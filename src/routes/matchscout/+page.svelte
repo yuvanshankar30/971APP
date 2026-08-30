@@ -58,9 +58,14 @@
   }
 
   function beginPath(event) {
+    if (event.button !== undefined && event.button !== 0) return;
     const point = pointFromEvent(event);
     drawing = true;
-    autoPath = [point];
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    const last = autoPath[autoPath.length - 1];
+    autoPath = !last || Math.hypot(point[0] - last[0], point[1] - last[1]) > 1.5
+      ? [...autoPath, point]
+      : autoPath;
   }
 
   function extendPath(event) {
@@ -70,8 +75,11 @@
     if (!last || Math.hypot(point[0] - last[0], point[1] - last[1]) > 1.5) autoPath = [...autoPath, point];
   }
 
-  function completePath() {
+  function completePath(event) {
+    if (!drawing) return;
+    if (event.type === 'pointerup') extendPath(event);
     drawing = false;
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   }
 
   // Rating profile as a star/radar. Five axes on an identical 0-5 scale for one
@@ -283,7 +291,7 @@
             <div class="control-group"><span class="field-label">Ball source</span><div class="choice-grid">{#each ['alliance zone', 'neutral zone', 'human player'] as source}<button class:chosen={ballSources.includes(source)} on:click={() => toggleBallSource(source)}>{source}</button>{/each}</div></div>
             <div class="control-group"><span class="field-label">Did it run?</span><div class="segmented"><button class:chosen={autoMoved === 'ran'} on:click={() => autoMoved = 'ran'}>Ran</button><button class:chosen={autoMoved === 'did-not-run'} on:click={() => autoMoved = 'did-not-run'}>Did not run</button></div></div>
           </div>
-          <div class="path-panel"><div class="path-heading"><span class="field-label">Robot path</span><button class="btn btn-sm" on:click={() => autoPath = []} disabled={!autoPath.length}><RotateCcw size={14} /> Clear</button></div><div class="field-board" role="application" aria-label="Draw the robot's autonomous path" on:pointerdown={beginPath} on:pointermove={extendPath} on:pointerup={completePath} on:pointerleave={completePath}><div class="field-line midline"></div><div class="field-zone top-zone"></div><div class="field-zone bottom-zone"></div><svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">{#if autoPath.length > 1}<polyline points={autoPath.map(([x, y]) => `${x},${y}`).join(' ')} />{/if}{#if autoPath.length}<circle cx={autoPath[0][0]} cy={autoPath[0][1]} r="2.2" class="path-start" />{/if}</svg></div></div>
+          <div class="path-panel"><div class="path-heading"><span class="field-label">Robot path</span><button class="btn btn-sm" on:click={() => autoPath = []} disabled={!autoPath.length}><RotateCcw size={14} /> Clear</button></div><div class="field-board" role="application" aria-label="Draw the robot's autonomous path" on:pointerdown={beginPath} on:pointermove={extendPath} on:pointerup={completePath} on:pointercancel={completePath}><div class="field-line midline"></div><div class="field-zone top-zone"></div><div class="field-zone bottom-zone"></div><svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">{#if autoPath.length > 1}<polyline points={autoPath.map(([x, y]) => `${x},${y}`).join(' ')} />{/if}{#if autoPath.length}<circle cx={autoPath[0][0]} cy={autoPath[0][1]} r="2.2" class="path-start" />{/if}</svg></div></div>
         </div>
         <div class="section-footer"><button class="btn" on:click={() => selectPhase('prematch')}>Back</button><button class="btn btn-primary" on:click={() => selectPhase('teleop')}>Continue to teleop <ChevronRight size={16} /></button></div>
       {:else if phase === 'teleop'}
