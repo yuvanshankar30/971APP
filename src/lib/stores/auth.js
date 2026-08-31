@@ -123,7 +123,7 @@ export function initAuth() {
 
     // Initial session load (safe to await here; not inside callback)
     (async () => {
-      const applyInitialSession = ({ data, error } = {}) => {
+      const applyInitialSession = async ({ data, error } = {}) => {
         if (error) console.warn('getSession error:', error.message || error);
         const authUser = data?.session?.user ?? null;
         user.set(authUser);
@@ -150,7 +150,7 @@ export function initAuth() {
             console.warn('Late getSession error:', e?.message || e);
           });
         } else {
-          applyInitialSession(result);
+          await applyInitialSession(result);
         }
       } finally {
         authReady.set(true);
