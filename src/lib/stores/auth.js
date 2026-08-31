@@ -15,6 +15,7 @@ export const authReady = writable(false);
 let subscription = null;
 let initialized = false;
 let initCount = 0;
+const INITIAL_SESSION_TIMEOUT_MS = 2500;
 
 export async function fetchUserProfile(userId) {
   if (!userId) {
@@ -109,15 +110,33 @@ export function initAuth() {
 
     // Initial session load (safe to await here; not inside callback)
     (async () => {
-      try {
-        const { data, error } = await supabase.auth.getSession();
+      const applyInitialSession = ({ data, error } = {}) => {
         if (error) console.warn('getSession error:', error.message || error);
         const authUser = data?.session?.user ?? null;
         user.set(authUser);
         if (authUser) {
-          await fetchUserProfile(authUser.id);
+          void fetchUserProfile(authUser.id);
         } else {
           userProfile.set(null);
+        }
+      };
+
+      try {
+        const sessionRequest = supabase.auth.getSession();
+        const result = await Promise.race([
+          sessionRequest,
+          new Promise((resolve) => setTimeout(() => resolve(null), INITIAL_SESSION_TIMEOUT_MS))
+        ]);
+
+        if (result === null) {
+          console.warn('Initial auth session check timed out; continuing without blocking the app.');
+          // Preserve a delayed but valid browser session instead of requiring
+          // a reload once the local Supabase client becomes responsive.
+          void sessionRequest.then(applyInitialSession).catch((e) => {
+            console.warn('Late getSession error:', e?.message || e);
+          });
+        } else {
+          applyInitialSession(result);
         }
       } finally {
         authReady.set(true);
