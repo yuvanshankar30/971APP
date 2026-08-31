@@ -55,6 +55,7 @@
   $: activeSequenceDiameter = Number(toolSequence?.[activeToolIndex]?.toolDiameter) || null;
   $: singleToolDiameter = Number(toolDiameter) || null;
   $: cutterDiameter = activeSequenceDiameter || singleToolDiameter || Number(cutterDiameterInput) || null;
+  $: speedProgress = Math.max(0, Math.min(100, ((Number(playbackSpeed) - 0.25) / 3.75) * 100));
   $: moveCounts = KINDS.reduce((counts, kind) => {
     counts[kind] = moves.filter((move) => move.kind === kind).length;
     return counts;
@@ -345,7 +346,7 @@
       </label>
       <label class="speed-control">
         <span>Simulation speed</span>
-        <input type="range" min="0.25" max="4" step="0.25" bind:value={playbackSpeed} disabled={!moves.length} />
+        <input class="speed-slider" type="range" min="0.25" max="4" step="0.25" value={playbackSpeed} style={`--speed-progress: ${speedProgress}%`} on:input={(event) => (playbackSpeed = Number(event.currentTarget.value))} disabled={!moves.length} />
         <output>{speedLabel(playbackSpeed)}</output>
       </label>
     </div>
@@ -424,6 +425,50 @@
   .scrub-control output { min-width: 7.7rem; color: var(--text); font-variant-numeric: tabular-nums; }
   .speed-control { display: grid; grid-template-columns: auto minmax(7rem, 1fr) auto; align-items: center; flex: 0 1 18rem; gap: 0.55rem; font-size: 0.82rem; color: var(--text-muted); }
   .speed-control input { min-width: 7rem; width: 100%; }
+  .speed-control .speed-slider {
+    appearance: none;
+    -webkit-appearance: none;
+    height: 1.2rem;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    cursor: pointer;
+  }
+  .speed-control .speed-slider::-webkit-slider-runnable-track {
+    height: 0.45rem;
+    border: 1px solid var(--border, #a8a8a8);
+    border-radius: 999px;
+    background: linear-gradient(to right, var(--blue, #1677f0) 0 var(--speed-progress), var(--surface-2, #e5e7eb) var(--speed-progress) 100%);
+  }
+  .speed-control .speed-slider::-webkit-slider-thumb {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 1.15rem;
+    height: 1.15rem;
+    margin-top: -0.43rem;
+    border: 0;
+    border-radius: 50%;
+    background: var(--blue, #1677f0);
+  }
+  .speed-control .speed-slider::-moz-range-track {
+    height: 0.45rem;
+    border: 1px solid var(--border, #a8a8a8);
+    border-radius: 999px;
+    background: var(--surface-2, #e5e7eb);
+  }
+  .speed-control .speed-slider::-moz-range-progress {
+    height: 0.45rem;
+    border-radius: 999px;
+    background: var(--blue, #1677f0);
+  }
+  .speed-control .speed-slider::-moz-range-thumb {
+    width: 1.15rem;
+    height: 1.15rem;
+    border: 0;
+    border-radius: 50%;
+    background: var(--blue, #1677f0);
+  }
   .speed-control output { min-width: 2.75rem; color: var(--text); font-variant-numeric: tabular-nums; }
   .tool-diameter-input { display: grid; gap: 0.3rem; font-size: 0.82rem; color: var(--text-muted); }
   .tool-diameter-input input { min-height: 2.25rem; color: var(--text); background: var(--surface, #fff); border: 1px solid var(--border, #d1d5db); border-radius: var(--radius-sm, 4px); padding: 0.25rem 0.45rem; }
