@@ -289,6 +289,8 @@ own docs are all together in one place instead of scattered across
   Turning accepts only rotationally symmetric finished geometry; gears,
   polygonal exteriors, tubes, and formed parts are rejected rather than
   approximated as a round turning envelope.
+  Router jobs use material-specific feed, plunge, and spindle presets, with
+  conservative dry-routing defaults when stock has not been selected.
 - **`autocam/toolpathPreview.js`** - parses generated G-code back into a
   toolpath for the 2D preview and 3D simulator, including a cumulative-distance
   interpolation helper for playback (`autocam/components/ToolpathViewer.svelte`,

@@ -201,6 +201,14 @@ describe('generateRoutingGcode - single-tool (default)', () => {
     expect(toolLineIdx).toBeLessThan(m03Idx); // stated before the spindle ever starts, not after
     expect(result.gcode).not.toMatch(/\bT\d+\s+M06\b/); // no ATC - never claim one
   });
+
+  it('uses conservative dry-routing defaults and never enables coolant', () => {
+    const result = generateRoutingGcode(contour, { toolDiameter: 0.25, targetDepth: 0.25 });
+    expect(result.gcode).toContain('S14000 M03');
+    expect(result.gcode).toContain('F8');
+    expect(result.gcode).toContain('F25');
+    expect(result.gcode).not.toMatch(/\bM[78]\b/);
+  });
 });
 
 describe('generateRoutingGcode - edgeMargin (real shop constraint: work zero is set, and stock is nailed down, at the same X0/Y0 stock edge - a part modeled close to its own local origin can put the cutter within a fraction of an inch of that hardware)', () => {
@@ -590,7 +598,7 @@ describe('generateRoutingGcode - tab zones are never silently dropped when they 
 
   it('a segment with no tab zone touching it still emits exactly one G01 move (no gratuitous splitting)', () => {
     const part = [{ points: square(0, 0, 4), isHole: false }];
-    const result = generateRoutingGcode(part, { toolDiameter: 0.25, targetDepth: 0.05, tabSpacing: 0 });
+    const result = generateRoutingGcode(part, { toolDiameter: 0.25, targetDepth: 0.05, stepDown: 0.05, tabSpacing: 0 });
     // With tabs off entirely, line count should match the simple one-move-
     // per-vertex baseline (4 edges = 4 G01 moves for this single-pass cut).
     const cutMoves = result.gcode.split('\n').filter((l) => l.startsWith('G01 X')).length;

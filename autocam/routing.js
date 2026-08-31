@@ -834,7 +834,10 @@ function clearPocket(lines, pocket, toolRadius, params, safeZ) {
   return { ringCount: rings.length };
 }
 
-const TOOL_STEP_DEFAULTS = { stepDown: 0.1, tabWidth: 0.25, tabHeight: 0.06, tabSpacing: 6, feedRate: 40, plungeRate: 15, spindleSpeed: 16000 };
+// Conservative fallback for unknown stock. A selected cam_material supplies
+// stock-specific values; these avoid treating aluminum like plywood when the
+// operator has not identified the material yet.
+const TOOL_STEP_DEFAULTS = { stepDown: 0.03, tabWidth: 0.25, tabHeight: 0.06, tabSpacing: 6, feedRate: 25, plungeRate: 8, spindleSpeed: 14000 };
 
 /**
  * For each contour, finds the first (in given order) tool whose radius
@@ -900,9 +903,9 @@ function dwellLine(isWinCNC, seconds, comment) {
  * @param {Array<{points: Array<{x,y}>, isHole: boolean}>} contours
  * @param {Object} params
  *   Single-tool mode (unchanged, backward compatible):
- *     toolDiameter (required, inches), stepDown (default 0.1), targetDepth (required)
+ *     toolDiameter (required, inches), stepDown (default 0.03), targetDepth (required)
  *     tabWidth (default 0.25), tabHeight (default 0.06), tabSpacing (default 6, inches; 0 = no tabs)
- *     feedRate (in/min, default 40), plungeRate (in/min, default 15), spindleSpeed (rpm, default 16000)
+ *     feedRate (in/min, default 25), plungeRate (in/min, default 8), spindleSpeed (rpm, default 14000)
  *   Multi-tool mode: params.toolSequence = [{ toolDiameter, toolNumber, label,
  *     stepDown, tabWidth, tabHeight, tabSpacing, feedRate, plungeRate, spindleSpeed }, ...],
  *     primary/largest tool first. targetDepth still comes from the top-level
@@ -1021,7 +1024,7 @@ export function generateRoutingGcode(contours, params = {}) {
 
   if (!hasSequence) {
     // Single-tool path, unchanged from before multi-tool support existed.
-    const { toolDiameter, stepDown = 0.1, tabWidth = 0.25, tabHeight = 0.06, tabSpacing = 6, feedRate = 40, plungeRate = 15, spindleSpeed = 16000 } = params;
+    const { toolDiameter, stepDown = 0.03, tabWidth = 0.25, tabHeight = 0.06, tabSpacing = 6, feedRate = 25, plungeRate = 8, spindleSpeed = 14000 } = params;
     if (!toolDiameter || toolDiameter <= 0) throw new Error('toolDiameter is required and must be > 0');
     // No T-code / M06 here on purpose - these routers have no automatic
     // tool changer (see toolchange-gcode-plan.md: tool changes are
