@@ -184,6 +184,32 @@ describe('generateTurningGcode - multi-tool (rough + finish insert)', () => {
     expect(changeCount).toBe(2);
     expect(result.stats.toolChanges).toBe(2);
   });
+
+  it('skips the manual pause and re-touch-off prompt when automaticToolChanger is set (real Haas TL-1 turret)', () => {
+    const result = generateTurningGcode(shaftProfile(), {
+      ...baseParams,
+      toolNumber: 1,
+      automaticToolChanger: true,
+      finishTool: { toolNumber: 2, label: 'finish insert', noseRadius: 0.015 }
+    });
+    expect(result.gcode).toContain('TOOL CHANGE: automatic - load finish insert - T2');
+    expect(result.gcode).not.toContain('M00');
+    expect(result.gcode).not.toContain('RE-TOUCH OFF');
+    expect(result.gcode).toContain('T0202 (finish tool - turret index)');
+    // Still stops the spindle before indexing the turret - an unattended
+    // change is not a running-spindle change.
+    expect(result.gcode).toContain('M05 (spindle off for tool change)');
+    expect(result.stats.toolChanges).toBe(1);
+  });
+
+  it('defaults to the manual pause when automaticToolChanger is left unset', () => {
+    const result = generateTurningGcode(shaftProfile(), {
+      ...baseParams,
+      finishTool: { toolNumber: 2, label: 'finish insert' }
+    });
+    expect(result.gcode).toContain('M00');
+    expect(result.gcode).toContain('RE-TOUCH OFF Z0');
+  });
 });
 
 describe('generateTurningGcode - tailstock mode', () => {

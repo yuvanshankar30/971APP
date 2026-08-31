@@ -191,14 +191,18 @@ export function offsetTurningProfile(profile, distance) {
  * MULTI-TOOL: pass `finishTool` ({ toolNumber, label, noseRadius }) to cut
  * roughing with the tool already loaded (the outer T-word emitted by the
  * caller before this function runs, understood as "the rough tool" once
- * finishTool is set) and finishing with a separate insert - a real M00
- * program pause between them, same no-tool-setter/re-touch-off-Z0 assumption
- * routing.js's tool changes make. Omit finishTool (default) for the
- * original single-tool behavior, completely unchanged.
+ * finishTool is set) and finishing with a separate insert. By default this
+ * is a real M00 program pause between them, same no-tool-setter/
+ * re-touch-off-Z0 assumption routing.js's tool changes make. Pass
+ * `automaticToolChanger: true` (from the machine profile - our real 971
+ * Lathe is a Haas TL-1 with a turret tool changer and bar/chip mover) to
+ * skip the pause: the T-word alone indexes tool + offset unattended, so no
+ * human re-touch-off is needed. Omit finishTool (default) for the original
+ * single-tool behavior, completely unchanged either way.
  *
  * Returns { passCount, toolChanged }.
  */
-function appendSetupBody(lines, profile, { stockDiameter, stepDown, finishAllowance, feedRough, feedFinish, noseRadius, finishTool, surfaceSpeed, maxRpm, spindleDwellSeconds }, finalLine = '(back to start clearance)') {
+function appendSetupBody(lines, profile, { stockDiameter, stepDown, finishAllowance, feedRough, feedFinish, noseRadius, finishTool, surfaceSpeed, maxRpm, spindleDwellSeconds, automaticToolChanger }, finalLine = '(back to start clearance)') {
   const safeDiameter = stockDiameter + 0.1;
   const startZ = profile[0].z + 0.1; // 0.1" of clearance in front of this setup's face
   lines.push(`G00 X${fmt(safeDiameter)} Z${fmt(startZ)} (rapid to start clearance)`);
@@ -229,11 +233,22 @@ function appendSetupBody(lines, profile, { stockDiameter, stepDown, finishAllowa
     lines.push(`G00 X${fmt(safeDiameter)} (retract clear of stock before tool change)`);
     lines.push(`G00 Z${fmt(startZ)} (back to start clearance)`);
     lines.push('M05 (spindle off for tool change)');
-    lines.push(
-      `M00 (TOOL CHANGE: load ${finishTool.label || 'finish tool'}${finishTool.toolNumber ? ` - T${finishTool.toolNumber}` : ''}, ` +
-      'then RE-TOUCH OFF Z0 before resuming - no automatic tool length compensation assumed)'
-    );
-    if (finishTool.toolNumber) lines.push(`T0${finishTool.toolNumber}0${finishTool.toolNumber} (finish tool - verify tool/offset number)`);
+    if (automaticToolChanger) {
+      // Haas TL-1 turret: the T-word indexes tool + offset together, so
+      // there's no manual re-touch-off step - unlike the no-ATC path below,
+      // this is a real unattended tool change, not a request for a human.
+      lines.push(
+        `(TOOL CHANGE: automatic - load ${finishTool.label || 'finish tool'}${finishTool.toolNumber ? ` - T${finishTool.toolNumber}` : ''})`
+      );
+      if (finishTool.toolNumber) lines.push(`T0${finishTool.toolNumber}0${finishTool.toolNumber} (finish tool - turret index)`);
+      lines.push('G04 P1.0 (allow turret index to complete before resuming motion)');
+    } else {
+      lines.push(
+        `M00 (TOOL CHANGE: load ${finishTool.label || 'finish tool'}${finishTool.toolNumber ? ` - T${finishTool.toolNumber}` : ''}, ` +
+        'then RE-TOUCH OFF Z0 before resuming - no automatic tool length compensation assumed)'
+      );
+      if (finishTool.toolNumber) lines.push(`T0${finishTool.toolNumber}0${finishTool.toolNumber} (finish tool - verify tool/offset number)`);
+    }
     lines.push(`G50 S${maxRpm} (clamp max spindle RPM for constant surface speed)`);
     lines.push(`G96 S${surfaceSpeed} M03 (constant surface speed, SFM, spindle back on)`);
     if (spindleDwellSeconds > 0) lines.push(`G04 P${fmt(spindleDwellSeconds, 1)} (wait for spindle to reach speed)`);
@@ -324,7 +339,8 @@ export function generateTurningGcode(profile, params = {}) {
     units = 'in',
     setupMode = 'single',
     finishTool = null,
-    spindleDwellSeconds = 2
+    spindleDwellSeconds = 2,
+    automaticToolChanger = false
   } = params;
 
   requireFiniteNumber(stockDiameter, 'stockDiameter', { positive: true });
@@ -361,7 +377,7 @@ export function generateTurningGcode(profile, params = {}) {
   profile = profile.map((p) => ({ x: p.x, z: zOrigin - p.z }));
 
   if (setupMode === 'flip') {
-    return generateFlipTurningGcode(profile, { stockDiameter, stepDown, finishAllowance, feedRough, feedFinish, surfaceSpeed, maxRpm, noseRadius, toolNumber, programNumber, units, finishTool, spindleDwellSeconds, flipAt: params.flipAt, minGripLength: params.minGripLength ?? 0.25 });
+    return generateFlipTurningGcode(profile, { stockDiameter, stepDown, finishAllowance, feedRough, feedFinish, surfaceSpeed, maxRpm, noseRadius, toolNumber, programNumber, units, finishTool, spindleDwellSeconds, automaticToolChanger, flipAt: params.flipAt, minGripLength: params.minGripLength ?? 0.25 });
   }
 
   const lines = [...HEADER_WARNING, ''];
@@ -388,7 +404,7 @@ export function generateTurningGcode(profile, params = {}) {
 
   const { passCount, toolChanged } = appendSetupBody(
     lines, profile,
-    { stockDiameter, stepDown, finishAllowance, feedRough, feedFinish, noseRadius, finishTool, surfaceSpeed, maxRpm, spindleDwellSeconds },
+    { stockDiameter, stepDown, finishAllowance, feedRough, feedFinish, noseRadius, finishTool, surfaceSpeed, maxRpm, spindleDwellSeconds, automaticToolChanger },
     'M05 (back to start clearance, spindle off)'
   );
 
@@ -419,7 +435,7 @@ export function generateTurningGcode(profile, params = {}) {
  * original face) - see generateTurningGcode above.
  */
 function generateFlipTurningGcode(profile, params) {
-  const { stockDiameter, stepDown, finishAllowance, feedRough, feedFinish, surfaceSpeed, maxRpm, noseRadius, toolNumber, programNumber, units, finishTool, spindleDwellSeconds, flipAt, minGripLength } = params;
+  const { stockDiameter, stepDown, finishAllowance, feedRough, feedFinish, surfaceSpeed, maxRpm, noseRadius, toolNumber, programNumber, units, finishTool, spindleDwellSeconds, automaticToolChanger, flipAt, minGripLength } = params;
 
   if (!flipAt || flipAt <= 0) {
     throw new Error('flipAt (inches from the face, where the part gets re-chucked) is required for setupMode "flip"');
@@ -467,7 +483,7 @@ function generateFlipTurningGcode(profile, params) {
   if (spindleDwellSeconds > 0) lines.push(`G04 P${fmt(spindleDwellSeconds, 1)} (wait for spindle to reach speed)`);
   lines.push('G95 (feed per revolution)');
 
-  const bodyParams = { stockDiameter, stepDown, finishAllowance, feedRough, feedFinish, noseRadius, finishTool, surfaceSpeed, maxRpm, spindleDwellSeconds };
+  const bodyParams = { stockDiameter, stepDown, finishAllowance, feedRough, feedFinish, noseRadius, finishTool, surfaceSpeed, maxRpm, spindleDwellSeconds, automaticToolChanger };
   const { passCount: pass1, toolChanged: toolChanged1 } = appendSetupBody(lines, setup1Profile, bodyParams);
 
   lines.push('M05 (spindle off)');

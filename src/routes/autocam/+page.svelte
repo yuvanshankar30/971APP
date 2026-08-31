@@ -95,7 +95,7 @@
   ];
 
   function emptyTurningParams() {
-    return { stockDiameter: '', stepDown: 0.05, finishAllowance: 0.02, feedRough: 0.008, feedFinish: 0.004, surfaceSpeed: 150, maxRpm: 2500, setupMode: 'single', flipAt: '', finishTool: null };
+    return { stockDiameter: '', stepDown: 0.05, finishAllowance: 0.02, feedRough: 0.008, feedFinish: 0.004, surfaceSpeed: 150, maxRpm: 2500, setupMode: 'single', flipAt: '', finishTool: null, automaticToolChanger: false };
   }
   function emptyRoutingParams() {
     return { toolDiameter: 0.25, stepDown: 0.1, targetDepth: '', tabWidth: 0.25, tabHeight: 0.06, tabSpacing: 6, feedRate: 40, plungeRate: 15, spindleSpeed: 16000, edgeMargin: 0.5, toolSequence: [] };
@@ -359,7 +359,7 @@
   // see autocam/docs/toolchange-gcode-plan.md) is an array of {toolId, toolDiameter,
   // toolNumber, label} objects and finishTool (turning multi-tool) is one
   // {toolId, toolNumber, label, noseRadius} object - both must pass through untouched.
-  const NON_NUMERIC_PARAM_KEYS = new Set(['toolSequence', 'setupMode', 'finishTool']);
+  const NON_NUMERIC_PARAM_KEYS = new Set(['toolSequence', 'setupMode', 'finishTool', 'automaticToolChanger']);
 
   function serializeParams(raw) {
     const params = {};

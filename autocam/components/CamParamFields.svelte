@@ -58,6 +58,13 @@
     </select>
     <p class="text-muted">Long/thin parts can't just cantilever safely out of the chuck - pick tailstock support if the machine has one, or flip-turning if it needs a real re-chuck.</p>
   </div>
+  <div class="form-group">
+    <label class="form-label" for="cf-atc">
+      <input id="cf-atc" type="checkbox" bind:checked={params.automaticToolChanger} />
+      Automatic tool changer (Haas TL-1 turret)
+    </label>
+    <p class="text-muted">On a multi-tool job (finish tool set below), skip the manual M00 pause + re-touch-off prompt - the turret indexes tool and offset together unattended. Leave off for a manually-tooled lathe.</p>
+  </div>
   {#if mode === 'job' && params.setupMode === 'flip'}
     <div class="form-group">
       <label class="form-label" for="cf-flip-at">Flip point (in from the face)</label>
