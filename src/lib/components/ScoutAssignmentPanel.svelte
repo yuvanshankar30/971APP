@@ -10,7 +10,7 @@
 
   export let scoutingType = 'data'; // 'data' | 'note' | 'quick'
 
-  let panelOpen = false;
+  let panelOpen = scoutingType === 'data';
   let matches = []; // { key, red:[], blue:[] }
   let eventKey = '';
   let publishedAssignments = {}; // match_key -> team_key -> { user_id, user_name }
@@ -33,6 +33,8 @@
   let modalContext = { match_key: '', team_key: '', team_number: '' };
   let selectedUserId = '';
   let lastUserId = null;
+  let draggingTeamKey = '';
+  let dropTargetUserId = '';
 
   async function authFetch(url, options = {}) {
     const headers = {
@@ -90,6 +92,48 @@
       nextAssignments,
       'Assignment drafts are staged locally. Publish assignments to send notifications.'
     );
+  }
+
+  function stageRobotAssignment(teamKey, userId) {
+    if (!teamKey || !userId || !capabilities.can_edit) return;
+    const nextAssignments = cloneAssignments(assignments);
+    let matchCount = 0;
+
+    for (const match of matches) {
+      if (!match.blue.includes(teamKey) && !match.red.includes(teamKey)) continue;
+      if (!nextAssignments[match.key]) nextAssignments[match.key] = {};
+      nextAssignments[match.key][teamKey] = {
+        user_id: userId,
+        user_name: findUserName(userId) || null
+      };
+      matchCount += 1;
+    }
+
+    if (matchCount) {
+      stageAssignments(
+        nextAssignments,
+        `Team ${displayTeam(teamKey)} is staged for ${findUserName(userId) || 'that scout'} across ${matchCount} match${matchCount === 1 ? '' : 'es'}. Publish assignments to notify scouts.`
+      );
+    }
+  }
+
+  function startTeamDrag(event, teamKey) {
+    if (!capabilities.can_edit) return;
+    draggingTeamKey = teamKey;
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', teamKey);
+  }
+
+  function finishTeamDrag() {
+    draggingTeamKey = '';
+    dropTargetUserId = '';
+  }
+
+  function dropTeamOnScout(event, userId) {
+    event.preventDefault();
+    const teamKey = draggingTeamKey || event.dataTransfer.getData('text/plain');
+    stageRobotAssignment(teamKey, userId);
+    finishTeamDrag();
   }
 
   async function loadCapabilities() {
@@ -332,6 +376,19 @@
 
   $: hasDraftChanges =
     serializeAssignments(assignments) !== serializeAssignments(publishedAssignments);
+  $: scheduledTeamKeys = [...new Set(matches.flatMap((match) => [...match.blue, ...match.red]))]
+    .sort((a, b) => Number(displayTeam(a)) - Number(displayTeam(b)));
+  $: teamOwner = scheduledTeamKeys.reduce((owners, teamKey) => {
+    const ownerIds = new Set(
+      matches
+        .filter((match) => match.blue.includes(teamKey) || match.red.includes(teamKey))
+        .map((match) => assignments?.[match.key]?.[teamKey]?.user_id)
+        .filter(Boolean)
+    );
+    owners[teamKey] = ownerIds.size === 1 ? [...ownerIds][0] : '';
+    return owners;
+  }, {});
+  $: unassignedTeamKeys = scheduledTeamKeys.filter((teamKey) => !teamOwner[teamKey]);
 </script>
 
 <details class="assignment-accordion" bind:open={panelOpen}>
@@ -350,7 +407,7 @@
     <div class="panel-header">
       <div class="hint">
         {#if capabilities.can_edit}
-          Click a team cell to stage changes. Nothing is sent to scouts until you publish assignments.
+          Drag a team onto a scout to stage that robot across its scheduled matches. Nothing is sent until you publish.
         {:else}
           Assignments are read-only unless you are a scouting lead in Roster Studio.
         {/if}
@@ -378,6 +435,52 @@
           {statusMsg}
         {/if}
       </div>
+    {/if}
+
+    {#if capabilities.can_edit}
+      <section class="drag-assignment-board" aria-label="Drag and drop scouting assignments">
+        <div class="assignment-pool">
+          <div class="assignment-board-label">Unassigned teams</div>
+          {#if unassignedTeamKeys.length}
+            <div class="team-chip-list">
+              {#each unassignedTeamKeys as teamKey}
+                <button class="team-chip" type="button" draggable="true" on:dragstart={(event) => startTeamDrag(event, teamKey)} on:dragend={finishTeamDrag}>
+                  {displayTeam(teamKey)}
+                </button>
+              {/each}
+            </div>
+          {:else}
+            <div class="assignment-empty">Every scheduled team has a single scout.</div>
+          {/if}
+        </div>
+
+        <div class="scout-drop-grid">
+          {#each users as scout}
+            <div
+              class="scout-drop-zone"
+              class:drop-target={dropTargetUserId === scout.id}
+              role="group"
+              aria-label={`Drop teams onto ${scout.full_name || scout.email}`}
+              on:dragenter={() => (dropTargetUserId = scout.id)}
+              on:dragleave={() => (dropTargetUserId = '')}
+              on:dragover|preventDefault
+              on:drop={(event) => dropTeamOnScout(event, scout.id)}
+            >
+              <div class="scout-drop-name">{scout.full_name || scout.email}</div>
+              <div class="team-chip-list">
+                {#each scheduledTeamKeys.filter((teamKey) => teamOwner[teamKey] === scout.id) as teamKey}
+                  <button class="team-chip assigned" type="button" draggable="true" on:dragstart={(event) => startTeamDrag(event, teamKey)} on:dragend={finishTeamDrag}>
+                    {displayTeam(teamKey)}
+                  </button>
+                {/each}
+                {#if !scheduledTeamKeys.some((teamKey) => teamOwner[teamKey] === scout.id)}
+                  <span class="assignment-empty">Drop a team here</span>
+                {/if}
+              </div>
+            </div>
+          {/each}
+        </div>
+      </section>
     {/if}
 
     <div class="scroll-x">
@@ -556,6 +659,80 @@
   .status-note.pending {
     background: rgba(255, 193, 7, 0.16);
   }
+
+  .drag-assignment-board {
+    display: grid;
+    gap: var(--gap-3);
+    padding: var(--space-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--surface-2, #f7f7f5);
+  }
+
+  .assignment-pool {
+    display: grid;
+    gap: var(--gap-2);
+  }
+
+  .assignment-board-label {
+    font-size: var(--font-xs);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+  }
+
+  .scout-drop-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+    gap: var(--gap-2);
+  }
+
+  .scout-drop-zone {
+    display: grid;
+    gap: var(--gap-2);
+    min-height: 6.5rem;
+    padding: var(--space-2);
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-1);
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+  }
+
+  .scout-drop-zone.drop-target {
+    border-color: var(--accent-strong, #b8860b);
+    background: var(--accent-subtle, #fff4cf);
+  }
+
+  .scout-drop-name {
+    font-size: var(--font-sm);
+    font-weight: 700;
+  }
+
+  .team-chip-list {
+    display: flex;
+    flex-wrap: wrap;
+    align-content: flex-start;
+    gap: 0.35rem;
+  }
+
+  .team-chip {
+    min-width: 2.7rem;
+    min-height: 2rem;
+    padding: 0.2rem 0.5rem;
+    border: 1px solid var(--accent-strong, #b8860b);
+    border-radius: var(--radius-sm);
+    background: var(--surface-1);
+    color: var(--text);
+    font: inherit;
+    font-size: var(--font-sm);
+    font-weight: 700;
+    cursor: grab;
+  }
+
+  .team-chip:active { cursor: grabbing; }
+  .team-chip.assigned { background: var(--accent-subtle, #fff4cf); }
+  .assignment-empty { font-size: var(--font-xs); color: var(--text-muted); }
 
   /* Assignment table */
   .scroll-x {

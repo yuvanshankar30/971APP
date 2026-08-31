@@ -58,8 +58,9 @@ browser confirmation or prompt popups.
   profiles, notes, and ACE Team problem reports into coverage graphs and a
   shareable Google Docs report for the signed-in scout,
   cross-team data discovery and analysis (`discover/`), a consolidated
-  team-view, and scouting-admin tooling (assignment management, form/config
-  editing) - integrates with The Blue Alliance API for competition data.
+  team-view, and scouting-admin tooling with drag-and-drop team-to-scout
+  assignment drafting and explicit publishing, plus form/config editing -
+  integrates with The Blue Alliance API for competition data.
 - **Vision Scouting**: a real Competition-folder nav tab, open to every
   approved user like the rest of Competition (no special permission needed),
   running post-match, multi-camera ML processing at `/scouting/vision` for
