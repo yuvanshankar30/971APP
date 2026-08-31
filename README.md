@@ -21,7 +21,10 @@ browser confirmation or prompt popups.
   optional notes on a request (visible/editable both at creation and from
   the manufacture list). Slack-DMs the relevant lead(s) when a new request
   is created for a workflow they're assigned to (admin-configurable per
-  user, per workflow - see **Admin & permissions** below). See the
+  user, per workflow - see **Admin & permissions** below), and again for
+  Router leads specifically as a router part moves through its pipeline
+  (CAM review, CAM reviewed, postprocessed, jprogged, machined, kitted -
+  Router's the only workflow with this many distinct steps). See the
   **AutoCAM** section below for automatic G-code generation specifically.
 - **AutoCAM**: automatic STEP → G-code generation for lathe turning, router
   routering, and rotary-4th-axis indexed tube-stock drilling jobs - either

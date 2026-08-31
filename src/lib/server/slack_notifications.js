@@ -515,6 +515,65 @@ export async function notifyPartRequesterStatusById(partId, newStatus) {
   return { ok: true, sent: results };
 }
 
+// Router-specific pipeline steps (see WORKFLOW_STATUSES.router in
+// statuses.js) - the only workflow with this many distinct, individually
+// actionable stages between "in progress" and "complete." 'pending' is
+// deliberately excluded: it's the starting state parts already sit in, not
+// something worth a "changed to" DM.
+const ROUTER_STATUS_LEAD_MESSAGES = {
+  'in-progress': (name) => `${name} is now in progress.`,
+  'cam_review': (name) => `${name} is CAM'd and ready for review.`,
+  'cammed': (name) => `CAM review done for ${name} - ready to postprocess.`,
+  'postprocessed': (name) => `${name} has been postprocessed - ready to load on the machine.`,
+  'jprogged': (name) => `${name} has been loaded onto the machine (Jprogged).`,
+  'machined': (name) => `${name} has finished machining.`,
+  'complete': (name) => `${name} is complete and kitted.`
+};
+
+// Notifies the leads signed up for the Router workflow (manufacturing_lead_
+// workflows includes 'router') whenever a router part reaches a new
+// pipeline step - not the requester (see notifyPartRequesterStatusById
+// above for that) and not a test/reserved workflow value (manufacturingLeads
+// ForWorkflow only ever returns real subscribers for the literal workflow
+// string passed in, so a part with workflow: 'test' naturally resolves to no
+// leads and this is a no-op, same safety property the rest of this file's
+// notifications already have). Called on every status update, same
+// unconditional-call-relies-on-dedup pattern as notifyPartRequesterStatusById
+// - entityKey has no timestamp, so a repeat call for a status already
+// notified is a silent no-op.
+export async function notifyRouterLeadsStatusById(partId, newStatus) {
+  if (!partId || !newStatus) return { ok: false, reason: 'invalid-input' };
+  const buildMessage = ROUTER_STATUS_LEAD_MESSAGES[newStatus];
+  if (!buildMessage) return { ok: false, reason: 'not-a-notifiable-status' };
+
+  const supa = getSupabase();
+  const { data: part, error: partError } = await supa
+    .from('parts')
+    .select('id, name, workflow')
+    .eq('id', partId)
+    .maybeSingle();
+  if (partError) console.error('notifyRouterLeadsStatusById: parts query failed', partError);
+  if (!part || part.workflow !== 'router') return { ok: false, reason: 'not-router-workflow' };
+
+  const leads = await manufacturingLeadsForWorkflow(supa, 'router');
+  if (!leads.length) return { ok: false, reason: 'no-leads-configured' };
+
+  const text = buildMessage(part.name || 'Unnamed part');
+  const results = [];
+  for (const lead of leads) {
+    results.push({
+      ...(await dispatchNotification({
+        userId: lead.id,
+        notificationKey: NOTIFICATION_KEYS.ROUTER_STATUS_UPDATE,
+        entityKey: `${part.id}:leads:${newStatus}`,
+        text
+      })),
+      email: lead.email
+    });
+  }
+  return { ok: true, sent: results };
+}
+
 // Stale-request reminders: max 2 per part, ever - a 2-day nudge, then a
 // 7-day-total (5 more days) second and final one. Called from a daily cron
 // (see api/notifications/manufacturing-stale-requests/+server.js). Doesn't

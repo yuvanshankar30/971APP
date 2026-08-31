@@ -6,7 +6,8 @@ import {
   notifyPartCompletedById,
   notifyPurchaseApprovedById,
   notifyManufacturingRequestById,
-  notifyPartRequesterStatusById
+  notifyPartRequesterStatusById,
+  notifyRouterLeadsStatusById
 } from '$lib/server/slack_notifications.js';
 
 function getClientFromRequest(request) {
@@ -53,6 +54,11 @@ export async function POST({ request }) {
     if (type === 'manufacturing-request-status') {
       if (!body.part_id || !body.status) return json({ error: 'part_id and status required' }, { status: 400 });
       const result = await notifyPartRequesterStatusById(body.part_id, body.status);
+      return json({ ok: true, result });
+    }
+    if (type === 'router-status') {
+      if (!body.part_id || !body.status) return json({ error: 'part_id and status required' }, { status: 400 });
+      const result = await notifyRouterLeadsStatusById(body.part_id, body.status);
       return json({ ok: true, result });
     }
     return json({ error: 'Unknown notification type' }, { status: 400 });
