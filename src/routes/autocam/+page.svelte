@@ -14,7 +14,6 @@
   import TurningFinishTool from '$autocam/components/TurningFinishTool.svelte';
   import CadViewer from '$lib/components/CadViewer.svelte';
   import ToolpathViewer from '$autocam/components/ToolpathViewer.svelte';
-  import ToolpathSimulator from '$autocam/components/ToolpathSimulator.svelte';
   import { toastActions } from '$lib/toast.js';
   import {
     queueCamJobForPart,
@@ -145,6 +144,8 @@
   let showJobCadModal = false;
   let showJobToolpathModal = false;
   let toolpathView = '2d';
+  let ToolpathSimulator = null;
+  let toolpathSimulatorLoading = false;
   let showNcviewerModal = false;
   let ncviewerCopyOk = null; // null = not attempted yet, true/false = result
 
@@ -496,10 +497,26 @@
     toolpathView = '2d';
     showJobToolpathModal = true;
   }
-  function open3DToolpathPreview(job) {
+  async function loadToolpathSimulator() {
+    if (ToolpathSimulator || toolpathSimulatorLoading) return;
+    toolpathSimulatorLoading = true;
+    try {
+      // Keep Three.js out of AutoCAM's normal startup path. The simulator is
+      // an optional completed-job tool, so it only needs to load on demand.
+      ToolpathSimulator = (await import('$autocam/components/ToolpathSimulator.svelte')).default;
+    } catch (error) {
+      console.error('Could not load the 3D toolpath simulator:', error);
+      toastActions.show('Could not load the 3D toolpath simulator.');
+      toolpathView = '2d';
+    } finally {
+      toolpathSimulatorLoading = false;
+    }
+  }
+  async function open3DToolpathPreview(job) {
     editingJob = job;
     toolpathView = '3d';
     showJobToolpathModal = true;
+    await loadToolpathSimulator();
   }
   // Embeds ncviewer.com directly in the app (iframe) instead of a plain
   // external-tab link. ncviewer.com has no documented way to load a file by
@@ -1415,11 +1432,15 @@
         {#if editingJob.operation_type === 'routing'}
           <div class="toolpath-view-tabs" role="tablist" aria-label="Toolpath view">
             <button type="button" role="tab" aria-selected={toolpathView === '2d'} class:active={toolpathView === '2d'} on:click={() => (toolpathView = '2d')}>2D Preview</button>
-            <button type="button" role="tab" aria-selected={toolpathView === '3d'} class:active={toolpathView === '3d'} on:click={() => (toolpathView = '3d')}>3D Toolpath</button>
+            <button type="button" role="tab" aria-selected={toolpathView === '3d'} class:active={toolpathView === '3d'} on:click={() => open3DToolpathPreview(editingJob)}>3D Toolpath</button>
           </div>
         {/if}
         {#if toolpathView === '3d' && editingJob.operation_type === 'routing'}
-          <ToolpathSimulator gcode={editingJob.gcode} toolDiameter={Number(editingJob.params?.toolDiameter) || null} toolSequence={editingJob.params?.toolSequence || []} />
+          {#if ToolpathSimulator}
+            <svelte:component this={ToolpathSimulator} gcode={editingJob.gcode} toolDiameter={Number(editingJob.params?.toolDiameter) || null} toolSequence={editingJob.params?.toolSequence || []} />
+          {:else}
+            <div class="toolpath-simulator-loading" aria-busy="true"><span class="loading-spinner"></span> Loading 3D toolpath...</div>
+          {/if}
         {:else}
           <ToolpathViewer gcode={editingJob.gcode} operationType={editingJob.operation_type} />
         {/if}
@@ -1758,6 +1779,8 @@
 
   .cad-modal { width: min(900px, 95vw); max-width: 95vw; }
   .toolpath-modal { width: min(1100px, 95vw); max-width: 95vw; }
+  .toolpath-simulator-loading { min-height: 320px; display: flex; align-items: center; justify-content: center; gap: 0.65rem; color: var(--text-muted); }
+  .toolpath-simulator-loading .loading-spinner { width: 1.25rem; height: 1.25rem; border-width: 2px; }
   .toolpath-view-tabs { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; border-bottom: 1px solid var(--border); }
   .toolpath-view-tabs button { padding: 0.5rem 0.75rem; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--text-muted); font: inherit; cursor: pointer; }
   .toolpath-view-tabs button.active { border-bottom-color: var(--accent-strong); color: var(--text); font-weight: 700; }
