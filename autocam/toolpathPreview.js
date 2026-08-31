@@ -379,3 +379,81 @@ export function toolpathBounds3D(moves) {
   }
   return { min, max };
 }
+
+/**
+ * Material-removal heightmap for the routing 3D sim - Phase 4 of
+ * docs/toolpath-simulation-plan.md, deferred when the sim first shipped.
+ * A router cut is inherently 2.5D (flat plate stock, vertical spindle,
+ * flat end mill): "lower the material under a circle to depth Z" is
+ * exact for that, which is why a grid works here where turning instead
+ * needs a 1D radius profile (see buildTurningStockProfile).
+ *
+ * For each executed cutting move, sweeps a capsule (the segment, expanded
+ * by the cutter radius at that move - resolved per-move via
+ * `cutterRadiusForMove`, since multi-tool routing jobs change tool
+ * mid-program) across the grid: for every cell whose center falls within
+ * the capsule, lowers that cell's height to the interpolated Z at the
+ * nearest point on the segment - a sweep, not point sampling, so a fast
+ * rapid-speed cut doesn't leave gaps between samples.
+ *
+ * @returns {Float32Array} nx*ny cell heights, row-major (x fastest) -
+ *   matches THREE.PlaneGeometry's own default vertex ordering directly.
+ */
+export function buildRoutingHeightmap(moves, {
+  nx,
+  ny,
+  minX,
+  minY,
+  cellSize,
+  topZ = 0,
+  floorZ = -1,
+  cutterRadiusForMove,
+  uptoMoveIndex = moves.length,
+  partialProgress = 1
+} = {}) {
+  const heights = new Float32Array(nx * ny).fill(topZ);
+
+  const applyMove = (move, progress) => {
+    if (!move || move.kind === 'rapid') return;
+    const radius = cutterRadiusForMove ? cutterRadiusForMove(move) : 0;
+    if (!(radius > 0)) return;
+
+    const toX = move.from.x + (move.to.x - move.from.x) * progress;
+    const toY = move.from.y + (move.to.y - move.from.y) * progress;
+    const toZ = move.from.z + (move.to.z - move.from.z) * progress;
+    const fromX = move.from.x;
+    const fromY = move.from.y;
+    const fromZ = move.from.z;
+
+    const ixStart = Math.max(0, Math.floor((Math.min(fromX, toX) - radius - minX) / cellSize));
+    const ixEnd = Math.min(nx - 1, Math.ceil((Math.max(fromX, toX) + radius - minX) / cellSize));
+    const iyStart = Math.max(0, Math.floor((Math.min(fromY, toY) - radius - minY) / cellSize));
+    const iyEnd = Math.min(ny - 1, Math.ceil((Math.max(fromY, toY) + radius - minY) / cellSize));
+
+    const dx = toX - fromX;
+    const dy = toY - fromY;
+    const lenSq = dx * dx + dy * dy;
+
+    for (let iy = iyStart; iy <= iyEnd; iy += 1) {
+      const cy = minY + (iy + 0.5) * cellSize;
+      const rowOffset = iy * nx;
+      for (let ix = ixStart; ix <= ixEnd; ix += 1) {
+        const cx = minX + (ix + 0.5) * cellSize;
+        let t = lenSq > 1e-12 ? ((cx - fromX) * dx + (cy - fromY) * dy) / lenSq : 0;
+        t = Math.max(0, Math.min(1, t));
+        const px = fromX + dx * t;
+        const py = fromY + dy * t;
+        if (Math.hypot(cx - px, cy - py) > radius) continue;
+        const z = Math.max(fromZ + (toZ - fromZ) * t, floorZ);
+        const cell = rowOffset + ix;
+        if (z < heights[cell]) heights[cell] = z;
+      }
+    }
+  };
+
+  const fullCount = Math.max(0, Math.min(uptoMoveIndex, moves.length));
+  for (let m = 0; m < fullCount; m += 1) applyMove(moves[m], 1);
+  if (moves[fullCount] && partialProgress > 0) applyMove(moves[fullCount], partialProgress);
+
+  return heights;
+}
