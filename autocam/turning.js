@@ -90,7 +90,7 @@ const HEX_ACROSS_CORNERS_FACTOR = 2 / Math.sqrt(3);
 // The *smallest* available radius (across-flats/2, i.e. stockDiameter/2
 // either way) is what the "is there enough material" validation checks -
 // that value is unaffected by stockShape, so it isn't computed here.
-function stockEnvelopeRadius(stockDiameter, stockShape) {
+export function stockEnvelopeRadius(stockDiameter, stockShape) {
   return stockShape === 'hex' ? (stockDiameter / 2) * HEX_ACROSS_CORNERS_FACTOR : stockDiameter / 2;
 }
 

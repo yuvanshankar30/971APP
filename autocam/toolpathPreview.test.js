@@ -5,9 +5,12 @@ import {
   projectTurningToolpath,
   toolpathPositionAtDistance,
   toolpathBounds,
-  toolpathBounds3D
+  toolpathBounds3D,
+  buildTurningStockProfile,
+  turningProfileToLathePoints
 } from './toolpathPreview.js';
 import { generateRoutingGcode } from './routing.js';
+import { generateTurningGcode, stockEnvelopeRadius } from './turning.js';
 
 const gcode = (...lines) => lines.join('\n');
 
@@ -302,5 +305,116 @@ describe('against real generated G-code', () => {
   it('cuts to the requested depth and no deeper', () => {
     const { min } = toolpathBounds3D(parseToolpath3D(text).moves);
     expect(min.z).toBeCloseTo(-0.5, 3);
+  });
+});
+
+describe('buildTurningStockProfile', () => {
+  it('with no moves executed, the outer profile is the initial (uncut) radius everywhere and there is no bore', () => {
+    const { axial, outer, inner } = buildTurningStockProfile([], {
+      samples: 10, axialMin: -2, axialMax: 0, initialOuterRadius: 0.5, uptoMoveIndex: 0, partialProgress: 0
+    });
+    expect(axial.length).toBe(10);
+    expect(Array.from(outer).every((r) => r === 0.5)).toBe(true);
+    expect(Array.from(inner).every((r) => r === 0)).toBe(true);
+  });
+
+  it('a cutting move lowers the outer profile only within the axial range it sweeps', () => {
+    const moves = [{ kind: 'cut', from: { x: -2, y: 0.5 }, to: { x: -1, y: 0.3 } }];
+    const { outer } = buildTurningStockProfile(moves, {
+      samples: 21, axialMin: -2, axialMax: 0, initialOuterRadius: 0.5, uptoMoveIndex: 1
+    });
+    // axial step is 0.1: index 0 = -2 (move start), 5 = -1.5 (midpoint),
+    // 10 = -1 (move end), 20 = 0 (past the move's near end - never swept)
+    expect(outer[0]).toBeCloseTo(0.5, 5);
+    expect(outer[5]).toBeCloseTo(0.4, 5);
+    expect(outer[10]).toBeCloseTo(0.3, 5);
+    expect(outer[20]).toBeCloseTo(0.5, 5);
+  });
+
+  it('ignores rapid moves - they do not cut', () => {
+    const moves = [{ kind: 'rapid', from: { x: -2, y: 0.6 }, to: { x: -1, y: 0.6 } }];
+    const { outer } = buildTurningStockProfile(moves, {
+      samples: 5, axialMin: -2, axialMax: 0, initialOuterRadius: 0.5, uptoMoveIndex: 1
+    });
+    expect(Array.from(outer).every((r) => r === 0.5)).toBe(true);
+  });
+
+  it('a centerline move (both endpoints at radius 0) cuts a bore, raising inner but never touching outer', () => {
+    const moves = [{ kind: 'cut', from: { x: -1, y: 0 }, to: { x: 0, y: 0 } }];
+    const { axial, outer, inner } = buildTurningStockProfile(moves, {
+      samples: 11, axialMin: -2, axialMax: 0, initialOuterRadius: 0.5, drillRadius: 0.1, uptoMoveIndex: 1
+    });
+    expect(Array.from(outer).every((r) => r === 0.5)).toBe(true);
+    for (let i = 0; i < axial.length; i += 1) {
+      if (axial[i] >= -1 - 1e-6) expect(inner[i]).toBeCloseTo(0.1, 5);
+      else expect(inner[i]).toBe(0);
+    }
+  });
+
+  it('applies partial progress on the in-progress move only, not the moves after it', () => {
+    const moves = [
+      { kind: 'cut', from: { x: -2, y: 0.5 }, to: { x: -1, y: 0.5 } },
+      { kind: 'cut', from: { x: -1, y: 0.5 }, to: { x: 0, y: 0.2 } }
+    ];
+    const full = buildTurningStockProfile(moves, { samples: 11, axialMin: -2, axialMax: 0, initialOuterRadius: 0.5, uptoMoveIndex: 2 });
+    const half = buildTurningStockProfile(moves, { samples: 11, axialMin: -2, axialMax: 0, initialOuterRadius: 0.5, uptoMoveIndex: 1, partialProgress: 0.5 });
+    expect(full.outer[10]).toBeCloseTo(0.2, 5); // fully cut to the far end
+    expect(half.outer[10]).toBeCloseTo(0.5, 5); // partial move only reached -0.5, never got here
+    expect(half.outer[7]).toBeCloseTo(0.38, 2); // within the partially-swept range
+  });
+
+  it('against real generated G-code: after the full program, the outer profile matches the finished (constant-radius) part', () => {
+    const profile = [{ z: 0, x: 0.4 }, { z: 2, x: 0.4 }];
+    const params = { stockDiameter: 0.9, stepDown: 0.05, finishAllowance: 0.02, feedRough: 0.008, feedFinish: 0.004 };
+    const { gcode: programText } = generateTurningGcode(profile, params);
+    const projected = projectTurningToolpath(parseToolpath3D(programText));
+    // Clamp to <= 0: Z=0 is always the face (turning.js's own normalization
+    // convention) and nothing physically exists past it - the finishing
+    // pass's approach move rapids to X0 then cuts to the first profile
+    // point, which technically sweeps through Z>0 (empty clearance air, not
+    // real stock); sampling out that far would pick up that artifact.
+    const axialMin = Math.min(...projected.moves.flatMap((m) => [m.from.x, m.to.x]));
+    const { outer } = buildTurningStockProfile(projected.moves, {
+      samples: 50,
+      axialMin,
+      axialMax: 0,
+      initialOuterRadius: stockEnvelopeRadius(params.stockDiameter, 'round'),
+      uptoMoveIndex: projected.moves.length
+    });
+    for (const r of outer) expect(r).toBeCloseTo(0.4, 2);
+  });
+});
+
+describe('turningProfileToLathePoints', () => {
+  // Plain arrays here (not Float32Array) so the expected values in these
+  // tests can compare exactly - the function itself doesn't care which kind
+  // of array it's given, it only indexes into them.
+  it('with no bore, returns the outer wall only, one point per sample, in order', () => {
+    const axial = [-2, -1, 0];
+    const outer = [0.5, 0.4, 0.4];
+    const inner = [0, 0, 0];
+    const points = turningProfileToLathePoints(axial, outer, inner);
+    expect(points.length).toBe(3);
+    expect(points[0]).toEqual([0.5, -2]);
+    expect(points[2]).toEqual([0.4, 0]);
+  });
+
+  it('with a bore touching the face end, closes a loop tracing outer wall, face annulus, bore wall, and hole bottom', () => {
+    const axial = [-2, -1, 0];
+    const outer = [0.5, 0.5, 0.5];
+    const inner = [0, 0.1, 0.1];
+    const points = turningProfileToLathePoints(axial, outer, inner);
+    expect(points[0][1]).toBe(-2); // starts at the far end, on axis
+    expect(points[0][0]).toBeLessThan(0.01);
+    expect(points[points.length - 1]).toEqual(points[0]); // closes the loop
+    expect(points.some((p) => Math.abs(p[0] - 0.1) < 1e-6)).toBe(true); // traces the bore wall
+  });
+
+  it('clamps radius at a small positive epsilon rather than exactly 0, avoiding degenerate geometry', () => {
+    const axial = [-1, 0];
+    const outer = [0, 0];
+    const inner = [0, 0];
+    const points = turningProfileToLathePoints(axial, outer, inner);
+    expect(points.every((p) => p[0] > 0)).toBe(true);
   });
 });
