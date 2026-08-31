@@ -103,6 +103,33 @@ describe('generateTurningGcode - single setup (default)', () => {
     expect(() => generateTurningGcode(shaftProfile(), { ...baseParams, stepDown: 0.0000001 })).toThrow(/safety limit/);
   });
 
+  it('real bug: a wide middle section keeps its own target size through every roughing pass, never clamped down toward the profile\'s overall minimum radius', () => {
+    // shaftProfile() is thin (0.4) at both ends, wide (0.5) through the
+    // middle (z=0.1..1.9) - minTargetRadius is computed from the profile's
+    // global minimum (0.4), so a roughing pass that clamps every point to
+    // "whichever is smaller, the target or this pass's depth" eventually
+    // cuts the wide section down to 0.4's target too, well before the
+    // unclamped finishing pass tries (and fails - the material is already
+    // gone) to bring it back out to 0.5. Verified by simulating the actual
+    // toolpath (see toolpathPreview.test.js's buildTurningStockProfile
+    // tests for the general-purpose version of this check), not just
+    // reading the G-code text - the bug was invisible to every text-based
+    // assertion in this file, since the finishing pass's own G-code line
+    // still "says" X1.0 (radius 0.5) regardless of whether roughing left
+    // any material there to actually cut.
+    const result = generateTurningGcode(shaftProfile(), baseParams);
+    const roughingSection = result.gcode.slice(
+      result.gcode.indexOf('ROUGHING PASSES'),
+      result.gcode.indexOf('FINISHING PASS')
+    );
+    const wideSectionLines = roughingSection.split('\n').filter((l) => l.includes('Z-1.9000'));
+    expect(wideSectionLines.length).toBeGreaterThan(1); // several roughing passes reach this Z
+    for (const line of wideSectionLines) {
+      const x = Number(line.match(/X([\d.]+)/)[1]);
+      expect(x).toBeGreaterThanOrEqual(1.0 - 1e-9); // radius >= 0.5 - the wide section's real target, never undercut
+    }
+  });
+
   it('applies no nose-radius offset (and no compensation note) when noseRadius is unset - byte-identical finishing pass', () => {
     const withoutParam = generateTurningGcode(shaftProfile(), baseParams);
     const withZero = generateTurningGcode(shaftProfile(), { ...baseParams, noseRadius: 0 });
