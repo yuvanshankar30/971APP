@@ -602,9 +602,11 @@
   // permissions they are safe for an authorized admin to edit on their own
   // row. Target hierarchy still applies when editing somebody else.
   function canEditNotificationsOf(target) {
+    // Anyone viewing their own admin-panel row may manage subscriptions;
+    // changing them grants no access and cannot escalate the account.
+    if (target?.id && target.id === $currentUser?.id) return true;
     const canManage = isAdminUser || isDevUser || hasPermission($currentUser, 'EDIT_PERMISSIONS');
     if (!canManage) return false;
-    if (target?.id && target.id === $currentUser?.id) return true;
     if (target?.is_dev) return isDevUser;
     if (target?.role === 'admin') return isAdminUser;
     return true;
