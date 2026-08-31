@@ -870,6 +870,7 @@
         await sendNotification('part-complete', { part_id: partId });
       }
       await sendNotification('manufacturing-request-status', { part_id: partId, status: newStatus });
+      await sendNotification('router-status', { part_id: partId, status: newStatus });
       // NOTE: no loadParts() here — callers use setLocalStatus for an optimistic update
       // so the hub doesn't flash/reload on every button click.
     } catch (error) {
@@ -916,6 +917,7 @@
       // previously missing the subsystem one entirely, a pre-existing gap.
       await sendNotification('part-complete', { part_id: partId });
       await sendNotification('manufacturing-request-status', { part_id: partId, status: 'complete' });
+      await sendNotification('router-status', { part_id: partId, status: 'complete' });
       await loadParts();
     } catch (error) {
       console.error('Error completing part:', error);
@@ -2707,7 +2709,7 @@
       <div class="modal-body">
         <p class="cad-modal-hint">
           This part was created before a STEP file was required for its workflow. Attach one now to unlock the 3D
-          viewer and let AutoCAM generate {camProfileModalPart.workflow === 'lathe' ? 'turning' : 'routing'} G-code
+          viewer and let AutoCAM generate {camProfileModalPart.workflow === 'lathe' ? 'turning' : 'routering'} G-code
           immediately.
           {#if camProfileModalPart.workflow === 'lathe'}
             Model it with the spindle axis along the STEP file's Z axis, centered at X=0, Y=0.

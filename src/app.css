@@ -2146,6 +2146,118 @@ textarea:focus,
   --btn-focus-ring: rgba(217, 164, 19, 0.32);
 }
 
+/* Account theme gallery. Every palette maps back onto the same global design
+   tokens so the entire application changes coherently. Semantic colours keep
+   their meaning (green still means success, red still means failure), but
+   their surfaces and contrast are mixed against the active palette instead
+   of dropping light-theme pastel stickers onto a dark custom background. */
+:root[data-theme^="theme-"] {
+  color-scheme: dark;
+  --color-white: var(--special-card);
+  --color-black: var(--special-text);
+  --neutral-100: color-mix(in srgb, var(--special-card) 82%, white 18%);
+  --neutral-300: color-mix(in srgb, var(--special-card) 66%, white 34%);
+  --neutral-500: color-mix(in srgb, var(--special-text) 62%, var(--special-card));
+  --neutral-800: var(--special-text);
+  --primary: var(--special-card);
+  --secondary: var(--special-text);
+  --background: var(--special-bg);
+  --card: var(--special-card);
+  --surface-1: var(--special-card);
+  --surface-2: color-mix(in srgb, var(--special-card) 88%, var(--special-accent) 12%);
+  --surface-3: color-mix(in srgb, var(--special-card) 78%, var(--special-accent) 22%);
+  --text: var(--special-text);
+  --text-secondary: color-mix(in srgb, var(--special-text) 72%, var(--special-card));
+  --text-muted: color-mix(in srgb, var(--special-text) 62%, var(--special-card));
+  --muted: var(--text-muted);
+  --muted-bg: var(--surface-2);
+  --border: color-mix(in srgb, var(--special-card) 60%, var(--special-text) 40%);
+  --divider: var(--border);
+  --brand-gold-base: var(--special-accent);
+  --brand-gold-strong: color-mix(in srgb, var(--special-accent) 72%, white 28%);
+  --brand-gold-soft: color-mix(in srgb, var(--special-accent) 18%, transparent);
+  --accent: var(--special-accent);
+  --accent-strong: var(--brand-gold-strong);
+  --accent-subtle: var(--brand-gold-soft);
+  --on-primary: var(--special-bg);
+  --blue-soft: color-mix(in srgb, var(--special-card) 78%, #2f81f7 22%);
+  --blue-base: color-mix(in srgb, #58a6ff 76%, var(--special-text) 24%);
+  --blue-strong: color-mix(in srgb, #79c0ff 76%, var(--special-text) 24%);
+  --green-soft: color-mix(in srgb, var(--special-card) 80%, #2ea043 20%);
+  --green-base: color-mix(in srgb, #3fb950 74%, var(--special-text) 26%);
+  --green-strong: color-mix(in srgb, #7ee787 74%, var(--special-text) 26%);
+  --red-soft: color-mix(in srgb, var(--special-card) 80%, #da3633 20%);
+  --red-base: color-mix(in srgb, #f85149 74%, var(--special-text) 26%);
+  --red-strong: color-mix(in srgb, #ff7b72 74%, var(--special-text) 26%);
+  --purple-soft: color-mix(in srgb, var(--special-card) 78%, var(--special-accent) 22%);
+  --purple-base: var(--special-accent);
+  --purple-strong: color-mix(in srgb, var(--special-accent) 72%, var(--special-text) 28%);
+  --orange-soft: color-mix(in srgb, var(--special-card) 80%, #db6d28 20%);
+  --orange-base: color-mix(in srgb, #f0883e 74%, var(--special-text) 26%);
+  --orange-strong: color-mix(in srgb, #ffa657 74%, var(--special-text) 26%);
+  --yellow-soft: color-mix(in srgb, var(--special-card) 80%, #d29922 20%);
+  --yellow-base: color-mix(in srgb, #e3b341 74%, var(--special-text) 26%);
+  --yellow-strong: color-mix(in srgb, #f2cc60 74%, var(--special-text) 26%);
+  --success: var(--green-base);
+  --danger: var(--red-base);
+  --warning: var(--yellow-base);
+  --info: var(--blue-base);
+  --status-pending-bg: var(--yellow-soft);
+  --status-pending-border: var(--yellow-base);
+  --status-pending-text: var(--yellow-strong);
+  --status-progress-bg: var(--blue-soft);
+  --status-progress-border: var(--blue-base);
+  --status-progress-text: var(--blue-strong);
+  --status-ready-bg: var(--green-soft);
+  --status-ready-border: var(--green-base);
+  --status-ready-text: var(--green-strong);
+  --status-risk-bg: var(--red-soft);
+  --status-risk-border: var(--red-base);
+  --status-risk-text: var(--red-strong);
+  --shadow-lg: 0 8px 24px rgba(0,0,0,.5);
+}
+
+/* Older pipeline badges predate the semantic status tokens. Normalize them
+   only under gallery themes so their nine light pastels do not clash with the
+   dark palette while their labels and workflow meanings stay intact. */
+[data-theme^="theme-"] .status-pending,
+[data-theme^="theme-"] .status-autocammed,
+[data-theme^="theme-"] .status-jprogged {
+  background: var(--status-pending-bg);
+  color: var(--status-pending-text);
+  border-color: var(--status-pending-border);
+}
+[data-theme^="theme-"] .status-in-progress,
+[data-theme^="theme-"] .status-progress,
+[data-theme^="theme-"] .status-postprocessed {
+  background: var(--status-progress-bg);
+  color: var(--status-progress-text);
+  border-color: var(--status-progress-border);
+}
+[data-theme^="theme-"] .status-complete,
+[data-theme^="theme-"] .status-travis,
+[data-theme^="theme-"] .status-delivered,
+[data-theme^="theme-"] .status-ready {
+  background: var(--status-ready-bg);
+  color: var(--status-ready-text);
+  border-color: var(--status-ready-border);
+}
+[data-theme^="theme-"] .status-error,
+[data-theme^="theme-"] .status-rejected {
+  background: var(--status-risk-bg);
+  color: var(--status-risk-text);
+  border-color: var(--status-risk-border);
+}
+[data-theme^="theme-"] .status-cam-review,
+[data-theme^="theme-"] .status-cammed,
+[data-theme^="theme-"] .status-machined {
+  background: var(--purple-soft);
+  color: var(--purple-strong);
+  border-color: var(--purple-base);
+}
+
+[data-theme^="theme-"] .brand-mark { background-image:url('/spartan-helmet-dark.png'); }
+
 /* Modern dark: warm charcoal, brighter gold, dark text on gold controls */
 :root[data-theme="modern-dark"] {
   color-scheme: dark;

@@ -71,6 +71,7 @@
   }
 
   function beginPath(event) {
+    if (event.button !== undefined && event.button !== 0) return;
     drawing = true;
     event.currentTarget.setPointerCapture?.(event.pointerId);
     const point = pointFromEvent(event);
@@ -104,8 +105,13 @@
     }
   }
 
-  function completePath() {
+  function completePath(event) {
+    if (!drawing) return;
+    if (event.type === 'pointerup') extendPath(event);
     drawing = false;
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
   }
 
   function appendSafeTerminalPoint(result) {

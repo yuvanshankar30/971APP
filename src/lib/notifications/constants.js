@@ -12,6 +12,7 @@ export const NOTIFICATION_KEYS = {
   MANUFACTURING_REQUEST_STARTED: 'manufacturing_request_started',
   MANUFACTURING_REQUEST_READY: 'manufacturing_request_ready',
   MANUFACTURING_REQUEST_STALE: 'manufacturing_request_stale',
+  ROUTER_STATUS_UPDATE: 'router_status_update',
   VISION_ALERT: 'vision_alert'
 };
 
@@ -29,6 +30,7 @@ export const DEFAULT_NOTIFICATION_SETTINGS = {
   [NOTIFICATION_KEYS.MANUFACTURING_REQUEST_STARTED]: true,
   [NOTIFICATION_KEYS.MANUFACTURING_REQUEST_READY]: true,
   [NOTIFICATION_KEYS.MANUFACTURING_REQUEST_STALE]: true,
+  [NOTIFICATION_KEYS.ROUTER_STATUS_UPDATE]: true,
   [NOTIFICATION_KEYS.VISION_ALERT]: true
 };
 
@@ -97,6 +99,11 @@ export const NOTIFICATION_UI_OPTIONS = [
     key: NOTIFICATION_KEYS.MANUFACTURING_REQUEST_READY,
     label: 'Your request is ready',
     description: 'DM when a manufacturing request you made is marked complete.'
+  },
+  {
+    key: NOTIFICATION_KEYS.ROUTER_STATUS_UPDATE,
+    label: 'Router part status updates (lead)',
+    description: 'DM when a router part reaches a new pipeline step (CAM review, CAM reviewed, postprocessed, jprogged, machined, kitted). Only sent if you lead the Router workflow.'
   },
   {
     key: NOTIFICATION_KEYS.VISION_ALERT,

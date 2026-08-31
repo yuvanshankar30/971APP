@@ -1,9 +1,11 @@
 # 3D toolpath simulation for routing — implementation plan
 
-A Fusion-style simulation for AutoCAM **routing** jobs: the stock on screen,
-the end mill moving along the real toolpath, and material disappearing as it
-cuts. Scoped to routing only — turning is explicitly out (see
-[Why routing only](#why-routing-only)).
+A Fusion-style simulation for AutoCAM routing and turning jobs. Routing shows
+the end mill in XYZ; turning reuses the same interface and playback system but
+projects Haas diameter-mode X/Z into axial/radial space, shows cylindrical
+stock rotating about the spindle axis, and moves a turning insert along the
+real path. Material-removal simulation remains routing-only because its
+heightmap cannot model a solid of revolution.
 
 Everything below was checked against the current code rather than assumed; the
 "what already exists" section is the reason this is smaller than it sounds, and
@@ -82,14 +84,14 @@ assumes it matters, but not by how much.
 
 ---
 
-## Why routing only
+## Why turning needs a separate scene model
 
-Turning needs a different representation entirely: the stock is a solid of
-revolution and the tool profile sweeps a 2D silhouette, so a Z-up heightmap
-does not model it. Trying to make one component do both is what would make
-this large-and-messy instead of large-and-tractable. `operationType` is already
-threaded through the existing viewer, so the 3D view simply declines anything
-that is not routing and falls back to the current 2D preview.
+Turning needs a different representation for the machine geometry: stock is a
+solid of revolution and the insert follows an X/Z silhouette. The shared
+component therefore keeps one set of controls and move rendering while using
+a turning-specific projection and cylindrical stock. It does not pretend the
+routing heightmap can remove lathe material; that later feature needs a radial
+stock envelope.
 
 ---
 
@@ -224,7 +226,10 @@ pure and fully testable with no 3D involved, which is why it goes first.
 
 ## Deliberately out of scope
 
-- Turning and tube-stock simulation (see above).
+- Tube-stock simulation.
+- Turning material removal. Turning path playback, rotating stock, and insert
+  motion are implemented; subtracting material needs a radial envelope rather
+  than routing's heightmap.
 - Holder/fixture collision detection. Fusion checks tool *and holder* against
   part and fixtures; we model neither holder nor fixtures, so claiming it would
   be false. Gouge detection against the finished surface is the one subset the

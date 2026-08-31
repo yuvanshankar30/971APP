@@ -4,12 +4,30 @@ Live checklist. The *why* behind each decision lives in
 [`toolpath-simulation-plan.md`](toolpath-simulation-plan.md); this file is the
 running state of the work.
 
-**Scope:** routing only. Turning is out — its stock is a solid of revolution
-and a Z-up heightmap cannot represent it.
+**Scope:** the shared path renderer and playback controls support routing and
+turning. Routing's material-removal is a heightmap (2.5D - exact for a flat
+end mill on flat stock); turning's is a 1D radius-per-axial-position profile
+revolved into a solid (exact for a solid of revolution) - see each function's
+own doc comment in `toolpathPreview.js`.
 
-**Status:** Phases 0–1 complete. Phase 2 has move-class rendering; the
-per-tool and remaining Fusion visibility controls remain open. Phase 3 is
-complete. Phases 4–7 are open.
+**Status (2026-08-31):** Phases 0, 1, 3, 4, 5, and 6 complete, for both
+routing and turning. Phase 2 has move-class rendering and the Toolpath/Tool/
+Stock/Model visibility toggles; only per-tool colour mode remains open there.
+Phase 7 hasn't had a dedicated, recorded measurement pass, though the
+implementation already uses typed arrays throughout and disposes geometries/
+materials/the renderer on destroy.
+
+**Phase 5 caught a real bug on first use.** The gouge check (comparing the
+live cut state against the STEP-derived target, independent ground truth the
+G-code can't be tautologically "correct" against) immediately flagged
+`lead-screw.step`'s demo job: `generateTurningGcode`'s roughing loop was
+under-cutting any profile section wider than the profile's own overall
+minimum radius, all the way down to that minimum, before the unclamped
+finishing pass tried (and failed - the material was already gone) to bring
+it back out. Fixed in `turning.js` (`Math.min` -> `Math.max` in the roughing
+clamp) - see that commit for the full explanation. No G-code-text-based test
+in this repo could have caught it, which is exactly the class of bug Phase 5
+was for.
 
 ---
 
@@ -74,38 +92,72 @@ New: `autocam/components/ToolpathSimulator.svelte`
 
 ---
 
-## Phase 4 — Material removal (the real work)
+## Phase 4 — Material removal (the real work) ✅
 
-- [ ] Heightmap sized to the stock; resolution adaptive to stock size with a
-      ceiling, defaulting fine enough that the smallest tool spans several cells
-- [ ] Initial height from the job's material thickness / `targetDepth`, with an
-      input fallback
-- [ ] Lower cells within the cutter radius of each **swept segment** — sweeping,
-      not point sampling, or fast moves leave uncut gaps
-- [ ] Mesh from the heightmap, updated incrementally over the dirty region only
-- [ ] Checkpoint every N moves so scrubbing backwards doesn't replay from zero
-- [ ] Verify the final heightmap matches the intended part depth
+Routing (heightmap) and turning (radius profile) both done - see
+`buildRoutingHeightmap()` / `buildTurningStockProfile()` +
+`turningProfileToLathePoints()` in `toolpathPreview.js`, wired into
+`ToolpathSimulator.svelte`'s `updateStock()`.
+
+- [x] Routing: heightmap sized to the stock (toolpath XY bounds + margin);
+      resolution adaptive (smallest active tool spans ~6 cells), capped at
+      160 cells/axis
+- [x] Routing: top Z from the program's own Z=0 convention; floor Z a bit
+      below the deepest programmed cut (no real stock-thickness param exists
+      today, so this is "safely into the spoilboard," not a measurement)
+- [x] Routing: lowers cells within the cutter radius of each **swept
+      segment**, not point sampling
+- [x] Turning: exact 1D radius-per-axial profile (outer + inner/bore),
+      revolved into a `THREE.LatheGeometry` - not an approximation, a solid
+      of revolution's whole state at any instant *is* that profile
+- [x] Turning: bore cuts detected as centerline moves, matching exactly how
+      `appendDrillingOperation` emits every drilling G01
+- [x] Both: rebuilt fresh from the full executed-move list on every playback
+      position change, not incrementally checkpointed - simpler, and
+      measured fast enough in practice (see Phase 7 note) that the planned
+      incremental/checkpoint optimization wasn't needed
+- [x] Verified against real generated G-code in both `toolpathPreview.test.js`
+      suites, and manually in-browser against real jobs run through
+      `/api/cam-generate`
+
+**Known gap, not covered by this phase:** hex turning stock's *uncut*
+regions render as a circle at the across-corners radius, not the true
+hexagonal cross-section (a hex prism isn't representable in a single
+radius-per-z profile) - converges to the exact turned shape the moment any
+material is removed there. Documented in `buildTurningStockProfile`'s own
+comment.
 
 ---
 
-## Phase 5 — Show the part
+## Phase 5 — Show the part ✅
 
-- [ ] **Extract** `CadViewer.svelte`'s `occt-import-js` STEP loader into a
-      shared helper — one implementation, not a second copy
-- [ ] Load the job's source geometry and display it against the simulated stock
-- [ ] Semi-transparent, toggleable
-- [ ] *Follow-up once this lands:* gouge detection — flag any move that removes
-      material below the finished surface. The one honest subset of Fusion's
-      collision check available to us
+- [x] **Extracted** the `occt-import-js` STEP fetch+parse into
+      `src/lib/stepMeshLoader.js`, shared between `CadViewer.svelte` and
+      `ToolpathSimulator.svelte` - one implementation, not a second copy.
+      Fixed a real unit bug in the same pass (`linearUnit: 'inch'` was never
+      passed to `occt.ReadStepFile`, unlike the server-side loader)
+- [x] Loads the job's source geometry (`transformMeshesForTurningScene` /
+      `transformMeshesForRoutingScene` in `stepProfile.js`, reusing
+      `pickLengthAxis` / the routing `frame` so it can never disagree with
+      the extractor that actually fed the G-code generator) and displays it
+      against the simulated stock, for both operations
+- [x] Semi-transparent, toggleable ("Model" checkbox)
+- [x] Gouge detection - flags a cut that removes material below the
+      finished surface, compared against the STEP-derived target (turning:
+      radius profile; routing: measured material thickness). **Caught a
+      real bug on first use** - see the status note above and the
+      `Math.min` -> `Math.max` roughing-pass commit
 
 ---
 
-## Phase 6 — Integration
+## Phase 6 — Integration ✅
 
-- [ ] Mount beside the existing 2D preview in `autocam/+page.svelte` and
-      `manufacture/+page.svelte` — a tab or toggle, never a replacement
-- [ ] Non-routing jobs keep the current 2D viewer
-- [ ] Responsive; usable on a shop laptop, not only a desktop
+- [x] Mounted beside the existing 2D preview (`2D Preview` / `3D Toolpath`
+      tabs) in `autocam/+page.svelte`
+- [x] Both routing and turning jobs get the 3D view now (tube-stock jobs
+      keep the 2D-only viewer - see "Explicitly not doing")
+- [x] Responsive layout (`.simulator-controls` wraps, mobile breakpoints in
+      `ToolpathSimulator.svelte`'s own `<style>`)
 
 ---
 
@@ -118,11 +170,29 @@ New: `autocam/components/ToolpathSimulator.svelte`
 
 ---
 
+## Turning simulator ✅
+
+- [x] Reuse the routing simulator's modal, tabs, move colours, visibility
+      controls, scrubber, playback speed, move stepping, operation stepping,
+      and camera reset
+- [x] Convert Haas diameter-mode X to radius and machine Z to the spindle axis
+- [x] Recompute playback distance after projection instead of using doubled
+      diameter-mode radial distances
+- [x] Render the real machined solid from the job's saved `stockDiameter`/
+      `stockShape` - not just a static cylinder, see Phase 4
+- [x] Rotate the workpiece during playback and translate a proportional turning
+      insert through the X/Z path (the insert itself does not spin on a lathe)
+- [x] Preserve finish-insert tool-change stepping
+- [x] Automatic-tool-changer (Haas TL-1 turret) tool changes, skipping the
+      manual M00 pause when `automaticToolChanger` is set
+- [x] Hex stock shape (across-flats sizing, across-corners clearance)
+- [x] Centerline drilling, rendered as a real bore once cut
+
 ## Explicitly not doing
 
 | | Why |
 |---|---|
-| Turning / tube-stock simulation | Different stock representation; a heightmap can't model a solid of revolution |
+| Tube-stock simulation | Different rotary-axis machine model and tool orientation |
 | Holder & fixture collision | We model neither, so claiming Fusion's collision check would be false |
 | Machining-time estimate | Needs acceleration modelling; a naive distance÷feed number would be confidently wrong |
 | Ball-nose / V-bit profiles | Routing only generates flat end mill paths today |
@@ -131,10 +201,18 @@ New: `autocam/components/ToolpathSimulator.svelte`
 
 ## Open questions
 
-- **Stock dimensions.** Phase 4 needs stock extents. Available from the job's
-  params, or does the UI need to ask? Resolve before starting Phase 4.
-- **Program size.** Unmeasured. Phase 7 assumes it matters; measure a real
-  multi-tool program early enough that Phase 4's design can react to it.
+- ~~**Stock dimensions.**~~ Resolved: routing has no real stock-size param
+  today, so the heightmap uses the toolpath's own XY bounds + a margin
+  instead of asking the UI for one - see Phase 4's "known gap" note. Revisit
+  if a real stock-dimensions param gets added later.
+- **Program size.** Not formally measured/recorded (Phase 7 still open on
+  that specifically), but verified interactively against real generated
+  jobs (a routing pocket job, a turning shaft job) with no perceptible lag
+  scrubbing or during playback - full rebuild per position, no incremental
+  checkpointing, turned out to be fast enough in practice.
 - **Lead-in/out colouring.** `routing.js` has a lead-in/out zone but doesn't
   mark it in the output, so those moves read as ordinary cuts. Worth emitting a
   marker for full Fusion colour parity — a generator change, not a viewer one.
+- **Phases 0-6 are all done now** (Phase 5 landed 2026-08-31). What's left:
+  per-tool colour mode (Phase 2) and a dedicated Phase 7 measurement/
+  performance pass - neither blocking, both quality-of-life.

@@ -1,7 +1,7 @@
 <script>
-  // 3D toolpath simulation for ROUTING jobs - see
-  // docs/toolpath-simulation-plan.md for why turning is excluded and why
-  // material removal (a later phase) uses a heightmap.
+  // 3D toolpath simulation for routing and turning jobs. Routing uses XYZ
+  // directly; turning projects diameter-mode machine X/Z into axial/radial
+  // scene coordinates and renders cylindrical stock plus an insert cursor.
   //
   // These are route-level imports: Vite keeps them out of unrelated app routes,
   // but loading them with the simulator avoids a second dynamic module request
@@ -10,19 +10,85 @@
   import * as THREE from 'three';
   import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
   import { FastForward, Pause, Play, RotateCcw, SkipForward } from 'lucide-svelte';
-  import { parseToolpath3D, toolpathBounds3D, toolpathPositionAtDistance } from '../toolpathPreview.js';
+  import {
+    parseToolpath3D,
+    projectTurningToolpath,
+    toolpathBounds3D,
+    toolpathPositionAtDistance,
+    buildTurningStockProfile,
+    turningProfileToLathePoints,
+    buildTurningStockRings,
+    buildRoutingHeightmap,
+    projectTubestockToolpath,
+    matchTubestockHolesToMoves,
+    tubeLocalPoint,
+    tubeWallNormal
+  } from '../toolpathPreview.js';
+  import { stockEnvelopeRadius } from '../turning.js';
+  import {
+    extractTurningProfileFromMeshes,
+    extractRoutingContoursFromMeshes,
+    transformMeshesForTurningScene,
+    transformMeshesForRoutingScene
+  } from '../stepProfile.js';
+  import { fetchStepMeshes } from '$lib/stepMeshLoader.js';
 
   export let gcode = '';
+  export let operationType = 'routing';
   /** Cutter diameter in program units for single-tool jobs. */
   export let toolDiameter = null;
   /** Ordered routing tool sequence, when a job uses more than one cutter. */
   export let toolSequence = [];
+  export let stockDiameter = null;
+  /** 'round' | 'hex' - see stockEnvelopeRadius in turning.js. */
+  export let stockShape = 'round';
+  export let noseRadius = null;
+  /** Drill diameter, if this job has a drilling operation - see turning.js's `drilling` param. */
+  export let drillDiameter = null;
+  /**
+   * Storage path of the job's source STEP file - Phase 5's "show the source
+   * part" ghost overlay + gouge detection (docs/toolpath-simulation-plan.md).
+   * Optional: without it, the sim works exactly as before, just without the
+   * Model toggle.
+   */
+  export let stepFileName = null;
+  /**
+   * Routing only: generateRoutingGcode's own edge-margin shift
+   * (routing.js's stats.edgeShiftX/edgeShiftY) - the actual toolpath and
+   * stock are rendered in that shifted frame, but the ghost part is
+   * rebuilt fresh from the source STEP file's raw (unshifted) coordinates,
+   * so it has to be shifted by the same amount to land in the same place.
+   */
+  export let edgeShiftX = 0;
+  export let edgeShiftY = 0;
+  /**
+   * Tube stock only: generateTubestockGcode's own stats.crossSection/walls
+   * (echoed straight from extractTubeFeaturesFromMeshes) - the tube's outer
+   * width along its two cross-section axes, and every wall's hole layout.
+   * Needed to place the G-code's X/Y/Z/A moves onto the tube's actual 3D
+   * surface (see projectTubestockToolpath) and to render the drilled holes
+   * themselves, which the moves alone don't carry (diameter isn't a
+   * coordinate).
+   */
+  export let crossSection = null;
+  export let walls = [];
 
   let container;
-  let renderer, scene, camera, controls, frameId, resizeObserver, grid, axes, toolMesh;
+  let renderer, scene, camera, controls, frameId, resizeObserver, grid, axes, toolMesh, stockMesh, ghostMesh;
   let disposed = false;
   let loading = true;
   let error = '';
+
+  // Ghost part (Phase 5) - loaded independently of the main scene/toolpath
+  // lifecycle, since fetching + parsing a STEP file is slow and shouldn't
+  // block (or be blocked by) the toolpath view rendering.
+  let modelVisible = true;
+  let ghostLoading = false;
+  let ghostError = '';
+  let ghostGeometryData = null; // [{position, index}, ...] in scene coordinates, or null
+  let turningTargetProfile = null; // {z,x}[] from extractTurningProfileFromMeshes - turning gouge check
+  let routingTargetThickness = null; // number from extractRoutingContoursFromMeshes - routing gouge check
+  let initializedStepFile = null;
 
   // Fusion colours a move by what it is, and CAM users read that scheme
   // fluently: yellow rapid, blue cutting, red ramp/plunge. Deliberately not
@@ -39,6 +105,7 @@
   let visible = { rapid: true, cut: true, ramp: true };
   let toolpathVisible = true;
   let toolVisible = true;
+  let stockVisible = true;
   const lineObjects = {};
   let cutterDiameterInput = '';
   let initializedProgram = null;
@@ -47,7 +114,12 @@
   let playbackSpeed = 1;
   let lastPlaybackFrame = null;
 
-  $: parsed = parseToolpath3D(gcode || '');
+  $: isTurning = operationType === 'turning';
+  $: isTubestock = operationType === 'tubestock';
+  $: rawParsed = parseToolpath3D(gcode || '');
+  $: parsed = isTurning
+    ? projectTurningToolpath(rawParsed)
+    : (isTubestock && crossSection ? projectTubestockToolpath(rawParsed, { crossSection }) : rawParsed);
   $: moves = parsed.moves;
   $: bounds = toolpathBounds3D(moves);
   $: toolPosition = toolpathPositionAtDistance(moves, playbackDistance);
@@ -56,10 +128,18 @@
   $: singleToolDiameter = Number(toolDiameter) || null;
   $: cutterDiameter = activeSequenceDiameter || singleToolDiameter || Number(cutterDiameterInput) || null;
   $: speedProgress = Math.max(0, Math.min(100, ((Number(playbackSpeed) - 0.25) / 3.75) * 100));
+  $: canAnimate = isTurning || isTubestock || !!cutterDiameter;
   $: moveCounts = KINDS.reduce((counts, kind) => {
     counts[kind] = moves.filter((move) => move.kind === kind).length;
     return counts;
   }, {});
+  // Tube stock: joins each real hole (walls, from generateTubestockGcode's
+  // own stats) to the raw (pre-projection) move that drills it, so playback
+  // can progressively reveal holes the same way routing/turning reveal
+  // material removal - see matchTubestockHolesToMoves' own doc comment.
+  // Recomputed only when the program or hole list actually changes, not on
+  // every scrub tick.
+  $: drilledHoleIndex = isTubestock && walls?.length ? matchTubestockHolesToMoves(walls, rawParsed.moves) : [];
 
   // A job may be edited while this modal stays open. Adopt its saved diameter
   // once, but preserve a deliberate manual value for old jobs that lack one.
@@ -73,7 +153,30 @@
   // Rebuild whenever the program changes, but only once the scene exists.
   $: if (scene && moves) rebuildToolpath();
   $: if (scene && toolpathVisible !== undefined) applyVisibility(visible);
-  $: if (scene && toolPosition && cutterDiameter !== undefined && toolVisible !== undefined) updateTool();
+  $: if (scene && toolPosition && cutterDiameter !== undefined && toolVisible !== undefined && isTurning !== undefined && isTubestock !== undefined && noseRadius !== undefined) updateTool();
+  $: if (scene && moves && toolPosition && stockVisible !== undefined && stockDiameter !== undefined && isTurning !== undefined && isTubestock !== undefined && drilledHoleIndex !== undefined) updateStock();
+
+  // Ghost part (Phase 5): fetch + parse doesn't need the scene, so it's
+  // decoupled from scene readiness - only actually adding the mesh does.
+  $: if (stepFileName !== initializedStepFile) {
+    initializedStepFile = stepFileName;
+    loadGhostPart();
+  }
+  $: if (scene && modelVisible !== undefined && ghostGeometryData !== undefined) updateGhostMesh();
+
+  // Gouge check: has the sim's cut state, at the current playback position,
+  // removed material the source part actually needed? An independent
+  // ground truth (the STEP file, not the G-code replaying itself) is the
+  // whole reason this needs the ghost part loaded first - comparing the
+  // program's own output against itself would be tautological.
+  const GOUGE_TOLERANCE = 0.01;
+  $: turningGouge = isTurning && turningTargetProfile && stockOuterProfile
+    ? detectTurningGouge(stockOuterProfile, turningTargetProfile)
+    : false;
+  $: routingGouge = !isTurning && routingTargetThickness != null && routingHeights
+    ? Math.min(...routingHeights) < -routingTargetThickness - GOUGE_TOLERANCE
+    : false;
+  $: gougeDetected = turningGouge || routingGouge;
 
   function applyVisibility(state) {
     for (const kind of KINDS) {
@@ -133,10 +236,509 @@
     toolMesh = null;
   }
 
+  function disposeStock() {
+    if (!stockMesh || !scene) return;
+    scene.remove(stockMesh);
+    stockMesh.traverse((child) => {
+      child.geometry?.dispose?.();
+      if (Array.isArray(child.material)) child.material.forEach((material) => material.dispose?.());
+      else child.material?.dispose?.();
+    });
+    stockMesh = null;
+  }
+
+  function disposeGhost() {
+    if (!ghostMesh || !scene) return;
+    scene.remove(ghostMesh);
+    ghostMesh.traverse((child) => {
+      child.geometry?.dispose?.();
+      if (Array.isArray(child.material)) child.material.forEach((material) => material.dispose?.());
+      else child.material?.dispose?.();
+    });
+    ghostMesh = null;
+  }
+
+  // Phase 5: load and show the source STEP part semi-transparently, so a
+  // gouge or a missed feature is visible against what the toolpath actually
+  // produced - see docs/toolpath-simulation-plan.md. Fetch + parse doesn't
+  // touch the scene, so this can run before the scene exists (or while the
+  // job is still being edited) without racing updateStock()/rebuildToolpath().
+  async function loadGhostPart() {
+    ghostGeometryData = null;
+    turningTargetProfile = null;
+    routingTargetThickness = null;
+    ghostError = '';
+    // Tube stock has no ghost-part/gouge-check support yet - its geometry
+    // (rectangular tube, indexed round holes) isn't something
+    // extractTurningProfileFromMeshes/extractRoutingContoursFromMeshes can
+    // read, and the sim is fully usable without it (the drilled-hole
+    // rendering already shows real, measured hole positions).
+    if (!stepFileName || isTubestock) return;
+
+    ghostLoading = true;
+    try {
+      const meshes = await fetchStepMeshes(stepFileName);
+      if (disposed) return;
+      if (isTurning) {
+        turningTargetProfile = extractTurningProfileFromMeshes(meshes);
+        ghostGeometryData = transformMeshesForTurningScene(meshes);
+      } else {
+        const { thickness, frame } = extractRoutingContoursFromMeshes(meshes);
+        routingTargetThickness = thickness;
+        ghostGeometryData = transformMeshesForRoutingScene(meshes, frame);
+        // transformMeshesForRoutingScene reproduces the RAW (pre-edge-margin)
+        // u/v coordinates - generateRoutingGcode shifted the actual toolpath
+        // by edgeShiftX/edgeShiftY to keep it clear of X0/Y0, so the ghost
+        // part needs the identical shift to land in the same place.
+        if (edgeShiftX || edgeShiftY) {
+          for (const { position } of ghostGeometryData) {
+            for (let i = 0; i < position.length; i += 3) {
+              position[i] += edgeShiftX;
+              position[i + 1] += edgeShiftY;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      // Non-fatal: the toolpath sim is fully usable without the ghost part -
+      // an older job whose STEP file was replaced/removed, or a part this
+      // extractor genuinely can't read, shouldn't break the rest of the view.
+      console.warn('Ghost part overlay unavailable:', e?.message || e);
+      ghostError = e?.message || 'Could not load the source part for comparison.';
+    } finally {
+      ghostLoading = false;
+    }
+  }
+
+  function updateGhostMesh() {
+    disposeGhost();
+    if (!scene || !ghostGeometryData || !modelVisible) return;
+
+    ghostMesh = new THREE.Group();
+    const material = new THREE.MeshPhongMaterial({
+      color: 0xf1c331, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false
+    });
+    for (const { position, index } of ghostGeometryData) {
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(position, 3));
+      if (index) geometry.setIndex(new THREE.Uint32BufferAttribute(index, 1));
+      geometry.computeVertexNormals();
+      ghostMesh.add(new THREE.Mesh(geometry, material));
+    }
+    scene.add(ghostMesh);
+  }
+
+  // Real machined solid, not a static ghost cylinder: rebuilt from the
+  // actual radius-per-axial-position profile at the current playback
+  // position - see buildTurningStockProfile in toolpathPreview.js for why
+  // this is exact (not an approximation) for OD turning. Sample count is a
+  // resolution/perf tradeoff, rebuilt on every position change like
+  // updateTool() already does.
+  const STOCK_PROFILE_SAMPLES = 200;
+  const STOCK_RADIAL_SEGMENTS = 56;
+
+  // Lifted out of updateStock()/updateRoutingStock() so the gouge check
+  // (below) can read the current cut state without recomputing it.
+  let stockOuterProfile = null; // turning: {axial, outer} at the current playback position
+  let routingHeights = null; // routing: Float32Array at the current playback position
+
+  function detectTurningGouge(profileNow, targetProfile) {
+    // targetProfile (from extractTurningProfileFromMeshes) is {z,x}[] in
+    // native STEP-file coordinates. Convert it into the exact same
+    // scene/machining axial coordinate the sim's own stock profile uses -
+    // zOrigin = targetProfile[0].z, machiningAxial = zOrigin - nativeZ - the
+    // identical transform turning.js itself applies before generating
+    // G-code (see its own zOrigin/profile normalization), not an
+    // independently-guessed fractional alignment. Getting this wrong is not
+    // a cosmetic bug: an earlier version normalized both profiles to
+    // independent 0..1 fractions, which silently compared the two ends of
+    // the part backwards (the stock profile's fraction=0 is the chuck end;
+    // the target's fraction=0 landed on the face end) - correct-looking on
+    // a constant-radius test fixture, wrong on any real tapered/stepped
+    // shaft, which is exactly the case this check exists for.
+    const zOrigin = targetProfile[0].z;
+    const sorted = targetProfile
+      .map((p) => ({ axial: zOrigin - p.z, radius: p.x }))
+      .sort((a, b) => a.axial - b.axial);
+
+    const radiusAtAxial = (axial) => {
+      if (axial <= sorted[0].axial) return sorted[0].radius;
+      const last = sorted[sorted.length - 1];
+      if (axial >= last.axial) return last.radius;
+      for (let i = 0; i < sorted.length - 1; i += 1) {
+        if (axial >= sorted[i].axial && axial <= sorted[i + 1].axial) {
+          const span = sorted[i + 1].axial - sorted[i].axial;
+          const t = span === 0 ? 0 : (axial - sorted[i].axial) / span;
+          return sorted[i].radius + t * (sorted[i + 1].radius - sorted[i].radius);
+        }
+      }
+      return last.radius;
+    };
+
+    const { axial, outer } = profileNow;
+    for (let i = 0; i < axial.length; i += 1) {
+      if (outer[i] < radiusAtAxial(axial[i]) - GOUGE_TOLERANCE) return true;
+    }
+    return false;
+  }
+
+  function updateStock() {
+    disposeStock();
+    if (!scene || !moves.length) return;
+
+    if (isTurning) {
+      if (!(Number(stockDiameter) > 0)) return;
+
+      const initialOuterRadius = stockEnvelopeRadius(Number(stockDiameter), stockShape);
+      const rawAxialMin = Math.min(...moves.flatMap((move) => [move.from.x, move.to.x]));
+      const margin = initialOuterRadius * 0.08;
+      // Z=0 is always the face (turning.js's own normalization convention) -
+      // nothing physically exists past it. Clamping here (rather than at the
+      // raw move bounds) is what keeps the finishing pass's X0-approach move
+      // - which technically sweeps through Z>0, empty clearance air, not
+      // real stock - from carving a fake divot into the rendered solid.
+      const axialMin = rawAxialMin - margin;
+      const axialMax = 0;
+
+      const drillRadius = Number(drillDiameter) > 0 ? Number(drillDiameter) / 2 : 0;
+      const moveIndex = toolPosition?.moveIndex ?? 0;
+      const progress = toolPosition?.progress ?? 0;
+
+      const { axial, outer, inner } = buildTurningStockProfile(moves, {
+        samples: STOCK_PROFILE_SAMPLES,
+        axialMin,
+        axialMax,
+        initialOuterRadius,
+        drillRadius,
+        uptoMoveIndex: moveIndex,
+        partialProgress: progress
+      });
+      stockOuterProfile = { axial, outer };
+
+      const hasBore = inner.some((r) => r > 0.001);
+      let geometry;
+      if (stockShape === 'hex' && !hasBore) {
+        // Exact hex cross-section, not the across-corners-circle
+        // approximation the axisymmetric path below uses for hex stock -
+        // see buildTurningStockRings's own comment for why this is exact,
+        // not just a nicer-looking guess. No bore support there yet (rare
+        // combination), so a drilled hex part still falls through to the
+        // axisymmetric path.
+        const rings = buildTurningStockRings(axial, outer, {
+          angularSegments: STOCK_RADIAL_SEGMENTS,
+          stockShape: 'hex',
+          acrossFlatsRadius: Number(stockDiameter) / 2
+        });
+        geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(rings.position, 3));
+        geometry.setIndex(new THREE.BufferAttribute(rings.index, 1));
+        // Already built directly in scene coordinates (x=axial), unlike
+        // LatheGeometry below - no extra rotation needed.
+      } else {
+        const points = turningProfileToLathePoints(axial, outer, inner).map(([r, z]) => new THREE.Vector2(r, z));
+        geometry = new THREE.LatheGeometry(points, STOCK_RADIAL_SEGMENTS);
+        // LatheGeometry revolves around its local Y axis (radius=x, axial
+        // position=y). rotateZ(-90deg) maps local Y -> scene +X directly (no
+        // sign flip), matching every other turning coordinate in this file
+        // (toolPosition.position.x is the same raw projected axial value) -
+        // unlike the old uniform cylinder, an asymmetric machined profile
+        // actually needs the correct sign here, not just "a" rotation.
+        geometry.rotateZ(-Math.PI / 2);
+      }
+      geometry.computeVertexNormals();
+
+      const solid = new THREE.Mesh(
+        geometry,
+        new THREE.MeshPhongMaterial({ color: 0xb8bcc2, side: THREE.DoubleSide })
+      );
+      stockMesh = new THREE.Group();
+      stockMesh.add(solid);
+      stockMesh.visible = stockVisible;
+      scene.add(stockMesh);
+      return;
+    }
+
+    if (isTubestock) {
+      updateTubestockStock();
+      return;
+    }
+
+    updateRoutingStock();
+  }
+
+  // Tube stock (rotary 4th-axis drilling): a static box in the tube's own
+  // local frame (see projectTubestockToolpath's own doc comment for why
+  // this isn't animated as a literal rotation), with each wall built as a
+  // flat surface that a hole is cut into the instant playback reaches its
+  // plunge move, plus a dark bore cylinder showing how deep that hole has
+  // actually gone - both placed via tubeLocalPoint, the same function that
+  // places the toolpath/tool, so the holes and the moves that drill them
+  // can never drift apart the way the routing ghost-part/edgeShift bug did.
+  const TUBESTOCK_CIRCLE_SEGMENTS = 24;
+  const TUBESTOCK_MIN_VISIBLE_DEPTH = 0.0005;
+
+  function updateTubestockStock() {
+    if (!crossSection || !(crossSection.a > 0) || !(crossSection.b > 0)) return;
+
+    const currentMoveIndex = toolPosition?.moveIndex ?? 0;
+    const currentProgress = toolPosition?.progress ?? 0;
+    const holeDepthNow = (hole) => {
+      if (hole.moveIndex < 0) return hole.fullDepth; // unmatched - safe fallback, always shown
+      if (hole.moveIndex < currentMoveIndex) return hole.fullDepth;
+      if (hole.moveIndex === currentMoveIndex) return hole.fullDepth * currentProgress;
+      return 0;
+    };
+
+    const minU = Number.isFinite(bounds.min.x) ? bounds.min.x : 0;
+    const maxU = Number.isFinite(bounds.max.x) && bounds.max.x > minU ? bounds.max.x : minU + 1;
+
+    const group = new THREE.Group();
+    const surfaceMaterial = new THREE.MeshPhongMaterial({ color: 0xb8bcc2, side: THREE.DoubleSide });
+    const boreMaterial = new THREE.MeshPhongMaterial({ color: 0x2b2b2e, side: THREE.DoubleSide });
+
+    const wallAngles = [...new Set((walls || []).map((w) => w.angleDeg))];
+    for (const angle of wallAngles) {
+      const snapped = (((Math.round(angle / 90) * 90) % 360) + 360) % 360;
+      const wallWidth = (snapped === 0 || snapped === 180) ? crossSection.b : crossSection.a;
+      const shape = new THREE.Shape([
+        new THREE.Vector2(minU, -wallWidth / 2),
+        new THREE.Vector2(maxU, -wallWidth / 2),
+        new THREE.Vector2(maxU, wallWidth / 2),
+        new THREE.Vector2(minU, wallWidth / 2)
+      ]);
+
+      for (const hole of drilledHoleIndex) {
+        if (hole.angleDeg !== angle) continue;
+        const depth = holeDepthNow(hole);
+        if (!(depth > TUBESTOCK_MIN_VISIBLE_DEPTH)) continue;
+
+        const radius = hole.diameter / 2;
+        const holePath = new THREE.Path();
+        holePath.absellipse(hole.position, hole.lateralOffset, radius, radius, 0, Math.PI * 2, false, 0);
+        shape.holes.push(holePath);
+
+        const outer3D = tubeLocalPoint(angle, hole.position, hole.lateralOffset, 0, crossSection);
+        const inner3D = tubeLocalPoint(angle, hole.position, hole.lateralOffset, -depth, crossSection);
+        const dir = new THREE.Vector3(inner3D.x - outer3D.x, inner3D.y - outer3D.y, inner3D.z - outer3D.z);
+        const boreLength = dir.length();
+        if (boreLength < 1e-6) continue;
+        dir.normalize();
+        const bore = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, boreLength, TUBESTOCK_CIRCLE_SEGMENTS), boreMaterial);
+        bore.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+        bore.position.set((outer3D.x + inner3D.x) / 2, (outer3D.y + inner3D.y) / 2, (outer3D.z + inner3D.z) / 2);
+        group.add(bore);
+      }
+
+      const geometry = new THREE.ShapeGeometry(shape);
+      const pos = geometry.attributes.position;
+      for (let i = 0; i < pos.count; i += 1) {
+        const local = tubeLocalPoint(angle, pos.getX(i), pos.getY(i), 0, crossSection);
+        pos.setXYZ(i, local.x, local.y, local.z);
+      }
+      pos.needsUpdate = true;
+      geometry.computeVertexNormals();
+      group.add(new THREE.Mesh(geometry, surfaceMaterial));
+    }
+
+    // End caps - plain rectangles, no holes (extractTubeFeaturesFromMeshes
+    // only reads side-wall holes) - just enough for the tube to read as a
+    // real solid bar rather than 4 open, floating panels.
+    const halfA = crossSection.a / 2;
+    const halfB = crossSection.b / 2;
+    for (const u of [minU, maxU]) {
+      const capGeometry = new THREE.BufferGeometry();
+      const positions = new Float32Array([
+        u, -halfA, -halfB, u, halfA, -halfB, u, halfA, halfB,
+        u, -halfA, -halfB, u, halfA, halfB, u, -halfA, halfB
+      ]);
+      capGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      capGeometry.computeVertexNormals();
+      group.add(new THREE.Mesh(capGeometry, surfaceMaterial));
+    }
+
+    group.visible = stockVisible;
+    stockMesh = group;
+    scene.add(stockMesh);
+  }
+
+  // Real machined solid for routing (Phase 4 of
+  // docs/toolpath-simulation-plan.md, deferred when the router sim first
+  // shipped) - a heightmap-displaced plate, rebuilt every playback position
+  // from buildRoutingHeightmap. See that function's own comment for why a
+  // grid is exact for a 2.5D router cut, unlike turning's radius profile.
+  const HEIGHTMAP_MAX_GRID = 160;
+  const HEIGHTMAP_MARGIN_FACTOR = 0.06;
+
+  function routingCutterRadius(move) {
+    const seqDiameter = Number(toolSequence?.[move.toolIndex || 0]?.toolDiameter);
+    const diameter = seqDiameter > 0 ? seqDiameter : (Number(toolDiameter) || Number(cutterDiameterInput) || 0);
+    return diameter > 0 ? diameter / 2 : 0;
+  }
+
+  function updateRoutingStock() {
+    const spanX = Math.max(bounds.max.x - bounds.min.x, 0.1);
+    const spanY = Math.max(bounds.max.y - bounds.min.y, 0.1);
+    const marginX = spanX * HEIGHTMAP_MARGIN_FACTOR;
+    const marginY = spanY * HEIGHTMAP_MARGIN_FACTOR;
+    const gridMinX = bounds.min.x - marginX;
+    const gridMinY = bounds.min.y - marginY;
+    const width = spanX + marginX * 2;
+    const heightSpan = spanY + marginY * 2;
+
+    const resolvedDiameters = [Number(toolDiameter), ...(toolSequence || []).map((t) => Number(t.toolDiameter))].filter((d) => d > 0);
+    const minToolDiameter = resolvedDiameters.length ? Math.min(...resolvedDiameters) : 0.25;
+    const targetCellSize = minToolDiameter / 6;
+    const cellSize = Math.max(targetCellSize, width / HEIGHTMAP_MAX_GRID, heightSpan / HEIGHTMAP_MAX_GRID);
+    const nx = Math.max(10, Math.ceil(width / cellSize) + 1);
+    const ny = Math.max(10, Math.ceil(heightSpan / cellSize) + 1);
+
+    // The real measured material thickness once the ghost part has loaded
+    // (Phase 5 - extractRoutingContoursFromMeshes); until/unless that's
+    // available, fall back to "a bit below the deepest programmed cut,
+    // safely into the spoilboard" - not a real measurement, but honest
+    // enough to read as a solid plate rather than a paper-thin sheet.
+    const floorZ = routingTargetThickness != null
+      ? -routingTargetThickness
+      : Math.min(bounds.min.z - cellSize, -0.05);
+    const moveIndex = toolPosition?.moveIndex ?? 0;
+    const progress = toolPosition?.progress ?? 0;
+
+    const heights = buildRoutingHeightmap(moves, {
+      nx, ny, minX: gridMinX, minY: gridMinY, cellSize, topZ: 0, floorZ,
+      cutterRadiusForMove: routingCutterRadius,
+      uptoMoveIndex: moveIndex,
+      partialProgress: progress
+    });
+    routingHeights = heights;
+
+    const geomWidth = (nx - 1) * cellSize;
+    const geomHeight = (ny - 1) * cellSize;
+    const geometry = new THREE.PlaneGeometry(geomWidth, geomHeight, nx - 1, ny - 1);
+    const centerX = gridMinX + cellSize / 2 + geomWidth / 2;
+    const centerY = gridMinY + cellSize / 2 + geomHeight / 2;
+    geometry.translate(centerX, centerY, 0);
+
+    // Look up each vertex's own (x,y) rather than assuming PlaneGeometry's
+    // internal iteration order matches the heightmap's (ix,iy) indexing -
+    // correct regardless of that internal convention, at negligible cost.
+    const posAttr = geometry.attributes.position;
+    for (let i = 0; i < posAttr.count; i += 1) {
+      const vx = posAttr.getX(i);
+      const vy = posAttr.getY(i);
+      const ix = Math.max(0, Math.min(nx - 1, Math.round((vx - gridMinX) / cellSize - 0.5)));
+      const iy = Math.max(0, Math.min(ny - 1, Math.round((vy - gridMinY) / cellSize - 0.5)));
+      posAttr.setZ(i, heights[iy * nx + ix]);
+    }
+    posAttr.needsUpdate = true;
+    geometry.computeVertexNormals();
+
+    const solid = new THREE.Mesh(
+      geometry,
+      new THREE.MeshPhongMaterial({ color: 0xb8bcc2, side: THREE.DoubleSide })
+    );
+    stockMesh = new THREE.Group();
+    stockMesh.add(solid);
+    stockMesh.visible = stockVisible;
+    scene.add(stockMesh);
+  }
+
   function updateTool() {
     if (!scene) return;
-    if (!cutterDiameter || !toolPosition) {
+    if ((!cutterDiameter && !isTurning && !isTubestock) || !toolPosition) {
       disposeTool();
+      return;
+    }
+
+    if (isTubestock) {
+      // A drill, not an end mill: rendered as a plain cylinder (same shape
+      // as the router bit below, no insert/holder detail needed) but
+      // oriented along the CURRENT move's own wall normal - unlike routing
+      // (always +Z) or turning (always the fixed XZ plane), the working
+      // direction changes with every wall the toolpath visits.
+      const currentAngle = moves[toolPosition.moveIndex]?.angleDeg ?? 0;
+      const normal = tubeWallNormal(currentAngle);
+      const span = Math.max(Number(crossSection?.a) || 0, Number(crossSection?.b) || 0, 0.5);
+      const size = Math.max(span * 0.03, 0.04);
+      const length = Math.max(size * 8, 0.4);
+
+      if (!toolMesh || toolMesh.userData.kind !== 'tubestock' || toolMesh.userData.size !== size) {
+        disposeTool();
+        toolMesh = new THREE.Mesh(
+          new THREE.CylinderGeometry(size, size, length, 16),
+          new THREE.MeshBasicMaterial({ color: 0x202020 })
+        );
+        toolMesh.userData.kind = 'tubestock';
+        toolMesh.userData.size = size;
+        scene.add(toolMesh);
+      }
+      const dir = new THREE.Vector3(normal.x, normal.y, normal.z);
+      toolMesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+      const tip = toolPosition.position;
+      toolMesh.position.set(
+        tip.x + normal.x * (length / 2),
+        tip.y + normal.y * (length / 2),
+        tip.z + normal.z * (length / 2)
+      );
+      toolMesh.visible = toolVisible;
+      return;
+    }
+
+    if (isTurning) {
+      // A real toolholder + diamond insert, matching Fusion's own turning
+      // simulation look (a metallic holder bar with a small bright insert
+      // at the tip) rather than a router end mill - a lathe cuts with a
+      // stationary insert against a rotating part, not a spinning bit.
+      // Sized off the stock so it reads clearly at any part scale - the
+      // old tiny 4-sided cone (sized only off noseRadius, which is often
+      // unset) was nearly invisible in practice.
+      const stockRadius = Number(stockDiameter) > 0 ? stockEnvelopeRadius(Number(stockDiameter), stockShape) : 0.5;
+      const insertSize = Math.max(Number(noseRadius) * 10, stockRadius * 0.16, 0.05);
+      const holderWidth = Math.max(stockRadius * 0.3, 0.12);
+      const holderLength = Math.max(stockRadius * 1.8, 0.7);
+
+      if (!toolMesh || toolMesh.userData.kind !== 'turning' || toolMesh.userData.size !== insertSize || toolMesh.userData.holderWidth !== holderWidth) {
+        disposeTool();
+        toolMesh = new THREE.Group();
+
+        // Insert tip - a flat 4-sided diamond (a real turning insert's
+        // shape, not a tall generic polyhedron), anchored at the group's
+        // local origin (= toolPosition below, the exact contact point).
+        // Bright, saturated, and strongly emissive so it reads as a
+        // distinct highlight against both the gray stock and the holder
+        // regardless of lighting/camera angle - the old muted gold was too
+        // easily lost against the holder's own shadow.
+        const insert = new THREE.Mesh(
+          new THREE.ConeGeometry(insertSize, insertSize * 0.7, 4),
+          new THREE.MeshPhongMaterial({ color: 0xffcc33, emissive: 0xcc8800, emissiveIntensity: 0.6, shininess: 100 })
+        );
+        insert.rotation.z = Math.PI / 4;
+        toolMesh.add(insert);
+
+        // Holder shank extends outward from the tip, tilted off the flat
+        // Z=0 plane every turning coordinate in this file otherwise stays
+        // in (toolPosition.position.z is always 0 - see
+        // projectTurningToolpath) - a pure +Y extension would sit exactly
+        // in that plane and can look edge-on/foreshortened to almost
+        // nothing from some camera angles. The tilt keeps it reading as a
+        // real 3D block from any reasonable orbit angle. Mid-gray steel
+        // color (not near-black) so the block itself stays legible instead
+        // of reading as a shadow.
+        const holder = new THREE.Mesh(
+          new THREE.BoxGeometry(holderWidth, holderLength, holderWidth),
+          new THREE.MeshPhongMaterial({ color: 0x6b7280, shininess: 60 })
+        );
+        const holderOffset = holderLength / 2 + insertSize * 0.6;
+        holder.position.set(0, holderOffset * 0.85, holderOffset * 0.53);
+        holder.rotation.x = -0.55;
+        toolMesh.add(holder);
+
+        toolMesh.userData.kind = 'turning';
+        toolMesh.userData.size = insertSize;
+        toolMesh.userData.holderWidth = holderWidth;
+        scene.add(toolMesh);
+      }
+      toolMesh.position.set(toolPosition.position.x, toolPosition.position.y, toolPosition.position.z);
+      toolMesh.visible = toolVisible;
       return;
     }
 
@@ -162,7 +764,7 @@
   }
 
   function togglePlayback() {
-    if (!moves.length || !cutterDiameter) return;
+    if (!moves.length || !canAnimate) return;
     if (playbackDistance >= parsed.totalDistance) playbackDistance = 0;
     isPlaying = !isPlaying;
   }
@@ -248,21 +850,32 @@
         scene.add(grid);
         axes = new THREE.AxesHelper(1);
         scene.add(axes);
+        scene.add(new THREE.AmbientLight(0xffffff, 1.5));
+        const keyLight = new THREE.DirectionalLight(0xffffff, 2.2);
+        keyLight.position.set(3, -4, 5);
+        scene.add(keyLight);
 
         controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
         controls.dampingFactor = 0.1;
 
         rebuildToolpath();
+        updateStock();
+        updateGhostMesh();
 
         const animate = (timestamp) => {
           if (disposed) return;
           frameId = requestAnimationFrame(animate);
-          if (isPlaying && cutterDiameter && lastPlaybackFrame !== null) {
+          if (isPlaying && canAnimate && lastPlaybackFrame !== null) {
             // This is deliberately distance, not an invented machining-time
             // estimate. The multiplier only controls how quickly to inspect.
             playbackDistance = Math.min(parsed.totalDistance, playbackDistance + ((timestamp - lastPlaybackFrame) / 1000) * playbackSpeed);
             if (playbackDistance >= parsed.totalDistance) isPlaying = false;
+          }
+          if (isTurning && stockMesh && isPlaying && lastPlaybackFrame !== null) {
+            // The workpiece rotates in a lathe; the insert translates through
+            // X/Z. Animate the honest machine motion, not a spinning insert.
+            stockMesh.rotation.x += ((timestamp - lastPlaybackFrame) / 1000) * Math.PI * 2;
           }
           lastPlaybackFrame = timestamp;
           controls.update();
@@ -309,6 +922,8 @@
     if (scene) {
       disposeToolpath();
       disposeTool();
+      disposeStock();
+      disposeGhost();
     }
     controls?.dispose?.();
     renderer?.dispose?.();
@@ -327,12 +942,17 @@
     {:else if !moves.length}
       <div class="overlay"><span>No toolpath moves could be read from this program.</span></div>
     {/if}
+    {#if gougeDetected}
+      <div class="gouge-banner" role="alert">
+        ⚠️ Possible gouge: as of the current playback position, this program has cut below the source part's actual finished surface.
+      </div>
+    {/if}
   </div>
 
   <div class="simulator-controls" aria-label="Toolpath simulation controls">
     <div class="playback-controls">
       <div class="transport-buttons">
-        <button class="btn btn-ghost btn-icon" type="button" title={isPlaying ? 'Pause simulation' : 'Play simulation'} aria-label={isPlaying ? 'Pause simulation' : 'Play simulation'} on:click={togglePlayback} disabled={loading || !!error || !moves.length || !cutterDiameter}>
+        <button class="btn btn-ghost btn-icon" type="button" title={isPlaying ? 'Pause simulation' : 'Play simulation'} aria-label={isPlaying ? 'Pause simulation' : 'Play simulation'} on:click={togglePlayback} disabled={loading || !!error || !moves.length || !canAnimate}>
           {#if isPlaying}<Pause size={17} />{:else}<Play size={17} />{/if}
         </button>
         <button class="btn btn-ghost btn-icon" type="button" title="Next move" aria-label="Next move" on:click={nextMove} disabled={loading || !moves.length}><SkipForward size={17} /></button>
@@ -356,10 +976,27 @@
       <input type="checkbox" bind:checked={toolpathVisible} />
       <span class="legend-label">Toolpath</span>
     </label>
-    <label class="legend-item" class:empty={!cutterDiameter}>
-      <input type="checkbox" bind:checked={toolVisible} disabled={!cutterDiameter} />
-      <span class="legend-label">Tool</span>
+    <label class="legend-item" class:empty={!isTurning && !isTubestock && !cutterDiameter}>
+      <input type="checkbox" bind:checked={toolVisible} disabled={!isTurning && !isTubestock && !cutterDiameter} />
+      <span class="legend-label">{isTurning ? 'Insert' : 'Tool'}</span>
     </label>
+    {#if isTurning}
+      <label class="legend-item" class:empty={!(Number(stockDiameter) > 0)}>
+        <input type="checkbox" bind:checked={stockVisible} disabled={!(Number(stockDiameter) > 0)} />
+        <span class="legend-label">Rotating stock</span>
+      </label>
+    {:else}
+      <label class="legend-item" class:empty={!moves.length}>
+        <input type="checkbox" bind:checked={stockVisible} disabled={!moves.length} />
+        <span class="legend-label">Stock</span>
+      </label>
+    {/if}
+    {#if stepFileName && !isTubestock}
+      <label class="legend-item" class:empty={!ghostGeometryData} title={ghostError || (ghostLoading ? 'Loading source part...' : 'The source STEP part, shown semi-transparently for comparison')}>
+        <input type="checkbox" bind:checked={modelVisible} disabled={!ghostGeometryData} />
+        <span class="legend-label">Model{ghostLoading ? '…' : ''}</span>
+      </label>
+    {/if}
     {#each KINDS as kind}
       <label class="legend-item" class:empty={!moveCounts[kind]}>
         <input type="checkbox" bind:checked={visible[kind]} disabled={!moveCounts[kind]} />
@@ -372,7 +1009,7 @@
     </div>
   </div>
 
-  {#if !singleToolDiameter && !activeSequenceDiameter}
+  {#if !isTurning && !isTubestock && !singleToolDiameter && !activeSequenceDiameter}
     <label class="tool-diameter-input">
       <span>End mill diameter (in)</span>
       <input type="number" min="0.001" step="0.001" bind:value={cutterDiameterInput} placeholder="e.g. 0.25" />
@@ -405,6 +1042,20 @@
     padding: 1rem;
   }
   .overlay-error { color: var(--red-strong, #991b1b); }
+  .gouge-banner {
+    position: absolute;
+    left: var(--space-3, 0.75rem);
+    right: var(--space-3, 0.75rem);
+    bottom: var(--space-3, 0.75rem);
+    padding: 0.6rem 0.9rem;
+    border-radius: var(--radius-sm, 4px);
+    background: var(--red-soft, #fee2e2);
+    color: var(--red-strong, #991b1b);
+    border: 1px solid var(--red-base, #dc3545);
+    font-size: 0.85rem;
+    font-weight: 600;
+    z-index: 2;
+  }
   .spinner {
     width: 32px;
     height: 32px;

@@ -267,6 +267,60 @@ export async function POST({ request }) {
       return json({ success: true, data: updatedRow });
     }
 
+    if (action === 'update-notifications') {
+      const { manufacturing_lead_workflows, vision_notify } = body;
+      const { data: { user: authenticatedUser } } = await supa.auth.getUser();
+      if (!authenticatedUser) return json({ error: 'Unauthorized' }, { status: 401 });
+      if (String(authenticatedUser.id) !== String(actor_id)) {
+        return json({ error: 'Actor does not match authenticated user' }, { status: 403 });
+      }
+
+      const editingSelf = String(actor_id) === String(target_id);
+      if (!editingSelf && !isActorAdmin && !isActorDev && !actorPerms.includes('EDIT_PERMISSIONS')) {
+        return json({ error: 'Not authorized' }, { status: 403 });
+      }
+      if (manufacturing_lead_workflows === undefined && vision_notify === undefined) {
+        return json({ error: 'No notification settings supplied' }, { status: 400 });
+      }
+
+      const { data: targetRow, error: targetErr } = await supa
+        .from('user_profiles')
+        .select('id, role, is_dev')
+        .eq('id', target_id)
+        .single();
+      if (targetErr) return json({ error: targetErr.message }, { status: 500 });
+
+      if (!editingSelf && targetRow.is_dev && !isActorDev) {
+        return json({ error: "Only a dev can change another dev's notifications" }, { status: 403 });
+      }
+      if (!editingSelf && targetRow.role === 'admin' && !isActorAdmin) {
+        return json({ error: "Only an admin can change another admin's notifications" }, { status: 403 });
+      }
+
+      const updatePayload = {};
+      if (manufacturing_lead_workflows !== undefined) {
+        if (!Array.isArray(manufacturing_lead_workflows)) {
+          return json({ error: 'manufacturing_lead_workflows must be an array' }, { status: 400 });
+        }
+        const allowedWorkflows = new Set(['3d-print', 'router', 'lathe']);
+        const normalizedWorkflows = Array.from(new Set(manufacturing_lead_workflows.map(String)));
+        if (normalizedWorkflows.some((workflow) => !allowedWorkflows.has(workflow))) {
+          return json({ error: 'Unknown manufacturing notification workflow' }, { status: 400 });
+        }
+        updatePayload.manufacturing_lead_workflows = normalizedWorkflows;
+      }
+      if (vision_notify !== undefined) updatePayload.vision_notify = !!vision_notify;
+
+      const { data: updatedRow, error } = await supa
+        .from('user_profiles')
+        .update(updatePayload)
+        .eq('id', target_id)
+        .select('id, manufacturing_lead_workflows, vision_notify')
+        .single();
+      if (error) return json({ error: error.message }, { status: 500 });
+      return json({ success: true, data: updatedRow });
+    }
+
     // Default to editing permissions
     if (!Array.isArray(permissions)) {
       return json({ error: 'permissions[] required for permission updates' }, { status: 400 });

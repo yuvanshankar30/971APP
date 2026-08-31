@@ -28,6 +28,26 @@ function cleanNumber(value) {
 // meaning and derive one numeric estimate for aggregation. Open-ended values
 // such as "100+" use 100 as a conservative lower-bound estimate; there is no
 // mathematically honest midpoint when the upper bound is unknown.
+// Ball-count buckets a scout picks from when estimating how many balls a robot
+// handled in a match. Deliberately a fixed vocabulary rather than the free-text
+// box used for auto points: counting balls at a glance is a rough judgement, and
+// offering exact entry would imply a precision nobody watching a match actually
+// has.
+//
+// Generated rather than written out so the steps cannot drift or contain a
+// typo. 0-25 through 475-500 in steps of 25, then an open-ended top bucket -
+// the ranges parse with parseAutoPointsEstimate() below, so "500+" yields a
+// conservative lower bound instead of a midpoint.
+export const BALL_COUNT_STEP = 25;
+export const BALL_COUNT_MAX = 500;
+export const BALL_COUNT_RANGES = Object.freeze([
+  ...Array.from(
+    { length: BALL_COUNT_MAX / BALL_COUNT_STEP },
+    (_, index) => `${index * BALL_COUNT_STEP}-${(index + 1) * BALL_COUNT_STEP}`
+  ),
+  `${BALL_COUNT_MAX}+`
+]);
+
 export function parseAutoPointsEstimate(raw) {
   const text = String(raw ?? '').trim().replaceAll(',', '');
   if (!text) return null;

@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
-  import { supabase } from '$lib/supabase.js';
+  import { fetchStepMeshes, occtMeshesToBufferGeometries } from '$lib/stepMeshLoader.js';
 
   // Renders an interactive 3D view of a part. Two sources:
   //  - Onshape parts: export to STL through the app's Onshape API.
@@ -47,42 +47,8 @@
   // Parse an uploaded STEP file into geometries (client-side, occt-import-js).
   async function loadStepGeometries(THREE) {
     loadingMsg = 'Parsing STEP file…';
-    const { data, error: signErr } = await supabase.storage
-      .from('manufacturing-files')
-      .createSignedUrl(stepFileName, 120);
-    if (signErr || !data?.signedUrl) {
-      // Retry with a decoded path (filenames are sometimes URL-encoded)
-      const retry = await supabase.storage
-        .from('manufacturing-files')
-        .createSignedUrl(decodeURIComponent(stepFileName), 120);
-      if (retry.error || !retry.data?.signedUrl) {
-        throw new Error('Could not locate the STEP file in storage.');
-      }
-      data.signedUrl = retry.data.signedUrl;
-    }
-    const fileRes = await fetch(data.signedUrl);
-    if (!fileRes.ok) throw new Error(`Failed to download STEP file (HTTP ${fileRes.status})`);
-    const bytes = new Uint8Array(await fileRes.arrayBuffer());
-
-    const occtimportjs = (await import('occt-import-js')).default;
-    const wasmUrl = (await import('occt-import-js/dist/occt-import-js.wasm?url')).default;
-    const occt = await occtimportjs({ locateFile: () => wasmUrl });
-
-    const result = occt.ReadStepFile(bytes, null);
-    if (!result?.success || !result.meshes?.length) {
-      throw new Error('Could not read solid geometry from this STEP file.');
-    }
-
-    return result.meshes.map((m) => {
-      const geom = new THREE.BufferGeometry();
-      geom.setAttribute('position', new THREE.Float32BufferAttribute(m.attributes.position.array, 3));
-      if (m.attributes.normal) {
-        geom.setAttribute('normal', new THREE.Float32BufferAttribute(m.attributes.normal.array, 3));
-      }
-      if (m.index) geom.setIndex(new THREE.Uint32BufferAttribute(m.index.array, 1));
-      if (!m.attributes.normal) geom.computeVertexNormals();
-      return geom;
-    });
+    const meshes = await fetchStepMeshes(stepFileName);
+    return occtMeshesToBufferGeometries(THREE, meshes);
   }
 
   onMount(() => {

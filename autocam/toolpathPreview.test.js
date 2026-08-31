@@ -1,12 +1,30 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   parseGcodeToolpath,
   parseToolpath3D,
+  projectTurningToolpath,
   toolpathPositionAtDistance,
   toolpathBounds,
-  toolpathBounds3D
+  toolpathBounds3D,
+  buildTurningStockProfile,
+  turningProfileToLathePoints,
+  buildTurningStockRings,
+  buildRoutingHeightmap,
+  tubeLocalPoint,
+  tubeWallNormal,
+  projectTubestockToolpath,
+  matchTubestockHolesToMoves
 } from './toolpathPreview.js';
 import { generateRoutingGcode } from './routing.js';
+import { generateTurningGcode, stockEnvelopeRadius } from './turning.js';
+import { generateTubestockGcode } from './tubestock.js';
+import { readStepMeshes, extractTubeFeaturesFromMeshes } from './stepProfile.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const TUBE_05X05_SQUARE = path.join(__dirname, '__fixtures__', 'tube-05x05-square.step');
 
 const gcode = (...lines) => lines.join('\n');
 
@@ -73,6 +91,32 @@ describe('parseToolpath3D - linear moves', () => {
   it('supports incremental mode', () => {
     const { moves } = parseToolpath3D(gcode('G90', 'G00 X1 Y1 Z0', 'G91', 'G01 X2 Y0'));
     expect(moves[0].to.x).toBe(3);
+  });
+});
+
+describe('projectTurningToolpath', () => {
+  it('maps machine Z to the spindle axis and diameter-mode X to radius', () => {
+    const parsed = parseToolpath3D(gcode('G00 X1.0 Z0.1', 'G01 X0.5 Z-2.0'));
+    const projected = projectTurningToolpath(parsed);
+    expect(projected.moves[0].from).toEqual({ x: 0.1, y: 0.5, z: 0 });
+    expect(projected.moves[0].to).toEqual({ x: -2, y: 0.25, z: 0 });
+  });
+
+  it('recomputes distance in the projected radius coordinate system', () => {
+    const projected = projectTurningToolpath(parseToolpath3D(gcode('G00 X2 Z0', 'G01 X0 Z0')));
+    expect(projected.totalDistance).toBe(1);
+    expect(projected.moves[0].length).toBe(1);
+  });
+
+  it('treats every feed as a cut and preserves tool changes', () => {
+    const projected = projectTurningToolpath(parseToolpath3D(gcode(
+      'G00 X1 Z0', 'G01 X1 Z-1',
+      'M00 (TOOL CHANGE: finish insert)',
+      'G01 X0.5 Z-2'
+    )));
+    expect(projected.moves.map((move) => move.kind)).toEqual(['cut', 'cut']);
+    expect(projected.toolChangeIndices).toEqual([1]);
+    expect(projected.moves[1].toolIndex).toBe(1);
   });
 });
 
@@ -275,5 +319,399 @@ describe('against real generated G-code', () => {
   it('cuts to the requested depth and no deeper', () => {
     const { min } = toolpathBounds3D(parseToolpath3D(text).moves);
     expect(min.z).toBeCloseTo(-0.5, 3);
+  });
+});
+
+describe('buildTurningStockProfile', () => {
+  it('with no moves executed, the outer profile is the initial (uncut) radius everywhere and there is no bore', () => {
+    const { axial, outer, inner } = buildTurningStockProfile([], {
+      samples: 10, axialMin: -2, axialMax: 0, initialOuterRadius: 0.5, uptoMoveIndex: 0, partialProgress: 0
+    });
+    expect(axial.length).toBe(10);
+    expect(Array.from(outer).every((r) => r === 0.5)).toBe(true);
+    expect(Array.from(inner).every((r) => r === 0)).toBe(true);
+  });
+
+  it('a cutting move lowers the outer profile only within the axial range it sweeps', () => {
+    const moves = [{ kind: 'cut', from: { x: -2, y: 0.5 }, to: { x: -1, y: 0.3 } }];
+    const { outer } = buildTurningStockProfile(moves, {
+      samples: 21, axialMin: -2, axialMax: 0, initialOuterRadius: 0.5, uptoMoveIndex: 1
+    });
+    // axial step is 0.1: index 0 = -2 (move start), 5 = -1.5 (midpoint),
+    // 10 = -1 (move end), 20 = 0 (past the move's near end - never swept)
+    expect(outer[0]).toBeCloseTo(0.5, 5);
+    expect(outer[5]).toBeCloseTo(0.4, 5);
+    expect(outer[10]).toBeCloseTo(0.3, 5);
+    expect(outer[20]).toBeCloseTo(0.5, 5);
+  });
+
+  it('ignores rapid moves - they do not cut', () => {
+    const moves = [{ kind: 'rapid', from: { x: -2, y: 0.6 }, to: { x: -1, y: 0.6 } }];
+    const { outer } = buildTurningStockProfile(moves, {
+      samples: 5, axialMin: -2, axialMax: 0, initialOuterRadius: 0.5, uptoMoveIndex: 1
+    });
+    expect(Array.from(outer).every((r) => r === 0.5)).toBe(true);
+  });
+
+  it('a centerline move (both endpoints at radius 0) cuts a bore, raising inner but never touching outer', () => {
+    const moves = [{ kind: 'cut', from: { x: -1, y: 0 }, to: { x: 0, y: 0 } }];
+    const { axial, outer, inner } = buildTurningStockProfile(moves, {
+      samples: 11, axialMin: -2, axialMax: 0, initialOuterRadius: 0.5, drillRadius: 0.1, uptoMoveIndex: 1
+    });
+    expect(Array.from(outer).every((r) => r === 0.5)).toBe(true);
+    for (let i = 0; i < axial.length; i += 1) {
+      if (axial[i] >= -1 - 1e-6) expect(inner[i]).toBeCloseTo(0.1, 5);
+      else expect(inner[i]).toBe(0);
+    }
+  });
+
+  it('applies partial progress on the in-progress move only, not the moves after it', () => {
+    const moves = [
+      { kind: 'cut', from: { x: -2, y: 0.5 }, to: { x: -1, y: 0.5 } },
+      { kind: 'cut', from: { x: -1, y: 0.5 }, to: { x: 0, y: 0.2 } }
+    ];
+    const full = buildTurningStockProfile(moves, { samples: 11, axialMin: -2, axialMax: 0, initialOuterRadius: 0.5, uptoMoveIndex: 2 });
+    const half = buildTurningStockProfile(moves, { samples: 11, axialMin: -2, axialMax: 0, initialOuterRadius: 0.5, uptoMoveIndex: 1, partialProgress: 0.5 });
+    expect(full.outer[10]).toBeCloseTo(0.2, 5); // fully cut to the far end
+    expect(half.outer[10]).toBeCloseTo(0.5, 5); // partial move only reached -0.5, never got here
+    expect(half.outer[7]).toBeCloseTo(0.38, 2); // within the partially-swept range
+  });
+
+  it('against real generated G-code: after the full program, the outer profile matches the finished (constant-radius) part', () => {
+    const profile = [{ z: 0, x: 0.4 }, { z: 2, x: 0.4 }];
+    const params = { stockDiameter: 0.9, stepDown: 0.05, finishAllowance: 0.02, feedRough: 0.008, feedFinish: 0.004 };
+    const { gcode: programText } = generateTurningGcode(profile, params);
+    const projected = projectTurningToolpath(parseToolpath3D(programText));
+    // Clamp to <= 0: Z=0 is always the face (turning.js's own normalization
+    // convention) and nothing physically exists past it - the finishing
+    // pass's approach move rapids to X0 then cuts to the first profile
+    // point, which technically sweeps through Z>0 (empty clearance air, not
+    // real stock); sampling out that far would pick up that artifact.
+    const axialMin = Math.min(...projected.moves.flatMap((m) => [m.from.x, m.to.x]));
+    const { outer } = buildTurningStockProfile(projected.moves, {
+      samples: 50,
+      axialMin,
+      axialMax: 0,
+      initialOuterRadius: stockEnvelopeRadius(params.stockDiameter, 'round'),
+      uptoMoveIndex: projected.moves.length
+    });
+    for (const r of outer) expect(r).toBeCloseTo(0.4, 2);
+  });
+});
+
+describe('turningProfileToLathePoints', () => {
+  // Plain arrays here (not Float32Array) so the expected values in these
+  // tests can compare exactly - the function itself doesn't care which kind
+  // of array it's given, it only indexes into them.
+  it('with no bore, returns the outer wall only, one point per sample, in order', () => {
+    const axial = [-2, -1, 0];
+    const outer = [0.5, 0.4, 0.4];
+    const inner = [0, 0, 0];
+    const points = turningProfileToLathePoints(axial, outer, inner);
+    expect(points.length).toBe(3);
+    expect(points[0]).toEqual([0.5, -2]);
+    expect(points[2]).toEqual([0.4, 0]);
+  });
+
+  it('with a bore touching the face end, closes a loop tracing outer wall, face annulus, bore wall, and hole bottom', () => {
+    const axial = [-2, -1, 0];
+    const outer = [0.5, 0.5, 0.5];
+    const inner = [0, 0.1, 0.1];
+    const points = turningProfileToLathePoints(axial, outer, inner);
+    expect(points[0][1]).toBe(-2); // starts at the far end, on axis
+    expect(points[0][0]).toBeLessThan(0.01);
+    expect(points[points.length - 1]).toEqual(points[0]); // closes the loop
+    expect(points.some((p) => Math.abs(p[0] - 0.1) < 1e-6)).toBe(true); // traces the bore wall
+  });
+
+  it('clamps radius at a small positive epsilon rather than exactly 0, avoiding degenerate geometry', () => {
+    const axial = [-1, 0];
+    const outer = [0, 0];
+    const inner = [0, 0];
+    const points = turningProfileToLathePoints(axial, outer, inner);
+    expect(points.every((p) => p[0] > 0)).toBe(true);
+  });
+});
+
+describe('buildTurningStockRings (hex stock rendered exactly, not the across-corners-circle approximation)', () => {
+  const angularSegments = 24; // multiple of 12, so 0deg/30deg land exactly on sample points
+  const ringSize = angularSegments + 1;
+  const acrossFlatsRadius = 0.5;
+
+  function ringRadii(position, ringIndex) {
+    const radii = [];
+    for (let a = 0; a < ringSize; a += 1) {
+      const base = (ringIndex * ringSize + a) * 3;
+      radii.push(Math.hypot(position[base + 1], position[base + 2]));
+    }
+    return radii;
+  }
+
+  it('an uncut hex ring shows the true hex cross-section: corners (theta=0,60,...) at the across-corners radius, flats (theta=30,90,...) at acrossFlatsRadius', () => {
+    const acrossCorners = acrossFlatsRadius * (2 / Math.sqrt(3));
+    const axial = [0, -1];
+    // "Uncut" means outer still sits at the initial envelope - across
+    // CORNERS for hex stock (stockEnvelopeRadius('hex'), what
+    // buildTurningStockProfile actually initializes to), not across flats.
+    const outer = [acrossCorners, acrossCorners];
+    const { position } = buildTurningStockRings(axial, outer, { angularSegments, stockShape: 'hex', acrossFlatsRadius });
+    const radii = ringRadii(position, 0);
+
+    expect(radii[0]).toBeCloseTo(acrossCorners, 4); // theta=0deg - a corner
+    const flatIndex = angularSegments / 12; // theta=30deg - a flat center
+    expect(radii[flatIndex]).toBeCloseTo(acrossFlatsRadius, 4);
+    // no vertex ever exceeds the true envelope
+    expect(Math.max(...radii)).toBeLessThanOrEqual(acrossCorners + 1e-6);
+  });
+
+  it('once a ring is cut below the hex\'s own across-flats radius, it becomes a perfect circle - a lathe tool commands one radius uniformly around the full revolution, it cannot leave the corners standing once it reaches the flats', () => {
+    const axial = [0];
+    const outer = [0.3]; // well below acrossFlatsRadius (0.5) - fully round now
+    const { position } = buildTurningStockRings(axial, outer, { angularSegments, stockShape: 'hex', acrossFlatsRadius });
+    const radii = ringRadii(position, 0);
+    for (const r of radii) expect(r).toBeCloseTo(0.3, 5);
+  });
+
+  it('round stock ignores the hex formula entirely - every angle at the same radius', () => {
+    const axial = [0];
+    const outer = [0.5];
+    const { position } = buildTurningStockRings(axial, outer, { angularSegments, stockShape: 'round' });
+    const radii = ringRadii(position, 0);
+    for (const r of radii) expect(r).toBeCloseTo(0.5, 5);
+  });
+
+  it('produces the expected vertex/index counts for a well-formed triangle mesh', () => {
+    const axial = [0, -1, -2];
+    const outer = [0.5, 0.4, 0.3];
+    const segs = 8;
+    const { position, index } = buildTurningStockRings(axial, outer, { angularSegments: segs, stockShape: 'round' });
+    expect(position.length).toBe(axial.length * (segs + 1) * 3);
+    expect(index.length).toBe((axial.length - 1) * segs * 6);
+    expect(Math.max(...index)).toBeLessThan(position.length / 3);
+  });
+});
+
+describe('buildRoutingHeightmap', () => {
+  const gridOpts = { nx: 5, ny: 5, minX: 0, minY: 0, cellSize: 1, topZ: 0, floorZ: -1 };
+
+  it('with no moves executed, every cell stays at the top surface (topZ)', () => {
+    const heights = buildRoutingHeightmap([], { ...gridOpts, cutterRadiusForMove: () => 0.25, uptoMoveIndex: 0 });
+    expect(Array.from(heights).every((h) => h === 0)).toBe(true);
+  });
+
+  it('a cutting move lowers only the cells its capsule (segment + cutter radius) actually sweeps', () => {
+    const moves = [{ kind: 'cut', from: { x: 1, y: 2.5, z: -0.1 }, to: { x: 4, y: 2.5, z: -0.1 } }];
+    const heights = buildRoutingHeightmap(moves, { ...gridOpts, cutterRadiusForMove: () => 0.6, uptoMoveIndex: 1 });
+    for (let iy = 0; iy < 5; iy += 1) {
+      for (let ix = 0; ix < 5; ix += 1) {
+        const expected = iy === 2 ? -0.1 : 0;
+        expect(heights[iy * 5 + ix]).toBeCloseTo(expected, 5);
+      }
+    }
+  });
+
+  it('ignores rapid moves - they do not cut', () => {
+    const moves = [{ kind: 'rapid', from: { x: 1, y: 2.5, z: -0.5 }, to: { x: 4, y: 2.5, z: -0.5 } }];
+    const heights = buildRoutingHeightmap(moves, { ...gridOpts, cutterRadiusForMove: () => 0.6, uptoMoveIndex: 1 });
+    expect(Array.from(heights).every((h) => h === 0)).toBe(true);
+  });
+
+  it('skips a move with no resolvable cutter radius (e.g. an unset tool)', () => {
+    const moves = [{ kind: 'cut', from: { x: 1, y: 2.5, z: -0.5 }, to: { x: 4, y: 2.5, z: -0.5 } }];
+    const heights = buildRoutingHeightmap(moves, { ...gridOpts, cutterRadiusForMove: () => 0, uptoMoveIndex: 1 });
+    expect(Array.from(heights).every((h) => h === 0)).toBe(true);
+  });
+
+  it('clamps a cut deeper than floorZ - never renders through the stock', () => {
+    const moves = [{ kind: 'cut', from: { x: 1, y: 2.5, z: -5 }, to: { x: 4, y: 2.5, z: -5 } }];
+    const heights = buildRoutingHeightmap(moves, { ...gridOpts, cutterRadiusForMove: () => 0.6, uptoMoveIndex: 1 });
+    expect(heights[2 * 5 + 2]).toBe(-1);
+  });
+
+  it('a later, shallower move never raises a cell back up - only the deepest cut at each cell wins', () => {
+    const moves = [
+      { kind: 'cut', from: { x: 1, y: 2.5, z: -0.5 }, to: { x: 4, y: 2.5, z: -0.5 } },
+      { kind: 'cut', from: { x: 1, y: 2.5, z: -0.1 }, to: { x: 4, y: 2.5, z: -0.1 } }
+    ];
+    const heights = buildRoutingHeightmap(moves, { ...gridOpts, cutterRadiusForMove: () => 0.6, uptoMoveIndex: 2 });
+    expect(heights[2 * 5 + 2]).toBeCloseTo(-0.5, 5);
+  });
+
+  it('applies partial progress on the in-progress move only', () => {
+    const moves = [{ kind: 'cut', from: { x: 0, y: 2.5, z: -0.4 }, to: { x: 4, y: 2.5, z: -0.4 } }];
+    const half = buildRoutingHeightmap(moves, { ...gridOpts, cutterRadiusForMove: () => 0.55, uptoMoveIndex: 0, partialProgress: 0.5 });
+    expect(half[2 * 5 + 4]).toBe(0); // far column - never reached at half progress
+    expect(half[2 * 5 + 0]).toBeCloseTo(-0.4, 5);
+  });
+
+  it('against real generated G-code: cuts reach the programmed depth somewhere along the toolpath', () => {
+    const contour = [{ points: [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 }], isHole: false }];
+    const { gcode: programText } = generateRoutingGcode(contour, { toolDiameter: 0.25, targetDepth: 0.2, stepDown: 0.2 });
+    const { moves } = parseToolpath3D(programText);
+    const minX = Math.min(...moves.flatMap((m) => [m.from.x, m.to.x])) - 0.2;
+    const minY = Math.min(...moves.flatMap((m) => [m.from.y, m.to.y])) - 0.2;
+    const maxX = Math.max(...moves.flatMap((m) => [m.from.x, m.to.x])) + 0.2;
+    const maxY = Math.max(...moves.flatMap((m) => [m.from.y, m.to.y])) + 0.2;
+    const cellSize = 0.05;
+    const nx = Math.round((maxX - minX) / cellSize) + 1;
+    const ny = Math.round((maxY - minY) / cellSize) + 1;
+    const heights = buildRoutingHeightmap(moves, {
+      nx, ny, minX, minY, cellSize, topZ: 0, floorZ: -0.3,
+      cutterRadiusForMove: () => 0.125,
+      uptoMoveIndex: moves.length
+    });
+    expect(Math.min(...heights)).toBeCloseTo(-0.2, 2);
+  });
+});
+
+describe('parseToolpath3D - tube stock A-axis tracking', () => {
+  it('tags each move with the angleDeg in effect at the time, including across an A-only indexing line that commands no X/Y/Z', () => {
+    const program = gcode(
+      'G20',
+      'G90',
+      'S8000 M03',
+      'G00 A0 (index rotary axis to this wall)',
+      'G00 X1.0 Y0.0',
+      'G00 Z0.25',
+      'G01 Z-0.15 F8',
+      'G00 Z0.25',
+      'G00 A90 (index rotary axis to this wall)',
+      'G00 X2.0 Y0.1',
+      'G00 Z0.25',
+      'G01 Z-0.15 F8'
+    );
+    const { moves } = parseToolpath3D(program);
+    const firstPlunge = moves.find((m) => m.kind === 'ramp' && m.to.x === 1);
+    const secondPlunge = moves.find((m) => m.kind === 'ramp' && m.to.x === 2);
+    expect(firstPlunge.angleDeg).toBe(0);
+    expect(secondPlunge.angleDeg).toBe(90);
+  });
+
+  it('routing/turning G-code (no A word ever appears) defaults every move to angleDeg 0', () => {
+    const contour = [{ points: [{ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 2 }, { x: 0, y: 2 }], isHole: false }];
+    const { gcode: programText } = generateRoutingGcode(contour, { toolDiameter: 0.25, targetDepth: 0.1 });
+    const { moves } = parseToolpath3D(programText);
+    expect(moves.length).toBeGreaterThan(0);
+    expect(moves.every((m) => m.angleDeg === 0)).toBe(true);
+  });
+});
+
+describe('tubeLocalPoint / tubeWallNormal (tube stock static local-frame geometry)', () => {
+  const crossSection = { a: 2, b: 1 }; // a 2"x1" tube, matching am-5180's real dimensions
+
+  it('places a point on the surface (machineZ=0) of the 0deg wall at +a/2 along Y, lateralOffset along Z', () => {
+    const p = tubeLocalPoint(0, 5, 0.3, 0, crossSection);
+    expect(p).toEqual({ x: 5, y: 1, z: 0.3 });
+  });
+
+  it('places a point on the surface of the 180deg wall at -a/2 along Y - same lateral (Z) direction as 0deg, not mirrored', () => {
+    const p = tubeLocalPoint(180, 5, 0.3, 0, crossSection);
+    expect(p).toEqual({ x: 5, y: -1, z: 0.3 });
+  });
+
+  it('places a point on the surface of the 90deg wall at +b/2 along Z, lateralOffset along Y', () => {
+    const p = tubeLocalPoint(90, 5, 0.3, 0, crossSection);
+    expect(p).toEqual({ x: 5, y: 0.3, z: 0.5 });
+  });
+
+  it('places a point on the surface of the 270deg wall at -b/2 along Z', () => {
+    const p = tubeLocalPoint(270, 5, 0.3, 0, crossSection);
+    expect(p).toEqual({ x: 5, y: 0.3, z: -0.5 });
+  });
+
+  it('a negative machineZ (a drill plunge) moves the point INWARD, toward the tube centerline, on every wall', () => {
+    const atSurface0 = tubeLocalPoint(0, 5, 0, 0, crossSection);
+    const drilled0 = tubeLocalPoint(0, 5, 0, -0.3, crossSection);
+    expect(Math.abs(drilled0.y)).toBeLessThan(Math.abs(atSurface0.y));
+
+    const atSurface180 = tubeLocalPoint(180, 5, 0, 0, crossSection);
+    const drilled180 = tubeLocalPoint(180, 5, 0, -0.3, crossSection);
+    expect(Math.abs(drilled180.y)).toBeLessThan(Math.abs(atSurface180.y));
+  });
+
+  it('snaps a slightly-off angle (float round-trip noise) to the nearest of 0/90/180/270', () => {
+    const exact = tubeLocalPoint(90, 1, 0, 0, crossSection);
+    const noisy = tubeLocalPoint(89.98, 1, 0, 0, crossSection);
+    expect(noisy).toEqual(exact);
+  });
+
+  it('tubeWallNormal returns the outward unit normal for each wall, matching tubeLocalPoint\'s own sign convention', () => {
+    expect(tubeWallNormal(0)).toEqual({ x: 0, y: 1, z: 0 });
+    expect(tubeWallNormal(180)).toEqual({ x: 0, y: -1, z: 0 });
+    expect(tubeWallNormal(90)).toEqual({ x: 0, y: 0, z: 1 });
+    expect(tubeWallNormal(270)).toEqual({ x: 0, y: 0, z: -1 });
+  });
+});
+
+describe('projectTubestockToolpath', () => {
+  it('projects a rapid index + plunge sequence onto the correct wall, order-preserving with the raw moves (same length, same order)', () => {
+    const crossSection = { a: 1, b: 1 };
+    const raw = {
+      moves: [
+        { from: { x: 0, y: 0, z: 0 }, to: { x: 3, y: 0, z: 0.25 }, kind: 'rapid', angleDeg: 0, toolIndex: 0 },
+        { from: { x: 3, y: 0, z: 0.25 }, to: { x: 3, y: 0, z: -0.2 }, kind: 'ramp', angleDeg: 0, toolIndex: 0 }
+      ],
+      toolChangeIndices: [],
+      totalDistance: 0
+    };
+    const { moves } = projectTubestockToolpath(raw, { crossSection });
+    expect(moves.length).toBe(2);
+    // The plunge move should end up sunk into the +Y face by 0.2" from the
+    // 0.5" surface (a/2), i.e. at local Y = 0.3.
+    expect(moves[1].to.y).toBeCloseTo(0.3, 5);
+    expect(moves[1].to.x).toBe(3);
+    expect(moves[1].kind).toBe('ramp'); // classification carries through unchanged
+  });
+});
+
+describe('matchTubestockHolesToMoves', () => {
+  it('joins each hole to its own plunge move by (angleDeg, position, lateralOffset), reporting the actual drilled depth', () => {
+    const walls = [
+      { angleDeg: 0, holes: [{ position: 3, lateralOffset: 0, diameter: 0.2 }] },
+      { angleDeg: 90, holes: [{ position: 5, lateralOffset: 0.1, diameter: 0.15 }] }
+    ];
+    const rawMoves = [
+      { from: { x: 0, y: 0, z: 0.25 }, to: { x: 3, y: 0, z: 0.25 }, kind: 'rapid', angleDeg: 0 },
+      { from: { x: 3, y: 0, z: 0.25 }, to: { x: 3, y: 0, z: -0.18 }, kind: 'ramp', angleDeg: 0 },
+      { from: { x: 3, y: 0, z: -0.18 }, to: { x: 5, y: 0.1, z: 0.25 }, kind: 'rapid', angleDeg: 90 },
+      { from: { x: 5, y: 0.1, z: 0.25 }, to: { x: 5, y: 0.1, z: -0.12 }, kind: 'ramp', angleDeg: 90 }
+    ];
+    const matched = matchTubestockHolesToMoves(walls, rawMoves);
+    expect(matched.length).toBe(2);
+    expect(matched[0].moveIndex).toBe(1);
+    expect(matched[0].fullDepth).toBeCloseTo(0.18, 5);
+    expect(matched[1].moveIndex).toBe(3);
+    expect(matched[1].fullDepth).toBeCloseTo(0.12, 5);
+  });
+
+  it('reports moveIndex -1 (rendered as always-drilled, not hidden) when no matching plunge move exists', () => {
+    const walls = [{ angleDeg: 0, holes: [{ position: 99, lateralOffset: 0, diameter: 0.2 }] }];
+    const matched = matchTubestockHolesToMoves(walls, []);
+    expect(matched[0].moveIndex).toBe(-1);
+    expect(matched[0].fullDepth).toBe(0);
+  });
+
+  it('against real generated G-code (tube-05x05-square.step): every hole in a real densely-drilled tube matches its own plunge move', async () => {
+    const meshes = await readStepMeshes(fs.readFileSync(TUBE_05X05_SQUARE));
+    const features = extractTubeFeaturesFromMeshes(meshes);
+    const { gcode: programText } = generateTubestockGcode(features, { holeDepth: 0.15 });
+    const { moves: rawMoves } = parseToolpath3D(programText);
+    const matched = matchTubestockHolesToMoves(features.walls, rawMoves);
+
+    const totalHoles = features.walls.reduce((sum, w) => sum + w.holes.length, 0);
+    expect(matched.length).toBe(totalHoles);
+    const unmatched = matched.filter((h) => h.moveIndex === -1);
+    expect(unmatched).toEqual([]);
+    for (const hole of matched) expect(hole.fullDepth).toBeCloseTo(0.15, 3);
+
+    // And every matched hole lands at a sane 3D point once projected: on
+    // the surface of its own wall (not floating in space or buried past the
+    // tube's own centerline).
+    const { moves: projectedMoves } = projectTubestockToolpath({ moves: rawMoves, toolChangeIndices: [], totalDistance: 0 }, { crossSection: features.crossSection });
+    for (const hole of matched) {
+      const drilledPoint = projectedMoves[hole.moveIndex].to;
+      const distanceFromAxis = Math.hypot(drilledPoint.y, drilledPoint.z);
+      expect(distanceFromAxis).toBeLessThanOrEqual(Math.max(features.crossSection.a, features.crossSection.b) / 2 + 1e-6);
+    }
   });
 });

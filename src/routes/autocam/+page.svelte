@@ -12,6 +12,7 @@
   import CamParamFields from '$autocam/components/CamParamFields.svelte';
   import RoutingToolSequence from '$autocam/components/RoutingToolSequence.svelte';
   import TurningFinishTool from '$autocam/components/TurningFinishTool.svelte';
+  import TurningDrilling from '$autocam/components/TurningDrilling.svelte';
   import CadViewer from '$lib/components/CadViewer.svelte';
   import ToolpathViewer from '$autocam/components/ToolpathViewer.svelte';
   import { toastActions } from '$lib/toast.js';
@@ -95,7 +96,7 @@
   ];
 
   function emptyTurningParams() {
-    return { stockDiameter: '', stepDown: 0.05, finishAllowance: 0.02, feedRough: 0.008, feedFinish: 0.004, surfaceSpeed: 150, maxRpm: 2500, setupMode: 'single', flipAt: '', finishTool: null };
+    return { stockDiameter: '', stockShape: 'round', stepDown: 0.05, finishAllowance: 0.02, feedRough: 0.008, feedFinish: 0.004, surfaceSpeed: 150, maxRpm: 2500, setupMode: 'single', flipAt: '', finishTool: null, automaticToolChanger: false, drilling: null };
   }
   function emptyRoutingParams() {
     // Unspecified stock must not inherit the old wood-friendly 40/15/16k
@@ -361,9 +362,11 @@
 
   // Numeric fields get coerced to Number(); toolSequence (routing multi-tool,
   // see autocam/docs/toolchange-gcode-plan.md) is an array of {toolId, toolDiameter,
-  // toolNumber, label} objects and finishTool (turning multi-tool) is one
-  // {toolId, toolNumber, label, noseRadius} object - both must pass through untouched.
-  const NON_NUMERIC_PARAM_KEYS = new Set(['toolSequence', 'setupMode', 'finishTool']);
+  // toolNumber, label} objects, finishTool (turning multi-tool) is one
+  // {toolId, toolNumber, label, noseRadius} object, and drilling (turning
+  // centerline drilling) is one {toolNumber, label, diameter, depth,
+  // peckDepth, feedRate, rpm} object - all three must pass through untouched.
+  const NON_NUMERIC_PARAM_KEYS = new Set(['toolSequence', 'setupMode', 'finishTool', 'automaticToolChanger', 'stockShape', 'drilling']);
 
   function serializeParams(raw) {
     const params = {};
@@ -372,8 +375,8 @@
         if (Array.isArray(value) && value.length > 0) params.toolSequence = value;
         continue;
       }
-      if (key === 'finishTool') {
-        if (value && typeof value === 'object') params.finishTool = value;
+      if (key === 'finishTool' || key === 'drilling') {
+        if (value && typeof value === 'object') params[key] = value;
         continue;
       }
       if (NON_NUMERIC_PARAM_KEYS.has(key)) {
@@ -499,7 +502,9 @@
   async function openToolpathPreview(job, previewParams = job.params) {
     editingJob = job;
     toolpathPreviewParams = previewParams;
-    toolpathView = job.operation_type === 'routing' ? '3d' : '2d';
+    // Tube stock moves in X/Y/Z plus a rotary A axis the 2D preview can't
+    // represent at all - it only ever has a 3D view, so go straight there.
+    toolpathView = ['routing', 'turning', 'tubestock'].includes(job.operation_type) ? '3d' : '2d';
     showJobToolpathModal = true;
     if (toolpathView === '3d') await loadToolpathSimulator();
   }
@@ -664,7 +669,7 @@
   // get their own label/color here rather than the raw "milling" string, so
   // it's clear at a glance which ones went through the external Fusion 360
   // Runner instead of this app's own in-process turning/routing math.
-  const OPERATION_LABEL = { turning: 'Turning', routing: 'Routing', milling: 'Fusion', tubestock: 'Tube Stock' };
+  const OPERATION_LABEL = { turning: 'Turning', routing: 'Routering', milling: 'Fusion', tubestock: 'Tube Stock' };
   function operationLabel(operationType) {
     return OPERATION_LABEL[operationType] || operationType || '—';
   }
@@ -789,7 +794,7 @@
     </button>
   </div>
 </div>
-<p class="page-subtitle">Upload a STEP file — or link an existing part that already has one — and get {CAM_GCODE_FORMAT.toUpperCase()} G-code back immediately for turning (lathe) or routing.</p>
+<p class="page-subtitle">Upload a STEP file — or link an existing part that already has one — and get {CAM_GCODE_FORMAT.toUpperCase()} G-code back immediately for turning (lathe) or routering.</p>
 
 {#if !loading && materials.length === 0 && tools.length === 0 && machines.length === 0}
   <div class="card setup-warning">
@@ -920,7 +925,7 @@
         <select class="form-select" bind:value={jobFilterOperation}>
           <option value="">All Operations</option>
           <option value="turning">Turning</option>
-          <option value="routing">Routing</option>
+          <option value="routing">Routering</option>
           <option value="milling">Fusion</option>
         </select>
       </div>
@@ -1065,7 +1070,7 @@
                 {#if job.status === 'completed' && job.gcode}
                   <span class="output-action-group">
                     <button class="btn btn-icon" data-tooltip="View Toolpath" aria-label="View toolpath simulation" on:click={() => openToolpathPreview(job)}><Route size={15} /></button>
-                    {#if job.operation_type === 'routing'}
+                    {#if job.operation_type === 'routing' || job.operation_type === 'turning' || job.operation_type === 'tubestock'}
                       <button class="btn btn-secondary btn-sm" on:click={() => open3DToolpathPreview(job)}>
                         <Route size={14} /> 3D Toolpath
                       </button>
@@ -1120,23 +1125,22 @@
           </div>
         {/if}
 
-        <div class="form-row two-col">
-          <div class="form-group">
-            <label class="form-label" for="job-operation">Operation</label>
-            <div class="source-toggle" id="job-operation">
-              <button class="btn btn-sm" class:btn-primary={newJobOperation === 'turning'} class:btn-secondary={newJobOperation !== 'turning'} on:click={() => (newJobOperation = 'turning')}>Turning</button>
-              <button class="btn btn-sm" class:btn-primary={newJobOperation === 'routing'} class:btn-secondary={newJobOperation !== 'routing'} on:click={() => (newJobOperation = 'routing')}>Routing</button>
-              <button class="btn btn-sm" class:btn-primary={newJobOperation === 'tubestock'} class:btn-secondary={newJobOperation !== 'tubestock'} on:click={() => { newJobOperation = 'tubestock'; newJobSource = 'upload'; }}>Tube Stock</button>
-              <button class="btn btn-sm btn-secondary" disabled title="Not available in this synchronous flow - use Fusion CAM (top of this page) for real 3-axis milling via Fusion 360">Milling</button>
+        <div class="job-choice-groups">
+          <fieldset class="job-choice-group">
+            <legend class="form-label">Operation</legend>
+            <div class="job-choice-options job-choice-options--operation">
+              <button type="button" class="btn" class:btn-primary={newJobOperation === 'routing'} class:btn-secondary={newJobOperation !== 'routing'} aria-pressed={newJobOperation === 'routing'} on:click={() => (newJobOperation = 'routing')}>Routering</button>
+              <button type="button" class="btn" class:btn-primary={newJobOperation === 'turning'} class:btn-secondary={newJobOperation !== 'turning'} aria-pressed={newJobOperation === 'turning'} on:click={() => (newJobOperation = 'turning')}>Turning</button>
+              <button type="button" class="btn" class:btn-primary={newJobOperation === 'tubestock'} class:btn-secondary={newJobOperation !== 'tubestock'} aria-pressed={newJobOperation === 'tubestock'} on:click={() => { newJobOperation = 'tubestock'; newJobSource = 'upload'; }}>Tube Stock</button>
             </div>
-          </div>
-          <div class="form-group">
-            <label class="form-label" for="job-source-toggle">Source</label>
-            <div class="source-toggle" id="job-source-toggle">
-              <button class="btn btn-sm" class:btn-primary={newJobSource === 'upload'} class:btn-secondary={newJobSource !== 'upload'} on:click={() => (newJobSource = 'upload')}>Standalone Upload</button>
-              <button class="btn btn-sm" class:btn-primary={newJobSource === 'part'} class:btn-secondary={newJobSource !== 'part'} disabled={newJobOperation === 'tubestock'} title={newJobOperation === 'tubestock' ? 'Tube stock jobs are standalone-upload only - no manufacturing-request workflow maps to it yet' : ''} on:click={() => (newJobSource = 'part')}>Link to Existing Part</button>
+          </fieldset>
+          <fieldset class="job-choice-group">
+            <legend class="form-label">Source</legend>
+            <div class="job-choice-options job-choice-options--source">
+              <button type="button" class="btn" class:btn-primary={newJobSource === 'upload'} class:btn-secondary={newJobSource !== 'upload'} aria-pressed={newJobSource === 'upload'} on:click={() => (newJobSource = 'upload')}>Upload STEP file</button>
+              <button type="button" class="btn" class:btn-primary={newJobSource === 'part'} class:btn-secondary={newJobSource !== 'part'} aria-pressed={newJobSource === 'part'} disabled={newJobOperation === 'tubestock'} title={newJobOperation === 'tubestock' ? 'Tube stock jobs are standalone-upload only - no manufacturing-request workflow maps to it yet' : ''} on:click={() => (newJobSource = 'part')}>Use existing part</button>
             </div>
-          </div>
+          </fieldset>
         </div>
 
         {#if newJobSource === 'part'}
@@ -1236,6 +1240,7 @@
         {#if newJobOperation === 'turning'}
           <CamParamFields operation="turning" bind:params={turningParams} mode="job" />
           <TurningFinishTool {tools} bind:finishTool={turningParams.finishTool} />
+          <TurningDrilling {tools} bind:drilling={turningParams.drilling} disabled={turningParams.setupMode === 'flip'} />
         {:else if newJobOperation === 'tubestock'}
           <CamParamFields operation="tubestock" bind:params={tubestockParams} mode="job" />
         {:else}
@@ -1345,7 +1350,7 @@
           <button class="btn btn-secondary btn-sm" on:click={() => (showJobCadModal = true)} disabled={!editingJob.step_file_name}>
             <Box size={14} /> View CAD
           </button>
-            <button class="btn btn-secondary btn-sm" on:click={() => openToolpathPreview(editingJob, editParams)} disabled={editingJob.status !== 'completed' || !editingJob.gcode || editingJob.operation_type === 'tubestock'} title={editingJob.operation_type === 'tubestock' ? 'No 2D preview for tube stock - it moves in X/Y/Z plus a rotary axis the viewer doesn\'t track; use Open ncviewer.com or download the G-code instead' : (editingJob.status !== 'completed' ? 'Only available once the job has completed' : '')}>
+          <button class="btn btn-secondary btn-sm" on:click={() => openToolpathPreview(editingJob, editParams)} disabled={editingJob.status !== 'completed' || !editingJob.gcode} title={editingJob.status !== 'completed' ? 'Only available once the job has completed' : ''}>
             <Route size={14} /> View {operationLabel(editingJob.operation_type)} Toolpath
           </button>
           {#if editingJob.operation_type === 'routing'}
@@ -1363,6 +1368,7 @@
         {#if editingJob.operation_type === 'turning'}
           <CamParamFields operation="turning" bind:params={editParams} mode="job" />
           <TurningFinishTool {tools} bind:finishTool={editParams.finishTool} />
+          <TurningDrilling {tools} bind:drilling={editParams.drilling} disabled={editParams.setupMode === 'flip'} />
         {:else if editingJob.operation_type === 'tubestock'}
           <CamParamFields operation="tubestock" bind:params={editParams} mode="job" />
         {:else}
@@ -1436,15 +1442,30 @@
         <button type="button" class="modal-close-button" aria-label="Close" on:click={() => (showJobToolpathModal = false)}><X size={18} /></button>
       </div>
       <div class="modal-body">
-        {#if editingJob.operation_type === 'routing'}
+        {#if editingJob.operation_type === 'routing' || editingJob.operation_type === 'turning'}
           <div class="toolpath-view-tabs" role="tablist" aria-label="Toolpath view">
             <button type="button" role="tab" aria-selected={toolpathView === '2d'} class:active={toolpathView === '2d'} on:click={() => (toolpathView = '2d')}>2D Preview</button>
             <button type="button" role="tab" aria-selected={toolpathView === '3d'} class:active={toolpathView === '3d'} on:click={() => open3DToolpathPreview(editingJob, toolpathPreviewParams || editingJob.params)}>3D Toolpath</button>
           </div>
         {/if}
-        {#if toolpathView === '3d' && editingJob.operation_type === 'routing'}
+        {#if toolpathView === '3d' && (editingJob.operation_type === 'routing' || editingJob.operation_type === 'turning' || editingJob.operation_type === 'tubestock')}
           {#if ToolpathSimulator}
-            <svelte:component this={ToolpathSimulator} gcode={editingJob.gcode} toolDiameter={Number((toolpathPreviewParams || editingJob.params)?.toolDiameter) || null} toolSequence={(toolpathPreviewParams || editingJob.params)?.toolSequence || []} />
+            <svelte:component
+              this={ToolpathSimulator}
+              gcode={editingJob.gcode}
+              operationType={editingJob.operation_type}
+              toolDiameter={Number((toolpathPreviewParams || editingJob.params)?.toolDiameter) || null}
+              toolSequence={(toolpathPreviewParams || editingJob.params)?.toolSequence || []}
+              stockDiameter={Number((toolpathPreviewParams || editingJob.params)?.stockDiameter) || null}
+              stockShape={(toolpathPreviewParams || editingJob.params)?.stockShape || 'round'}
+              noseRadius={Number((toolpathPreviewParams || editingJob.params)?.finishTool?.noseRadius ?? (toolpathPreviewParams || editingJob.params)?.noseRadius) || null}
+              drillDiameter={Number((toolpathPreviewParams || editingJob.params)?.drilling?.diameter) || null}
+              stepFileName={editingJob.step_file_name || null}
+              edgeShiftX={Number(editingJob.stats?.edgeShiftX) || 0}
+              edgeShiftY={Number(editingJob.stats?.edgeShiftY) || 0}
+              crossSection={editingJob.stats?.crossSection || null}
+              walls={editingJob.stats?.walls || []}
+            />
           {:else}
             <div class="toolpath-simulator-loading" aria-busy="true"><span class="loading-spinner"></span> Loading 3D toolpath...</div>
           {/if}
@@ -1525,7 +1546,7 @@
           <label class="form-label" for="mp-operation">Operation Type</label>
           <div class="source-toggle" id="mp-operation">
             <button class="btn btn-sm" class:btn-primary={machineForm.operation_type === 'turning'} class:btn-secondary={machineForm.operation_type !== 'turning'} on:click={() => setMachineFormOperation('turning')}>Turning (Lathe)</button>
-            <button class="btn btn-sm" class:btn-primary={machineForm.operation_type === 'routing'} class:btn-secondary={machineForm.operation_type !== 'routing'} on:click={() => setMachineFormOperation('routing')}>Routing (Router)</button>
+            <button class="btn btn-sm" class:btn-primary={machineForm.operation_type === 'routing'} class:btn-secondary={machineForm.operation_type !== 'routing'} on:click={() => setMachineFormOperation('routing')}>Routering (Router)</button>
             <button class="btn btn-sm" class:btn-primary={machineForm.operation_type === 'tubestock'} class:btn-secondary={machineForm.operation_type !== 'tubestock'} on:click={() => setMachineFormOperation('tubestock')}>Tube Stock (Rotary Drill)</button>
           </div>
         </div>
@@ -1943,6 +1964,14 @@
     margin-bottom: 1rem;
   }
 
+  .job-choice-groups { display: grid; gap: var(--space-4, 1rem); }
+  .job-choice-group { min-width: 0; margin: 0; padding: 0; border: 0; }
+  .job-choice-group legend { margin-bottom: var(--space-2, 0.5rem); }
+  .job-choice-options { display: grid; gap: var(--space-2, 0.5rem); }
+  .job-choice-options--operation { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .job-choice-options--source { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .job-choice-options .btn { width: 100%; min-width: 0; min-height: 2.6rem; white-space: normal; }
+
   .cam-form-hint {
     font-size: var(--font-xs, 0.75rem);
     color: var(--text-muted);
@@ -2027,5 +2056,9 @@
   }
   .form-row.two-col {
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  }
+  @media (max-width: 560px) {
+    .job-choice-options--operation,
+    .job-choice-options--source { grid-template-columns: 1fr; }
   }
 </style>

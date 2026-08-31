@@ -21,22 +21,28 @@ browser confirmation or prompt popups.
   optional notes on a request (visible/editable both at creation and from
   the manufacture list). Slack-DMs the relevant lead(s) when a new request
   is created for a workflow they're assigned to (admin-configurable per
-  user, per workflow - see **Admin & permissions** below). See the
+  user, per workflow - see **Admin & permissions** below), and again for
+  Router leads specifically as a router part moves through its pipeline
+  (CAM review, CAM reviewed, postprocessed, jprogged, machined, kitted -
+  Router's the only workflow with this many distinct steps). See the
   **AutoCAM** section below for automatic G-code generation specifically.
 - **AutoCAM**: automatic STEP → G-code generation for lathe turning, router
-  routing, and rotary-4th-axis indexed tube-stock drilling jobs - either
+  routering, and rotary-4th-axis indexed tube-stock drilling jobs - either
   manually queued from `/autocam` or auto-triggered by dropping a CAD file
-  into a machine's watched Google Drive folder (turning/routing only; tube
+  into a machine's watched Google Drive folder (turning/routering only; tube
   stock is standalone-upload only, no manufacturing-request workflow maps to
   it yet). No external CAM software involved (pure JS geometry math). Real
   3-axis milling (contoured toolpaths a flat 2.5D profile can't represent)
   is a separate sub-section, **Fusion CAM** (`/autocam/fusion`), backed by
-  an actual Fusion 360 Runner rather than in-process math. See the
+  an actual Fusion 360 Runner rather than in-process math; it is intentionally
+  absent from the New AutoCAM Job operation picker. See the
   **AutoCAM** section below for the code-level detail on all three.
-  Completed routing jobs also have a switchable 2D preview and a routing-only
-  3D toolpath simulator with rapid, cutting, and ramp/plunge paths
-  distinguished, a moving flat end mill, distance scrubbing, and tool-change
-  stepping for multi-tool jobs.
+  Completed routering and turning jobs have a switchable 2D preview and a
+  3D toolpath simulator for router and lathe jobs with rapid and cutting paths
+  distinguished, distance scrubbing, and tool-change stepping. Routering shows
+  a moving flat end mill; turning correctly projects diameter-mode X/Z into
+  axial/radial coordinates, animates the rotating cylindrical stock, and moves
+  a turning insert along the programmed path.
 - **Scouting**: pit scouting (a topic-at-a-time form with per-topic
   completion counts, scout/contact attribution, and up to three robot photos,
   built for filling in a noisy pit on a phone while a team answers out of
@@ -57,7 +63,8 @@ browser confirmation or prompt popups.
 - **Vision Scouting**: a real Competition-folder nav tab, open to every
   approved user like the rest of Competition (no special permission needed),
   running post-match, multi-camera ML processing at `/scouting/vision` for
-  robot trajectories/mobility, fuel, and climbing.
+  robot trajectories/mobility, fuel, and climbing, with a calibrated
+  red/blue field-occupancy heatmap that fills as trajectory results arrive.
   A full BF16 Qwen3-VL-30B-A3B service on NVIDIA DGX Spark proposes semantic
   events from bounded multi-camera clips; a
   separate versioned YOLO/ByteTrack runner supplies dense tracking and
@@ -94,8 +101,14 @@ browser confirmation or prompt popups.
   location/schedule configuration.
 - **Attendance**: attendance logging against configured locations/schedules,
   surfaced on user profiles.
-- **Profile**: per-user profile settings and personal stats (attendance
-  history, etc.).
+- **Account** (`profile/`): a consistently named Account tab on desktop and
+  mobile for per-user profile settings and personal stats (attendance history,
+  etc.), plus a Slack-style theme gallery available to every signed-in account
+  covering both the built-in themes and extra palette groups. Gallery themes
+  also remap semantic success/error/progress/warning and operation badges onto
+  palette-coordinated dark surfaces without changing their meanings. The page
+  is divided into direct-linkable Account, Appearance, Navigation, and
+  Notifications panels instead of one continuous settings scroll.
 - **Pick List** (`scouting/`): a team-comparison / pick-list workspace for the
   active event. Named for what it produces: it was previously labelled "Data
   Scouting" in the nav, which collided with the separate `datascout` route and
@@ -134,7 +147,9 @@ browser confirmation or prompt popups.
   continues the saved route; only Clear removes it. Auto scoring accepts an
   exact estimate, a bounded range such as `40-60` (stored average `50`), or an open
   lower bound such as `100+` (conservatively stored as at least `100`). Teleop
-  adds optional observed-role tags and five quick ratings while keeping every
+  also offers an optional ball-count estimate in 25-ball buckets through an
+  open-ended `500+` bucket, storing the selected label and parsed bounds for
+  later analytics. It adds optional observed-role tags and five quick ratings while keeping every
   subjective input skippable; teleop and post-match prose areas are deliberately
   large enough for real scout observations. The live
   Data Scouting form deliberately omits shift toggles and subjective speed/
@@ -241,7 +256,7 @@ than duplicating that detail.
 
 ## AutoCAM (`autocam/`, top-level - not under `src/lib/`)
 
-STEP → G-code generation for turning/routing/tube stock: pure JS geometry
+STEP → G-code generation for turning/routering/tube stock: pure JS geometry
 math, no external CAM software, no DXF. Deliberately lives outside
 `src/lib/` in its own top-level folder, imported via the `$autocam` alias
 (`svelte.config.js`) - the whole engine, the Google Drive watcher, shared
@@ -250,7 +265,7 @@ own docs are all together in one place instead of scattered across
 `src/lib/cam/`, `src/lib/server/`, `src/lib/components/`, and
 `implementations/`.
 
-- **`autocam/stepProfile.js`** - extracts 2D profiles (turning/routing) or
+- **`autocam/stepProfile.js`** - extracts 2D profiles (turning/routering) or
   tube-wall hole geometry (`extractTubeFeaturesFromMeshes`) directly from a
   STEP file's triangulated mesh (via `occt-import-js`).
 - **`autocam/turning.js`** / **`autocam/routing.js`** / **`autocam/tubestock.js`**
@@ -287,7 +302,7 @@ own docs are all together in one place instead of scattered across
   not arbitrarily.
 - **`autocam/docs/`** - AutoCAM-specific planning/architecture docs
   (`drive-watcher-folder-layout.md`, `drive-watcher-implementation.md`, etc.).
-- **`autocam/runner/README.md`** - the milling Runner concept (turning/routing
+- **`autocam/runner/README.md`** - the milling Runner concept (turning/routering
   are synchronous in-process math; milling needs an actual external Fusion
   360 Runner) - now built as **Fusion CAM**, see the next bullet.
 - **`autocam/fusion/`** (reachable from `/autocam/fusion`) - **Fusion CAM**:
@@ -344,8 +359,8 @@ own docs are all together in one place instead of scattered across
   off-the-shelf) part stock tracking and kitting workflows.
 - **`tasks/`** - general task tracking, separate from the planner's
   scheduling-focused tasks.
-- **`admin/`, `profile/`** - user/permission administration, user profile
-  settings.
+- **`admin/`, `profile/`** - user/permission administration and the Account
+  settings destination.
 - **`docs/`** - repo-wide markdown file browser (see **Features** above).
 - **`scouting/`** - new unified scouting app, currently blank (see **Features** above).
 - **`api/`** - server endpoints backing the above, plus integration

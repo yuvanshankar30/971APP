@@ -930,7 +930,12 @@ function dwellLine(isWinCNC, seconds, comment) {
  *     far - see DEFAULT_EDGE_MARGIN's doc comment: work zero is set, and
  *     stock is nailed down, right at that same X0/Y0 corner on a real
  *     machine. Set to 0 to cut the geometry exactly as extracted, with no
- *     shift (the old, pre-this-option behavior).
+ *     shift (the old, pre-this-option behavior). The actual shift applied
+ *     is returned as stats.edgeShiftX/edgeShiftY (0 if edgeMargin is 0, or
+ *     if the geometry already cleared the margin on its own) - any
+ *     consumer working from the original extracted contour/mesh
+ *     coordinates (the 3D sim's ghost-part overlay) needs this to land in
+ *     the same place as the actual toolpath.
  */
 export function generateRoutingGcode(contours, params = {}) {
   if (!Array.isArray(contours) || contours.length === 0) {
@@ -942,6 +947,18 @@ export function generateRoutingGcode(contours, params = {}) {
   const isWinCNC = controller === 'wincnc';
   const hasSequence = Array.isArray(params.toolSequence) && params.toolSequence.length > 0;
   let pockets = Array.isArray(params.pockets) ? params.pockets : [];
+
+  // Recorded (in stats, below) so a consumer working from the *original*
+  // extracted contour coordinates - the 3D sim's ghost-part overlay
+  // (ToolpathSimulator.svelte/stepProfile.js's transformMeshesForRouting
+  // Scene, which has no reason to know this generator silently repositions
+  // everything) - can apply the identical shift and actually land on top
+  // of the real toolpath instead of sitting off to the side. Real bug this
+  // fixes: the ghost part rendered in the pre-shift coordinate frame while
+  // the simulated stock (built from the parsed G-code, which IS shifted)
+  // did not - visibly misaligned for any part not already touching X0/Y0.
+  let edgeShiftX = 0;
+  let edgeShiftY = 0;
 
   // Shift every contour and pocket so nothing cuts closer to X0/Y0 than
   // edgeMargin (plus the tool's own outward reach, so the CUTTING PATH -
@@ -964,6 +981,8 @@ export function generateRoutingGcode(contours, params = {}) {
         const shiftPoints = (points) => points.map((p) => ({ x: p.x + shiftX, y: p.y + shiftY }));
         contours = contours.map((c) => ({ ...c, points: shiftPoints(c.points) }));
         pockets = pockets.map((pocket) => ({ ...pocket, points: shiftPoints(pocket.points) }));
+        edgeShiftX = shiftX;
+        edgeShiftY = shiftY;
       }
     }
   }
@@ -1052,7 +1071,7 @@ export function generateRoutingGcode(contours, params = {}) {
     lines.push('M05 (spindle off)');
     lines.push(isWinCNC ? '(PROGRAM END)' : 'M30 (program end)'); // M30 is not a documented WinCNC code - omitted rather than guessed
     gcode = lines.join('\n');
-    stats = { contours: contours.length, tabZones: totalTabZones, pockets: pockets.length, pocketRings: totalPocketRings, targetDepth, toolChanges: 0 };
+    stats = { contours: contours.length, tabZones: totalTabZones, pockets: pockets.length, pocketRings: totalPocketRings, targetDepth, toolChanges: 0, edgeShiftX, edgeShiftY };
   } else {
     // Multi-tool path.
     const toolSequence = params.toolSequence.map((t) => ({ ...TOOL_STEP_DEFAULTS, ...t }));
@@ -1128,7 +1147,7 @@ export function generateRoutingGcode(contours, params = {}) {
     lines.push(isWinCNC ? '(PROGRAM END)' : 'M30 (program end)');
 
     gcode = lines.join('\n');
-    stats = { contours: contours.length, tabZones: totalTabZones, targetDepth, toolChanges, toolsUsed: [...new Set(assignments.map((a) => a.toolIndex))].length };
+    stats = { contours: contours.length, tabZones: totalTabZones, targetDepth, toolChanges, toolsUsed: [...new Set(assignments.map((a) => a.toolIndex))].length, edgeShiftX, edgeShiftY };
   }
 
   // WinCNC comments are "[...]", not "(...)" - see file header comment. Every

@@ -6,7 +6,7 @@
   import { toastActions } from '$lib/toast.js';
   import { requestConfirmation } from '$lib/confirmation.js';
   import navigation from '$lib/navigation.json';
-  import { theme, setTheme } from '$lib/stores/theme.js';
+  import { theme, setTheme, specialThemeGroups } from '$lib/stores/theme.js';
   import { setLoginScreenStyle } from '$lib/stores/loginScreenPref.js';
   import { defaultHeaderTabs } from '$lib/defaultTabs.js';
   import HeaderPreview from '$lib/components/HeaderPreview.svelte';
@@ -37,8 +37,22 @@
   let targetFolderIdx = '';
   let resettingNav = false;
   let notificationSettings = mergeNotificationSettings();
+  const SETTINGS_TABS = [
+    { id: 'account', label: 'Account' },
+    { id: 'appearance', label: 'Appearance' },
+    { id: 'navigation', label: 'Navigation' },
+    { id: 'notifications', label: 'Notifications' }
+  ];
+  let activeSettingsTab = 'account';
 
   const frcTeamOptions = Object.values(FRC_TEAMS);
+
+  const BUILT_IN_THEME_GROUP = { label: 'Built-in', themes: [
+    { id: 'modern', label: 'Modern Light (default)', preview: ['#f8ecca', '#d9a413'] },
+    { id: 'modern-dark', label: 'Modern Dark', preview: ['#1c1913', '#e9b830'] },
+    { id: 'light', label: 'Legacy', preview: ['#ffffff', '#1d4ed8'] }
+  ] };
+  $: themeGroups = [BUILT_IN_THEME_GROUP, ...$specialThemeGroups];
 
   function formatFrcTeamLabel(value) {
     if (!value) return 'Not Set';
@@ -194,7 +208,16 @@
     try { saveProfile(); } catch (e) { console.warn('autosave failed', e); }
   }
 
+  function selectSettingsTab(tabId, { updateHash = true } = {}) {
+    if (!SETTINGS_TABS.some((tab) => tab.id === tabId)) tabId = 'account';
+    activeSettingsTab = tabId;
+    if (updateHash && typeof history !== 'undefined') history.replaceState(null, '', `#${tabId}`);
+  }
+
   onMount(() => {
+    const syncTabFromHash = () => selectSettingsTab(window.location.hash.slice(1), { updateHash: false });
+    syncTabFromHash();
+    window.addEventListener('hashchange', syncTabFromHash);
     unsub = userStore.subscribe((v) => {
       user = v;
       if (user) {
@@ -212,7 +235,10 @@
         notificationSettings = mergeNotificationSettings(user.notification_settings);
       }
     });
-    return () => unsub?.();
+    return () => {
+      window.removeEventListener('hashchange', syncTabFromHash);
+      unsub?.();
+    };
   });
 
   function toggleNotification(key, enabled) {
@@ -336,15 +362,31 @@
 </script>
 
 <svelte:head>
-  <title>Profile</title>
+  <title>Account Settings</title>
 </svelte:head>
 
 {#if user}
   <div class="profile-page">
-    <h2>Profile</h2>
+    <header class="account-header">
+      <p class="eyebrow">Account</p>
+      <h2>Account Settings</h2>
+      <p>Manage your profile, appearance, navigation, security, and notifications.</p>
+    </header>
 
+    <nav class="settings-tabs" aria-label="Account settings sections">
+      {#each SETTINGS_TABS as tab}
+        <button
+          type="button"
+          class:active={activeSettingsTab === tab.id}
+          aria-current={activeSettingsTab === tab.id ? 'page' : undefined}
+          on:click={() => selectSettingsTab(tab.id)}
+        >{tab.label}</button>
+      {/each}
+    </nav>
+
+    {#if activeSettingsTab === 'account'}
     <section class="card">
-      <h3>Account</h3>
+      <h3>Profile details</h3>
       <label class="form-label">Full name
         <input class="form-input" type="text" bind:value={full_name} />
       </label>
@@ -359,21 +401,6 @@
           {/each}
         </select>
         <small class="form-help">Which FRC team are you affiliated with?</small>
-      </label>
-      <label class="form-label" for="theme-select">Theme
-        <select class="form-select" id="theme-select" value={$theme} on:change={(e) => setTheme(e.target.value)}>
-          <option value="modern">Modern Light (default)</option>
-          <option value="modern-dark">Modern Dark</option>
-          <option value="light">Legacy</option>
-        </select>
-        <small class="form-help">Applies instantly and is remembered on this device.</small>
-      </label>
-      <label class="form-label" for="login-screen-select">Login Screen
-        <select class="form-select" id="login-screen-select" value={login_screen_style} on:change={(e) => saveLoginScreenStyle(e.target.value)}>
-          <option value="legacy">Legacy Login</option>
-          <option value="modern">Modern Login</option>
-        </select>
-        <small class="form-help">Applies instantly and is saved to your account.</small>
       </label>
       <div class="actions">
         <button class="btn" on:click={saveProfile} disabled={savingProfile}>{savingProfile ? 'Saving...' : 'Save'}</button>
@@ -419,7 +446,36 @@
         <button class="btn" on:click={changePassword} disabled={changingPassword}>{changingPassword ? 'Changing...' : 'Change Password'}</button>
       </div>
     </section>
+    {/if}
 
+    {#if activeSettingsTab === 'appearance'}
+      <section class="card">
+        <h3>Appearance</h3>
+        <div class="theme-picker">
+          <div class="special-theme-heading"><div><strong>Theme</strong><small>Applies instantly and is remembered on this device.</small></div></div>
+          {#each themeGroups as group}
+            <h4>{group.label}</h4>
+            <div class="theme-grid">
+              {#each group.themes as t}
+                <button type="button" class="theme-card" class:selected={$theme === t.id} aria-pressed={$theme === t.id} on:click={() => setTheme(t.id)}>
+                  <span class="theme-swatch" style={`--swatch-a:${t.preview[0]};--swatch-b:${t.preview[1]}`}></span>
+                  <span>{t.label}</span>
+                </button>
+              {/each}
+            </div>
+          {/each}
+        </div>
+        <label class="form-label" for="login-screen-select">Login Screen
+          <select class="form-select" id="login-screen-select" value={login_screen_style} on:change={(e) => saveLoginScreenStyle(e.target.value)}>
+            <option value="legacy">Legacy Login</option>
+            <option value="modern">Modern Login</option>
+          </select>
+          <small class="form-help">Applies instantly and is saved to your account.</small>
+        </label>
+      </section>
+    {/if}
+
+    {#if activeSettingsTab === 'navigation'}
     <section class="card">
       <h3>Customize Navigation</h3>
       <p class="muted">Drag and drop to reorder tabs and folders. Add new tabs or create folders to organize your navigation.</p>
@@ -506,7 +562,9 @@
         </button>
       </div>
     </section>
+    {/if}
 
+    {#if activeSettingsTab === 'notifications'}
     <section class="card">
       <h3>Notifications</h3>
       <p class="muted"><strong>New users:</strong> Choose which Slack DMs you want to receive.</p>
@@ -529,16 +587,46 @@
         <button class="btn" on:click={saveProfile} disabled={savingProfile}>{savingProfile ? 'Saving...' : 'Save Notifications'}</button>
       </div>
     </section>
+    {/if}
   </div>
 {:else}
   <div class="profile-page">
-    <h2>Profile</h2>
-    <p>Please sign in to view your profile.</p>
+    <header class="account-header">
+      <p class="eyebrow">Account</p>
+      <h2>Account Settings</h2>
+      <p>Please sign in to manage your account.</p>
+    </header>
   </div>
 {/if}
 
 <style>
   .profile-page { max-width: 860px; margin: 0 auto; padding: var(--space-4); }
+  .account-header { margin-bottom: var(--space-6); }
+  .account-header .eyebrow { margin: 0 0 var(--space-1); color: var(--accent-strong, var(--accent)); font-size: var(--font-xs); font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+  .account-header h2 { margin: 0; }
+  .account-header > p:last-child { margin: var(--space-2) 0 0; color: var(--text-muted); }
+  .settings-tabs {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--space-1);
+    margin-bottom: var(--space-5);
+    padding: var(--space-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--surface-2);
+  }
+  .settings-tabs button {
+    min-height: 2.5rem;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-muted);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .settings-tabs button:hover { color: var(--text); background: var(--surface-1); }
+  .settings-tabs button.active { color: var(--text); background: var(--surface-1); border-color: var(--accent); }
   .profile-page :global(.card) { padding: var(--space-6); margin-bottom: var(--space-6); }
   .profile-page :global(.card h3) { margin-top: 0; margin-bottom: var(--space-4); font-size: 1.25rem; }
   .profile-page :global(.card h4) { margin: var(--space-4) 0 var(--space-2); font-size: 1rem; font-weight: 600; }
@@ -563,6 +651,15 @@
   .preview-container { margin: var(--space-6) 0; padding: var(--space-4); background: var(--background); border: 1px solid var(--border); border-radius: var(--radius-sm); }
   .preview-container h4 { margin-top: 0; margin-bottom: var(--space-3); font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); }
   .notification-grid { display: flex; flex-direction: column; gap: var(--space-3); }
+  .theme-picker { margin:var(--space-5) 0; padding-top:var(--space-4); border-top:1px solid var(--border); }
+  .special-theme-heading div { display:grid; gap:2px; }
+  .special-theme-heading small { color:var(--text-muted); }
+  .theme-picker h4 { color:var(--text-muted); }
+  .theme-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:var(--gap-3); }
+  .theme-card { min-height:5.2rem; display:flex; align-items:center; gap:var(--gap-3); padding:var(--space-3); border:1px solid var(--border); border-radius:var(--radius-lg); background:var(--surface-1); color:var(--text); text-align:left; font-weight:600; cursor:pointer; }
+  .theme-card:hover { border-color:var(--text-muted); background:var(--surface-2); }
+  .theme-card.selected { border-color:var(--blue-base); box-shadow:0 0 0 1px var(--blue-base); }
+  .theme-swatch { width:3.5rem; height:3.5rem; flex:0 0 3.5rem; border-radius:50%; border:1px solid rgba(255,255,255,.18); background:linear-gradient(135deg,var(--swatch-a),var(--swatch-b)); }
   .notify-row { display: flex; gap: var(--gap-3); align-items: flex-start; padding: var(--space-2) 0; border-bottom: 1px solid var(--border); }
   .notify-row:last-child { border-bottom: none; }
   .notify-label { font-weight: 600; }
@@ -598,11 +695,18 @@
     .profile-page :global(.card h3) {
       font-size: 1.1rem;
     }
+    .settings-tabs {
+      display: flex;
+      overflow-x: auto;
+      scrollbar-width: thin;
+    }
+    .settings-tabs button { flex: 1 0 8rem; }
     
     .roles-grid {
       grid-template-columns: repeat(2, 1fr);
       gap: var(--gap-2);
     }
+    .theme-grid { grid-template-columns:1fr; }
     
     .role-box {
       padding: var(--space-3);

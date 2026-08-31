@@ -79,6 +79,40 @@ function requireFiniteNumber(value, name, { positive = false, nonNegative = fals
   }
 }
 
+// Across-corners / across-flats ratio for a regular hexagon: 2/sqrt(3).
+// stockDiameter always means "across flats" for hex bar (how hex stock is
+// actually called out/ordered), never across-corners.
+const HEX_ACROSS_CORNERS_FACTOR = 2 / Math.sqrt(3);
+
+// The largest radius the raw stock actually occupies while spinning in the
+// chuck - across-corners for hex bar (what a rapid move must clear, and
+// where the first roughing pass(es) start), the nominal radius for round.
+// The *smallest* available radius (across-flats/2, i.e. stockDiameter/2
+// either way) is what the "is there enough material" validation checks -
+// that value is unaffected by stockShape, so it isn't computed here.
+export function stockEnvelopeRadius(stockDiameter, stockShape) {
+  return stockShape === 'hex' ? (stockDiameter / 2) * HEX_ACROSS_CORNERS_FACTOR : stockDiameter / 2;
+}
+
+// Every tool change in this generator - the finish-insert change and the
+// drill change alike - makes the same decision the same way: a real
+// unattended turret index (Haas TL-1 ATC) or a manual M00 pause with a
+// re-touch-off-Z0 prompt. `label` is the human-readable tool role ("finish
+// tool", "drill") used in both the comment and the fallback name.
+function emitToolChange(lines, tool, automaticToolChanger, label) {
+  if (automaticToolChanger) {
+    lines.push(`(TOOL CHANGE: automatic - load ${tool.label || label}${tool.toolNumber ? ` - T${tool.toolNumber}` : ''})`);
+    if (tool.toolNumber) lines.push(`T0${tool.toolNumber}0${tool.toolNumber} (${label} - turret index)`);
+    lines.push('G04 P1.0 (allow turret index to complete before resuming motion)');
+  } else {
+    lines.push(
+      `M00 (TOOL CHANGE: load ${tool.label || label}${tool.toolNumber ? ` - T${tool.toolNumber}` : ''}, ` +
+      'then RE-TOUCH OFF Z0 before resuming - no automatic tool length compensation assumed)'
+    );
+    if (tool.toolNumber) lines.push(`T0${tool.toolNumber}0${tool.toolNumber} (${label} - verify tool/offset number)`);
+  }
+}
+
 // Length-to-diameter ratio above which an unsupported (no tailstock/steady
 // rest) cantilevered cut is a real deflection/whip/chatter risk, checked
 // against the part's SMALLEST working diameter (the most vulnerable point
@@ -191,20 +225,31 @@ export function offsetTurningProfile(profile, distance) {
  * MULTI-TOOL: pass `finishTool` ({ toolNumber, label, noseRadius }) to cut
  * roughing with the tool already loaded (the outer T-word emitted by the
  * caller before this function runs, understood as "the rough tool" once
- * finishTool is set) and finishing with a separate insert - a real M00
- * program pause between them, same no-tool-setter/re-touch-off-Z0 assumption
- * routing.js's tool changes make. Omit finishTool (default) for the
- * original single-tool behavior, completely unchanged.
+ * finishTool is set) and finishing with a separate insert. By default this
+ * is a real M00 program pause between them, same no-tool-setter/
+ * re-touch-off-Z0 assumption routing.js's tool changes make. Pass
+ * `automaticToolChanger: true` (from the machine profile - our real 971
+ * Lathe is a Haas TL-1 with a turret tool changer and bar/chip mover) to
+ * skip the pause: the T-word alone indexes tool + offset unattended, so no
+ * human re-touch-off is needed. Omit finishTool (default) for the original
+ * single-tool behavior, completely unchanged either way.
  *
  * Returns { passCount, toolChanged }.
  */
-function appendSetupBody(lines, profile, { stockDiameter, stepDown, finishAllowance, feedRough, feedFinish, noseRadius, finishTool, surfaceSpeed, maxRpm, spindleDwellSeconds }, finalLine = '(back to start clearance)') {
-  const safeDiameter = stockDiameter + 0.1;
+function appendSetupBody(lines, profile, { stockDiameter, stockShape = 'round', stepDown, finishAllowance, feedRough, feedFinish, noseRadius, finishTool, surfaceSpeed, maxRpm, spindleDwellSeconds, automaticToolChanger }, finalLine = '(back to start clearance)') {
+  const envelopeRadius = stockEnvelopeRadius(stockDiameter, stockShape);
+  const safeDiameter = envelopeRadius * 2 + 0.1;
   const startZ = profile[0].z + 0.1; // 0.1" of clearance in front of this setup's face
   lines.push(`G00 X${fmt(safeDiameter)} Z${fmt(startZ)} (rapid to start clearance)`);
 
+  if (stockShape === 'hex') {
+    lines.push(`(*** HEX STOCK: ${fmt(stockDiameter, 3)}" across flats, ${fmt(envelopeRadius * 2, 3)}" across corners. ***)`);
+    lines.push('(First roughing pass(es) cut intermittently across the corners until the stock goes)');
+    lines.push('(round - expect interrupted-cut noise/chatter on those passes; normal, not a fault.)');
+  }
+
   const minTargetRadius = Math.min(...profile.map((p) => p.x)) + finishAllowance;
-  let currentRadius = stockDiameter / 2;
+  let currentRadius = envelopeRadius;
   let passCount = 0;
 
   lines.push('(--- ROUGHING PASSES ---)');
@@ -216,7 +261,28 @@ function appendSetupBody(lines, profile, { stockDiameter, stepDown, finishAllowa
     lines.push(`(-- roughing pass ${passCount}, radius ${fmt(currentRadius)}" --)`);
     lines.push(`G00 X${fmt(currentRadius * 2)} Z${fmt(startZ)}`);
     for (const pt of profile) {
-      const cutRadius = Math.min(pt.x, currentRadius);
+      // max, not min: a roughing pass must never cut CLOSER to center than
+      // this point's own final target (pt.x), even once currentRadius (this
+      // pass's aggressive intermediate depth) has dropped below it - only
+      // relevant for a non-monotonic profile (a boss/step/flange wider than
+      // the profile's own overall minimum radius, exactly what
+      // minTargetRadius is computed from). Real bug this fixes: with
+      // Math.min, once currentRadius fell below a wide section's target
+      // (which it always eventually does, since the loop runs until
+      // currentRadius reaches the profile's SMALLEST radius + allowance),
+      // that section got roughed straight past its intended finished size
+      // - the later, unclamped finishing pass's move to the true target
+      // radius then travelled through empty air instead of cutting
+      // anything, since the material was already gone. Silent, and
+      // invisible to every existing test here, because none of them
+      // simulate the actual resulting material shape - they only check the
+      // G-code's own text/structure, which still "says" the right X value
+      // in the finishing pass regardless. Found via the 3D sim's Phase 5
+      // gouge check (ToolpathSimulator.svelte), which compares the
+      // simulated cut result against the source STEP part - a real,
+      // independent ground truth the G-code can't be tautologically
+      // "correct" against.
+      const cutRadius = Math.max(pt.x, currentRadius);
       lines.push(`G01 X${fmt(cutRadius * 2)} Z${fmt(pt.z)} F${fmt(feedRough, 5)}`);
     }
     lines.push(`G00 X${fmt(safeDiameter)} (retract clear of stock)`);
@@ -229,11 +295,7 @@ function appendSetupBody(lines, profile, { stockDiameter, stepDown, finishAllowa
     lines.push(`G00 X${fmt(safeDiameter)} (retract clear of stock before tool change)`);
     lines.push(`G00 Z${fmt(startZ)} (back to start clearance)`);
     lines.push('M05 (spindle off for tool change)');
-    lines.push(
-      `M00 (TOOL CHANGE: load ${finishTool.label || 'finish tool'}${finishTool.toolNumber ? ` - T${finishTool.toolNumber}` : ''}, ` +
-      'then RE-TOUCH OFF Z0 before resuming - no automatic tool length compensation assumed)'
-    );
-    if (finishTool.toolNumber) lines.push(`T0${finishTool.toolNumber}0${finishTool.toolNumber} (finish tool - verify tool/offset number)`);
+    emitToolChange(lines, finishTool, automaticToolChanger, 'finish tool');
     lines.push(`G50 S${maxRpm} (clamp max spindle RPM for constant surface speed)`);
     lines.push(`G96 S${surfaceSpeed} M03 (constant surface speed, SFM, spindle back on)`);
     if (spindleDwellSeconds > 0) lines.push(`G04 P${fmt(spindleDwellSeconds, 1)} (wait for spindle to reach speed)`);
@@ -261,6 +323,53 @@ function appendSetupBody(lines, profile, { stockDiameter, stepDown, finishAllowa
   lines.push(`G00 Z${fmt(startZ)} ${finalLine}`);
 
   return { passCount, toolChanged };
+}
+
+/**
+ * Centerline (on-axis) peck-drilling from the already-established face
+ * (Z0), appended after OD turning is done. `depth` is a validated < part
+ * length by the caller.
+ *
+ * G97 (direct RPM), not G96 (constant surface speed): a small drill
+ * diameter would make the G96 formula demand an unreasonably high RPM, and
+ * surface speed isn't the relevant number for a centerline drill anyway.
+ *
+ * Peck cycle: full retract to clearance after every peck rather than a
+ * canned-cycle G-word, matching this file's general "explicit moves, no
+ * canned cycles" approach (see the file header). The full retract is also
+ * what actually clears chips out of the hole - the machine's chip mover
+ * only carries swarf away after that, it doesn't reach into the bore.
+ *
+ * Returns { toolChanged: true } unconditionally - drilling always changes
+ * to (at minimum) T0101 if nothing else already loaded that number, so the
+ * caller can fold it into the program's total tool-change count.
+ */
+function appendDrillingOperation(lines, drilling, { automaticToolChanger, spindleDwellSeconds }) {
+  const { toolNumber, label, diameter, depth, peckDepth, feedRate, rpm, dwellSeconds } = drilling;
+  const clearanceZ = 0.1; // matches appendSetupBody's own startZ clearance convention
+
+  lines.push('(--- DRILLING (centerline, from the face) ---)');
+  lines.push(`G00 X0.0 Z${fmt(clearanceZ)} (rapid to centerline, clear of face)`);
+  lines.push('M05 (spindle off for tool change)');
+  emitToolChange(lines, { toolNumber, label }, automaticToolChanger, 'drill');
+  lines.push(`G97 S${fmt(rpm, 0)} M03 (direct RPM - surface-speed formula isn't meaningful at a small drill diameter)`);
+  const effectiveDwell = dwellSeconds ?? spindleDwellSeconds;
+  if (effectiveDwell > 0) lines.push(`G04 P${fmt(effectiveDwell, 1)} (wait for spindle to reach speed)`);
+  lines.push('G95 (feed per revolution)');
+
+  const effectivePeck = peckDepth > 0 ? peckDepth : Math.max(Math.min(diameter * 3, depth), 0.05);
+  let currentDepth = 0;
+  let peckCount = 0;
+  while (currentDepth < depth) {
+    currentDepth = Math.min(currentDepth + effectivePeck, depth);
+    peckCount += 1;
+    if (peckCount > 500) throw new Error('Drilling peck count exceeded safety limit (500) - check drilling.peckDepth/depth');
+    lines.push(`G01 Z${fmt(-currentDepth)} F${fmt(feedRate, 5)} (peck ${peckCount})`);
+    lines.push(`G00 Z${fmt(clearanceZ)} (full retract - clear chips)`);
+  }
+  lines.push('M05 (spindle off)');
+
+  return { toolChanged: true };
 }
 
 // Linear-interpolated radius at an arbitrary Z along an ordered profile -
@@ -297,14 +406,31 @@ function radiusAtZ(profile, z) {
  *     refuses to generate a flip plan that re-grips less material than this
  *   finishTool ({ toolNumber, label, noseRadius }, optional) - MULTI-TOOL:
  *     when set, roughing cuts with `toolNumber` (the rough insert) and the
- *     program pauses for a real tool change (M00, re-touch-off Z0 assumed)
- *     before finishing with this separate tool. finishTool.noseRadius (if
- *     given) is what actually gets nose-radius-compensated on the finishing
- *     pass - the top-level `noseRadius` is ignored once finishTool is set,
- *     since that param described the single tool's nose radius in the
- *     single-tool case. Applies inside each setup independently, so 'flip'
- *     mode with a finishTool does the rough->change->finish sequence twice
- *     (once per physical chucking) - see appendSetupBody.
+ *     program pauses for a real tool change (M00, re-touch-off Z0 assumed,
+ *     unless automaticToolChanger) before finishing with this separate
+ *     tool. finishTool.noseRadius (if given) is what actually gets
+ *     nose-radius-compensated on the finishing pass - the top-level
+ *     `noseRadius` is ignored once finishTool is set, since that param
+ *     described the single tool's nose radius in the single-tool case.
+ *     Applies inside each setup independently, so 'flip' mode with a
+ *     finishTool does the rough->change->finish sequence twice (once per
+ *     physical chucking) - see appendSetupBody.
+ *   automaticToolChanger (default false) - the real 971 Lathe is a Haas
+ *     TL-1 with a turret ATC and bar/chip mover. When true, every tool
+ *     change (finishTool, drilling) skips the manual M00 pause + re-touch-
+ *     off prompt - see emitToolChange.
+ *   stockShape: 'round' | 'hex' (default 'round'). stockDiameter always
+ *     means "across flats" for hex bar (how it's actually ordered) - the
+ *     across-corners envelope (what a rapid must clear, and where the
+ *     first roughing pass(es) start) is derived from it. See
+ *     stockEnvelopeRadius.
+ *   drilling ({ toolNumber, label, diameter, depth, peckDepth, feedRate,
+ *     rpm, dwellSeconds }, optional) - a single centerline peck-drilling
+ *     operation appended after OD turning is done, drilled from the
+ *     already-established face (Z0). Not supported with setupMode='flip'
+ *     (which end the drill enters from is ambiguous across a re-chuck).
+ *     peckDepth defaults to 3x diameter (capped at depth); rpm is a direct
+ *     RPM (G97), not surface speed - see appendDrillingOperation.
  */
 export function generateTurningGcode(profile, params = {}) {
   if (!Array.isArray(profile) || profile.length < 2) {
@@ -312,6 +438,7 @@ export function generateTurningGcode(profile, params = {}) {
   }
   const {
     stockDiameter,
+    stockShape = 'round',
     stepDown = 0.05,
     finishAllowance = 0.02,
     feedRough = 0.008,
@@ -324,10 +451,13 @@ export function generateTurningGcode(profile, params = {}) {
     units = 'in',
     setupMode = 'single',
     finishTool = null,
-    spindleDwellSeconds = 2
+    spindleDwellSeconds = 2,
+    automaticToolChanger = false,
+    drilling = null
   } = params;
 
   requireFiniteNumber(stockDiameter, 'stockDiameter', { positive: true });
+  if (!['round', 'hex'].includes(stockShape)) throw new Error('stockShape must be round or hex');
   requireFiniteNumber(stepDown, 'stepDown', { positive: true });
   requireFiniteNumber(finishAllowance, 'finishAllowance', { nonNegative: true });
   requireFiniteNumber(feedRough, 'feedRough', { positive: true });
@@ -342,6 +472,22 @@ export function generateTurningGcode(profile, params = {}) {
     throw new Error('setupMode must be one of single, tailstock, or flip');
   }
   if (!['in', 'mm'].includes(units)) throw new Error('units must be in or mm');
+
+  if (drilling) {
+    if (setupMode === 'flip') {
+      throw new Error('drilling is not supported with setupMode "flip" - which end the drill enters from is ambiguous across a re-chuck. Drill in a separate single-setup job instead.');
+    }
+    requireFiniteNumber(drilling.diameter, 'drilling.diameter', { positive: true });
+    requireFiniteNumber(drilling.depth, 'drilling.depth', { positive: true });
+    requireFiniteNumber(drilling.feedRate, 'drilling.feedRate', { positive: true });
+    requireFiniteNumber(drilling.rpm, 'drilling.rpm', { positive: true });
+    if (drilling.peckDepth !== undefined && drilling.peckDepth !== null) {
+      requireFiniteNumber(drilling.peckDepth, 'drilling.peckDepth', { positive: true });
+    }
+    if (drilling.toolNumber !== undefined && drilling.toolNumber !== null) {
+      requireFiniteNumber(drilling.toolNumber, 'drilling.toolNumber', { positive: true, integer: true });
+    }
+  }
 
   const maxProfileRadius = Math.max(...profile.map((p) => p.x));
   if (stockDiameter / 2 < maxProfileRadius) {
@@ -360,8 +506,15 @@ export function generateTurningGcode(profile, params = {}) {
   const zOrigin = profile[0].z;
   profile = profile.map((p) => ({ x: p.x, z: zOrigin - p.z }));
 
+  if (drilling) {
+    const partLength = Math.abs(profile[profile.length - 1].z - profile[0].z);
+    if (drilling.depth >= partLength) {
+      throw new Error(`drilling.depth (${drilling.depth}") must be less than the part's total length (${fmt(partLength, 3)}")`);
+    }
+  }
+
   if (setupMode === 'flip') {
-    return generateFlipTurningGcode(profile, { stockDiameter, stepDown, finishAllowance, feedRough, feedFinish, surfaceSpeed, maxRpm, noseRadius, toolNumber, programNumber, units, finishTool, spindleDwellSeconds, flipAt: params.flipAt, minGripLength: params.minGripLength ?? 0.25 });
+    return generateFlipTurningGcode(profile, { stockDiameter, stockShape, stepDown, finishAllowance, feedRough, feedFinish, surfaceSpeed, maxRpm, noseRadius, toolNumber, programNumber, units, finishTool, spindleDwellSeconds, automaticToolChanger, flipAt: params.flipAt, minGripLength: params.minGripLength ?? 0.25 });
   }
 
   const lines = [...HEADER_WARNING, ''];
@@ -388,9 +541,14 @@ export function generateTurningGcode(profile, params = {}) {
 
   const { passCount, toolChanged } = appendSetupBody(
     lines, profile,
-    { stockDiameter, stepDown, finishAllowance, feedRough, feedFinish, noseRadius, finishTool, surfaceSpeed, maxRpm, spindleDwellSeconds },
+    { stockDiameter, stockShape, stepDown, finishAllowance, feedRough, feedFinish, noseRadius, finishTool, surfaceSpeed, maxRpm, spindleDwellSeconds, automaticToolChanger },
     'M05 (back to start clearance, spindle off)'
   );
+
+  let drillToolChanged = false;
+  if (drilling) {
+    ({ toolChanged: drillToolChanged } = appendDrillingOperation(lines, drilling, { automaticToolChanger, spindleDwellSeconds }));
+  }
 
   lines.push('M09 (coolant off)');
   lines.push('M30 (program end)');
@@ -398,7 +556,14 @@ export function generateTurningGcode(profile, params = {}) {
 
   return {
     gcode: lines.join('\n'),
-    stats: { roughingPasses: passCount, profilePoints: profile.length, maxRadius: maxProfileRadius, setupMode, toolChanges: toolChanged ? 1 : 0 }
+    stats: {
+      roughingPasses: passCount,
+      profilePoints: profile.length,
+      maxRadius: maxProfileRadius,
+      setupMode,
+      toolChanges: (toolChanged ? 1 : 0) + (drillToolChanged ? 1 : 0),
+      drilled: !!drilling
+    }
   };
 }
 
@@ -419,7 +584,7 @@ export function generateTurningGcode(profile, params = {}) {
  * original face) - see generateTurningGcode above.
  */
 function generateFlipTurningGcode(profile, params) {
-  const { stockDiameter, stepDown, finishAllowance, feedRough, feedFinish, surfaceSpeed, maxRpm, noseRadius, toolNumber, programNumber, units, finishTool, spindleDwellSeconds, flipAt, minGripLength } = params;
+  const { stockDiameter, stockShape, stepDown, finishAllowance, feedRough, feedFinish, surfaceSpeed, maxRpm, noseRadius, toolNumber, programNumber, units, finishTool, spindleDwellSeconds, automaticToolChanger, flipAt, minGripLength } = params;
 
   if (!flipAt || flipAt <= 0) {
     throw new Error('flipAt (inches from the face, where the part gets re-chucked) is required for setupMode "flip"');
@@ -467,7 +632,7 @@ function generateFlipTurningGcode(profile, params) {
   if (spindleDwellSeconds > 0) lines.push(`G04 P${fmt(spindleDwellSeconds, 1)} (wait for spindle to reach speed)`);
   lines.push('G95 (feed per revolution)');
 
-  const bodyParams = { stockDiameter, stepDown, finishAllowance, feedRough, feedFinish, noseRadius, finishTool, surfaceSpeed, maxRpm, spindleDwellSeconds };
+  const bodyParams = { stockDiameter, stockShape, stepDown, finishAllowance, feedRough, feedFinish, noseRadius, finishTool, surfaceSpeed, maxRpm, spindleDwellSeconds, automaticToolChanger };
   const { passCount: pass1, toolChanged: toolChanged1 } = appendSetupBody(lines, setup1Profile, bodyParams);
 
   lines.push('M05 (spindle off)');

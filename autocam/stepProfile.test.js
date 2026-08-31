@@ -2,7 +2,15 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readStepMeshes, extractTurningProfileFromMeshes, extractRoutingContoursFromMeshes, extractTubeFeaturesFromMeshes, pickLengthAxis } from './stepProfile.js';
+import {
+  readStepMeshes,
+  extractTurningProfileFromMeshes,
+  extractRoutingContoursFromMeshes,
+  extractTubeFeaturesFromMeshes,
+  pickLengthAxis,
+  transformMeshesForTurningScene,
+  transformMeshesForRoutingScene
+} from './stepProfile.js';
 import { generateTurningGcode } from './turning.js';
 import { generateRoutingGcode } from './routing.js';
 import { generateTubestockGcode } from './tubestock.js';
@@ -709,5 +717,81 @@ describe('extractTubeFeaturesFromMeshes (synthetic rectangular tube: 6"x1.5"x1.0
     const result = generateTubestockGcode(features, { holeDepth: 0.15 });
     expect(result.gcode).toContain('M30');
     expect(result.stats.totalHoles).toBe(3);
+  });
+});
+
+describe('transformMeshesForTurningScene (Phase 5 ghost-part overlay)', () => {
+  it('aligns with extractTurningProfileFromMeshes for the same real STEP file (lead-screw.step) - not just a similar-looking transform, the same one', async () => {
+    const meshes = await readStepMeshes(fs.readFileSync(LEAD_SCREW));
+    const profile = extractTurningProfileFromMeshes(meshes);
+    const transformed = transformMeshesForTurningScene(meshes);
+
+    let transformedMaxRadius = 0;
+    let transformedMinX = Infinity;
+    let transformedMaxX = -Infinity;
+    for (const mesh of transformed) {
+      const pos = mesh.position;
+      for (let i = 0; i < pos.length; i += 3) {
+        const r = Math.hypot(pos[i + 1], pos[i + 2]);
+        if (r > transformedMaxRadius) transformedMaxRadius = r;
+        if (pos[i] < transformedMinX) transformedMinX = pos[i];
+        if (pos[i] > transformedMaxX) transformedMaxX = pos[i];
+      }
+    }
+
+    // Same envelope: the extracted profile's max radius is the exact same
+    // "farthest any vertex sits from the spindle axis" measurement the
+    // transform's own radial plane should reproduce.
+    const profileMaxRadius = Math.max(...profile.map((p) => p.x));
+    expect(transformedMaxRadius).toBeCloseTo(profileMaxRadius, 2);
+
+    // Same axial span, and scene x=0 (the face) is the near end, going
+    // negative toward the chuck - matches turning.js's own normalization
+    // (zOrigin = profile[0].z, machining Z = zOrigin - nativeZ).
+    const profileZRange = Math.abs(profile[profile.length - 1].z - profile[0].z);
+    expect(Math.abs(transformedMaxX - transformedMinX)).toBeCloseTo(profileZRange, 1);
+    expect(transformedMaxX).toBeGreaterThanOrEqual(-1e-6);
+    expect(transformedMinX).toBeLessThan(0);
+  });
+
+  it('throws the same "no spindle axis" error extractTurningProfileFromMeshes would, for a non-turned part', async () => {
+    const meshes = await readStepMeshes(fs.readFileSync(FLAT_PLATE));
+    expect(() => transformMeshesForTurningScene(meshes)).toThrow(/spindle axis/);
+  });
+});
+
+describe('transformMeshesForRoutingScene (Phase 5 ghost-part overlay)', () => {
+  it('aligns with extractRoutingContoursFromMeshes for the same real STEP file (flat-plate.step) - same frame, so it cannot disagree', async () => {
+    const meshes = await readStepMeshes(fs.readFileSync(FLAT_PLATE));
+    const { contours, thickness, frame } = extractRoutingContoursFromMeshes(meshes);
+    const transformed = transformMeshesForRoutingScene(meshes, frame);
+
+    let minZ = Infinity;
+    let maxZ = -Infinity;
+    let meshMinX = Infinity;
+    let meshMaxX = -Infinity;
+    for (const mesh of transformed) {
+      const pos = mesh.position;
+      for (let i = 0; i < pos.length; i += 3) {
+        if (pos[i] < meshMinX) meshMinX = pos[i];
+        if (pos[i] > meshMaxX) meshMaxX = pos[i];
+        if (pos[i + 2] < minZ) minZ = pos[i + 2];
+        if (pos[i + 2] > maxZ) maxZ = pos[i + 2];
+      }
+    }
+
+    // scene z=0 is the found face (routing.js's own Z0 convention, no
+    // further offset) - depth into the material reads negative, down to
+    // -thickness, never meaningfully positive.
+    expect(maxZ).toBeLessThanOrEqual(1e-4);
+    expect(minZ).toBeCloseTo(-thickness, 1);
+
+    // scene x/y footprint matches the traced outer contour - same u/v
+    // basis both were built from.
+    const outer = contours[0].points;
+    const contourMinX = Math.min(...outer.map((p) => p.x));
+    const contourMaxX = Math.max(...outer.map((p) => p.x));
+    expect(meshMinX).toBeCloseTo(contourMinX, 1);
+    expect(meshMaxX).toBeCloseTo(contourMaxX, 1);
   });
 });
