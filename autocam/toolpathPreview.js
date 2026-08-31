@@ -336,6 +336,85 @@ export function turningProfileToLathePoints(axial, outer, inner) {
   return points;
 }
 
+// theta=0, 60deg, 120deg, ... land on corners (across-corners radius =
+// acrossFlatsRadius / cos(30deg) = acrossFlatsRadius * 2/sqrt(3), the same
+// HEX_ACROSS_CORNERS_FACTOR turning.js itself uses for the rapid/first-pass
+// clearance); 30deg, 90deg, ... land on flat centers (acrossFlatsRadius
+// exactly). The physical rotation of the raw stock in the chuck is
+// arbitrary anyway, so this phase choice doesn't matter - only that flats
+// and corners alternate every 30deg, which they do.
+const HEX_SECTOR = Math.PI / 3;
+function hexRadiusAtAngle(theta, acrossFlatsRadius) {
+  const local = (((theta % HEX_SECTOR) + HEX_SECTOR) % HEX_SECTOR) - HEX_SECTOR / 2;
+  return acrossFlatsRadius / Math.cos(local);
+}
+
+/**
+ * Builds a turning stock mesh (position + index, ready for
+ * THREE.BufferGeometry) that shows a HEX cross-section exactly - not the
+ * across-corners-circle approximation turningProfileToLathePoints/
+ * turningProfileToLathePoints's LatheGeometry caller uses for hex stock.
+ *
+ * The insight that makes this exact rather than approximate: a lathe tool
+ * commands one radius at a time, uniformly around the full revolution - it
+ * cannot leave a different amount of material at different angles. So the
+ * true radius at any (axial position, angle) is always
+ * min(hexRadiusAtAngle(angle), outer[i]) - the existing 1D `outer` profile
+ * (already an exact simulation of what a single-point turning tool leaves,
+ * see buildTurningStockProfile) still IS the ground truth once the corners
+ * are gone; this only adds the angular variation back in for whatever the
+ * tool hasn't reached yet. No new cut-simulation logic, just a richer
+ * rendering of the same result.
+ *
+ * Bore (inner radius) is not supported here - a drilled bore combined with
+ * hex stock is a rare enough combination that the caller should fall back
+ * to turningProfileToLathePoints's axisymmetric (across-corners-circle
+ * approximation) path when `inner` has any bore in it; that path already
+ * handles a bore correctly for round stock.
+ *
+ * @returns {{position: Float32Array, index: Uint32Array}}
+ */
+export function buildTurningStockRings(axial, outer, {
+  angularSegments = 48,
+  stockShape = 'round',
+  acrossFlatsRadius = null
+} = {}) {
+  const n = axial.length;
+  const ringSize = angularSegments + 1;
+  const position = new Float32Array(n * ringSize * 3);
+
+  let vi = 0;
+  for (let i = 0; i < n; i += 1) {
+    for (let a = 0; a <= angularSegments; a += 1) {
+      const theta = (a / angularSegments) * Math.PI * 2;
+      const hexBound = stockShape === 'hex' && acrossFlatsRadius != null
+        ? hexRadiusAtAngle(theta, acrossFlatsRadius)
+        : Infinity;
+      const r = Math.max(Math.min(hexBound, outer[i]), AXIS_EPSILON);
+      position[vi] = axial[i];
+      position[vi + 1] = r * Math.cos(theta);
+      position[vi + 2] = r * Math.sin(theta);
+      vi += 3;
+    }
+  }
+
+  const index = new Uint32Array(Math.max(0, n - 1) * angularSegments * 6);
+  let ii = 0;
+  for (let i = 0; i < n - 1; i += 1) {
+    for (let a = 0; a < angularSegments; a += 1) {
+      const a0 = i * ringSize + a;
+      const a1 = i * ringSize + a + 1;
+      const b0 = (i + 1) * ringSize + a;
+      const b1 = (i + 1) * ringSize + a + 1;
+      index[ii] = a0; index[ii + 1] = b0; index[ii + 2] = a1;
+      index[ii + 3] = a1; index[ii + 4] = b0; index[ii + 5] = b1;
+      ii += 6;
+    }
+  }
+
+  return { position, index };
+}
+
 // Fusion colours a move by what it is: rapid, a plunge/ramp, or cutting. A
 // ramp is Z descending while XY is also moving - which is exactly the helical
 // entry routing.js emits. A pure vertical plunge counts too; it is the same

@@ -8,6 +8,7 @@ import {
   toolpathBounds3D,
   buildTurningStockProfile,
   turningProfileToLathePoints,
+  buildTurningStockRings,
   buildRoutingHeightmap
 } from './toolpathPreview.js';
 import { generateRoutingGcode } from './routing.js';
@@ -417,6 +418,64 @@ describe('turningProfileToLathePoints', () => {
     const inner = [0, 0];
     const points = turningProfileToLathePoints(axial, outer, inner);
     expect(points.every((p) => p[0] > 0)).toBe(true);
+  });
+});
+
+describe('buildTurningStockRings (hex stock rendered exactly, not the across-corners-circle approximation)', () => {
+  const angularSegments = 24; // multiple of 12, so 0deg/30deg land exactly on sample points
+  const ringSize = angularSegments + 1;
+  const acrossFlatsRadius = 0.5;
+
+  function ringRadii(position, ringIndex) {
+    const radii = [];
+    for (let a = 0; a < ringSize; a += 1) {
+      const base = (ringIndex * ringSize + a) * 3;
+      radii.push(Math.hypot(position[base + 1], position[base + 2]));
+    }
+    return radii;
+  }
+
+  it('an uncut hex ring shows the true hex cross-section: corners (theta=0,60,...) at the across-corners radius, flats (theta=30,90,...) at acrossFlatsRadius', () => {
+    const acrossCorners = acrossFlatsRadius * (2 / Math.sqrt(3));
+    const axial = [0, -1];
+    // "Uncut" means outer still sits at the initial envelope - across
+    // CORNERS for hex stock (stockEnvelopeRadius('hex'), what
+    // buildTurningStockProfile actually initializes to), not across flats.
+    const outer = [acrossCorners, acrossCorners];
+    const { position } = buildTurningStockRings(axial, outer, { angularSegments, stockShape: 'hex', acrossFlatsRadius });
+    const radii = ringRadii(position, 0);
+
+    expect(radii[0]).toBeCloseTo(acrossCorners, 4); // theta=0deg - a corner
+    const flatIndex = angularSegments / 12; // theta=30deg - a flat center
+    expect(radii[flatIndex]).toBeCloseTo(acrossFlatsRadius, 4);
+    // no vertex ever exceeds the true envelope
+    expect(Math.max(...radii)).toBeLessThanOrEqual(acrossCorners + 1e-6);
+  });
+
+  it('once a ring is cut below the hex\'s own across-flats radius, it becomes a perfect circle - a lathe tool commands one radius uniformly around the full revolution, it cannot leave the corners standing once it reaches the flats', () => {
+    const axial = [0];
+    const outer = [0.3]; // well below acrossFlatsRadius (0.5) - fully round now
+    const { position } = buildTurningStockRings(axial, outer, { angularSegments, stockShape: 'hex', acrossFlatsRadius });
+    const radii = ringRadii(position, 0);
+    for (const r of radii) expect(r).toBeCloseTo(0.3, 5);
+  });
+
+  it('round stock ignores the hex formula entirely - every angle at the same radius', () => {
+    const axial = [0];
+    const outer = [0.5];
+    const { position } = buildTurningStockRings(axial, outer, { angularSegments, stockShape: 'round' });
+    const radii = ringRadii(position, 0);
+    for (const r of radii) expect(r).toBeCloseTo(0.5, 5);
+  });
+
+  it('produces the expected vertex/index counts for a well-formed triangle mesh', () => {
+    const axial = [0, -1, -2];
+    const outer = [0.5, 0.4, 0.3];
+    const segs = 8;
+    const { position, index } = buildTurningStockRings(axial, outer, { angularSegments: segs, stockShape: 'round' });
+    expect(position.length).toBe(axial.length * (segs + 1) * 3);
+    expect(index.length).toBe((axial.length - 1) * segs * 6);
+    expect(Math.max(...index)).toBeLessThan(position.length / 3);
   });
 });
 
