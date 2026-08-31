@@ -343,15 +343,19 @@
 </script>
 
 <svelte:head>
-  <title>Profile</title>
+  <title>Account Settings</title>
 </svelte:head>
 
 {#if user}
   <div class="profile-page">
-    <h2>Profile</h2>
+    <header class="account-header">
+      <p class="eyebrow">Account</p>
+      <h2>Account Settings</h2>
+      <p>Manage your profile, appearance, navigation, security, and notifications.</p>
+    </header>
 
     <section class="card">
-      <h3>Account</h3>
+      <h3>Profile details</h3>
       <label class="form-label">Full name
         <input class="form-input" type="text" bind:value={full_name} />
       </label>
@@ -545,13 +549,20 @@
   </div>
 {:else}
   <div class="profile-page">
-    <h2>Profile</h2>
-    <p>Please sign in to view your profile.</p>
+    <header class="account-header">
+      <p class="eyebrow">Account</p>
+      <h2>Account Settings</h2>
+      <p>Please sign in to manage your account.</p>
+    </header>
   </div>
 {/if}
 
 <style>
   .profile-page { max-width: 860px; margin: 0 auto; padding: var(--space-4); }
+  .account-header { margin-bottom: var(--space-6); }
+  .account-header .eyebrow { margin: 0 0 var(--space-1); color: var(--accent-strong, var(--accent)); font-size: var(--font-xs); font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+  .account-header h2 { margin: 0; }
+  .account-header > p:last-child { margin: var(--space-2) 0 0; color: var(--text-muted); }
   .profile-page :global(.card) { padding: var(--space-6); margin-bottom: var(--space-6); }
   .profile-page :global(.card h3) { margin-top: 0; margin-bottom: var(--space-4); font-size: 1.25rem; }
   .profile-page :global(.card h4) { margin: var(--space-4) 0 var(--space-2); font-size: 1rem; font-weight: 600; }

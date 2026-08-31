@@ -98,10 +98,10 @@ browser confirmation or prompt popups.
   location/schedule configuration.
 - **Attendance**: attendance logging against configured locations/schedules,
   surfaced on user profiles.
-- **Profile**: per-user profile settings and personal stats (attendance
-  history, etc.), plus a Slack-style theme gallery (available to every
-  signed-in account) covering both the built-in themes and the extra
-  palette groups.
+- **Account** (`profile/`): a consistently named Account tab on desktop and
+  mobile for per-user profile settings and personal stats (attendance history,
+  etc.), plus a Slack-style theme gallery available to every signed-in account
+  covering both the built-in themes and the extra palette groups.
 - **Pick List** (`scouting/`): a team-comparison / pick-list workspace for the
   active event. Named for what it produces: it was previously labelled "Data
   Scouting" in the nav, which collided with the separate `datascout` route and
@@ -350,8 +350,8 @@ own docs are all together in one place instead of scattered across
   off-the-shelf) part stock tracking and kitting workflows.
 - **`tasks/`** - general task tracking, separate from the planner's
   scheduling-focused tasks.
-- **`admin/`, `profile/`** - user/permission administration, user profile
-  settings.
+- **`admin/`, `profile/`** - user/permission administration and the Account
+  settings destination.
 - **`docs/`** - repo-wide markdown file browser (see **Features** above).
 - **`scouting/`** - new unified scouting app, currently blank (see **Features** above).
 - **`api/`** - server endpoints backing the above, plus integration
