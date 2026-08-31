@@ -1,5 +1,6 @@
 import { writable } from 'svelte/store';
 import { supabase } from '$lib/supabase.js';
+import { authorizeSpecialThemes } from '$lib/stores/theme.js';
 
 /**
  * Minimal auth stores:
@@ -114,6 +115,7 @@ export function initAuth() {
         if (error) console.warn('getSession error:', error.message || error);
         const authUser = data?.session?.user ?? null;
         user.set(authUser);
+        authorizeSpecialThemes(authUser?.email);
         if (authUser) {
           await fetchUserProfile(authUser.id);
         } else {
@@ -129,6 +131,7 @@ export function initAuth() {
     const { data } = supabase.auth.onAuthStateChange((event, session) => {
       const authUser = session?.user ?? null;
       user.set(authUser);
+      authorizeSpecialThemes(authUser?.email);
 
       if (event === 'SIGNED_IN' && authUser) {
         // Avoid await inside callback to prevent deadlocks
@@ -162,6 +165,7 @@ export function initAuth() {
  */
 export async function signOut() {
   const { error } = await supabase.auth.signOut();
+  authorizeSpecialThemes(null);
   if (error) console.error('Error logging out:', error);
 }
 

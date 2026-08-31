@@ -2157,6 +2157,59 @@ textarea:focus,
   --btn-focus-ring: rgba(217, 164, 19, 0.32);
 }
 
+/* Private account theme gallery. Authorization lives in theme.js/profile;
+   these selectors are presentation only, because CSS itself is not an access
+   control boundary. Every palette maps back onto the same global design
+   tokens so the entire application changes coherently. */
+:root[data-theme^="theme-"] {
+  color-scheme: dark;
+  --color-white: var(--special-card);
+  --color-black: var(--special-text);
+  --neutral-100: color-mix(in srgb, var(--special-card) 82%, white 18%);
+  --neutral-300: color-mix(in srgb, var(--special-card) 66%, white 34%);
+  --neutral-500: color-mix(in srgb, var(--special-text) 62%, var(--special-card));
+  --neutral-800: var(--special-text);
+  --primary: var(--special-card);
+  --secondary: var(--special-text);
+  --background: var(--special-bg);
+  --card: var(--special-card);
+  --surface-1: var(--special-card);
+  --surface-2: color-mix(in srgb, var(--special-card) 88%, var(--special-accent) 12%);
+  --surface-3: color-mix(in srgb, var(--special-card) 78%, var(--special-accent) 22%);
+  --text: var(--special-text);
+  --text-secondary: color-mix(in srgb, var(--special-text) 72%, var(--special-card));
+  --text-muted: color-mix(in srgb, var(--special-text) 62%, var(--special-card));
+  --muted: var(--text-muted);
+  --muted-bg: var(--surface-2);
+  --border: color-mix(in srgb, var(--special-card) 60%, var(--special-text) 40%);
+  --divider: var(--border);
+  --brand-gold-base: var(--special-accent);
+  --brand-gold-strong: color-mix(in srgb, var(--special-accent) 72%, white 28%);
+  --brand-gold-soft: color-mix(in srgb, var(--special-accent) 18%, transparent);
+  --accent: var(--special-accent);
+  --accent-strong: var(--brand-gold-strong);
+  --accent-subtle: var(--brand-gold-soft);
+  --on-primary: var(--special-bg);
+  --shadow-lg: 0 8px 24px rgba(0,0,0,.5);
+}
+
+:root[data-theme="theme-kind-of-blue"] { --special-bg:#071827; --special-card:#102a40; --special-accent:#4aa8d8; --special-text:#e7f4fb; }
+:root[data-theme="theme-funky-fresh"] { --special-bg:#17152a; --special-card:#282342; --special-accent:#5ecf9a; --special-text:#f0ecff; }
+:root[data-theme="theme-jazz-club"] { --special-bg:#150510; --special-card:#280919; --special-accent:#d42645; --special-text:#fae9ee; }
+:root[data-theme="theme-aubergine"] { --special-bg:#16091c; --special-card:#2a1033; --special-accent:#b15bd1; --special-text:#f4e9f8; }
+:root[data-theme="theme-clementine"] { --special-bg:#1e0c03; --special-card:#351306; --special-accent:#f27422; --special-text:#fff0e6; }
+:root[data-theme="theme-banana"] { --special-bg:#181305; --special-card:#2c2208; --special-accent:#e0b126; --special-text:#fff7d6; }
+:root[data-theme="theme-jade"] { --special-bg:#041914; --special-card:#092c23; --special-accent:#37bd91; --special-text:#e1fbf1; }
+:root[data-theme="theme-lagoon"] { --special-bg:#041722; --special-card:#082b3c; --special-accent:#20b9d6; --special-text:#e1f8fc; }
+:root[data-theme="theme-barbra"] { --special-bg:#1d0208; --special-card:#350610; --special-accent:#e3264f; --special-text:#ffe8ed; }
+:root[data-theme="theme-raspberry-beret"] { --special-bg:#1b0612; --special-card:#330a1d; --special-accent:#db2464; --special-text:#ffe9f1; }
+:root[data-theme="theme-big-business"] { --special-bg:#080f22; --special-card:#111c38; --special-accent:#3d6fea; --special-text:#eaf0ff; }
+:root[data-theme="theme-mint-chip"] { --special-bg:#061817; --special-card:#0b2927; --special-accent:#54d6b1; --special-text:#e5fff8; }
+:root[data-theme="theme-pbj"] { --special-bg:#1b0d12; --special-card:#321722; --special-accent:#cf4776; --special-text:#fbeaf0; }
+:root[data-theme="theme-chill-vibes"] { --special-bg:#041719; --special-card:#082a2e; --special-accent:#27a9b7; --special-text:#e2fbfd; }
+
+[data-theme^="theme-"] .brand-mark { background-image:url('/spartan-helmet-dark.png'); }
+
 /* Modern dark: warm charcoal, brighter gold, dark text on gold controls */
 :root[data-theme="modern-dark"] {
   color-scheme: dark;
