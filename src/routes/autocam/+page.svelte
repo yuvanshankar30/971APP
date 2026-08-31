@@ -1121,8 +1121,8 @@
           <fieldset class="job-choice-group">
             <legend class="form-label">Operation</legend>
             <div class="job-choice-options job-choice-options--operation">
-              <button type="button" class="btn" class:btn-primary={newJobOperation === 'turning'} class:btn-secondary={newJobOperation !== 'turning'} aria-pressed={newJobOperation === 'turning'} on:click={() => (newJobOperation = 'turning')}>Turning</button>
               <button type="button" class="btn" class:btn-primary={newJobOperation === 'routing'} class:btn-secondary={newJobOperation !== 'routing'} aria-pressed={newJobOperation === 'routing'} on:click={() => (newJobOperation = 'routing')}>Routering</button>
+              <button type="button" class="btn" class:btn-primary={newJobOperation === 'turning'} class:btn-secondary={newJobOperation !== 'turning'} aria-pressed={newJobOperation === 'turning'} on:click={() => (newJobOperation = 'turning')}>Turning</button>
               <button type="button" class="btn" class:btn-primary={newJobOperation === 'tubestock'} class:btn-secondary={newJobOperation !== 'tubestock'} aria-pressed={newJobOperation === 'tubestock'} on:click={() => { newJobOperation = 'tubestock'; newJobSource = 'upload'; }}>Tube Stock</button>
             </div>
           </fieldset>
