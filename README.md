@@ -31,9 +31,10 @@ browser confirmation or prompt popups.
   it yet). No external CAM software involved (pure JS geometry math). Real
   3-axis milling (contoured toolpaths a flat 2.5D profile can't represent)
   is a separate sub-section, **Fusion CAM** (`/autocam/fusion`), backed by
-  an actual Fusion 360 Runner rather than in-process math. See the
+  an actual Fusion 360 Runner rather than in-process math; it is intentionally
+  absent from the New AutoCAM Job operation picker. See the
   **AutoCAM** section below for the code-level detail on all three.
-  Completed routing jobs also have a switchable 2D preview and a routing-only
+  Completed routing and turning jobs have a switchable 2D preview and a
   3D toolpath simulator for router and lathe jobs with rapid and cutting paths
   distinguished, distance scrubbing, and tool-change stepping. Routing shows
   a moving flat end mill; turning correctly projects diameter-mode X/Z into

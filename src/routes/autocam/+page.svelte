@@ -1114,23 +1114,22 @@
           </div>
         {/if}
 
-        <div class="form-row two-col">
-          <div class="form-group">
-            <label class="form-label" for="job-operation">Operation</label>
-            <div class="source-toggle" id="job-operation">
-              <button class="btn btn-sm" class:btn-primary={newJobOperation === 'turning'} class:btn-secondary={newJobOperation !== 'turning'} on:click={() => (newJobOperation = 'turning')}>Turning</button>
-              <button class="btn btn-sm" class:btn-primary={newJobOperation === 'routing'} class:btn-secondary={newJobOperation !== 'routing'} on:click={() => (newJobOperation = 'routing')}>Routing</button>
-              <button class="btn btn-sm" class:btn-primary={newJobOperation === 'tubestock'} class:btn-secondary={newJobOperation !== 'tubestock'} on:click={() => { newJobOperation = 'tubestock'; newJobSource = 'upload'; }}>Tube Stock</button>
-              <button class="btn btn-sm btn-secondary" disabled title="Not available in this synchronous flow - use Fusion CAM (top of this page) for real 3-axis milling via Fusion 360">Milling</button>
+        <div class="job-choice-groups">
+          <fieldset class="job-choice-group">
+            <legend class="form-label">Operation</legend>
+            <div class="job-choice-options job-choice-options--operation">
+              <button type="button" class="btn" class:btn-primary={newJobOperation === 'turning'} class:btn-secondary={newJobOperation !== 'turning'} aria-pressed={newJobOperation === 'turning'} on:click={() => (newJobOperation = 'turning')}>Turning</button>
+              <button type="button" class="btn" class:btn-primary={newJobOperation === 'routing'} class:btn-secondary={newJobOperation !== 'routing'} aria-pressed={newJobOperation === 'routing'} on:click={() => (newJobOperation = 'routing')}>Routing</button>
+              <button type="button" class="btn" class:btn-primary={newJobOperation === 'tubestock'} class:btn-secondary={newJobOperation !== 'tubestock'} aria-pressed={newJobOperation === 'tubestock'} on:click={() => { newJobOperation = 'tubestock'; newJobSource = 'upload'; }}>Tube Stock</button>
             </div>
-          </div>
-          <div class="form-group">
-            <label class="form-label" for="job-source-toggle">Source</label>
-            <div class="source-toggle" id="job-source-toggle">
-              <button class="btn btn-sm" class:btn-primary={newJobSource === 'upload'} class:btn-secondary={newJobSource !== 'upload'} on:click={() => (newJobSource = 'upload')}>Standalone Upload</button>
-              <button class="btn btn-sm" class:btn-primary={newJobSource === 'part'} class:btn-secondary={newJobSource !== 'part'} disabled={newJobOperation === 'tubestock'} title={newJobOperation === 'tubestock' ? 'Tube stock jobs are standalone-upload only - no manufacturing-request workflow maps to it yet' : ''} on:click={() => (newJobSource = 'part')}>Link to Existing Part</button>
+          </fieldset>
+          <fieldset class="job-choice-group">
+            <legend class="form-label">Source</legend>
+            <div class="job-choice-options job-choice-options--source">
+              <button type="button" class="btn" class:btn-primary={newJobSource === 'upload'} class:btn-secondary={newJobSource !== 'upload'} aria-pressed={newJobSource === 'upload'} on:click={() => (newJobSource = 'upload')}>Upload STEP file</button>
+              <button type="button" class="btn" class:btn-primary={newJobSource === 'part'} class:btn-secondary={newJobSource !== 'part'} aria-pressed={newJobSource === 'part'} disabled={newJobOperation === 'tubestock'} title={newJobOperation === 'tubestock' ? 'Tube stock jobs are standalone-upload only - no manufacturing-request workflow maps to it yet' : ''} on:click={() => (newJobSource = 'part')}>Use existing part</button>
             </div>
-          </div>
+          </fieldset>
         </div>
 
         {#if newJobSource === 'part'}
@@ -1945,6 +1944,14 @@
     margin-bottom: 1rem;
   }
 
+  .job-choice-groups { display: grid; gap: var(--space-4, 1rem); }
+  .job-choice-group { min-width: 0; margin: 0; padding: 0; border: 0; }
+  .job-choice-group legend { margin-bottom: var(--space-2, 0.5rem); }
+  .job-choice-options { display: grid; gap: var(--space-2, 0.5rem); }
+  .job-choice-options--operation { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .job-choice-options--source { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .job-choice-options .btn { width: 100%; min-width: 0; min-height: 2.6rem; white-space: normal; }
+
   .cam-form-hint {
     font-size: var(--font-xs, 0.75rem);
     color: var(--text-muted);
@@ -2029,5 +2036,9 @@
   }
   .form-row.two-col {
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  }
+  @media (max-width: 560px) {
+    .job-choice-options--operation,
+    .job-choice-options--source { grid-template-columns: 1fr; }
   }
 </style>
