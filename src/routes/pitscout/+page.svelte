@@ -225,7 +225,7 @@
 
   function topicProgress(topicId, details, core, climb, autos, photos, pending) {
     if (topicId === 'basics') {
-      const values = [core.scout_name, core.drivebase_type, core.shooter_type, core.hopper_type, core.human_player_balls_in_auto, climb, autos];
+      const values = [core.scout_name, core.drivebase_type, core.shooter_type, core.hopper_type, climb, autos];
       return { done: values.filter(answered).length, total: values.length };
     }
     if (topicId === 'photos') {
@@ -242,7 +242,7 @@
 
   $: coreAnswers = {
     scout_name,
-    drivebase_type, shooter_type, hopper_type, human_player_balls_in_auto,
+    drivebase_type, shooter_type, hopper_type,
     estimated_bps, likely_breaking_component
   };
   $: topicStates = TOPICS.map((topic) => ({
@@ -1169,15 +1169,6 @@
       </select>
     </div>
 
-    <div class="form-group">
-      <label class="form-label" for="humanPlayerBallsSelect">Human Player Balls In Auto</label>
-      <select id="humanPlayerBallsSelect" class="form-select" bind:value={human_player_balls_in_auto}>
-        <option value="">-- Select --</option>
-        {#each HUMAN_PLAYER_AUTO_OPTIONS as option}
-          <option value={option}>{option}</option>
-        {/each}
-      </select>
-    </div>
 {/if}
 
     {#if pitSchema.robot_archetype}
