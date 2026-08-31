@@ -1,7 +1,9 @@
 :root {
-  /* Typography roles (all themes): characterful grotesque for headings,
-     mono for data readouts — body stays on the system stack */
-  --font-display: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  /* One standard sans-serif across navigation, headings, body copy and
+     controls. Keep the mono role only for technical data/code where fixed
+     character widths carry meaning. */
+  --font-standard: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-display: var(--font-standard);
   --font-mono-stack: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
   /* Base neutrals */
@@ -348,7 +350,7 @@ body { transition: background-color 0.2s ease, color 0.2s ease; }
 body {
   margin: 0;
   padding: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+  font-family: var(--font-standard);
   background-color: var(--background);
   color: var(--text);
   line-height: 1.5;
@@ -357,8 +359,17 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-/* Headings carry the brand voice (all themes): a characterful grotesque,
-   tight and confident. Body stays on the system stack. */
+/* Browsers otherwise give native form controls their own platform font,
+   which makes buttons and selects visibly disagree with the surrounding UI. */
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+/* Headings use the same standard family as the rest of the interface; weight,
+   spacing and scale provide hierarchy without introducing another typeface. */
 h1, h2, h3, h4 {
   font-family: var(--font-display);
   letter-spacing: -0.02em;
