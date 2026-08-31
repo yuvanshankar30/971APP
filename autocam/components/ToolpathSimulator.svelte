@@ -20,6 +20,13 @@
     buildRoutingHeightmap
   } from '../toolpathPreview.js';
   import { stockEnvelopeRadius } from '../turning.js';
+  import {
+    extractTurningProfileFromMeshes,
+    extractRoutingContoursFromMeshes,
+    transformMeshesForTurningScene,
+    transformMeshesForRoutingScene
+  } from '../stepProfile.js';
+  import { fetchStepMeshes } from '$lib/stepMeshLoader.js';
 
   export let gcode = '';
   export let operationType = 'routing';
@@ -33,12 +40,30 @@
   export let noseRadius = null;
   /** Drill diameter, if this job has a drilling operation - see turning.js's `drilling` param. */
   export let drillDiameter = null;
+  /**
+   * Storage path of the job's source STEP file - Phase 5's "show the source
+   * part" ghost overlay + gouge detection (docs/toolpath-simulation-plan.md).
+   * Optional: without it, the sim works exactly as before, just without the
+   * Model toggle.
+   */
+  export let stepFileName = null;
 
   let container;
-  let renderer, scene, camera, controls, frameId, resizeObserver, grid, axes, toolMesh, stockMesh;
+  let renderer, scene, camera, controls, frameId, resizeObserver, grid, axes, toolMesh, stockMesh, ghostMesh;
   let disposed = false;
   let loading = true;
   let error = '';
+
+  // Ghost part (Phase 5) - loaded independently of the main scene/toolpath
+  // lifecycle, since fetching + parsing a STEP file is slow and shouldn't
+  // block (or be blocked by) the toolpath view rendering.
+  let modelVisible = true;
+  let ghostLoading = false;
+  let ghostError = '';
+  let ghostGeometryData = null; // [{position, index}, ...] in scene coordinates, or null
+  let turningTargetProfile = null; // {z,x}[] from extractTurningProfileFromMeshes - turning gouge check
+  let routingTargetThickness = null; // number from extractRoutingContoursFromMeshes - routing gouge check
+  let initializedStepFile = null;
 
   // Fusion colours a move by what it is, and CAM users read that scheme
   // fluently: yellow rapid, blue cutting, red ramp/plunge. Deliberately not
@@ -94,6 +119,28 @@
   $: if (scene && toolpathVisible !== undefined) applyVisibility(visible);
   $: if (scene && toolPosition && cutterDiameter !== undefined && toolVisible !== undefined && isTurning !== undefined && noseRadius !== undefined) updateTool();
   $: if (scene && moves && toolPosition && stockVisible !== undefined && stockDiameter !== undefined && isTurning !== undefined) updateStock();
+
+  // Ghost part (Phase 5): fetch + parse doesn't need the scene, so it's
+  // decoupled from scene readiness - only actually adding the mesh does.
+  $: if (stepFileName !== initializedStepFile) {
+    initializedStepFile = stepFileName;
+    loadGhostPart();
+  }
+  $: if (scene && modelVisible !== undefined && ghostGeometryData !== undefined) updateGhostMesh();
+
+  // Gouge check: has the sim's cut state, at the current playback position,
+  // removed material the source part actually needed? An independent
+  // ground truth (the STEP file, not the G-code replaying itself) is the
+  // whole reason this needs the ghost part loaded first - comparing the
+  // program's own output against itself would be tautological.
+  const GOUGE_TOLERANCE = 0.01;
+  $: turningGouge = isTurning && turningTargetProfile && stockOuterProfile
+    ? detectTurningGouge(stockOuterProfile, turningTargetProfile)
+    : false;
+  $: routingGouge = !isTurning && routingTargetThickness != null && routingHeights
+    ? Math.min(...routingHeights) < -routingTargetThickness - GOUGE_TOLERANCE
+    : false;
+  $: gougeDetected = turningGouge || routingGouge;
 
   function applyVisibility(state) {
     for (const kind of KINDS) {
@@ -164,6 +211,70 @@
     stockMesh = null;
   }
 
+  function disposeGhost() {
+    if (!ghostMesh || !scene) return;
+    scene.remove(ghostMesh);
+    ghostMesh.traverse((child) => {
+      child.geometry?.dispose?.();
+      if (Array.isArray(child.material)) child.material.forEach((material) => material.dispose?.());
+      else child.material?.dispose?.();
+    });
+    ghostMesh = null;
+  }
+
+  // Phase 5: load and show the source STEP part semi-transparently, so a
+  // gouge or a missed feature is visible against what the toolpath actually
+  // produced - see docs/toolpath-simulation-plan.md. Fetch + parse doesn't
+  // touch the scene, so this can run before the scene exists (or while the
+  // job is still being edited) without racing updateStock()/rebuildToolpath().
+  async function loadGhostPart() {
+    ghostGeometryData = null;
+    turningTargetProfile = null;
+    routingTargetThickness = null;
+    ghostError = '';
+    if (!stepFileName) return;
+
+    ghostLoading = true;
+    try {
+      const meshes = await fetchStepMeshes(stepFileName);
+      if (disposed) return;
+      if (isTurning) {
+        turningTargetProfile = extractTurningProfileFromMeshes(meshes);
+        ghostGeometryData = transformMeshesForTurningScene(meshes);
+      } else {
+        const { thickness, frame } = extractRoutingContoursFromMeshes(meshes);
+        routingTargetThickness = thickness;
+        ghostGeometryData = transformMeshesForRoutingScene(meshes, frame);
+      }
+    } catch (e) {
+      // Non-fatal: the toolpath sim is fully usable without the ghost part -
+      // an older job whose STEP file was replaced/removed, or a part this
+      // extractor genuinely can't read, shouldn't break the rest of the view.
+      console.warn('Ghost part overlay unavailable:', e?.message || e);
+      ghostError = e?.message || 'Could not load the source part for comparison.';
+    } finally {
+      ghostLoading = false;
+    }
+  }
+
+  function updateGhostMesh() {
+    disposeGhost();
+    if (!scene || !ghostGeometryData || !modelVisible) return;
+
+    ghostMesh = new THREE.Group();
+    const material = new THREE.MeshPhongMaterial({
+      color: 0xf1c331, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false
+    });
+    for (const { position, index } of ghostGeometryData) {
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(position, 3));
+      if (index) geometry.setIndex(new THREE.Uint32BufferAttribute(index, 1));
+      geometry.computeVertexNormals();
+      ghostMesh.add(new THREE.Mesh(geometry, material));
+    }
+    scene.add(ghostMesh);
+  }
+
   // Real machined solid, not a static ghost cylinder: rebuilt from the
   // actual radius-per-axial-position profile at the current playback
   // position - see buildTurningStockProfile in toolpathPreview.js for why
@@ -172,6 +283,51 @@
   // updateTool() already does.
   const STOCK_PROFILE_SAMPLES = 200;
   const STOCK_RADIAL_SEGMENTS = 56;
+
+  // Lifted out of updateStock()/updateRoutingStock() so the gouge check
+  // (below) can read the current cut state without recomputing it.
+  let stockOuterProfile = null; // turning: {axial, outer} at the current playback position
+  let routingHeights = null; // routing: Float32Array at the current playback position
+
+  function detectTurningGouge(profileNow, targetProfile) {
+    // targetProfile (from extractTurningProfileFromMeshes) is {z,x}[] in
+    // native STEP-file coordinates. Convert it into the exact same
+    // scene/machining axial coordinate the sim's own stock profile uses -
+    // zOrigin = targetProfile[0].z, machiningAxial = zOrigin - nativeZ - the
+    // identical transform turning.js itself applies before generating
+    // G-code (see its own zOrigin/profile normalization), not an
+    // independently-guessed fractional alignment. Getting this wrong is not
+    // a cosmetic bug: an earlier version normalized both profiles to
+    // independent 0..1 fractions, which silently compared the two ends of
+    // the part backwards (the stock profile's fraction=0 is the chuck end;
+    // the target's fraction=0 landed on the face end) - correct-looking on
+    // a constant-radius test fixture, wrong on any real tapered/stepped
+    // shaft, which is exactly the case this check exists for.
+    const zOrigin = targetProfile[0].z;
+    const sorted = targetProfile
+      .map((p) => ({ axial: zOrigin - p.z, radius: p.x }))
+      .sort((a, b) => a.axial - b.axial);
+
+    const radiusAtAxial = (axial) => {
+      if (axial <= sorted[0].axial) return sorted[0].radius;
+      const last = sorted[sorted.length - 1];
+      if (axial >= last.axial) return last.radius;
+      for (let i = 0; i < sorted.length - 1; i += 1) {
+        if (axial >= sorted[i].axial && axial <= sorted[i + 1].axial) {
+          const span = sorted[i + 1].axial - sorted[i].axial;
+          const t = span === 0 ? 0 : (axial - sorted[i].axial) / span;
+          return sorted[i].radius + t * (sorted[i + 1].radius - sorted[i].radius);
+        }
+      }
+      return last.radius;
+    };
+
+    const { axial, outer } = profileNow;
+    for (let i = 0; i < axial.length; i += 1) {
+      if (outer[i] < radiusAtAxial(axial[i]) - GOUGE_TOLERANCE) return true;
+    }
+    return false;
+  }
 
   function updateStock() {
     disposeStock();
@@ -204,6 +360,7 @@
         uptoMoveIndex: moveIndex,
         partialProgress: progress
       });
+      stockOuterProfile = { axial, outer };
 
       const points = turningProfileToLathePoints(axial, outer, inner).map(([r, z]) => new THREE.Vector2(r, z));
       const geometry = new THREE.LatheGeometry(points, STOCK_RADIAL_SEGMENTS);
@@ -261,11 +418,14 @@
     const nx = Math.max(10, Math.ceil(width / cellSize) + 1);
     const ny = Math.max(10, Math.ceil(heightSpan / cellSize) + 1);
 
-    // A bit below the deepest programmed cut - "safely into the spoilboard",
-    // not a real stock-bottom measurement (routing jobs have no stock-
-    // thickness param today), but honest enough to read as a solid plate
-    // rather than a paper-thin sheet.
-    const floorZ = Math.min(bounds.min.z - cellSize, -0.05);
+    // The real measured material thickness once the ghost part has loaded
+    // (Phase 5 - extractRoutingContoursFromMeshes); until/unless that's
+    // available, fall back to "a bit below the deepest programmed cut,
+    // safely into the spoilboard" - not a real measurement, but honest
+    // enough to read as a solid plate rather than a paper-thin sheet.
+    const floorZ = routingTargetThickness != null
+      ? -routingTargetThickness
+      : Math.min(bounds.min.z - cellSize, -0.05);
     const moveIndex = toolPosition?.moveIndex ?? 0;
     const progress = toolPosition?.progress ?? 0;
 
@@ -275,6 +435,7 @@
       uptoMoveIndex: moveIndex,
       partialProgress: progress
     });
+    routingHeights = heights;
 
     const geomWidth = (nx - 1) * cellSize;
     const geomHeight = (ny - 1) * cellSize;
@@ -474,6 +635,7 @@
 
         rebuildToolpath();
         updateStock();
+        updateGhostMesh();
 
         const animate = (timestamp) => {
           if (disposed) return;
@@ -535,6 +697,7 @@
       disposeToolpath();
       disposeTool();
       disposeStock();
+      disposeGhost();
     }
     controls?.dispose?.();
     renderer?.dispose?.();
@@ -552,6 +715,11 @@
       <div class="overlay overlay-error"><span>⚠️ {error}</span></div>
     {:else if !moves.length}
       <div class="overlay"><span>No toolpath moves could be read from this program.</span></div>
+    {/if}
+    {#if gougeDetected}
+      <div class="gouge-banner" role="alert">
+        ⚠️ Possible gouge: as of the current playback position, this program has cut below the source part's actual finished surface.
+      </div>
     {/if}
   </div>
 
@@ -595,6 +763,12 @@
       <label class="legend-item" class:empty={!moves.length}>
         <input type="checkbox" bind:checked={stockVisible} disabled={!moves.length} />
         <span class="legend-label">Stock</span>
+      </label>
+    {/if}
+    {#if stepFileName}
+      <label class="legend-item" class:empty={!ghostGeometryData} title={ghostError || (ghostLoading ? 'Loading source part...' : 'The source STEP part, shown semi-transparently for comparison')}>
+        <input type="checkbox" bind:checked={modelVisible} disabled={!ghostGeometryData} />
+        <span class="legend-label">Model{ghostLoading ? '…' : ''}</span>
       </label>
     {/if}
     {#each KINDS as kind}
@@ -642,6 +816,20 @@
     padding: 1rem;
   }
   .overlay-error { color: var(--red-strong, #991b1b); }
+  .gouge-banner {
+    position: absolute;
+    left: var(--space-3, 0.75rem);
+    right: var(--space-3, 0.75rem);
+    bottom: var(--space-3, 0.75rem);
+    padding: 0.6rem 0.9rem;
+    border-radius: var(--radius-sm, 4px);
+    background: var(--red-soft, #fee2e2);
+    color: var(--red-strong, #991b1b);
+    border: 1px solid var(--red-base, #dc3545);
+    font-size: 0.85rem;
+    font-weight: 600;
+    z-index: 2;
+  }
   .spinner {
     width: 32px;
     height: 32px;

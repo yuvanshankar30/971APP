@@ -261,7 +261,28 @@ function appendSetupBody(lines, profile, { stockDiameter, stockShape = 'round', 
     lines.push(`(-- roughing pass ${passCount}, radius ${fmt(currentRadius)}" --)`);
     lines.push(`G00 X${fmt(currentRadius * 2)} Z${fmt(startZ)}`);
     for (const pt of profile) {
-      const cutRadius = Math.min(pt.x, currentRadius);
+      // max, not min: a roughing pass must never cut CLOSER to center than
+      // this point's own final target (pt.x), even once currentRadius (this
+      // pass's aggressive intermediate depth) has dropped below it - only
+      // relevant for a non-monotonic profile (a boss/step/flange wider than
+      // the profile's own overall minimum radius, exactly what
+      // minTargetRadius is computed from). Real bug this fixes: with
+      // Math.min, once currentRadius fell below a wide section's target
+      // (which it always eventually does, since the loop runs until
+      // currentRadius reaches the profile's SMALLEST radius + allowance),
+      // that section got roughed straight past its intended finished size
+      // - the later, unclamped finishing pass's move to the true target
+      // radius then travelled through empty air instead of cutting
+      // anything, since the material was already gone. Silent, and
+      // invisible to every existing test here, because none of them
+      // simulate the actual resulting material shape - they only check the
+      // G-code's own text/structure, which still "says" the right X value
+      // in the finishing pass regardless. Found via the 3D sim's Phase 5
+      // gouge check (ToolpathSimulator.svelte), which compares the
+      // simulated cut result against the source STEP part - a real,
+      // independent ground truth the G-code can't be tautologically
+      // "correct" against.
+      const cutRadius = Math.max(pt.x, currentRadius);
       lines.push(`G01 X${fmt(cutRadius * 2)} Z${fmt(pt.z)} F${fmt(feedRough, 5)}`);
     }
     lines.push(`G00 X${fmt(safeDiameter)} (retract clear of stock)`);

@@ -10,14 +10,24 @@ end mill on flat stock); turning's is a 1D radius-per-axial-position profile
 revolved into a solid (exact for a solid of revolution) - see each function's
 own doc comment in `toolpathPreview.js`.
 
-**Status (2026-08-31):** Phases 0, 1, 3, 4, and 6 complete, for both routing
-and turning. Phase 2 has move-class rendering and the Toolpath/Tool/Stock
-visibility toggles; per-tool colour mode and a "Model" toggle (that one needs
-Phase 5) remain open. Phase 5 (load and show the source STEP geometry
-alongside the simulated stock, plus gouge detection) has not been started -
-the real remaining gap. Phase 7 hasn't had a dedicated, recorded measurement
-pass, though the implementation already uses typed arrays throughout and
-disposes geometries/materials/the renderer on destroy.
+**Status (2026-08-31):** Phases 0, 1, 3, 4, 5, and 6 complete, for both
+routing and turning. Phase 2 has move-class rendering and the Toolpath/Tool/
+Stock/Model visibility toggles; only per-tool colour mode remains open there.
+Phase 7 hasn't had a dedicated, recorded measurement pass, though the
+implementation already uses typed arrays throughout and disposes geometries/
+materials/the renderer on destroy.
+
+**Phase 5 caught a real bug on first use.** The gouge check (comparing the
+live cut state against the STEP-derived target, independent ground truth the
+G-code can't be tautologically "correct" against) immediately flagged
+`lead-screw.step`'s demo job: `generateTurningGcode`'s roughing loop was
+under-cutting any profile section wider than the profile's own overall
+minimum radius, all the way down to that minimum, before the unclamped
+finishing pass tried (and failed - the material was already gone) to bring
+it back out. Fixed in `turning.js` (`Math.min` -> `Math.max` in the roughing
+clamp) - see that commit for the full explanation. No G-code-text-based test
+in this repo could have caught it, which is exactly the class of bug Phase 5
+was for.
 
 ---
 
@@ -119,15 +129,24 @@ comment.
 
 ---
 
-## Phase 5 — Show the part
+## Phase 5 — Show the part ✅
 
-- [ ] **Extract** `CadViewer.svelte`'s `occt-import-js` STEP loader into a
-      shared helper — one implementation, not a second copy
-- [ ] Load the job's source geometry and display it against the simulated stock
-- [ ] Semi-transparent, toggleable
-- [ ] *Follow-up once this lands:* gouge detection — flag any move that removes
-      material below the finished surface. The one honest subset of Fusion's
-      collision check available to us
+- [x] **Extracted** the `occt-import-js` STEP fetch+parse into
+      `src/lib/stepMeshLoader.js`, shared between `CadViewer.svelte` and
+      `ToolpathSimulator.svelte` - one implementation, not a second copy.
+      Fixed a real unit bug in the same pass (`linearUnit: 'inch'` was never
+      passed to `occt.ReadStepFile`, unlike the server-side loader)
+- [x] Loads the job's source geometry (`transformMeshesForTurningScene` /
+      `transformMeshesForRoutingScene` in `stepProfile.js`, reusing
+      `pickLengthAxis` / the routing `frame` so it can never disagree with
+      the extractor that actually fed the G-code generator) and displays it
+      against the simulated stock, for both operations
+- [x] Semi-transparent, toggleable ("Model" checkbox)
+- [x] Gouge detection - flags a cut that removes material below the
+      finished surface, compared against the STEP-derived target (turning:
+      radius profile; routing: measured material thickness). **Caught a
+      real bug on first use** - see the status note above and the
+      `Math.min` -> `Math.max` roughing-pass commit
 
 ---
 
@@ -194,5 +213,6 @@ comment.
 - **Lead-in/out colouring.** `routing.js` has a lead-in/out zone but doesn't
   mark it in the output, so those moves read as ordinary cuts. Worth emitting a
   marker for full Fusion colour parity — a generator change, not a viewer one.
-- **Phase 5 (show the part) is the one real remaining gap.** Everything else
-  through Phase 4 and Phase 6 is done for both operations.
+- **Phases 0-6 are all done now** (Phase 5 landed 2026-08-31). What's left:
+  per-tool colour mode (Phase 2) and a dedicated Phase 7 measurement/
+  performance pass - neither blocking, both quality-of-life.

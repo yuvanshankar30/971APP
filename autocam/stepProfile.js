@@ -345,6 +345,53 @@ export function extractTurningProfileFromMeshes(meshes, { buckets = 300 } = {}) 
   return profile;
 }
 
+/**
+ * Transforms raw STEP mesh vertices (native CAD coordinates) into the
+ * turning 3D sim's scene coordinates, for the "show the source part"
+ * ghost overlay (docs/toolpath-simulation-plan.md Phase 5). Reuses
+ * pickLengthAxis so this can never disagree with what
+ * extractTurningProfileFromMeshes itself picked for the same file.
+ *
+ * Unlike the toolpath's own 2D diameter-mode projection (which collapses
+ * the radial plane down to a signed radius, discarding angle - see
+ * projectTurningToolpath in toolpathPreview.js), this keeps the true 3D
+ * shape: scene x = axial position (matches turning.js's own
+ * zOrigin-at-the-face normalization exactly), scene y/z = the real
+ * radial-plane position, not a collapsed radius. A genuinely turned part
+ * is axisymmetric anyway (or extraction would have rejected it), so this
+ * reads as a clean round solid once rendered - any residual real-world
+ * asymmetry within the extractor's tolerance shows up honestly instead of
+ * being hidden.
+ *
+ * @returns {Array<{position: Float32Array, index: Uint32Array|null}>}
+ */
+export function transformMeshesForTurningScene(meshes) {
+  const bbox = meshesBoundingBox(meshes);
+  const spans = { x: bbox.maxX - bbox.minX, y: bbox.maxY - bbox.minY, z: bbox.maxZ - bbox.minZ };
+  const picked = pickLengthAxis(spans);
+  if (!picked) {
+    throw new Error('Could not determine a spindle axis for this part - same check as extractTurningProfileFromMeshes');
+  }
+  const { lengthAxis, radiusAxisA, radiusAxisB } = picked;
+  const lengthMinByAxis = { x: bbox.minX, y: bbox.minY, z: bbox.minZ };
+  const lengthMaxByAxis = { x: bbox.maxX, y: bbox.maxY, z: bbox.maxZ };
+  const lengthMin = lengthMinByAxis[lengthAxis];
+  const centerA = (lengthMinByAxis[radiusAxisA] + lengthMaxByAxis[radiusAxisA]) / 2;
+  const centerB = (lengthMinByAxis[radiusAxisB] + lengthMaxByAxis[radiusAxisB]) / 2;
+  const li = AXIS_INDEX[lengthAxis], ai = AXIS_INDEX[radiusAxisA], bi = AXIS_INDEX[radiusAxisB];
+
+  return meshes.map((mesh) => {
+    const src = mesh.attributes.position.array;
+    const out = new Float32Array(src.length);
+    for (let i = 0; i < src.length; i += 3) {
+      out[i] = lengthMin - src[i + li];
+      out[i + 1] = src[i + ai] - centerA;
+      out[i + 2] = src[i + bi] - centerB;
+    }
+    return { position: out, index: mesh.index?.array || null };
+  });
+}
+
 function faceTriangleRange(mesh, brepFace) {
   // brep_faces gives inclusive triangle index ranges into mesh.index.array.
   const tris = [];
@@ -578,6 +625,13 @@ export function extractRoutingContoursFromMeshes(meshes) {
     if (d > maxD) maxD = d;
   }
   const thickness = Number.isFinite(minD) && Number.isFinite(maxD) ? maxD - minD : null;
+  // origin sits ON the found face (best.point is one of its own vertices),
+  // so the material's bulk is whichever side of minD/maxD is NOT ~0 - used
+  // by transformMeshesForRoutingScene to know which way "into the material"
+  // points, matching routing.js's own Z0-at-the-face/cuts-go-negative
+  // convention regardless of which raw direction best.normal happens to
+  // point in this particular STEP file.
+  const materialSign = Number.isFinite(minD) && Number.isFinite(maxD) && Math.abs(maxD) < Math.abs(minD) ? -1 : 1;
 
   // Sanity check: minD/maxD is only real material thickness if the far
   // extreme is the depth of a genuine, roughly-parallel "bottom" face - not
@@ -660,7 +714,42 @@ export function extractRoutingContoursFromMeshes(meshes) {
     );
   }
 
-  return { contours, thickness };
+  return { contours, thickness, frame: { origin: best.point, normal: best.normal, u, v, materialSign } };
+}
+
+/**
+ * Transforms raw STEP mesh vertices into the routing 3D sim's scene
+ * coordinates, for the "show the source part" ghost overlay
+ * (docs/toolpath-simulation-plan.md Phase 5). Takes the `frame` that
+ * extractRoutingContoursFromMeshes already returned for this same file -
+ * pass it straight through - so the ghost part can never disagree with the
+ * contours actually fed to generateRoutingGcode.
+ *
+ * scene x/y = the face-plane u/v basis, matching the routing G-code's own
+ * X/Y directly (project() in this file uses the exact same u/v dot
+ * products for the 2D contour points). scene z = depth into the material,
+ * negative - matches both the sim's "Z is depth, negative into the
+ * material" scene convention and routing.js's own Z0-at-the-face
+ * convention.
+ *
+ * @returns {Array<{position: Float32Array, index: Uint32Array|null}>}
+ */
+export function transformMeshesForRoutingScene(meshes, frame) {
+  const { origin, normal, u, v, materialSign } = frame;
+  return meshes.map((mesh) => {
+    const src = mesh.attributes.position.array;
+    const out = new Float32Array(src.length);
+    for (let i = 0; i < src.length; i += 3) {
+      const dx = src[i] - origin.x;
+      const dy = src[i + 1] - origin.y;
+      const dz = src[i + 2] - origin.z;
+      const d = dx * normal.x + dy * normal.y + dz * normal.z;
+      out[i] = dx * u.x + dy * u.y + dz * u.z;
+      out[i + 1] = dx * v.x + dy * v.y + dz * v.z;
+      out[i + 2] = -materialSign * d;
+    }
+    return { position: out, index: mesh.index?.array || null };
+  });
 }
 
 // Minimum face area, as a fraction of the largest wall candidate found, to
