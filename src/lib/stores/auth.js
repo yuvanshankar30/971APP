@@ -1,6 +1,18 @@
 import { writable } from 'svelte/store';
 import { supabase } from '$lib/supabase.js';
-import { authorizeSpecialThemes } from '$lib/stores/theme.js';
+import { registerSpecialThemes } from '$lib/stores/theme.js';
+
+async function loadPrivateThemes(session) {
+  if (!session?.access_token) return registerSpecialThemes([]);
+  try {
+    const response = await fetch('/api/special-themes', { headers: { Authorization: `Bearer ${session.access_token}` } });
+    if (!response.ok) return registerSpecialThemes([]);
+    const payload = await response.json();
+    registerSpecialThemes(payload?.data || []);
+  } catch {
+    registerSpecialThemes([]);
+  }
+}
 
 /**
  * Minimal auth stores:
@@ -115,7 +127,7 @@ export function initAuth() {
         if (error) console.warn('getSession error:', error.message || error);
         const authUser = data?.session?.user ?? null;
         user.set(authUser);
-        authorizeSpecialThemes(authUser?.email);
+        await loadPrivateThemes(data?.session);
         if (authUser) {
           await fetchUserProfile(authUser.id);
         } else {
@@ -131,7 +143,7 @@ export function initAuth() {
     const { data } = supabase.auth.onAuthStateChange((event, session) => {
       const authUser = session?.user ?? null;
       user.set(authUser);
-      authorizeSpecialThemes(authUser?.email);
+      void loadPrivateThemes(session);
 
       if (event === 'SIGNED_IN' && authUser) {
         // Avoid await inside callback to prevent deadlocks
@@ -165,7 +177,7 @@ export function initAuth() {
  */
 export async function signOut() {
   const { error } = await supabase.auth.signOut();
-  authorizeSpecialThemes(null);
+  registerSpecialThemes([]);
   if (error) console.error('Error logging out:', error);
 }
 

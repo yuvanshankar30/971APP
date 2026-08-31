@@ -6,7 +6,7 @@
   import { toastActions } from '$lib/toast.js';
   import { requestConfirmation } from '$lib/confirmation.js';
   import navigation from '$lib/navigation.json';
-  import { theme, setTheme, specialThemesAllowed, SPECIAL_THEME_GROUPS } from '$lib/stores/theme.js';
+  import { theme, setTheme, specialThemesAllowed, specialThemeGroups } from '$lib/stores/theme.js';
   import { setLoginScreenStyle } from '$lib/stores/loginScreenPref.js';
   import { defaultHeaderTabs } from '$lib/defaultTabs.js';
   import HeaderPreview from '$lib/components/HeaderPreview.svelte';
@@ -371,7 +371,7 @@
       {#if $specialThemesAllowed}
         <div class="special-themes" aria-label="Arin-only special themes">
           <div class="special-theme-heading"><div><strong>Special themes</strong><small>Private theme gallery for Arin Rao.</small></div></div>
-          {#each SPECIAL_THEME_GROUPS as group}
+          {#each $specialThemeGroups as group}
             <h4>{group.label}</h4>
             <div class="theme-grid">
               {#each group.themes as specialTheme}
