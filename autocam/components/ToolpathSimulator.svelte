@@ -3,10 +3,12 @@
   // docs/toolpath-simulation-plan.md for why turning is excluded and why
   // material removal (a later phase) uses a heightmap.
   //
-  // three.js is loaded dynamically, matching CadViewer.svelte, so it stays out
-  // of the SSR bundle and off the critical path for anyone who never opens a
-  // toolpath.
+  // These are route-level imports: Vite keeps them out of unrelated app routes,
+  // but loading them with the simulator avoids a second dynamic module request
+  // that left the viewer's startup overlay hanging in local development.
   import { onMount, onDestroy } from 'svelte';
+  import * as THREE from 'three';
+  import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
   import { FastForward, Pause, Play, RotateCcw, SkipForward } from 'lucide-svelte';
   import { parseToolpath3D, toolpathBounds3D, toolpathPositionAtDistance } from '../toolpathPreview.js';
 
@@ -78,8 +80,6 @@
     }
   }
 
-  let THREE_NS = null;
-
   function disposeToolpath() {
     for (const kind of KINDS) {
       const object = lineObjects[kind];
@@ -92,8 +92,7 @@
   }
 
   function rebuildToolpath() {
-    if (!THREE_NS || !scene) return;
-    const THREE = THREE_NS;
+    if (!scene) return;
     disposeToolpath();
 
     // One flat Float32Array per move class rather than an object per segment -
@@ -134,13 +133,12 @@
   }
 
   function updateTool() {
-    if (!THREE_NS || !scene) return;
+    if (!scene) return;
     if (!cutterDiameter || !toolPosition) {
       disposeTool();
       return;
     }
 
-    const THREE = THREE_NS;
     const visualHeight = Math.max(cutterDiameter * 3, 0.5);
     if (!toolMesh || toolMesh.userData.diameter !== cutterDiameter) {
       disposeTool();
@@ -191,7 +189,7 @@
   }
 
   function frameCamera() {
-    if (!camera || !controls || !THREE_NS) return;
+    if (!camera || !controls) return;
     const { min, max } = bounds;
     const center = {
       x: (min.x + max.x) / 2,
@@ -215,10 +213,7 @@
     let cancelled = false;
     (async () => {
       try {
-        const THREE = await import('three');
-        const { OrbitControls } = await import('three/examples/jsm/controls/OrbitControls.js');
         if (cancelled || disposed) return;
-        THREE_NS = THREE;
 
         const width = container.clientWidth || 600;
         const height = container.clientHeight || 400;

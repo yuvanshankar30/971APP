@@ -15,7 +15,6 @@ export const authReady = writable(false);
 let subscription = null;
 let initialized = false;
 let initCount = 0;
-const INITIAL_SESSION_TIMEOUT_MS = 3000;
 
 export async function fetchUserProfile(userId) {
   if (!userId) {
@@ -110,37 +109,15 @@ export function initAuth() {
 
     // Initial session load (safe to await here; not inside callback)
     (async () => {
-      const applyInitialSession = ({ data, error } = {}) => {
+      try {
+        const { data, error } = await supabase.auth.getSession();
         if (error) console.warn('getSession error:', error.message || error);
         const authUser = data?.session?.user ?? null;
         user.set(authUser);
         if (authUser) {
-          // A profile query is useful for navigation and permissions, but it
-          // must not hold the entire protected app behind its loading screen.
-          // Supabase can retry a slow network request independently while the
-          // already-known signed-in session renders the page.
-          void fetchUserProfile(authUser.id);
+          await fetchUserProfile(authUser.id);
         } else {
           userProfile.set(null);
-        }
-      };
-
-      try {
-        const sessionRequest = supabase.auth.getSession();
-        const timeout = new Promise((resolve) => {
-          setTimeout(() => resolve(null), INITIAL_SESSION_TIMEOUT_MS);
-        });
-        const initialSession = await Promise.race([sessionRequest, timeout]);
-
-        if (initialSession === null) {
-          console.warn('Initial auth session check timed out; continuing without blocking the app.');
-          // Do not discard a late session response. It can still sign the user
-          // in after a flaky local/network startup settles.
-          void sessionRequest.then(applyInitialSession).catch((e) => {
-            console.warn('Late getSession error:', e?.message || e);
-          });
-        } else {
-          applyInitialSession(initialSession);
         }
       } finally {
         authReady.set(true);
