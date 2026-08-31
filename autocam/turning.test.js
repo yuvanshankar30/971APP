@@ -184,6 +184,32 @@ describe('generateTurningGcode - multi-tool (rough + finish insert)', () => {
     expect(changeCount).toBe(2);
     expect(result.stats.toolChanges).toBe(2);
   });
+
+  it('skips the manual pause and re-touch-off prompt when automaticToolChanger is set (real Haas TL-1 turret)', () => {
+    const result = generateTurningGcode(shaftProfile(), {
+      ...baseParams,
+      toolNumber: 1,
+      automaticToolChanger: true,
+      finishTool: { toolNumber: 2, label: 'finish insert', noseRadius: 0.015 }
+    });
+    expect(result.gcode).toContain('TOOL CHANGE: automatic - load finish insert - T2');
+    expect(result.gcode).not.toContain('M00');
+    expect(result.gcode).not.toContain('RE-TOUCH OFF');
+    expect(result.gcode).toContain('T0202 (finish tool - turret index)');
+    // Still stops the spindle before indexing the turret - an unattended
+    // change is not a running-spindle change.
+    expect(result.gcode).toContain('M05 (spindle off for tool change)');
+    expect(result.stats.toolChanges).toBe(1);
+  });
+
+  it('defaults to the manual pause when automaticToolChanger is left unset', () => {
+    const result = generateTurningGcode(shaftProfile(), {
+      ...baseParams,
+      finishTool: { toolNumber: 2, label: 'finish insert' }
+    });
+    expect(result.gcode).toContain('M00');
+    expect(result.gcode).toContain('RE-TOUCH OFF Z0');
+  });
 });
 
 describe('generateTurningGcode - tailstock mode', () => {
@@ -328,5 +354,89 @@ describe('generateTurningGcode - spindle spin-up dwell (real risk: engaging the 
     const dwellCount = (result.gcode.match(/G04 P2\.0/g) || []).length;
     expect(m03Count).toBe(2); // setup 1 start + setup 2 restart after re-chuck
     expect(dwellCount).toBe(2);
+  });
+});
+
+describe('generateTurningGcode - hex stock shape', () => {
+  it('is byte-identical to explicit stockShape "round" when left unset (default)', () => {
+    const withDefault = generateTurningGcode(shaftProfile(), baseParams);
+    const withRound = generateTurningGcode(shaftProfile(), { ...baseParams, stockShape: 'round' });
+    expect(withDefault.gcode).toBe(withRound.gcode);
+  });
+
+  it('rapids to the across-corners clearance diameter (not the across-flats stockDiameter) and warns about interrupted cutting', () => {
+    const result = generateTurningGcode(shaftProfile(), { ...baseParams, stockShape: 'hex' });
+    const acrossCorners = baseParams.stockDiameter * (2 / Math.sqrt(3));
+    expect(result.gcode).toContain(`G00 X${(acrossCorners + 0.1).toFixed(4)} Z0.1000 (rapid to start clearance)`);
+    expect(result.gcode).toContain('HEX STOCK');
+    expect(result.gcode).toContain('interrupted-cut');
+  });
+
+  it('rejects an unknown stockShape', () => {
+    expect(() => generateTurningGcode(shaftProfile(), { ...baseParams, stockShape: 'square' })).toThrow(/stockShape must be/);
+  });
+});
+
+describe('generateTurningGcode - drilling', () => {
+  const drillParams = { toolNumber: 3, label: 'center drill', diameter: 0.25, depth: 0.6, peckDepth: 0.25, feedRate: 0.003, rpm: 800 };
+
+  it('appends a centerline peck-drilling section after OD turning, retracting fully after every peck', () => {
+    const result = generateTurningGcode(shaftProfile(), { ...baseParams, drilling: drillParams });
+    expect(result.gcode).toContain('(--- DRILLING (centerline, from the face) ---)');
+    expect(result.gcode).toContain('G97 S800 M03');
+    expect(result.gcode).toContain('T0303 (drill - verify tool/offset number)');
+
+    const pecks = result.gcode.split('\n').filter((l) => l.startsWith('G01 Z') && l.includes('peck'));
+    expect(pecks.length).toBe(3); // 0.25, 0.5, 0.6
+    expect(pecks[2]).toContain('Z-0.6000');
+
+    const retracts = result.gcode.split('\n').filter((l) => l.includes('full retract'));
+    expect(retracts.length).toBe(3);
+
+    expect(result.stats.drilled).toBe(true);
+    expect(result.stats.toolChanges).toBe(1);
+  });
+
+  it('uses the automatic-tool-changer path for the drill tool change too', () => {
+    const result = generateTurningGcode(shaftProfile(), { ...baseParams, automaticToolChanger: true, drilling: drillParams });
+    expect(result.gcode).toContain('(TOOL CHANGE: automatic - load center drill - T3)');
+    expect(result.gcode).not.toContain('RE-TOUCH OFF');
+  });
+
+  it('counts a second tool change (and a second TOOL CHANGE marker) when combined with a finishTool', () => {
+    const result = generateTurningGcode(shaftProfile(), {
+      ...baseParams,
+      finishTool: { toolNumber: 2, label: 'finish insert' },
+      drilling: drillParams
+    });
+    expect(result.stats.toolChanges).toBe(2);
+    expect((result.gcode.match(/\(TOOL CHANGE:/g) || []).length).toBe(2);
+  });
+
+  it('defaults peckDepth to 3x diameter (capped at depth) when omitted', () => {
+    const result = generateTurningGcode(shaftProfile(), {
+      ...baseParams,
+      drilling: { toolNumber: 3, diameter: 0.1, depth: 0.5, feedRate: 0.003, rpm: 800 }
+    });
+    // 3 * 0.1 = 0.3 -> pecks at 0.3, then 0.5 (capped)
+    const pecks = result.gcode.split('\n').filter((l) => l.startsWith('G01 Z') && l.includes('peck'));
+    expect(pecks.length).toBe(2);
+  });
+
+  it('rejects drilling.depth at or beyond the part length', () => {
+    const length = Math.abs(shaftProfile()[shaftProfile().length - 1].z - shaftProfile()[0].z);
+    expect(() => generateTurningGcode(shaftProfile(), { ...baseParams, drilling: { ...drillParams, depth: length } }))
+      .toThrow(/must be less than the part's total length/);
+  });
+
+  it('rejects drilling combined with flip mode - which end the drill enters from is ambiguous across a re-chuck', () => {
+    expect(() => generateTurningGcode(shaftProfile(), { ...baseParams, setupMode: 'flip', flipAt: 1.0, drilling: drillParams }))
+      .toThrow(/not supported with setupMode "flip"/);
+  });
+
+  it('rejects malformed drilling parameters', () => {
+    expect(() => generateTurningGcode(shaftProfile(), { ...baseParams, drilling: { ...drillParams, depth: 0 } })).toThrow(/drilling\.depth must be > 0/);
+    expect(() => generateTurningGcode(shaftProfile(), { ...baseParams, drilling: { ...drillParams, rpm: -1 } })).toThrow(/drilling\.rpm must be > 0/);
+    expect(() => generateTurningGcode(shaftProfile(), { ...baseParams, drilling: { ...drillParams, diameter: 0 } })).toThrow(/drilling\.diameter must be > 0/);
   });
 });

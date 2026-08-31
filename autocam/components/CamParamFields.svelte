@@ -58,6 +58,13 @@
     </select>
     <p class="text-muted">Long/thin parts can't just cantilever safely out of the chuck - pick tailstock support if the machine has one, or flip-turning if it needs a real re-chuck.</p>
   </div>
+  <div class="form-group">
+    <label class="form-label" for="cf-atc">
+      <input id="cf-atc" type="checkbox" bind:checked={params.automaticToolChanger} />
+      Automatic tool changer (Haas TL-1 turret)
+    </label>
+    <p class="text-muted">On a multi-tool job (finish tool set below), skip the manual M00 pause + re-touch-off prompt - the turret indexes tool and offset together unattended. Leave off for a manually-tooled lathe.</p>
+  </div>
   {#if mode === 'job' && params.setupMode === 'flip'}
     <div class="form-group">
       <label class="form-label" for="cf-flip-at">Flip point (in from the face)</label>
@@ -69,8 +76,18 @@
   <div class="form-row">
     {#if mode === 'job'}
       <div class="form-group">
-        <label class="form-label" for="cf-stock-dia">Stock diameter (in)</label>
+        <label class="form-label" for="cf-stock-shape">Stock shape</label>
+        <select id="cf-stock-shape" class="form-select" bind:value={params.stockShape}>
+          <option value="round">Round bar</option>
+          <option value="hex">Hex bar</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="cf-stock-dia">Stock {params.stockShape === 'hex' ? 'across flats' : 'diameter'} (in)</label>
         <input id="cf-stock-dia" class="form-input" type="number" step="0.01" bind:value={params.stockDiameter} placeholder="Required" />
+        {#if params.stockShape === 'hex'}
+          <p class="text-muted">Across-flats size, same as how hex bar is ordered - the rapid/first roughing pass(es) clear the larger across-corners dimension automatically.</p>
+        {/if}
       </div>
     {/if}
     <div class="form-group">

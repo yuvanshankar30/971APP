@@ -209,6 +209,133 @@ export function projectTurningToolpath(parsed) {
   return { moves, toolChangeIndices, totalDistance };
 }
 
+/**
+ * Material-removal model for the turning 3D sim. Unlike routing (2.5D,
+ * needs a heightmap - see docs/toolpath-simulation-plan.md), a lathe part
+ * is a solid of revolution: its complete state at any instant in the
+ * program is exactly two 1D radius-per-axial-position arrays, outer and
+ * inner (bore) - no grid needed, and this is *exact* for OD turning, not
+ * an approximation.
+ *
+ * Takes already-`projectTurningToolpath`-ed moves (scene x = axial,
+ * scene y = radius). An OD cut lowers `outer` where it sweeps. A bore cut
+ * is detected as a move at ~zero radius (both endpoints) - exactly how
+ * turning.js's appendDrillingOperation emits every drilling G01 (X0.0
+ * throughout) - and raises `inner` to `drillRadius` where it sweeps;
+ * `drillRadius` itself can't be read off the move (a centerline move's own
+ * radius is 0 regardless of drill diameter), so it's passed in from the
+ * job's saved drilling params.
+ *
+ * ONE DOCUMENTED APPROXIMATION: hex stock's *uncut* regions render as a
+ * circle at the across-corners radius (`initialOuterRadius` - pass
+ * `stockEnvelopeRadius()` from turning.js), not the true hexagonal
+ * cross-section, since a hex prism isn't representable in a single
+ * radius-per-z profile. It converges to the exact turned shape the moment
+ * any material is removed there.
+ *
+ * @returns {{axial: Float32Array, outer: Float32Array, inner: Float32Array}}
+ */
+export function buildTurningStockProfile(moves, {
+  samples = 220,
+  axialMin,
+  axialMax,
+  initialOuterRadius,
+  drillRadius = 0,
+  uptoMoveIndex = moves.length,
+  partialProgress = 1
+} = {}) {
+  const sampleCount = Math.max(2, Math.floor(samples));
+  const span = (axialMax - axialMin) || 1;
+  const axial = new Float32Array(sampleCount);
+  const outer = new Float32Array(sampleCount).fill(initialOuterRadius);
+  const inner = new Float32Array(sampleCount).fill(0);
+  for (let i = 0; i < sampleCount; i += 1) axial[i] = axialMin + (span * i) / (sampleCount - 1);
+
+  const indexAt = (z) => Math.round(((z - axialMin) / span) * (sampleCount - 1));
+
+  const applyMove = (move, progress) => {
+    if (!move || move.kind === 'rapid') return;
+    const toX = move.from.x + (move.to.x - move.from.x) * progress;
+    const toY = move.from.y + (move.to.y - move.from.y) * progress;
+    const fromX = move.from.x;
+    const fromY = move.from.y;
+    const isBore = Math.abs(fromY) < 1e-6 && Math.abs(toY) < 1e-6;
+    const lo = Math.min(fromX, toX);
+    const hi = Math.max(fromX, toX);
+
+    if (hi - lo < 1e-9) {
+      // Facing/plunge move at ~constant axial position - affects only the
+      // nearest sample rather than a range.
+      const idx = Math.max(0, Math.min(sampleCount - 1, indexAt(lo)));
+      if (isBore) inner[idx] = Math.max(inner[idx], drillRadius);
+      else outer[idx] = Math.min(outer[idx], Math.max(fromY, toY, 0));
+      return;
+    }
+
+    const iStart = Math.max(0, Math.ceil(((lo - axialMin) / span) * (sampleCount - 1)));
+    const iEnd = Math.min(sampleCount - 1, Math.floor(((hi - axialMin) / span) * (sampleCount - 1)));
+    for (let i = iStart; i <= iEnd; i += 1) {
+      if (isBore) {
+        inner[i] = Math.max(inner[i], drillRadius);
+      } else {
+        const t = (axial[i] - fromX) / (toX - fromX);
+        const r = fromY + (toY - fromY) * t;
+        outer[i] = Math.min(outer[i], Math.max(r, 0));
+      }
+    }
+  };
+
+  const fullCount = Math.max(0, Math.min(uptoMoveIndex, moves.length));
+  for (let m = 0; m < fullCount; m += 1) applyMove(moves[m], 1);
+  if (moves[fullCount] && partialProgress > 0) applyMove(moves[fullCount], partialProgress);
+
+  return { axial, outer, inner };
+}
+
+// A radius this small reads as "on the axis" for rendering purposes while
+// staying nonzero, avoiding degenerate zero-radius geometry at the tip/bore
+// bottom.
+const AXIS_EPSILON = 0.001;
+
+/**
+ * Converts a turning stock profile into an ordered list of [radius, axial]
+ * points tracing the SOLID's boundary once around - ready to hand to
+ * THREE.LatheGeometry (revolve around the axial axis) after mapping into
+ * Vector2s. With no bore, this is just the outer wall (open-ended, no flat
+ * caps - a documented, deliberately-accepted minor gap; see
+ * ToolpathSimulator.svelte). With a bore (always a contiguous run touching
+ * the face end - drilling only ever cuts inward from Z0, see
+ * appendDrillingOperation), the loop walks the far end cap, up the outer
+ * wall, across the face annulus, down the bore wall, and across the
+ * hole's flat bottom - a real closed profile, so the hole actually reads
+ * as a hole once revolved.
+ *
+ * @returns {Array<[number, number]>} [radius, axial] pairs
+ */
+export function turningProfileToLathePoints(axial, outer, inner) {
+  const n = axial.length;
+  let boreStart = -1;
+  for (let i = 0; i < n; i += 1) {
+    if (inner[i] > AXIS_EPSILON) { boreStart = i; break; }
+  }
+
+  if (boreStart === -1) {
+    const points = [];
+    for (let i = 0; i < n; i += 1) points.push([Math.max(outer[i], AXIS_EPSILON), axial[i]]);
+    return points;
+  }
+
+  const points = [];
+  points.push([AXIS_EPSILON, axial[0]]);
+  points.push([Math.max(outer[0], AXIS_EPSILON), axial[0]]);
+  for (let i = 1; i < n; i += 1) points.push([Math.max(outer[i], AXIS_EPSILON), axial[i]]);
+  points.push([Math.max(inner[n - 1], AXIS_EPSILON), axial[n - 1]]);
+  for (let i = n - 2; i >= boreStart; i -= 1) points.push([Math.max(inner[i], AXIS_EPSILON), axial[i]]);
+  points.push([AXIS_EPSILON, axial[boreStart]]);
+  points.push([AXIS_EPSILON, axial[0]]);
+  return points;
+}
+
 // Fusion colours a move by what it is: rapid, a plunge/ramp, or cutting. A
 // ramp is Z descending while XY is also moving - which is exactly the helical
 // entry routing.js emits. A pure vertical plunge counts too; it is the same
