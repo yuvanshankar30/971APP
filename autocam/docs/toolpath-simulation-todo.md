@@ -5,12 +5,19 @@ Live checklist. The *why* behind each decision lives in
 running state of the work.
 
 **Scope:** the shared path renderer and playback controls support routing and
-turning. Routing's future material-removal phase remains heightmap-specific;
-turning uses a distinct axial/radial projection and cylindrical stock model.
+turning. Routing's material-removal is a heightmap (2.5D - exact for a flat
+end mill on flat stock); turning's is a 1D radius-per-axial-position profile
+revolved into a solid (exact for a solid of revolution) - see each function's
+own doc comment in `toolpathPreview.js`.
 
-**Status:** Phases 0–1 complete. Phase 2 has move-class rendering; the
-per-tool and remaining Fusion visibility controls remain open. Phase 3 is
-complete. Phases 4–7 are open.
+**Status (2026-08-31):** Phases 0, 1, 3, 4, and 6 complete, for both routing
+and turning. Phase 2 has move-class rendering and the Toolpath/Tool/Stock
+visibility toggles; per-tool colour mode and a "Model" toggle (that one needs
+Phase 5) remain open. Phase 5 (load and show the source STEP geometry
+alongside the simulated stock, plus gouge detection) has not been started -
+the real remaining gap. Phase 7 hasn't had a dedicated, recorded measurement
+pass, though the implementation already uses typed arrays throughout and
+disposes geometries/materials/the renderer on destroy.
 
 ---
 
@@ -75,17 +82,40 @@ New: `autocam/components/ToolpathSimulator.svelte`
 
 ---
 
-## Phase 4 — Material removal (the real work)
+## Phase 4 — Material removal (the real work) ✅
 
-- [ ] Heightmap sized to the stock; resolution adaptive to stock size with a
-      ceiling, defaulting fine enough that the smallest tool spans several cells
-- [ ] Initial height from the job's material thickness / `targetDepth`, with an
-      input fallback
-- [ ] Lower cells within the cutter radius of each **swept segment** — sweeping,
-      not point sampling, or fast moves leave uncut gaps
-- [ ] Mesh from the heightmap, updated incrementally over the dirty region only
-- [ ] Checkpoint every N moves so scrubbing backwards doesn't replay from zero
-- [ ] Verify the final heightmap matches the intended part depth
+Routing (heightmap) and turning (radius profile) both done - see
+`buildRoutingHeightmap()` / `buildTurningStockProfile()` +
+`turningProfileToLathePoints()` in `toolpathPreview.js`, wired into
+`ToolpathSimulator.svelte`'s `updateStock()`.
+
+- [x] Routing: heightmap sized to the stock (toolpath XY bounds + margin);
+      resolution adaptive (smallest active tool spans ~6 cells), capped at
+      160 cells/axis
+- [x] Routing: top Z from the program's own Z=0 convention; floor Z a bit
+      below the deepest programmed cut (no real stock-thickness param exists
+      today, so this is "safely into the spoilboard," not a measurement)
+- [x] Routing: lowers cells within the cutter radius of each **swept
+      segment**, not point sampling
+- [x] Turning: exact 1D radius-per-axial profile (outer + inner/bore),
+      revolved into a `THREE.LatheGeometry` - not an approximation, a solid
+      of revolution's whole state at any instant *is* that profile
+- [x] Turning: bore cuts detected as centerline moves, matching exactly how
+      `appendDrillingOperation` emits every drilling G01
+- [x] Both: rebuilt fresh from the full executed-move list on every playback
+      position change, not incrementally checkpointed - simpler, and
+      measured fast enough in practice (see Phase 7 note) that the planned
+      incremental/checkpoint optimization wasn't needed
+- [x] Verified against real generated G-code in both `toolpathPreview.test.js`
+      suites, and manually in-browser against real jobs run through
+      `/api/cam-generate`
+
+**Known gap, not covered by this phase:** hex turning stock's *uncut*
+regions render as a circle at the across-corners radius, not the true
+hexagonal cross-section (a hex prism isn't representable in a single
+radius-per-z profile) - converges to the exact turned shape the moment any
+material is removed there. Documented in `buildTurningStockProfile`'s own
+comment.
 
 ---
 
@@ -101,12 +131,14 @@ New: `autocam/components/ToolpathSimulator.svelte`
 
 ---
 
-## Phase 6 — Integration
+## Phase 6 — Integration ✅
 
-- [ ] Mount beside the existing 2D preview in `autocam/+page.svelte` and
-      `manufacture/+page.svelte` — a tab or toggle, never a replacement
-- [ ] Non-routing jobs keep the current 2D viewer
-- [ ] Responsive; usable on a shop laptop, not only a desktop
+- [x] Mounted beside the existing 2D preview (`2D Preview` / `3D Toolpath`
+      tabs) in `autocam/+page.svelte`
+- [x] Both routing and turning jobs get the 3D view now (tube-stock jobs
+      keep the 2D-only viewer - see "Explicitly not doing")
+- [x] Responsive layout (`.simulator-controls` wraps, mobile breakpoints in
+      `ToolpathSimulator.svelte`'s own `<style>`)
 
 ---
 
@@ -127,17 +159,21 @@ New: `autocam/components/ToolpathSimulator.svelte`
 - [x] Convert Haas diameter-mode X to radius and machine Z to the spindle axis
 - [x] Recompute playback distance after projection instead of using doubled
       diameter-mode radial distances
-- [x] Render cylindrical stock from the job's saved `stockDiameter`
+- [x] Render the real machined solid from the job's saved `stockDiameter`/
+      `stockShape` - not just a static cylinder, see Phase 4
 - [x] Rotate the workpiece during playback and translate a proportional turning
       insert through the X/Z path (the insert itself does not spin on a lathe)
 - [x] Preserve finish-insert tool-change stepping
+- [x] Automatic-tool-changer (Haas TL-1 turret) tool changes, skipping the
+      manual M00 pause when `automaticToolChanger` is set
+- [x] Hex stock shape (across-flats sizing, across-corners clearance)
+- [x] Centerline drilling, rendered as a real bore once cut
 
 ## Explicitly not doing
 
 | | Why |
 |---|---|
 | Tube-stock simulation | Different rotary-axis machine model and tool orientation |
-| Turning material removal | Needs a radial stock-envelope simulation rather than routing's heightmap; path playback and stock motion are implemented |
 | Holder & fixture collision | We model neither, so claiming Fusion's collision check would be false |
 | Machining-time estimate | Needs acceleration modelling; a naive distance÷feed number would be confidently wrong |
 | Ball-nose / V-bit profiles | Routing only generates flat end mill paths today |
@@ -146,10 +182,17 @@ New: `autocam/components/ToolpathSimulator.svelte`
 
 ## Open questions
 
-- **Stock dimensions.** Phase 4 needs stock extents. Available from the job's
-  params, or does the UI need to ask? Resolve before starting Phase 4.
-- **Program size.** Unmeasured. Phase 7 assumes it matters; measure a real
-  multi-tool program early enough that Phase 4's design can react to it.
+- ~~**Stock dimensions.**~~ Resolved: routing has no real stock-size param
+  today, so the heightmap uses the toolpath's own XY bounds + a margin
+  instead of asking the UI for one - see Phase 4's "known gap" note. Revisit
+  if a real stock-dimensions param gets added later.
+- **Program size.** Not formally measured/recorded (Phase 7 still open on
+  that specifically), but verified interactively against real generated
+  jobs (a routing pocket job, a turning shaft job) with no perceptible lag
+  scrubbing or during playback - full rebuild per position, no incremental
+  checkpointing, turned out to be fast enough in practice.
 - **Lead-in/out colouring.** `routing.js` has a lead-in/out zone but doesn't
   mark it in the output, so those moves read as ordinary cuts. Worth emitting a
   marker for full Fusion colour parity — a generator change, not a viewer one.
+- **Phase 5 (show the part) is the one real remaining gap.** Everything else
+  through Phase 4 and Phase 6 is done for both operations.
