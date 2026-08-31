@@ -461,7 +461,6 @@
   // ensurePowerRankingsTab().
   $: baseNavTabs = addAdminTabIfAllowed(ensureScoutingAdminTab(ensurePowerRankingsTab(effectiveTabs, navConfig)), canViewAdmin);
   $: navItems = isApproved ? buildNavItems(baseNavTabs) : [];
-  $: profileDisplayName = activeProfile?.full_name || activeProfile?.email || authUser?.email || 'Profile';
 
   // Drag-to-reorder for the desktop nav's top-level tabs/folders. Home is
   // rendered outside this list entirely, and Admin is appended by
@@ -626,10 +625,11 @@
         {/if}
       </nav>
 
-      <!-- Desktop Profile -->
-      <a href="/profile" class="desktop-profile" on:click={closeDesktopFolders}>
+      <!-- Account is a stable destination; using the person's name here made
+           it read like identity chrome rather than an actual navigation tab. -->
+      <a href="/profile" class="desktop-profile" class:active={isActive('/profile')} aria-label="Account settings" on:click={closeDesktopFolders}>
         <User size={16} />
-        <span class="profile-name">{profileDisplayName}</span>
+        <span class="profile-name">Account</span>
       </a>
 
       <!-- Mobile Menu Toggle -->
@@ -690,10 +690,9 @@
     {/if}
 
     <div class="mobile-divider"></div>
-    <div class="mobile-section-label">Account</div>
     <a href="/profile" class="mobile-link" class:active={isActive('/profile')} on:click={closeMobileMenu}>
       <User size={18} />
-      <span>{profileDisplayName}</span>
+      <span>Account</span>
     </a>
   </nav>
 {/if}
@@ -952,6 +951,12 @@
   .desktop-profile:hover {
     background: var(--surface-2);
     border-color: var(--accent);
+  }
+
+  .desktop-profile.active {
+    background: var(--accent-subtle);
+    border-color: var(--accent);
+    color: var(--secondary);
   }
 
   .profile-name {
