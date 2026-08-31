@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte';
+  import { requestConfirmation } from '$lib/confirmation.js';
   import { userStore } from '$lib/stores/auth.js';
   import { getAuthHeader } from '$lib/supabase.js';
   import { fetchActiveScoutingEventKey } from '$lib/scoutingEvent.js';
@@ -306,9 +307,12 @@
 
   async function refreshAll({ force = false } = {}) {
     if (!force && hasDraftChanges) {
-      const discard = confirm(
-        'Discard unpublished scouting assignment drafts and reload the published assignments?'
-      );
+      const discard = await requestConfirmation({
+        title: 'Discard assignment drafts',
+        message: 'Discard unpublished scouting assignment drafts and reload the published assignments?',
+        confirmLabel: 'Discard drafts',
+        danger: true
+      });
       if (!discard) return;
     }
 

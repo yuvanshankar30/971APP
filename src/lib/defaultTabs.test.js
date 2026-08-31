@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { defaultHeaderTabs, ensurePowerRankingsTab } from './defaultTabs.js';
+import { defaultHeaderTabs, ensurePowerRankingsTab, ensureScoutingAdminTab } from './defaultTabs.js';
 
 const enabled = { tabs: { powerrankings: true } };
 
@@ -7,10 +7,24 @@ function competitionChildren(tabs) {
   return tabs.find((tab) => tab.type === 'folder' && tab.label === 'Competition')?.children || [];
 }
 
+const savedNav = () => [
+  { type: 'tab', key: 'purchasing', label: 'Purchasing' },
+  {
+    type: 'folder',
+    label: 'Competition',
+    children: [
+      { key: 'pitscout', label: 'Pit Scouting' },
+      { key: 'vision', label: 'Vision Scouting' }
+    ]
+  },
+  { type: 'tab', key: 'docs', label: 'Docs' }
+];
+
 describe('defaultHeaderTabs', () => {
-  it('ends the Competition folder with Power Rankings', () => {
+  it('includes Power Rankings and Scouting Admin in the Competition folder', () => {
     const children = competitionChildren(defaultHeaderTabs());
-    expect(children.at(-1)).toEqual({ key: 'powerrankings', label: 'Power Rankings' });
+    expect(children).toContainEqual({ key: 'powerrankings', label: 'Power Rankings' });
+    expect(children.at(-1)).toEqual({ key: 'scouting-admin', label: 'Scouting Admin' });
   });
 
   it('keeps the other active scouting surfaces alongside it', () => {
@@ -21,23 +35,23 @@ describe('defaultHeaderTabs', () => {
   });
 });
 
+describe('ensureScoutingAdminTab', () => {
+  it('appends Scouting Admin to an existing Competition folder', () => {
+    const result = ensureScoutingAdminTab(savedNav());
+    expect(competitionChildren(result).at(-1)).toEqual({ key: 'scouting-admin', label: 'Scouting Admin' });
+  });
+
+  it('does not add a duplicate Scouting Admin item', () => {
+    const nav = savedNav();
+    nav[1].children.push({ key: 'scouting-admin', label: 'Scouting Admin' });
+    expect(ensureScoutingAdminTab(nav)).toBe(nav);
+  });
+});
+
 describe('ensurePowerRankingsTab', () => {
   // Anyone who customized their header keeps a saved header_tabs that predates
   // this tab, and defaults never apply to them again. The augment has to add
   // the tab without disturbing anything they chose.
-  const savedNav = () => [
-    { type: 'tab', key: 'purchasing', label: 'Purchasing' },
-    {
-      type: 'folder',
-      label: 'Competition',
-      children: [
-        { key: 'pitscout', label: 'Pit Scouting' },
-        { key: 'vision', label: 'Vision Scouting' }
-      ]
-    },
-    { type: 'tab', key: 'docs', label: 'Docs' }
-  ];
-
   it('appends to an existing Competition folder', () => {
     const result = ensurePowerRankingsTab(savedNav(), enabled);
     expect(competitionChildren(result).at(-1)).toEqual({ key: 'powerrankings', label: 'Power Rankings' });

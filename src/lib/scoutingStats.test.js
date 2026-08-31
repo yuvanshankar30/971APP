@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   summarizeTeamEvents, summarizeTeamPerformance, buildPowerRankings,
-  fuelCountFromEvents, deriveMatchTeamRow, summarizeScoutNotes
+  fuelCountFromEvents, deriveMatchTeamRow, summarizeScoutNotes, summarizePitScouting,
+  applyPairwiseConsensus, summarizePairwisePair
 } from './scoutingStats.js';
 
 function event(overrides) {
@@ -219,7 +220,108 @@ describe('power rankings', () => {
       { team_key: 'frc2', ranking_impact: 2 }
     ]);
 
-    expect(ranked.find((row) => row.key === 'frc1').scoutPower).toBeCloseTo(53.833333, 5);
-    expect(ranked.find((row) => row.key === 'frc2').scoutPower).toBeCloseTo(46.166667, 5);
+    expect(ranked.find((row) => row.key === 'frc1').scoutPower).toBeCloseTo(52.156863, 5);
+    expect(ranked.find((row) => row.key === 'frc2').scoutPower).toBeCloseTo(47.843137, 5);
+  });
+
+  it('uses pit capability and unresolved problems without scoring prose or archetype labels', () => {
+    const teams = [{ key: 'frc1' }, { key: 'frc2' }];
+    const pitEntries = [
+      {
+        team_key: 'frc1', robot_archetype: 'Shooter', additional_notes: 'Fast repair access',
+        climb_options: ['No Climb'], technical_details: { overall_reliability_rating: 4 }
+      },
+      {
+        team_key: 'frc2', robot_archetype: 'Hybrid', additional_notes: '',
+        climb_options: ['L3'], technical_details: { overall_reliability_rating: 10 }
+      }
+    ];
+    const problemReports = [{ team_key: 'frc1', severity: 'urgent', resolved: false }];
+    const ranked = buildPowerRankings(teams, [], [], { pitEntries, problemReports });
+    const first = ranked.find((row) => row.key === 'frc1');
+    const second = ranked.find((row) => row.key === 'frc2');
+
+    expect(second.powerRank).toBe(1);
+    expect(first.pitSummary.openProblemCount).toBe(1);
+    expect(first.pitSummary.robotArchetype).toBe('Shooter');
+    expect(first.pitSummary.hasAdditionalNotes).toBe(true);
+    expect(second.pitSummary.pitScore).toBeGreaterThan(first.pitSummary.pitScore);
+  });
+
+  it('does not let resolved pit problems reduce a team score', () => {
+    const summary = summarizePitScouting(
+      { climb_options: ['L2'] },
+      [{ severity: 'urgent', resolved: true }],
+      null
+    );
+    expect(summary.openProblemCount).toBe(0);
+    expect(summary.problemPenalty).toBe(0);
+    expect(summary.pitScore).toBe(summary.capabilityScore);
+  });
+
+  it('builds an event-relative star profile without inventing missing observations', () => {
+    const ranked = buildPowerRankings(
+      [{ key: 'frc1' }, { key: 'frc2' }],
+      [
+        event({ team_key: 'frc1', event_type: 'rank_driving', event_value: '1' }),
+        event({ team_key: 'frc2', event_type: 'rank_driving', event_value: '3' })
+      ]
+    );
+    const first = ranked.find((row) => row.key === 'frc1').starProfile;
+    const second = ranked.find((row) => row.key === 'frc2').starProfile;
+    expect(first.find((axis) => axis.key === 'driving').value).toBe(0);
+    expect(second.find((axis) => axis.key === 'driving').value).toBe(100);
+    expect(first.find((axis) => axis.key === 'accuracy').value).toBeNull();
+  });
+});
+
+describe('human pairwise consensus', () => {
+  const teams = [
+    { key: 'frc1', team_number: 1, scoutPower: 80, powerRank: 1 },
+    { key: 'frc2', team_number: 2, scoutPower: 60, powerRank: 2 },
+    { key: 'frc3', team_number: 3, scoutPower: 40, powerRank: 3 }
+  ];
+
+  it('summarizes the selected pair in selector order', () => {
+    const summary = summarizePairwisePair([
+      { team_a_key: 'frc1', team_b_key: 'frc2', winner_team_key: 'frc2' },
+      { team_a_key: 'frc1', team_b_key: 'frc2', winner_team_key: 'frc1' },
+      { team_a_key: 'frc1', team_b_key: 'frc3', winner_team_key: 'frc1' }
+    ], 'frc2', 'frc1');
+    expect(summary).toMatchObject({ voteCount: 2, firstWins: 1, secondWins: 1, leaderKey: null });
+    expect(summary.firstShare).toBe(0.5);
+  });
+
+  it('creates a separate human rank without altering calculated Scout Power', () => {
+    const consensus = applyPairwiseConsensus(teams, [
+      { team_a_key: 'frc1', team_b_key: 'frc2', winner_team_key: 'frc2' },
+      { team_a_key: 'frc2', team_b_key: 'frc3', winner_team_key: 'frc2' },
+      { team_a_key: 'frc1', team_b_key: 'frc3', winner_team_key: 'frc3' }
+    ]);
+    const second = consensus.find((row) => row.key === 'frc2');
+    expect(second.humanRank).toBe(1);
+    expect(second.humanWinRate).toBe(1);
+    expect(second.scoutPower).toBe(60);
+    expect(second.powerRank).toBe(2);
+  });
+
+  it('flags a strong human/calculated disagreement for review', () => {
+    const consensus = applyPairwiseConsensus(teams, [
+      { team_a_key: 'frc1', team_b_key: 'frc2', winner_team_key: 'frc2' },
+      { team_a_key: 'frc1', team_b_key: 'frc2', winner_team_key: 'frc2' },
+      { team_a_key: 'frc1', team_b_key: 'frc2', winner_team_key: 'frc1' }
+    ]);
+    expect(consensus.find((row) => row.key === 'frc1').reviewFlag).toBe(true);
+    expect(consensus.find((row) => row.key === 'frc2').consensusSummary.reviewCount).toBe(1);
+    expect(consensus.find((row) => row.key === 'frc3').reviewFlag).toBe(false);
+  });
+
+  it('does not flag a single vote or a weak majority', () => {
+    const consensus = applyPairwiseConsensus(teams, [
+      { team_a_key: 'frc1', team_b_key: 'frc2', winner_team_key: 'frc2' },
+      { team_a_key: 'frc1', team_b_key: 'frc3', winner_team_key: 'frc1' },
+      { team_a_key: 'frc1', team_b_key: 'frc3', winner_team_key: 'frc3' }
+    ]);
+    expect(consensus.every((row) => !row.reviewFlag)).toBe(true);
   });
 });

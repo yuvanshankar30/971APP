@@ -1,5 +1,18 @@
 import { writable } from 'svelte/store';
 import { supabase } from '$lib/supabase.js';
+import { registerSpecialThemes } from '$lib/stores/theme.js';
+
+async function loadPrivateThemes(session) {
+  if (!session?.access_token) return registerSpecialThemes([]);
+  try {
+    const response = await fetch('/api/special-themes', { headers: { Authorization: `Bearer ${session.access_token}` } });
+    if (!response.ok) return registerSpecialThemes([]);
+    const payload = await response.json();
+    registerSpecialThemes(payload?.data || []);
+  } catch {
+    registerSpecialThemes([]);
+  }
+}
 
 /**
  * Minimal auth stores:
@@ -15,6 +28,7 @@ export const authReady = writable(false);
 let subscription = null;
 let initialized = false;
 let initCount = 0;
+const INITIAL_SESSION_TIMEOUT_MS = 2500;
 
 export async function fetchUserProfile(userId) {
   if (!userId) {
@@ -22,11 +36,18 @@ export async function fetchUserProfile(userId) {
     return null;
   }
   try {
-    const { data, error } = await supabase
-      .from('user_profiles')
-      .select('id, email, full_name, role, is_dev, permissions, header_tabs, dashboard_layout, login_screen_style, created_at, updated_at, banned, general_role, purchasing_role, team_role, frc_team, notification_settings, slack_user_id, slack_dm_channel, manufacturing_lead_workflows')
-      .eq('id', userId)
-      .single();
+    const [profileResult, rosterResult] = await Promise.all([
+      supabase
+        .from('user_profiles')
+        .select('id, email, full_name, role, is_dev, permissions, header_tabs, dashboard_layout, login_screen_style, created_at, updated_at, banned, general_role, purchasing_role, team_role, frc_team, notification_settings, slack_user_id, slack_dm_channel, manufacturing_lead_workflows')
+        .eq('id', userId)
+        .single(),
+      supabase
+        .from('roster_entries')
+        .select('key:key_id(key_name)')
+        .eq('user_id', userId)
+    ]);
+    const { data, error } = profileResult;
 
     if (error) {
       console.warn('user_profiles fetch error:', error.message || error);
@@ -62,6 +83,7 @@ export async function fetchUserProfile(userId) {
       purchasing_role: data.purchasing_role || 'basic',
       team_role: data.team_role || 'other',
       frc_team: data.frc_team || null,
+      roster_keys: (rosterResult.data || []).map((entry) => entry?.key?.key_name).filter(Boolean),
       is_dev: !!data.is_dev,
       // new customization fields
       header_tabs: headerTabs,
@@ -101,15 +123,34 @@ export function initAuth() {
 
     // Initial session load (safe to await here; not inside callback)
     (async () => {
-      try {
-        const { data, error } = await supabase.auth.getSession();
+      const applyInitialSession = async ({ data, error } = {}) => {
         if (error) console.warn('getSession error:', error.message || error);
         const authUser = data?.session?.user ?? null;
         user.set(authUser);
+        await loadPrivateThemes(data?.session);
         if (authUser) {
-          await fetchUserProfile(authUser.id);
+          void fetchUserProfile(authUser.id);
         } else {
           userProfile.set(null);
+        }
+      };
+
+      try {
+        const sessionRequest = supabase.auth.getSession();
+        const result = await Promise.race([
+          sessionRequest,
+          new Promise((resolve) => setTimeout(() => resolve(null), INITIAL_SESSION_TIMEOUT_MS))
+        ]);
+
+        if (result === null) {
+          console.warn('Initial auth session check timed out; continuing without blocking the app.');
+          // Preserve a delayed but valid browser session instead of requiring
+          // a reload once the local Supabase client becomes responsive.
+          void sessionRequest.then(applyInitialSession).catch((e) => {
+            console.warn('Late getSession error:', e?.message || e);
+          });
+        } else {
+          await applyInitialSession(result);
         }
       } finally {
         authReady.set(true);
@@ -121,6 +162,7 @@ export function initAuth() {
     const { data } = supabase.auth.onAuthStateChange((event, session) => {
       const authUser = session?.user ?? null;
       user.set(authUser);
+      void loadPrivateThemes(session);
 
       if (event === 'SIGNED_IN' && authUser) {
         // Avoid await inside callback to prevent deadlocks
@@ -154,6 +196,7 @@ export function initAuth() {
  */
 export async function signOut() {
   const { error } = await supabase.auth.signOut();
+  registerSpecialThemes([]);
   if (error) console.error('Error logging out:', error);
 }
 

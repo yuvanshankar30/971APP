@@ -1,4 +1,5 @@
 <script>
+  import { requestConfirmation } from '$lib/confirmation.js';
   import { onMount } from 'svelte';
   import { toastActions } from '$lib/toast.js';
   import { fetchFusionJobs, cancelFusionJob } from '$lib/fusionCam.js';
@@ -39,7 +40,7 @@
   });
 
   async function handleCancel(job) {
-    if (!confirm(`Cancel job "${job.name || job.id}"?`)) return;
+    if (!await requestConfirmation({ title: 'Cancel job', message: `Cancel job "${job.name || job.id}"?`, confirmLabel: 'Cancel job', danger: true })) return;
     try {
       await cancelFusionJob(job.id);
       await load();

@@ -41,7 +41,7 @@ function computeScoutingAccess(profile, rosterKeys) {
   const isAdmin = profile?.role === 'admin';
   const isCompetitionLead = String(profile?.team_role || '').trim().toLowerCase() === 'competition lead';
 
-  const hasDataLeadKey = keys.has('data scout lead') || keys.has('scouting lead');
+  const hasDataLeadKey = keys.has('scouting admin') || keys.has('data scout lead') || keys.has('scouting lead');
   const hasNoteLeadKey = keys.has('note scout lead') || hasDataLeadKey;
   const hasDataMemberKey = keys.has('data scout member') || hasDataLeadKey;
   const hasNoteMemberKey = keys.has('note scout member') || hasDataMemberKey || hasNoteLeadKey;
@@ -81,14 +81,15 @@ function isEligibleKeyForType(scoutingType, keyName) {
   const key = normalizeKey(keyName);
   if (!key) return false;
   if (scoutingType === 'data' || scoutingType === 'quick') {
-    return key === 'data scout member' || key === 'data scout lead' || key === 'scouting lead';
+    return key === 'data scout member' || key === 'data scout lead' || key === 'scouting lead' || key === 'scouting admin';
   }
   return (
     key === 'note scout member' ||
     key === 'note scout lead' ||
     key === 'data scout member' ||
     key === 'data scout lead' ||
-    key === 'scouting lead'
+    key === 'scouting lead' ||
+    key === 'scouting admin'
   );
 }
 

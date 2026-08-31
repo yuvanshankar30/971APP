@@ -941,6 +941,7 @@ CREATE TABLE IF NOT EXISTS "public"."pit_scout_entries" (
     "shooter_type" "text",
     "hopper_type" "text",
     "human_player_balls_in_auto" "text",
+    "scout_name" "text",
     "photo_paths" "text"[] DEFAULT '{}'::"text"[] NOT NULL,
     "created_by" "uuid",
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
@@ -956,7 +957,8 @@ CREATE TABLE IF NOT EXISTS "public"."pit_scout_entries" (
     CONSTRAINT "pit_scout_entries_hopper_check" CHECK ((("hopper_type" IS NULL) OR ("hopper_type" = ANY (ARRAY['Spindexer'::"text", 'Dye Rotor'::"text", 'Belted'::"text"])))),
     CONSTRAINT "pit_scout_entries_human_player_balls_check" CHECK ((("human_player_balls_in_auto" IS NULL) OR ("human_player_balls_in_auto" = ANY (ARRAY['0-10'::"text", '10-20'::"text", '20+'::"text"])))),
     CONSTRAINT "pit_scout_entries_photo_limit_check" CHECK ((COALESCE("array_length"("photo_paths", 1), 0) <= 3)),
-    CONSTRAINT "pit_scout_entries_shooter_check" CHECK ((("shooter_type" IS NULL) OR ("shooter_type" = ANY (ARRAY['Single Fixed'::"text", 'Multi Fixed'::"text", 'Wide'::"text", 'Turret'::"text", 'Double Turret'::"text"]))))
+    CONSTRAINT "pit_scout_entries_shooter_check" CHECK ((("shooter_type" IS NULL) OR ("shooter_type" = ANY (ARRAY['Single Fixed'::"text", 'Multi Fixed'::"text", 'Wide'::"text", 'Turret'::"text", 'Double Turret'::"text"])))),
+    CONSTRAINT "pit_scout_entries_scout_name_length_check" CHECK ((("scout_name" IS NULL) OR (char_length("scout_name") <= 120)))
 );
 
 
@@ -4046,8 +4048,6 @@ ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TAB
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES  TO "anon";
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES  TO "authenticated";
 ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES  TO "service_role";
-
-
 
 
 

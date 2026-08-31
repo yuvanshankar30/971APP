@@ -1,4 +1,5 @@
 <script>
+  import { requestConfirmation } from '$lib/confirmation.js';
   import { onMount } from 'svelte';
   import { supabase } from '$lib/supabase.js';
   import { userStore, loadUserFromUUID } from '$lib/stores/user.js';
@@ -142,6 +143,9 @@
   let editDeleting = false;
   let showJobCadModal = false;
   let showJobToolpathModal = false;
+  let toolpathView = '3d';
+  let ToolpathSimulator = null;
+  let toolpathSimulatorLoading = false;
   let showNcviewerModal = false;
   let ncviewerCopyOk = null; // null = not attempted yet, true/false = result
 
@@ -488,9 +492,32 @@
     editingJob = job;
     showJobCadModal = true;
   }
-  function openToolpathPreview(job) {
+  async function openToolpathPreview(job) {
     editingJob = job;
+    toolpathView = job.operation_type === 'routing' ? '3d' : '2d';
     showJobToolpathModal = true;
+    if (toolpathView === '3d') await loadToolpathSimulator();
+  }
+  async function loadToolpathSimulator() {
+    if (ToolpathSimulator || toolpathSimulatorLoading) return;
+    toolpathSimulatorLoading = true;
+    try {
+      // Keep Three.js out of AutoCAM's normal startup path. The simulator is
+      // an optional completed-job tool, so it only needs to load on demand.
+      ToolpathSimulator = (await import('$autocam/components/ToolpathSimulator.svelte')).default;
+    } catch (error) {
+      console.error('Could not load the 3D toolpath simulator:', error);
+      toastActions.show('Could not load the 3D toolpath simulator.');
+      toolpathView = '2d';
+    } finally {
+      toolpathSimulatorLoading = false;
+    }
+  }
+  async function open3DToolpathPreview(job) {
+    editingJob = job;
+    toolpathView = '3d';
+    showJobToolpathModal = true;
+    await loadToolpathSimulator();
   }
   // Embeds ncviewer.com directly in the app (iframe) instead of a plain
   // external-tab link. ncviewer.com has no documented way to load a file by
@@ -599,7 +626,7 @@
 
   async function deleteEditingJob() {
     if (!editingJob) return;
-    if (!confirm(`Delete job "${jobDisplayName(editingJob)}"? This cannot be undone.`)) return;
+    if (!await requestConfirmation({ title: 'Delete AutoCAM job', message: `Delete job "${jobDisplayName(editingJob)}"? This cannot be undone.`, confirmLabel: 'Delete', danger: true })) return;
     editDeleting = true;
     try {
       const result = await deleteCamJob(editingJob.id);
@@ -1032,6 +1059,11 @@
                 {#if job.status === 'completed' && job.gcode}
                   <span class="output-action-group">
                     <button class="btn btn-icon" data-tooltip="View Toolpath" aria-label="View toolpath simulation" on:click={() => openToolpathPreview(job)}><Route size={15} /></button>
+                    {#if job.operation_type === 'routing'}
+                      <button class="btn btn-secondary btn-sm" on:click={() => open3DToolpathPreview(job)}>
+                        <Route size={14} /> 3D Toolpath
+                      </button>
+                    {/if}
                     <button class="btn btn-secondary btn-sm" title={job.gcode_file_name || 'output.ngc'} on:click={() => downloadGcodeBlob(job)}>
                       <Download size={14} /> Install NGC
                     </button>
@@ -1307,9 +1339,14 @@
           <button class="btn btn-secondary btn-sm" on:click={() => (showJobCadModal = true)} disabled={!editingJob.step_file_name}>
             <Box size={14} /> View CAD
           </button>
-          <button class="btn btn-secondary btn-sm" on:click={() => (showJobToolpathModal = true)} disabled={editingJob.status !== 'completed' || !editingJob.gcode || editingJob.operation_type === 'tubestock'} title={editingJob.operation_type === 'tubestock' ? 'No 2D preview for tube stock - it moves in X/Y/Z plus a rotary axis the viewer doesn\'t track; use Open ncviewer.com or download the G-code instead' : (editingJob.status !== 'completed' ? 'Only available once the job has completed' : '')}>
+          <button class="btn btn-secondary btn-sm" on:click={() => openToolpathPreview(editingJob)} disabled={editingJob.status !== 'completed' || !editingJob.gcode || editingJob.operation_type === 'tubestock'} title={editingJob.operation_type === 'tubestock' ? 'No 2D preview for tube stock - it moves in X/Y/Z plus a rotary axis the viewer doesn\'t track; use Open ncviewer.com or download the G-code instead' : (editingJob.status !== 'completed' ? 'Only available once the job has completed' : '')}>
             <Route size={14} /> View {operationLabel(editingJob.operation_type)} Toolpath
           </button>
+          {#if editingJob.operation_type === 'routing'}
+            <button class="btn btn-secondary btn-sm" on:click={() => open3DToolpathPreview(editingJob)} disabled={editingJob.status !== 'completed' || !editingJob.gcode}>
+              <Route size={14} /> 3D Toolpath
+            </button>
+          {/if}
           {#if editingJob.status === 'completed' && editingJob.gcode}
             <button class="btn btn-secondary btn-sm" on:click={() => openNcviewer(editingJob)}>
               <ExternalLink size={14} /> Open ncviewer.com
@@ -1393,7 +1430,21 @@
         <button type="button" class="modal-close-button" aria-label="Close" on:click={() => (showJobToolpathModal = false)}><X size={18} /></button>
       </div>
       <div class="modal-body">
-        <ToolpathViewer gcode={editingJob.gcode} operationType={editingJob.operation_type} />
+        {#if editingJob.operation_type === 'routing'}
+          <div class="toolpath-view-tabs" role="tablist" aria-label="Toolpath view">
+            <button type="button" role="tab" aria-selected={toolpathView === '2d'} class:active={toolpathView === '2d'} on:click={() => (toolpathView = '2d')}>2D Preview</button>
+            <button type="button" role="tab" aria-selected={toolpathView === '3d'} class:active={toolpathView === '3d'} on:click={() => open3DToolpathPreview(editingJob)}>3D Toolpath</button>
+          </div>
+        {/if}
+        {#if toolpathView === '3d' && editingJob.operation_type === 'routing'}
+          {#if ToolpathSimulator}
+            <svelte:component this={ToolpathSimulator} gcode={editingJob.gcode} toolDiameter={Number(editingJob.params?.toolDiameter) || null} toolSequence={editingJob.params?.toolSequence || []} />
+          {:else}
+            <div class="toolpath-simulator-loading" aria-busy="true"><span class="loading-spinner"></span> Loading 3D toolpath...</div>
+          {/if}
+        {:else}
+          <ToolpathViewer gcode={editingJob.gcode} operationType={editingJob.operation_type} />
+        {/if}
       </div>
     </div>
   </div>
@@ -1728,7 +1779,12 @@
   }
 
   .cad-modal { width: min(900px, 95vw); max-width: 95vw; }
-  .toolpath-modal { width: min(700px, 95vw); max-width: 95vw; }
+  .toolpath-modal { width: min(1100px, 95vw); max-width: 95vw; }
+  .toolpath-simulator-loading { min-height: 320px; display: flex; align-items: center; justify-content: center; gap: 0.65rem; color: var(--text-muted); }
+  .toolpath-simulator-loading .loading-spinner { width: 1.25rem; height: 1.25rem; border-width: 2px; }
+  .toolpath-view-tabs { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; border-bottom: 1px solid var(--border); }
+  .toolpath-view-tabs button { padding: 0.5rem 0.75rem; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--text-muted); font: inherit; cursor: pointer; }
+  .toolpath-view-tabs button.active { border-bottom-color: var(--accent-strong); color: var(--text); font-weight: 700; }
   .ncviewer-modal { width: min(1500px, 98vw); max-width: 98vw; height: min(94vh, 1100px); }
   .ncviewer-modal-body {
     display: flex;
@@ -1783,10 +1839,10 @@
     margin-top: 0.4rem;
   }
 
-  .output-cell { min-width: 160px; }
+  .output-cell { min-width: 460px; white-space: nowrap; }
   .output-actions {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     align-items: center;
     gap: 0.6rem;
   }

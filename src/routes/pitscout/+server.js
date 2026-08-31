@@ -3,9 +3,11 @@ import { createClient } from '@supabase/supabase-js';
 import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/public';
 import { getSupabase } from '$lib/server/971bot.js';
 import { selectPitScoutEntries, upsertPitScoutEntry } from '$lib/server/pitScoutingSchema.js';
+import { normalizeTeamKey } from '$lib/server/matchScoutingSchema.js';
 
 const NO_CLIMB_OPTION = 'No Climb';
 const CLIMB_OPTIONS = [NO_CLIMB_OPTION, 'L1 Auto', 'L1', 'L2', 'L3'];
+const ROBOT_ARCHETYPES = ['Shooter', 'Shuttler', 'Defender', 'Climber', 'Hybrid', 'Support / Feeder', 'Unknown'];
 
 const TECHNICAL_DETAIL_OPTIONS = {
   use_net: ['Yes', 'No'],
@@ -62,7 +64,8 @@ const TECHNICAL_MULTI_FIELDS = new Set([
 const TECHNICAL_TEXT_FIELDS = new Set([
   'mostly_used_wire_gauge',
   'drivebase_tube_thickness',
-  'roller_hub_material'
+  'roller_hub_material',
+  'software_other'
 ]);
 
 const TECHNICAL_NUMBER_FIELDS = new Set([
@@ -70,6 +73,9 @@ const TECHNICAL_NUMBER_FIELDS = new Set([
   'bumper_length',
   'bumper_width',
   'bumper_height',
+  'drivetrain_length',
+  'drivetrain_width',
+  'drivetrain_height',
   'can_bus_count',
   'electrical_rating',
   'drivebase_rating',
@@ -225,11 +231,14 @@ export async function POST({ request, url }) {
     if (!isLocal && !actor?.id) return json({ error: 'Unauthorized' }, { status: 401 });
 
     const event_key = String(body?.event_key || '').trim();
-    const team_key = String(body?.team_key || '').trim();
+    const team_key = normalizeTeamKey(body?.team_key);
     const drivebase_type = body?.drivebase_type || null;
     const shooter_type = body?.shooter_type || null;
     const hopper_type = body?.hopper_type || null;
     const human_player_balls_in_auto = body?.human_player_balls_in_auto || null;
+    const scout_name = sanitizeLongText(body?.scout_name, 120);
+    const robot_archetype = ROBOT_ARCHETYPES.includes(body?.robot_archetype) ? body.robot_archetype : null;
+    const additional_notes = sanitizeLongText(body?.additional_notes, 4000);
     const likely_breaking_component = sanitizeLongText(body?.likely_breaking_component);
     const estimated_bps = sanitizeEstimatedBps(body?.estimated_bps);
     const climb_options = sanitizeClimbOptions(body?.climb_options);
@@ -248,6 +257,9 @@ export async function POST({ request, url }) {
       shooter_type,
       hopper_type,
       human_player_balls_in_auto,
+      scout_name,
+      robot_archetype,
+      additional_notes,
       likely_breaking_component,
       estimated_bps,
       climb_options,
@@ -282,6 +294,21 @@ export async function GET({ url, request }) {
     const canReadPublic = isPublicReadRequest(url);
 
     if (!isLocal && !actor?.id && !canReadPublic) return json({ error: 'Unauthorized' }, { status: 401 });
+
+    if (url.searchParams.get('resource') === 'pit-contacts') {
+      if (!isLocal && !actor?.id) return json({ error: 'Unauthorized' }, { status: 401 });
+      const { data, error } = await db
+        .from('pit_scout_entries')
+        .select('scout_name')
+        .not('scout_name', 'is', null)
+        .order('updated_at', { ascending: false })
+        .limit(250);
+      if (error) return json({ error: error.message }, { status: 500 });
+      return json({
+        success: true,
+        data: [...new Set((data || []).map((row) => String(row.scout_name || '').trim()).filter(Boolean))]
+      });
+    }
 
     const event_key = String(url.searchParams.get('event_key') || '').trim();
     const team_key = String(url.searchParams.get('team_key') || '').trim();

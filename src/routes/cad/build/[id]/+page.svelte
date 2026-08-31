@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte';
+  import { requestConfirmation } from '$lib/confirmation.js';
   import { page } from '$app/stores';
   import { supabase } from '$lib/supabase.js';
   import { userStore, loadUserFromUUID, upsertProfileIfMissing, setUserUUID } from '$lib/stores/user.js';
@@ -1020,7 +1021,7 @@
   }
 
   async function deleteBuild() {
-    if (!confirm('Are you sure you want to delete this build? This will also delete all BOM data. This action cannot be undone.')) {
+    if (!await requestConfirmation({ title: 'Delete build', message: 'Delete this build and all BOM data? This cannot be undone.', confirmLabel: 'Delete build', danger: true })) {
       return;
     }
 
@@ -1060,7 +1061,7 @@
       return;
     }
 
-    if (!confirm(`Update build quantity from ${oldQty} to ${newQty}? This will rescale all associated BOM, manufacturing, purchasing, and kitting quantities.`)) {
+    if (!await requestConfirmation({ title: 'Update build quantity', message: `Update build quantity from ${oldQty} to ${newQty}? This rescales all associated BOM, manufacturing, purchasing, and kitting quantities.`, confirmLabel: 'Update quantity' })) {
       buildQuantityInput = String(oldQty);
       return;
     }

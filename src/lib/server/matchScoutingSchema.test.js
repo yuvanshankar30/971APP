@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   RATING_FIELDS,
+  normalizeAutoPathFile,
   normalizeAutoPath,
   normalizeMatchScoutEntry,
   normalizePitProblemReport,
   normalizeRatings,
-  normalizeTeamKey
+  normalizeTeamKey,
+  requiresPitProblemReport,
+  validatePitProblemHandoff
 } from './matchScoutingSchema.js';
 
 describe('normalizeTeamKey', () => {
@@ -82,10 +85,16 @@ describe('normalizeMatchScoutEntry', () => {
       alliance: 'blue',
       starting_position: 'center',
       auto_start_zone: 'wing',
-      auto_points_band: '3-4',
+      auto_points_estimate: '80-100',
       ball_sources: ['wing', 'wing', 'floor'],
+      auto_collision: true,
+      auto_collision_notes: 'Bumped 254 near center',
+      auto_path_name: 'Center four-piece',
       auto_path: [[10, 10], [20, 20]],
       ratings: { Defense: 4 },
+      teleop_roles: ['Scoring', 'Defense', 'Defense', 'made-up role'],
+      intake_speed: 2,
+      intake_jammed: true,
       crash_or_break: true,
       card: 'yellow',
       driver_skill: 4
@@ -93,6 +102,16 @@ describe('normalizeMatchScoutEntry', () => {
     expect(value.team_key).toBe('frc971');
     expect(value.alliance).toBe('blue');
     expect(value.ball_sources).toEqual(['wing', 'floor']); // deduped
+    expect(value.auto_points_band).toBe('80-100');
+    expect(value.auto_points_min).toBe(80);
+    expect(value.auto_points_max).toBe(100);
+    expect(value.auto_points_average).toBe(90);
+    expect(value.auto_collision).toBe(true);
+    expect(value.auto_collision_notes).toBe('Bumped 254 near center');
+    expect(value.auto_path_name).toBe('Center four-piece');
+    expect(value.teleop_roles).toEqual(['Scoring', 'Defense']);
+    expect(value.intake_speed).toBe(2);
+    expect(value.intake_jammed).toBe(true);
     expect(value.crash_or_break).toBe(true);
     expect(value.created_by).toBe('user-1');
   });
@@ -104,15 +123,24 @@ describe('normalizeMatchScoutEntry', () => {
       ...base,
       alliance: 'green',
       starting_position: 'somewhere else',
-      auto_points_band: '400',
       card: 'blue',
       ball_sources: ['wing', 'unknown-source']
     });
     expect(value.alliance).toBeNull();
     expect(value.starting_position).toBeNull();
-    expect(value.auto_points_band).toBeNull();
     expect(value.card).toBeNull();
     expect(value.ball_sources).toEqual(['wing']);
+  });
+
+  it('rejects malformed point estimates rather than saving ambiguous text', () => {
+    expect(normalizeMatchScoutEntry({ ...base, auto_points_estimate: 'a bunch' }).error).toMatch(/Auto points/);
+    expect(normalizeMatchScoutEntry({ ...base, auto_points_estimate: '100-50' }).error).toMatch(/Auto points/);
+  });
+
+  it('keeps older point-band clients compatible while deriving an average', () => {
+    const { value } = normalizeMatchScoutEntry({ ...base, auto_points_band: '6-10' });
+    expect(value.auto_points_band).toBe('6-10');
+    expect(value.auto_points_average).toBe(8);
   });
 
   it('clamps driver skill and treats junk as unrated', () => {
@@ -126,9 +154,48 @@ describe('normalizeMatchScoutEntry', () => {
     expect(normalizeMatchScoutEntry(base).value.crash_or_break).toBe(false);
   });
 
+  it('clamps intake speed to the 1-3 scouting scale and defaults booleans safely', () => {
+    expect(normalizeMatchScoutEntry({ ...base, intake_speed: 9 }).value.intake_speed).toBe(3);
+    expect(normalizeMatchScoutEntry({ ...base, intake_speed: 0 }).value.intake_speed).toBe(1);
+    expect(normalizeMatchScoutEntry({ ...base, intake_speed: 'fast' }).value.intake_speed).toBeNull();
+    expect(normalizeMatchScoutEntry({ ...base, auto_collision: 'yes', intake_jammed: 'yes' }).value)
+      .toMatchObject({ auto_collision: false, intake_jammed: false });
+  });
+
   it('caps long free text instead of rejecting the whole report', () => {
     const { value } = normalizeMatchScoutEntry({ ...base, post_notes: 'x'.repeat(10_000) });
     expect(value.post_notes.length).toBe(4000);
+    expect(normalizeMatchScoutEntry({ ...base, auto_path_name: 'x'.repeat(300) }).value.auto_path_name.length).toBe(120);
+  });
+});
+
+describe('normalizeAutoPathFile', () => {
+  const base = { event_key: '2026casj', team_key: '971', name: 'Center four-piece', path: [[1, 2], [3, 4]] };
+
+  it('normalizes a reusable path independently of a match report', () => {
+    expect(normalizeAutoPathFile({ ...base, alliance: 'blue' }, 'user-1').value).toMatchObject({
+      event_key: '2026casj', team_key: 'frc971', name: 'Center four-piece',
+      alliance: 'blue', path: [[1, 2], [3, 4]], created_by: 'user-1'
+    });
+  });
+
+  it('requires a name and an actual drawn path', () => {
+    expect(normalizeAutoPathFile({ ...base, name: '' }).error).toMatch(/name/);
+    expect(normalizeAutoPathFile({ ...base, path: [[1, 2]] }).error).toMatch(/Draw a path/);
+  });
+});
+
+describe('pit problem handoff requirement', () => {
+  it('requires a description when a robot is disabled or dies', () => {
+    expect(requiresPitProblemReport('disabled')).toBe(true);
+    expect(requiresPitProblemReport('died')).toBe(true);
+    expect(validatePitProblemHandoff({ robot_disabled: 'disabled', pit_problem_summary: '' })).toMatch(/Describe/);
+  });
+
+  it('keeps notes and voluntary handoffs optional for an active robot', () => {
+    expect(requiresPitProblemReport('no')).toBe(false);
+    expect(validatePitProblemHandoff({ robot_disabled: 'no' })).toBeNull();
+    expect(validatePitProblemHandoff({ robot_disabled: 'no', report_pit_problem: true })).toMatch(/Describe/);
   });
 });
 

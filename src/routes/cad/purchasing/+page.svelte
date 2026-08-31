@@ -1,4 +1,5 @@
 <script>
+  import { requestConfirmation } from '$lib/confirmation.js';
   import { onMount } from 'svelte';
   import { supabase } from '$lib/supabase.js';
   import { userStore, loadUserFromUUID, upsertProfileIfMissing, setUserUUID } from '$lib/stores/user.js';
@@ -833,7 +834,7 @@
       toastActions.show('Select at least one item to approve');
       return;
     }
-    if (!confirm(`Approve ${ids.length} item${ids.length === 1 ? '' : 's'}?`)) return;
+    if (!await requestConfirmation({ title: 'Approve selected items', message: `Approve ${ids.length} item${ids.length === 1 ? '' : 's'}?`, confirmLabel: 'Approve' })) return;
 
     bulkApproving = true;
     try {

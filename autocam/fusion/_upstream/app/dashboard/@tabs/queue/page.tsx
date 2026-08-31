@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useDashboardEvents } from "@/app/dashboard/dashboardTeam";
 import { PrimaryButton, SecondaryButton } from "@/components/Buttons/Buttons";
 import styles from "./queue.module.css";
+import { ConfirmationDialog } from "@/components/ConfirmationDialog/ConfirmationDialog";
 
 type ApiPartCategory = {
   id: number;
@@ -92,6 +93,7 @@ export default function QueueTab() {
   const [isApplying, setIsApplying] = useState<PlatesJobKind | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [pendingApplyKind, setPendingApplyKind] = useState<PlatesJobKind | null>(null);
 
   const [arrangeQueue, setArrangeQueue] = useState<QueueItem[]>([]);
   const [camQueue, setCamQueue] = useState<QueueItem[]>([]);
@@ -213,7 +215,7 @@ export default function QueueTab() {
     return () => controller.abort();
   }, [loadQueues, teamId]);
 
-  async function applyQueue(kind: PlatesJobKind) {
+  async function applyQueue(kind: PlatesJobKind, confirmed = false) {
     if (!teamId) return;
     setError(null);
     setNotice(null);
@@ -232,10 +234,10 @@ export default function QueueTab() {
       return;
     }
 
-    const confirmed = window.confirm(
-      `Apply new ${kind.toUpperCase()} queue order?\n\nThis will requeue jobs by deleting and recreating all pending ${kind.toUpperCase()} jobs in the new order.`
-    );
-    if (!confirmed) return;
+    if (!confirmed) {
+      setPendingApplyKind(kind);
+      return;
+    }
 
     setIsApplying(kind);
 
@@ -498,6 +500,19 @@ export default function QueueTab() {
           </div>
         </>
       )}
+      <ConfirmationDialog
+        open={pendingApplyKind !== null}
+        title="Apply queue order"
+        message={pendingApplyKind ? `Apply the new ${pendingApplyKind.toUpperCase()} queue order?\n\nThis will requeue jobs by deleting and recreating all pending ${pendingApplyKind.toUpperCase()} jobs in the new order.` : ""}
+        confirmLabel="Apply order"
+        danger
+        onCancel={() => setPendingApplyKind(null)}
+        onConfirm={() => {
+          const kind = pendingApplyKind;
+          setPendingApplyKind(null);
+          if (kind) void applyQueue(kind, true);
+        }}
+      />
     </div>
   );
 }

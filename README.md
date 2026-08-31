@@ -11,6 +11,10 @@ file, **keep this current when a feature is added, removed, or changes
 scope** - it's the one place meant to answer "does this app do X?" without
 reading code.
 
+All destructive and state-changing confirmations use a shared in-app dialog,
+including typed confirmation for irreversible bulk actions, rather than native
+browser confirmation or prompt popups.
+
 - **Manufacturing/CAM**: part tracking through the manufacturing pipeline
   (queued → in-progress → completed), STEP file 3D viewing, BOM and build
   tracking, kitting, bins, post-processing, router-specific workflows,
@@ -29,16 +33,32 @@ reading code.
   is a separate sub-section, **Fusion CAM** (`/autocam/fusion`), backed by
   an actual Fusion 360 Runner rather than in-process math. See the
   **AutoCAM** section below for the code-level detail on all three.
+  Completed routing jobs also have a switchable 2D preview and a routing-only
+  3D toolpath simulator with rapid, cutting, and ramp/plunge paths
+  distinguished, a moving flat end mill, distance scrubbing, and tool-change
+  stepping for multi-tool jobs.
 - **Scouting**: pit scouting (a topic-at-a-time form with per-topic
-  completion counts, built for filling in a noisy pit on a phone while a team
-  answers out of order), match/data scouting, free-form notes,
+  completion counts, scout/contact attribution, and up to three robot photos,
+  built for filling in a noisy pit on a phone while a team answers out of
+  order), alliance-tinted match scouting with event-team type-ahead and
+  structured auto collision/fuel-source plus intake-speed/jam observations,
+  and an explicit named autonomous-path file library with “Save as new file”
+  and “Load file” actions independent of report submission, a 29-by-29-inch
+  robot footprint, centerline-conflict marking, and hub/trench collision
+  prevention,
+  data scouting, free-form notes,
+  an Event Analysis view in Data Scouting that consolidates submitted data
+  observations (including released vision observations), match reports, pit
+  profiles, notes, and ACE Team problem reports into coverage graphs and a
+  shareable Google Docs report for the signed-in scout,
   cross-team data discovery and analysis (`discover/`), a consolidated
   team-view, and scouting-admin tooling (assignment management, form/config
   editing) - integrates with The Blue Alliance API for competition data.
 - **Vision Scouting**: a real Competition-folder nav tab, open to every
   approved user like the rest of Competition (no special permission needed),
   running post-match, multi-camera ML processing at `/scouting/vision` for
-  robot trajectories/mobility, fuel, and climbing.
+  robot trajectories/mobility, fuel, and climbing, with a calibrated
+  red/blue field-occupancy heatmap that fills as trajectory results arrive.
   A full BF16 Qwen3-VL-30B-A3B service on NVIDIA DGX Spark proposes semantic
   events from bounded multi-camera clips; a
   separate versioned YOLO/ByteTrack runner supplies dense tracking and
@@ -76,7 +96,8 @@ reading code.
 - **Attendance**: attendance logging against configured locations/schedules,
   surfaced on user profiles.
 - **Profile**: per-user profile settings and personal stats (attendance
-  history, etc.).
+  history, etc.), plus the standard theme selector and an authenticated
+  Arin-only Slack-style special-theme gallery.
 - **Pick List** (`scouting/`): a team-comparison / pick-list workspace for the
   active event. Named for what it produces: it was previously labelled "Data
   Scouting" in the nav, which collided with the separate `datascout` route and
@@ -100,16 +121,42 @@ reading code.
     any entry (deliberately more open than `scout_notes`' creator-only
     edit rule - a pick list is one document the whole strategy group edits
     together, and per-row ownership would break group reordering).
+- **Match + Pit Scouting** (`matchscout/`, `pitscout/`): durable Supabase-backed
+  match reports and shared per-team pit profiles. Pit profiles include robot
+  archetype, mechanisms, climb capability, technical ratings, photos, failure
+  risks, and additional human-review notes. Match and pit scouts share a repair
+  queue backed by `pit_problem_reports`; open problems can be resolved or
+  reopened from Pit Scouting instead of disappearing into browser-local state.
+  Match Scouting keeps robot status available throughout the workflow and
+  requires a described pit handoff whenever a robot is marked disabled or dead;
+  general notes and the auto-path drawing remain optional. The path tool uses
+  a simplified, alliance-relative version of WPILib/AdvantageScope's top-down
+  2026 REBUILT field, so the scout's wall is always on the left and red/blue
+  paths share one useful coordinate system. Releasing and pressing again
+  continues the saved route; only Clear removes it. Auto scoring accepts an
+  exact estimate, a bounded range such as `40-60` (stored average `50`), or an open
+  lower bound such as `100+` (conservatively stored as at least `100`). Teleop
+  adds optional observed-role tags and five quick ratings while keeping every
+  subjective input skippable; teleop and post-match prose areas are deliberately
+  large enough for real scout observations. The live
+  Data Scouting form deliberately omits shift toggles and subjective speed/
+  accuracy grading: scouts record timed robot actions, tap once per scored fuel,
+  choose the objective endgame result, and may add an optional note.
 - **Power Rankings** (`powerrankings/`): the last item in the Competition nav
   folder - its own page rather than a mode of the Pick List workspace, so it
   never gets confused with that page's comparison table. An event-relative
   ranking built only from combined local scout observations.
 
-  It shows **three deliberately distinct measures**, and the page says so in
+  It shows **four deliberately distinct measures**, and the page says so in
   as many words, because conflating them would misrepresent an official FRC
   standing:
   - **971 Scout Power** - our own ranking from our own scouts. The primary
     column, and *not* an FRC ranking; it exists to inform our picks.
+  - **Human Consensus** - a separate preference rank produced by authenticated
+    scouts choosing between two robots. Each scout gets one current vote per
+    event/team pair; changing the choice updates it. These votes never alter
+    Scout Power. A two-thirds-or-stronger majority that opposes a calculated
+    Scout Power gap of at least five points flags both robots for human review.
   - **Official Event Rank** - the real qualification standing from The Blue
     Alliance, which FIRST computes from Ranking Points earned in qualification
     matches. The only official rank on the page.
@@ -123,15 +170,23 @@ reading code.
   recessively so the page reads as our ranking with official data alongside,
   not a scoreboard of equals. A TBA outage degrades to a note rather than
   hiding the scouting ranking.
-  Observed match performance contributes 85% and an explicit human-selected
-  impact attached to saved `scout_notes` contributes 15%; neutral and legacy
-  notes remain review-only. Within match performance, weights are average fuel
+  Observed match performance contributes 70%, an explicit human-selected
+  impact attached to saved `scout_notes` contributes 15%, and structured pit
+  capability/reliability contributes 15%; unresolved pit problems reduce the
+  pit score while archetype and freeform prose remain human context. Neutral
+  and legacy notes remain review-only. Within match performance, weights are
+  average fuel
   per match (40%), driving (20%), accuracy (15%), climb level (15%), and speed
   (10%); missing dimensions are omitted and the remaining weights are
   rebalanced instead of being treated as zero. Also
   includes a **head-to-head comparison** view for any two event teams,
-  covering scout power, matches scouted, fuel, driving, accuracy, speed, and
-  climb success.
+  covering scout power, human consensus, matches scouted, fuel, driving,
+  accuracy, speed, and climb success. Its overlaid robot star plot normalizes
+  fuel, driving, accuracy, speed, climb, and pit capability against the
+  currently loaded event field; missing observations stay visibly absent at
+  the center rather than becoming invented zero-valued evidence. Pairwise
+  preferences persist in `scouting_pairwise_votes` through
+  `api/scouting-comparisons`.
 - **Docs** (`docs/`): browses every `*.md` file in the repo (a "finder" -
   folder tree + search on the left, rendered markdown on the right).
   Content is bundled at build time via Vite's `import.meta.glob` (raw
@@ -210,7 +265,9 @@ own docs are all together in one place instead of scattered across
   polygonal exteriors, tubes, and formed parts are rejected rather than
   approximated as a round turning envelope.
 - **`autocam/toolpathPreview.js`** - parses generated G-code back into a
-  toolpath for preview (`autocam/components/ToolpathViewer.svelte`).
+  toolpath for the 2D preview and 3D simulator, including a cumulative-distance
+  interpolation helper for playback (`autocam/components/ToolpathViewer.svelte`,
+  `autocam/components/ToolpathSimulator.svelte`).
 - **`autocam/drive_watcher.js`** - Google Drive input-sweep (`cad` →
   auto-queue) and output-delivery (finished G-code → dated `cammed`
   subfolder) - see `autocam/docs/drive-watcher-folder-layout.md` for the real folder
@@ -269,12 +326,12 @@ own docs are all together in one place instead of scattered across
   (`wx-svelte-gantt`), Slack-driven prompts/notifications
   (`src/lib/server/planner_notifications.js`, `971bot.js`), driven by a
   Supabase `pg_cron` job every 15 minutes.
-- **`pitscout/`, `datascout/`, `notescout/`, `scouting-admin/`,
+- **`matchscout/`, `pitscout/`, `datascout/`, `notescout/`, `scouting-admin/`,
   `teamview/`, `discover/`, `powerrankings/`** - FRC competition scouting:
   pit scouting forms, match data scouting, notes, cross-team data
-  discovery/analysis, and the local-scouting-only power rankings +
-  head-to-head comparison view (own top-level tab, not nested under
-  `scouting/`).
+  discovery/analysis, and the local-scouting power rankings + persisted human
+  consensus + star-plot head-to-head comparison view (own top-level tab, not
+  nested under `scouting/`).
 - **`scouting/vision/`, `scouting/vision/dashboard/`** - post-match
   multi-view ML processing, TBA discrepancy review, and the release bridge
   into `scout_data_events` (the release action itself is `VISION_RELEASE`-
@@ -313,6 +370,11 @@ AutoCAM's own code (engine, Drive watcher, `camJobs.js`, its components) is
   generic STEP/3D viewer used outside AutoCAM too - `/manufacture`,
   `/manufacture/completed` - so it stayed here rather than moving into
   `autocam/` despite being CAD-adjacent), nav/layout pieces, etc.
+- **`matchScouting.js`** - shared match-scout vocabularies and the parser that
+  turns exact/range/open-ended auto point estimates into explicit numeric
+  bounds and a conservative aggregation value; `RebuiltFieldMap.svelte` owns
+  the reusable 2026 field-relative drawing surface, including the 29-inch
+  footprint, protected-geometry validation, and centerline-overlap analysis.
 - **`config/`** - feature flags (e.g. `DISABLE_AUTOCAM` - see **Known
   gaps**, the legacy autocam system this flag referred to has since been
   removed entirely).
@@ -331,6 +393,11 @@ AutoCAM's own code (engine, Drive watcher, `camJobs.js`, its components) is
 - **RLS (Row Level Security)** is the real authorization boundary - not
   app-layer checks. Every table should have RLS enabled with real policies;
   see **Known gaps** for tables that currently don't.
+- **Power-ranking consensus** is stored in `scouting_pairwise_votes`, with a
+  unique row per event/team-pair/scout and RLS restricting writes to the
+  authenticated scout's own choice. The API returns aggregate-safe team and
+  winner keys, not voter identities; consensus is deliberately separate from
+  the calculated Scout Power inputs.
 - **Auth**: Supabase Auth, client-side only (no server session/SSR) - see
   `docs/guides/AUTH_PROTOCOL.md`.
 

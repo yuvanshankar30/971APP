@@ -8,6 +8,7 @@
   const SHOOTER_OPTIONS = ['Single Fixed', 'Multi Fixed', 'Wide', 'Turret', 'Double Turret'];
   const HOPPER_OPTIONS = ['Spindexer', 'Dye Rotor', 'Belted'];
   const HUMAN_PLAYER_AUTO_OPTIONS = ['0-10', '10-20', '20+'];
+  const ROBOT_ARCHETYPES = ['Shooter', 'Shuttler', 'Defender', 'Climber', 'Hybrid', 'Support / Feeder', 'Unknown'];
   const NO_CLIMB_OPTION = 'No Climb';
   const CLIMB_OPTIONS = [NO_CLIMB_OPTION, 'L1 Auto', 'L1', 'L2', 'L3'];
   const MAX_AUTO_OPTIONS = 8;
@@ -116,12 +117,16 @@
     coprocessor: '',
     programming_language: [],
     uses_wpilib: '',
+    software_other: '',
     grip_tape: '',
     swerve_module: '',
     hopper_wall_reinforcement: '',
     fits_under_trench: '',
     drives_over_mound: '',
     drivebase_tube_thickness: '',
+    drivetrain_length: undefined,
+    drivetrain_width: undefined,
+    drivetrain_height: undefined,
     bumper_foam: '',
     hardware_standards: [],
     encoder_types: [],
@@ -147,17 +152,28 @@
   let saving = false;
   let uploading = false;
   let apiNote = '';
+  let activeView = 'teams';
+  let problems = [];
+  let problemsError = '';
+  let problemLoading = false;
+  let problemSaving = false;
+  let problemDraft = { team_key: '', summary: '', detail: '', severity: 'watch' };
 
   let teams = [];
   let entriesByTeam = {};
   let selectedTeam = '';
   let teamSearch = '';
+  let pitContacts = [];
+  let scout_name = '';
 
   let drivebase_type = '';
   let shooter_type = '';
   let hopper_type = '';
   let human_player_balls_in_auto = '';
   let pitSchema = {
+    scout_name: true,
+    robot_archetype: true,
+    additional_notes: true,
     likely_breaking_component: true,
     estimated_bps: true,
     climb_options: true,
@@ -165,6 +181,8 @@
     technical_details: true
   };
   let schemaWarning = '';
+  let robot_archetype = '';
+  let additional_notes = '';
   let likely_breaking_component = '';
   let estimated_bps = undefined;
   let climb_options = [];
@@ -193,10 +211,10 @@
   // explicit rather than derived from the markup so a field moving between
   // topics is a deliberate edit, not a silent change in what "complete" means.
   const TOPIC_FIELDS = {
-    mechanisms: ['use_net', 'intake_style', 'ground_roller_motor_count', 'ground_intake_kicker'],
-    electrical: ['main_breaker_brand', 'sb_connector', 'main_breaker_shroud', 'wire_insulation', 'mostly_used_wire_gauge', 'battery_type'],
-    controls: ['uses_canivore', 'can_bus_count', 'coprocessor', 'uses_wpilib'],
-    structure: ['swerve_module', 'drivebase_tube_thickness', 'bumper_width', 'bumper_height', 'bumper_length', 'bumper_foam', 'grip_tape', 'hopper_wall_reinforcement', 'fits_under_trench', 'drives_over_mound', 'printed_roller_hubs', 'roller_hub_material'],
+    mechanisms: ['use_net', 'intake_style', 'ground_roller_motor_count'],
+    electrical: ['main_breaker_brand', 'sb_connector', 'main_breaker_shroud'],
+    controls: ['uses_canivore', 'can_bus_count', 'coprocessor', 'uses_wpilib', 'software_other'],
+    structure: ['swerve_module', 'drivetrain_length', 'drivetrain_width', 'drivetrain_height', 'bumper_width', 'bumper_height', 'bumper_length', 'bumper_foam', 'fits_under_trench', 'drives_over_mound', 'printed_roller_hubs', 'roller_hub_material'],
     ratings: ['drivebase_rating', 'electrical_rating', 'overall_reliability_rating']
   };
 
@@ -207,7 +225,7 @@
 
   function topicProgress(topicId, details, core, climb, autos, photos, pending) {
     if (topicId === 'basics') {
-      const values = [core.drivebase_type, core.shooter_type, core.hopper_type, core.human_player_balls_in_auto, climb, autos];
+      const values = [core.scout_name, core.drivebase_type, core.shooter_type, core.hopper_type, core.human_player_balls_in_auto, climb, autos];
       return { done: values.filter(answered).length, total: values.length };
     }
     if (topicId === 'photos') {
@@ -223,6 +241,7 @@
   }
 
   $: coreAnswers = {
+    scout_name,
     drivebase_type, shooter_type, hopper_type, human_player_balls_in_auto,
     estimated_bps, likely_breaking_component
   };
@@ -291,11 +310,15 @@
     normalized.mostly_used_wire_gauge = String(source.mostly_used_wire_gauge || '').trim().slice(0, 80);
     normalized.drivebase_tube_thickness = String(source.drivebase_tube_thickness || '').trim().slice(0, 80);
     normalized.roller_hub_material = String(source.roller_hub_material || '').trim().slice(0, 80);
+    normalized.software_other = String(source.software_other || '').trim().slice(0, 240);
 
     normalized.ground_roller_motor_count = normalizeTechnicalNumber(source.ground_roller_motor_count, { integer: true });
     normalized.bumper_length = normalizeTechnicalNumber(source.bumper_length);
     normalized.bumper_width = normalizeTechnicalNumber(source.bumper_width);
     normalized.bumper_height = normalizeTechnicalNumber(source.bumper_height);
+    normalized.drivetrain_length = normalizeTechnicalNumber(source.drivetrain_length);
+    normalized.drivetrain_width = normalizeTechnicalNumber(source.drivetrain_width);
+    normalized.drivetrain_height = normalizeTechnicalNumber(source.drivetrain_height);
     normalized.can_bus_count = normalizeTechnicalNumber(source.can_bus_count, { integer: true });
     normalized.electrical_rating = normalizeTechnicalNumber(source.electrical_rating, { min: 1, max: 10, integer: true });
     normalized.drivebase_rating = normalizeTechnicalNumber(source.drivebase_rating, { min: 1, max: 10, integer: true });
@@ -376,6 +399,8 @@
       String(entry.hopper_type).trim() ||
       entry.human_player_balls_in_auto &&
       String(entry.human_player_balls_in_auto).trim() ||
+      String(entry.robot_archetype || '').trim() ||
+      String(entry.additional_notes || '').trim() ||
       normalizeLikelyBreakingComponent(entry.likely_breaking_component) ||
       hasEstimatedBps(entry.estimated_bps) ||
       normalizeClimbOptions(entry.climb_options).length ||
@@ -409,10 +434,13 @@
 
   function applyTeamEntry(teamKey) {
     const entry = entriesByTeam[teamKey] || null;
+    scout_name = entry?.scout_name || '';
     drivebase_type = entry?.drivebase_type || '';
     shooter_type = entry?.shooter_type || '';
     hopper_type = entry?.hopper_type || '';
     human_player_balls_in_auto = entry?.human_player_balls_in_auto || '';
+    robot_archetype = ROBOT_ARCHETYPES.includes(entry?.robot_archetype) ? entry.robot_archetype : '';
+    additional_notes = String(entry?.additional_notes || '');
     likely_breaking_component = entry?.likely_breaking_component || '';
     estimated_bps = hasEstimatedBps(entry?.estimated_bps) ? Number(entry.estimated_bps) : undefined;
     climb_options = normalizeClimbOptions(entry?.climb_options || []);
@@ -505,52 +533,82 @@
     return next;
   }
 
-  // Open problems a match scout flagged for this team. These are the whole
-  // reason the pit-problem handoff exists, and until now nothing displayed
-  // them: match scouting wrote them and the pit crew - the intended audience -
-  // had no way to see them.
-  let openProblems = [];
-  let problemsError = '';
+  async function loadPitContacts() {
+    const res = await authFetch('/pitscout?resource=pit-contacts');
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data?.success) return [];
+    pitContacts = data.data || [];
+    return pitContacts;
+  }
 
-  $: problemsByTeam = openProblems.reduce((map, report) => {
-    (map[report.team_key] ||= []).push(report);
-    return map;
-  }, {});
-  $: selectedTeamProblems = selectedTeam ? (problemsByTeam[selectedTeam] || []) : [];
-
-  async function loadOpenProblems() {
-    problemsError = '';
+  async function loadProblems() {
     if (!resolvedEventKey) {
-      openProblems = [];
-      return;
+      problems = [];
+      return [];
     }
+    problemLoading = true;
+    problemsError = '';
     try {
-      const res = await authFetch(
-        `/api/matchscout?resource=pit-problems&open=1&event_key=${encodeURIComponent(resolvedEventKey)}`
-      );
+      const res = await authFetch(`/api/matchscout?resource=pit-problems&event_key=${encodeURIComponent(resolvedEventKey)}`);
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.success) throw new Error(data?.error || `Failed to load pit problems (${res.status})`);
-      openProblems = data.data || [];
-    } catch (error) {
-      // A pit entry is still worth filling in even if the problem queue is
-      // unreachable, so this never blocks the rest of the page.
-      openProblems = [];
-      problemsError = error.message;
+      problems = data.data || [];
+      return problems;
+    } catch (e) {
+      problems = [];
+      problemsError = e.message || 'Failed to load pit problems';
+      return [];
+    } finally {
+      problemLoading = false;
     }
   }
 
-  async function resolveProblem(report) {
+  async function createProblem() {
+    if (!eventKey || !problemDraft.team_key || !problemDraft.summary.trim() || isViewingPastEvent) return;
+    problemSaving = true;
+    apiNote = '';
     try {
       const res = await authFetch('/api/matchscout', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'resolve-pit-problem', id: report.id, resolved: true })
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          action: 'report-pit-problem',
+          event_key: eventKey,
+          team_key: problemDraft.team_key,
+          source: 'Pit scout',
+          summary: problemDraft.summary,
+          detail: problemDraft.detail,
+          severity: problemDraft.severity
+        })
       });
       const data = await res.json().catch(() => null);
-      if (!res.ok || !data?.success) throw new Error(data?.error || `Failed to resolve (${res.status})`);
-      openProblems = openProblems.filter((item) => item.id !== report.id);
-    } catch (error) {
-      problemsError = error.message;
+      if (!res.ok || !data?.success) throw new Error(data?.error || `Problem save failed (${res.status})`);
+      problemDraft = { team_key: '', summary: '', detail: '', severity: 'watch' };
+      await loadProblems();
+      apiNote = 'Pit problem added to the shared queue.';
+    } catch (e) {
+      apiNote = e.message || 'Problem save failed';
+    } finally {
+      problemSaving = false;
+    }
+  }
+
+  async function setProblemResolved(problem, resolved) {
+    problemSaving = true;
+    apiNote = '';
+    try {
+      const res = await authFetch('/api/matchscout', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'resolve-pit-problem', id: problem.id, resolved })
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) throw new Error(data?.error || `Problem update failed (${res.status})`);
+      problems = problems.map((row) => row.id === problem.id ? data.data : row);
+    } catch (e) {
+      apiNote = e.message || 'Problem update failed';
+    } finally {
+      problemSaving = false;
     }
   }
 
@@ -573,7 +631,7 @@
         return;
       }
 
-      const [loadedTeams, loadedEntries] = await Promise.all([loadTeams(), loadEntries(), loadOpenProblems()]);
+      const [loadedTeams, loadedEntries] = await Promise.all([loadTeams(), loadEntries(), loadProblems(), loadPitContacts()]);
       teams = [...new Set([...loadedTeams, ...Object.keys(loadedEntries)])].sort(teamSort);
       syncSelectedTeam();
     } catch (e) {
@@ -721,10 +779,13 @@
         action: 'save-entry',
         event_key: eventKey,
         team_key: selectedTeam,
+        ...(pitSchema.scout_name ? { scout_name: String(scout_name || '').trim() } : {}),
         drivebase_type,
         shooter_type,
         hopper_type,
         human_player_balls_in_auto,
+        ...(pitSchema.robot_archetype ? { robot_archetype } : {}),
+        ...(pitSchema.additional_notes ? { additional_notes } : {}),
         ...(pitSchema.likely_breaking_component
           ? { likely_breaking_component: normalizedLikelyBreakingComponent }
           : {}),
@@ -786,6 +847,13 @@
   $: selectedEntry = selectedTeam ? entriesByTeam[selectedTeam] || null : null;
   $: photoSlotsRemaining = Math.max(0, 3 - editablePhotoPaths.length - pendingFiles.length);
   $: photoButtonLabel = prefersCameraCapture ? 'Take Photo' : 'Add Photos';
+  $: openProblems = problems.filter((problem) => !problem.resolved);
+  $: resolvedProblems = problems.filter((problem) => problem.resolved);
+  $: problemsByTeam = openProblems.reduce((map, report) => {
+    (map[report.team_key] ||= []).push(report);
+    return map;
+  }, {});
+  $: selectedTeamProblems = selectedTeam ? (problemsByTeam[selectedTeam] || []) : [];
 
   onMount(() => {
     prefersCameraCapture = detectCameraCapturePreference();
@@ -841,7 +909,88 @@
   </div>
 </div>
 
-{#if !selectedTeam}
+<div class="view-tabs" aria-label="Pit Scouting sections">
+  <button class:active={activeView === 'teams'} type="button" on:click={() => activeView = 'teams'}>Team profiles</button>
+  <button class:active={activeView === 'problems'} type="button" on:click={() => activeView = 'problems'}>
+    Problems {#if openProblems.length}<span>{openProblems.length}</span>{/if}
+  </button>
+</div>
+
+{#if activeView === 'problems'}
+  <div class="problems-layout">
+    <section class="card problem-queue">
+      <div class="problem-heading">
+        <div><h3>Shared repair queue</h3><p>Problems reported by match and pit scouts for {resolvedEventKey || 'the active event'}.</p></div>
+        <button class="btn btn-secondary" type="button" on:click={loadProblems} disabled={problemLoading}>Refresh</button>
+      </div>
+
+      {#if problemLoading}
+        <div class="empty">Loading problems...</div>
+      {:else if !problems.length}
+        <div class="empty">No pit problems reported for this event.</div>
+      {:else if !openProblems.length}
+        <div class="empty">No open pit problems for this event.</div>
+      {:else}
+        <div class="problem-list">
+          {#each openProblems as problem (problem.id)}
+            <article class="problem-card" class:urgent={problem.severity === 'urgent'}>
+              <div class="problem-meta">
+                <strong>Team {displayTeam(problem.team_key)}</strong>
+                <span class="severity">{problem.severity}</span>
+                <span>{problem.source || 'Scout'}</span>
+                {#if problem.match_key}<span>{problem.match_key}</span>{/if}
+              </div>
+              <h4>{problem.summary}</h4>
+              {#if problem.detail}<p>{problem.detail}</p>{/if}
+              <button class="btn btn-primary" type="button" disabled={problemSaving} on:click={() => setProblemResolved(problem, true)}>Mark resolved</button>
+            </article>
+          {/each}
+        </div>
+      {/if}
+
+      {#if resolvedProblems.length}
+        <details class="resolved-problems">
+          <summary>Resolved problems ({resolvedProblems.length})</summary>
+          {#each resolvedProblems as problem (problem.id)}
+            <div class="resolved-row">
+              <span>Team {displayTeam(problem.team_key)} · {problem.summary}</span>
+              <button class="btn btn-outline" type="button" disabled={problemSaving} on:click={() => setProblemResolved(problem, false)}>Reopen</button>
+            </div>
+          {/each}
+        </details>
+      {/if}
+    </section>
+
+    <form class="card problem-form" on:submit|preventDefault={createProblem}>
+      <h3>Add a pit report</h3>
+      {#if isViewingPastEvent}<div class="note">Switch to the current event before adding a problem.</div>{/if}
+      <div class="form-group">
+        <label class="form-label" for="problemTeam">Team</label>
+        <select id="problemTeam" class="form-select" bind:value={problemDraft.team_key} disabled={isViewingPastEvent}>
+          <option value="">-- Select --</option>
+          {#each teams as teamKey}<option value={teamKey}>Team {displayTeam(teamKey)}</option>{/each}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="problemSummary">Problem</label>
+        <input id="problemSummary" class="form-input" maxlength="300" bind:value={problemDraft.summary} placeholder="Example: intake belt slipping" disabled={isViewingPastEvent} />
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="problemSeverity">Severity</label>
+        <select id="problemSeverity" class="form-select" bind:value={problemDraft.severity} disabled={isViewingPastEvent}>
+          <option value="watch">Watch</option><option value="urgent">Urgent</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="problemDetail">Details</label>
+        <textarea id="problemDetail" class="form-input" rows="5" bind:value={problemDraft.detail} placeholder="What failed and what should be checked?" disabled={isViewingPastEvent}></textarea>
+      </div>
+      <button class="btn btn-primary" type="submit" disabled={problemSaving || isViewingPastEvent || !problemDraft.team_key || !problemDraft.summary.trim()}>
+        {problemSaving ? 'Saving...' : 'Add problem'}
+      </button>
+    </form>
+  </div>
+{:else if !selectedTeam}
   <div class="card picker-card">
     <div class="form-group" style="margin-bottom:0">
       <label class="form-label" for="teamSearch">Team</label>
@@ -899,6 +1048,13 @@
           {/if}
         </div>
       </div>
+      <button
+        class="btn btn-outline entry-photo-action"
+        type="button"
+        on:click={() => (activeTopic = 'photos')}
+      >
+        {editablePhotoPaths.length + pendingFiles.length ? 'Manage photos' : 'Add photos'}
+      </button>
     </div>
 
     {#if isViewingPastEvent}
@@ -926,7 +1082,7 @@
                 {report.severity === 'urgent' ? ' · urgent' : ''}
               </p>
             </div>
-            <button class="btn btn-outline btn-sm" type="button" on:click={() => resolveProblem(report)}>
+            <button class="btn btn-outline btn-sm" type="button" on:click={() => setProblemResolved(report, true)}>
               Mark inspected
             </button>
           </article>
@@ -963,6 +1119,26 @@
     </div>
 
 {#if activeTopic === 'basics'}
+    {#if pitSchema.scout_name}
+      <div class="form-group">
+        <label class="form-label" for="scoutNameInput">Pit contact name</label>
+        <input
+          id="scoutNameInput"
+          class="form-input"
+          type="text"
+          maxlength="120"
+          list="pitContacts"
+          autocomplete="off"
+          placeholder="Start typing the person you spoke with"
+          bind:value={scout_name}
+        />
+        <datalist id="pitContacts">
+          {#each pitContacts as contact}<option value={contact}></option>{/each}
+        </datalist>
+        <small class="form-help">Suggestions appear as you type from previous pit contacts. You can always enter someone new for follow-up questions.</small>
+      </div>
+    {/if}
+
     <div class="form-group">
       <label class="form-label" for="drivebaseSelect">Drivebase Type</label>
       <select id="drivebaseSelect" class="form-select" bind:value={drivebase_type}>
@@ -1004,6 +1180,24 @@
     </div>
 {/if}
 
+    {#if pitSchema.robot_archetype}
+      <div class="form-group">
+        <label class="form-label" for="robotArchetypeSelect">Robot Archetype</label>
+        <select id="robotArchetypeSelect" class="form-select" bind:value={robot_archetype}>
+          <option value="">-- Select --</option>
+          {#each ROBOT_ARCHETYPES as option}<option value={option}>{option}</option>{/each}
+        </select>
+      </div>
+    {/if}
+
+    {#if pitSchema.additional_notes}
+      <div class="form-group">
+        <label class="form-label" for="additionalNotesInput">Additional Notes</label>
+        <textarea id="additionalNotesInput" class="form-input additional-notes-input" rows="5" maxlength="4000" bind:value={additional_notes} placeholder="Strategy observations, pit conversations, repair history, or follow-up questions"></textarea>
+        <small class="form-help">Saved for human review. Structured pit capabilities and unresolved problems affect Power Rankings.</small>
+      </div>
+    {/if}
+
     {#if pitSchema.technical_details}
 {#if activeTopic === 'mechanisms'}
       <section class="question-section">
@@ -1042,19 +1236,6 @@
             />
           </div>
 
-          <div class="form-group">
-            <label class="form-label" for="groundIntakeKickerSelect">Ground intake has a kicker?</label>
-            <select
-              id="groundIntakeKickerSelect"
-              class="form-select"
-              bind:value={technical_details.ground_intake_kicker}
-            >
-              <option value="">-- Select --</option>
-              {#each YES_NO_OPTIONS as option}
-                <option value={option}>{option}</option>
-              {/each}
-            </select>
-          </div>
         </div>
 
         <div class="form-group">
@@ -1126,53 +1307,6 @@
             </select>
           </div>
 
-          <div class="form-group">
-            <label class="form-label" for="wireGaugeInput">Wire gauge mostly used</label>
-            <input
-              id="wireGaugeInput"
-              class="form-input"
-              type="text"
-              maxlength="80"
-              placeholder="e.g. 6 AWG, 12 AWG"
-              bind:value={technical_details.mostly_used_wire_gauge}
-            />
-          </div>
-
-          <div class="form-group">
-            <label class="form-label" for="wireInsulationSelect">Wire insulation</label>
-            <select id="wireInsulationSelect" class="form-select" bind:value={technical_details.wire_insulation}>
-              <option value="">-- Select --</option>
-              {#each WIRE_INSULATION_OPTIONS as option}
-                <option value={option}>{option}</option>
-              {/each}
-            </select>
-          </div>
-
-          <div class="form-group">
-            <label class="form-label" for="batteryTypeSelect">Battery type</label>
-            <select id="batteryTypeSelect" class="form-select" bind:value={technical_details.battery_type}>
-              <option value="">-- Select --</option>
-              {#each BATTERY_OPTIONS as option}
-                <option value={option}>{option}</option>
-              {/each}
-            </select>
-          </div>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label">Connectors and boards used</label>
-          <div class="option-grid">
-            {#each ELECTRICAL_CONNECTOR_OPTIONS as option}
-              <label class="form-checkbox option-tile">
-                <input
-                  type="checkbox"
-                  checked={hasTechnicalMulti('electrical_connectors', option)}
-                  on:change={(event) => setTechnicalMulti('electrical_connectors', option, event.currentTarget.checked)}
-                />
-                <span>{option}</span>
-              </label>
-            {/each}
-          </div>
         </div>
       </section>
 {/if}
@@ -1272,6 +1406,10 @@
             {/each}
           </div>
         </div>
+        <div class="form-group">
+          <label class="form-label" for="softwareOtherInput">Other software or controls</label>
+          <input id="softwareOtherInput" class="form-input" maxlength="240" placeholder="Anything not listed above" bind:value={technical_details.software_other} />
+        </div>
       </section>
 {/if}
 
@@ -1285,30 +1423,6 @@
             <select id="swerveModuleSelect" class="form-select" bind:value={technical_details.swerve_module}>
               <option value="">-- Select --</option>
               {#each SWERVE_MODULE_OPTIONS as option}
-                <option value={option}>{option}</option>
-              {/each}
-            </select>
-          </div>
-
-          <div class="form-group">
-            <label class="form-label" for="gripTapeSelect">Grip tape</label>
-            <select id="gripTapeSelect" class="form-select" bind:value={technical_details.grip_tape}>
-              <option value="">-- Select --</option>
-              {#each GRIP_TAPE_OPTIONS as option}
-                <option value={option}>{option}</option>
-              {/each}
-            </select>
-          </div>
-
-          <div class="form-group">
-            <label class="form-label" for="hopperWallSelect">Hopper wall reinforcement</label>
-            <select
-              id="hopperWallSelect"
-              class="form-select"
-              bind:value={technical_details.hopper_wall_reinforcement}
-            >
-              <option value="">-- Select --</option>
-              {#each HOPPER_WALL_OPTIONS as option}
                 <option value={option}>{option}</option>
               {/each}
             </select>
@@ -1335,18 +1449,6 @@
           </div>
 
           <div class="form-group">
-            <label class="form-label" for="drivebaseTubeThicknessInput">Drivebase tube thickness</label>
-            <input
-              id="drivebaseTubeThicknessInput"
-              class="form-input"
-              type="text"
-              maxlength="80"
-              placeholder="e.g. 1/8 in, 0.090 in"
-              bind:value={technical_details.drivebase_tube_thickness}
-            />
-          </div>
-
-          <div class="form-group">
             <label class="form-label" for="bumperFoamSelect">Bumper foam</label>
             <select id="bumperFoamSelect" class="form-select" bind:value={technical_details.bumper_foam}>
               <option value="">-- Select --</option>
@@ -1355,6 +1457,12 @@
               {/each}
             </select>
           </div>
+        </div>
+
+        <div class="dimension-grid">
+          <div class="form-group"><label class="form-label" for="drivetrainLengthInput">Drivetrain length (in)</label><input id="drivetrainLengthInput" class="form-input" type="number" min="0" step="0.01" bind:value={technical_details.drivetrain_length} /></div>
+          <div class="form-group"><label class="form-label" for="drivetrainWidthInput">Drivetrain width (in)</label><input id="drivetrainWidthInput" class="form-input" type="number" min="0" step="0.01" bind:value={technical_details.drivetrain_width} /></div>
+          <div class="form-group"><label class="form-label" for="drivetrainHeightInput">Drivetrain height (in)</label><input id="drivetrainHeightInput" class="form-input" type="number" min="0" step="0.01" bind:value={technical_details.drivetrain_height} /></div>
         </div>
 
         <div class="dimension-grid">
@@ -1392,22 +1500,6 @@
               step="0.01"
               bind:value={technical_details.bumper_height}
             />
-          </div>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label">Hardware standards used</label>
-          <div class="option-grid compact">
-            {#each HARDWARE_STANDARD_OPTIONS as option}
-              <label class="form-checkbox option-tile">
-                <input
-                  type="checkbox"
-                  checked={hasTechnicalMulti('hardware_standards', option)}
-                  on:change={(event) => setTechnicalMulti('hardware_standards', option, event.currentTarget.checked)}
-                />
-                <span>{option}</span>
-              </label>
-            {/each}
           </div>
         </div>
 
@@ -1680,6 +1772,93 @@
 {/if}
 
 <style>
+  .view-tabs {
+    display: flex;
+    gap: 0.5rem;
+    max-width: 760px;
+    margin: 0 auto 1rem;
+  }
+
+  .view-tabs button {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    min-height: var(--control-height);
+    padding: 0 var(--space-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--text-muted);
+    cursor: pointer;
+  }
+
+  .view-tabs button.active {
+    border-color: var(--brand-gold-strong);
+    background: var(--brand-gold-soft);
+    color: var(--text);
+    font-weight: 700;
+  }
+
+  .view-tabs button span {
+    min-width: 1.35rem;
+    padding: 0.1rem 0.35rem;
+    border-radius: 999px;
+    background: var(--danger);
+    color: white;
+    font-size: 0.72rem;
+    text-align: center;
+  }
+
+  .problems-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1.5fr) minmax(280px, 0.75fr);
+    gap: 1rem;
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  .problem-heading,
+  .problem-meta,
+  .resolved-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+
+  .problem-heading h3,
+  .problem-heading p,
+  .problem-form h3,
+  .problem-card h4,
+  .problem-card p {
+    margin-top: 0;
+  }
+
+  .problem-heading p,
+  .problem-card p {
+    color: var(--text-muted);
+  }
+
+  .problem-list {
+    display: grid;
+    gap: 0.75rem;
+  }
+
+  .problem-card {
+    padding: 1rem;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--warning);
+    border-radius: var(--radius-sm);
+  }
+
+  .problem-card.urgent { border-left-color: var(--danger); }
+  .problem-meta { justify-content: flex-start; flex-wrap: wrap; color: var(--text-muted); font-size: 0.8rem; }
+  .severity { text-transform: uppercase; font-weight: 700; }
+  .resolved-problems { margin-top: 1rem; }
+  .resolved-row { padding: 0.65rem 0; border-bottom: 1px solid var(--border); }
+  .problem-form { align-self: start; }
+  .additional-notes-input { min-height: 120px; resize: vertical; }
+
   .page-header {
     display: flex;
     justify-content: space-between;
@@ -1768,6 +1947,9 @@
     align-items: flex-start;
     gap: 1rem;
   }
+
+  .entry-header > div { flex: 1; }
+  .entry-photo-action { margin-left: auto; white-space: nowrap; }
 
   .entry-subtitle {
     margin-top: 0.3rem;
@@ -2063,6 +2245,8 @@
       align-items: stretch;
     }
 
+    .entry-photo-action { width: 100%; margin-left: 0; }
+
     .page-summary {
       width: 100%;
       justify-content: flex-start;
@@ -2088,6 +2272,8 @@
     .submit-btn {
       width: 100%;
     }
+
+    .problems-layout { grid-template-columns: 1fr; }
   }
 
   @media (max-width: 480px) {

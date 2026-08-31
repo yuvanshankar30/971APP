@@ -1,4 +1,5 @@
 <script>
+  import { requestConfirmation } from '$lib/confirmation.js';
   import { onMount } from 'svelte';
   import { supabase } from '$lib/supabase.js';
   import { page } from '$app/stores';
@@ -114,7 +115,7 @@
 
    async function deleteBin() {
      if (!editingBin) return;
-     if (!confirm(`Delete bin "${editingBin.name} (${editingBin.bin_id})"? This will clear kitting bin on any parts that reference it.`)) return;
+     if (!await requestConfirmation({ title: 'Delete bin', message: `Delete bin "${editingBin.name} (${editingBin.bin_id})"? This will clear kitting bin on any parts that reference it.`, confirmLabel: 'Delete bin', danger: true })) return;
      savingEdit = true;
      try {
        // Clear parts

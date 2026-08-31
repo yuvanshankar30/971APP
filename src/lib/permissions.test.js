@@ -69,6 +69,12 @@ describe('hasPermission', () => {
 });
 
 describe('getRoleDerivedPermissions', () => {
+  it('grants scouting administration permissions via the Scouting Admin roster key', () => {
+    const derived = getRoleDerivedPermissions({ roster_keys: ['Scouting Admin'] });
+    expect(derived.has('DATA_SCOUT_ADMIN')).toBe(true);
+    expect(derived.has('NOTE_SCOUT_ADMIN')).toBe(true);
+  });
+
   it('merges general, purchasing, and team role permissions', () => {
     const derived = getRoleDerivedPermissions({
       general_role: 'member',

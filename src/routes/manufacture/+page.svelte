@@ -1,5 +1,6 @@
 <script>
   import { browser } from '$app/environment';
+  import { requestConfirmation } from '$lib/confirmation.js';
   import { onMount, tick } from 'svelte';
   import { supabase } from '$lib/supabase.js';
   import { page } from '$app/stores';
@@ -1505,7 +1506,7 @@
 
   async function deletePreviewPart() {
     if (!previewPart) return;
-    if (!confirm('Delete this part permanently?')) return;
+    if (!await requestConfirmation({ message: 'Delete this part permanently?', confirmLabel: 'Delete part', danger: true })) return;
     try {
       await deletePartsByIds([previewPart.id]);
       showToastMessage('Part deleted');
@@ -1564,7 +1565,7 @@
 
   async function deleteCurrentPart() {
     if (!editPart) return;
-    if (!confirm('Delete this part permanently?')) return;
+    if (!await requestConfirmation({ message: 'Delete this part permanently?', confirmLabel: 'Delete part', danger: true })) return;
     try {
       await deletePartsByIds([editPart.id]);
       showToastMessage('Part deleted');
@@ -1610,7 +1611,7 @@
       .map((part) => part.id);
 
     if (idsToDelete.length === 0) return;
-    if (!confirm(`Delete ${idsToDelete.length} selected part${idsToDelete.length === 1 ? '' : 's'} permanently?`)) return;
+    if (!await requestConfirmation({ message: `Delete ${idsToDelete.length} selected part${idsToDelete.length === 1 ? '' : 's'} permanently?`, confirmLabel: 'Delete parts', danger: true })) return;
 
     try {
       await deletePartsByIds(idsToDelete);

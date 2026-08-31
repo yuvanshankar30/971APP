@@ -6,11 +6,12 @@
   import { supabase } from '$lib/supabase.js';
   import { fetchActiveScoutingEventKey } from '$lib/scoutingEvent.js';
   import navConfig from '$lib/navigation.json';
-  import { defaultHeaderTabs, ensurePowerRankingsTab } from '$lib/defaultTabs.js';
+  import { defaultHeaderTabs, ensurePowerRankingsTab, ensureScoutingAdminTab } from '$lib/defaultTabs.js';
   import { Move3d, Hammer, Wrench, Receipt, Home, Briefcase, Coins, Package, User, ChevronDown, Menu, X, Camera, CalendarDays, Cpu, FileText, Trophy, Eye, ClipboardCheck, ListChecks } from 'lucide-svelte';
   import { goto, afterNavigate } from '$app/navigation';
   import { page } from '$app/stores';
   import Toasts from '$lib/Toasts.svelte';
+  import ConfirmationDialog from '$lib/components/ConfirmationDialog.svelte';
   import { trackUserAttendance } from '$lib/attendance.js';
   import { toastActions } from '$lib/toast.js';
 
@@ -366,10 +367,11 @@
   function canRenderTabKey(key) {
     const k = normalizeKey(key);
     if (k === 'admin') return hasPermission(activeProfile, 'VIEW_ADMIN_PANEL');
-    // Scouting Admin: Competition Leads, or admins (who can access everything).
+    // Scouting Admin is a scoped competition role, separate from site-wide admin.
     if (k === 'scouting-admin') {
       return activeProfile?.team_role === 'Competition Lead'
-        || hasPermission(activeProfile, 'VIEW_ADMIN_PANEL');
+        || hasPermission(activeProfile, 'VIEW_ADMIN_PANEL')
+        || (activeProfile?.roster_keys || []).some((role) => String(role).toLowerCase() === 'scouting admin');
     }
     return true;
   }
@@ -457,7 +459,7 @@
   // Power Rankings is appended for anyone whose saved header_tabs predates it,
   // so a customized nav still surfaces the feature. Purely additive - see
   // ensurePowerRankingsTab().
-  $: baseNavTabs = addAdminTabIfAllowed(ensurePowerRankingsTab(effectiveTabs, navConfig), canViewAdmin);
+  $: baseNavTabs = addAdminTabIfAllowed(ensureScoutingAdminTab(ensurePowerRankingsTab(effectiveTabs, navConfig)), canViewAdmin);
   $: navItems = isApproved ? buildNavItems(baseNavTabs) : [];
   $: profileDisplayName = activeProfile?.full_name || activeProfile?.email || authUser?.email || 'Profile';
 
@@ -716,6 +718,7 @@
 {/if}
 
 <Toasts />
+<ConfirmationDialog />
 
 <style>
   :global(html) {

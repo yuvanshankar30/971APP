@@ -69,6 +69,9 @@ describe('normalizePitScoutRow', () => {
     expect(normalized.climb_options).toEqual([]);
     expect(normalized.technical_details).toEqual({});
     expect(normalized.estimated_bps).toBeNull();
+    expect(normalized.robot_archetype).toBeNull();
+    expect(normalized.additional_notes).toBeNull();
+    expect(normalized.scout_name).toBeNull();
   });
 
   it('preserves a real value already present on the row', () => {
@@ -90,7 +93,9 @@ describe('normalizePitScoutRow', () => {
     const a = normalizePitScoutRow({ id: '1' });
     const b = normalizePitScoutRow({ id: '2' });
     a.climb_options.push('x');
+    a.technical_details.drive = 'swerve';
     expect(b.climb_options).toEqual([]);
+    expect(b.technical_details).toEqual({});
   });
 });
 
@@ -115,6 +120,9 @@ describe('pitScoutSchemaWarning', () => {
     const warning = pitScoutSchemaWarning(buildPitScoutSchema([]));
     expect(warning).toContain('likely breaking component');
     expect(warning).toContain('estimated BPS');
+    expect(warning).toContain('robot archetype');
+    expect(warning).toContain('additional notes');
+    expect(warning).toContain('scout name');
   });
 });
 

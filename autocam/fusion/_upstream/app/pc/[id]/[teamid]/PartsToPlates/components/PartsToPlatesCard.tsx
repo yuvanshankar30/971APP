@@ -15,6 +15,7 @@ import { CamDeleteConfirmModal } from "./modals/CamDeleteConfirmModal";
 import { ArrangeErrorModal } from "./modals/ArrangeErrorModal";
 import { CamErrorModal } from "./modals/CamErrorModal";
 import { PlateDeleteConfirmModal } from "./modals/PlateDeleteConfirmModal";
+import { ConfirmationDialog } from "@/components/ConfirmationDialog/ConfirmationDialog";
 
 function formatMachiningTime(seconds: number): string {
   const totalSeconds = Math.max(0, Math.round(seconds));
@@ -68,6 +69,7 @@ export function PartsToPlatesCard({
     {}
   );
   const [jobsDeleteError, setJobsDeleteError] = useState<string | null>(null);
+  const [pendingDeleteRun, setPendingDeleteRun] = useState<PlateJobRun | null>(null);
   const [arrangeLoading, setArrangeLoading] = useState(false);
   const { teamid } = useParams();
   const teamDbId = Number(Array.isArray(teamid) ? teamid[0] : teamid);
@@ -1352,10 +1354,17 @@ export function PartsToPlatesCard({
     );
     if (jobIds.length === 0) return;
 
-    const ok = window.confirm(
-      `Delete ${jobIds.length === 1 ? "this job" : "these jobs"}?`
+    setPendingDeleteRun(run);
+  }
+
+  async function confirmDeleteRun() {
+    const run = pendingDeleteRun;
+    setPendingDeleteRun(null);
+    if (!run || !isValidPlateId(currentPlateId)) return;
+    const jobIds = [run.arrange.id, run.cam?.id].filter(
+      (id): id is number => typeof id === "number"
     );
-    if (!ok) return;
+    if (jobIds.length === 0) return;
 
     setJobsDeleteError(null);
     setJobsDeleteBusy((prev) => {
@@ -1614,6 +1623,15 @@ export function PartsToPlatesCard({
         onConfirm={() => {
           if (plateDeleteTargetId != null) deletePlate(plateDeleteTargetId);
         }}
+      />
+      <ConfirmationDialog
+        open={pendingDeleteRun !== null}
+        title="Delete queued job"
+        message={pendingDeleteRun && [pendingDeleteRun.arrange.id, pendingDeleteRun.cam?.id].filter((id) => typeof id === "number").length === 1 ? "Delete this job?" : "Delete these jobs?"}
+        confirmLabel="Delete"
+        danger
+        onCancel={() => setPendingDeleteRun(null)}
+        onConfirm={confirmDeleteRun}
       />
     </div>
   );

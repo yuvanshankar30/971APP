@@ -1,4 +1,5 @@
 <script>
+  import { requestConfirmation } from '$lib/confirmation.js';
   import { onMount } from 'svelte';
   import { toastActions } from '$lib/toast.js';
   import { fetchParts, createPart, deletePart, fetchPartCategories } from '$lib/fusionCam.js';
@@ -61,7 +62,7 @@
   }
 
   async function handleDelete(part) {
-    if (!confirm(`Delete part "${part.name}"?`)) return;
+    if (!await requestConfirmation({ title: 'Delete part', message: `Delete part "${part.name}"?`, confirmLabel: 'Delete', danger: true })) return;
     try {
       await deletePart(part.id);
       await load();

@@ -15,7 +15,7 @@
 //   - CAD: CAD and Build combined into one group, since Build is really a
 //     CAD sub-concern (already lives at /cad/build).
 //   - Competition: the active scouting surfaces only. The legacy routes
-//     (Power Rankings, Note Scouting, Team View, Scouting Admin) stay in the
+//     (Note Scouting and Team View) stay in the
 //     codebase for a future restoration but are deliberately out of the
 //     default menu - they are still reachable by URL, and by anyone who
 //     already added them to their own saved nav.
@@ -61,7 +61,8 @@ export function defaultHeaderTabs(navConfig = navigation) {
       { key: 'pitscout', label: 'Pit Scouting' },
       { key: 'matchscout', label: 'Match Scouting' },
       { key: 'vision', label: 'Vision Scouting' },
-      { key: 'powerrankings', label: 'Power Rankings' }
+      { key: 'powerrankings', label: 'Power Rankings' },
+      { key: 'scouting-admin', label: 'Scouting Admin' }
     ]
   });
 
@@ -103,6 +104,27 @@ export function ensurePowerRankingsTab(tabs, navConfig = navigation) {
   if (containsTabKey(tabs, 'powerrankings')) return tabs;
 
   const entry = { key: 'powerrankings', label: 'Power Rankings' };
+  const folderIndex = tabs.findIndex(
+    (item) => item?.type === 'folder' && item?.label === COMPETITION_FOLDER_LABEL
+  );
+  if (folderIndex === -1) return [...tabs, { type: 'tab', ...entry }];
+
+  const folder = tabs[folderIndex];
+  const next = [...tabs];
+  next[folderIndex] = {
+    ...folder,
+    children: [...(Array.isArray(folder.children) ? folder.children : []), entry]
+  };
+  return next;
+}
+
+// Scouting Admin is filtered by the layout based on the signed-in user's role.
+// Adding it here also lets an authorized user with a saved/custom header see it.
+export function ensureScoutingAdminTab(tabs) {
+  if (!Array.isArray(tabs)) return tabs;
+  if (containsTabKey(tabs, 'scouting-admin')) return tabs;
+
+  const entry = { key: 'scouting-admin', label: 'Scouting Admin' };
   const folderIndex = tabs.findIndex(
     (item) => item?.type === 'folder' && item?.label === COMPETITION_FOLDER_LABEL
   );

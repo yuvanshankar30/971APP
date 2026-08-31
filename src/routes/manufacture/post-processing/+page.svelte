@@ -1,4 +1,5 @@
 <script>
+  import { requestConfirmation } from '$lib/confirmation.js';
   import { onMount } from 'svelte';
   import { supabase } from '$lib/supabase.js';
   import { page } from '$app/stores';
@@ -192,7 +193,7 @@
   // progress) so it leaves Post Processing and returns to the Router / ToDo tabs.
   async function recutPart(part) {
     if (savingPartIds.has(part.id)) return;
-    if (!confirm(`Send "${part.name}" back to be re-cut? It will return to Pending and leave Post Processing.`)) return;
+    if (!await requestConfirmation({ title: 'Send part for re-cut', message: `Send "${part.name}" back to be re-cut? It will return to Pending and leave Post Processing.`, confirmLabel: 'Send for re-cut', danger: true })) return;
 
     const root = parseMeta(part);
     const routerMeta = { ...(root.router_meta || {}) };

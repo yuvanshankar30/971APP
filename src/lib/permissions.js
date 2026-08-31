@@ -82,6 +82,7 @@ export const PURCHASING_ROLE_PERMISSIONS = {
 };
 
 const ROSTER_KEY_PERMISSIONS = {
+  'Scouting Admin': ['DATA_SCOUT_ADMIN', 'NOTE_SCOUT_ADMIN'],
   'Video Scout Member': ['VIDEO_SCOUT_MEMBER'],
   'Data Scout Member': ['DATA_SCOUT_MEMBER'],
   'Video Scout Lead': [], // Add if needed
