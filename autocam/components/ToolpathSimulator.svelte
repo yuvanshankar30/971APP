@@ -18,7 +18,11 @@
     buildTurningStockProfile,
     turningProfileToLathePoints,
     buildTurningStockRings,
-    buildRoutingHeightmap
+    buildRoutingHeightmap,
+    projectTubestockToolpath,
+    matchTubestockHolesToMoves,
+    tubeLocalPoint,
+    tubeWallNormal
   } from '../toolpathPreview.js';
   import { stockEnvelopeRadius } from '../turning.js';
   import {
@@ -57,6 +61,17 @@
    */
   export let edgeShiftX = 0;
   export let edgeShiftY = 0;
+  /**
+   * Tube stock only: generateTubestockGcode's own stats.crossSection/walls
+   * (echoed straight from extractTubeFeaturesFromMeshes) - the tube's outer
+   * width along its two cross-section axes, and every wall's hole layout.
+   * Needed to place the G-code's X/Y/Z/A moves onto the tube's actual 3D
+   * surface (see projectTubestockToolpath) and to render the drilled holes
+   * themselves, which the moves alone don't carry (diameter isn't a
+   * coordinate).
+   */
+  export let crossSection = null;
+  export let walls = [];
 
   let container;
   let renderer, scene, camera, controls, frameId, resizeObserver, grid, axes, toolMesh, stockMesh, ghostMesh;
@@ -100,8 +115,11 @@
   let lastPlaybackFrame = null;
 
   $: isTurning = operationType === 'turning';
+  $: isTubestock = operationType === 'tubestock';
   $: rawParsed = parseToolpath3D(gcode || '');
-  $: parsed = isTurning ? projectTurningToolpath(rawParsed) : rawParsed;
+  $: parsed = isTurning
+    ? projectTurningToolpath(rawParsed)
+    : (isTubestock && crossSection ? projectTubestockToolpath(rawParsed, { crossSection }) : rawParsed);
   $: moves = parsed.moves;
   $: bounds = toolpathBounds3D(moves);
   $: toolPosition = toolpathPositionAtDistance(moves, playbackDistance);
@@ -109,11 +127,18 @@
   $: activeSequenceDiameter = Number(toolSequence?.[activeToolIndex]?.toolDiameter) || null;
   $: singleToolDiameter = Number(toolDiameter) || null;
   $: cutterDiameter = activeSequenceDiameter || singleToolDiameter || Number(cutterDiameterInput) || null;
-  $: canAnimate = isTurning || !!cutterDiameter;
+  $: canAnimate = isTurning || isTubestock || !!cutterDiameter;
   $: moveCounts = KINDS.reduce((counts, kind) => {
     counts[kind] = moves.filter((move) => move.kind === kind).length;
     return counts;
   }, {});
+  // Tube stock: joins each real hole (walls, from generateTubestockGcode's
+  // own stats) to the raw (pre-projection) move that drills it, so playback
+  // can progressively reveal holes the same way routing/turning reveal
+  // material removal - see matchTubestockHolesToMoves' own doc comment.
+  // Recomputed only when the program or hole list actually changes, not on
+  // every scrub tick.
+  $: drilledHoleIndex = isTubestock && walls?.length ? matchTubestockHolesToMoves(walls, rawParsed.moves) : [];
 
   // A job may be edited while this modal stays open. Adopt its saved diameter
   // once, but preserve a deliberate manual value for old jobs that lack one.
@@ -127,8 +152,8 @@
   // Rebuild whenever the program changes, but only once the scene exists.
   $: if (scene && moves) rebuildToolpath();
   $: if (scene && toolpathVisible !== undefined) applyVisibility(visible);
-  $: if (scene && toolPosition && cutterDiameter !== undefined && toolVisible !== undefined && isTurning !== undefined && noseRadius !== undefined) updateTool();
-  $: if (scene && moves && toolPosition && stockVisible !== undefined && stockDiameter !== undefined && isTurning !== undefined) updateStock();
+  $: if (scene && toolPosition && cutterDiameter !== undefined && toolVisible !== undefined && isTurning !== undefined && isTubestock !== undefined && noseRadius !== undefined) updateTool();
+  $: if (scene && moves && toolPosition && stockVisible !== undefined && stockDiameter !== undefined && isTurning !== undefined && isTubestock !== undefined && drilledHoleIndex !== undefined) updateStock();
 
   // Ghost part (Phase 5): fetch + parse doesn't need the scene, so it's
   // decoupled from scene readiness - only actually adding the mesh does.
@@ -242,7 +267,12 @@
     turningTargetProfile = null;
     routingTargetThickness = null;
     ghostError = '';
-    if (!stepFileName) return;
+    // Tube stock has no ghost-part/gouge-check support yet - its geometry
+    // (rectangular tube, indexed round holes) isn't something
+    // extractTurningProfileFromMeshes/extractRoutingContoursFromMeshes can
+    // read, and the sim is fully usable without it (the drilled-hole
+    // rendering already shows real, measured hole positions).
+    if (!stepFileName || isTubestock) return;
 
     ghostLoading = true;
     try {
@@ -427,7 +457,107 @@
       return;
     }
 
+    if (isTubestock) {
+      updateTubestockStock();
+      return;
+    }
+
     updateRoutingStock();
+  }
+
+  // Tube stock (rotary 4th-axis drilling): a static box in the tube's own
+  // local frame (see projectTubestockToolpath's own doc comment for why
+  // this isn't animated as a literal rotation), with each wall built as a
+  // flat surface that a hole is cut into the instant playback reaches its
+  // plunge move, plus a dark bore cylinder showing how deep that hole has
+  // actually gone - both placed via tubeLocalPoint, the same function that
+  // places the toolpath/tool, so the holes and the moves that drill them
+  // can never drift apart the way the routing ghost-part/edgeShift bug did.
+  const TUBESTOCK_CIRCLE_SEGMENTS = 24;
+  const TUBESTOCK_MIN_VISIBLE_DEPTH = 0.0005;
+
+  function updateTubestockStock() {
+    if (!crossSection || !(crossSection.a > 0) || !(crossSection.b > 0)) return;
+
+    const currentMoveIndex = toolPosition?.moveIndex ?? 0;
+    const currentProgress = toolPosition?.progress ?? 0;
+    const holeDepthNow = (hole) => {
+      if (hole.moveIndex < 0) return hole.fullDepth; // unmatched - safe fallback, always shown
+      if (hole.moveIndex < currentMoveIndex) return hole.fullDepth;
+      if (hole.moveIndex === currentMoveIndex) return hole.fullDepth * currentProgress;
+      return 0;
+    };
+
+    const minU = Number.isFinite(bounds.min.x) ? bounds.min.x : 0;
+    const maxU = Number.isFinite(bounds.max.x) && bounds.max.x > minU ? bounds.max.x : minU + 1;
+
+    const group = new THREE.Group();
+    const surfaceMaterial = new THREE.MeshPhongMaterial({ color: 0xb8bcc2, side: THREE.DoubleSide });
+    const boreMaterial = new THREE.MeshPhongMaterial({ color: 0x2b2b2e, side: THREE.DoubleSide });
+
+    const wallAngles = [...new Set((walls || []).map((w) => w.angleDeg))];
+    for (const angle of wallAngles) {
+      const snapped = (((Math.round(angle / 90) * 90) % 360) + 360) % 360;
+      const wallWidth = (snapped === 0 || snapped === 180) ? crossSection.b : crossSection.a;
+      const shape = new THREE.Shape([
+        new THREE.Vector2(minU, -wallWidth / 2),
+        new THREE.Vector2(maxU, -wallWidth / 2),
+        new THREE.Vector2(maxU, wallWidth / 2),
+        new THREE.Vector2(minU, wallWidth / 2)
+      ]);
+
+      for (const hole of drilledHoleIndex) {
+        if (hole.angleDeg !== angle) continue;
+        const depth = holeDepthNow(hole);
+        if (!(depth > TUBESTOCK_MIN_VISIBLE_DEPTH)) continue;
+
+        const radius = hole.diameter / 2;
+        const holePath = new THREE.Path();
+        holePath.absellipse(hole.position, hole.lateralOffset, radius, radius, 0, Math.PI * 2, false, 0);
+        shape.holes.push(holePath);
+
+        const outer3D = tubeLocalPoint(angle, hole.position, hole.lateralOffset, 0, crossSection);
+        const inner3D = tubeLocalPoint(angle, hole.position, hole.lateralOffset, -depth, crossSection);
+        const dir = new THREE.Vector3(inner3D.x - outer3D.x, inner3D.y - outer3D.y, inner3D.z - outer3D.z);
+        const boreLength = dir.length();
+        if (boreLength < 1e-6) continue;
+        dir.normalize();
+        const bore = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, boreLength, TUBESTOCK_CIRCLE_SEGMENTS), boreMaterial);
+        bore.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+        bore.position.set((outer3D.x + inner3D.x) / 2, (outer3D.y + inner3D.y) / 2, (outer3D.z + inner3D.z) / 2);
+        group.add(bore);
+      }
+
+      const geometry = new THREE.ShapeGeometry(shape);
+      const pos = geometry.attributes.position;
+      for (let i = 0; i < pos.count; i += 1) {
+        const local = tubeLocalPoint(angle, pos.getX(i), pos.getY(i), 0, crossSection);
+        pos.setXYZ(i, local.x, local.y, local.z);
+      }
+      pos.needsUpdate = true;
+      geometry.computeVertexNormals();
+      group.add(new THREE.Mesh(geometry, surfaceMaterial));
+    }
+
+    // End caps - plain rectangles, no holes (extractTubeFeaturesFromMeshes
+    // only reads side-wall holes) - just enough for the tube to read as a
+    // real solid bar rather than 4 open, floating panels.
+    const halfA = crossSection.a / 2;
+    const halfB = crossSection.b / 2;
+    for (const u of [minU, maxU]) {
+      const capGeometry = new THREE.BufferGeometry();
+      const positions = new Float32Array([
+        u, -halfA, -halfB, u, halfA, -halfB, u, halfA, halfB,
+        u, -halfA, -halfB, u, halfA, halfB, u, -halfA, halfB
+      ]);
+      capGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      capGeometry.computeVertexNormals();
+      group.add(new THREE.Mesh(capGeometry, surfaceMaterial));
+    }
+
+    group.visible = stockVisible;
+    stockMesh = group;
+    scene.add(stockMesh);
   }
 
   // Real machined solid for routing (Phase 4 of
@@ -513,8 +643,42 @@
 
   function updateTool() {
     if (!scene) return;
-    if ((!cutterDiameter && !isTurning) || !toolPosition) {
+    if ((!cutterDiameter && !isTurning && !isTubestock) || !toolPosition) {
       disposeTool();
+      return;
+    }
+
+    if (isTubestock) {
+      // A drill, not an end mill: rendered as a plain cylinder (same shape
+      // as the router bit below, no insert/holder detail needed) but
+      // oriented along the CURRENT move's own wall normal - unlike routing
+      // (always +Z) or turning (always the fixed XZ plane), the working
+      // direction changes with every wall the toolpath visits.
+      const currentAngle = moves[toolPosition.moveIndex]?.angleDeg ?? 0;
+      const normal = tubeWallNormal(currentAngle);
+      const span = Math.max(Number(crossSection?.a) || 0, Number(crossSection?.b) || 0, 0.5);
+      const size = Math.max(span * 0.03, 0.04);
+      const length = Math.max(size * 8, 0.4);
+
+      if (!toolMesh || toolMesh.userData.kind !== 'tubestock' || toolMesh.userData.size !== size) {
+        disposeTool();
+        toolMesh = new THREE.Mesh(
+          new THREE.CylinderGeometry(size, size, length, 16),
+          new THREE.MeshBasicMaterial({ color: 0x202020 })
+        );
+        toolMesh.userData.kind = 'tubestock';
+        toolMesh.userData.size = size;
+        scene.add(toolMesh);
+      }
+      const dir = new THREE.Vector3(normal.x, normal.y, normal.z);
+      toolMesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+      const tip = toolPosition.position;
+      toolMesh.position.set(
+        tip.x + normal.x * (length / 2),
+        tip.y + normal.y * (length / 2),
+        tip.z + normal.z * (length / 2)
+      );
+      toolMesh.visible = toolVisible;
       return;
     }
 
@@ -811,8 +975,8 @@
       <input type="checkbox" bind:checked={toolpathVisible} />
       <span class="legend-label">Toolpath</span>
     </label>
-    <label class="legend-item" class:empty={!isTurning && !cutterDiameter}>
-      <input type="checkbox" bind:checked={toolVisible} disabled={!isTurning && !cutterDiameter} />
+    <label class="legend-item" class:empty={!isTurning && !isTubestock && !cutterDiameter}>
+      <input type="checkbox" bind:checked={toolVisible} disabled={!isTurning && !isTubestock && !cutterDiameter} />
       <span class="legend-label">{isTurning ? 'Insert' : 'Tool'}</span>
     </label>
     {#if isTurning}
@@ -826,7 +990,7 @@
         <span class="legend-label">Stock</span>
       </label>
     {/if}
-    {#if stepFileName}
+    {#if stepFileName && !isTubestock}
       <label class="legend-item" class:empty={!ghostGeometryData} title={ghostError || (ghostLoading ? 'Loading source part...' : 'The source STEP part, shown semi-transparently for comparison')}>
         <input type="checkbox" bind:checked={modelVisible} disabled={!ghostGeometryData} />
         <span class="legend-label">Model{ghostLoading ? '…' : ''}</span>
@@ -844,7 +1008,7 @@
     </div>
   </div>
 
-  {#if !isTurning && !singleToolDiameter && !activeSequenceDiameter}
+  {#if !isTurning && !isTubestock && !singleToolDiameter && !activeSequenceDiameter}
     <label class="tool-diameter-input">
       <span>End mill diameter (in)</span>
       <input type="number" min="0.001" step="0.001" bind:value={cutterDiameterInput} placeholder="e.g. 0.25" />

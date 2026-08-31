@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   parseGcodeToolpath,
@@ -9,10 +12,19 @@ import {
   buildTurningStockProfile,
   turningProfileToLathePoints,
   buildTurningStockRings,
-  buildRoutingHeightmap
+  buildRoutingHeightmap,
+  tubeLocalPoint,
+  tubeWallNormal,
+  projectTubestockToolpath,
+  matchTubestockHolesToMoves
 } from './toolpathPreview.js';
 import { generateRoutingGcode } from './routing.js';
 import { generateTurningGcode, stockEnvelopeRadius } from './turning.js';
+import { generateTubestockGcode } from './tubestock.js';
+import { readStepMeshes, extractTubeFeaturesFromMeshes } from './stepProfile.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const TUBE_05X05_SQUARE = path.join(__dirname, '__fixtures__', 'tube-05x05-square.step');
 
 const gcode = (...lines) => lines.join('\n');
 
@@ -549,5 +561,157 @@ describe('buildRoutingHeightmap', () => {
       uptoMoveIndex: moves.length
     });
     expect(Math.min(...heights)).toBeCloseTo(-0.2, 2);
+  });
+});
+
+describe('parseToolpath3D - tube stock A-axis tracking', () => {
+  it('tags each move with the angleDeg in effect at the time, including across an A-only indexing line that commands no X/Y/Z', () => {
+    const program = gcode(
+      'G20',
+      'G90',
+      'S8000 M03',
+      'G00 A0 (index rotary axis to this wall)',
+      'G00 X1.0 Y0.0',
+      'G00 Z0.25',
+      'G01 Z-0.15 F8',
+      'G00 Z0.25',
+      'G00 A90 (index rotary axis to this wall)',
+      'G00 X2.0 Y0.1',
+      'G00 Z0.25',
+      'G01 Z-0.15 F8'
+    );
+    const { moves } = parseToolpath3D(program);
+    const firstPlunge = moves.find((m) => m.kind === 'ramp' && m.to.x === 1);
+    const secondPlunge = moves.find((m) => m.kind === 'ramp' && m.to.x === 2);
+    expect(firstPlunge.angleDeg).toBe(0);
+    expect(secondPlunge.angleDeg).toBe(90);
+  });
+
+  it('routing/turning G-code (no A word ever appears) defaults every move to angleDeg 0', () => {
+    const contour = [{ points: [{ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 2 }, { x: 0, y: 2 }], isHole: false }];
+    const { gcode: programText } = generateRoutingGcode(contour, { toolDiameter: 0.25, targetDepth: 0.1 });
+    const { moves } = parseToolpath3D(programText);
+    expect(moves.length).toBeGreaterThan(0);
+    expect(moves.every((m) => m.angleDeg === 0)).toBe(true);
+  });
+});
+
+describe('tubeLocalPoint / tubeWallNormal (tube stock static local-frame geometry)', () => {
+  const crossSection = { a: 2, b: 1 }; // a 2"x1" tube, matching am-5180's real dimensions
+
+  it('places a point on the surface (machineZ=0) of the 0deg wall at +a/2 along Y, lateralOffset along Z', () => {
+    const p = tubeLocalPoint(0, 5, 0.3, 0, crossSection);
+    expect(p).toEqual({ x: 5, y: 1, z: 0.3 });
+  });
+
+  it('places a point on the surface of the 180deg wall at -a/2 along Y - same lateral (Z) direction as 0deg, not mirrored', () => {
+    const p = tubeLocalPoint(180, 5, 0.3, 0, crossSection);
+    expect(p).toEqual({ x: 5, y: -1, z: 0.3 });
+  });
+
+  it('places a point on the surface of the 90deg wall at +b/2 along Z, lateralOffset along Y', () => {
+    const p = tubeLocalPoint(90, 5, 0.3, 0, crossSection);
+    expect(p).toEqual({ x: 5, y: 0.3, z: 0.5 });
+  });
+
+  it('places a point on the surface of the 270deg wall at -b/2 along Z', () => {
+    const p = tubeLocalPoint(270, 5, 0.3, 0, crossSection);
+    expect(p).toEqual({ x: 5, y: 0.3, z: -0.5 });
+  });
+
+  it('a negative machineZ (a drill plunge) moves the point INWARD, toward the tube centerline, on every wall', () => {
+    const atSurface0 = tubeLocalPoint(0, 5, 0, 0, crossSection);
+    const drilled0 = tubeLocalPoint(0, 5, 0, -0.3, crossSection);
+    expect(Math.abs(drilled0.y)).toBeLessThan(Math.abs(atSurface0.y));
+
+    const atSurface180 = tubeLocalPoint(180, 5, 0, 0, crossSection);
+    const drilled180 = tubeLocalPoint(180, 5, 0, -0.3, crossSection);
+    expect(Math.abs(drilled180.y)).toBeLessThan(Math.abs(atSurface180.y));
+  });
+
+  it('snaps a slightly-off angle (float round-trip noise) to the nearest of 0/90/180/270', () => {
+    const exact = tubeLocalPoint(90, 1, 0, 0, crossSection);
+    const noisy = tubeLocalPoint(89.98, 1, 0, 0, crossSection);
+    expect(noisy).toEqual(exact);
+  });
+
+  it('tubeWallNormal returns the outward unit normal for each wall, matching tubeLocalPoint\'s own sign convention', () => {
+    expect(tubeWallNormal(0)).toEqual({ x: 0, y: 1, z: 0 });
+    expect(tubeWallNormal(180)).toEqual({ x: 0, y: -1, z: 0 });
+    expect(tubeWallNormal(90)).toEqual({ x: 0, y: 0, z: 1 });
+    expect(tubeWallNormal(270)).toEqual({ x: 0, y: 0, z: -1 });
+  });
+});
+
+describe('projectTubestockToolpath', () => {
+  it('projects a rapid index + plunge sequence onto the correct wall, order-preserving with the raw moves (same length, same order)', () => {
+    const crossSection = { a: 1, b: 1 };
+    const raw = {
+      moves: [
+        { from: { x: 0, y: 0, z: 0 }, to: { x: 3, y: 0, z: 0.25 }, kind: 'rapid', angleDeg: 0, toolIndex: 0 },
+        { from: { x: 3, y: 0, z: 0.25 }, to: { x: 3, y: 0, z: -0.2 }, kind: 'ramp', angleDeg: 0, toolIndex: 0 }
+      ],
+      toolChangeIndices: [],
+      totalDistance: 0
+    };
+    const { moves } = projectTubestockToolpath(raw, { crossSection });
+    expect(moves.length).toBe(2);
+    // The plunge move should end up sunk into the +Y face by 0.2" from the
+    // 0.5" surface (a/2), i.e. at local Y = 0.3.
+    expect(moves[1].to.y).toBeCloseTo(0.3, 5);
+    expect(moves[1].to.x).toBe(3);
+    expect(moves[1].kind).toBe('ramp'); // classification carries through unchanged
+  });
+});
+
+describe('matchTubestockHolesToMoves', () => {
+  it('joins each hole to its own plunge move by (angleDeg, position, lateralOffset), reporting the actual drilled depth', () => {
+    const walls = [
+      { angleDeg: 0, holes: [{ position: 3, lateralOffset: 0, diameter: 0.2 }] },
+      { angleDeg: 90, holes: [{ position: 5, lateralOffset: 0.1, diameter: 0.15 }] }
+    ];
+    const rawMoves = [
+      { from: { x: 0, y: 0, z: 0.25 }, to: { x: 3, y: 0, z: 0.25 }, kind: 'rapid', angleDeg: 0 },
+      { from: { x: 3, y: 0, z: 0.25 }, to: { x: 3, y: 0, z: -0.18 }, kind: 'ramp', angleDeg: 0 },
+      { from: { x: 3, y: 0, z: -0.18 }, to: { x: 5, y: 0.1, z: 0.25 }, kind: 'rapid', angleDeg: 90 },
+      { from: { x: 5, y: 0.1, z: 0.25 }, to: { x: 5, y: 0.1, z: -0.12 }, kind: 'ramp', angleDeg: 90 }
+    ];
+    const matched = matchTubestockHolesToMoves(walls, rawMoves);
+    expect(matched.length).toBe(2);
+    expect(matched[0].moveIndex).toBe(1);
+    expect(matched[0].fullDepth).toBeCloseTo(0.18, 5);
+    expect(matched[1].moveIndex).toBe(3);
+    expect(matched[1].fullDepth).toBeCloseTo(0.12, 5);
+  });
+
+  it('reports moveIndex -1 (rendered as always-drilled, not hidden) when no matching plunge move exists', () => {
+    const walls = [{ angleDeg: 0, holes: [{ position: 99, lateralOffset: 0, diameter: 0.2 }] }];
+    const matched = matchTubestockHolesToMoves(walls, []);
+    expect(matched[0].moveIndex).toBe(-1);
+    expect(matched[0].fullDepth).toBe(0);
+  });
+
+  it('against real generated G-code (tube-05x05-square.step): every hole in a real densely-drilled tube matches its own plunge move', async () => {
+    const meshes = await readStepMeshes(fs.readFileSync(TUBE_05X05_SQUARE));
+    const features = extractTubeFeaturesFromMeshes(meshes);
+    const { gcode: programText } = generateTubestockGcode(features, { holeDepth: 0.15 });
+    const { moves: rawMoves } = parseToolpath3D(programText);
+    const matched = matchTubestockHolesToMoves(features.walls, rawMoves);
+
+    const totalHoles = features.walls.reduce((sum, w) => sum + w.holes.length, 0);
+    expect(matched.length).toBe(totalHoles);
+    const unmatched = matched.filter((h) => h.moveIndex === -1);
+    expect(unmatched).toEqual([]);
+    for (const hole of matched) expect(hole.fullDepth).toBeCloseTo(0.15, 3);
+
+    // And every matched hole lands at a sane 3D point once projected: on
+    // the surface of its own wall (not floating in space or buried past the
+    // tube's own centerline).
+    const { moves: projectedMoves } = projectTubestockToolpath({ moves: rawMoves, toolChangeIndices: [], totalDistance: 0 }, { crossSection: features.crossSection });
+    for (const hole of matched) {
+      const drilledPoint = projectedMoves[hole.moveIndex].to;
+      const distanceFromAxis = Math.hypot(drilledPoint.y, drilledPoint.z);
+      expect(distanceFromAxis).toBeLessThanOrEqual(Math.max(features.crossSection.a, features.crossSection.b) / 2 + 1e-6);
+    }
   });
 });

@@ -497,7 +497,9 @@
   }
   async function openToolpathPreview(job) {
     editingJob = job;
-    toolpathView = ['routing', 'turning'].includes(job.operation_type) ? '3d' : '2d';
+    // Tube stock moves in X/Y/Z plus a rotary A axis the 2D preview can't
+    // represent at all - it only ever has a 3D view, so go straight there.
+    toolpathView = ['routing', 'turning', 'tubestock'].includes(job.operation_type) ? '3d' : '2d';
     showJobToolpathModal = true;
     if (toolpathView === '3d') await loadToolpathSimulator();
   }
@@ -1062,7 +1064,7 @@
                 {#if job.status === 'completed' && job.gcode}
                   <span class="output-action-group">
                     <button class="btn btn-icon" data-tooltip="View Toolpath" aria-label="View toolpath simulation" on:click={() => openToolpathPreview(job)}><Route size={15} /></button>
-                    {#if job.operation_type === 'routing' || job.operation_type === 'turning'}
+                    {#if job.operation_type === 'routing' || job.operation_type === 'turning' || job.operation_type === 'tubestock'}
                       <button class="btn btn-secondary btn-sm" on:click={() => open3DToolpathPreview(job)}>
                         <Route size={14} /> 3D Toolpath
                       </button>
@@ -1342,7 +1344,7 @@
           <button class="btn btn-secondary btn-sm" on:click={() => (showJobCadModal = true)} disabled={!editingJob.step_file_name}>
             <Box size={14} /> View CAD
           </button>
-          <button class="btn btn-secondary btn-sm" on:click={() => openToolpathPreview(editingJob)} disabled={editingJob.status !== 'completed' || !editingJob.gcode || editingJob.operation_type === 'tubestock'} title={editingJob.operation_type === 'tubestock' ? 'No 2D preview for tube stock - it moves in X/Y/Z plus a rotary axis the viewer doesn\'t track; use Open ncviewer.com or download the G-code instead' : (editingJob.status !== 'completed' ? 'Only available once the job has completed' : '')}>
+          <button class="btn btn-secondary btn-sm" on:click={() => openToolpathPreview(editingJob)} disabled={editingJob.status !== 'completed' || !editingJob.gcode} title={editingJob.status !== 'completed' ? 'Only available once the job has completed' : ''}>
             <Route size={14} /> View {operationLabel(editingJob.operation_type)} Toolpath
           </button>
           {#if editingJob.operation_type === 'routing'}
@@ -1440,7 +1442,7 @@
             <button type="button" role="tab" aria-selected={toolpathView === '3d'} class:active={toolpathView === '3d'} on:click={() => open3DToolpathPreview(editingJob)}>3D Toolpath</button>
           </div>
         {/if}
-        {#if toolpathView === '3d' && (editingJob.operation_type === 'routing' || editingJob.operation_type === 'turning')}
+        {#if toolpathView === '3d' && (editingJob.operation_type === 'routing' || editingJob.operation_type === 'turning' || editingJob.operation_type === 'tubestock')}
           {#if ToolpathSimulator}
             <svelte:component
               this={ToolpathSimulator}
@@ -1455,6 +1457,8 @@
               stepFileName={editingJob.step_file_name || null}
               edgeShiftX={Number(editingJob.stats?.edgeShiftX) || 0}
               edgeShiftY={Number(editingJob.stats?.edgeShiftY) || 0}
+              crossSection={editingJob.stats?.crossSection || null}
+              walls={editingJob.stats?.walls || []}
             />
           {:else}
             <div class="toolpath-simulator-loading" aria-busy="true"><span class="loading-spinner"></span> Loading 3D toolpath...</div>
