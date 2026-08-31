@@ -2707,7 +2707,7 @@
       <div class="modal-body">
         <p class="cad-modal-hint">
           This part was created before a STEP file was required for its workflow. Attach one now to unlock the 3D
-          viewer and let AutoCAM generate {camProfileModalPart.workflow === 'lathe' ? 'turning' : 'routing'} G-code
+          viewer and let AutoCAM generate {camProfileModalPart.workflow === 'lathe' ? 'turning' : 'routering'} G-code
           immediately.
           {#if camProfileModalPart.workflow === 'lathe'}
             Model it with the spindle axis along the STEP file's Z axis, centered at X=0, Y=0.
