@@ -4,8 +4,9 @@ Live checklist. The *why* behind each decision lives in
 [`toolpath-simulation-plan.md`](toolpath-simulation-plan.md); this file is the
 running state of the work.
 
-**Scope:** routing only. Turning is out — its stock is a solid of revolution
-and a Z-up heightmap cannot represent it.
+**Scope:** the shared path renderer and playback controls support routing and
+turning. Routing's future material-removal phase remains heightmap-specific;
+turning uses a distinct axial/radial projection and cylindrical stock model.
 
 **Status:** Phases 0–1 complete. Phase 2 has move-class rendering; the
 per-tool and remaining Fusion visibility controls remain open. Phase 3 is
@@ -118,11 +119,25 @@ New: `autocam/components/ToolpathSimulator.svelte`
 
 ---
 
+## Turning simulator ✅
+
+- [x] Reuse the routing simulator's modal, tabs, move colours, visibility
+      controls, scrubber, playback speed, move stepping, operation stepping,
+      and camera reset
+- [x] Convert Haas diameter-mode X to radius and machine Z to the spindle axis
+- [x] Recompute playback distance after projection instead of using doubled
+      diameter-mode radial distances
+- [x] Render cylindrical stock from the job's saved `stockDiameter`
+- [x] Rotate the workpiece during playback and translate a proportional turning
+      insert through the X/Z path (the insert itself does not spin on a lathe)
+- [x] Preserve finish-insert tool-change stepping
+
 ## Explicitly not doing
 
 | | Why |
 |---|---|
-| Turning / tube-stock simulation | Different stock representation; a heightmap can't model a solid of revolution |
+| Tube-stock simulation | Different rotary-axis machine model and tool orientation |
+| Turning material removal | Needs a radial stock-envelope simulation rather than routing's heightmap; path playback and stock motion are implemented |
 | Holder & fixture collision | We model neither, so claiming Fusion's collision check would be false |
 | Machining-time estimate | Needs acceleration modelling; a naive distance÷feed number would be confidently wrong |
 | Ball-nose / V-bit profiles | Routing only generates flat end mill paths today |

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   parseGcodeToolpath,
   parseToolpath3D,
+  projectTurningToolpath,
   toolpathPositionAtDistance,
   toolpathBounds,
   toolpathBounds3D
@@ -73,6 +74,32 @@ describe('parseToolpath3D - linear moves', () => {
   it('supports incremental mode', () => {
     const { moves } = parseToolpath3D(gcode('G90', 'G00 X1 Y1 Z0', 'G91', 'G01 X2 Y0'));
     expect(moves[0].to.x).toBe(3);
+  });
+});
+
+describe('projectTurningToolpath', () => {
+  it('maps machine Z to the spindle axis and diameter-mode X to radius', () => {
+    const parsed = parseToolpath3D(gcode('G00 X1.0 Z0.1', 'G01 X0.5 Z-2.0'));
+    const projected = projectTurningToolpath(parsed);
+    expect(projected.moves[0].from).toEqual({ x: 0.1, y: 0.5, z: 0 });
+    expect(projected.moves[0].to).toEqual({ x: -2, y: 0.25, z: 0 });
+  });
+
+  it('recomputes distance in the projected radius coordinate system', () => {
+    const projected = projectTurningToolpath(parseToolpath3D(gcode('G00 X2 Z0', 'G01 X0 Z0')));
+    expect(projected.totalDistance).toBe(1);
+    expect(projected.moves[0].length).toBe(1);
+  });
+
+  it('treats every feed as a cut and preserves tool changes', () => {
+    const projected = projectTurningToolpath(parseToolpath3D(gcode(
+      'G00 X1 Z0', 'G01 X1 Z-1',
+      'M00 (TOOL CHANGE: finish insert)',
+      'G01 X0.5 Z-2'
+    )));
+    expect(projected.moves.map((move) => move.kind)).toEqual(['cut', 'cut']);
+    expect(projected.toolChangeIndices).toEqual([1]);
+    expect(projected.moves[1].toolIndex).toBe(1);
   });
 });
 
