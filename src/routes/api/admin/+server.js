@@ -269,7 +269,14 @@ export async function POST({ request }) {
 
     if (action === 'update-notifications') {
       const { manufacturing_lead_workflows, vision_notify } = body;
-      if (!isActorAdmin && !isActorDev && !actorPerms.includes('EDIT_PERMISSIONS')) {
+      const { data: { user: authenticatedUser } } = await supa.auth.getUser();
+      if (!authenticatedUser) return json({ error: 'Unauthorized' }, { status: 401 });
+      if (String(authenticatedUser.id) !== String(actor_id)) {
+        return json({ error: 'Actor does not match authenticated user' }, { status: 403 });
+      }
+
+      const editingSelf = String(actor_id) === String(target_id);
+      if (!editingSelf && !isActorAdmin && !isActorDev && !actorPerms.includes('EDIT_PERMISSIONS')) {
         return json({ error: 'Not authorized' }, { status: 403 });
       }
       if (manufacturing_lead_workflows === undefined && vision_notify === undefined) {
@@ -283,7 +290,6 @@ export async function POST({ request }) {
         .single();
       if (targetErr) return json({ error: targetErr.message }, { status: 500 });
 
-      const editingSelf = String(actor_id) === String(target_id);
       if (!editingSelf && targetRow.is_dev && !isActorDev) {
         return json({ error: "Only a dev can change another dev's notifications" }, { status: 403 });
       }
