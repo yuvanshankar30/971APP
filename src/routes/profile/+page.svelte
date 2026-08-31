@@ -37,6 +37,13 @@
   let targetFolderIdx = '';
   let resettingNav = false;
   let notificationSettings = mergeNotificationSettings();
+  const SETTINGS_TABS = [
+    { id: 'account', label: 'Account' },
+    { id: 'appearance', label: 'Appearance' },
+    { id: 'navigation', label: 'Navigation' },
+    { id: 'notifications', label: 'Notifications' }
+  ];
+  let activeSettingsTab = 'account';
 
   const frcTeamOptions = Object.values(FRC_TEAMS);
 
@@ -201,7 +208,16 @@
     try { saveProfile(); } catch (e) { console.warn('autosave failed', e); }
   }
 
+  function selectSettingsTab(tabId, { updateHash = true } = {}) {
+    if (!SETTINGS_TABS.some((tab) => tab.id === tabId)) tabId = 'account';
+    activeSettingsTab = tabId;
+    if (updateHash && typeof history !== 'undefined') history.replaceState(null, '', `#${tabId}`);
+  }
+
   onMount(() => {
+    const syncTabFromHash = () => selectSettingsTab(window.location.hash.slice(1), { updateHash: false });
+    syncTabFromHash();
+    window.addEventListener('hashchange', syncTabFromHash);
     unsub = userStore.subscribe((v) => {
       user = v;
       if (user) {
@@ -219,7 +235,10 @@
         notificationSettings = mergeNotificationSettings(user.notification_settings);
       }
     });
-    return () => unsub?.();
+    return () => {
+      window.removeEventListener('hashchange', syncTabFromHash);
+      unsub?.();
+    };
   });
 
   function toggleNotification(key, enabled) {
@@ -354,6 +373,18 @@
       <p>Manage your profile, appearance, navigation, security, and notifications.</p>
     </header>
 
+    <nav class="settings-tabs" aria-label="Account settings sections">
+      {#each SETTINGS_TABS as tab}
+        <button
+          type="button"
+          class:active={activeSettingsTab === tab.id}
+          aria-current={activeSettingsTab === tab.id ? 'page' : undefined}
+          on:click={() => selectSettingsTab(tab.id)}
+        >{tab.label}</button>
+      {/each}
+    </nav>
+
+    {#if activeSettingsTab === 'account'}
     <section class="card">
       <h3>Profile details</h3>
       <label class="form-label">Full name
@@ -370,27 +401,6 @@
           {/each}
         </select>
         <small class="form-help">Which FRC team are you affiliated with?</small>
-      </label>
-      <div class="theme-picker">
-        <div class="special-theme-heading"><div><strong>Theme</strong><small>Applies instantly and is remembered on this device.</small></div></div>
-        {#each themeGroups as group}
-          <h4>{group.label}</h4>
-          <div class="theme-grid">
-            {#each group.themes as t}
-              <button type="button" class="theme-card" class:selected={$theme === t.id} aria-pressed={$theme === t.id} on:click={() => setTheme(t.id)}>
-                <span class="theme-swatch" style={`--swatch-a:${t.preview[0]};--swatch-b:${t.preview[1]}`}></span>
-                <span>{t.label}</span>
-              </button>
-            {/each}
-          </div>
-        {/each}
-      </div>
-      <label class="form-label" for="login-screen-select">Login Screen
-        <select class="form-select" id="login-screen-select" value={login_screen_style} on:change={(e) => saveLoginScreenStyle(e.target.value)}>
-          <option value="legacy">Legacy Login</option>
-          <option value="modern">Modern Login</option>
-        </select>
-        <small class="form-help">Applies instantly and is saved to your account.</small>
       </label>
       <div class="actions">
         <button class="btn" on:click={saveProfile} disabled={savingProfile}>{savingProfile ? 'Saving...' : 'Save'}</button>
@@ -436,7 +446,36 @@
         <button class="btn" on:click={changePassword} disabled={changingPassword}>{changingPassword ? 'Changing...' : 'Change Password'}</button>
       </div>
     </section>
+    {/if}
 
+    {#if activeSettingsTab === 'appearance'}
+      <section class="card">
+        <h3>Appearance</h3>
+        <div class="theme-picker">
+          <div class="special-theme-heading"><div><strong>Theme</strong><small>Applies instantly and is remembered on this device.</small></div></div>
+          {#each themeGroups as group}
+            <h4>{group.label}</h4>
+            <div class="theme-grid">
+              {#each group.themes as t}
+                <button type="button" class="theme-card" class:selected={$theme === t.id} aria-pressed={$theme === t.id} on:click={() => setTheme(t.id)}>
+                  <span class="theme-swatch" style={`--swatch-a:${t.preview[0]};--swatch-b:${t.preview[1]}`}></span>
+                  <span>{t.label}</span>
+                </button>
+              {/each}
+            </div>
+          {/each}
+        </div>
+        <label class="form-label" for="login-screen-select">Login Screen
+          <select class="form-select" id="login-screen-select" value={login_screen_style} on:change={(e) => saveLoginScreenStyle(e.target.value)}>
+            <option value="legacy">Legacy Login</option>
+            <option value="modern">Modern Login</option>
+          </select>
+          <small class="form-help">Applies instantly and is saved to your account.</small>
+        </label>
+      </section>
+    {/if}
+
+    {#if activeSettingsTab === 'navigation'}
     <section class="card">
       <h3>Customize Navigation</h3>
       <p class="muted">Drag and drop to reorder tabs and folders. Add new tabs or create folders to organize your navigation.</p>
@@ -523,7 +562,9 @@
         </button>
       </div>
     </section>
+    {/if}
 
+    {#if activeSettingsTab === 'notifications'}
     <section class="card">
       <h3>Notifications</h3>
       <p class="muted"><strong>New users:</strong> Choose which Slack DMs you want to receive.</p>
@@ -546,6 +587,7 @@
         <button class="btn" on:click={saveProfile} disabled={savingProfile}>{savingProfile ? 'Saving...' : 'Save Notifications'}</button>
       </div>
     </section>
+    {/if}
   </div>
 {:else}
   <div class="profile-page">
@@ -563,6 +605,28 @@
   .account-header .eyebrow { margin: 0 0 var(--space-1); color: var(--accent-strong, var(--accent)); font-size: var(--font-xs); font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
   .account-header h2 { margin: 0; }
   .account-header > p:last-child { margin: var(--space-2) 0 0; color: var(--text-muted); }
+  .settings-tabs {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--space-1);
+    margin-bottom: var(--space-5);
+    padding: var(--space-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--surface-2);
+  }
+  .settings-tabs button {
+    min-height: 2.5rem;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-muted);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .settings-tabs button:hover { color: var(--text); background: var(--surface-1); }
+  .settings-tabs button.active { color: var(--text); background: var(--surface-1); border-color: var(--accent); }
   .profile-page :global(.card) { padding: var(--space-6); margin-bottom: var(--space-6); }
   .profile-page :global(.card h3) { margin-top: 0; margin-bottom: var(--space-4); font-size: 1.25rem; }
   .profile-page :global(.card h4) { margin: var(--space-4) 0 var(--space-2); font-size: 1rem; font-weight: 600; }
@@ -631,6 +695,12 @@
     .profile-page :global(.card h3) {
       font-size: 1.1rem;
     }
+    .settings-tabs {
+      display: flex;
+      overflow-x: auto;
+      scrollbar-width: thin;
+    }
+    .settings-tabs button { flex: 1 0 8rem; }
     
     .roles-grid {
       grid-template-columns: repeat(2, 1fr);
