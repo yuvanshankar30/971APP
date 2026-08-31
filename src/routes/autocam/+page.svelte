@@ -1449,7 +1449,9 @@
               toolDiameter={Number(editingJob.params?.toolDiameter) || null}
               toolSequence={editingJob.params?.toolSequence || []}
               stockDiameter={Number(editingJob.params?.stockDiameter) || null}
-              noseRadius={Number(editingJob.params?.noseRadius) || null}
+              stockShape={editingJob.params?.stockShape || 'round'}
+              noseRadius={Number(editingJob.params?.finishTool?.noseRadius ?? editingJob.params?.noseRadius) || null}
+              drillDiameter={Number(editingJob.params?.drilling?.diameter) || null}
             />
           {:else}
             <div class="toolpath-simulator-loading" aria-busy="true"><span class="loading-spinner"></span> Loading 3D toolpath...</div>

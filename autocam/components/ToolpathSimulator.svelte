@@ -10,7 +10,15 @@
   import * as THREE from 'three';
   import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
   import { FastForward, Pause, Play, RotateCcw, SkipForward } from 'lucide-svelte';
-  import { parseToolpath3D, projectTurningToolpath, toolpathBounds3D, toolpathPositionAtDistance } from '../toolpathPreview.js';
+  import {
+    parseToolpath3D,
+    projectTurningToolpath,
+    toolpathBounds3D,
+    toolpathPositionAtDistance,
+    buildTurningStockProfile,
+    turningProfileToLathePoints
+  } from '../toolpathPreview.js';
+  import { stockEnvelopeRadius } from '../turning.js';
 
   export let gcode = '';
   export let operationType = 'routing';
@@ -19,7 +27,11 @@
   /** Ordered routing tool sequence, when a job uses more than one cutter. */
   export let toolSequence = [];
   export let stockDiameter = null;
+  /** 'round' | 'hex' - see stockEnvelopeRadius in turning.js. */
+  export let stockShape = 'round';
   export let noseRadius = null;
+  /** Drill diameter, if this job has a drilling operation - see turning.js's `drilling` param. */
+  export let drillDiameter = null;
 
   let container;
   let renderer, scene, camera, controls, frameId, resizeObserver, grid, axes, toolMesh, stockMesh;
@@ -80,7 +92,7 @@
   $: if (scene && moves) rebuildToolpath();
   $: if (scene && toolpathVisible !== undefined) applyVisibility(visible);
   $: if (scene && toolPosition && cutterDiameter !== undefined && toolVisible !== undefined && isTurning !== undefined && noseRadius !== undefined) updateTool();
-  $: if (scene && moves && stockVisible !== undefined && stockDiameter !== undefined && isTurning !== undefined) updateStock();
+  $: if (scene && moves && toolPosition && stockVisible !== undefined && stockDiameter !== undefined && isTurning !== undefined) updateStock();
 
   function applyVisibility(state) {
     for (const kind of KINDS) {
@@ -151,39 +163,61 @@
     stockMesh = null;
   }
 
+  // Real machined solid, not a static ghost cylinder: rebuilt from the
+  // actual radius-per-axial-position profile at the current playback
+  // position - see buildTurningStockProfile in toolpathPreview.js for why
+  // this is exact (not an approximation) for OD turning. Sample count is a
+  // resolution/perf tradeoff, rebuilt on every position change like
+  // updateTool() already does.
+  const STOCK_PROFILE_SAMPLES = 200;
+  const STOCK_RADIAL_SEGMENTS = 56;
+
   function updateStock() {
     disposeStock();
     if (!scene || !isTurning || !(Number(stockDiameter) > 0) || !moves.length) return;
-    const axialMin = Math.min(...moves.flatMap((move) => [move.from.x, move.to.x]));
-    const axialMax = Math.max(...moves.flatMap((move) => [move.from.x, move.to.x]));
-    const margin = Number(stockDiameter) * 0.08;
-    const length = Math.max(axialMax - axialMin + margin * 2, Number(stockDiameter) * 0.5);
-    const geometry = new THREE.CylinderGeometry(Number(stockDiameter) / 2, Number(stockDiameter) / 2, length, 48, 1, true);
-    geometry.rotateZ(Math.PI / 2);
-    const cylinder = new THREE.Mesh(
+
+    const initialOuterRadius = stockEnvelopeRadius(Number(stockDiameter), stockShape);
+    const rawAxialMin = Math.min(...moves.flatMap((move) => [move.from.x, move.to.x]));
+    const margin = initialOuterRadius * 0.08;
+    // Z=0 is always the face (turning.js's own normalization convention) -
+    // nothing physically exists past it. Clamping here (rather than at the
+    // raw move bounds) is what keeps the finishing pass's X0-approach move
+    // - which technically sweeps through Z>0, empty clearance air, not
+    // real stock - from carving a fake divot into the rendered solid.
+    const axialMin = rawAxialMin - margin;
+    const axialMax = 0;
+
+    const drillRadius = Number(drillDiameter) > 0 ? Number(drillDiameter) / 2 : 0;
+    const moveIndex = toolPosition?.moveIndex ?? 0;
+    const progress = toolPosition?.progress ?? 0;
+
+    const { axial, outer, inner } = buildTurningStockProfile(moves, {
+      samples: STOCK_PROFILE_SAMPLES,
+      axialMin,
+      axialMax,
+      initialOuterRadius,
+      drillRadius,
+      uptoMoveIndex: moveIndex,
+      partialProgress: progress
+    });
+
+    const points = turningProfileToLathePoints(axial, outer, inner).map(([r, z]) => new THREE.Vector2(r, z));
+    const geometry = new THREE.LatheGeometry(points, STOCK_RADIAL_SEGMENTS);
+    // LatheGeometry revolves around its local Y axis (radius=x, axial
+    // position=y). rotateZ(-90deg) maps local Y -> scene +X directly (no
+    // sign flip), matching every other turning coordinate in this file
+    // (toolPosition.position.x is the same raw projected axial value) -
+    // unlike the old uniform cylinder, an asymmetric machined profile
+    // actually needs the correct sign here, not just "a" rotation.
+    geometry.rotateZ(-Math.PI / 2);
+    geometry.computeVertexNormals();
+
+    const solid = new THREE.Mesh(
       geometry,
-      new THREE.MeshPhongMaterial({ color: 0xb8bcc2, transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthWrite: false })
+      new THREE.MeshPhongMaterial({ color: 0xb8bcc2, side: THREE.DoubleSide })
     );
     stockMesh = new THREE.Group();
-    stockMesh.add(cylinder);
-    // A uniform cylinder looks stationary while spinning. Four longitudinal
-    // witness lines make spindle rotation visible without pretending they are
-    // physical grooves in the stock.
-    const markerPoints = [];
-    const radius = Number(stockDiameter) / 2;
-    for (let index = 0; index < 4; index += 1) {
-      const angle = (index / 4) * Math.PI * 2;
-      const y = Math.cos(angle) * radius * 1.002;
-      const z = Math.sin(angle) * radius * 1.002;
-      markerPoints.push(-length / 2, y, z, length / 2, y, z);
-    }
-    const markerGeometry = new THREE.BufferGeometry();
-    markerGeometry.setAttribute('position', new THREE.Float32BufferAttribute(markerPoints, 3));
-    stockMesh.add(new THREE.LineSegments(
-      markerGeometry,
-      new THREE.LineBasicMaterial({ color: 0x5f6670, transparent: true, opacity: 0.7 })
-    ));
-    stockMesh.position.x = (axialMin + axialMax) / 2;
+    stockMesh.add(solid);
     stockMesh.visible = stockVisible;
     scene.add(stockMesh);
   }
@@ -196,20 +230,42 @@
     }
 
     if (isTurning) {
-      const insertSize = Math.max(Number(noseRadius) * 8 || Number(stockDiameter) * 0.08 || 0.08, 0.04);
-      if (!toolMesh || toolMesh.userData.kind !== 'turning' || toolMesh.userData.size !== insertSize) {
+      // A real toolholder + insert, sized off the stock so it reads clearly
+      // at any part scale - the old tiny 4-sided cone (sized only off
+      // noseRadius, which is often unset) was nearly invisible in practice.
+      const stockRadius = Number(stockDiameter) > 0 ? stockEnvelopeRadius(Number(stockDiameter), stockShape) : 0.5;
+      const insertSize = Math.max(Number(noseRadius) * 6, stockRadius * 0.06, 0.02);
+      const holderWidth = Math.max(stockRadius * 0.22, 0.08);
+      const holderLength = Math.max(stockRadius * 1.4, 0.5);
+
+      if (!toolMesh || toolMesh.userData.kind !== 'turning' || toolMesh.userData.size !== insertSize || toolMesh.userData.holderWidth !== holderWidth) {
         disposeTool();
-        toolMesh = new THREE.Mesh(
-          new THREE.ConeGeometry(insertSize, insertSize * 1.5, 4),
-          new THREE.MeshPhongMaterial({ color: 0x252525, emissive: 0x080808 })
+        toolMesh = new THREE.Group();
+
+        // Insert tip - marks the exact contact point, anchored at the
+        // group's local origin (= toolPosition below).
+        const insert = new THREE.Mesh(
+          new THREE.OctahedronGeometry(insertSize, 0),
+          new THREE.MeshPhongMaterial({ color: 0xd4af37, emissive: 0x2a2000 })
         );
-        toolMesh.rotation.x = Math.PI / 2;
-        toolMesh.rotation.z = Math.PI / 4;
+        toolMesh.add(insert);
+
+        // Holder shank extends outward (+Y, away from the part surface)
+        // from the tip - reads as a real tool approaching the work rather
+        // than a floating marker.
+        const holder = new THREE.Mesh(
+          new THREE.BoxGeometry(holderWidth, holderLength, holderWidth),
+          new THREE.MeshPhongMaterial({ color: 0x2b2f36 })
+        );
+        holder.position.y = holderLength / 2 + insertSize;
+        toolMesh.add(holder);
+
         toolMesh.userData.kind = 'turning';
         toolMesh.userData.size = insertSize;
+        toolMesh.userData.holderWidth = holderWidth;
         scene.add(toolMesh);
       }
-      toolMesh.position.set(toolPosition.position.x, toolPosition.position.y + insertSize * 0.75, toolPosition.position.z);
+      toolMesh.position.set(toolPosition.position.x, toolPosition.position.y, toolPosition.position.z);
       toolMesh.visible = toolVisible;
       return;
     }
