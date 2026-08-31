@@ -658,7 +658,7 @@
   // get their own label/color here rather than the raw "milling" string, so
   // it's clear at a glance which ones went through the external Fusion 360
   // Runner instead of this app's own in-process turning/routing math.
-  const OPERATION_LABEL = { turning: 'Turning', routing: 'Routing', milling: 'Fusion', tubestock: 'Tube Stock' };
+  const OPERATION_LABEL = { turning: 'Turning', routing: 'Routering', milling: 'Fusion', tubestock: 'Tube Stock' };
   function operationLabel(operationType) {
     return OPERATION_LABEL[operationType] || operationType || '—';
   }
@@ -783,7 +783,7 @@
     </button>
   </div>
 </div>
-<p class="page-subtitle">Upload a STEP file — or link an existing part that already has one — and get {CAM_GCODE_FORMAT.toUpperCase()} G-code back immediately for turning (lathe) or routing.</p>
+<p class="page-subtitle">Upload a STEP file — or link an existing part that already has one — and get {CAM_GCODE_FORMAT.toUpperCase()} G-code back immediately for turning (lathe) or routering.</p>
 
 {#if !loading && materials.length === 0 && tools.length === 0 && machines.length === 0}
   <div class="card setup-warning">
@@ -914,7 +914,7 @@
         <select class="form-select" bind:value={jobFilterOperation}>
           <option value="">All Operations</option>
           <option value="turning">Turning</option>
-          <option value="routing">Routing</option>
+          <option value="routing">Routering</option>
           <option value="milling">Fusion</option>
         </select>
       </div>
@@ -1119,7 +1119,7 @@
             <legend class="form-label">Operation</legend>
             <div class="job-choice-options job-choice-options--operation">
               <button type="button" class="btn" class:btn-primary={newJobOperation === 'turning'} class:btn-secondary={newJobOperation !== 'turning'} aria-pressed={newJobOperation === 'turning'} on:click={() => (newJobOperation = 'turning')}>Turning</button>
-              <button type="button" class="btn" class:btn-primary={newJobOperation === 'routing'} class:btn-secondary={newJobOperation !== 'routing'} aria-pressed={newJobOperation === 'routing'} on:click={() => (newJobOperation = 'routing')}>Routing</button>
+              <button type="button" class="btn" class:btn-primary={newJobOperation === 'routing'} class:btn-secondary={newJobOperation !== 'routing'} aria-pressed={newJobOperation === 'routing'} on:click={() => (newJobOperation = 'routing')}>Routering</button>
               <button type="button" class="btn" class:btn-primary={newJobOperation === 'tubestock'} class:btn-secondary={newJobOperation !== 'tubestock'} aria-pressed={newJobOperation === 'tubestock'} on:click={() => { newJobOperation = 'tubestock'; newJobSource = 'upload'; }}>Tube Stock</button>
             </div>
           </fieldset>
@@ -1526,7 +1526,7 @@
           <label class="form-label" for="mp-operation">Operation Type</label>
           <div class="source-toggle" id="mp-operation">
             <button class="btn btn-sm" class:btn-primary={machineForm.operation_type === 'turning'} class:btn-secondary={machineForm.operation_type !== 'turning'} on:click={() => setMachineFormOperation('turning')}>Turning (Lathe)</button>
-            <button class="btn btn-sm" class:btn-primary={machineForm.operation_type === 'routing'} class:btn-secondary={machineForm.operation_type !== 'routing'} on:click={() => setMachineFormOperation('routing')}>Routing (Router)</button>
+            <button class="btn btn-sm" class:btn-primary={machineForm.operation_type === 'routing'} class:btn-secondary={machineForm.operation_type !== 'routing'} on:click={() => setMachineFormOperation('routing')}>Routering (Router)</button>
             <button class="btn btn-sm" class:btn-primary={machineForm.operation_type === 'tubestock'} class:btn-secondary={machineForm.operation_type !== 'tubestock'} on:click={() => setMachineFormOperation('tubestock')}>Tube Stock (Rotary Drill)</button>
           </div>
         </div>

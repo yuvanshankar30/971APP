@@ -38,7 +38,7 @@
       <div class="form-row">
         <div class="form-group">
           <label class="form-label" for="cf-tube-feed">Feed rate (in/min)</label>
-          <input id="cf-tube-feed" class="form-input" type="number" bind:value={params.feedRate} title="A straight drilling plunge - much slower than a routing contour pass" />
+          <input id="cf-tube-feed" class="form-input" type="number" bind:value={params.feedRate} title="A straight drilling plunge - much slower than a routering contour pass" />
         </div>
         <div class="form-group">
           <label class="form-label" for="cf-tube-spindle">Spindle speed (RPM)</label>
