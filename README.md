@@ -11,6 +11,10 @@ file, **keep this current when a feature is added, removed, or changes
 scope** - it's the one place meant to answer "does this app do X?" without
 reading code.
 
+All destructive and state-changing confirmations use a shared in-app dialog,
+including typed confirmation for irreversible bulk actions, rather than native
+browser confirmation or prompt popups.
+
 - **Manufacturing/CAM**: part tracking through the manufacturing pipeline
   (queued → in-progress → completed), STEP file 3D viewing, BOM and build
   tracking, kitting, bins, post-processing, router-specific workflows,
@@ -29,20 +33,32 @@ reading code.
   is a separate sub-section, **Fusion CAM** (`/autocam/fusion`), backed by
   an actual Fusion 360 Runner rather than in-process math. See the
   **AutoCAM** section below for the code-level detail on all three.
+  Completed routing jobs also have a switchable 2D preview and a routing-only
+  3D toolpath simulator with rapid, cutting, and ramp/plunge paths
+  distinguished, a moving flat end mill, distance scrubbing, and tool-change
+  stepping for multi-tool jobs.
 - **Scouting**: pit scouting (a topic-at-a-time form with per-topic
   completion counts, scout/contact attribution, and up to three robot photos,
   built for filling in a noisy pit on a phone while a team answers out of
   order), alliance-tinted match scouting with event-team type-ahead and
   structured auto collision/fuel-source plus intake-speed/jam observations,
-  and named drawn autonomous paths that can be reopened for later reports,
+  and an explicit named autonomous-path file library with “Save as new file”
+  and “Load file” actions independent of report submission, a 29-by-29-inch
+  robot footprint, centerline-conflict marking, and hub/trench collision
+  prevention,
   data scouting, free-form notes,
+  an Event Analysis view in Data Scouting that consolidates submitted data
+  observations (including released vision observations), match reports, pit
+  profiles, notes, and ACE Team problem reports into coverage graphs and a
+  shareable Google Docs report for the signed-in scout,
   cross-team data discovery and analysis (`discover/`), a consolidated
   team-view, and scouting-admin tooling (assignment management, form/config
   editing) - integrates with The Blue Alliance API for competition data.
 - **Vision Scouting**: a real Competition-folder nav tab, open to every
   approved user like the rest of Competition (no special permission needed),
   running post-match, multi-camera ML processing at `/scouting/vision` for
-  robot trajectories/mobility, fuel, and climbing.
+  robot trajectories/mobility, fuel, and climbing, with a calibrated
+  red/blue field-occupancy heatmap that fills as trajectory results arrive.
   A full BF16 Qwen3-VL-30B-A3B service on NVIDIA DGX Spark proposes semantic
   events from bounded multi-camera clips; a
   separate versioned YOLO/ByteTrack runner supplies dense tracking and
@@ -80,7 +96,8 @@ reading code.
 - **Attendance**: attendance logging against configured locations/schedules,
   surfaced on user profiles.
 - **Profile**: per-user profile settings and personal stats (attendance
-  history, etc.).
+  history, etc.), plus the standard theme selector and an authenticated
+  Arin-only Slack-style special-theme gallery.
 - **Pick List** (`scouting/`): a team-comparison / pick-list workspace for the
   active event. Named for what it produces: it was previously labelled "Data
   Scouting" in the nav, which collided with the separate `datascout` route and
@@ -119,7 +136,9 @@ reading code.
   continues the saved route; only Clear removes it. Auto scoring accepts an
   exact estimate, a bounded range such as `40-60` (stored average `50`), or an open
   lower bound such as `100+` (conservatively stored as at least `100`). Teleop
-  adds optional observed-role tags and five quick ratings while keeping every
+  also offers an optional ball-count estimate in 25-ball buckets through an
+  open-ended `500+` bucket, storing the selected label and parsed bounds for
+  later analytics. It adds optional observed-role tags and five quick ratings while keeping every
   subjective input skippable; teleop and post-match prose areas are deliberately
   large enough for real scout observations. The live
   Data Scouting form deliberately omits shift toggles and subjective speed/
@@ -248,7 +267,9 @@ own docs are all together in one place instead of scattered across
   polygonal exteriors, tubes, and formed parts are rejected rather than
   approximated as a round turning envelope.
 - **`autocam/toolpathPreview.js`** - parses generated G-code back into a
-  toolpath for preview (`autocam/components/ToolpathViewer.svelte`).
+  toolpath for the 2D preview and 3D simulator, including a cumulative-distance
+  interpolation helper for playback (`autocam/components/ToolpathViewer.svelte`,
+  `autocam/components/ToolpathSimulator.svelte`).
 - **`autocam/drive_watcher.js`** - Google Drive input-sweep (`cad` →
   auto-queue) and output-delivery (finished G-code → dated `cammed`
   subfolder) - see `autocam/docs/drive-watcher-folder-layout.md` for the real folder
@@ -354,7 +375,8 @@ AutoCAM's own code (engine, Drive watcher, `camJobs.js`, its components) is
 - **`matchScouting.js`** - shared match-scout vocabularies and the parser that
   turns exact/range/open-ended auto point estimates into explicit numeric
   bounds and a conservative aggregation value; `RebuiltFieldMap.svelte` owns
-  the reusable 2026 field-relative drawing surface.
+  the reusable 2026 field-relative drawing surface, including the 29-inch
+  footprint, protected-geometry validation, and centerline-overlap analysis.
 - **`config/`** - feature flags (e.g. `DISABLE_AUTOCAM` - see **Known
   gaps**, the legacy autocam system this flag referred to has since been
   removed entirely).

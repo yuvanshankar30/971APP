@@ -1,5 +1,6 @@
 <script>
   import { browser } from '$app/environment';
+  import { requestConfirmation } from '$lib/confirmation.js';
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
   import { supabase } from '$lib/supabase.js';
@@ -207,7 +208,7 @@
   }
 
   async function deleteSubsystem() {
-    if (!confirm('Are you sure you want to delete this subsystem? This will also delete all associated builds and data. This action cannot be undone.')) {
+    if (!await requestConfirmation({ title: 'Delete subsystem', message: 'Delete this subsystem and all associated builds and data? This cannot be undone.', confirmLabel: 'Delete subsystem', danger: true })) {
       return;
     }
 
@@ -362,7 +363,7 @@
       return;
     }
 
-    if (!confirm('Are you sure you want to remove this member from the subsystem?')) {
+    if (!await requestConfirmation({ message: 'Remove this member from the subsystem?', confirmLabel: 'Remove member', danger: true })) {
       return;
     }
 
@@ -402,7 +403,7 @@
       return;
     }
 
-    if (!confirm('Are you sure you want to transfer subsystem leadership? This action cannot be undone.')) {
+    if (!await requestConfirmation({ title: 'Transfer subsystem leadership', message: 'Transfer subsystem leadership? This cannot be undone.', confirmLabel: 'Transfer leadership', danger: true })) {
       return;
     }
 

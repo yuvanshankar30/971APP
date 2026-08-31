@@ -1,4 +1,5 @@
 <script>
+  import { requestConfirmation } from '$lib/confirmation.js';
   import { onMount, tick } from 'svelte';
   import { goto } from '$app/navigation';
   import { Gantt, Willow } from 'wx-svelte-gantt';
@@ -968,7 +969,7 @@
 
   async function deleteP0Bug() {
     if (!editingP0BugId || typeof window === 'undefined') return;
-    const confirmed = window.confirm('Delete this P0 bug? This will also remove any fixing task that only exists for this bug.');
+    const confirmed = await requestConfirmation({ title: 'Delete P0 bug', message: 'Delete this P0 bug? This will also remove any fixing task that only exists for this bug.', confirmLabel: 'Delete', danger: true });
     if (!confirmed) return;
 
     saving = true;
@@ -1143,7 +1144,7 @@
   }
 
   async function deleteItem() {
-    if (!editingItemId || !confirm('Delete this planner item?')) return;
+    if (!editingItemId || !await requestConfirmation({ title: 'Delete planner item', message: 'Delete this planner item?', confirmLabel: 'Delete', danger: true })) return;
     await submitPlannerAction({
       action: 'delete-item',
       item_id: editingItemId
@@ -1189,7 +1190,7 @@
   }
 
   async function deleteRule(ruleId) {
-    if (!confirm('Delete this calendar rule?')) return;
+    if (!await requestConfirmation({ title: 'Delete calendar rule', message: 'Delete this calendar rule?', confirmLabel: 'Delete', danger: true })) return;
     await submitPlannerAction({
       action: 'delete-calendar-rule',
       rule_id: ruleId
@@ -2592,13 +2593,13 @@
     --wx-gantt-border-color: #0f172a09;
     --wx-gantt-border: 1px solid #0f172a09;
     --wx-timescale-border: 1px solid #0f172a08;
-    --wx-timescale-font: 700 0.72rem/1.1 system-ui, sans-serif;
+    --wx-timescale-font: 700 0.72rem/1.1 var(--font-standard);
     --wx-timescale-font-color: #475569;
     --wx-timescale-text-transform: none;
-    --wx-grid-header-font: 700 0.72rem/1.1 system-ui, sans-serif;
+    --wx-grid-header-font: 700 0.72rem/1.1 var(--font-standard);
     --wx-grid-header-font-color: #334155;
     --wx-grid-header-shadow: none;
-    --wx-grid-body-font: 500 0.78rem/1.2 system-ui, sans-serif;
+    --wx-grid-body-font: 500 0.78rem/1.2 var(--font-standard);
     --wx-grid-body-font-color: #0f172a;
     --wx-grid-body-row-border: 1px solid #0f172a08;
     --wx-grid-body-cell-border: 1px solid #0f172a04;
@@ -2609,7 +2610,7 @@
     --wx-gantt-holiday-background: rgba(15, 23, 42, 0.015);
     --wx-gantt-holiday-color: #94a3b8;
     --wx-gantt-marker-color: rgba(241, 195, 49, 0.55);
-    --wx-gantt-marker-font: 700 0.68rem/1.1 system-ui, sans-serif;
+    --wx-gantt-marker-font: 700 0.68rem/1.1 var(--font-standard);
     --wx-gantt-bar-border-radius: 4px;
     --wx-gantt-milestone-border-radius: 4px;
     --wx-gantt-bar-shadow: none;

@@ -20,6 +20,7 @@
   let compareRightKey = '';
   let voteSaving = false;
   let voteMessage = '';
+  let pairwiseVotingAvailable = true;
 
   const fmt = (value) => value == null ? '—' : Number(value).toFixed(1);
   const fmtPercent = (value) => value == null ? '—' : `${Math.round(value * 100)}%`;
@@ -109,6 +110,7 @@
     const pitEntries = pitResult?.success ? pitResult.data : [];
     const problemReports = problemResult?.success ? problemResult.data : [];
     pairwiseVotes = comparisonResult?.success ? comparisonResult.data : [];
+    pairwiseVotingAvailable = !comparisonResult?.unavailable;
     if (!scoutResult?.success) warning = scoutResult?.error || 'Local scouting data is unavailable.';
     else if (scoutResult.truncated) warning = 'Only the first 50,000 scouting observations were loaded.';
     if (!notesResult?.success) warning = `${warning ? `${warning} ` : ''}${notesResult?.error || 'Scouting notes are unavailable.'}`;
@@ -230,13 +232,15 @@
             <p>Choose two different teams to compare and vote.</p>
           {:else if selectedPair.voteCount}
             <p>{selectedPair.voteCount} scout vote{selectedPair.voteCount === 1 ? '' : 's'} · Team {compareLeft.team_number}: {fmtPercent(selectedPair.firstShare)} · Team {compareRight.team_number}: {fmtPercent(selectedPair.secondShare)}</p>
+          {:else if !pairwiseVotingAvailable}
+            <p>Human comparison voting will be available after the scouting consensus data migration is applied.</p>
           {:else}
             <p>No preference votes for this matchup yet.</p>
           {/if}
         </div>
         <div class="vote-buttons">
-          <button class="btn btn-sm" class:vote-leader={selectedPair.leaderKey === compareLeftKey} disabled={voteSaving || compareLeftKey === compareRightKey} on:click={() => savePairwiseVote(compareLeftKey)}>Prefer #{compareLeft.team_number}</button>
-          <button class="btn btn-sm" class:vote-leader={selectedPair.leaderKey === compareRightKey} disabled={voteSaving || compareLeftKey === compareRightKey} on:click={() => savePairwiseVote(compareRightKey)}>Prefer #{compareRight.team_number}</button>
+          <button class="btn btn-sm" class:vote-leader={selectedPair.leaderKey === compareLeftKey} disabled={!pairwiseVotingAvailable || voteSaving || compareLeftKey === compareRightKey} on:click={() => savePairwiseVote(compareLeftKey)}>Prefer #{compareLeft.team_number}</button>
+          <button class="btn btn-sm" class:vote-leader={selectedPair.leaderKey === compareRightKey} disabled={!pairwiseVotingAvailable || voteSaving || compareLeftKey === compareRightKey} on:click={() => savePairwiseVote(compareRightKey)}>Prefer #{compareRight.team_number}</button>
         </div>
       </div>
       {#if voteMessage}<p class="vote-message" aria-live="polite">{voteMessage}</p>{/if}

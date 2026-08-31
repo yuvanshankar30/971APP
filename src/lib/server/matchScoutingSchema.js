@@ -187,6 +187,31 @@ export function normalizeMatchScoutEntry(body, actorId = null) {
   };
 }
 
+/** A reusable autonomous-path file saved independently of a match report. */
+export function normalizeAutoPathFile(body, actorId = null) {
+  const event_key = trimmed(body?.event_key, 60);
+  const team_key = normalizeTeamKey(body?.team_key);
+  const name = trimmed(body?.name, 120);
+  const path = normalizeAutoPath(body?.path);
+  if (!event_key) return { value: null, error: 'event_key is required' };
+  if (!team_key) return { value: null, error: 'A valid team_key is required (e.g. frc971)' };
+  if (!name) return { value: null, error: 'A path name is required' };
+  if (path.length < 2) return { value: null, error: 'Draw a path before saving the file' };
+
+  return {
+    value: {
+      event_key,
+      team_key,
+      name,
+      alliance: oneOf(body?.alliance, ['red', 'blue']),
+      path,
+      created_by: actorId,
+      updated_at: new Date().toISOString()
+    },
+    error: null
+  };
+}
+
 /**
  * A match scout flagging a mechanical problem for the pit crew. Severity is
  * derived from what was observed rather than trusted from the client: a robot

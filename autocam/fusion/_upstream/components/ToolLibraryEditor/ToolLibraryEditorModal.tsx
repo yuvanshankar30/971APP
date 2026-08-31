@@ -10,6 +10,7 @@ import BasicInfoSection from "./sections/BasicInfoSection";
 import GeometrySection from "./sections/GeometrySection";
 import PostProcessSection from "./sections/PostProcessSection";
 import PresetsSection from "./sections/PresetsSection";
+import { ConfirmationDialog } from "@/components/ConfirmationDialog/ConfirmationDialog";
 
 interface ToolLibraryEditorModalProps {
   isOpen: boolean;
@@ -35,6 +36,7 @@ export default function ToolLibraryEditorModal({
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [showDiscardConfirmation, setShowDiscardConfirmation] = useState(false);
 
   // Load tool library when modal opens
   useEffect(() => {
@@ -189,9 +191,8 @@ export default function ToolLibraryEditorModal({
 
   const handleClose = useCallback(() => {
     if (hasUnsavedChanges) {
-      if (!confirm("You have unsaved changes. Are you sure you want to close?")) {
-        return;
-      }
+      setShowDiscardConfirmation(true);
+      return;
     }
     onClose();
   }, [hasUnsavedChanges, onClose]);
@@ -400,6 +401,18 @@ export default function ToolLibraryEditorModal({
                 </PrimaryButton>
               </div>
             </div>
+            <ConfirmationDialog
+              open={showDiscardConfirmation}
+              title="Discard unsaved changes"
+              message="You have unsaved changes. Close without saving them?"
+              confirmLabel="Discard changes"
+              danger
+              onCancel={() => setShowDiscardConfirmation(false)}
+              onConfirm={() => {
+                setShowDiscardConfirmation(false);
+                onClose();
+              }}
+            />
           </motion.div>
         </motion.div>
       )}

@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { BALL_COUNT_RANGES, continueAutoPath, parseAutoPointsEstimate } from './matchScouting.js';
+import {
+  AUTO_ROBOT_SIZE,
+  BALL_COUNT_RANGES,
+  autoCenterlineIntervals,
+  autoRobotCollision,
+  canExtendAutoPath,
+  continueAutoPath,
+  parseAutoPointsEstimate,
+  robotBoundsAtAutoPoint
+} from './matchScouting.js';
 
 describe('parseAutoPointsEstimate', () => {
   it('keeps an exact count exact', () => {
@@ -89,5 +98,33 @@ describe('BALL_COUNT_RANGES', () => {
 
     const middle = parseAutoPointsEstimate('75-100');
     expect(middle.average).toBe(87.5);
+  });
+});
+
+describe('autonomous robot footprint', () => {
+  it('uses a square 29-inch robot footprint', () => {
+    const bounds = robotBoundsAtAutoPoint([50, 50]);
+    expect(AUTO_ROBOT_SIZE.width).toBeCloseTo(AUTO_ROBOT_SIZE.height, 1);
+    expect(bounds.width).toBeCloseTo(AUTO_ROBOT_SIZE.width, 6);
+    expect(bounds.height).toBeCloseTo(AUTO_ROBOT_SIZE.height, 6);
+  });
+
+  it('rejects robot positions that overlap a hub or protected trench', () => {
+    expect(autoRobotCollision([29.2, 50])?.id).toBe('own-hub');
+    expect(autoRobotCollision([27.7, 8.5])?.id).toBe('own-top-trench');
+  });
+
+  it('does not let a fast path extension jump through a hub', () => {
+    const result = canExtendAutoPath([[15, 50]], [45, 50]);
+    expect(result.allowed).toBe(false);
+    expect(result.collision?.id).toBe('own-hub');
+    expect(autoRobotCollision(result.lastSafePoint)).toBeNull();
+  });
+
+  it('returns only the portion of a path segment that overlaps a centerline', () => {
+    const intervals = autoCenterlineIntervals([40, 30], [60, 30]);
+    expect(intervals).toHaveLength(1);
+    expect(intervals[0][0]).toBeGreaterThan(0);
+    expect(intervals[0][1]).toBeLessThan(1);
   });
 });

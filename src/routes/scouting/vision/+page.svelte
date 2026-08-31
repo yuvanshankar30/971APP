@@ -1,4 +1,5 @@
 <script>
+  import { requestConfirmation } from '$lib/confirmation.js';
   import { onMount } from 'svelte';
   import { Camera, ChevronRight, Eye, RefreshCw, Upload, Video, LayoutDashboard, UploadCloud } from 'lucide-svelte';
   import { getAuthHeader, supabase } from '$lib/supabase.js';
@@ -6,6 +7,7 @@
   import { userStore } from '$lib/stores/auth.js';
   import { hasPermission } from '$lib/permissions.js';
   import VisionCalibrator from '$lib/components/VisionCalibrator.svelte';
+  import VisionHeatmap from '$lib/components/VisionHeatmap.svelte';
 
   let user = null;
   userStore.subscribe((v) => { user = v; });
@@ -242,7 +244,7 @@
   }
 
   async function cancelRun(run) {
-    if (!confirm(`Cancel ${run.model_name} ${run.model_version}? A runner already working on it will fail the job when it finishes.`)) return;
+    if (!await requestConfirmation({ title: 'Cancel vision run', message: `Cancel ${run.model_name} ${run.model_version}? A runner already working on it will fail the job when it finishes.`, confirmLabel: 'Cancel run', danger: true })) return;
     busy = true;
     error = '';
     try {
@@ -266,7 +268,7 @@
 
   let releasingRunId = '';
   async function releaseRun(run) {
-    if (!confirm(`Release ${run.model_name} ${run.model_version}'s results into real scouting data? This cannot be undone.`)) return;
+    if (!await requestConfirmation({ title: 'Release scouting results', message: `Release ${run.model_name} ${run.model_version}'s results into real scouting data? This cannot be undone.`, confirmLabel: 'Release', danger: true })) return;
     releasingRunId = run.id;
     error = '';
     try {
@@ -364,7 +366,7 @@
 
   async function reviewVisible(status) {
     if (!bulkReviewable.length) return;
-    if (!confirm(`Mark ${bulkReviewable.length} shown observation(s) as ${status}?`)) return;
+    if (!await requestConfirmation({ title: 'Review observations', message: `Mark ${bulkReviewable.length} shown observation(s) as ${status}?`, confirmLabel: 'Confirm' })) return;
     busy = true;
     error = '';
     try {
@@ -556,6 +558,7 @@
       {#if detail.tracks.length}
         <section class="surface-card section">
           <h2>Robot tracks & mobility</h2>
+          <VisionHeatmap tracks={detail.tracks} />
           <div class="roster-bar">
             {#if expectedRobots}
               <span>Match roster: {rosterFor('red').map((k) => k.replace(/^frc/i, '')).join(', ') || '—'} vs {rosterFor('blue').map((k) => k.replace(/^frc/i, '')).join(', ') || '—'}</span>
@@ -740,7 +743,7 @@
   .released-tag { color:var(--brand-gold-base,#d9a413); font-style:normal; font-size:.75rem; text-transform:uppercase; letter-spacing:.05em; }
   .table-wrap { overflow:auto; } table { width:100%; border-collapse:collapse; } th,td { padding:var(--space-2); border-bottom:1px solid var(--border); text-align:left; white-space:nowrap; }
   .identity-editor { display:flex; gap:var(--gap-1); }
-  .roster-bar { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:var(--gap-2); margin-bottom:var(--space-2); color:var(--text-muted); font-size:.82rem; }
+  .roster-bar { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:var(--gap-2); margin:var(--space-4) 0 var(--space-2); color:var(--text-muted); font-size:.82rem; }
   .track-warning { margin:0 0 var(--space-2); color:var(--danger); font-size:.82rem; }
   .observation-list > div { display:grid; grid-template-columns:minmax(9rem,.75fr) minmax(11rem,1fr) minmax(0,1.5fr) auto; gap:var(--gap-2); padding:var(--space-3) var(--space-2); border-bottom:1px solid var(--border); align-items:center; }
   .observation-list code { min-width:0; overflow-wrap:anywhere; white-space:pre-wrap; font-size:.78rem; color:var(--text-muted); }

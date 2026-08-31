@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   BALL_COUNT_RANGES,
   RATING_FIELDS,
+  normalizeAutoPathFile,
   normalizeAutoPath,
   normalizeMatchScoutEntry,
   normalizePitProblemReport,
@@ -166,6 +167,22 @@ describe('normalizeMatchScoutEntry', () => {
     const { value } = normalizeMatchScoutEntry({ ...base, post_notes: 'x'.repeat(10_000) });
     expect(value.post_notes.length).toBe(4000);
     expect(normalizeMatchScoutEntry({ ...base, auto_path_name: 'x'.repeat(300) }).value.auto_path_name.length).toBe(120);
+  });
+});
+
+describe('normalizeAutoPathFile', () => {
+  const base = { event_key: '2026casj', team_key: '971', name: 'Center four-piece', path: [[1, 2], [3, 4]] };
+
+  it('normalizes a reusable path independently of a match report', () => {
+    expect(normalizeAutoPathFile({ ...base, alliance: 'blue' }, 'user-1').value).toMatchObject({
+      event_key: '2026casj', team_key: 'frc971', name: 'Center four-piece',
+      alliance: 'blue', path: [[1, 2], [3, 4]], created_by: 'user-1'
+    });
+  });
+
+  it('requires a name and an actual drawn path', () => {
+    expect(normalizeAutoPathFile({ ...base, name: '' }).error).toMatch(/name/);
+    expect(normalizeAutoPathFile({ ...base, path: [[1, 2]] }).error).toMatch(/Draw a path/);
   });
 });
 

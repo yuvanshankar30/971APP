@@ -1,4 +1,5 @@
 <script>
+  import { requestConfirmation } from '$lib/confirmation.js';
   import { onMount } from 'svelte';
   import { getAuthHeader } from '$lib/supabase.js';
   import { toastActions } from '$lib/toast.js';
@@ -202,7 +203,7 @@
 
   async function deleteRule(ruleId) {
     if (!ruleId) return;
-    if (!confirm('Delete this planner calendar rule?')) return;
+    if (!await requestConfirmation({ title: 'Delete calendar rule', message: 'Delete this planner calendar rule?', confirmLabel: 'Delete', danger: true })) return;
 
     await submitPlannerAction({
       action: 'delete-calendar-rule',

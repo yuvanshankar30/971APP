@@ -1,4 +1,5 @@
 <script>
+  import { requestConfirmation } from '$lib/confirmation.js';
   import { onMount } from 'svelte';
   import { supabase } from '$lib/supabase.js';
   import { toastActions } from '$lib/toast.js';
@@ -68,7 +69,7 @@
   }
 
   async function handleDelete(boxTube) {
-    if (!confirm(`Delete box tube "${boxTube.name}"?`)) return;
+    if (!await requestConfirmation({ title: 'Delete box tube', message: `Delete box tube "${boxTube.name}"?`, confirmLabel: 'Delete', danger: true })) return;
     try {
       await deleteBoxTube(boxTube.id);
       await load();

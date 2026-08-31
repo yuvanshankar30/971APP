@@ -1,5 +1,6 @@
 <script>
   import { browser } from '$app/environment';
+  import { requestConfirmation } from '$lib/confirmation.js';
   import { onMount, tick } from 'svelte';
   import { supabase } from '$lib/supabase.js';
   import { userStore, loadUserFromUUID, upsertProfileIfMissing, setUserUUID } from '$lib/stores/user.js';
@@ -823,7 +824,7 @@
   }
 
   async function deleteSubsystem(subsystemId) {
-    if (!confirm('Are you sure you want to delete this subsystem? This will also delete all associated builds and data. This action cannot be undone.')) {
+    if (!await requestConfirmation({ title: 'Delete subsystem', message: 'Delete this subsystem and all associated builds and data? This cannot be undone.', confirmLabel: 'Delete subsystem', danger: true })) {
       return;
     }
 
@@ -867,7 +868,7 @@
   }
 
   async function deleteBuild(buildId) {
-    if (!confirm('Are you sure you want to delete this build? This will also delete all BOM data. This action cannot be undone.')) {
+    if (!await requestConfirmation({ title: 'Delete build', message: 'Delete this build and all BOM data? This cannot be undone.', confirmLabel: 'Delete build', danger: true })) {
       return;
     }
 

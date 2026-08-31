@@ -1,4 +1,5 @@
 <script>
+  import { requestConfirmation } from '$lib/confirmation.js';
   import { onMount } from 'svelte';
   import { supabase } from '$lib/supabase.js';
   import { hasPermission, PURCHASING_ROLES } from '$lib/permissions.js';
@@ -247,7 +248,7 @@
   }
 
   async function deleteBudget(budget) {
-    if (!confirm(`Delete budget "${budget.name}"? This cannot be undone.`)) return;
+    if (!await requestConfirmation({ title: 'Delete budget', message: `Delete budget "${budget.name}"? This cannot be undone.`, confirmLabel: 'Delete', danger: true })) return;
     try {
       const { error } = await supabase.from('purchasing_budgets').delete().eq('id', budget.id);
       if (error) throw error;

@@ -1,5 +1,18 @@
 import { writable } from 'svelte/store';
 import { supabase } from '$lib/supabase.js';
+import { registerSpecialThemes } from '$lib/stores/theme.js';
+
+async function loadPrivateThemes(session) {
+  if (!session?.access_token) return registerSpecialThemes([]);
+  try {
+    const response = await fetch('/api/special-themes', { headers: { Authorization: `Bearer ${session.access_token}` } });
+    if (!response.ok) return registerSpecialThemes([]);
+    const payload = await response.json();
+    registerSpecialThemes(payload?.data || []);
+  } catch {
+    registerSpecialThemes([]);
+  }
+}
 
 /**
  * Minimal auth stores:
@@ -15,6 +28,7 @@ export const authReady = writable(false);
 let subscription = null;
 let initialized = false;
 let initCount = 0;
+const INITIAL_SESSION_TIMEOUT_MS = 2500;
 
 export async function fetchUserProfile(userId) {
   if (!userId) {
@@ -109,15 +123,34 @@ export function initAuth() {
 
     // Initial session load (safe to await here; not inside callback)
     (async () => {
-      try {
-        const { data, error } = await supabase.auth.getSession();
+      const applyInitialSession = async ({ data, error } = {}) => {
         if (error) console.warn('getSession error:', error.message || error);
         const authUser = data?.session?.user ?? null;
         user.set(authUser);
+        await loadPrivateThemes(data?.session);
         if (authUser) {
-          await fetchUserProfile(authUser.id);
+          void fetchUserProfile(authUser.id);
         } else {
           userProfile.set(null);
+        }
+      };
+
+      try {
+        const sessionRequest = supabase.auth.getSession();
+        const result = await Promise.race([
+          sessionRequest,
+          new Promise((resolve) => setTimeout(() => resolve(null), INITIAL_SESSION_TIMEOUT_MS))
+        ]);
+
+        if (result === null) {
+          console.warn('Initial auth session check timed out; continuing without blocking the app.');
+          // Preserve a delayed but valid browser session instead of requiring
+          // a reload once the local Supabase client becomes responsive.
+          void sessionRequest.then(applyInitialSession).catch((e) => {
+            console.warn('Late getSession error:', e?.message || e);
+          });
+        } else {
+          await applyInitialSession(result);
         }
       } finally {
         authReady.set(true);
@@ -129,6 +162,7 @@ export function initAuth() {
     const { data } = supabase.auth.onAuthStateChange((event, session) => {
       const authUser = session?.user ?? null;
       user.set(authUser);
+      void loadPrivateThemes(session);
 
       if (event === 'SIGNED_IN' && authUser) {
         // Avoid await inside callback to prevent deadlocks
@@ -162,6 +196,7 @@ export function initAuth() {
  */
 export async function signOut() {
   const { error } = await supabase.auth.signOut();
+  registerSpecialThemes([]);
   if (error) console.error('Error logging out:', error);
 }
 

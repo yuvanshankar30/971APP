@@ -11,6 +11,7 @@
   import { goto, afterNavigate } from '$app/navigation';
   import { page } from '$app/stores';
   import Toasts from '$lib/Toasts.svelte';
+  import ConfirmationDialog from '$lib/components/ConfirmationDialog.svelte';
   import { trackUserAttendance } from '$lib/attendance.js';
   import { toastActions } from '$lib/toast.js';
 
@@ -717,6 +718,7 @@
 {/if}
 
 <Toasts />
+<ConfirmationDialog />
 
 <style>
   :global(html) {

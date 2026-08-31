@@ -5,6 +5,7 @@
   import { fetchActiveScoutingEventKey, fetchAvailableScoutingEvents } from "$lib/scoutingEvent.js";
   import { fuelCountFromEvents } from "$lib/scoutingStats.js";
   import SeasonFilter from "$lib/components/SeasonFilter.svelte";
+  import { BarChart3, FileText, RefreshCw } from "lucide-svelte";
 
   let user;
   userStore.subscribe((v) => (user = v));
@@ -69,13 +70,19 @@
   let allCompetitionTeams = [];
   let teamsWithData = [];
   let selectedTeamForView = "";
-  let viewMode = "scout"; // scout | schedule | view
+  let viewMode = "scout"; // scout | schedule | analysis | view
   let teamEvents = [];
   let viewFilterMatch = "all";
   let viewLoading = false;
   let expandedSections = {};
   let myDataAssignments = {};
   let lastAssignmentUserId = null;
+  let eventAnalysis = null;
+  let analysisLoading = false;
+  let analysisError = "";
+  let exportingReport = false;
+  let exportMessage = "";
+  let exportDocumentUrl = "";
   function teamSort(a, b) {
     const numA = parseInt(String(a).replace(/\D/g, "")) || 0;
     const numB = parseInt(String(b).replace(/\D/g, "")) || 0;
@@ -971,10 +978,57 @@
     }
     viewLoading = false;
   }
+  $: analysisTeams = eventAnalysis?.summary?.teams || [];
+  $: analysisMaxReports = Math.max(1, ...analysisTeams.map((team) => team.total || 0));
+
+  async function openAnalysis() {
+    if (!resolvedEventKey) return;
+    viewMode = "analysis";
+    analysisLoading = true;
+    analysisError = "";
+    exportMessage = "";
+    exportDocumentUrl = "";
+    try {
+      const res = await authFetch(`/api/scouting-report?event_key=${encodeURIComponent(resolvedEventKey)}`);
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) throw new Error(data?.error || "Could not load event scouting data.");
+      eventAnalysis = data;
+    } catch (error) {
+      eventAnalysis = null;
+      analysisError = error?.message || "Could not load event scouting data.";
+    } finally {
+      analysisLoading = false;
+    }
+  }
+
+  async function exportGoogleDoc() {
+    if (!resolvedEventKey || exportingReport) return;
+    exportingReport = true;
+    exportMessage = "";
+    exportDocumentUrl = "";
+    try {
+      const res = await authFetch("/api/scouting-report", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "export-google-doc", event_key: resolvedEventKey })
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) throw new Error(data?.error || "Could not export the Google Doc.");
+      exportDocumentUrl = data.data.url;
+      exportMessage = "Google Doc created and shared with your signed-in Google account.";
+    } catch (error) {
+      exportMessage = error?.message || "Could not export the Google Doc.";
+    } finally {
+      exportingReport = false;
+    }
+  }
+
   function backToScout() {
     viewMode = "scout";
     viewFilterMatch = "all";
     teamEvents = [];
+    eventAnalysis = null;
+    analysisError = "";
   }
 
   async function loadEventOptions() {
@@ -1048,7 +1102,7 @@
       </select>
     </div>
     <div class="schedule-action">
-      {#if viewMode === "schedule"}
+      {#if viewMode === "schedule" || viewMode === "analysis" || viewMode === "view"}
         <button class="btn btn-secondary" on:click={backToScout}>
           &larr; Back to Scout
         </button>
@@ -1059,6 +1113,9 @@
           disabled={loadingMatches || matches.length === 0}
         >
           Schedule
+        </button>
+        <button class="btn btn-secondary" on:click={openAnalysis} disabled={!resolvedEventKey}>
+          <BarChart3 size={15} /> Event Analysis
         </button>
       {/if}
     </div>
@@ -1137,6 +1194,98 @@
       </div>
     {/if}
   </div>
+{:else if viewMode === "analysis"}
+  <section class="card analysis-page">
+    <div class="analysis-header">
+      <div>
+        <h3><BarChart3 size={20} /> Event Analysis</h3>
+        <p>One view of every submitted scouting record for {resolvedEventKey}: Data Scouting, Match Scouting, Pit Scouting, notes, and released vision observations.</p>
+      </div>
+      <div class="analysis-actions">
+        <button class="btn btn-outline" on:click={openAnalysis} disabled={analysisLoading} title="Refresh event analysis"><RefreshCw size={15} /></button>
+        <button class="btn btn-primary" on:click={exportGoogleDoc} disabled={analysisLoading || exportingReport || !eventAnalysis}>
+          <FileText size={15} /> {exportingReport ? "Exporting..." : "Export Google Doc"}
+        </button>
+      </div>
+    </div>
+
+    {#if analysisLoading}
+      <div class="empty-state">Loading scouting data...</div>
+    {:else if analysisError}
+      <div class="empty-state">{analysisError}</div>
+    {:else if eventAnalysis}
+      {@const totals = eventAnalysis.summary.totals}
+      <div class="stat-cards-grid analysis-totals">
+        <div class="stat-card"><div class="stat-label">Teams covered</div><div class="stat-value">{totals.teams}</div></div>
+        <div class="stat-card"><div class="stat-label">Data observations</div><div class="stat-value">{totals.data_events}</div></div>
+        <div class="stat-card"><div class="stat-label">Match reports</div><div class="stat-value">{totals.match_entries}</div></div>
+        <div class="stat-card"><div class="stat-label">Pit profiles</div><div class="stat-value">{totals.pit_entries}</div></div>
+        <div class="stat-card"><div class="stat-label">Scout notes</div><div class="stat-value">{totals.notes}</div></div>
+        <div class="stat-card" class:problem-total={totals.open_problems > 0}><div class="stat-label">Open ACE problems</div><div class="stat-value">{totals.open_problems}</div></div>
+      </div>
+
+      {#if exportMessage}
+        <p class:export-error={exportMessage.startsWith("Could not")} class="export-message">
+          {exportMessage}
+          {#if exportDocumentUrl}<a href={exportDocumentUrl} target="_blank" rel="noopener noreferrer">Open Google Doc</a>{/if}
+        </p>
+      {/if}
+
+      <section class="analysis-section">
+        <div class="analysis-section-header">
+          <h4>Scouting Coverage by Team</h4>
+          <span>Each bar combines all submitted report types.</span>
+        </div>
+        {#if analysisTeams.length}
+          <div class="coverage-chart">
+            {#each analysisTeams.slice(0, 20) as team}
+              <div class="coverage-row">
+                <div class="coverage-team">{displayTeam(team.team_key)}</div>
+                <div class="coverage-track" title={`${team.total} total reports`}>
+                  <div class="coverage-bar" style={`width:${Math.max(4, team.total / analysisMaxReports * 100)}%`}>
+                    <span>{team.total}</span>
+                  </div>
+                </div>
+                <div class="coverage-sources">D {team.data_events} · M {team.match_entries} · P {team.pit_entries} · N {team.notes}</div>
+              </div>
+            {/each}
+          </div>
+        {:else}
+          <p class="text-muted">No submitted scouting records yet.</p>
+        {/if}
+      </section>
+
+      <section class="analysis-section team-records">
+        <div class="analysis-section-header">
+          <h4>All Collected Team Data</h4>
+          <span>Open a team to see each scouting source represented in Data Scouting.</span>
+        </div>
+        {#each analysisTeams as team}
+          {@const pit = eventAnalysis.data.pit_entries.find((entry) => entry.team_key === team.team_key)}
+          {@const matchEntries = eventAnalysis.data.match_entries.filter((entry) => entry.team_key === team.team_key)}
+          {@const notes = eventAnalysis.data.notes.filter((entry) => entry.team_key === team.team_key)}
+          {@const problems = eventAnalysis.data.pit_problems.filter((entry) => entry.team_key === team.team_key && !entry.resolved)}
+          <details class="team-record">
+            <summary>
+              <strong>Team {displayTeam(team.team_key)}</strong>
+              <span>{team.total} records</span>
+            </summary>
+            <div class="record-grid">
+              <div><span class="label">Data scouting</span><p>{team.data_events} recorded observations, including any released vision observations.</p></div>
+              <div><span class="label">Match scouting</span><p>{matchEntries.length ? `${matchEntries.length} report${matchEntries.length === 1 ? "" : "s"} submitted.` : "No match report submitted."}</p></div>
+              <div><span class="label">Pit scouting</span><p>{pit ? `${pit.robot_archetype || "Robot profile"}${pit.estimated_bps != null ? ` · ${pit.estimated_bps} estimated BPS` : ""}` : "No pit profile submitted."}</p></div>
+              <div><span class="label">Notes and problems</span><p>{notes.length} note{notes.length === 1 ? "" : "s"}{problems.length ? ` · ${problems.length} open ACE problem${problems.length === 1 ? "" : "s"}` : ""}</p></div>
+            </div>
+            {#if notes.length}
+              <div class="record-notes">
+                {#each notes.slice(0, 4) as note}<p>{note.notes}</p>{/each}
+              </div>
+            {/if}
+          </details>
+        {/each}
+      </section>
+    {/if}
+  </section>
 {:else if viewMode === "view"}
   <!-- View Mode -->
   <div class="card">
@@ -3352,5 +3501,47 @@
 
   .flex-1 {
     flex: 1;
+  }
+
+  .analysis-page { padding: 1.25rem; }
+  .analysis-header, .analysis-section-header, .coverage-row, .team-record summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--gap-3);
+  }
+  .analysis-header { align-items: flex-start; margin-bottom: var(--gap-4); }
+  .analysis-header h3 { display: flex; align-items: center; gap: 0.45rem; margin: 0; }
+  .analysis-header p, .analysis-section-header span { margin: 0.35rem 0 0; color: var(--scout-secondary); }
+  .analysis-actions { display: flex; gap: 0.5rem; flex: 0 0 auto; }
+  .analysis-actions .btn { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.65rem 0.8rem; }
+  .analysis-totals { margin-bottom: var(--gap-4); }
+  .problem-total { border-color: var(--scout-danger); background: color-mix(in srgb, var(--scout-danger) 8%, white); }
+  .export-message { margin: 0 0 var(--gap-4); color: var(--scout-success); font-weight: 600; }
+  .export-message a { margin-left: 0.5rem; color: var(--scout-primary); }
+  .export-error { color: var(--scout-danger); }
+  .analysis-section { border-top: 1px solid var(--scout-border); padding-top: var(--gap-4); margin-top: var(--gap-4); }
+  .analysis-section h4 { margin: 0; font-size: 1rem; }
+  .coverage-chart { display: grid; gap: 0.6rem; margin-top: var(--gap-3); }
+  .coverage-row { display: grid; grid-template-columns: 4.5rem minmax(8rem, 1fr) minmax(12rem, auto); gap: 0.75rem; }
+  .coverage-team { font-weight: 800; }
+  .coverage-track { height: 1.35rem; overflow: hidden; background: var(--scout-light); border: 1px solid var(--scout-border); }
+  .coverage-bar { height: 100%; min-width: 1.5rem; display: flex; align-items: center; justify-content: flex-end; padding-right: 0.35rem; box-sizing: border-box; color: white; background: var(--scout-primary); font-size: 0.72rem; font-weight: 800; transition: width 180ms ease; }
+  .coverage-sources { font-size: 0.78rem; color: var(--scout-secondary); white-space: nowrap; }
+  .team-records { display: grid; gap: 0.45rem; }
+  .team-record { border: 1px solid var(--scout-border); background: var(--scout-light); }
+  .team-record summary { padding: 0.75rem; cursor: pointer; list-style: none; }
+  .team-record summary::-webkit-details-marker { display: none; }
+  .team-record summary span { color: var(--scout-secondary); font-size: 0.8rem; }
+  .record-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; padding: 0 0.75rem 0.75rem; }
+  .record-grid p, .record-notes p { margin: 0.25rem 0 0; font-size: 0.86rem; line-height: 1.4; }
+  .record-notes { margin: 0 0.75rem 0.75rem; padding: 0.6rem; border-left: 3px solid var(--scout-primary); background: white; }
+  @media (max-width: 700px) {
+    .analysis-header, .analysis-section-header { flex-direction: column; }
+    .analysis-actions { width: 100%; }
+    .analysis-actions .btn { flex: 1; justify-content: center; }
+    .coverage-row { grid-template-columns: 3.25rem minmax(5rem, 1fr); }
+    .coverage-sources { grid-column: 1 / -1; }
+    .record-grid { grid-template-columns: 1fr; }
   }
 </style>

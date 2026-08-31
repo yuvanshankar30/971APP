@@ -9,6 +9,12 @@ function requestClient(request) {
   });
 }
 
+function isMissingVotesTable(error) {
+  return error?.code === '42P01'
+    || error?.code === 'PGRST205'
+    || /(relation|table).*scouting_pairwise_votes.*(does not exist|schema cache)|scouting_pairwise_votes.*(does not exist|schema cache)/i.test(error?.message || '');
+}
+
 async function actorFor(client) {
   const { data } = await client.auth.getUser();
   return data?.user || null;
@@ -30,6 +36,9 @@ export async function GET({ request, url }) {
     .select('team_a_key,team_b_key,winner_team_key')
     .eq('event_key', eventKey)
     .order('updated_at', { ascending: true });
+  // The rankings themselves do not depend on pairwise votes. Let deployments
+  // that have not yet applied the optional consensus migration keep working.
+  if (error && isMissingVotesTable(error)) return json({ success: true, data: [], unavailable: true });
   if (error) return json({ error: error.message }, { status: 500 });
   return json({ success: true, data: data || [] });
 }
@@ -49,6 +58,12 @@ export async function POST({ request }) {
     .upsert(value, { onConflict: 'event_key,team_a_key,team_b_key,created_by' })
     .select('team_a_key,team_b_key,winner_team_key')
     .single();
+  if (error && isMissingVotesTable(error)) {
+    return json({
+      error: 'Human comparison voting is unavailable until the scouting pairwise-votes migration is applied.',
+      code: 'SCOUTING_PAIRWISE_VOTES_UNAVAILABLE'
+    }, { status: 503 });
+  }
   if (error) return json({ error: error.message }, { status: 500 });
   return json({ success: true, data });
 }

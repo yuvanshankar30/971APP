@@ -4,8 +4,9 @@
   import { userStore, fetchUserProfile, signOut } from '$lib/stores/auth.js';
   import { supabase } from '$lib/supabase.js';
   import { toastActions } from '$lib/toast.js';
+  import { requestConfirmation } from '$lib/confirmation.js';
   import navigation from '$lib/navigation.json';
-  import { theme, setTheme } from '$lib/stores/theme.js';
+  import { theme, setTheme, specialThemesAllowed, specialThemeGroups } from '$lib/stores/theme.js';
   import { setLoginScreenStyle } from '$lib/stores/loginScreenPref.js';
   import { defaultHeaderTabs } from '$lib/defaultTabs.js';
   import HeaderPreview from '$lib/components/HeaderPreview.svelte';
@@ -132,19 +133,19 @@
     autosave();
   }
 
-  function removeEntry(idx) {
+  async function removeEntry(idx) {
     ensureHeaderTabs();
-    if (!confirm('Remove this tab/folder?')) return;
+    if (!await requestConfirmation({ message: 'Remove this tab or folder?', confirmLabel: 'Remove', danger: true })) return;
     header_tabs.splice(idx, 1);
     header_tabs = header_tabs.slice();
     toastActions.show('Removed');
     autosave();
   }
 
-  function removeChild(folderIdx, childIdx) {
+  async function removeChild(folderIdx, childIdx) {
     ensureHeaderTabs();
     const f = header_tabs[folderIdx];
-    if (!confirm('Remove this tab from the folder?')) return;
+    if (!await requestConfirmation({ message: 'Remove this tab from the folder?', confirmLabel: 'Remove', danger: true })) return;
     if (f && Array.isArray(f.children)) f.children.splice(childIdx, 1);
     header_tabs = header_tabs.slice();
     toastActions.show('Removed');
@@ -306,7 +307,7 @@
 
   async function resetNavigation() {
     if (!user?.id) return toastActions.show('Not signed in');
-    if (!confirm('Reset navigation to defaults? This will remove all custom folders/tabs you have added.')) return;
+    if (!await requestConfirmation({ title: 'Reset navigation', message: 'Reset navigation to defaults? This removes all custom folders and tabs you have added.', confirmLabel: 'Reset navigation', danger: true })) return;
     resettingNav = true;
     try {
       const { error } = await supabase
@@ -367,6 +368,22 @@
         </select>
         <small class="form-help">Applies instantly and is remembered on this device.</small>
       </label>
+      {#if $specialThemesAllowed}
+        <div class="special-themes" aria-label="Arin-only special themes">
+          <div class="special-theme-heading"><div><strong>Special themes</strong><small>Private theme gallery for Arin Rao.</small></div></div>
+          {#each $specialThemeGroups as group}
+            <h4>{group.label}</h4>
+            <div class="theme-grid">
+              {#each group.themes as specialTheme}
+                <button type="button" class="theme-card" class:selected={$theme === specialTheme.id} aria-pressed={$theme === specialTheme.id} on:click={() => setTheme(specialTheme.id)}>
+                  <span class="theme-swatch" style={`--swatch-a:${specialTheme.preview[0]};--swatch-b:${specialTheme.preview[1]}`}></span>
+                  <span>{specialTheme.label}</span>
+                </button>
+              {/each}
+            </div>
+          {/each}
+        </div>
+      {/if}
       <label class="form-label" for="login-screen-select">Login Screen
         <select class="form-select" id="login-screen-select" value={login_screen_style} on:change={(e) => saveLoginScreenStyle(e.target.value)}>
           <option value="legacy">Legacy Login</option>
@@ -562,6 +579,15 @@
   .preview-container { margin: var(--space-6) 0; padding: var(--space-4); background: var(--background); border: 1px solid var(--border); border-radius: var(--radius-sm); }
   .preview-container h4 { margin-top: 0; margin-bottom: var(--space-3); font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); }
   .notification-grid { display: flex; flex-direction: column; gap: var(--space-3); }
+  .special-themes { margin:var(--space-5) 0; padding-top:var(--space-4); border-top:1px solid var(--border); }
+  .special-theme-heading div { display:grid; gap:2px; }
+  .special-theme-heading small { color:var(--text-muted); }
+  .special-themes h4 { color:var(--text-muted); }
+  .theme-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:var(--gap-3); }
+  .theme-card { min-height:5.2rem; display:flex; align-items:center; gap:var(--gap-3); padding:var(--space-3); border:1px solid var(--border); border-radius:var(--radius-lg); background:var(--surface-1); color:var(--text); text-align:left; font-weight:600; cursor:pointer; }
+  .theme-card:hover { border-color:var(--text-muted); background:var(--surface-2); }
+  .theme-card.selected { border-color:var(--blue-base); box-shadow:0 0 0 1px var(--blue-base); }
+  .theme-swatch { width:3.5rem; height:3.5rem; flex:0 0 3.5rem; border-radius:50%; border:1px solid rgba(255,255,255,.18); background:linear-gradient(135deg,var(--swatch-a),var(--swatch-b)); }
   .notify-row { display: flex; gap: var(--gap-3); align-items: flex-start; padding: var(--space-2) 0; border-bottom: 1px solid var(--border); }
   .notify-row:last-child { border-bottom: none; }
   .notify-label { font-weight: 600; }
@@ -602,6 +628,7 @@
       grid-template-columns: repeat(2, 1fr);
       gap: var(--gap-2);
     }
+    .theme-grid { grid-template-columns:1fr; }
     
     .role-box {
       padding: var(--space-3);

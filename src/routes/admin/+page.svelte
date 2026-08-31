@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte';
+  import { requestConfirmation } from '$lib/confirmation.js';
   import { userStore, getUserUUID } from '$lib/stores/user.js';
   import { fetchUserProfile } from '$lib/stores/auth.js';
   import { PERMISSIONS, hasPermission, GENERAL_ROLES, PURCHASING_ROLES, TEAM_ROLES, FRC_TEAMS } from '$lib/permissions.js';
@@ -178,7 +179,7 @@
     const next = checked
       ? Array.from(new Set([...current, workflow]))
       : current.filter((w) => w !== workflow);
-    updateUserRoles(user, { manufacturing_lead_workflows: next });
+    updateUserNotifications(user, { manufacturing_lead_workflows: next });
   }
 
   // Vision alerts: a single opt-in flag (user_profiles.vision_notify),
@@ -187,7 +188,7 @@
   // discrepancies - see notifyVisionRunFailed/notifyVisionCriticalDiscrepancy
   // in slack_notifications.js) rather than a set of workflows to pick from.
   function toggleVisionNotify(user, checked) {
-    updateUserRoles(user, { vision_notify: checked });
+    updateUserNotifications(user, { vision_notify: checked });
   }
 
   // Vision Scouting itself is open to every approved user (see
@@ -597,6 +598,20 @@
     return true;
   }
 
+  // Notification subscriptions do not grant access, so unlike roles and
+  // permissions they are safe for an authorized admin to edit on their own
+  // row. Target hierarchy still applies when editing somebody else.
+  function canEditNotificationsOf(target) {
+    // Anyone viewing their own admin-panel row may manage subscriptions;
+    // changing them grants no access and cannot escalate the account.
+    if (target?.id && target.id === $currentUser?.id) return true;
+    const canManage = isAdminUser || isDevUser || hasPermission($currentUser, 'EDIT_PERMISSIONS');
+    if (!canManage) return false;
+    if (target?.is_dev) return isDevUser;
+    if (target?.role === 'admin') return isAdminUser;
+    return true;
+  }
+
   // Tooltip explaining why a disabled role <select> can't be used, so the
   // restriction isn't silent. Returns null when editing is allowed or the
   // control is merely mid-save (not a permission issue).
@@ -893,6 +908,43 @@
     }
   }
 
+  async function updateUserNotifications(user, settings) {
+    if (!canEditNotificationsOf(user)) {
+      toastActions.show('You are not permitted to change these notification subscriptions');
+      users = [...users];
+      return;
+    }
+
+    setSaving(user.id, true);
+    const previous = user;
+    const optimisticUsers = users.map((u) => (u.id === user.id ? { ...u, ...settings } : u));
+    users = optimisticUsers;
+
+    try {
+      const res = await fetch('/api/admin', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...(await getAuthHeader()) },
+        body: JSON.stringify({
+          action: 'update-notifications',
+          actor_id: await resolveActorId(),
+          target_id: user.id,
+          ...settings
+        })
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || 'Failed to update notification subscriptions');
+      users = optimisticUsers.map((u) => (u.id === user.id ? { ...u, ...(body.data || {}) } : u));
+      if (get(currentUser)?.id === user.id) await fetchUserProfile(user.id);
+      toastActions.show('Notifications updated');
+    } catch (err) {
+      console.error('Failed to update notifications', err);
+      toastActions.show(err.message || 'Failed to update notifications');
+      users = users.map((u) => (u.id === user.id ? previous : u));
+    } finally {
+      setSaving(user.id, false);
+    }
+  }
+
   async function loadVendors() {
     loadingVendors = true;
     try {
@@ -1012,7 +1064,7 @@
   }
 
   async function deleteVendor(vendor) {
-    if (!confirm(`Delete vendor "${vendor.name}"? This cannot be undone.`)) return;
+    if (!await requestConfirmation({ message: `Delete vendor "${vendor.name}"? This cannot be undone.`, confirmLabel: 'Delete vendor', danger: true })) return;
 
     try {
       const { error: err } = await supabase
@@ -1310,7 +1362,7 @@
 
   async function removeLocation(loc) {
     if (!loc?.id) return;
-    if (!confirm(`Remove ${loc.name}? Existing schedules will need to be updated.`)) return;
+    if (!await requestConfirmation({ message: `Remove ${loc.name}? Existing schedules will need to be updated.`, confirmLabel: 'Remove location', danger: true })) return;
     try {
       const success = await deleteAttendanceLocation(loc.id);
       if (success) {
@@ -1403,7 +1455,7 @@
 
   async function removeSchedule(schedule) {
     if (!schedule?.id) return;
-    if (!confirm(`Delete "${schedule.label}"?`)) return;
+    if (!await requestConfirmation({ message: `Delete "${schedule.label}"?`, confirmLabel: 'Delete schedule', danger: true })) return;
     try {
       const success = await deleteAttendanceSchedule(schedule.id);
       if (success) {
@@ -1694,7 +1746,7 @@
                         <input
                           type="checkbox"
                           checked={(user.manufacturing_lead_workflows || []).includes(opt.value)}
-                          disabled={savingRoleIds.has(user.id) || !canEditRolesOf(user)}
+                          disabled={savingRoleIds.has(user.id) || !canEditNotificationsOf(user)}
                           on:change={(e) => toggleManufacturingNotify(user, opt.value, e.target.checked)}
                         />
                         {opt.label}
@@ -1704,7 +1756,7 @@
                       <input
                         type="checkbox"
                         checked={!!user.vision_notify}
-                        disabled={savingRoleIds.has(user.id) || !canEditRolesOf(user)}
+                        disabled={savingRoleIds.has(user.id) || !canEditNotificationsOf(user)}
                         on:change={(e) => toggleVisionNotify(user, e.target.checked)}
                       />
                       Vision Alerts
@@ -1866,7 +1918,7 @@
                           <input
                             type="checkbox"
                             checked={(user.manufacturing_lead_workflows || []).includes(opt.value)}
-                            disabled={savingRoleIds.has(user.id) || !canEditRolesOf(user)}
+                            disabled={savingRoleIds.has(user.id) || !canEditNotificationsOf(user)}
                             on:change={(e) => toggleManufacturingNotify(user, opt.value, e.target.checked)}
                           />
                           {opt.label}
@@ -1876,7 +1928,7 @@
                         <input
                           type="checkbox"
                           checked={!!user.vision_notify}
-                          disabled={savingRoleIds.has(user.id) || !canEditRolesOf(user)}
+                          disabled={savingRoleIds.has(user.id) || !canEditNotificationsOf(user)}
                           on:change={(e) => toggleVisionNotify(user, e.target.checked)}
                         />
                         Vision Alerts

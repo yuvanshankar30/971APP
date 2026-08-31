@@ -64,7 +64,8 @@ const TECHNICAL_MULTI_FIELDS = new Set([
 const TECHNICAL_TEXT_FIELDS = new Set([
   'mostly_used_wire_gauge',
   'drivebase_tube_thickness',
-  'roller_hub_material'
+  'roller_hub_material',
+  'software_other'
 ]);
 
 const TECHNICAL_NUMBER_FIELDS = new Set([
@@ -72,6 +73,9 @@ const TECHNICAL_NUMBER_FIELDS = new Set([
   'bumper_length',
   'bumper_width',
   'bumper_height',
+  'drivetrain_length',
+  'drivetrain_width',
+  'drivetrain_height',
   'can_bus_count',
   'electrical_rating',
   'drivebase_rating',
@@ -291,18 +295,18 @@ export async function GET({ url, request }) {
 
     if (!isLocal && !actor?.id && !canReadPublic) return json({ error: 'Unauthorized' }, { status: 401 });
 
-    if (url.searchParams.get('resource') === 'scout-names') {
+    if (url.searchParams.get('resource') === 'pit-contacts') {
       if (!isLocal && !actor?.id) return json({ error: 'Unauthorized' }, { status: 401 });
       const { data, error } = await db
-        .from('user_profiles')
-        .select('full_name')
-        .eq('banned', false)
-        .not('full_name', 'is', null)
-        .order('full_name', { ascending: true });
+        .from('pit_scout_entries')
+        .select('scout_name')
+        .not('scout_name', 'is', null)
+        .order('updated_at', { ascending: false })
+        .limit(250);
       if (error) return json({ error: error.message }, { status: 500 });
       return json({
         success: true,
-        data: [...new Set((data || []).map((row) => String(row.full_name || '').trim()).filter(Boolean))]
+        data: [...new Set((data || []).map((row) => String(row.scout_name || '').trim()).filter(Boolean))]
       });
     }
 

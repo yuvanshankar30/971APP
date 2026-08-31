@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte';
+  import { requestConfirmation } from '$lib/confirmation.js';
   import { userStore } from '$lib/stores/auth.js';
   import { getAuthHeader } from '$lib/supabase.js';
   import { FRC_TEAMS } from '$lib/permissions.js';
@@ -335,18 +336,13 @@
   }
 
   async function deleteAllScoutingData() {
-    if (
-      !confirm(
-        'Delete all scouting data? This permanently removes scouting notes, assignments, data events, pit entries, and pit scout photos.'
-      )
-    ) {
-      return;
-    }
-
-    const typed = prompt('Type DELETE to permanently clear all scouting data.');
-    if (typed === null) return;
-    if (typed.trim() !== 'DELETE') {
-      warning = 'Delete cancelled. Type DELETE exactly to confirm.';
+    if (!await requestConfirmation({
+      title: 'Delete all scouting data',
+      message: 'This permanently removes scouting notes, assignments, data events, pit entries, and pit scout photos.',
+      confirmLabel: 'Delete all data',
+      danger: true,
+      requireText: 'DELETE'
+    })) {
       return;
     }
 
@@ -1172,4 +1168,3 @@
     }
   }
 </style>
-

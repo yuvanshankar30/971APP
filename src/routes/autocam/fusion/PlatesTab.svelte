@@ -1,4 +1,5 @@
 <script>
+  import { requestConfirmation } from '$lib/confirmation.js';
   import { onMount } from 'svelte';
   import { supabase } from '$lib/supabase.js';
   import { toastActions } from '$lib/toast.js';
@@ -60,7 +61,7 @@
   }
 
   async function handleDelete(plate) {
-    if (!confirm(`Delete plate "${plate.name}"?`)) return;
+    if (!await requestConfirmation({ title: 'Delete plate', message: `Delete plate "${plate.name}"?`, confirmLabel: 'Delete', danger: true })) return;
     try {
       await deletePlate(plate.id);
       await load();
