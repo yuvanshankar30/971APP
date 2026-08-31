@@ -188,6 +188,11 @@
     seek(parsed.totalDistance);
   }
 
+  function speedLabel(speed) {
+    const value = Number(speed) || 0;
+    return `${Number.isInteger(value) ? value : value.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}x`;
+  }
+
   function frameCamera() {
     if (!camera || !controls) return;
     const { min, max } = bounds;
@@ -323,40 +328,29 @@
     {/if}
   </div>
 
-  <div class="playback-controls" aria-label="Toolpath playback controls">
-    <div class="transport-buttons">
-      <button class="btn btn-ghost btn-icon" type="button" title={isPlaying ? 'Pause simulation' : 'Play simulation'} aria-label={isPlaying ? 'Pause simulation' : 'Play simulation'} on:click={togglePlayback} disabled={loading || !!error || !moves.length || !cutterDiameter}>
-        {#if isPlaying}<Pause size={17} />{:else}<Play size={17} />{/if}
-      </button>
-      <button class="btn btn-ghost btn-icon" type="button" title="Next move" aria-label="Next move" on:click={nextMove} disabled={loading || !moves.length}><SkipForward size={17} /></button>
-      <button class="btn btn-ghost btn-icon" type="button" title="Next operation" aria-label="Next operation" on:click={nextOperation} disabled={loading || !moves.length}><span class="operation-icon">T</span><SkipForward size={13} /></button>
-      <button class="btn btn-ghost btn-icon" type="button" title="Go to end of toolpath" aria-label="Go to end of toolpath" on:click={goToEnd} disabled={loading || !moves.length}><FastForward size={17} /></button>
+  <div class="simulator-controls" aria-label="Toolpath simulation controls">
+    <div class="playback-controls">
+      <div class="transport-buttons">
+        <button class="btn btn-ghost btn-icon" type="button" title={isPlaying ? 'Pause simulation' : 'Play simulation'} aria-label={isPlaying ? 'Pause simulation' : 'Play simulation'} on:click={togglePlayback} disabled={loading || !!error || !moves.length || !cutterDiameter}>
+          {#if isPlaying}<Pause size={17} />{:else}<Play size={17} />{/if}
+        </button>
+        <button class="btn btn-ghost btn-icon" type="button" title="Next move" aria-label="Next move" on:click={nextMove} disabled={loading || !moves.length}><SkipForward size={17} /></button>
+        <button class="btn btn-ghost btn-icon" type="button" title="Next operation" aria-label="Next operation" on:click={nextOperation} disabled={loading || !moves.length}><span class="operation-icon">T</span><SkipForward size={13} /></button>
+        <button class="btn btn-ghost btn-icon" type="button" title="Go to end of toolpath" aria-label="Go to end of toolpath" on:click={goToEnd} disabled={loading || !moves.length}><FastForward size={17} /></button>
+      </div>
+      <label class="scrub-control">
+        <span>Route position</span>
+        <input type="range" min="0" max={parsed.totalDistance || 0} step="any" value={playbackDistance} on:input={(event) => seek(event.currentTarget.value)} disabled={!moves.length} />
+        <output>{playbackDistance.toFixed(2)} / {parsed.totalDistance.toFixed(2)} in</output>
+      </label>
+      <label class="speed-control">
+        <span>Simulation speed</span>
+        <input type="range" min="0.25" max="4" step="0.25" bind:value={playbackSpeed} disabled={!moves.length} />
+        <output>{speedLabel(playbackSpeed)}</output>
+      </label>
     </div>
-    <label class="scrub-control">
-      <span>Route position</span>
-      <input type="range" min="0" max={parsed.totalDistance || 0} step="any" value={playbackDistance} on:input={(event) => seek(event.currentTarget.value)} disabled={!moves.length} />
-      <output>{playbackDistance.toFixed(2)} / {parsed.totalDistance.toFixed(2)} in</output>
-    </label>
-    <label class="speed-control">
-      <span>Inspection speed</span>
-      <select bind:value={playbackSpeed} disabled={!moves.length}>
-        <option value={0.25}>0.25x</option>
-        <option value={0.5}>0.5x</option>
-        <option value={1}>1x</option>
-        <option value={2}>2x</option>
-        <option value={4}>4x</option>
-      </select>
-    </label>
-  </div>
 
-  {#if !singleToolDiameter && !activeSequenceDiameter}
-    <label class="tool-diameter-input">
-      <span>End mill diameter (in)</span>
-      <input type="number" min="0.001" step="0.001" bind:value={cutterDiameterInput} placeholder="e.g. 0.25" />
-    </label>
-  {/if}
-
-  <div class="legend">
+    <div class="legend">
     <label class="legend-item">
       <input type="checkbox" bind:checked={toolpathVisible} />
       <span class="legend-label">Toolpath</span>
@@ -373,8 +367,16 @@
         <span class="legend-count">{moveCounts[kind]}</span>
       </label>
     {/each}
-    <button class="btn btn-ghost btn-icon" type="button" title="Reset camera view" aria-label="Reset camera view" on:click={resetView} disabled={loading || !!error}><RotateCcw size={17} /></button>
+      <button class="btn btn-ghost btn-icon" type="button" title="Reset camera view" aria-label="Reset camera view" on:click={resetView} disabled={loading || !!error}><RotateCcw size={17} /></button>
+    </div>
   </div>
+
+  {#if !singleToolDiameter && !activeSequenceDiameter}
+    <label class="tool-diameter-input">
+      <span>End mill diameter (in)</span>
+      <input type="number" min="0.001" step="0.001" bind:value={cutterDiameterInput} placeholder="e.g. 0.25" />
+    </label>
+  {/if}
 </div>
 
 <style>
@@ -412,17 +414,21 @@
   }
   @keyframes sim-spin { to { transform: rotate(360deg); } }
 
-  .playback-controls { display: flex; flex-wrap: wrap; align-items: end; gap: var(--gap-3); }
+  .simulator-controls { display: flex; align-items: center; gap: var(--gap-3); overflow-x: auto; padding-bottom: 0.15rem; }
+  .playback-controls { display: flex; align-items: center; flex: 1 0 48rem; gap: var(--gap-3); }
   .transport-buttons { display: flex; gap: 0.25rem; }
   .btn-icon { display: inline-flex; align-items: center; justify-content: center; min-width: 2.25rem; min-height: 2.25rem; padding: 0.35rem; }
   .operation-icon { font-size: 0.7rem; font-weight: 700; line-height: 1; }
   .scrub-control { display: grid; grid-template-columns: auto minmax(9rem, 1fr) auto; align-items: center; flex: 1 1 24rem; gap: 0.55rem; font-size: 0.82rem; color: var(--text-muted); }
   .scrub-control input { min-width: 0; width: 100%; }
   .scrub-control output { min-width: 7.7rem; color: var(--text); font-variant-numeric: tabular-nums; }
-  .speed-control, .tool-diameter-input { display: grid; gap: 0.3rem; font-size: 0.82rem; color: var(--text-muted); }
-  .speed-control select, .tool-diameter-input input { min-height: 2.25rem; color: var(--text); background: var(--surface, #fff); border: 1px solid var(--border, #d1d5db); border-radius: var(--radius-sm, 4px); padding: 0.25rem 0.45rem; }
+  .speed-control { display: grid; grid-template-columns: auto minmax(7rem, 1fr) auto; align-items: center; flex: 0 1 18rem; gap: 0.55rem; font-size: 0.82rem; color: var(--text-muted); }
+  .speed-control input { min-width: 7rem; width: 100%; }
+  .speed-control output { min-width: 2.75rem; color: var(--text); font-variant-numeric: tabular-nums; }
+  .tool-diameter-input { display: grid; gap: 0.3rem; font-size: 0.82rem; color: var(--text-muted); }
+  .tool-diameter-input input { min-height: 2.25rem; color: var(--text); background: var(--surface, #fff); border: 1px solid var(--border, #d1d5db); border-radius: var(--radius-sm, 4px); padding: 0.25rem 0.45rem; }
   .tool-diameter-input input { width: 11rem; }
-  .legend { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gap-3); }
+  .legend { display: flex; flex: 0 0 auto; align-items: center; gap: var(--gap-3); white-space: nowrap; }
   .legend-item { display: flex; align-items: center; gap: var(--gap-2); font-size: 0.82rem; cursor: pointer; }
   .legend-item.empty { opacity: 0.45; cursor: default; }
   .swatch { width: 0.85rem; height: 0.85rem; border-radius: 2px; }
@@ -431,6 +437,8 @@
   .legend button { margin-left: auto; }
   @media (max-width: 560px) {
     .viewport { height: 45vh; }
+    .simulator-controls { align-items: flex-start; }
+    .playback-controls { flex-basis: 44rem; }
     .scrub-control { grid-template-columns: 1fr auto; }
     .scrub-control span { grid-column: 1 / -1; }
     .legend button { margin-left: 0; }

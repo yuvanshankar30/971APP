@@ -143,7 +143,7 @@
   let editDeleting = false;
   let showJobCadModal = false;
   let showJobToolpathModal = false;
-  let toolpathView = '2d';
+  let toolpathView = '3d';
   let ToolpathSimulator = null;
   let toolpathSimulatorLoading = false;
   let showNcviewerModal = false;
@@ -492,10 +492,11 @@
     editingJob = job;
     showJobCadModal = true;
   }
-  function openToolpathPreview(job) {
+  async function openToolpathPreview(job) {
     editingJob = job;
-    toolpathView = '2d';
+    toolpathView = job.operation_type === 'routing' ? '3d' : '2d';
     showJobToolpathModal = true;
+    if (toolpathView === '3d') await loadToolpathSimulator();
   }
   async function loadToolpathSimulator() {
     if (ToolpathSimulator || toolpathSimulatorLoading) return;
@@ -1338,7 +1339,7 @@
           <button class="btn btn-secondary btn-sm" on:click={() => (showJobCadModal = true)} disabled={!editingJob.step_file_name}>
             <Box size={14} /> View CAD
           </button>
-          <button class="btn btn-secondary btn-sm" on:click={() => (showJobToolpathModal = true)} disabled={editingJob.status !== 'completed' || !editingJob.gcode || editingJob.operation_type === 'tubestock'} title={editingJob.operation_type === 'tubestock' ? 'No 2D preview for tube stock - it moves in X/Y/Z plus a rotary axis the viewer doesn\'t track; use Open ncviewer.com or download the G-code instead' : (editingJob.status !== 'completed' ? 'Only available once the job has completed' : '')}>
+          <button class="btn btn-secondary btn-sm" on:click={() => openToolpathPreview(editingJob)} disabled={editingJob.status !== 'completed' || !editingJob.gcode || editingJob.operation_type === 'tubestock'} title={editingJob.operation_type === 'tubestock' ? 'No 2D preview for tube stock - it moves in X/Y/Z plus a rotary axis the viewer doesn\'t track; use Open ncviewer.com or download the G-code instead' : (editingJob.status !== 'completed' ? 'Only available once the job has completed' : '')}>
             <Route size={14} /> View {operationLabel(editingJob.operation_type)} Toolpath
           </button>
           {#if editingJob.operation_type === 'routing'}
@@ -1838,10 +1839,10 @@
     margin-top: 0.4rem;
   }
 
-  .output-cell { min-width: 160px; }
+  .output-cell { min-width: 460px; white-space: nowrap; }
   .output-actions {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     align-items: center;
     gap: 0.6rem;
   }
