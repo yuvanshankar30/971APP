@@ -17,6 +17,7 @@
     toolpathPositionAtDistance,
     buildTurningStockProfile,
     turningProfileToLathePoints,
+    buildTurningStockRings,
     buildRoutingHeightmap
   } from '../toolpathPreview.js';
   import { stockEnvelopeRadius } from '../turning.js';
@@ -362,15 +363,36 @@
       });
       stockOuterProfile = { axial, outer };
 
-      const points = turningProfileToLathePoints(axial, outer, inner).map(([r, z]) => new THREE.Vector2(r, z));
-      const geometry = new THREE.LatheGeometry(points, STOCK_RADIAL_SEGMENTS);
-      // LatheGeometry revolves around its local Y axis (radius=x, axial
-      // position=y). rotateZ(-90deg) maps local Y -> scene +X directly (no
-      // sign flip), matching every other turning coordinate in this file
-      // (toolPosition.position.x is the same raw projected axial value) -
-      // unlike the old uniform cylinder, an asymmetric machined profile
-      // actually needs the correct sign here, not just "a" rotation.
-      geometry.rotateZ(-Math.PI / 2);
+      const hasBore = inner.some((r) => r > 0.001);
+      let geometry;
+      if (stockShape === 'hex' && !hasBore) {
+        // Exact hex cross-section, not the across-corners-circle
+        // approximation the axisymmetric path below uses for hex stock -
+        // see buildTurningStockRings's own comment for why this is exact,
+        // not just a nicer-looking guess. No bore support there yet (rare
+        // combination), so a drilled hex part still falls through to the
+        // axisymmetric path.
+        const rings = buildTurningStockRings(axial, outer, {
+          angularSegments: STOCK_RADIAL_SEGMENTS,
+          stockShape: 'hex',
+          acrossFlatsRadius: Number(stockDiameter) / 2
+        });
+        geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(rings.position, 3));
+        geometry.setIndex(new THREE.BufferAttribute(rings.index, 1));
+        // Already built directly in scene coordinates (x=axial), unlike
+        // LatheGeometry below - no extra rotation needed.
+      } else {
+        const points = turningProfileToLathePoints(axial, outer, inner).map(([r, z]) => new THREE.Vector2(r, z));
+        geometry = new THREE.LatheGeometry(points, STOCK_RADIAL_SEGMENTS);
+        // LatheGeometry revolves around its local Y axis (radius=x, axial
+        // position=y). rotateZ(-90deg) maps local Y -> scene +X directly (no
+        // sign flip), matching every other turning coordinate in this file
+        // (toolPosition.position.x is the same raw projected axial value) -
+        // unlike the old uniform cylinder, an asymmetric machined profile
+        // actually needs the correct sign here, not just "a" rotation.
+        geometry.rotateZ(-Math.PI / 2);
+      }
       geometry.computeVertexNormals();
 
       const solid = new THREE.Mesh(
@@ -476,34 +498,52 @@
     }
 
     if (isTurning) {
-      // A real toolholder + insert, sized off the stock so it reads clearly
-      // at any part scale - the old tiny 4-sided cone (sized only off
-      // noseRadius, which is often unset) was nearly invisible in practice.
+      // A real toolholder + diamond insert, matching Fusion's own turning
+      // simulation look (a metallic holder bar with a small bright insert
+      // at the tip) rather than a router end mill - a lathe cuts with a
+      // stationary insert against a rotating part, not a spinning bit.
+      // Sized off the stock so it reads clearly at any part scale - the
+      // old tiny 4-sided cone (sized only off noseRadius, which is often
+      // unset) was nearly invisible in practice.
       const stockRadius = Number(stockDiameter) > 0 ? stockEnvelopeRadius(Number(stockDiameter), stockShape) : 0.5;
-      const insertSize = Math.max(Number(noseRadius) * 6, stockRadius * 0.06, 0.02);
-      const holderWidth = Math.max(stockRadius * 0.22, 0.08);
-      const holderLength = Math.max(stockRadius * 1.4, 0.5);
+      const insertSize = Math.max(Number(noseRadius) * 10, stockRadius * 0.16, 0.05);
+      const holderWidth = Math.max(stockRadius * 0.3, 0.12);
+      const holderLength = Math.max(stockRadius * 1.8, 0.7);
 
       if (!toolMesh || toolMesh.userData.kind !== 'turning' || toolMesh.userData.size !== insertSize || toolMesh.userData.holderWidth !== holderWidth) {
         disposeTool();
         toolMesh = new THREE.Group();
 
-        // Insert tip - marks the exact contact point, anchored at the
-        // group's local origin (= toolPosition below).
+        // Insert tip - a flat 4-sided diamond (a real turning insert's
+        // shape, not a tall generic polyhedron), anchored at the group's
+        // local origin (= toolPosition below, the exact contact point).
+        // Bright, saturated, and strongly emissive so it reads as a
+        // distinct highlight against both the gray stock and the holder
+        // regardless of lighting/camera angle - the old muted gold was too
+        // easily lost against the holder's own shadow.
         const insert = new THREE.Mesh(
-          new THREE.OctahedronGeometry(insertSize, 0),
-          new THREE.MeshPhongMaterial({ color: 0xd4af37, emissive: 0x2a2000 })
+          new THREE.ConeGeometry(insertSize, insertSize * 0.7, 4),
+          new THREE.MeshPhongMaterial({ color: 0xffcc33, emissive: 0xcc8800, emissiveIntensity: 0.6, shininess: 100 })
         );
+        insert.rotation.z = Math.PI / 4;
         toolMesh.add(insert);
 
-        // Holder shank extends outward (+Y, away from the part surface)
-        // from the tip - reads as a real tool approaching the work rather
-        // than a floating marker.
+        // Holder shank extends outward from the tip, tilted off the flat
+        // Z=0 plane every turning coordinate in this file otherwise stays
+        // in (toolPosition.position.z is always 0 - see
+        // projectTurningToolpath) - a pure +Y extension would sit exactly
+        // in that plane and can look edge-on/foreshortened to almost
+        // nothing from some camera angles. The tilt keeps it reading as a
+        // real 3D block from any reasonable orbit angle. Mid-gray steel
+        // color (not near-black) so the block itself stays legible instead
+        // of reading as a shadow.
         const holder = new THREE.Mesh(
           new THREE.BoxGeometry(holderWidth, holderLength, holderWidth),
-          new THREE.MeshPhongMaterial({ color: 0x2b2f36 })
+          new THREE.MeshPhongMaterial({ color: 0x6b7280, shininess: 60 })
         );
-        holder.position.y = holderLength / 2 + insertSize;
+        const holderOffset = holderLength / 2 + insertSize * 0.6;
+        holder.position.set(0, holderOffset * 0.85, holderOffset * 0.53);
+        holder.rotation.x = -0.55;
         toolMesh.add(holder);
 
         toolMesh.userData.kind = 'turning';
