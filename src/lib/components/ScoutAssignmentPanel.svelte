@@ -35,7 +35,6 @@
   let lastUserId = null;
   let draggingTeamKey = '';
   let dropTargetUserId = '';
-  let selectedTeamKey = '';
   let scoutFilter = '';
 
   async function authFetch(url, options = {}) {
@@ -448,18 +447,24 @@
     {#if capabilities.can_edit}
       <section class="drag-assignment-board" aria-label="Drag and drop scouting assignments">
         <div class="assignment-toolbar">
-          <label class="assignment-select">
-            <span>Team</span>
-            <select class="form-select" bind:value={selectedTeamKey}>
-              <option value="">Select a team</option>
+          <div class="team-drag-source">
+            <span>FRC teams</span>
+            <div class="team-drag-bar" aria-label="Drag an FRC team to a scout">
               {#each scheduledTeamKeys as teamKey}
-                <option value={teamKey}>#{displayTeam(teamKey)}{teamOwner[teamKey] ? ` - ${findUserName(teamOwner[teamKey]) || 'assigned'}` : ' - unassigned'}</option>
+                <button
+                  class="team-chip"
+                  class:assigned={!!teamOwner[teamKey]}
+                  type="button"
+                  draggable="true"
+                  title={teamOwner[teamKey] ? `Assigned to ${findUserName(teamOwner[teamKey]) || 'a scout'}; drag to reassign` : 'Drag to assign'}
+                  on:dragstart={(event) => startTeamDrag(event, teamKey)}
+                  on:dragend={finishTeamDrag}
+                >
+                  #{displayTeam(teamKey)}
+                </button>
               {/each}
-            </select>
-          </label>
-          <button class="team-chip selected-team" type="button" draggable={!!selectedTeamKey} disabled={!selectedTeamKey} on:dragstart={(event) => startTeamDrag(event, selectedTeamKey)} on:dragend={finishTeamDrag}>
-            {selectedTeamKey ? `Drag #${displayTeam(selectedTeamKey)}` : 'Select a team'}
-          </button>
+            </div>
+          </div>
           <label class="scout-filter">
             <span>Scouts</span>
             <input class="form-input" type="search" bind:value={scoutFilter} placeholder="Filter roster" />
@@ -685,13 +690,12 @@
   }
 
   .assignment-toolbar {
-    display: grid;
-    grid-template-columns: minmax(12rem, 1fr) auto minmax(12rem, 1fr);
+    display: flex;
     align-items: end;
     gap: var(--gap-2);
   }
 
-  .assignment-select,
+  .team-drag-source,
   .scout-filter {
     display: grid;
     gap: 0.25rem;
@@ -701,20 +705,34 @@
     color: var(--text-muted);
   }
 
+  .team-drag-source { flex: 1; }
+  .scout-filter { flex: 0 1 13rem; }
+
+  .team-drag-bar {
+    display: flex;
+    gap: 0.3rem;
+    min-height: 2.1rem;
+    overflow-x: auto;
+    padding: 0.1rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-1);
+  }
+
   .scout-drop-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
     gap: var(--gap-2);
-    max-height: 28rem;
+    max-height: 20rem;
     overflow-y: auto;
     padding-right: 0.2rem;
   }
 
   .scout-drop-zone {
     display: grid;
-    gap: var(--gap-2);
-    min-height: 4.75rem;
-    padding: 0.45rem 0.55rem;
+    gap: 0.25rem;
+    min-height: 3.35rem;
+    padding: 0.35rem 0.45rem;
     border: 1px dashed var(--border);
     border-radius: var(--radius-sm);
     background: var(--surface-1);
@@ -735,27 +753,25 @@
     display: flex;
     flex-wrap: wrap;
     align-content: flex-start;
-    gap: 0.35rem;
+    gap: 0.2rem;
   }
 
   .team-chip {
-    min-width: 2.7rem;
-    min-height: 2rem;
-    padding: 0.2rem 0.5rem;
+    min-width: 2.35rem;
+    min-height: 1.7rem;
+    padding: 0.1rem 0.35rem;
     border: 1px solid var(--accent-strong, #b8860b);
     border-radius: var(--radius-sm);
     background: var(--surface-1);
     color: var(--text);
     font: inherit;
-    font-size: var(--font-sm);
+    font-size: var(--font-xs);
     font-weight: 700;
     cursor: grab;
   }
 
   .team-chip:active { cursor: grabbing; }
   .team-chip.assigned { background: var(--accent-subtle, #fff4cf); }
-  .team-chip.selected-team { align-self: end; white-space: nowrap; }
-  .team-chip:disabled { cursor: not-allowed; opacity: 0.55; }
   .assignment-empty { font-size: var(--font-xs); color: var(--text-muted); }
 
   /* Assignment table */
@@ -834,10 +850,10 @@
     }
 
     .assignment-toolbar {
-      grid-template-columns: 1fr;
       align-items: stretch;
+      flex-direction: column;
     }
 
-    .team-chip.selected-team { justify-self: start; }
+    .scout-filter { flex-basis: auto; }
   }
 </style>
