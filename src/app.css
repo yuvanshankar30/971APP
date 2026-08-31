@@ -2157,6 +2157,44 @@ textarea:focus,
   --btn-focus-ring: rgba(217, 164, 19, 0.32);
 }
 
+/* Private account theme gallery. Authorization lives in theme.js/profile;
+   these selectors are presentation only, because CSS itself is not an access
+   control boundary. Every palette maps back onto the same global design
+   tokens so the entire application changes coherently. */
+:root[data-theme^="theme-"] {
+  color-scheme: dark;
+  --color-white: var(--special-card);
+  --color-black: var(--special-text);
+  --neutral-100: color-mix(in srgb, var(--special-card) 82%, white 18%);
+  --neutral-300: color-mix(in srgb, var(--special-card) 66%, white 34%);
+  --neutral-500: color-mix(in srgb, var(--special-text) 62%, var(--special-card));
+  --neutral-800: var(--special-text);
+  --primary: var(--special-card);
+  --secondary: var(--special-text);
+  --background: var(--special-bg);
+  --card: var(--special-card);
+  --surface-1: var(--special-card);
+  --surface-2: color-mix(in srgb, var(--special-card) 88%, var(--special-accent) 12%);
+  --surface-3: color-mix(in srgb, var(--special-card) 78%, var(--special-accent) 22%);
+  --text: var(--special-text);
+  --text-secondary: color-mix(in srgb, var(--special-text) 72%, var(--special-card));
+  --text-muted: color-mix(in srgb, var(--special-text) 62%, var(--special-card));
+  --muted: var(--text-muted);
+  --muted-bg: var(--surface-2);
+  --border: color-mix(in srgb, var(--special-card) 60%, var(--special-text) 40%);
+  --divider: var(--border);
+  --brand-gold-base: var(--special-accent);
+  --brand-gold-strong: color-mix(in srgb, var(--special-accent) 72%, white 28%);
+  --brand-gold-soft: color-mix(in srgb, var(--special-accent) 18%, transparent);
+  --accent: var(--special-accent);
+  --accent-strong: var(--brand-gold-strong);
+  --accent-subtle: var(--brand-gold-soft);
+  --on-primary: var(--special-bg);
+  --shadow-lg: 0 8px 24px rgba(0,0,0,.5);
+}
+
+[data-theme^="theme-"] .brand-mark { background-image:url('/spartan-helmet-dark.png'); }
+
 /* Modern dark: warm charcoal, brighter gold, dark text on gold controls */
 :root[data-theme="modern-dark"] {
   color-scheme: dark;

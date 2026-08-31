@@ -57,7 +57,8 @@ browser confirmation or prompt popups.
 - **Vision Scouting**: a real Competition-folder nav tab, open to every
   approved user like the rest of Competition (no special permission needed),
   running post-match, multi-camera ML processing at `/scouting/vision` for
-  robot trajectories/mobility, fuel, and climbing.
+  robot trajectories/mobility, fuel, and climbing, with a calibrated
+  red/blue field-occupancy heatmap that fills as trajectory results arrive.
   A full BF16 Qwen3-VL-30B-A3B service on NVIDIA DGX Spark proposes semantic
   events from bounded multi-camera clips; a
   separate versioned YOLO/ByteTrack runner supplies dense tracking and
@@ -95,7 +96,8 @@ browser confirmation or prompt popups.
 - **Attendance**: attendance logging against configured locations/schedules,
   surfaced on user profiles.
 - **Profile**: per-user profile settings and personal stats (attendance
-  history, etc.).
+  history, etc.), plus the standard theme selector and an authenticated
+  Arin-only Slack-style special-theme gallery.
 - **Pick List** (`scouting/`): a team-comparison / pick-list workspace for the
   active event. Named for what it produces: it was previously labelled "Data
   Scouting" in the nav, which collided with the separate `datascout` route and
