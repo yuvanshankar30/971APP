@@ -136,7 +136,9 @@ browser confirmation or prompt popups.
   continues the saved route; only Clear removes it. Auto scoring accepts an
   exact estimate, a bounded range such as `40-60` (stored average `50`), or an open
   lower bound such as `100+` (conservatively stored as at least `100`). Teleop
-  adds optional observed-role tags and five quick ratings while keeping every
+  also offers an optional ball-count estimate in 25-ball buckets through an
+  open-ended `500+` bucket, storing the selected label and parsed bounds for
+  later analytics. It adds optional observed-role tags and five quick ratings while keeping every
   subjective input skippable; teleop and post-match prose areas are deliberately
   large enough for real scout observations. The live
   Data Scouting form deliberately omits shift toggles and subjective speed/

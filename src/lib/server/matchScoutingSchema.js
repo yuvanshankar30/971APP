@@ -8,6 +8,7 @@
 // the UI shows up as missing data instead of quietly widening the schema.
 
 import {
+  BALL_COUNT_RANGES as SHARED_BALL_COUNT_RANGES,
   MATCH_RATING_FIELDS,
   TELEOP_ROLES as SHARED_TELEOP_ROLES,
   parseAutoPointsEstimate
@@ -18,6 +19,7 @@ export const AUTO_ZONES = ['source', 'wing', 'neutral', 'opponent wing'];
 export const RATING_FIELDS = MATCH_RATING_FIELDS;
 export const TELEOP_ROLES = SHARED_TELEOP_ROLES;
 export const BALL_SOURCES = ['source', 'wing', 'neutral', 'opponent wing', 'human player', 'floor'];
+export const BALL_COUNT_RANGES = SHARED_BALL_COUNT_RANGES;
 export const CARDS = ['', 'yellow', 'red'];
 export const DISABLED_STATES = ['', 'no', 'tipped', 'died', 'disabled'];
 export const SEVERITIES = ['urgent', 'watch'];
@@ -129,6 +131,12 @@ export function normalizeMatchScoutEntry(body, actorId = null) {
     };
   }
 
+  // Balls are picked from a fixed bucket list, so an unrecognized value is a
+  // client that has drifted from the vocabulary rather than a scout typo -
+  // dropped like every other out-of-vocabulary field instead of stored.
+  const ballsBand = oneOf(body?.balls_scored_band, BALL_COUNT_RANGES);
+  const balls = ballsBand ? parseAutoPointsEstimate(ballsBand) : null;
+
   const driverSkillRaw = Number(body?.driver_skill);
   return {
     value: {
@@ -147,6 +155,13 @@ export function normalizeMatchScoutEntry(body, actorId = null) {
       auto_finish: trimmed(body?.auto_finish, 120),
       auto_moved: trimmed(body?.auto_moved, 40),
       ball_sources: normalizeStringList(body?.ball_sources, BALL_SOURCES),
+      // Same shape as auto points: the readable bucket plus its parsed bounds,
+      // so analytics never has to re-parse text. "500+" has no max, and its
+      // average is the lower bound rather than an invented midpoint.
+      balls_scored_band: balls?.input ?? null,
+      balls_scored_min: balls?.min ?? null,
+      balls_scored_max: balls?.max ?? null,
+      balls_scored_average: balls?.average ?? null,
       auto_collision: body?.auto_collision === true,
       auto_collision_notes: trimmed(body?.auto_collision_notes, 500),
       auto_path_name: trimmed(body?.auto_path_name, 120),
