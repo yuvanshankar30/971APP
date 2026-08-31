@@ -6,7 +6,7 @@
   import { toastActions } from '$lib/toast.js';
   import { requestConfirmation } from '$lib/confirmation.js';
   import navigation from '$lib/navigation.json';
-  import { theme, setTheme, specialThemesAllowed, specialThemeGroups } from '$lib/stores/theme.js';
+  import { theme, setTheme, specialThemeGroups } from '$lib/stores/theme.js';
   import { setLoginScreenStyle } from '$lib/stores/loginScreenPref.js';
   import { defaultHeaderTabs } from '$lib/defaultTabs.js';
   import HeaderPreview from '$lib/components/HeaderPreview.svelte';
@@ -39,6 +39,13 @@
   let notificationSettings = mergeNotificationSettings();
 
   const frcTeamOptions = Object.values(FRC_TEAMS);
+
+  const BUILT_IN_THEME_GROUP = { label: 'Built-in', themes: [
+    { id: 'modern', label: 'Modern Light (default)', preview: ['#f8ecca', '#d9a413'] },
+    { id: 'modern-dark', label: 'Modern Dark', preview: ['#1c1913', '#e9b830'] },
+    { id: 'light', label: 'Legacy', preview: ['#ffffff', '#1d4ed8'] }
+  ] };
+  $: themeGroups = [BUILT_IN_THEME_GROUP, ...$specialThemeGroups];
 
   function formatFrcTeamLabel(value) {
     if (!value) return 'Not Set';
@@ -360,30 +367,20 @@
         </select>
         <small class="form-help">Which FRC team are you affiliated with?</small>
       </label>
-      <label class="form-label" for="theme-select">Theme
-        <select class="form-select" id="theme-select" value={$theme} on:change={(e) => setTheme(e.target.value)}>
-          <option value="modern">Modern Light (default)</option>
-          <option value="modern-dark">Modern Dark</option>
-          <option value="light">Legacy</option>
-        </select>
-        <small class="form-help">Applies instantly and is remembered on this device.</small>
-      </label>
-      {#if $specialThemesAllowed}
-        <div class="special-themes" aria-label="Arin-only special themes">
-          <div class="special-theme-heading"><div><strong>Special themes</strong><small>Private theme gallery for Arin Rao.</small></div></div>
-          {#each $specialThemeGroups as group}
-            <h4>{group.label}</h4>
-            <div class="theme-grid">
-              {#each group.themes as specialTheme}
-                <button type="button" class="theme-card" class:selected={$theme === specialTheme.id} aria-pressed={$theme === specialTheme.id} on:click={() => setTheme(specialTheme.id)}>
-                  <span class="theme-swatch" style={`--swatch-a:${specialTheme.preview[0]};--swatch-b:${specialTheme.preview[1]}`}></span>
-                  <span>{specialTheme.label}</span>
-                </button>
-              {/each}
-            </div>
-          {/each}
-        </div>
-      {/if}
+      <div class="theme-picker">
+        <div class="special-theme-heading"><div><strong>Theme</strong><small>Applies instantly and is remembered on this device.</small></div></div>
+        {#each themeGroups as group}
+          <h4>{group.label}</h4>
+          <div class="theme-grid">
+            {#each group.themes as t}
+              <button type="button" class="theme-card" class:selected={$theme === t.id} aria-pressed={$theme === t.id} on:click={() => setTheme(t.id)}>
+                <span class="theme-swatch" style={`--swatch-a:${t.preview[0]};--swatch-b:${t.preview[1]}`}></span>
+                <span>{t.label}</span>
+              </button>
+            {/each}
+          </div>
+        {/each}
+      </div>
       <label class="form-label" for="login-screen-select">Login Screen
         <select class="form-select" id="login-screen-select" value={login_screen_style} on:change={(e) => saveLoginScreenStyle(e.target.value)}>
           <option value="legacy">Legacy Login</option>
@@ -579,10 +576,10 @@
   .preview-container { margin: var(--space-6) 0; padding: var(--space-4); background: var(--background); border: 1px solid var(--border); border-radius: var(--radius-sm); }
   .preview-container h4 { margin-top: 0; margin-bottom: var(--space-3); font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); }
   .notification-grid { display: flex; flex-direction: column; gap: var(--space-3); }
-  .special-themes { margin:var(--space-5) 0; padding-top:var(--space-4); border-top:1px solid var(--border); }
+  .theme-picker { margin:var(--space-5) 0; padding-top:var(--space-4); border-top:1px solid var(--border); }
   .special-theme-heading div { display:grid; gap:2px; }
   .special-theme-heading small { color:var(--text-muted); }
-  .special-themes h4 { color:var(--text-muted); }
+  .theme-picker h4 { color:var(--text-muted); }
   .theme-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:var(--gap-3); }
   .theme-card { min-height:5.2rem; display:flex; align-items:center; gap:var(--gap-3); padding:var(--space-3); border:1px solid var(--border); border-radius:var(--radius-lg); background:var(--surface-1); color:var(--text); text-align:left; font-weight:600; cursor:pointer; }
   .theme-card:hover { border-color:var(--text-muted); background:var(--surface-2); }

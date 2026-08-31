@@ -99,8 +99,9 @@ browser confirmation or prompt popups.
 - **Attendance**: attendance logging against configured locations/schedules,
   surfaced on user profiles.
 - **Profile**: per-user profile settings and personal stats (attendance
-  history, etc.), plus the standard theme selector and an authenticated
-  Arin-only Slack-style special-theme gallery.
+  history, etc.), plus a Slack-style theme gallery (available to every
+  signed-in account) covering both the built-in themes and the extra
+  palette groups.
 - **Pick List** (`scouting/`): a team-comparison / pick-list workspace for the
   active event. Named for what it produces: it was previously labelled "Data
   Scouting" in the nav, which collided with the separate `datascout` route and

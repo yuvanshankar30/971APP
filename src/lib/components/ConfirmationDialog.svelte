@@ -39,7 +39,7 @@
 {/if}
 
 <style>
-  .confirm-backdrop { position:fixed; inset:0; z-index:1400; display:grid; place-items:center; padding:var(--space-4); background:rgb(22 24 23 / .52); }
+  .confirm-backdrop { position:fixed; inset:0; z-index:1600; display:grid; place-items:center; padding:var(--space-4); background:rgb(22 24 23 / .52); }
   .confirm-dialog { width:min(100%, 30rem); padding:var(--space-5); border:1px solid var(--border); border-radius:8px; background:var(--surface-1); box-shadow:var(--shadow-lg); }
   .confirm-dialog h2 { margin:0 0 var(--space-2); font-size:var(--font-lg); }
   .confirm-dialog p { margin:0; color:var(--text-muted); white-space:pre-wrap; line-height:1.5; }

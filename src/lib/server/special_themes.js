@@ -1,7 +1,5 @@
-export const SPECIAL_THEME_EMAIL = 'arin.rao12@gmail.com';
-
 export function canAccessSpecialThemes(user) {
-  return String(user?.email || '').trim().toLowerCase() === SPECIAL_THEME_EMAIL;
+  return !!user;
 }
 
 export const SPECIAL_THEME_GROUPS = [
