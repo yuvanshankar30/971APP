@@ -1,4 +1,5 @@
 import path from 'node:path';
+import fs from 'node:fs';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 
@@ -21,7 +22,11 @@ export default defineConfig({
 			// sibling top-level autocam/ folder. Vite's fs.strict check
 			// runs against that allowlist regardless of alias resolution,
 			// so every $autocam/* import 403s in dev without this entry.
-			allow: [path.resolve('autocam')]
+			// Worktrees may share the primary checkout's node_modules through a
+			// symlink. Vite checks the resolved path, so allow that real directory
+			// as well or its own SvelteKit client entry returns 403 and hydration
+			// never starts.
+			allow: [path.resolve('autocam'), fs.realpathSync(path.resolve('node_modules'))]
 		}
 	},
 	test: {
