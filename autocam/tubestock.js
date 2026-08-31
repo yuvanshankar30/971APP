@@ -198,6 +198,12 @@ export function generateTubestockGcode(tubeFeatures, params = {}) {
     gcode,
     stats: {
       tubeLength: tubeFeatures.tubeLength ?? null,
+      // Echoed straight from extractTubeFeaturesFromMeshes so a client-side
+      // consumer (the 3D toolpath simulator) can reconstruct the tube's
+      // outer geometry and hole layout without re-parsing the STEP file -
+      // same reasoning as routing.js's stats.edgeShiftX/edgeShiftY.
+      crossSection: tubeFeatures.crossSection ?? null,
+      walls,
       wallsUsed: [...new Set(groups.flatMap((g) => g.holes.map((h) => h.angleDeg)))].length,
       totalHoles,
       toolsUsed: groups.length,
