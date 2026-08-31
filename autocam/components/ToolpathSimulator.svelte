@@ -48,6 +48,15 @@
    * Model toggle.
    */
   export let stepFileName = null;
+  /**
+   * Routing only: generateRoutingGcode's own edge-margin shift
+   * (routing.js's stats.edgeShiftX/edgeShiftY) - the actual toolpath and
+   * stock are rendered in that shifted frame, but the ghost part is
+   * rebuilt fresh from the source STEP file's raw (unshifted) coordinates,
+   * so it has to be shifted by the same amount to land in the same place.
+   */
+  export let edgeShiftX = 0;
+  export let edgeShiftY = 0;
 
   let container;
   let renderer, scene, camera, controls, frameId, resizeObserver, grid, axes, toolMesh, stockMesh, ghostMesh;
@@ -246,6 +255,18 @@
         const { thickness, frame } = extractRoutingContoursFromMeshes(meshes);
         routingTargetThickness = thickness;
         ghostGeometryData = transformMeshesForRoutingScene(meshes, frame);
+        // transformMeshesForRoutingScene reproduces the RAW (pre-edge-margin)
+        // u/v coordinates - generateRoutingGcode shifted the actual toolpath
+        // by edgeShiftX/edgeShiftY to keep it clear of X0/Y0, so the ghost
+        // part needs the identical shift to land in the same place.
+        if (edgeShiftX || edgeShiftY) {
+          for (const { position } of ghostGeometryData) {
+            for (let i = 0; i < position.length; i += 3) {
+              position[i] += edgeShiftX;
+              position[i + 1] += edgeShiftY;
+            }
+          }
+        }
       }
     } catch (e) {
       // Non-fatal: the toolpath sim is fully usable without the ghost part -

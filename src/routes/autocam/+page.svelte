@@ -1453,6 +1453,8 @@
               noseRadius={Number(editingJob.params?.finishTool?.noseRadius ?? editingJob.params?.noseRadius) || null}
               drillDiameter={Number(editingJob.params?.drilling?.diameter) || null}
               stepFileName={editingJob.step_file_name || null}
+              edgeShiftX={Number(editingJob.stats?.edgeShiftX) || 0}
+              edgeShiftY={Number(editingJob.stats?.edgeShiftY) || 0}
             />
           {:else}
             <div class="toolpath-simulator-loading" aria-busy="true"><span class="loading-spinner"></span> Loading 3D toolpath...</div>

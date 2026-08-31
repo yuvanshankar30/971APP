@@ -288,6 +288,32 @@ describe('generateRoutingGcode - edgeMargin (real shop constraint: work zero is 
     expect(withMargin.stats.pocketRings).toBe(noMargin.stats.pocketRings);
     expect(withMargin.stats.pockets).toBe(noMargin.stats.pockets);
   });
+
+  it('reports the applied shift on stats.edgeShiftX/edgeShiftY, so a consumer (e.g. the ghost-part overlay) can re-derive the same coordinate frame as the actual cutting path without re-deriving the margin math itself', () => {
+    const contour = [{ points: square(0, 0, 4), isHole: false }];
+    const result = generateRoutingGcode(contour, { toolDiameter: 0.25, targetDepth: 0.25 });
+    // square(0,0,4) spans -2..2, tool radius 0.125, default margin 0.5:
+    // shift = (0.5 + 0.125) - (-2) = 2.625
+    expect(result.stats.edgeShiftX).toBeCloseTo(2.625, 3);
+    expect(result.stats.edgeShiftY).toBeCloseTo(2.625, 3);
+  });
+
+  it('edgeShiftX/edgeShiftY are 0 when edgeMargin: 0 disables the shift entirely', () => {
+    const contour = [{ points: square(0, 0, 4), isHole: false }];
+    const result = generateRoutingGcode(contour, { toolDiameter: 0.25, targetDepth: 0.25, edgeMargin: 0 });
+    expect(result.stats.edgeShiftX).toBe(0);
+    expect(result.stats.edgeShiftY).toBe(0);
+  });
+
+  it('edgeShiftX/edgeShiftY are 0 when the geometry is already positioned exactly at the margin (no shift needed) - the shift always re-anchors to margin+toolRadius, in either direction', () => {
+    // square centered at (0.625, 0.625) with half-width 2 -> minX = minY = -1.375,
+    // and margin(0.5) + toolRadius(0.125) - (-1.375) != 0, so instead center it
+    // so minX/minY land exactly on margin + toolRadius (0.625).
+    const contour = [{ points: square(2.625, 2.625, 4), isHole: false }];
+    const result = generateRoutingGcode(contour, { toolDiameter: 0.25, targetDepth: 0.25 });
+    expect(result.stats.edgeShiftX).toBe(0);
+    expect(result.stats.edgeShiftY).toBe(0);
+  });
 });
 
 describe('generateRoutingGcode - cut order (real-world CAM safety practice: internal features before the outer profile, not after)', () => {
