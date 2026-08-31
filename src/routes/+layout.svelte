@@ -1179,15 +1179,10 @@
       font-size: 0.74rem;
     }
 
-    .desktop-profile {
-      max-width: 42px;
-      justify-content: center;
-      padding: 6px;
-    }
-
-    .profile-name {
-      display: none;
-    }
+    /* Keep the Account destination legible. The whole desktop header is
+       replaced by the mobile menu at 768px, so hiding only this label between
+       769–960px creates a mystery icon without buying useful mobile space. */
+    .desktop-profile { max-width: none; }
   }
 
   /* ========== MOBILE (≤768px) ========== */
