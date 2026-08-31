@@ -177,6 +177,38 @@ export function toolpathPositionAtDistance(moves, distance) {
   };
 }
 
+/**
+ * Project diameter-mode lathe moves into the simulator's right-handed scene.
+ * Scene X is the spindle/part axis (machine Z), scene Y is radius (machine
+ * X / 2), and scene Z is the tool's fixed approach plane. Recomputing lengths
+ * after the projection matters: using diameter-mode distances would make the
+ * playback cursor run at twice the visible radial speed.
+ */
+export function projectTurningToolpath(parsed) {
+  let totalDistance = 0;
+  const moves = (parsed?.moves || []).map((move) => {
+    const project = (point) => ({ x: point.z, y: point.x / 2, z: 0 });
+    const from = project(move.from);
+    const to = project(move.to);
+    const length = Math.hypot(to.x - from.x, to.y - from.y);
+    const projected = {
+      ...move,
+      from,
+      to,
+      // A lathe has no router-style plunge/ramp category. Every non-rapid
+      // move is an engaged turning/facing cut in the XZ plane.
+      kind: move.kind === 'rapid' ? 'rapid' : 'cut',
+      length,
+      startDistance: totalDistance
+    };
+    totalDistance += length;
+    return projected;
+  });
+
+  const toolChangeIndices = (parsed?.toolChangeIndices || []).filter((index) => index < moves.length);
+  return { moves, toolChangeIndices, totalDistance };
+}
+
 // Fusion colours a move by what it is: rapid, a plunge/ramp, or cutting. A
 // ramp is Z descending while XY is also moving - which is exactly the helical
 // entry routing.js emits. A pure vertical plunge counts too; it is the same

@@ -1,7 +1,7 @@
 <script>
-  // 3D toolpath simulation for ROUTING jobs - see
-  // docs/toolpath-simulation-plan.md for why turning is excluded and why
-  // material removal (a later phase) uses a heightmap.
+  // 3D toolpath simulation for routing and turning jobs. Routing uses XYZ
+  // directly; turning projects diameter-mode machine X/Z into axial/radial
+  // scene coordinates and renders cylindrical stock plus an insert cursor.
   //
   // These are route-level imports: Vite keeps them out of unrelated app routes,
   // but loading them with the simulator avoids a second dynamic module request
@@ -10,16 +10,19 @@
   import * as THREE from 'three';
   import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
   import { FastForward, Pause, Play, RotateCcw, SkipForward } from 'lucide-svelte';
-  import { parseToolpath3D, toolpathBounds3D, toolpathPositionAtDistance } from '../toolpathPreview.js';
+  import { parseToolpath3D, projectTurningToolpath, toolpathBounds3D, toolpathPositionAtDistance } from '../toolpathPreview.js';
 
   export let gcode = '';
+  export let operationType = 'routing';
   /** Cutter diameter in program units for single-tool jobs. */
   export let toolDiameter = null;
   /** Ordered routing tool sequence, when a job uses more than one cutter. */
   export let toolSequence = [];
+  export let stockDiameter = null;
+  export let noseRadius = null;
 
   let container;
-  let renderer, scene, camera, controls, frameId, resizeObserver, grid, axes, toolMesh;
+  let renderer, scene, camera, controls, frameId, resizeObserver, grid, axes, toolMesh, stockMesh;
   let disposed = false;
   let loading = true;
   let error = '';
@@ -39,6 +42,7 @@
   let visible = { rapid: true, cut: true, ramp: true };
   let toolpathVisible = true;
   let toolVisible = true;
+  let stockVisible = true;
   const lineObjects = {};
   let cutterDiameterInput = '';
   let initializedProgram = null;
@@ -47,7 +51,9 @@
   let playbackSpeed = 1;
   let lastPlaybackFrame = null;
 
-  $: parsed = parseToolpath3D(gcode || '');
+  $: isTurning = operationType === 'turning';
+  $: rawParsed = parseToolpath3D(gcode || '');
+  $: parsed = isTurning ? projectTurningToolpath(rawParsed) : rawParsed;
   $: moves = parsed.moves;
   $: bounds = toolpathBounds3D(moves);
   $: toolPosition = toolpathPositionAtDistance(moves, playbackDistance);
@@ -55,6 +61,7 @@
   $: activeSequenceDiameter = Number(toolSequence?.[activeToolIndex]?.toolDiameter) || null;
   $: singleToolDiameter = Number(toolDiameter) || null;
   $: cutterDiameter = activeSequenceDiameter || singleToolDiameter || Number(cutterDiameterInput) || null;
+  $: canAnimate = isTurning || !!cutterDiameter;
   $: moveCounts = KINDS.reduce((counts, kind) => {
     counts[kind] = moves.filter((move) => move.kind === kind).length;
     return counts;
@@ -72,7 +79,8 @@
   // Rebuild whenever the program changes, but only once the scene exists.
   $: if (scene && moves) rebuildToolpath();
   $: if (scene && toolpathVisible !== undefined) applyVisibility(visible);
-  $: if (scene && toolPosition && cutterDiameter !== undefined && toolVisible !== undefined) updateTool();
+  $: if (scene && toolPosition && cutterDiameter !== undefined && toolVisible !== undefined && isTurning !== undefined && noseRadius !== undefined) updateTool();
+  $: if (scene && moves && stockVisible !== undefined && stockDiameter !== undefined && isTurning !== undefined) updateStock();
 
   function applyVisibility(state) {
     for (const kind of KINDS) {
@@ -132,10 +140,77 @@
     toolMesh = null;
   }
 
+  function disposeStock() {
+    if (!stockMesh || !scene) return;
+    scene.remove(stockMesh);
+    stockMesh.traverse((child) => {
+      child.geometry?.dispose?.();
+      if (Array.isArray(child.material)) child.material.forEach((material) => material.dispose?.());
+      else child.material?.dispose?.();
+    });
+    stockMesh = null;
+  }
+
+  function updateStock() {
+    disposeStock();
+    if (!scene || !isTurning || !(Number(stockDiameter) > 0) || !moves.length) return;
+    const axialMin = Math.min(...moves.flatMap((move) => [move.from.x, move.to.x]));
+    const axialMax = Math.max(...moves.flatMap((move) => [move.from.x, move.to.x]));
+    const margin = Number(stockDiameter) * 0.08;
+    const length = Math.max(axialMax - axialMin + margin * 2, Number(stockDiameter) * 0.5);
+    const geometry = new THREE.CylinderGeometry(Number(stockDiameter) / 2, Number(stockDiameter) / 2, length, 48, 1, true);
+    geometry.rotateZ(Math.PI / 2);
+    const cylinder = new THREE.Mesh(
+      geometry,
+      new THREE.MeshPhongMaterial({ color: 0xb8bcc2, transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthWrite: false })
+    );
+    stockMesh = new THREE.Group();
+    stockMesh.add(cylinder);
+    // A uniform cylinder looks stationary while spinning. Four longitudinal
+    // witness lines make spindle rotation visible without pretending they are
+    // physical grooves in the stock.
+    const markerPoints = [];
+    const radius = Number(stockDiameter) / 2;
+    for (let index = 0; index < 4; index += 1) {
+      const angle = (index / 4) * Math.PI * 2;
+      const y = Math.cos(angle) * radius * 1.002;
+      const z = Math.sin(angle) * radius * 1.002;
+      markerPoints.push(-length / 2, y, z, length / 2, y, z);
+    }
+    const markerGeometry = new THREE.BufferGeometry();
+    markerGeometry.setAttribute('position', new THREE.Float32BufferAttribute(markerPoints, 3));
+    stockMesh.add(new THREE.LineSegments(
+      markerGeometry,
+      new THREE.LineBasicMaterial({ color: 0x5f6670, transparent: true, opacity: 0.7 })
+    ));
+    stockMesh.position.x = (axialMin + axialMax) / 2;
+    stockMesh.visible = stockVisible;
+    scene.add(stockMesh);
+  }
+
   function updateTool() {
     if (!scene) return;
-    if (!cutterDiameter || !toolPosition) {
+    if ((!cutterDiameter && !isTurning) || !toolPosition) {
       disposeTool();
+      return;
+    }
+
+    if (isTurning) {
+      const insertSize = Math.max(Number(noseRadius) * 8 || Number(stockDiameter) * 0.08 || 0.08, 0.04);
+      if (!toolMesh || toolMesh.userData.kind !== 'turning' || toolMesh.userData.size !== insertSize) {
+        disposeTool();
+        toolMesh = new THREE.Mesh(
+          new THREE.ConeGeometry(insertSize, insertSize * 1.5, 4),
+          new THREE.MeshPhongMaterial({ color: 0x252525, emissive: 0x080808 })
+        );
+        toolMesh.rotation.x = Math.PI / 2;
+        toolMesh.rotation.z = Math.PI / 4;
+        toolMesh.userData.kind = 'turning';
+        toolMesh.userData.size = insertSize;
+        scene.add(toolMesh);
+      }
+      toolMesh.position.set(toolPosition.position.x, toolPosition.position.y + insertSize * 0.75, toolPosition.position.z);
+      toolMesh.visible = toolVisible;
       return;
     }
 
@@ -161,7 +236,7 @@
   }
 
   function togglePlayback() {
-    if (!moves.length || !cutterDiameter) return;
+    if (!moves.length || !canAnimate) return;
     if (playbackDistance >= parsed.totalDistance) playbackDistance = 0;
     isPlaying = !isPlaying;
   }
@@ -247,21 +322,31 @@
         scene.add(grid);
         axes = new THREE.AxesHelper(1);
         scene.add(axes);
+        scene.add(new THREE.AmbientLight(0xffffff, 1.5));
+        const keyLight = new THREE.DirectionalLight(0xffffff, 2.2);
+        keyLight.position.set(3, -4, 5);
+        scene.add(keyLight);
 
         controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
         controls.dampingFactor = 0.1;
 
         rebuildToolpath();
+        updateStock();
 
         const animate = (timestamp) => {
           if (disposed) return;
           frameId = requestAnimationFrame(animate);
-          if (isPlaying && cutterDiameter && lastPlaybackFrame !== null) {
+          if (isPlaying && canAnimate && lastPlaybackFrame !== null) {
             // This is deliberately distance, not an invented machining-time
             // estimate. The multiplier only controls how quickly to inspect.
             playbackDistance = Math.min(parsed.totalDistance, playbackDistance + ((timestamp - lastPlaybackFrame) / 1000) * playbackSpeed);
             if (playbackDistance >= parsed.totalDistance) isPlaying = false;
+          }
+          if (isTurning && stockMesh && isPlaying && lastPlaybackFrame !== null) {
+            // The workpiece rotates in a lathe; the insert translates through
+            // X/Z. Animate the honest machine motion, not a spinning insert.
+            stockMesh.rotation.x += ((timestamp - lastPlaybackFrame) / 1000) * Math.PI * 2;
           }
           lastPlaybackFrame = timestamp;
           controls.update();
@@ -308,6 +393,7 @@
     if (scene) {
       disposeToolpath();
       disposeTool();
+      disposeStock();
     }
     controls?.dispose?.();
     renderer?.dispose?.();
@@ -331,7 +417,7 @@
   <div class="simulator-controls" aria-label="Toolpath simulation controls">
     <div class="playback-controls">
       <div class="transport-buttons">
-        <button class="btn btn-ghost btn-icon" type="button" title={isPlaying ? 'Pause simulation' : 'Play simulation'} aria-label={isPlaying ? 'Pause simulation' : 'Play simulation'} on:click={togglePlayback} disabled={loading || !!error || !moves.length || !cutterDiameter}>
+        <button class="btn btn-ghost btn-icon" type="button" title={isPlaying ? 'Pause simulation' : 'Play simulation'} aria-label={isPlaying ? 'Pause simulation' : 'Play simulation'} on:click={togglePlayback} disabled={loading || !!error || !moves.length || !canAnimate}>
           {#if isPlaying}<Pause size={17} />{:else}<Play size={17} />{/if}
         </button>
         <button class="btn btn-ghost btn-icon" type="button" title="Next move" aria-label="Next move" on:click={nextMove} disabled={loading || !moves.length}><SkipForward size={17} /></button>
@@ -355,10 +441,16 @@
       <input type="checkbox" bind:checked={toolpathVisible} />
       <span class="legend-label">Toolpath</span>
     </label>
-    <label class="legend-item" class:empty={!cutterDiameter}>
-      <input type="checkbox" bind:checked={toolVisible} disabled={!cutterDiameter} />
-      <span class="legend-label">Tool</span>
+    <label class="legend-item" class:empty={!isTurning && !cutterDiameter}>
+      <input type="checkbox" bind:checked={toolVisible} disabled={!isTurning && !cutterDiameter} />
+      <span class="legend-label">{isTurning ? 'Insert' : 'Tool'}</span>
     </label>
+    {#if isTurning}
+      <label class="legend-item" class:empty={!(Number(stockDiameter) > 0)}>
+        <input type="checkbox" bind:checked={stockVisible} disabled={!(Number(stockDiameter) > 0)} />
+        <span class="legend-label">Rotating stock</span>
+      </label>
+    {/if}
     {#each KINDS as kind}
       <label class="legend-item" class:empty={!moveCounts[kind]}>
         <input type="checkbox" bind:checked={visible[kind]} disabled={!moveCounts[kind]} />
@@ -371,7 +463,7 @@
     </div>
   </div>
 
-  {#if !singleToolDiameter && !activeSequenceDiameter}
+  {#if !isTurning && !singleToolDiameter && !activeSequenceDiameter}
     <label class="tool-diameter-input">
       <span>End mill diameter (in)</span>
       <input type="number" min="0.001" step="0.001" bind:value={cutterDiameterInput} placeholder="e.g. 0.25" />

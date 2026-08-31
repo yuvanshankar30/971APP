@@ -34,9 +34,11 @@ browser confirmation or prompt popups.
   an actual Fusion 360 Runner rather than in-process math. See the
   **AutoCAM** section below for the code-level detail on all three.
   Completed routing jobs also have a switchable 2D preview and a routing-only
-  3D toolpath simulator with rapid, cutting, and ramp/plunge paths
-  distinguished, a moving flat end mill, distance scrubbing, and tool-change
-  stepping for multi-tool jobs.
+  3D toolpath simulator for router and lathe jobs with rapid and cutting paths
+  distinguished, distance scrubbing, and tool-change stepping. Routing shows
+  a moving flat end mill; turning correctly projects diameter-mode X/Z into
+  axial/radial coordinates, animates the rotating cylindrical stock, and moves
+  a turning insert along the programmed path.
 - **Scouting**: pit scouting (a topic-at-a-time form with per-topic
   completion counts, scout/contact attribution, and up to three robot photos,
   built for filling in a noisy pit on a phone while a team answers out of

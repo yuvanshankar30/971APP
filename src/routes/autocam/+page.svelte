@@ -494,7 +494,7 @@
   }
   async function openToolpathPreview(job) {
     editingJob = job;
-    toolpathView = job.operation_type === 'routing' ? '3d' : '2d';
+    toolpathView = ['routing', 'turning'].includes(job.operation_type) ? '3d' : '2d';
     showJobToolpathModal = true;
     if (toolpathView === '3d') await loadToolpathSimulator();
   }
@@ -1059,7 +1059,7 @@
                 {#if job.status === 'completed' && job.gcode}
                   <span class="output-action-group">
                     <button class="btn btn-icon" data-tooltip="View Toolpath" aria-label="View toolpath simulation" on:click={() => openToolpathPreview(job)}><Route size={15} /></button>
-                    {#if job.operation_type === 'routing'}
+                    {#if job.operation_type === 'routing' || job.operation_type === 'turning'}
                       <button class="btn btn-secondary btn-sm" on:click={() => open3DToolpathPreview(job)}>
                         <Route size={14} /> 3D Toolpath
                       </button>
@@ -1430,15 +1430,23 @@
         <button type="button" class="modal-close-button" aria-label="Close" on:click={() => (showJobToolpathModal = false)}><X size={18} /></button>
       </div>
       <div class="modal-body">
-        {#if editingJob.operation_type === 'routing'}
+        {#if editingJob.operation_type === 'routing' || editingJob.operation_type === 'turning'}
           <div class="toolpath-view-tabs" role="tablist" aria-label="Toolpath view">
             <button type="button" role="tab" aria-selected={toolpathView === '2d'} class:active={toolpathView === '2d'} on:click={() => (toolpathView = '2d')}>2D Preview</button>
             <button type="button" role="tab" aria-selected={toolpathView === '3d'} class:active={toolpathView === '3d'} on:click={() => open3DToolpathPreview(editingJob)}>3D Toolpath</button>
           </div>
         {/if}
-        {#if toolpathView === '3d' && editingJob.operation_type === 'routing'}
+        {#if toolpathView === '3d' && (editingJob.operation_type === 'routing' || editingJob.operation_type === 'turning')}
           {#if ToolpathSimulator}
-            <svelte:component this={ToolpathSimulator} gcode={editingJob.gcode} toolDiameter={Number(editingJob.params?.toolDiameter) || null} toolSequence={editingJob.params?.toolSequence || []} />
+            <svelte:component
+              this={ToolpathSimulator}
+              gcode={editingJob.gcode}
+              operationType={editingJob.operation_type}
+              toolDiameter={Number(editingJob.params?.toolDiameter) || null}
+              toolSequence={editingJob.params?.toolSequence || []}
+              stockDiameter={Number(editingJob.params?.stockDiameter) || null}
+              noseRadius={Number(editingJob.params?.noseRadius) || null}
+            />
           {:else}
             <div class="toolpath-simulator-loading" aria-busy="true"><span class="loading-spinner"></span> Loading 3D toolpath...</div>
           {/if}
