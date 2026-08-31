@@ -101,7 +101,9 @@ browser confirmation or prompt popups.
 - **Account** (`profile/`): a consistently named Account tab on desktop and
   mobile for per-user profile settings and personal stats (attendance history,
   etc.), plus a Slack-style theme gallery available to every signed-in account
-  covering both the built-in themes and the extra palette groups.
+  covering both the built-in themes and extra palette groups. Gallery themes
+  also remap semantic success/error/progress/warning and operation badges onto
+  palette-coordinated dark surfaces without changing their meanings.
 - **Pick List** (`scouting/`): a team-comparison / pick-list workspace for the
   active event. Named for what it produces: it was previously labelled "Data
   Scouting" in the nav, which collided with the separate `datascout` route and
