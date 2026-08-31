@@ -7,7 +7,8 @@ import {
   toolpathBounds,
   toolpathBounds3D,
   buildTurningStockProfile,
-  turningProfileToLathePoints
+  turningProfileToLathePoints,
+  buildRoutingHeightmap
 } from './toolpathPreview.js';
 import { generateRoutingGcode } from './routing.js';
 import { generateTurningGcode, stockEnvelopeRadius } from './turning.js';
@@ -416,5 +417,78 @@ describe('turningProfileToLathePoints', () => {
     const inner = [0, 0];
     const points = turningProfileToLathePoints(axial, outer, inner);
     expect(points.every((p) => p[0] > 0)).toBe(true);
+  });
+});
+
+describe('buildRoutingHeightmap', () => {
+  const gridOpts = { nx: 5, ny: 5, minX: 0, minY: 0, cellSize: 1, topZ: 0, floorZ: -1 };
+
+  it('with no moves executed, every cell stays at the top surface (topZ)', () => {
+    const heights = buildRoutingHeightmap([], { ...gridOpts, cutterRadiusForMove: () => 0.25, uptoMoveIndex: 0 });
+    expect(Array.from(heights).every((h) => h === 0)).toBe(true);
+  });
+
+  it('a cutting move lowers only the cells its capsule (segment + cutter radius) actually sweeps', () => {
+    const moves = [{ kind: 'cut', from: { x: 1, y: 2.5, z: -0.1 }, to: { x: 4, y: 2.5, z: -0.1 } }];
+    const heights = buildRoutingHeightmap(moves, { ...gridOpts, cutterRadiusForMove: () => 0.6, uptoMoveIndex: 1 });
+    for (let iy = 0; iy < 5; iy += 1) {
+      for (let ix = 0; ix < 5; ix += 1) {
+        const expected = iy === 2 ? -0.1 : 0;
+        expect(heights[iy * 5 + ix]).toBeCloseTo(expected, 5);
+      }
+    }
+  });
+
+  it('ignores rapid moves - they do not cut', () => {
+    const moves = [{ kind: 'rapid', from: { x: 1, y: 2.5, z: -0.5 }, to: { x: 4, y: 2.5, z: -0.5 } }];
+    const heights = buildRoutingHeightmap(moves, { ...gridOpts, cutterRadiusForMove: () => 0.6, uptoMoveIndex: 1 });
+    expect(Array.from(heights).every((h) => h === 0)).toBe(true);
+  });
+
+  it('skips a move with no resolvable cutter radius (e.g. an unset tool)', () => {
+    const moves = [{ kind: 'cut', from: { x: 1, y: 2.5, z: -0.5 }, to: { x: 4, y: 2.5, z: -0.5 } }];
+    const heights = buildRoutingHeightmap(moves, { ...gridOpts, cutterRadiusForMove: () => 0, uptoMoveIndex: 1 });
+    expect(Array.from(heights).every((h) => h === 0)).toBe(true);
+  });
+
+  it('clamps a cut deeper than floorZ - never renders through the stock', () => {
+    const moves = [{ kind: 'cut', from: { x: 1, y: 2.5, z: -5 }, to: { x: 4, y: 2.5, z: -5 } }];
+    const heights = buildRoutingHeightmap(moves, { ...gridOpts, cutterRadiusForMove: () => 0.6, uptoMoveIndex: 1 });
+    expect(heights[2 * 5 + 2]).toBe(-1);
+  });
+
+  it('a later, shallower move never raises a cell back up - only the deepest cut at each cell wins', () => {
+    const moves = [
+      { kind: 'cut', from: { x: 1, y: 2.5, z: -0.5 }, to: { x: 4, y: 2.5, z: -0.5 } },
+      { kind: 'cut', from: { x: 1, y: 2.5, z: -0.1 }, to: { x: 4, y: 2.5, z: -0.1 } }
+    ];
+    const heights = buildRoutingHeightmap(moves, { ...gridOpts, cutterRadiusForMove: () => 0.6, uptoMoveIndex: 2 });
+    expect(heights[2 * 5 + 2]).toBeCloseTo(-0.5, 5);
+  });
+
+  it('applies partial progress on the in-progress move only', () => {
+    const moves = [{ kind: 'cut', from: { x: 0, y: 2.5, z: -0.4 }, to: { x: 4, y: 2.5, z: -0.4 } }];
+    const half = buildRoutingHeightmap(moves, { ...gridOpts, cutterRadiusForMove: () => 0.55, uptoMoveIndex: 0, partialProgress: 0.5 });
+    expect(half[2 * 5 + 4]).toBe(0); // far column - never reached at half progress
+    expect(half[2 * 5 + 0]).toBeCloseTo(-0.4, 5);
+  });
+
+  it('against real generated G-code: cuts reach the programmed depth somewhere along the toolpath', () => {
+    const contour = [{ points: [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 }], isHole: false }];
+    const { gcode: programText } = generateRoutingGcode(contour, { toolDiameter: 0.25, targetDepth: 0.2, stepDown: 0.2 });
+    const { moves } = parseToolpath3D(programText);
+    const minX = Math.min(...moves.flatMap((m) => [m.from.x, m.to.x])) - 0.2;
+    const minY = Math.min(...moves.flatMap((m) => [m.from.y, m.to.y])) - 0.2;
+    const maxX = Math.max(...moves.flatMap((m) => [m.from.x, m.to.x])) + 0.2;
+    const maxY = Math.max(...moves.flatMap((m) => [m.from.y, m.to.y])) + 0.2;
+    const cellSize = 0.05;
+    const nx = Math.round((maxX - minX) / cellSize) + 1;
+    const ny = Math.round((maxY - minY) / cellSize) + 1;
+    const heights = buildRoutingHeightmap(moves, {
+      nx, ny, minX, minY, cellSize, topZ: 0, floorZ: -0.3,
+      cutterRadiusForMove: () => 0.125,
+      uptoMoveIndex: moves.length
+    });
+    expect(Math.min(...heights)).toBeCloseTo(-0.2, 2);
   });
 });
