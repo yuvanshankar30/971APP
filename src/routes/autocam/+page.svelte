@@ -496,6 +496,11 @@
     toolpathView = '2d';
     showJobToolpathModal = true;
   }
+  function open3DToolpathPreview(job) {
+    editingJob = job;
+    toolpathView = '3d';
+    showJobToolpathModal = true;
+  }
   // Embeds ncviewer.com directly in the app (iframe) instead of a plain
   // external-tab link. ncviewer.com has no documented way to load a file by
   // URL (checked directly, twice), but it does accept pasted G-code text in
@@ -1036,6 +1041,11 @@
                 {#if job.status === 'completed' && job.gcode}
                   <span class="output-action-group">
                     <button class="btn btn-icon" data-tooltip="View Toolpath" aria-label="View toolpath simulation" on:click={() => openToolpathPreview(job)}><Route size={15} /></button>
+                    {#if job.operation_type === 'routing'}
+                      <button class="btn btn-secondary btn-sm" on:click={() => open3DToolpathPreview(job)}>
+                        <Route size={14} /> 3D Toolpath
+                      </button>
+                    {/if}
                     <button class="btn btn-secondary btn-sm" title={job.gcode_file_name || 'output.ngc'} on:click={() => downloadGcodeBlob(job)}>
                       <Download size={14} /> Install NGC
                     </button>
@@ -1314,6 +1324,11 @@
           <button class="btn btn-secondary btn-sm" on:click={() => (showJobToolpathModal = true)} disabled={editingJob.status !== 'completed' || !editingJob.gcode || editingJob.operation_type === 'tubestock'} title={editingJob.operation_type === 'tubestock' ? 'No 2D preview for tube stock - it moves in X/Y/Z plus a rotary axis the viewer doesn\'t track; use Open ncviewer.com or download the G-code instead' : (editingJob.status !== 'completed' ? 'Only available once the job has completed' : '')}>
             <Route size={14} /> View {operationLabel(editingJob.operation_type)} Toolpath
           </button>
+          {#if editingJob.operation_type === 'routing'}
+            <button class="btn btn-secondary btn-sm" on:click={() => open3DToolpathPreview(editingJob)} disabled={editingJob.status !== 'completed' || !editingJob.gcode}>
+              <Route size={14} /> 3D Toolpath
+            </button>
+          {/if}
           {#if editingJob.status === 'completed' && editingJob.gcode}
             <button class="btn btn-secondary btn-sm" on:click={() => openNcviewer(editingJob)}>
               <ExternalLink size={14} /> Open ncviewer.com
