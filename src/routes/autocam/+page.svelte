@@ -1452,6 +1452,7 @@
               stockShape={editingJob.params?.stockShape || 'round'}
               noseRadius={Number(editingJob.params?.finishTool?.noseRadius ?? editingJob.params?.noseRadius) || null}
               drillDiameter={Number(editingJob.params?.drilling?.diameter) || null}
+              stepFileName={editingJob.step_file_name || null}
             />
           {:else}
             <div class="toolpath-simulator-loading" aria-busy="true"><span class="loading-spinner"></span> Loading 3D toolpath...</div>
