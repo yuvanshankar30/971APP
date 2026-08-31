@@ -2593,13 +2593,13 @@
     --wx-gantt-border-color: #0f172a09;
     --wx-gantt-border: 1px solid #0f172a09;
     --wx-timescale-border: 1px solid #0f172a08;
-    --wx-timescale-font: 700 0.72rem/1.1 var(--font-standard);
+    --wx-timescale-font: 700 0.72rem/1.1 system-ui, sans-serif;
     --wx-timescale-font-color: #475569;
     --wx-timescale-text-transform: none;
-    --wx-grid-header-font: 700 0.72rem/1.1 var(--font-standard);
+    --wx-grid-header-font: 700 0.72rem/1.1 system-ui, sans-serif;
     --wx-grid-header-font-color: #334155;
     --wx-grid-header-shadow: none;
-    --wx-grid-body-font: 500 0.78rem/1.2 var(--font-standard);
+    --wx-grid-body-font: 500 0.78rem/1.2 system-ui, sans-serif;
     --wx-grid-body-font-color: #0f172a;
     --wx-grid-body-row-border: 1px solid #0f172a08;
     --wx-grid-body-cell-border: 1px solid #0f172a04;
@@ -2610,7 +2610,7 @@
     --wx-gantt-holiday-background: rgba(15, 23, 42, 0.015);
     --wx-gantt-holiday-color: #94a3b8;
     --wx-gantt-marker-color: rgba(241, 195, 49, 0.55);
-    --wx-gantt-marker-font: 700 0.68rem/1.1 var(--font-standard);
+    --wx-gantt-marker-font: 700 0.68rem/1.1 system-ui, sans-serif;
     --wx-gantt-bar-border-radius: 4px;
     --wx-gantt-milestone-border-radius: 4px;
     --wx-gantt-bar-shadow: none;
