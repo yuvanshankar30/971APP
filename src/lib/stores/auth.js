@@ -114,8 +114,12 @@ export function initAuth() {
         if (error) console.warn('getSession error:', error.message || error);
         const authUser = data?.session?.user ?? null;
         user.set(authUser);
+        // The session tells us whether protected content may render. Profile
+        // enrichment controls navigation and permissions, but a slow profile
+        // request must never keep an already signed-in user on a blank loader.
+        authReady.set(true);
         if (authUser) {
-          await fetchUserProfile(authUser.id);
+          void fetchUserProfile(authUser.id);
         } else {
           userProfile.set(null);
         }
