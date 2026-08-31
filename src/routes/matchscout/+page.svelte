@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import RebuiltFieldMap from '$lib/components/RebuiltFieldMap.svelte';
-  import { MATCH_RATING_FIELDS, TELEOP_ROLES, parseAutoPointsEstimate } from '$lib/matchScouting.js';
+  import { BALL_COUNT_RANGES, MATCH_RATING_FIELDS, TELEOP_ROLES, parseAutoPointsEstimate } from '$lib/matchScouting.js';
   import { getAuthHeader } from '$lib/supabase.js';
   import { fetchActiveScoutingEventKey } from '$lib/scoutingEvent.js';
   import { AlertTriangle, Check, ChevronRight, ClipboardCheck, MapPinned, Route, RotateCcw, Timer, Trophy } from 'lucide-svelte';
@@ -31,6 +31,7 @@
   let savedAutoPaths = [];
   let savedPathLoading = false;
   let ballSources = [];
+  let ballsScored = '';
   let autoCollision = false;
   let autoCollisionNotes = '';
   let ratings = Object.fromEntries(RATING_FIELDS.map((field) => [field, 0]));
@@ -57,6 +58,7 @@
   $: shouldReportPitProblem = requiresPitReport || pitProblem;
   $: canFinish = !saving && !autoPointsInvalid && (!shouldReportPitProblem || pitProblemDetails.trim());
   $: autoPointsEstimate = parseAutoPointsEstimate(autoPoints);
+  $: ballsEstimate = ballsScored ? parseAutoPointsEstimate(ballsScored) : null;
   $: autoPointsInvalid = Boolean(autoPoints.trim()) && !autoPointsEstimate;
 
   function selectPhase(nextPhase) {
@@ -212,6 +214,7 @@
         auto_points_estimate: autoPoints,
         auto_moved: autoMoved,
         ball_sources: ballSources,
+        balls_scored_band: ballsScored,
         auto_collision: autoCollision,
         auto_collision_notes: autoCollision ? autoCollisionNotes : '',
         auto_path_name: autoPathName,
@@ -467,6 +470,21 @@
             {/each}
           </div>
         </fieldset>
+        <div class="control-group balls-control">
+          <label for="balls-scored" class="field-label">Balls scored</label>
+          <small class="field-help">Pick the closest range. Optional - leave it unset rather than guessing wildly.</small>
+          <select id="balls-scored" class="form-input" bind:value={ballsScored}>
+            <option value="">Not counted</option>
+            {#each BALL_COUNT_RANGES as range}
+              <option value={range}>{range}</option>
+            {/each}
+          </select>
+          {#if ballsEstimate?.kind === 'lower-bound'}
+            <small class="estimate-result">Analytics estimate: <strong>at least {ballsEstimate.average} balls</strong> (no upper bound observed).</small>
+          {:else if ballsEstimate}
+            <small class="estimate-result">Analytics estimate: <strong>{ballsEstimate.average} balls</strong> (midpoint of {ballsEstimate.input}).</small>
+          {/if}
+        </div>
         <div class="ratings-grid">
           <div class="ratings-heading"><span class="field-label">Optional 1-5 ratings</span><small>1 = poor, 5 = excellent. Leave untouched when not observed.</small></div>
           {#each TELEOP_RATING_FIELDS as field}
@@ -540,6 +558,7 @@
   .auto-layout { display:grid; grid-template-columns:minmax(18rem,.9fr) minmax(18rem,1.1fr); gap:var(--space-6); } .auto-controls { display:grid; align-content:start; gap:var(--space-1); } .choice-grid { margin-top:var(--space-2); }
   .auto-points-input { margin-top:var(--space-2); font-size:1.1rem; font-variant-numeric:tabular-nums; }
   .auto-points-input.invalid { border-color:var(--danger); }
+  .balls-control { display:grid; gap:4px; margin-bottom:var(--space-4); max-width:22rem; }
   .point-examples { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); }
   .estimate-result { color:var(--text-muted); }
   .estimate-result strong { color:var(--text); }

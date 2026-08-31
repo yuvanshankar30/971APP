@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { continueAutoPath, parseAutoPointsEstimate } from './matchScouting.js';
+import { BALL_COUNT_RANGES, continueAutoPath, parseAutoPointsEstimate } from './matchScouting.js';
 
 describe('parseAutoPointsEstimate', () => {
   it('keeps an exact count exact', () => {
@@ -56,5 +56,38 @@ describe('continueAutoPath', () => {
 
   it('starts a path when no earlier gesture exists', () => {
     expect(continueAutoPath(undefined, [5, 10])).toEqual([[5, 10]]);
+  });
+});
+
+describe('BALL_COUNT_RANGES', () => {
+  it('covers 0-25 through 475-500 in steps of 25, plus an open top bucket', () => {
+    expect(BALL_COUNT_RANGES).toHaveLength(21);
+    expect(BALL_COUNT_RANGES[0]).toBe('0-25');
+    expect(BALL_COUNT_RANGES[1]).toBe('25-50');
+    expect(BALL_COUNT_RANGES[19]).toBe('475-500');
+    expect(BALL_COUNT_RANGES.at(-1)).toBe('500+');
+  });
+
+  it('has no gaps or overlaps between consecutive buckets', () => {
+    const bounded = BALL_COUNT_RANGES.slice(0, -1).map((range) => range.split('-').map(Number));
+    bounded.forEach(([min, max], index) => {
+      expect(max - min).toBe(25);
+      if (index > 0) expect(min).toBe(bounded[index - 1][1]);
+    });
+  });
+
+  it('parses every bucket, and treats the top one as a lower bound', () => {
+    for (const range of BALL_COUNT_RANGES) {
+      expect(parseAutoPointsEstimate(range)).not.toBeNull();
+    }
+    // "500+" has no observed ceiling, so averaging it against an invented
+    // upper value would bias every aggregate that includes it.
+    const top = parseAutoPointsEstimate('500+');
+    expect(top.kind).toBe('lower-bound');
+    expect(top.max).toBeNull();
+    expect(top.average).toBe(500);
+
+    const middle = parseAutoPointsEstimate('75-100');
+    expect(middle.average).toBe(87.5);
   });
 });

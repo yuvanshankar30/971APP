@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BALL_COUNT_RANGES,
   RATING_FIELDS,
   normalizeAutoPath,
   normalizeMatchScoutEntry,
@@ -213,5 +214,44 @@ describe('normalizePitProblemReport', () => {
     expect(value.resolved).toBe(false);
     expect(value.created_by).toBe('user-9');
     expect(value.source).toBe('Match scout');
+  });
+});
+
+describe('ball count estimate', () => {
+  const base = { event_key: '2026casj', match_key: 'qm12', team_key: '971' };
+
+  it('stores the bucket alongside its parsed bounds', () => {
+    const { value } = normalizeMatchScoutEntry({ ...base, balls_scored_band: '75-100' });
+    expect(value.balls_scored_band).toBe('75-100');
+    expect(value.balls_scored_min).toBe(75);
+    expect(value.balls_scored_max).toBe(100);
+    expect(value.balls_scored_average).toBe(87.5);
+  });
+
+  it('leaves the top bucket open-ended rather than inventing a ceiling', () => {
+    const { value } = normalizeMatchScoutEntry({ ...base, balls_scored_band: '500+' });
+    expect(value.balls_scored_min).toBe(500);
+    expect(value.balls_scored_max).toBeNull();
+    expect(value.balls_scored_average).toBe(500);
+  });
+
+  it('drops a value outside the bucket vocabulary instead of storing it', () => {
+    // A free-typed or drifted client value is missing data, not a new bucket.
+    for (const bad of ['0-30', '1000+', 'lots', '25', '']) {
+      expect(normalizeMatchScoutEntry({ ...base, balls_scored_band: bad }).value.balls_scored_band).toBeNull();
+    }
+  });
+
+  it('is optional and does not fail the report when absent', () => {
+    const { value, error } = normalizeMatchScoutEntry(base);
+    expect(error).toBeNull();
+    expect(value.balls_scored_band).toBeNull();
+    expect(value.balls_scored_average).toBeNull();
+  });
+
+  it('accepts every bucket the UI offers', () => {
+    for (const range of BALL_COUNT_RANGES) {
+      expect(normalizeMatchScoutEntry({ ...base, balls_scored_band: range }).value.balls_scored_band).toBe(range);
+    }
   });
 });
