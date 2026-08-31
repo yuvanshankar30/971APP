@@ -76,8 +76,18 @@
   <div class="form-row">
     {#if mode === 'job'}
       <div class="form-group">
-        <label class="form-label" for="cf-stock-dia">Stock diameter (in)</label>
+        <label class="form-label" for="cf-stock-shape">Stock shape</label>
+        <select id="cf-stock-shape" class="form-select" bind:value={params.stockShape}>
+          <option value="round">Round bar</option>
+          <option value="hex">Hex bar</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="cf-stock-dia">Stock {params.stockShape === 'hex' ? 'across flats' : 'diameter'} (in)</label>
         <input id="cf-stock-dia" class="form-input" type="number" step="0.01" bind:value={params.stockDiameter} placeholder="Required" />
+        {#if params.stockShape === 'hex'}
+          <p class="text-muted">Across-flats size, same as how hex bar is ordered - the rapid/first roughing pass(es) clear the larger across-corners dimension automatically.</p>
+        {/if}
       </div>
     {/if}
     <div class="form-group">

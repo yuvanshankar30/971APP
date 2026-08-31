@@ -12,6 +12,7 @@
   import CamParamFields from '$autocam/components/CamParamFields.svelte';
   import RoutingToolSequence from '$autocam/components/RoutingToolSequence.svelte';
   import TurningFinishTool from '$autocam/components/TurningFinishTool.svelte';
+  import TurningDrilling from '$autocam/components/TurningDrilling.svelte';
   import CadViewer from '$lib/components/CadViewer.svelte';
   import ToolpathViewer from '$autocam/components/ToolpathViewer.svelte';
   import { toastActions } from '$lib/toast.js';
@@ -95,7 +96,7 @@
   ];
 
   function emptyTurningParams() {
-    return { stockDiameter: '', stepDown: 0.05, finishAllowance: 0.02, feedRough: 0.008, feedFinish: 0.004, surfaceSpeed: 150, maxRpm: 2500, setupMode: 'single', flipAt: '', finishTool: null, automaticToolChanger: false };
+    return { stockDiameter: '', stockShape: 'round', stepDown: 0.05, finishAllowance: 0.02, feedRough: 0.008, feedFinish: 0.004, surfaceSpeed: 150, maxRpm: 2500, setupMode: 'single', flipAt: '', finishTool: null, automaticToolChanger: false, drilling: null };
   }
   function emptyRoutingParams() {
     return { toolDiameter: 0.25, stepDown: 0.1, targetDepth: '', tabWidth: 0.25, tabHeight: 0.06, tabSpacing: 6, feedRate: 40, plungeRate: 15, spindleSpeed: 16000, edgeMargin: 0.5, toolSequence: [] };
@@ -357,9 +358,11 @@
 
   // Numeric fields get coerced to Number(); toolSequence (routing multi-tool,
   // see autocam/docs/toolchange-gcode-plan.md) is an array of {toolId, toolDiameter,
-  // toolNumber, label} objects and finishTool (turning multi-tool) is one
-  // {toolId, toolNumber, label, noseRadius} object - both must pass through untouched.
-  const NON_NUMERIC_PARAM_KEYS = new Set(['toolSequence', 'setupMode', 'finishTool', 'automaticToolChanger']);
+  // toolNumber, label} objects, finishTool (turning multi-tool) is one
+  // {toolId, toolNumber, label, noseRadius} object, and drilling (turning
+  // centerline drilling) is one {toolNumber, label, diameter, depth,
+  // peckDepth, feedRate, rpm} object - all three must pass through untouched.
+  const NON_NUMERIC_PARAM_KEYS = new Set(['toolSequence', 'setupMode', 'finishTool', 'automaticToolChanger', 'stockShape', 'drilling']);
 
   function serializeParams(raw) {
     const params = {};
@@ -368,8 +371,8 @@
         if (Array.isArray(value) && value.length > 0) params.toolSequence = value;
         continue;
       }
-      if (key === 'finishTool') {
-        if (value && typeof value === 'object') params.finishTool = value;
+      if (key === 'finishTool' || key === 'drilling') {
+        if (value && typeof value === 'object') params[key] = value;
         continue;
       }
       if (NON_NUMERIC_PARAM_KEYS.has(key)) {
@@ -1229,6 +1232,7 @@
         {#if newJobOperation === 'turning'}
           <CamParamFields operation="turning" bind:params={turningParams} mode="job" />
           <TurningFinishTool {tools} bind:finishTool={turningParams.finishTool} />
+          <TurningDrilling {tools} bind:drilling={turningParams.drilling} disabled={turningParams.setupMode === 'flip'} />
         {:else if newJobOperation === 'tubestock'}
           <CamParamFields operation="tubestock" bind:params={tubestockParams} mode="job" />
         {:else}
@@ -1356,6 +1360,7 @@
         {#if editingJob.operation_type === 'turning'}
           <CamParamFields operation="turning" bind:params={editParams} mode="job" />
           <TurningFinishTool {tools} bind:finishTool={editParams.finishTool} />
+          <TurningDrilling {tools} bind:drilling={editParams.drilling} disabled={editParams.setupMode === 'flip'} />
         {:else if editingJob.operation_type === 'tubestock'}
           <CamParamFields operation="tubestock" bind:params={editParams} mode="job" />
         {:else}
