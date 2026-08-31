@@ -1555,41 +1555,47 @@
         <div class="rating-grid">
           <div class="form-group">
             <label class="form-label" for="electricalRatingInput">Electrical rating (1-10)</label>
-            <input
-              id="electricalRatingInput"
-              class="form-input"
-              type="number"
-              min="1"
-              max="10"
-              step="1"
-              bind:value={technical_details.electrical_rating}
-            />
+            <div class="rating-slider">
+              <input
+                id="electricalRatingInput"
+                type="range"
+                min="1"
+                max="10"
+                step="1"
+                bind:value={technical_details.electrical_rating}
+              />
+              <output>{technical_details.electrical_rating ?? 'Not rated'}</output>
+            </div>
           </div>
 
           <div class="form-group">
             <label class="form-label" for="drivebaseRatingInput">Drivebase rating (1-10)</label>
-            <input
-              id="drivebaseRatingInput"
-              class="form-input"
-              type="number"
-              min="1"
-              max="10"
-              step="1"
-              bind:value={technical_details.drivebase_rating}
-            />
+            <div class="rating-slider">
+              <input
+                id="drivebaseRatingInput"
+                type="range"
+                min="1"
+                max="10"
+                step="1"
+                bind:value={technical_details.drivebase_rating}
+              />
+              <output>{technical_details.drivebase_rating ?? 'Not rated'}</output>
+            </div>
           </div>
 
           <div class="form-group">
             <label class="form-label" for="overallReliabilityRatingInput">Overall reliability rating (1-10)</label>
-            <input
-              id="overallReliabilityRatingInput"
-              class="form-input"
-              type="number"
-              min="1"
-              max="10"
-              step="1"
-              bind:value={technical_details.overall_reliability_rating}
-            />
+            <div class="rating-slider">
+              <input
+                id="overallReliabilityRatingInput"
+                type="range"
+                min="1"
+                max="10"
+                step="1"
+                bind:value={technical_details.overall_reliability_rating}
+              />
+              <output>{technical_details.overall_reliability_rating ?? 'Not rated'}</output>
+            </div>
           </div>
         </div>
       </section>
@@ -2105,6 +2111,23 @@
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
     gap: 0.75rem;
+  }
+
+  .rating-slider {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
+  .rating-slider input[type="range"] {
+    flex: 1;
+    min-width: 0;
+  }
+  .rating-slider output {
+    min-width: 4.5rem;
+    text-align: right;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
   }
 
   .option-grid {
