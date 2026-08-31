@@ -10,7 +10,7 @@
   import * as THREE from 'three';
   import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
   import { FastForward, Pause, Play, RotateCcw, SkipForward } from 'lucide-svelte';
-  import { parseToolpath3D, projectTurningToolpath, toolpathBounds3D, toolpathPositionAtDistance } from '../toolpathPreview.js';
+  import { parseToolpath3D, projectTurningToolpath, toolpathBounds3D, toolpathPositionAtDistance, buildRoutingHeightmap } from '../toolpathPreview.js';
 
   export let gcode = '';
   export let operationType = 'routing';
@@ -80,7 +80,7 @@
   $: if (scene && moves) rebuildToolpath();
   $: if (scene && toolpathVisible !== undefined) applyVisibility(visible);
   $: if (scene && toolPosition && cutterDiameter !== undefined && toolVisible !== undefined && isTurning !== undefined && noseRadius !== undefined) updateTool();
-  $: if (scene && moves && stockVisible !== undefined && stockDiameter !== undefined && isTurning !== undefined) updateStock();
+  $: if (scene && moves && toolPosition && stockVisible !== undefined && stockDiameter !== undefined && isTurning !== undefined) updateStock();
 
   function applyVisibility(state) {
     for (const kind of KINDS) {
@@ -153,37 +153,121 @@
 
   function updateStock() {
     disposeStock();
-    if (!scene || !isTurning || !(Number(stockDiameter) > 0) || !moves.length) return;
-    const axialMin = Math.min(...moves.flatMap((move) => [move.from.x, move.to.x]));
-    const axialMax = Math.max(...moves.flatMap((move) => [move.from.x, move.to.x]));
-    const margin = Number(stockDiameter) * 0.08;
-    const length = Math.max(axialMax - axialMin + margin * 2, Number(stockDiameter) * 0.5);
-    const geometry = new THREE.CylinderGeometry(Number(stockDiameter) / 2, Number(stockDiameter) / 2, length, 48, 1, true);
-    geometry.rotateZ(Math.PI / 2);
-    const cylinder = new THREE.Mesh(
+    if (!scene || !moves.length) return;
+
+    if (isTurning) {
+      if (!(Number(stockDiameter) > 0)) return;
+      const axialMin = Math.min(...moves.flatMap((move) => [move.from.x, move.to.x]));
+      const axialMax = Math.max(...moves.flatMap((move) => [move.from.x, move.to.x]));
+      const margin = Number(stockDiameter) * 0.08;
+      const length = Math.max(axialMax - axialMin + margin * 2, Number(stockDiameter) * 0.5);
+      const geometry = new THREE.CylinderGeometry(Number(stockDiameter) / 2, Number(stockDiameter) / 2, length, 48, 1, true);
+      geometry.rotateZ(Math.PI / 2);
+      const cylinder = new THREE.Mesh(
+        geometry,
+        new THREE.MeshPhongMaterial({ color: 0xb8bcc2, transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthWrite: false })
+      );
+      stockMesh = new THREE.Group();
+      stockMesh.add(cylinder);
+      // A uniform cylinder looks stationary while spinning. Four longitudinal
+      // witness lines make spindle rotation visible without pretending they are
+      // physical grooves in the stock.
+      const markerPoints = [];
+      const radius = Number(stockDiameter) / 2;
+      for (let index = 0; index < 4; index += 1) {
+        const angle = (index / 4) * Math.PI * 2;
+        const y = Math.cos(angle) * radius * 1.002;
+        const z = Math.sin(angle) * radius * 1.002;
+        markerPoints.push(-length / 2, y, z, length / 2, y, z);
+      }
+      const markerGeometry = new THREE.BufferGeometry();
+      markerGeometry.setAttribute('position', new THREE.Float32BufferAttribute(markerPoints, 3));
+      stockMesh.add(new THREE.LineSegments(
+        markerGeometry,
+        new THREE.LineBasicMaterial({ color: 0x5f6670, transparent: true, opacity: 0.7 })
+      ));
+      stockMesh.position.x = (axialMin + axialMax) / 2;
+      stockMesh.visible = stockVisible;
+      scene.add(stockMesh);
+      return;
+    }
+
+    updateRoutingStock();
+  }
+
+  // Real machined solid for routing (Phase 4 of
+  // docs/toolpath-simulation-plan.md, deferred when the router sim first
+  // shipped) - a heightmap-displaced plate, rebuilt every playback position
+  // from buildRoutingHeightmap. See that function's own comment for why a
+  // grid is exact for a 2.5D router cut, unlike turning's radius profile.
+  const HEIGHTMAP_MAX_GRID = 160;
+  const HEIGHTMAP_MARGIN_FACTOR = 0.06;
+
+  function routingCutterRadius(move) {
+    const seqDiameter = Number(toolSequence?.[move.toolIndex || 0]?.toolDiameter);
+    const diameter = seqDiameter > 0 ? seqDiameter : (Number(toolDiameter) || Number(cutterDiameterInput) || 0);
+    return diameter > 0 ? diameter / 2 : 0;
+  }
+
+  function updateRoutingStock() {
+    const spanX = Math.max(bounds.max.x - bounds.min.x, 0.1);
+    const spanY = Math.max(bounds.max.y - bounds.min.y, 0.1);
+    const marginX = spanX * HEIGHTMAP_MARGIN_FACTOR;
+    const marginY = spanY * HEIGHTMAP_MARGIN_FACTOR;
+    const gridMinX = bounds.min.x - marginX;
+    const gridMinY = bounds.min.y - marginY;
+    const width = spanX + marginX * 2;
+    const heightSpan = spanY + marginY * 2;
+
+    const resolvedDiameters = [Number(toolDiameter), ...(toolSequence || []).map((t) => Number(t.toolDiameter))].filter((d) => d > 0);
+    const minToolDiameter = resolvedDiameters.length ? Math.min(...resolvedDiameters) : 0.25;
+    const targetCellSize = minToolDiameter / 6;
+    const cellSize = Math.max(targetCellSize, width / HEIGHTMAP_MAX_GRID, heightSpan / HEIGHTMAP_MAX_GRID);
+    const nx = Math.max(10, Math.ceil(width / cellSize) + 1);
+    const ny = Math.max(10, Math.ceil(heightSpan / cellSize) + 1);
+
+    // A bit below the deepest programmed cut - "safely into the spoilboard",
+    // not a real stock-bottom measurement (routing jobs have no stock-
+    // thickness param today), but honest enough to read as a solid plate
+    // rather than a paper-thin sheet.
+    const floorZ = Math.min(bounds.min.z - cellSize, -0.05);
+    const moveIndex = toolPosition?.moveIndex ?? 0;
+    const progress = toolPosition?.progress ?? 0;
+
+    const heights = buildRoutingHeightmap(moves, {
+      nx, ny, minX: gridMinX, minY: gridMinY, cellSize, topZ: 0, floorZ,
+      cutterRadiusForMove: routingCutterRadius,
+      uptoMoveIndex: moveIndex,
+      partialProgress: progress
+    });
+
+    const geomWidth = (nx - 1) * cellSize;
+    const geomHeight = (ny - 1) * cellSize;
+    const geometry = new THREE.PlaneGeometry(geomWidth, geomHeight, nx - 1, ny - 1);
+    const centerX = gridMinX + cellSize / 2 + geomWidth / 2;
+    const centerY = gridMinY + cellSize / 2 + geomHeight / 2;
+    geometry.translate(centerX, centerY, 0);
+
+    // Look up each vertex's own (x,y) rather than assuming PlaneGeometry's
+    // internal iteration order matches the heightmap's (ix,iy) indexing -
+    // correct regardless of that internal convention, at negligible cost.
+    const posAttr = geometry.attributes.position;
+    for (let i = 0; i < posAttr.count; i += 1) {
+      const vx = posAttr.getX(i);
+      const vy = posAttr.getY(i);
+      const ix = Math.max(0, Math.min(nx - 1, Math.round((vx - gridMinX) / cellSize - 0.5)));
+      const iy = Math.max(0, Math.min(ny - 1, Math.round((vy - gridMinY) / cellSize - 0.5)));
+      posAttr.setZ(i, heights[iy * nx + ix]);
+    }
+    posAttr.needsUpdate = true;
+    geometry.computeVertexNormals();
+
+    const solid = new THREE.Mesh(
       geometry,
-      new THREE.MeshPhongMaterial({ color: 0xb8bcc2, transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthWrite: false })
+      new THREE.MeshPhongMaterial({ color: 0xb8bcc2, side: THREE.DoubleSide })
     );
     stockMesh = new THREE.Group();
-    stockMesh.add(cylinder);
-    // A uniform cylinder looks stationary while spinning. Four longitudinal
-    // witness lines make spindle rotation visible without pretending they are
-    // physical grooves in the stock.
-    const markerPoints = [];
-    const radius = Number(stockDiameter) / 2;
-    for (let index = 0; index < 4; index += 1) {
-      const angle = (index / 4) * Math.PI * 2;
-      const y = Math.cos(angle) * radius * 1.002;
-      const z = Math.sin(angle) * radius * 1.002;
-      markerPoints.push(-length / 2, y, z, length / 2, y, z);
-    }
-    const markerGeometry = new THREE.BufferGeometry();
-    markerGeometry.setAttribute('position', new THREE.Float32BufferAttribute(markerPoints, 3));
-    stockMesh.add(new THREE.LineSegments(
-      markerGeometry,
-      new THREE.LineBasicMaterial({ color: 0x5f6670, transparent: true, opacity: 0.7 })
-    ));
-    stockMesh.position.x = (axialMin + axialMax) / 2;
+    stockMesh.add(solid);
     stockMesh.visible = stockVisible;
     scene.add(stockMesh);
   }
@@ -449,6 +533,11 @@
       <label class="legend-item" class:empty={!(Number(stockDiameter) > 0)}>
         <input type="checkbox" bind:checked={stockVisible} disabled={!(Number(stockDiameter) > 0)} />
         <span class="legend-label">Rotating stock</span>
+      </label>
+    {:else}
+      <label class="legend-item" class:empty={!moves.length}>
+        <input type="checkbox" bind:checked={stockVisible} disabled={!moves.length} />
+        <span class="legend-label">Stock</span>
       </label>
     {/if}
     {#each KINDS as kind}
