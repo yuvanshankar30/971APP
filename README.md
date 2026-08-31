@@ -37,12 +37,23 @@ browser confirmation or prompt popups.
   an actual Fusion 360 Runner rather than in-process math; it is intentionally
   absent from the New AutoCAM Job operation picker. See the
   **AutoCAM** section below for the code-level detail on all three.
-  Completed routering and turning jobs have a switchable 2D preview and a
-  3D toolpath simulator for router and lathe jobs with rapid and cutting paths
-  distinguished, distance scrubbing, and tool-change stepping. Routering shows
-  a moving flat end mill; turning correctly projects diameter-mode X/Z into
-  axial/radial coordinates, animates the rotating cylindrical stock, and moves
-  a turning insert along the programmed path.
+  Completed routering, turning, and tube-stock jobs all get a 3D toolpath
+  simulator (routering/turning also get a switchable 2D preview; tube stock
+  has no 2D representation of a rotary-axis program, so it goes straight to
+  3D) with rapid/cutting/plunge paths distinguished, distance scrubbing, and
+  tool-change stepping. All three render real material removal as playback
+  scrubs, not a static stock model: routering displaces a heightmap plate
+  under a moving flat end mill; turning projects diameter-mode X/Z into
+  axial/radial coordinates and revolves the actual machined profile into a
+  solid, animating the rotating stock and a turning insert along the
+  programmed path; tube stock renders a static box (see its own file-header
+  comment for why it isn't animated as a literal rotation) with real drilled
+  holes cut into whichever wall each move is on, and a drill oriented into
+  that wall. Routering and turning additionally overlay the job's source
+  STEP geometry semi-transparently and flag a gouge - a cut that removed
+  material the source part actually needed, checked against that
+  independent STEP-derived ground truth rather than the G-code comparing
+  itself to itself.
 - **Scouting**: pit scouting (a topic-at-a-time form with per-topic
   completion counts, scout/contact attribution, and up to three robot photos,
   built for filling in a noisy pit on a phone while a team answers out of
