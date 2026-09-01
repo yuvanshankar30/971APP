@@ -2890,7 +2890,11 @@
   }
   .metadata-status {
     flex-direction: column;
-    gap: 0.35rem;
+    gap: 0.65rem;
+  }
+
+  .metadata-status .router-progress-note {
+    margin-top: 0;
   }
   .metadata-created {
     flex-wrap: wrap;
