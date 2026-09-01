@@ -66,7 +66,8 @@ export function parseToolpath3D(gcode, { chordTolerance = DEFAULT_CHORD_TOLERANC
   // whole turning program.
   const at = (point) => ({ x: point.x ?? 0, y: point.y ?? 0, z: point.z ?? 0 });
 
-  // angleDeg: tubestock.js's rotary A-axis index, tagged onto every move so
+  // angleDeg: tubestock.js's face index (no real rotary axis - see the
+  // FACE-tag comment handling below), tagged onto every move so
   // a tube-stock consumer can place it on the right wall (routing/turning
   // never command A, so this is always 0 for them - see
   // projectTubestockToolpath, the only reader that cares).
@@ -84,6 +85,14 @@ export function parseToolpath3D(gcode, { chordTolerance = DEFAULT_CHORD_TOLERANC
       toolIndex += 1;
       toolChangeIndices.push(moves.length);
     }
+
+    // tubestock.js's combined multi-face program has no real rotary axis to
+    // command, so a face change is tagged as a `(FACE A90 - ...)` comment
+    // (never a live G-code word - see tubestock.js's own comment at the
+    // call site) rather than an actual `A90` motion word. Read it before
+    // the comment-stripping below, which would otherwise discard it.
+    const faceTagMatch = rawLine.match(/\(FACE A(-?[\d.]+)/);
+    if (faceTagMatch) cur.a = Number(faceTagMatch[1]);
 
     const line = rawLine.replace(/\(.*?\)/g, '').trim();
     if (!line || line.startsWith('%') || line.startsWith('O')) continue;
@@ -758,13 +767,15 @@ export function findRoutingHeightmapWalls(heights, {
 }
 
 /**
- * Tube stock (rotary 4th-axis drilling - see tubestock.js) geometry model.
+ * Tube stock (standard 3-axis router, manual flip between faces - see
+ * tubestock.js) geometry model.
  *
- * The real machine's rotary axis (A) physically spins the tube to present
- * each wall to a spindle that only moves in a fixed X/Y/Z - but animating
- * that rotation live is a lot of extra complexity for no real gain in what
- * the sim needs to answer ("did this hole land in the right XYZ spot on the
- * part, at the right depth"). Instead this treats the tube as ONE static
+ * There's no rotary axis on the real machine - the operator physically
+ * flips the tube between faces so a fixed X/Y/Z spindle can reach each one
+ * - but animating that flip live is a lot of extra complexity for no real
+ * gain in what the sim needs to answer ("did this hole land in the right
+ * XYZ spot on the part, at the right depth"). Instead this treats the tube
+ * as ONE static
  * solid sitting in its own local frame (X = along tube length, Y = the
  * lengthAxis's `axisA` cross-section direction, Z = its `axisB` direction -
  * see extractTubeFeaturesFromMeshes in stepProfile.js, which this mirrors
@@ -788,7 +799,7 @@ export function findRoutingHeightmapWalls(heights, {
  * static local 3D frame, given the wall it's on (angleDeg) and the tube's
  * outer cross-section.
  *
- * @param {number} angleDeg rotary index angle - snapped to the nearest of
+ * @param {number} angleDeg face index angle - snapped to the nearest of
  *   0/90/180/270 (the only angles extractTubeFeaturesFromMeshes emits, but
  *   G-code is text round-tripped through toFixed(1), so exact float
  *   equality can't be assumed).

@@ -5,25 +5,25 @@
  * consumes: { walls: [{ angleDeg, holes: [{ position, lateralOffset,
  * diameter }, ...] }, ...] }).
  *
- * Targets a router-class machine with an added rotary 4th axis (A, rotating
- * about the tube's own long axis, which is programmed as machine X) - a
- * common way to add tube-stock capability to an existing CNC router rather
- * than needing a dedicated tube notcher. UNLIKE turning.js (a real Haas
- * TL-1) and routing.js (a real ShopSabre Pro 408), there is no specific
- * real machine this has been confirmed against - no such machine exists yet
- * in this app's cam_machines data. The axis convention here - X = along
- * tube length, A = rotary index about X (0/90/180/270deg matching
- * extractTubeFeaturesFromMeshes' wall angles), Z = spindle plunge, Y = the
- * hole's lateralOffset (signed distance from the currently-indexed wall's
- * own centerline, assuming the tube's centerline sits on the rotary axis
- * and the spindle's Y=0 line) - is a reasonable, common setup, not a
- * verified one. Y matters, not just a convenience default: a real AndyMark
- * 2"x1" predrilled tube fixture (am-5180) has multiple holes at the same
- * length position but different lateral offsets on its wide face - a real
- * side-by-side hole pair, not a duplicate; drilling all of them at Y0 would
- * redrill one spot instead of the real holes. CONFIRM the real machine's
- * rotary center offset, A-axis direction, and Z=0 reference before running
- * on material.
+ * Targets a standard 3-axis CNC router - NOT a rotary/4th-axis machine.
+ * There is no A axis: each face's holes get their own separately-runnable
+ * program (see facePrograms below), and the operator manually flips the
+ * tube stock over and re-zeros Z between faces, the same way an existing
+ * router gets tube-stock capability without needing a dedicated tube
+ * notcher or an added rotary axis. UNLIKE turning.js (a real Haas TL-1)
+ * and routing.js (a real ShopSabre Pro 408), there is no specific real
+ * machine this has been confirmed against - no such machine exists yet in
+ * this app's cam_machines data. The axis convention here - X = along tube
+ * length, Z = spindle plunge, Y = the hole's lateralOffset (signed
+ * distance from the currently-loaded wall's own centerline, assuming the
+ * tube's centerline sits on the spindle's Y=0 line once fixtured for that
+ * face) - is a reasonable, common setup, not a verified one. Y matters,
+ * not just a convenience default: a real AndyMark 2"x1" predrilled tube
+ * fixture (am-5180) has multiple holes at the same length position but
+ * different lateral offsets on its wide face - a real side-by-side hole
+ * pair, not a duplicate; drilling all of them at Y0 would redrill one spot
+ * instead of the real holes. CONFIRM the fixture's centerline offset and
+ * Z=0 reference for each face before running on material.
  *
  * Reuses routing.js's linuxcnc/wincnc dialect conventions (comments,
  * spindle codes, tool-change pause) since this targets the same class of
@@ -137,11 +137,11 @@ function generateProgram(walls, params, { faceAngleDeg = null, faceLabel = null,
   const totalHoles = walls.reduce((sum, wall) => sum + wall.holes.length, 0);
 
   const lines = [...HEADER_WARNING, ''];
-  const faceDescription = faceAngleDeg === null ? null : `${faceLabel || tubestockFaceLabel(faceAngleDeg)} (A${fmt(faceAngleDeg, 1)})`;
+  const faceDescription = faceAngleDeg === null ? null : `${faceLabel || tubestockFaceLabel(faceAngleDeg)} (${fmt(faceAngleDeg, 1)} deg from Top)`;
   lines.push(faceDescription === null
-    ? '(*** TUBE STOCK: rotary 4th-axis indexed drilling - verify A-axis ***)'
-    : `(** TUBE STOCK ${faceDescription}: rotary 4th-axis indexed drilling - verify A-axis **)`);
-  lines.push('(direction/rotary-center offset and Z=0 reference against the real machine)');
+    ? '(*** TUBE STOCK: standard 3-axis router, NOT rotary - manual flip between faces ***)'
+    : `(** TUBE STOCK ${faceDescription}: standard 3-axis router - fixture this face, verify Z=0, then run **)`);
+  lines.push('(Verify the fixture centerline offset and Z=0 reference against the real machine)');
   lines.push('(before running - see tubestock.js file header. Round holes only, each)');
   lines.push('(drilled straight in from whichever wall it is on.)');
   lines.push('%');
@@ -186,8 +186,24 @@ function generateProgram(walls, params, { faceAngleDeg = null, faceLabel = null,
     let currentAngle = null;
     for (const hole of group.holes) {
       if (hole.angleDeg !== currentAngle) {
-        lines.push(`G00 Z${fmt(safeZ)} (retract clear before indexing)`);
-        lines.push(`G00 A${fmt(hole.angleDeg, 1)} (index rotary axis to this wall)`);
+        // No rotary axis on this machine - a face change is a manual
+        // re-fixture, not a G-code move. Only the combined all-faces
+        // program (faceAngleDeg === null) can span more than one face
+        // within a single run, so only it needs to stop and prompt for
+        // one; a per-face program (see facePrograms below) only ever
+        // covers a single already-fixtured face and drills straight
+        // through with no pause here.
+        if (faceAngleDeg === null) {
+          lines.push(`G00 Z${fmt(safeZ)} (retract clear before flipping tube)`);
+          // (FACE A...) is a comment tag, not a live G-code word - there is
+          // no rotary axis on this machine, so nothing here commands motion.
+          // It exists only so the 3D toolpath preview (toolpathPreview.js's
+          // parseToolpath3D, which reads this combined multi-face program -
+          // see gcode={job.gcode} in ToolpathSimulator's callers) can still
+          // tell which physical face each subsequent move belongs to.
+          lines.push(`(FACE A${fmt(hole.angleDeg, 1)} - FLIP TUBE to ${tubestockFaceLabel(hole.angleDeg)} face and RE-ZERO Z before resuming - no rotary axis on this machine)`);
+          lines.push(pauseLine(isWinCNC, `FLIP TUBE to ${tubestockFaceLabel(hole.angleDeg)} face (${fmt(hole.angleDeg, 1)} deg from Top) and RE-ZERO Z before resuming - no rotary axis on this machine`));
+        }
         currentAngle = hole.angleDeg;
       }
       lines.push(`G00 X${fmt(hole.position)} Y${fmt(hole.lateralOffset)} (rapid to hole position)`);

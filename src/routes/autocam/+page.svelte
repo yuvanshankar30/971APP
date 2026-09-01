@@ -708,7 +708,7 @@
     return 'status-running';
   }
 
-  const MACHINE_TYPE_LABEL = { turning: 'Lathe', routing: 'Router', milling: 'Mill', tubestock: 'Rotary Drill' };
+  const MACHINE_TYPE_LABEL = { turning: 'Lathe', routing: 'Router', milling: 'Mill', tubestock: 'Router (manual flip)' };
   function machineTypeLabel(operationType) {
     return MACHINE_TYPE_LABEL[operationType] || operationType || '—';
   }
@@ -1663,7 +1663,7 @@
           <div class="source-toggle" id="mp-operation">
             <button class="btn btn-sm" class:btn-primary={machineForm.operation_type === 'turning'} class:btn-secondary={machineForm.operation_type !== 'turning'} on:click={() => setMachineFormOperation('turning')}>Turning (Lathe)</button>
             <button class="btn btn-sm" class:btn-primary={machineForm.operation_type === 'routing'} class:btn-secondary={machineForm.operation_type !== 'routing'} on:click={() => setMachineFormOperation('routing')}>Routering (Router)</button>
-            <button class="btn btn-sm" class:btn-primary={machineForm.operation_type === 'tubestock'} class:btn-secondary={machineForm.operation_type !== 'tubestock'} on:click={() => setMachineFormOperation('tubestock')}>Tube Stock (Rotary Drill)</button>
+            <button class="btn btn-sm" class:btn-primary={machineForm.operation_type === 'tubestock'} class:btn-secondary={machineForm.operation_type !== 'tubestock'} on:click={() => setMachineFormOperation('tubestock')}>Tube Stock (Router, manual flip)</button>
           </div>
         </div>
 
