@@ -1756,7 +1756,7 @@
   /* AutoCAM has a denser operational table than the rest of the app. Give it
      room on desktop, then switch to labeled records before the columns would
      require a horizontal scrollbar. */
-  :global(.page-container:has(.autocam-page-header)) {
+  :global(main.container.page-container:has(.autocam-page-header)) {
     max-width: 1800px;
   }
 
@@ -2042,16 +2042,16 @@
   .autocam-jobs-table {
     table-layout: fixed;
   }
-  .autocam-jobs-table th:nth-child(1) { width: 16%; }
-  .autocam-jobs-table th:nth-child(2) { width: 8%; }
-  .autocam-jobs-table th:nth-child(3) { width: 10%; }
-  .autocam-jobs-table th:nth-child(4) { width: 8%; }
-  .autocam-jobs-table th:nth-child(5) { width: 9%; }
-  .autocam-jobs-table th:nth-child(6) { width: 8%; }
-  .autocam-jobs-table th:nth-child(7) { width: 8%; }
-  .autocam-jobs-table th:nth-child(8) { width: 12%; }
+  .autocam-jobs-table th:nth-child(1) { width: 12%; }
+  .autocam-jobs-table th:nth-child(2) { width: 6%; }
+  .autocam-jobs-table th:nth-child(3) { width: 7%; }
+  .autocam-jobs-table th:nth-child(4) { width: 5%; }
+  .autocam-jobs-table th:nth-child(5) { width: 6%; }
+  .autocam-jobs-table th:nth-child(6) { width: 6%; }
+  .autocam-jobs-table th:nth-child(7) { width: 7%; }
+  .autocam-jobs-table th:nth-child(8) { width: 9%; }
   .autocam-jobs-table th:nth-child(9) { width: 8%; }
-  .autocam-jobs-table th:nth-child(10) { width: 13%; }
+  .autocam-jobs-table th:nth-child(10) { width: 34%; }
   .autocam-jobs-table td {
     overflow-wrap: anywhere;
     vertical-align: top;
@@ -2059,16 +2059,16 @@
   .output-cell { min-width: 0; white-space: normal; }
   .output-actions {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     align-items: center;
     gap: 0.45rem;
+    white-space: nowrap;
   }
   .output-action-group {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     align-items: center;
     min-width: 0;
-    max-width: 100%;
     gap: 0.4rem;
   }
   .tube-face-files { position: relative; }
