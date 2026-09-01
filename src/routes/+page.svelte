@@ -157,6 +157,30 @@
     return 'datascout';
   }
 
+  function compareScoutAssignmentMatches(left, right) {
+    // TBA match keys use qualification/playoff prefixes such as qm12,
+    // qf1m2, sf2m1, and f1m1. Compare their numeric components rather than
+    // their raw strings so qm10 correctly follows qm2.
+    const parse = (matchKey) => {
+      const suffix = String(matchKey || '').split('_').pop().toLowerCase();
+      const match = suffix.match(/^(qm|qf|sf|f)(\d+)(?:m(\d+))?$/);
+      const phase = { qm: 0, qf: 1, sf: 2, f: 3 }[match?.[1]] ?? 4;
+      return {
+        phase,
+        set: Number(match?.[2]) || 0,
+        round: Number(match?.[3]) || 0,
+        raw: suffix
+      };
+    };
+    const a = parse(left?.match_key);
+    const b = parse(right?.match_key);
+    return a.phase - b.phase
+      || a.set - b.set
+      || a.round - b.round
+      || a.raw.localeCompare(b.raw)
+      || String(left?.team_key || '').localeCompare(String(right?.team_key || ''));
+  }
+
   async function loadScoutAssignments(){
     if(!user?.id) return;
     try {
@@ -177,8 +201,9 @@
       const rows = [].concat(js1?.data||[], js2?.data||[], js3?.data||[]);
       // Filter incomplete
       const incomplete = rows.filter(r => !r.completed_at);
-      myScoutAssignments = incomplete;
-      nextScoutAssignment = incomplete.sort((a,b)=> a.match_key.localeCompare(b.match_key))[0] || null;
+      const sortedIncomplete = [...incomplete].sort(compareScoutAssignmentMatches);
+      myScoutAssignments = sortedIncomplete;
+      nextScoutAssignment = sortedIncomplete[0] || null;
     }catch(e){ /* ignore */ }
   }
 
@@ -389,6 +414,7 @@
       <div class="dashboard-sections">
         {#each visibleSections as section (section.key)}
           <div
+            id={section.key === 'assignment-queue' ? 'assignment-queue' : undefined}
             class="dashboard-section"
             class:editing={editMode}
             class:dragging={draggedSectionKey === section.key}
@@ -414,14 +440,14 @@
             {#if section.key === 'stats'}
               <!-- At-a-glance stats -->
               <div class="stat-grid">
-                <a href="/matchscout" class="stat-card">
+                <a href="#assignment-queue" class="stat-card">
                   <div class="stat-icon"><ClipboardCheck size={20} /></div>
                   <div class="stat-body">
                     <span class="stat-value">{myScoutAssignments.length}</span>
                     <span class="stat-label">Open Assignments</span>
                   </div>
                 </a>
-                <a href="/matchscout" class="stat-card">
+                <a href={nextScoutAssignment ? `/${scoutAssignmentRoute(nextScoutAssignment.scouting_type)}` : '#assignment-queue'} class="stat-card">
                   <div class="stat-icon"><ListChecks size={20} /></div>
                   <div class="stat-body">
                     <span class="stat-value">{nextScoutAssignment ? `#${nextScoutAssignment.match_key.split('_').pop()}` : '—'}</span>
