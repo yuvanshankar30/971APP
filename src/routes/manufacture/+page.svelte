@@ -2879,7 +2879,7 @@
     width: 12rem;
     min-width: 12rem;
     max-width: 12rem;
-    vertical-align: middle;
+    vertical-align: top;
   }
   .metadata-value {
     box-sizing: border-box;
