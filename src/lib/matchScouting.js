@@ -116,16 +116,14 @@ export const AUTO_ROBOT_SIZE = Object.freeze({
   height: AUTO_FIELD.robotSizeInches * (AUTO_FIELD.height / AUTO_FIELD.fieldHeightInches)
 });
 
-// These are the simplified map's solid hubs and protected trenches. They are
-// deliberately rectangles because the robot footprint is also represented as
-// an axis-aligned square in the scouting view.
+// These are the simplified map's solid hubs - the only field elements a
+// robot's 29-inch footprint can't occupy. Trenches (like bumps) are terrain
+// a robot drives under/through, not a wall - they render on the map but
+// were wrongly listed here as a total no-go zone, blocking a perfectly
+// legal drawn path through either alliance's trench.
 export const AUTO_NO_GO_AREAS = Object.freeze([
   { id: 'own-hub', label: 'alliance hub', x: 246, y: 198, width: 92, height: 92 },
-  { id: 'opponent-hub', label: 'opponent hub', x: 662, y: 198, width: 92, height: 92 },
-  { id: 'own-top-trench', label: 'alliance top trench', x: 260, y: 14, width: 34, height: 55 },
-  { id: 'own-bottom-trench', label: 'alliance bottom trench', x: 260, y: 418, width: 34, height: 55 },
-  { id: 'opponent-top-trench', label: 'opponent top trench', x: 706, y: 14, width: 34, height: 55 },
-  { id: 'opponent-bottom-trench', label: 'opponent bottom trench', x: 706, y: 418, width: 34, height: 55 }
+  { id: 'opponent-hub', label: 'opponent hub', x: 662, y: 198, width: 92, height: 92 }
 ]);
 
 function clamp(value, min, max) {
