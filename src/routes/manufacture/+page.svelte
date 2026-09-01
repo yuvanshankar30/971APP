@@ -1934,6 +1934,10 @@
               <PartDueDate {part} on:update={() => loadParts()} />
             </span>
           </div>
+          <div class="part-card-detail">
+            <span class="detail-label">Requested By</span>
+            <span class="detail-value">{part.requester || '—'}</span>
+          </div>
         </div>
         {#if part.workflow === 'router' && getRouterProgressSummary(part)}
           <div class="part-card-progress">{getRouterProgressSummary(part)}</div>
@@ -2088,6 +2092,7 @@
           <th class="metadata-col">Status</th>
           <th class="metadata-col" class:hidden={assignMode}>Due</th>
           <th class="metadata-col" class:hidden={assignMode}>Created</th>
+          <th class="requester-col" class:hidden={assignMode}>Requested By</th>
           <th class:hidden={assignMode}>Actions</th>
         </tr>
       </thead>
@@ -2238,6 +2243,9 @@
                   </span>
                 {/if}
               </div>
+            </td>
+            <td class="requester-col" class:hidden={assignMode} title={part.requester || 'Requester not recorded'}>
+              {part.requester || '—'}
             </td>
             <td class:hidden={assignMode}>
               <div class="row-actions">
@@ -2871,7 +2879,7 @@
     width: 12rem;
     min-width: 12rem;
     max-width: 12rem;
-    vertical-align: middle;
+    vertical-align: top;
   }
   .metadata-value {
     box-sizing: border-box;
@@ -2887,6 +2895,16 @@
   }
   .metadata-col :global(.due-date) { width: 100%; }
   .metadata-col :global(.due-input) { box-sizing: border-box; width: 100%; }
+  .table th.requester-col,
+  .table td.requester-col {
+    width: 11rem;
+    min-width: 11rem;
+    max-width: 11rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: middle;
+  }
 
   .name-line {
     display: inline-flex;
