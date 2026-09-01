@@ -19,6 +19,8 @@
     turningProfileToLathePoints,
     buildTurningStockRings,
     buildRoutingHeightmap,
+    smoothRoutingHeightmap,
+    findRoutingHeightmapWalls,
     projectTubestockToolpath,
     matchTubestockHolesToMoves,
     tubeLocalPoint,
@@ -654,6 +656,14 @@
       partialProgress: progress
     });
     routingHeights = heights;
+    // The raw heightmap remains the simulation state for gouge detection.
+    // The top mesh gets a shallow, edge-preserving pass so grid noise does
+    // not show up as lighting facets; actual depth steps become wall quads.
+    const surfaceHeights = smoothRoutingHeightmap(heights, {
+      nx,
+      ny,
+      epsilon: Math.max(cellSize * 0.08, 0.0005)
+    });
 
     const geomWidth = (nx - 1) * cellSize;
     const geomHeight = (ny - 1) * cellSize;
@@ -671,7 +681,7 @@
       const vy = posAttr.getY(i);
       const ix = Math.max(0, Math.min(nx - 1, Math.round((vx - gridMinX) / cellSize - 0.5)));
       const iy = Math.max(0, Math.min(ny - 1, Math.round((vy - gridMinY) / cellSize - 0.5)));
-      posAttr.setZ(i, heights[iy * nx + ix]);
+      posAttr.setZ(i, surfaceHeights[iy * nx + ix]);
     }
     posAttr.needsUpdate = true;
     geometry.computeVertexNormals();
@@ -682,7 +692,7 @@
     stockMesh = new THREE.Group();
     stockMesh.add(solid);
     stockMesh.add(new THREE.Mesh(
-      buildRoutingStockSkirt(heights, nx, ny, gridMinX, gridMinY, cellSize, floorZ),
+      buildRoutingStockSkirt(heights, surfaceHeights, nx, ny, gridMinX, gridMinY, cellSize, floorZ),
       material
     ));
     stockMesh.visible = stockVisible;
@@ -696,10 +706,10 @@
   // sharing exact vertex positions with the top surface's own edge cells
   // (same gridMinX/cellSize formula updateRoutingStock uses) so there's no
   // seam gap between this and the heightmap mesh.
-  function buildRoutingStockSkirt(heights, nx, ny, gridMinX, gridMinY, cellSize, floorZ) {
+  function buildRoutingStockSkirt(heights, surfaceHeights, nx, ny, gridMinX, gridMinY, cellSize, floorZ) {
     const vx = (ix) => gridMinX + cellSize * (ix + 0.5);
     const vy = (iy) => gridMinY + cellSize * (iy + 0.5);
-    const topAt = (ix, iy) => heights[iy * nx + ix];
+    const topAt = (ix, iy) => surfaceHeights[iy * nx + ix];
 
     const positions = [];
     const quad = (a, b, c, d) => {
@@ -733,6 +743,26 @@
         [maxX, y0, floorZ], [maxX, y1, floorZ],
         [maxX, y1, topAt(nx - 1, iy + 1)], [maxX, y0, topAt(nx - 1, iy)]
       );
+    }
+
+    // PlaneGeometry shares vertices across every cell, which is right for a
+    // continuous top surface but cannot represent an internal depth step.
+    // Emit a separate vertical quad at each raw height discontinuity: pocket
+    // and profile walls now read as real machined walls instead of a sloped
+    // interpolation between the two grid samples.
+    const wallEpsilon = Math.max(cellSize * 0.08, 0.0005);
+    for (const wall of findRoutingHeightmapWalls(heights, { nx, ny, epsilon: wallEpsilon })) {
+      if (wall.axis === 'x') {
+        const x = gridMinX + cellSize * (wall.ix + 1);
+        const y0 = vy(wall.iy);
+        const y1 = vy(Math.min(wall.iy + 1, ny - 1));
+        if (y1 > y0) quad([x, y0, wall.a], [x, y1, wall.a], [x, y1, wall.b], [x, y0, wall.b]);
+      } else {
+        const y = gridMinY + cellSize * (wall.iy + 1);
+        const x0 = vx(wall.ix);
+        const x1 = vx(Math.min(wall.ix + 1, nx - 1));
+        if (x1 > x0) quad([x0, y, wall.a], [x1, y, wall.a], [x1, y, wall.b], [x0, y, wall.b]);
+      }
     }
 
     const geometry = new THREE.BufferGeometry();
