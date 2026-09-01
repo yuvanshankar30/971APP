@@ -397,6 +397,9 @@ AutoCAM's own code (engine, Drive watcher, `camJobs.js`, its components) is
   generic STEP/3D viewer used outside AutoCAM too - `/manufacture`,
   `/manufacture/completed` - so it stayed here rather than moving into
   `autocam/` despite being CAD-adjacent), nav/layout pieces, etc.
+- **`stock.json`** plus **`manufacturing_stock_options`** - bundled baseline
+  stock choices and approved-user additions shared by the new manufacturing
+  request form, including aluminum, polycarbonate, SRPP, tube, and lathe stock.
 - **`matchScouting.js`** - shared match-scout vocabularies and the parser that
   turns exact/range/open-ended auto point estimates into explicit numeric
   bounds and a conservative aggregation value; `RebuiltFieldMap.svelte` owns

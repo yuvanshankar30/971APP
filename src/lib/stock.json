@@ -235,6 +235,22 @@
       "workflow": "router"
     },
     {
+      "id": "srpp_1_8_router_sheet",
+      "material": "SRPP",
+      "description": "1/8\" SRPP Sheet",
+      "thickness": 0.125,
+      "dimensions": "Sheet",
+      "workflow": "router"
+    },
+    {
+      "id": "srpp_1_4_router_sheet",
+      "material": "SRPP",
+      "description": "1/4\" SRPP Sheet",
+      "thickness": 0.25,
+      "dimensions": "Sheet",
+      "workflow": "router"
+    },
+    {
       "id": "al_1x2_1_16_tube",
       "material": "Aluminum",
       "description": "1x2\" Aluminum Tube (1/16\" wall)",
