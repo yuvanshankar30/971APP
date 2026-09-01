@@ -11,7 +11,7 @@
   import SeasonFilter from '$lib/components/SeasonFilter.svelte';
   import { goto } from '$app/navigation';
   import { PUBLIC_ONSHAPE_BASE_URL } from '$env/static/public';
-  import { Search, Filter, Clock, Truck, Package, Download, Zap, Wrench, FileText, Upload, ExternalLink, Pencil, Trash2, X, Users, Box, Route } from 'lucide-svelte';
+  import { Search, Filter, Clock, Truck, Package, Download, Zap, Wrench, FileText, Upload, ExternalLink, Pencil, Trash2, X, Users, Box, Route, CircleCheck } from 'lucide-svelte';
   import ROUTER_FLOW from '$lib/router_flow.json';
   import { getDisplayStatus, BUTTONS, getBadgeClass, getWorkflowStatuses } from '$lib/statuses.js';
   import { summarizeRouterStages, isFullyKitted, buildRouterProgressUpdate } from '$lib/router_progress.js';
@@ -2091,6 +2091,9 @@
                 {/if}
               {/if}
             </div>
+            {#if camJob?.status === 'completed'}
+              <span class="autocam-completed part-card-autocam-status"><CircleCheck size={14} /> AutoCAM completed</span>
+            {/if}
           {:else if WORKFLOW_OPERATION_TYPE[part.workflow]}
             <button
               class="btn btn-secondary btn-sm"
@@ -2379,6 +2382,9 @@
                       {/if}
                     {/if}
                   </div>
+                  {#if camJob?.status === 'completed'}
+                    <span class="autocam-completed"><CircleCheck size={14} /> AutoCAM completed</span>
+                  {/if}
                 {:else if WORKFLOW_OPERATION_TYPE[part.workflow]}
                   <button
                     class="btn btn-secondary btn-sm"
@@ -2940,6 +2946,19 @@
     color: var(--purple-strong);
     border-color: var(--purple-soft);
     cursor: default;
+  }
+
+  .autocam-completed {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    color: var(--green-strong, #237a41);
+    font-size: var(--font-xs, 0.75rem);
+    font-weight: 600;
+  }
+
+  .part-card-autocam-status {
+    flex-basis: 100%;
   }
 
   .autocam-spinner {
