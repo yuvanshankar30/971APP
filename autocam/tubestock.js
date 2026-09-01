@@ -252,6 +252,32 @@ export function generateTubestockGcode(tubeFeatures, params = {}) {
   if (!holeDepth || holeDepth <= 0) throw new Error('holeDepth is required and must be > 0');
   if (safeZ <= 0) throw new Error('safeZ must be > 0');
 
+  // Real tube/extrusion stock check: the caller resolves stockCatalogId (a
+  // pick from this team's real stock catalog, see CamParamFields.svelte's
+  // tube-stock "Stock" field) into the two dimensions it actually promises
+  // and passes them here as expectedOuterA/expectedOuterB - not the id
+  // itself, so this generator stays decoupled from stock.json as a data
+  // source. The STEP file's own measured cross-section is still what
+  // drives the actual G-code math (tubeFeatures.crossSection, unchanged) -
+  // this only catches "the wrong tube is about to get loaded relative to
+  // what the CAD model assumes," a real, otherwise-silent mistake, not a
+  // math input. Order-independent (a 1x2 tube modeled with X/Y swapped
+  // from the catalog's own width/height convention is still the same real
+  // stock) and tolerant of real extrusion tolerance (+-0.02"), not exact.
+  const { expectedOuterA, expectedOuterB } = params;
+  if (expectedOuterA > 0 && expectedOuterB > 0 && tubeFeatures.crossSection) {
+    const { a: measuredA, b: measuredB } = tubeFeatures.crossSection;
+    const tolerance = 0.02;
+    const matchesDirect = Math.abs(measuredA - expectedOuterA) <= tolerance && Math.abs(measuredB - expectedOuterB) <= tolerance;
+    const matchesSwapped = Math.abs(measuredA - expectedOuterB) <= tolerance && Math.abs(measuredB - expectedOuterA) <= tolerance;
+    if (!matchesDirect && !matchesSwapped) {
+      throw new Error(
+        `Selected stock is ${expectedOuterA}"x${expectedOuterB}" but the STEP file's measured cross-section is ` +
+        `${measuredA.toFixed(3)}"x${measuredB.toFixed(3)}" - re-check the stock selection or the CAD model before running this on material.`
+      );
+    }
+  }
+
   const combined = generateProgram(walls, params, { programNumber });
   const facePrograms = wallsWithHolesByFace(walls).map((wall, index) => {
     const label = tubestockFaceLabel(wall.angleDeg);
