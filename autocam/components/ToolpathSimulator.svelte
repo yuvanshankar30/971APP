@@ -102,6 +102,21 @@
   };
   const KINDS = ['rapid', 'cut', 'ramp'];
 
+  // Real material, not flat plastic: MeshPhongMaterial has no physical
+  // basis for metalness/roughness, so no amount of light tuning makes it
+  // read as machined aluminum - MeshStandardMaterial (PBR) does, matching
+  // how Fusion 360's own renderer assigns real metal/plastic appearances
+  // rather than a flat Phong shade. A factory (not a shared instance)
+  // since each stock mesh disposes its own material independently.
+  function createStockMaterial(color = 0xb8bcc2) {
+    return new THREE.MeshStandardMaterial({
+      color,
+      metalness: 0.75,
+      roughness: 0.42,
+      side: THREE.DoubleSide
+    });
+  }
+
   let visible = { rapid: true, cut: true, ramp: true };
   let toolpathVisible = true;
   let toolVisible = true;
@@ -467,10 +482,7 @@
       }
       geometry.computeVertexNormals();
 
-      const solid = new THREE.Mesh(
-        geometry,
-        new THREE.MeshPhongMaterial({ color: 0xb8bcc2, side: THREE.DoubleSide })
-      );
+      const solid = new THREE.Mesh(geometry, createStockMaterial());
       stockMesh = new THREE.Group();
       stockMesh.add(solid);
       stockMesh.visible = stockVisible;
@@ -513,8 +525,12 @@
     const maxU = Number.isFinite(bounds.max.x) && bounds.max.x > minU ? bounds.max.x : minU + 1;
 
     const group = new THREE.Group();
-    const surfaceMaterial = new THREE.MeshPhongMaterial({ color: 0xb8bcc2, side: THREE.DoubleSide });
-    const boreMaterial = new THREE.MeshPhongMaterial({ color: 0x2b2b2e, side: THREE.DoubleSide });
+    const surfaceMaterial = createStockMaterial();
+    // The visible inside of a drilled hole is a duller, rougher-looking
+    // surface than the tube's own outer face (no direct light reaches deep
+    // into it either way) - lower metalness/higher roughness reads as that
+    // shadowed interior rather than a mirror-bright twin of the outside.
+    const boreMaterial = new THREE.MeshStandardMaterial({ color: 0x2b2b2e, metalness: 0.4, roughness: 0.75, side: THREE.DoubleSide });
 
     const wallAngles = [...new Set((walls || []).map((w) => w.angleDeg))];
     for (const angle of wallAngles) {
@@ -660,7 +676,7 @@
     posAttr.needsUpdate = true;
     geometry.computeVertexNormals();
 
-    const material = new THREE.MeshPhongMaterial({ color: 0xb8bcc2, side: THREE.DoubleSide });
+    const material = createStockMaterial();
     const solid = new THREE.Mesh(geometry, material);
 
     stockMesh = new THREE.Group();
@@ -746,10 +762,22 @@
 
       if (!toolMesh || toolMesh.userData.kind !== 'tubestock' || toolMesh.userData.size !== size) {
         disposeTool();
-        toolMesh = new THREE.Mesh(
-          new THREE.CylinderGeometry(size, size, length, 16),
-          new THREE.MeshBasicMaterial({ color: 0x202020 })
-        );
+        toolMesh = new THREE.Group();
+        const drillMaterial = new THREE.MeshStandardMaterial({ color: 0x9aa0a6, metalness: 0.85, roughness: 0.3 });
+        // A real twist drill tapers to a point (a plain flat-ended cylinder
+        // reads as a rod, not a drill) - the shank stays a cylinder, with a
+        // short cone (a real drill's ~118deg included point angle) at the
+        // working end so the silhouette is actually recognizable as a bit.
+        const pointAngleRad = (118 * Math.PI) / 180;
+        const pointHeight = size / Math.tan(pointAngleRad / 2);
+        const shankHeight = Math.max(length - pointHeight, length * 0.5);
+        const shank = new THREE.Mesh(new THREE.CylinderGeometry(size, size, shankHeight, 16), drillMaterial);
+        shank.position.y = pointHeight / 2;
+        toolMesh.add(shank);
+        const point = new THREE.Mesh(new THREE.ConeGeometry(size, pointHeight, 16), drillMaterial);
+        point.position.y = -shankHeight / 2;
+        point.rotation.x = Math.PI;
+        toolMesh.add(point);
         toolMesh.userData.kind = 'tubestock';
         toolMesh.userData.size = size;
         scene.add(toolMesh);
@@ -808,7 +836,7 @@
         // of reading as a shadow.
         const holder = new THREE.Mesh(
           new THREE.BoxGeometry(holderWidth, holderLength, holderWidth),
-          new THREE.MeshPhongMaterial({ color: 0x6b7280, shininess: 60 })
+          new THREE.MeshStandardMaterial({ color: 0x6b7280, metalness: 0.8, roughness: 0.35 })
         );
         const holderOffset = holderLength / 2 + insertSize * 0.6;
         holder.position.set(0, holderOffset * 0.85, holderOffset * 0.53);
@@ -933,10 +961,21 @@
         scene.add(grid);
         axes = new THREE.AxesHelper(1);
         scene.add(axes);
-        scene.add(new THREE.AmbientLight(0xffffff, 1.5));
-        const keyLight = new THREE.DirectionalLight(0xffffff, 2.2);
+        // A single flat ambient + one directional light reads as a plastic
+        // toy under any material, no matter how the material itself is
+        // tuned - real CAM simulators (Fusion 360 included) render stock as
+        // recognizable metal via soft multi-directional lighting, not
+        // brute-force ambient. This is a standard 3-point-ish studio rig:
+        // a soft hemisphere fill (sky/ground gradient, no hard shadow
+        // direction) plus a stronger key light and a dimmer fill from the
+        // opposite side so no face of the part ever goes fully black.
+        scene.add(new THREE.HemisphereLight(0xf5f3ea, 0x35342c, 0.55));
+        const keyLight = new THREE.DirectionalLight(0xffffff, 1.6);
         keyLight.position.set(3, -4, 5);
         scene.add(keyLight);
+        const fillLight = new THREE.DirectionalLight(0xffffff, 0.5);
+        fillLight.position.set(-4, 3, 2);
+        scene.add(fillLight);
 
         controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
