@@ -11,14 +11,34 @@
   // every time is tucked behind "Advanced Settings" (closed by default) -
   // same pattern as the old /manufacture/autocam settings page - since a
   // selected Machine Profile already fills sensible values for all of it.
+  import stockData from '$lib/stock.json';
+
   export let operation = 'routing'; // 'turning' | 'routing' | 'tubestock'
   export let params = {};
   export let mode = 'job';
+
+  // Real tube/extrusion stock this team actually stocks (router.json entries
+  // flagged isTube) - the STEP file's own measured geometry is still what
+  // actually drives the G-code math (see extractTubeFeaturesFromMeshes), but
+  // picking the real stock here lets generation catch a mismatch (wrong
+  // tube loaded vs. what the CAD model assumes) before it ever reaches the
+  // machine - see /api/cam-generate's own stock-cross-section check.
+  const tubeStockOptions = (stockData.router || []).filter((s) => s.isTube);
 </script>
 
 {#if operation === 'tubestock'}
   <div class="form-row">
     {#if mode === 'job'}
+      <div class="form-group">
+        <label class="form-label" for="cf-stock-catalog">Stock (extrusion)</label>
+        <select id="cf-stock-catalog" class="form-select" bind:value={params.stockCatalogId}>
+          <option value="">Not specified (skip stock-size check)</option>
+          {#each tubeStockOptions as stock}
+            <option value={stock.id}>{stock.description}</option>
+          {/each}
+        </select>
+        <p class="text-muted">The real tube that will be loaded on the machine - generation checks it against the STEP file's own measured cross-section and refuses to run if they don't match.</p>
+      </div>
       <div class="form-group">
         <label class="form-label" for="cf-hole-depth">Hole depth (in)</label>
         <input id="cf-hole-depth" class="form-input" type="number" step="0.01" bind:value={params.holeDepth} placeholder="Required" />

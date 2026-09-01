@@ -6,6 +6,7 @@ import { generateTurningGcode } from '$autocam/turning.js';
 import { generateRoutingGcode } from '$autocam/routing.js';
 import { generateTubestockGcode, tubestockFaceFileName } from '$autocam/tubestock.js';
 import { deliverJobToDrive } from '$autocam/drive_watcher.js';
+import stockData from '$lib/stock.json';
 // Vite-built asset URL for occt-import-js's WASM binary - the same one
 // CadViewer.svelte already fetches successfully client-side. Fetching it
 // over HTTP (below) instead of reading it off disk sidesteps Vercel's
@@ -193,8 +194,18 @@ export async function POST({ request, url }) {
       result = generateTurningGcode(profile, params);
     } else if (job.operation_type === 'tubestock') {
       const features = extractTubeFeaturesFromMeshes(meshes);
+      // Resolve the operator's real-stock pick (CamParamFields.svelte's
+      // "Stock" select, an id into stock.json) into the two dimensions it
+      // actually promises - generateTubestockGcode compares those against
+      // the STEP file's own measured cross-section and refuses to run on a
+      // mismatch. Stays optional: an unresolved/unset id just skips the
+      // check rather than blocking generation.
+      const selectedStock = (stockData.router || []).find((s) => s.isTube && s.id === params.stockCatalogId);
+      const tubestockParams = selectedStock
+        ? { ...params, expectedOuterA: selectedStock.outer_width, expectedOuterB: selectedStock.outer_height }
+        : params;
       await setProgress(supabase, jobId, 80, 'Generating tube stock G-code...');
-      result = generateTubestockGcode(features, params);
+      result = generateTubestockGcode(features, tubestockParams);
     } else {
       const { contours, thickness } = extractRoutingContoursFromMeshes(meshes);
       if (params.targetDepth === undefined && thickness) params.targetDepth = thickness;

@@ -172,4 +172,35 @@ describe('generateTubestockGcode', () => {
     expect(result.stats.totalHoles).toBe(1);
     expect(result.gcode).toContain('M30');
   });
+
+  describe('real-stock cross-section check (CamParamFields.svelte\'s "Stock" picker, resolved server-side into expectedOuterA/B - see /api/cam-generate)', () => {
+    function tubeWithCrossSection(a, b) {
+      return { ...twoWallTube(), crossSection: { a, b } };
+    }
+
+    it('generates normally when the selected stock matches the STEP file\'s measured cross-section', () => {
+      const result = generateTubestockGcode(tubeWithCrossSection(1.0, 2.0), { ...baseParams, expectedOuterA: 1.0, expectedOuterB: 2.0 });
+      expect(result.gcode).toContain('M30');
+    });
+
+    it('matches regardless of which axis the STEP file happened to call "a" vs "b" - same real tube either way', () => {
+      const result = generateTubestockGcode(tubeWithCrossSection(2.0, 1.0), { ...baseParams, expectedOuterA: 1.0, expectedOuterB: 2.0 });
+      expect(result.gcode).toContain('M30');
+    });
+
+    it('tolerates real extrusion tolerance (a hair under/over nominal), not just an exact match', () => {
+      const result = generateTubestockGcode(tubeWithCrossSection(1.01, 1.99), { ...baseParams, expectedOuterA: 1.0, expectedOuterB: 2.0 });
+      expect(result.gcode).toContain('M30');
+    });
+
+    it('rejects generation when the selected stock does not match the STEP file\'s real measured cross-section - the wrong tube would otherwise silently get loaded', () => {
+      expect(() => generateTubestockGcode(tubeWithCrossSection(1.0, 1.0), { ...baseParams, expectedOuterA: 1.0, expectedOuterB: 2.0 }))
+        .toThrow(/Selected stock is 1x2|measured cross-section/);
+    });
+
+    it('skips the check entirely when no stock was selected (expectedOuterA/B absent) - optional, not a new required field on old jobs', () => {
+      const result = generateTubestockGcode(tubeWithCrossSection(5, 5), baseParams);
+      expect(result.gcode).toContain('M30');
+    });
+  });
 });
