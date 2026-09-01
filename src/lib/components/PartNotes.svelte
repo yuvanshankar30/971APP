@@ -143,7 +143,8 @@
 
   .inline-note {
     display: flex;
-    align-items: flex-start;
+    flex-wrap: wrap;
+    align-items: center;
     gap: 0.35rem;
     min-width: 0;
     color: var(--text-muted, #64748b);
@@ -151,9 +152,13 @@
     line-height: 1.4;
   }
 
-  .inline-note .note-icon { margin-top: 0.1rem; }
-
   .inline-note-text {
+    /* Grows to fill the row so Edit lands right after the text (or wraps
+       cleanly under it via the row's own flex-wrap for a long note) instead
+       of sitting at a different height/column than the note text - the
+       icon and Edit link both being their own flex-basis:auto items next
+       to a growing text item is what put them on visibly different levels. */
+    flex: 1 1 auto;
     min-width: 0;
     white-space: pre-wrap;
     overflow-wrap: anywhere;

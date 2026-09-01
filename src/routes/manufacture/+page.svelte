@@ -803,40 +803,57 @@
     e.dataTransfer.dropEffect = 'copy';
   }
 
-  async function handleDrop(e, part) {
-    if (!assignMode || !canUseAssignMode) return;
-    e.preventDefault();
-    if (!draggingUser) return;
-    
+  // Shared by both assignment paths: drag-and-drop (handleDrop, below - the
+  // only realistic path on a desktop pointer) and a tap/select picker
+  // (assignPartByTap, mobile) - dragging a roster card onto a part card
+  // isn't a workable touch gesture, but the assignment itself is the same
+  // write either way.
+  async function assignPartToUser(part, user) {
+    if (!user) return;
     try {
       const { error } = await supabase
         .from('parts')
-        .update({ assigned_to: draggingUser.user_id, updated_at: new Date().toISOString() })
+        .update({ assigned_to: user.user_id, updated_at: new Date().toISOString() })
         .eq('id', part.id);
-        
+
       if (error) throw error;
-      
+
       const updatedParts = parts.map(p => {
         if (p.id === part.id) {
-          return { ...p, assigned_to: draggingUser.user_id };
+          return { ...p, assigned_to: user.user_id };
         }
         return p;
       });
       parts = updatedParts;
-      
+
       assignedUserNames = {
         ...assignedUserNames,
-        [draggingUser.user_id]: draggingUser.user.full_name || draggingUser.user.email
+        [user.user_id]: user.user?.full_name || user.user?.email
       };
-      
-      showToastMessage(`Assigned to ${draggingUser.user.full_name || draggingUser.user.email}`);
+
+      showToastMessage(`Assigned to ${user.user?.full_name || user.user?.email}`);
       await sendNotification('part-assigned', { part_id: part.id });
     } catch (err) {
       console.error('Failed to assign user', err);
       showToastMessage('Failed to assign user');
-    } finally {
-      draggingUser = null;
     }
+  }
+
+  async function handleDrop(e, part) {
+    if (!assignMode || !canUseAssignMode) return;
+    e.preventDefault();
+    if (!draggingUser) return;
+    await assignPartToUser(part, draggingUser);
+    draggingUser = null;
+  }
+
+  // Mobile assign-mode picker: a <select> per part card instead of the
+  // desktop drag-and-drop, which isn't a workable touch gesture. Fires on
+  // change with the roster member's user_id.
+  async function assignPartByTap(part, userId) {
+    if (!userId) return;
+    const member = filteredRosterMembers.find((m) => m.user_id === userId);
+    await assignPartToUser(part, member);
   }
 
   $: filteredRosterMembers = rosterMembers.filter(m => {
@@ -1875,7 +1892,7 @@
       <Upload size={16} />
       Quick Print Add
     </button>
-    <a href="/manufacture/create" class="btn btn-primary">
+    <a href="/manufacture/create" class="btn btn-primary page-actions-primary">
       <Upload size={16} />
       Create New Part
     </a>
@@ -2027,6 +2044,27 @@
           </div>
           <span class="status-badge {getBadgeClass(part.status, getRouterMeta(part))}">{getStatusDisplay(part)}</span>
         </div>
+
+        {#if assignMode}
+          <!-- Touch alternative to the desktop roster sidebar's drag-and-drop
+               (handleDrop) - dragging a card onto another card isn't a
+               workable gesture on a phone, so assign mode gets its own tap
+               picker per part here instead of losing the feature on mobile. -->
+          <label class="part-card-assign">
+            <span class="detail-label">Assign to</span>
+            <select
+              class="form-select"
+              value={part.assigned_to || ''}
+              on:click|stopPropagation
+              on:change|stopPropagation={(e) => assignPartByTap(part, e.currentTarget.value)}
+            >
+              <option value="">Unassigned</option>
+              {#each filteredRosterMembers as member}
+                <option value={member.user_id}>{member.user?.full_name || member.user?.email}</option>
+              {/each}
+            </select>
+          </label>
+        {/if}
 
         <PartNotes item={part} table="parts" inline on:update={() => loadParts()} />
 
@@ -2240,7 +2278,7 @@
           <th class="project-col mono" class:hidden={assignMode}>Project ID</th>
           <th class="quantity-col" class:hidden={assignMode}>Qty</th>
           <th class="stock-col" class:hidden={assignMode}>Stock</th>
-          <th class="metadata-col">Status</th>
+          <th class="metadata-col status-col">Status</th>
           <th class="metadata-col" class:hidden={assignMode}>Due</th>
           <th class="metadata-col" class:hidden={assignMode}>Created</th>
           <th class="requester-col" class:hidden={assignMode}>Requested By</th>
@@ -2299,7 +2337,7 @@
             <td class="project-col mono" class:hidden={assignMode}>{part.project_id}</td>
             <td class="quantity-col" class:hidden={assignMode}>{getQuantitySummary(part)}</td>
             <td class="stock-col text-muted" class:hidden={assignMode}>{part.stock_assignment || '-'}</td>
-            <td class="metadata-col">
+            <td class="metadata-col status-col">
               <div class="metadata-value metadata-status">
                 <span class="status-badge {getBadgeClass(part.status, getRouterMeta(part))} status-table status-fade">{getStatusDisplay(part)}</span>
                 {#if part.workflow === 'router' && getRouterProgressSummary(part)}
@@ -3187,9 +3225,9 @@
 
   .table th.name-col,
   .table td.name-col {
-    width: 11rem;
-    min-width: 11rem;
-    max-width: 11rem;
+    width: 10rem;
+    min-width: 10rem;
+    max-width: 10rem;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -3208,7 +3246,10 @@
   }
   .table th.workflow-col,
   .table td.workflow-col {
-    width: 6.5rem;
+    /* Wide enough for the real longest workflow label ("ROUTERING",
+       measured at ~103px rendered) plus cell padding - it was clipping/
+       wrapping at the old 6.5rem. */
+    width: 8rem;
   }
   .table th.project-col,
   .table td.project-col {
@@ -3220,14 +3261,23 @@
   }
   .table th.stock-col,
   .table td.stock-col {
-    width: 8.5rem;
+    width: 7.5rem;
   }
   .table th.metadata-col,
   .table td.metadata-col {
-    width: 9rem;
-    min-width: 9rem;
-    max-width: 9rem;
+    width: 8rem;
+    min-width: 8rem;
+    max-width: 8rem;
     vertical-align: top;
+  }
+  /* Status specifically needs more room than Due/Created - the real
+     longest status label ("CAM Review Pending") measures ~160px rendered,
+     which never fit in the shared metadata-col width. */
+  .table th.status-col,
+  .table td.status-col {
+    width: 12rem;
+    min-width: 12rem;
+    max-width: 12rem;
   }
   .metadata-value {
     box-sizing: border-box;
@@ -3256,9 +3306,9 @@
   .metadata-col :global(.due-input) { box-sizing: border-box; width: 100%; }
   .table th.requester-col,
   .table td.requester-col {
-    width: 6.5rem;
-    min-width: 6.5rem;
-    max-width: 6.5rem;
+    width: 5.5rem;
+    min-width: 5.5rem;
+    max-width: 5.5rem;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -3621,7 +3671,21 @@
     margin: 0;
     flex-shrink: 0;
   }
-  
+
+  .part-card-assign {
+    display: grid;
+    gap: 0.25rem;
+    margin-bottom: var(--space-3);
+    padding: var(--space-2) var(--space-3);
+    background: var(--accent-subtle, rgba(34, 197, 94, 0.08));
+    border: 1px solid var(--accent, currentColor);
+    border-radius: var(--radius-sm);
+  }
+
+  .part-card-assign select {
+    width: 100%;
+  }
+
   .part-card-actions .btn {
     flex: 1 1 auto;
     min-width: 80px;
@@ -3652,42 +3716,52 @@
     .manufacture-page-container {
       padding: 0;
     }
-    
+
     /* Hide desktop table, show mobile cards */
     .desktop-table {
       display: none;
     }
-    
+
     .mobile-parts-list {
       display: block;
     }
-    
-    /* Compact filters */
-    .filter-card {
-      padding: var(--space-3);
+
+    /* The roster sidebar's assignment gesture is drag-and-drop, which isn't
+       workable on a touch screen - each part-card gets its own "Assign to"
+       select instead (see .part-card-assign / assignPartByTap above), so
+       the sidebar itself would just be dead weight here. */
+    .assign-sidebar {
+      display: none;
     }
-    
-    .filter-grid {
-      grid-template-columns: 1fr;
-      gap: var(--gap-3);
-    }
-    
+
     .page-header {
       padding: var(--space-3);
     }
-    
+
     .page-header h1 {
       font-size: 1.25rem;
     }
-    
+
+    /* A 1-column stack of 6 buttons pushed every part below the fold on a
+       phone. Two columns halves that, and the primary action (Create New
+       Part) is pulled to the top and spans both columns via `order` so it
+       reads as the one thing most people came here to do, regardless of
+       where it sits in the desktop button row's own DOM order. */
     .page-actions {
-      flex-direction: column;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: var(--gap-2);
       width: 100%;
     }
-    
+
     .page-actions .btn {
       width: 100%;
       justify-content: center;
+    }
+
+    .page-actions .page-actions-primary {
+      grid-column: 1 / -1;
+      order: -1;
     }
   }
 
