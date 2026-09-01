@@ -655,8 +655,9 @@
   function openToolpathModal(job) {
     if (!job?.gcode) return;
     toolpathModalJob = job;
-    toolpathView3D = false;
+    toolpathView3D = true;
     showToolpathModal = true;
+    loadToolpathSimulator3D();
   }
 
   async function loadToolpathSimulator3D() {
@@ -676,11 +677,8 @@
     }
   }
 
-  async function open3DToolpathModal(job) {
-    if (!job?.gcode) return;
-    toolpathModalJob = job;
+  async function showToolpath3D() {
     toolpathView3D = true;
-    showToolpathModal = true;
     await loadToolpathSimulator3D();
   }
 
@@ -2115,12 +2113,7 @@
               </button>
               {#if camCapable}
                 <button class="btn btn-secondary btn-sm" disabled={camJob?.status !== 'completed'} on:click={() => openToolpathModal(camJob)} title={camJob?.status === 'completed' ? 'Preview the generated toolpath' : 'Generate G-code first'}>
-                  <Route size={14} /> View Toolpath
-                </button>
-              {/if}
-              {#if camCapable && camJob?.status === 'completed'}
-                <button class="btn btn-secondary btn-sm" on:click={() => open3DToolpathModal(camJob)} title="Show the 3D toolpath simulation">
-                  <Route size={14} /> Show 3D Toolpath
+                  <Route size={14} /> Show Toolpath
                 </button>
               {/if}
               <button class="btn btn-secondary btn-sm" on:click={() => installCadStepFile(part)} title="Download STEP file">
@@ -2344,12 +2337,7 @@
                     </button>
                     {#if camCapable}
                       <button class="btn btn-secondary btn-sm" disabled={camJob?.status !== 'completed'} on:click={() => openToolpathModal(camJob)} title={camJob?.status === 'completed' ? 'Preview the generated toolpath' : 'Generate G-code first'}>
-                        <Route size={13} /> View Toolpath
-                      </button>
-                    {/if}
-                    {#if camCapable && camJob?.status === 'completed'}
-                      <button class="btn btn-secondary btn-sm" on:click={() => open3DToolpathModal(camJob)} title="Show the 3D toolpath simulation">
-                        <Route size={13} /> Show 3D Toolpath
+                        <Route size={13} /> Show Toolpath
                       </button>
                     {/if}
                     <button class="btn btn-secondary btn-sm" on:click={() => installCadStepFile(part)} title="Download STEP file">
@@ -2984,6 +2972,12 @@
         </button>
       </div>
       <div class="modal-body">
+        {#if toolpathModalJob.operation_type === 'routing' || toolpathModalJob.operation_type === 'turning'}
+          <div class="toolpath-view-tabs" role="tablist" aria-label="Toolpath view">
+            <button type="button" role="tab" aria-selected={toolpathView3D} class:active={toolpathView3D} on:click={showToolpath3D}>3D Toolpath</button>
+            <button type="button" role="tab" aria-selected={!toolpathView3D} class:active={!toolpathView3D} on:click={() => (toolpathView3D = false)}>2D Preview</button>
+          </div>
+        {/if}
         {#if toolpathView3D}
           {#if ToolpathSimulator}
             <svelte:component
@@ -3078,6 +3072,9 @@
   .toolpath-modal-3d { width: min(1100px, 95vw); }
   .toolpath-simulator-loading { min-height: 320px; display: flex; align-items: center; justify-content: center; gap: 0.65rem; color: var(--text-muted); }
   .toolpath-simulator-loading .loading-spinner { width: 1.25rem; height: 1.25rem; border-width: 2px; }
+  .toolpath-view-tabs { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; border-bottom: 1px solid var(--border); }
+  .toolpath-view-tabs button { padding: 0.5rem 0.75rem; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--text-muted); font: inherit; cursor: pointer; }
+  .toolpath-view-tabs button.active { border-bottom-color: var(--accent-strong); color: var(--text); font-weight: 700; }
 
   .tube-face-files-modal { width: min(1100px, 96vw); max-width: 96vw; }
   .tube-face-files-modal .modal-header { align-items: flex-start; }

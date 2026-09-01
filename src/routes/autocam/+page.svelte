@@ -1164,12 +1164,9 @@
                 {/if}
                 {#if job.status === 'completed' && job.gcode}
                   <span class="output-action-group">
-                    <button class="btn btn-icon" data-tooltip="View Toolpath" aria-label="View toolpath simulation" on:click={() => openToolpathPreview(job)}><Route size={15} /></button>
-                    {#if job.operation_type === 'routing' || job.operation_type === 'turning' || job.operation_type === 'tubestock'}
-                      <button class="btn btn-secondary btn-sm" on:click={() => open3DToolpathPreview(job)}>
-                        <Route size={14} /> 3D Toolpath
-                      </button>
-                    {/if}
+                    <button class="btn btn-secondary btn-sm" on:click={() => openToolpathPreview(job)}>
+                      <Route size={14} /> Show Toolpath
+                    </button>
                     <button class="btn btn-secondary btn-sm" title={job.gcode_file_name || 'output.ngc'} on:click={() => downloadGcodeBlob(job)}>
                       <Download size={14} /> Install NGC
                     </button>
@@ -1468,13 +1465,8 @@
             <Box size={14} /> View CAD
           </button>
           <button class="btn btn-secondary btn-sm" on:click={() => openToolpathPreview(editingJob, editParams)} disabled={editingJob.status !== 'completed' || !editingJob.gcode} title={editingJob.status !== 'completed' ? 'Only available once the job has completed' : ''}>
-            <Route size={14} /> View {operationLabel(editingJob.operation_type)} Toolpath
+            <Route size={14} /> Show Toolpath
           </button>
-          {#if editingJob.operation_type === 'routing'}
-            <button class="btn btn-secondary btn-sm" on:click={() => open3DToolpathPreview(editingJob, editParams)} disabled={editingJob.status !== 'completed' || !editingJob.gcode}>
-              <Route size={14} /> 3D Toolpath
-            </button>
-          {/if}
           {#if editingJob.status === 'completed' && editingJob.gcode}
             <button class="btn btn-secondary btn-sm" on:click={() => openNcviewer(editingJob)}>
               <ExternalLink size={14} /> Open ncviewer.com
