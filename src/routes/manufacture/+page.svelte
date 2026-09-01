@@ -2093,7 +2093,7 @@
           <th class="metadata-col" class:hidden={assignMode}>Due</th>
           <th class="metadata-col" class:hidden={assignMode}>Created</th>
           <th class="requester-col" class:hidden={assignMode}>Requested By</th>
-          <th class:hidden={assignMode}>Actions</th>
+          <th class="actions-table-col" class:hidden={assignMode}>Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -2247,7 +2247,7 @@
             <td class="requester-col" class:hidden={assignMode} title={part.requester || 'Requester not recorded'}>
               {part.requester || '—'}
             </td>
-            <td class:hidden={assignMode}>
+            <td class="actions-table-col" class:hidden={assignMode}>
               <div class="row-actions">
                 {#if canViewCad(part)}
                   {@const camJob = camJobsByPart[part.id]}
@@ -2810,13 +2810,13 @@
 
   .cad-action-grid {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(7.5rem, 1fr));
     gap: 0.4rem;
   }
   .cad-action-grid .btn {
     justify-content: center;
     text-align: center;
-    white-space: normal;
+    white-space: nowrap;
     line-height: 1.2;
     font-size: var(--font-xs, 0.75rem);
     padding: 0.35rem 0.5rem;
@@ -2932,6 +2932,22 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     vertical-align: middle;
+  }
+  .table th.actions-table-col,
+  .table td.actions-table-col {
+    box-sizing: border-box;
+    position: sticky;
+    right: 0;
+    width: 17rem;
+    min-width: 17rem;
+    background: var(--surface-1);
+    box-shadow: -1px 0 0 var(--border);
+  }
+  .table thead th.actions-table-col {
+    z-index: 3;
+  }
+  .table tbody td.actions-table-col {
+    z-index: 2;
   }
 
   .name-line {
