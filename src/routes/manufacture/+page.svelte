@@ -11,7 +11,7 @@
   import SeasonFilter from '$lib/components/SeasonFilter.svelte';
   import { goto } from '$app/navigation';
   import { PUBLIC_ONSHAPE_BASE_URL } from '$env/static/public';
-  import { Search, Filter, Clock, Truck, Package, Download, Zap, Wrench, FileText, Upload, ExternalLink, Pencil, Trash2, X, Users, Box, Route } from 'lucide-svelte';
+  import { Search, Filter, Clock, Truck, Package, Download, Zap, Wrench, FileText, Upload, ExternalLink, Pencil, Trash2, X, Users, Box, Route, CircleCheck } from 'lucide-svelte';
   import ROUTER_FLOW from '$lib/router_flow.json';
   import { getDisplayStatus, BUTTONS, getBadgeClass, getWorkflowStatuses } from '$lib/statuses.js';
   import { summarizeRouterStages, isFullyKitted, buildRouterProgressUpdate } from '$lib/router_progress.js';
@@ -24,7 +24,7 @@
   import ToolpathViewer from '$autocam/components/ToolpathViewer.svelte';
   import {
     queueCamJobForPart,
-    retryCamJob,
+    updateCamJobAndRegenerate,
     getPartStepFileName,
     loadLatestCamJobsForParts,
     downloadGcodeBlob,
@@ -49,9 +49,20 @@
   let show971 = true;
   let show9584 = true;
   let toastMessage = '';
+  let toastTone = 'neutral';
   let showToast = false;
   let camJobsByPart = {};
   let queuingCamJobForPartId = null;
+  let showCamSetupModal = false;
+  let camSetupPart = null;
+  let camSetupJob = null;
+  let camSetupMachines = [];
+  let camSetupTools = [];
+  let camSetupMachineTools = [];
+  let camSetupMachineId = '';
+  let camSetupToolId = '';
+  let availableCamSetupTools = [];
+  let loadingCamSetup = false;
   let subsystemOptions = [];
   let showQuickPrintModal = false;
   let quickPrintPartName = '';
@@ -470,17 +481,93 @@
     camJobsByPart = byPart;
   }
 
-  // Every router/lathe part requires a STEP file at creation now, so most of
-  // the time AutoCAM can just run straight off it - no modal, no upload.
-  async function generateAutocam(part) {
-    queuingCamJobForPartId = part.id;
+  $: selectedCamSetupMachine = camSetupMachines.find((machine) => String(machine.id) === String(camSetupMachineId));
+  $: {
+    const assignedToolIds = new Set(camSetupMachineTools
+      .filter((link) => String(link.machine_id) === String(camSetupMachineId))
+      .map((link) => String(link.tool_id)));
+    availableCamSetupTools = camSetupTools.filter((tool) => tool.enabled && (
+      assignedToolIds.size ? assignedToolIds.has(String(tool.id)) : !selectedCamSetupMachine?.default_tool_id || String(tool.id) === String(selectedCamSetupMachine.default_tool_id)
+    ));
+  }
+
+  function selectCamSetupMachine(machineId) {
+    camSetupMachineId = machineId;
+    const machine = camSetupMachines.find((candidate) => String(candidate.id) === String(machineId));
+    const defaultTool = camSetupTools.find((tool) => String(tool.id) === String(machine?.default_tool_id));
+    camSetupToolId = defaultTool?.id || camSetupTools.find((tool) => tool.enabled)?.id || '';
+  }
+
+  async function openCamSetupModal(part, job = null) {
+    const operationType = WORKFLOW_OPERATION_TYPE[part.workflow];
+    if (!operationType) return;
+    loadingCamSetup = true;
+    camSetupPart = part;
+    camSetupJob = job;
+    showCamSetupModal = true;
     try {
-      const result = await queueCamJobForPart(part, { userId: user?.id || null, name: part.name });
+      const [machinesResponse, toolsResponse, machineToolsResponse] = await Promise.all([
+        supabase.from('cam_machines').select('id, name, default_tool_id, default_params, gcode_extension').eq('operation_type', operationType).eq('enabled', true).order('name'),
+        supabase.from('cam_tools').select('id, name, diameter, enabled').eq('enabled', true).order('name'),
+        supabase.from('cam_machine_tools').select('machine_id, tool_id')
+      ]);
+      if (machinesResponse.error) throw machinesResponse.error;
+      if (toolsResponse.error) throw toolsResponse.error;
+      camSetupMachines = machinesResponse.data || [];
+      camSetupTools = toolsResponse.data || [];
+      camSetupMachineTools = machineToolsResponse.data || [];
+      const preferredMachine = camSetupMachines.find((machine) => String(machine.id) === String(job?.machine_id))
+        || (part.workflow === 'router' ? camSetupMachines.find((machine) => machine.name === 'UNC Router') : null)
+        || camSetupMachines[0];
+      selectCamSetupMachine(preferredMachine?.id || '');
+      if (job?.tool_id && camSetupTools.some((tool) => String(tool.id) === String(job.tool_id))) camSetupToolId = job.tool_id;
+    } catch (error) {
+      showToastMessage(error.message || 'Could not load AutoCAM machine profiles', 'error');
+      closeCamSetupModal();
+    } finally {
+      loadingCamSetup = false;
+    }
+  }
+
+  function closeCamSetupModal() {
+    showCamSetupModal = false;
+    camSetupPart = null;
+    camSetupJob = null;
+    camSetupMachines = [];
+    camSetupTools = [];
+    camSetupMachineTools = [];
+    camSetupMachineId = '';
+    camSetupToolId = '';
+  }
+
+  async function submitCamSetup() {
+    if (!camSetupPart || !selectedCamSetupMachine || !camSetupToolId) return;
+    const part = camSetupPart;
+    queuingCamJobForPartId = part.id;
+    const options = {
+      userId: user?.id || null,
+      name: camSetupJob?.name || part.name,
+      machineId: selectedCamSetupMachine.id,
+      toolId: camSetupToolId,
+      params: selectedCamSetupMachine.default_params || {},
+      gcodeExtension: selectedCamSetupMachine.gcode_extension || 'ngc'
+    };
+    try {
+      const result = camSetupJob
+        ? await updateCamJobAndRegenerate(camSetupJob, options)
+        : await queueCamJobForPart(part, options);
       camJobsByPart = { ...camJobsByPart, [part.id]: result.job };
-      showToastMessage(result.success ? 'CAM generated' : (result.error || 'AutoCAM generation failed'));
+      showToastMessage(result.success ? 'CAM generated successfully' : (result.error || 'AutoCAM generation failed'), result.success ? 'success' : 'error');
+      if (result.success) closeCamSetupModal();
+    } catch (error) {
+      showToastMessage(error.message || 'AutoCAM generation failed', 'error');
     } finally {
       queuingCamJobForPartId = null;
     }
+  }
+
+  function generateAutocam(part) {
+    openCamSetupModal(part);
   }
 
   // "Attach STEP" modal - only needed for the retrofit case: a lathe part
@@ -543,14 +630,7 @@
   async function retryAutocam(part) {
     const job = camJobsByPart[part.id];
     if (!job) return;
-    queuingCamJobForPartId = part.id;
-    try {
-      const result = await retryCamJob(job, { userId: user?.id || null });
-      camJobsByPart = { ...camJobsByPart, [part.id]: result.job };
-      showToastMessage(result.success ? 'CAM generated' : (result.error || 'AutoCAM generation failed'));
-    } finally {
-      queuingCamJobForPartId = null;
-    }
+    openCamSetupModal(part, job);
   }
 
   // Single dispatcher for "Install CAD" (STEP download) regardless of where
@@ -1651,8 +1731,9 @@
   $: allFilteredSelected = filteredPartKeys.length > 0 && selectedFilteredCount === filteredPartKeys.length;
 
   // Toast notification functions
-  function showToastMessage(message) {
+  function showToastMessage(message, tone = 'neutral') {
     toastMessage = message;
+    toastTone = tone;
     showToast = true;
     
     // Auto-hide after 3 seconds
@@ -2011,6 +2092,9 @@
                 {/if}
               {/if}
             </div>
+            {#if camJob?.status === 'completed'}
+              <span class="autocam-completed part-card-autocam-status"><CircleCheck size={14} /> AutoCAM completed</span>
+            {/if}
           {:else if WORKFLOW_OPERATION_TYPE[part.workflow]}
             <button
               class="btn btn-secondary btn-sm"
@@ -2037,6 +2121,11 @@
               >
                 <Clock size={14} /> Start
               </button>
+            {/if}
+            {#if camJobsByPart[part.id]}
+              <a class="btn btn-secondary btn-sm" href={`/autocam?job=${camJobsByPart[part.id].id}`} on:click|stopPropagation>
+                <ExternalLink size={14} /> AutoCAM
+              </a>
             {/if}
           {:else if part.status === 'in-progress'}
             {#if part.workflow === 'router'}
@@ -2179,80 +2268,83 @@
                 {#if canViewCad(part)}
                   {@const camJob = camJobsByPart[part.id]}
                   {@const camCapable = !!WORKFLOW_OPERATION_TYPE[part.workflow]}
-                  <div class="cad-action-grid desktop-cad-actions" on:click|stopPropagation on:keydown|stopPropagation role="presentation">
-                    <button class="btn btn-secondary action-icon" on:click={() => openCadViewer(part)} aria-label="View 3D model" title="View CAD">
-                      <Box size={15} />
+                  <div class="cad-action-grid" on:click|stopPropagation on:keydown|stopPropagation role="presentation">
+                    <button class="btn btn-secondary btn-sm" on:click={() => openCadViewer(part)} title="View 3D model">
+                      <Box size={13} /> View CAD
                     </button>
                     {#if camCapable}
-                      <button class="btn btn-secondary action-icon" disabled={camJob?.status !== 'completed'} on:click={() => openToolpathModal(camJob)} aria-label="View toolpath" title={camJob?.status === 'completed' ? 'View Toolpath' : 'Generate G-code first'}>
-                        <Route size={15} />
+                      <button class="btn btn-secondary btn-sm" disabled={camJob?.status !== 'completed'} on:click={() => openToolpathModal(camJob)} title={camJob?.status === 'completed' ? 'Preview the generated toolpath' : 'Generate G-code first'}>
+                        <Route size={13} /> View Toolpath
                       </button>
                     {/if}
-                    <button class="btn btn-secondary action-icon" on:click={() => installCadStepFile(part)} aria-label="Download STEP file" title="Install CAD">
-                      <Download size={15} />
+                    <button class="btn btn-secondary btn-sm" on:click={() => installCadStepFile(part)} title="Download STEP file">
+                      <Download size={13} /> Install CAD
                     </button>
                     {#if camCapable}
                       {#if isCamJobActive(camJob)}
-                        <span class="btn btn-secondary action-icon autocam-running" aria-label="AutoCAM is processing this part" title={camJobStatusLabel(camJob.status)}>
-                          <span class="autocam-spinner"></span>
+                        <span class="btn btn-secondary btn-sm autocam-running" title="AutoCAM is processing this part">
+                          <span class="autocam-spinner"></span> {camJobStatusLabel(camJob.status)}
                         </span>
                       {:else if camJob?.status === 'completed'}
-                        <button class="btn btn-secondary action-icon" on:click={() => downloadGcodeBlob(camJob)} aria-label="Download G-code" title="Install NGC">
-                          <Download size={15} />
+                        <button class="btn btn-secondary btn-sm" on:click={() => downloadGcodeBlob(camJob)} title="Download G-code">
+                          <Download size={13} /> Install NGC
                         </button>
                       {:else if camJob?.status === 'failed'}
                         <button
-                          class="btn btn-secondary action-icon"
+                          class="btn btn-secondary btn-sm"
                           disabled={queuingCamJobForPartId === part.id}
-                          aria-label="Retry AutoCAM"
                           title={`AutoCAM failed: ${camJob.errors?.[0] || 'unknown error'} - click to retry`}
                           on:click={() => retryAutocam(part)}
                         >
-                          <Zap size={15} />
+                          <Zap size={13} /> Retry AutoCAM
                         </button>
                       {:else}
                         <button
-                          class="btn btn-secondary action-icon"
+                          class="btn btn-secondary btn-sm"
                           disabled={queuingCamJobForPartId === part.id}
-                          aria-label="Generate G-code"
                           title="Generate G-code from this part's STEP file"
                           on:click={() => generateAutocam(part)}
                         >
-                          <Zap size={15} />
+                          <Zap size={13} /> Generate G-code
                         </button>
                       {/if}
                     {/if}
                   </div>
+                  {#if camJob?.status === 'completed'}
+                    <span class="autocam-completed"><CircleCheck size={14} /> AutoCAM completed</span>
+                  {/if}
                 {:else if WORKFLOW_OPERATION_TYPE[part.workflow]}
                   <button
-                    class="btn btn-secondary action-icon"
+                    class="btn btn-secondary btn-sm"
                     on:click={() => openCamProfileModal(part)}
-                    aria-label="Attach STEP file"
                     title="This part was created before STEP was required for its workflow - attach one to unlock the 3D viewer and AutoCAM"
                   >
-                    <Upload size={15} />
+                    <Upload size={13} /> Attach STEP
                   </button>
                 {/if}
               </div>
               {#if part.status === 'pending'}
                 {#if part.workflow === 'router'}
                 <button
-                  class="btn btn-secondary action-icon"
+                  class="btn btn-secondary btn-sm"
                   on:click={async () => { await updatePartStatus(part.id, 'in-progress'); await updateRouterMeta(part, { step: 'cam_ing' }); setLocalStatus(part.id, 'in-progress'); setLocalRouterMeta(part.id, { step: 'cam_ing' }); }}
-                  aria-label="Start"
                   title="Start"
                 >
-                  <Clock size={15} />
+                  <Clock size={13} /> Start
                 </button>
                 {:else}
                 <button
-                  class="btn btn-secondary action-icon"
+                  class="btn btn-secondary btn-sm"
                   on:click={async () => { await updatePartStatus(part.id, 'in-progress'); setLocalStatus(part.id, 'in-progress'); }}
-                  aria-label="Start work"
                   title="Start Work"
                 >
-                  <Clock size={15} />
+                  <Clock size={13} /> Start
                 </button>
+                {/if}
+                {#if camJobsByPart[part.id]}
+                  <a class="btn btn-secondary btn-sm" href={`/autocam?job=${camJobsByPart[part.id].id}`} on:click|stopPropagation title="Open this AutoCAM job">
+                    <ExternalLink size={14} /> AutoCAM
+                  </a>
                 {/if}
 
               {:else if part.status === 'in-progress'}
@@ -2635,6 +2727,62 @@
   </div>
 {/if}
 
+{#if showCamSetupModal && camSetupPart}
+  <div
+    class="modal-backdrop"
+    on:click|self={closeCamSetupModal}
+    role="button"
+    tabindex="0"
+    on:keydown={(e) => { if (e.key === 'Escape') { e.preventDefault(); closeCamSetupModal(); } }}
+  >
+    <div class="modal cam-setup-modal" role="dialog" aria-modal="true" aria-label="AutoCAM setup">
+      <div class="modal-header">
+        <h3>{camSetupJob ? 'Retry AutoCAM' : 'Generate G-code'} - {camSetupPart.name}</h3>
+        <button type="button" class="modal-close-button" aria-label="Close dialog" on:click={closeCamSetupModal}>
+          <X size={18} />
+        </button>
+      </div>
+      <div class="modal-body">
+        {#if loadingCamSetup}
+          <p class="text-muted">Loading machine profiles...</p>
+        {:else}
+          <div class="cam-setup-grid">
+            <div class="form-group">
+              <label class="form-label" for="cam-setup-machine">Machine profile</label>
+              <select id="cam-setup-machine" class="form-select" value={camSetupMachineId} on:change={(event) => selectCamSetupMachine(event.currentTarget.value)}>
+                {#each camSetupMachines as machine}
+                  <option value={machine.id}>{machine.name}</option>
+                {/each}
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="cam-setup-tool">Tool / end mill</label>
+              <select id="cam-setup-tool" class="form-select" bind:value={camSetupToolId}>
+                {#each availableCamSetupTools as tool}
+                  <option value={tool.id}>{tool.name}{tool.diameter ? ` (${tool.diameter}\" dia)` : ''}</option>
+                {/each}
+              </select>
+            </div>
+          </div>
+          {#if !camSetupMachines.length || !availableCamSetupTools.length}
+            <p class="cam-setup-error">Add an enabled machine profile and tool before generating this job.</p>
+          {/if}
+        {/if}
+      </div>
+      <div class="modal-footer">
+        <button class="btn" on:click={closeCamSetupModal}>Cancel</button>
+        <button
+          class="btn btn-primary"
+          disabled={loadingCamSetup || !selectedCamSetupMachine || !camSetupToolId || queuingCamJobForPartId === camSetupPart.id}
+          on:click={submitCamSetup}
+        >
+          <Zap size={16} /> {queuingCamJobForPartId === camSetupPart.id ? 'Generating...' : 'Generate G-code'}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
 {#if showCamProfileModal && camProfileModalPart}
   <div
     class="modal-backdrop"
@@ -2706,7 +2854,7 @@
 
 <!-- Toast Notification -->
 {#if showToast}
-  <div class="toast">
+  <div class="toast toast-{toastTone}" role="status">
     {toastMessage}
   </div>
 {/if}
@@ -2726,6 +2874,19 @@
     cursor: default;
   }
 
+  .autocam-completed {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    color: var(--green-strong, #237a41);
+    font-size: var(--font-xs, 0.75rem);
+    font-weight: 600;
+  }
+
+  .part-card-autocam-status {
+    flex-basis: 100%;
+  }
+
   .autocam-spinner {
     display: inline-block;
     width: 12px;
@@ -2741,19 +2902,15 @@
   .cad-action-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.4rem;
+    gap: 0.3rem;
   }
-  .desktop-cad-actions {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 0.25rem;
-  }
-  .action-icon {
-    width: 2rem;
-    min-width: 2rem;
-    height: 2rem;
-    min-height: 2rem;
-    padding: 0;
+  .cad-action-grid .btn {
     justify-content: center;
+    text-align: center;
+    white-space: nowrap;
+    line-height: 1.2;
+    font-size: var(--font-xs, 0.75rem);
+    padding: 0.3rem 0.4rem;
   }
 
   .toolpath-modal { width: min(700px, 95vw); max-width: 95vw; }
@@ -2792,38 +2949,38 @@
 
   .table th.name-col,
   .table td.name-col {
-    min-width: 144px;
-    max-width: 216px;
-    width: 1%;
+    width: 11rem;
+    min-width: 11rem;
+    max-width: 11rem;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
   .table {
     table-layout: fixed;
-    min-width: 120rem;
+    width: 100%;
   }
   .table th.workflow-col,
   .table td.workflow-col {
-    width: 8.5rem;
+    width: 6.5rem;
   }
   .table th.project-col,
   .table td.project-col {
-    width: 9rem;
+    width: 7rem;
   }
   .table th.quantity-col,
   .table td.quantity-col {
-    width: 3.5rem;
+    width: 2.75rem;
   }
   .table th.stock-col,
   .table td.stock-col {
-    width: 11rem;
+    width: 8.5rem;
   }
   .table th.metadata-col,
   .table td.metadata-col {
-    width: 12rem;
-    min-width: 12rem;
-    max-width: 12rem;
+    width: 9rem;
+    min-width: 9rem;
+    max-width: 9rem;
     vertical-align: top;
   }
   .metadata-value {
@@ -2850,9 +3007,9 @@
   .metadata-col :global(.due-input) { box-sizing: border-box; width: 100%; }
   .table th.requester-col,
   .table td.requester-col {
-    width: 11rem;
-    min-width: 11rem;
-    max-width: 11rem;
+    width: 6.5rem;
+    min-width: 6.5rem;
+    max-width: 6.5rem;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -2863,8 +3020,8 @@
     box-sizing: border-box;
     position: sticky;
     right: 0;
-    width: 10.5rem;
-    min-width: 10.5rem;
+    width: 15.5rem;
+    min-width: 15.5rem;
     background: var(--surface-1);
     box-shadow: -1px 0 0 var(--border);
   }
@@ -3082,7 +3239,18 @@
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-lg);
     z-index: 1000;
+    animation: toast-fade 3s ease forwards;
   }
+  .toast-success { background: var(--green-strong, #237a41); color: white; }
+  .toast-error { background: var(--red-strong, #b4232e); color: white; }
+  @keyframes toast-fade {
+    0%, 78% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+
+  .cam-setup-modal { width: min(34rem, 94vw); }
+  .cam-setup-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+  .cam-setup-error { color: var(--red-strong, #b4232e); margin: 1rem 0 0; }
 
   /* Mobile Responsive Styles */
   
@@ -3204,6 +3372,7 @@
   @media (max-width: 900px) {
     .actions-col { min-width: auto; }
     .table th.name-col, .table td.name-col { min-width: 80px; max-width: 100px; }
+    .cam-setup-grid { grid-template-columns: 1fr; }
     
     .content-layout {
       flex-direction: column;
