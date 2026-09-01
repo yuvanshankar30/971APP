@@ -864,7 +864,7 @@
 
 <svelte:head><title>AutoCAM | Spartans Hub</title></svelte:head>
 
-<div class="page-header">
+<div class="page-header autocam-page-header">
   <h1><Cpu size={28} /> AutoCAM</h1>
   <div class="page-actions">
     <a class="btn btn-secondary" href="/autocam/fusion">
@@ -1094,8 +1094,8 @@
     <h3>No jobs match these filters</h3>
   </div>
 {:else}
-  <div class="table-container">
-    <table class="table">
+  <div class="table-container autocam-jobs-container">
+    <table class="table autocam-jobs-table">
       <thead>
         <tr>
           <th>Job</th>
@@ -1114,7 +1114,7 @@
         {#each filteredJobs as job (job.id)}
           {@const bucket = getSeasonBucket(job.created_at)}
           <tr class="job-row" on:click={() => openJobDetail(job)} tabindex="0" role="button" on:keydown={(e) => { if (e.key === 'Enter') openJobDetail(job); }}>
-            <td>
+            <td data-label="Job">
               <div class="name-line">
                 {#if job.source_type === 'part'}<Package size={14} />{:else}<Upload size={14} />{/if}
                 <strong title={jobDisplayName(job)}>{jobDisplayName(job)}</strong>
@@ -1125,16 +1125,16 @@
                 </a>
               {/if}
             </td>
-            <td>
+            <td data-label="Operation">
               <span class="tag {operationTagClass(job.operation_type)}">{operationLabel(job.operation_type)}</span>
             </td>
-            <td>{job.cam_materials?.name || '—'}</td>
-            <td>{job.cam_tools?.name || '—'}</td>
-            <td>{job.cam_machines?.name || '—'}</td>
-            <td>
+            <td data-label="Material">{job.cam_materials?.name || '—'}</td>
+            <td data-label="Tool">{job.cam_tools?.name || '—'}</td>
+            <td data-label="Machine">{job.cam_machines?.name || '—'}</td>
+            <td data-label="Machine Type">
               <span class="tag {operationTagClass(job.operation_type)}">{machineTypeLabel(job.operation_type)}</span>
             </td>
-            <td>
+            <td data-label="Status">
               <span class="status-badge {jobStatusClass(job)}">{camJobStatusLabel(job.status)}</span>
               {#if isCamJobActive(job)}
                 <div class="job-row-progress">
@@ -1143,14 +1143,14 @@
                 </div>
               {/if}
             </td>
-            <td>
+            <td data-label="Created">
               {formatPacificDateTimeWithZone(job.created_at)}
               {#if bucket}
                 <span class="tag season-tag {bucket.isOffseason ? 'tag-offseason' : 'tag-season'}">{bucket.label}</span>
               {/if}
             </td>
-            <td>{job.requester?.full_name || job.requester?.email || '—'}</td>
-            <td on:click|stopPropagation class="output-cell">
+            <td data-label="Created By">{job.requester?.full_name || job.requester?.email || '—'}</td>
+            <td data-label="Output" on:click|stopPropagation class="output-cell">
               <div class="output-actions">
                 {#if job.step_file_name}
                   <span class="output-action-group">
@@ -1757,6 +1757,13 @@
 {/if}
 
 <style>
+  /* AutoCAM has a denser operational table than the rest of the app. Give it
+     room on desktop, then switch to labeled records before the columns would
+     require a horizontal scrollbar. */
+  :global(.page-container:has(.autocam-page-header)) {
+    max-width: 1800px;
+  }
+
   .page-subtitle {
     color: var(--text-muted);
     margin: -0.5rem 0 1rem;
@@ -2033,17 +2040,40 @@
     margin-top: 0.4rem;
   }
 
-  .output-cell { min-width: 460px; white-space: nowrap; }
+  .autocam-jobs-container {
+    overflow: visible;
+  }
+  .autocam-jobs-table {
+    table-layout: fixed;
+  }
+  .autocam-jobs-table th:nth-child(1) { width: 16%; }
+  .autocam-jobs-table th:nth-child(2) { width: 8%; }
+  .autocam-jobs-table th:nth-child(3) { width: 10%; }
+  .autocam-jobs-table th:nth-child(4) { width: 8%; }
+  .autocam-jobs-table th:nth-child(5) { width: 9%; }
+  .autocam-jobs-table th:nth-child(6) { width: 8%; }
+  .autocam-jobs-table th:nth-child(7) { width: 8%; }
+  .autocam-jobs-table th:nth-child(8) { width: 12%; }
+  .autocam-jobs-table th:nth-child(9) { width: 8%; }
+  .autocam-jobs-table th:nth-child(10) { width: 13%; }
+  .autocam-jobs-table td {
+    overflow-wrap: anywhere;
+    vertical-align: top;
+  }
+  .output-cell { min-width: 0; white-space: normal; }
   .output-actions {
     display: flex;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 0.6rem;
+    gap: 0.45rem;
   }
   .output-action-group {
-    display: inline-flex;
+    display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 0.3rem;
+    min-width: 0;
+    max-width: 100%;
+    gap: 0.4rem;
   }
   .tube-face-files { position: relative; }
   .tube-face-files summary { list-style: none; }
@@ -2240,6 +2270,62 @@
   }
   .form-row.two-col {
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  }
+  @media (max-width: 1260px) {
+    .autocam-jobs-container {
+      overflow: visible;
+      border: none;
+      border-radius: 0;
+      box-shadow: none;
+      background: transparent;
+    }
+    .autocam-jobs-table,
+    .autocam-jobs-table tbody,
+    .autocam-jobs-table tr,
+    .autocam-jobs-table td {
+      display: block;
+      width: 100%;
+    }
+    .autocam-jobs-table thead { display: none; }
+    .autocam-jobs-table tbody {
+      display: grid;
+      gap: 0.75rem;
+    }
+    .autocam-jobs-table tr {
+      padding: 0.85rem 1rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg, 8px);
+      background: var(--surface-1);
+      box-shadow: var(--shadow-sm);
+    }
+    .autocam-jobs-table td {
+      display: grid;
+      grid-template-columns: minmax(8.5rem, 0.8fr) minmax(0, 1.5fr);
+      gap: 0.75rem;
+      padding: 0.45rem 0;
+      border: 0;
+      min-width: 0;
+    }
+    .autocam-jobs-table td + td { border-top: 1px solid var(--border); }
+    .autocam-jobs-table td::before {
+      content: attr(data-label);
+      color: var(--text-muted);
+      font-family: var(--font-mono-stack);
+      font-size: 0.66rem;
+      font-weight: 500;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .autocam-jobs-table .name-line { max-width: none; }
+    .autocam-jobs-table .output-actions { justify-content: flex-start; }
+  }
+  @media (max-width: 560px) {
+    .autocam-jobs-table tr { padding: 0.75rem; }
+    .autocam-jobs-table td {
+      grid-template-columns: 1fr;
+      gap: 0.3rem;
+    }
+    .autocam-jobs-table td::before { font-size: 0.62rem; }
   }
   @media (max-width: 560px) {
     .job-choice-options--operation,
