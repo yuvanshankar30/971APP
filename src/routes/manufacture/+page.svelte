@@ -2221,7 +2221,7 @@
               {/if}
             </td>
             <td class="metadata-col">
-              <div class="metadata-value">
+              <div class="metadata-value metadata-status">
                 <span class="status-badge {getBadgeClass(part.status, getRouterMeta(part))} status-table status-fade">{getStatusDisplay(part)}</span>
                 {#if part.workflow === 'router' && getRouterProgressSummary(part)}
                   <div class="router-progress-note">{getRouterProgressSummary(part)}</div>
@@ -2884,13 +2884,17 @@
   .metadata-value {
     box-sizing: border-box;
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     min-height: 2.75rem;
     width: 100%;
   }
+  .metadata-status {
+    flex-direction: column;
+    gap: 0.35rem;
+  }
   .metadata-created {
     flex-wrap: wrap;
-    align-content: center;
+    align-content: flex-start;
     gap: 0.3rem 0.45rem;
   }
   .metadata-col :global(.due-date) { width: 100%; }
