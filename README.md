@@ -301,6 +301,12 @@ own docs are all together in one place instead of scattered across
   layout this was built for.
 - **`autocam/camJobs.js`** - shared job-queue helpers used by both
   `/autocam` and `/manufacture`.
+- **Machine-scoped tooling** - `cam_machine_tools` records which cutters are
+  installed on each physical profile. Choosing a machine filters the job's
+  Tool / End Mill selector and copies a selected router bit's diameter into
+  the generated-job parameters and 3D simulation. The seeded UNC Router
+  default is a `0.1575 in` flat end mill; operators can add another tool for
+  the selected machine directly from the job form.
 - **`autocam/components/`** - `ToolpathViewer.svelte`, `CamParamFields.svelte`,
   `RoutingToolSequence.svelte`, `TurningFinishTool.svelte`,
   `AutocamReviewModal.svelte` (the last one currently unused anywhere - a

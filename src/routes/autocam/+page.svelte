@@ -43,6 +43,7 @@
   let materials = [];
   let tools = [];
   let machines = [];
+  let machineTools = [];
 
   // Jobs list filters - mirrors the filter bar on /manufacture (search,
   // status, project-like dropdowns, season) adapted to what a CAM job
@@ -169,6 +170,7 @@
 
   let showProfilesPanel = false;
   let showToolsModal = false;
+  let toolMachineId = '';
   let newMaterialName = '';
   let newToolName = '';
   let newToolDiameter = '';
@@ -178,7 +180,7 @@
   // Machine profile editor
   let showMachineModal = false;
   let editingMachineId = null;
-  let machineForm = { name: '', description: '', operation_type: 'routing', default_material_id: '', default_tool_id: '', gcode_extension: 'ngc', controller: 'linuxcnc', drive_folder_id: '', drive_output_folder_id: '', params: emptyRoutingParams() };
+  let machineForm = { name: '', description: '', operation_type: 'routing', default_material_id: '', default_tool_id: '', tool_ids: [], gcode_extension: 'ngc', controller: 'linuxcnc', drive_folder_id: '', drive_output_folder_id: '', params: emptyRoutingParams() };
   let savingMachine = false;
 
   $: canManageProfiles = canManageCamProfiles(user);
@@ -193,6 +195,8 @@
     .filter((p) => passesSeasonFilter(p.created_at, partFilterSeason))
     .filter((p) => passesTeamFilter(p.frc_team, partShow971, partShow9584));
   $: machinesForOperation = machines.filter((mc) => mc.enabled && mc.operation_type === newJobOperation);
+  $: selectedMachineTools = toolsForMachine(selectedMachineId);
+  $: editMachineTools = toolsForMachine(editMachineId);
   $: jobStats = {
     total: jobs.length,
     generating: jobs.filter((j) => ['queued', 'claimed', 'processing'].includes(j.status)).length,
@@ -242,14 +246,50 @@
   }
 
   async function loadReferenceData() {
-    const [m, t, mc] = await Promise.all([
+    const [m, t, mc, mt] = await Promise.all([
       supabase.from('cam_materials').select('*').order('name'),
       supabase.from('cam_tools').select('*').order('name'),
-      supabase.from('cam_machines').select('*').order('name')
+      supabase.from('cam_machines').select('*').order('name'),
+      supabase.from('cam_machine_tools').select('machine_id, tool_id')
     ]);
     materials = m.data || [];
     tools = t.data || [];
     machines = mc.data || [];
+    machineTools = mt.data || [];
+  }
+
+  function toolsForMachine(machineId) {
+    const enabledTools = tools.filter((tool) => tool.enabled);
+    if (!machineId) return enabledTools;
+    const installedToolIds = new Set(machineTools
+      .filter((link) => String(link.machine_id) === String(machineId))
+      .map((link) => String(link.tool_id)));
+    return enabledTools.filter((tool) => installedToolIds.has(String(tool.id)));
+  }
+
+  function applyToolDiameter(toolId, operationType, params) {
+    const tool = tools.find((candidate) => String(candidate.id) === String(toolId));
+    if (operationType !== 'routing' || !tool?.diameter) return params;
+    return { ...params, toolDiameter: Number(tool.diameter) };
+  }
+
+  function selectNewJobTool(toolId) {
+    selectedToolId = toolId;
+    routingParams = applyToolDiameter(toolId, newJobOperation, routingParams);
+  }
+
+  function selectEditJobTool(toolId) {
+    editToolId = toolId;
+    editParams = applyToolDiameter(toolId, editingJob?.operation_type, editParams);
+  }
+
+  function selectEditMachine(machineId) {
+    editMachineId = machineId;
+    const machine = machines.find((candidate) => String(candidate.id) === String(machineId));
+    const availableTools = toolsForMachine(machineId);
+    const defaultTool = availableTools.find((tool) => String(tool.id) === String(machine?.default_tool_id));
+    if (defaultTool) selectEditJobTool(defaultTool.id);
+    else if (!availableTools.some((tool) => String(tool.id) === String(editToolId))) selectEditJobTool('');
   }
 
   async function loadEligibleParts() {
@@ -352,7 +392,10 @@
     } else {
       routingParams = { ...routingParams, ...(machine.default_params || {}) };
     }
-    if (machine.default_tool_id) selectedToolId = machine.default_tool_id;
+    const availableTools = toolsForMachine(machineId);
+    const defaultTool = availableTools.find((tool) => String(tool.id) === String(machine.default_tool_id));
+    if (defaultTool) selectNewJobTool(defaultTool.id);
+    else if (!availableTools.some((tool) => String(tool.id) === String(selectedToolId))) selectNewJobTool('');
   }
 
   function buildParams() {
@@ -686,20 +729,42 @@
     await loadReferenceData();
   }
 
+  function openToolsModal(machineId = '') {
+    toolMachineId = machineId;
+    showToolsModal = true;
+  }
+
   async function addTool() {
     if (!newToolName.trim()) return;
-    const { error } = await supabase.from('cam_tools').insert({
+    const diameter = newToolDiameter ? Number(newToolDiameter) : null;
+    if (newToolDiameter && (!Number.isFinite(diameter) || diameter <= 0)) {
+      toastActions.show('Tool diameter must be greater than zero');
+      return;
+    }
+    const { data, error } = await supabase.from('cam_tools').insert({
       name: newToolName.trim(),
-      diameter: newToolDiameter ? Number(newToolDiameter) : null,
+      tool_type: 'endmill',
+      diameter,
       nose_radius: newToolNoseRadius ? Number(newToolNoseRadius) : null,
       tool_number: newToolNumber ? Number(newToolNumber) : null
-    });
+    }).select().single();
     if (error) { toastActions.show('Failed to add tool'); return; }
+    if (toolMachineId && data?.id) {
+      const { error: associationError } = await supabase
+        .from('cam_machine_tools')
+        .insert({ machine_id: toolMachineId, tool_id: data.id, created_by: user?.id || null });
+      if (associationError) {
+        toastActions.show('Tool added, but could not attach it to this machine');
+        await loadReferenceData();
+        return;
+      }
+    }
     newToolName = '';
     newToolDiameter = '';
     newToolNoseRadius = '';
     newToolNumber = '';
     await loadReferenceData();
+    if (toolMachineId && data?.id) selectNewJobTool(data.id);
   }
 
   async function toggleEnabled(table, row) {
@@ -716,6 +781,7 @@
         operation_type: machine.operation_type,
         default_material_id: machine.default_material_id || '',
         default_tool_id: machine.default_tool_id || '',
+        tool_ids: machineTools.filter((link) => String(link.machine_id) === String(machine.id)).map((link) => link.tool_id),
         gcode_extension: machine.gcode_extension || 'ngc',
         controller: machine.controller || 'linuxcnc',
         drive_folder_id: machine.drive_folder_id || '',
@@ -727,7 +793,7 @@
       };
     } else {
       editingMachineId = null;
-      machineForm = { name: '', description: '', operation_type: 'routing', default_material_id: '', default_tool_id: '', gcode_extension: 'ngc', controller: 'linuxcnc', drive_folder_id: '', drive_output_folder_id: '', params: emptyRoutingParams() };
+      machineForm = { name: '', description: '', operation_type: 'routing', default_material_id: '', default_tool_id: '', tool_ids: [], gcode_extension: 'ngc', controller: 'linuxcnc', drive_folder_id: '', drive_output_folder_id: '', params: emptyRoutingParams() };
     }
     showMachineModal = true;
   }
@@ -760,10 +826,19 @@
         drive_output_folder_id: machineForm.drive_output_folder_id?.trim() || null,
         default_params: serializeParams(machineForm.params)
       };
-      const { error } = editingMachineId
+      const { data: savedMachine, error } = editingMachineId
         ? await supabase.from('cam_machines').update(row).eq('id', editingMachineId)
-        : await supabase.from('cam_machines').insert({ ...row, created_by: user?.id || null });
+          .select('id').single()
+        : await supabase.from('cam_machines').insert({ ...row, created_by: user?.id || null })
+          .select('id').single();
       if (error) { toastActions.show('Failed to save machine profile'); return; }
+      const toolIds = [...new Set([...(machineForm.tool_ids || []), machineForm.default_tool_id].filter(Boolean))];
+      const { error: removeError } = await supabase.from('cam_machine_tools').delete().eq('machine_id', savedMachine.id);
+      if (removeError) { toastActions.show('Machine profile saved, but its tool list could not be updated'); return; }
+      if (toolIds.length) {
+        const { error: toolError } = await supabase.from('cam_machine_tools').insert(toolIds.map((tool_id) => ({ machine_id: savedMachine.id, tool_id, created_by: user?.id || null })));
+        if (toolError) { toastActions.show('Machine profile saved, but its tool list could not be updated'); return; }
+      }
       toastActions.show('Machine profile saved');
       closeMachineModal();
       await loadReferenceData();
@@ -786,7 +861,7 @@
         <Settings size={16} /> {showProfilesPanel ? 'Hide' : 'Manage'} Profiles
       </button>
     {/if}
-    <button class="btn btn-secondary" on:click={() => (showToolsModal = true)}>
+    <button class="btn btn-secondary" on:click={() => openToolsModal()}>
       <Wrench size={16} /> Manage Tools
     </button>
     <button class="btn btn-primary" on:click={openNewJobModal}>
@@ -872,11 +947,12 @@
   <div class="modal-backdrop" on:click|self={() => (showToolsModal = false)} role="button" tabindex="0" on:keydown={(e) => { if (e.key === 'Escape') (showToolsModal = false); }}>
     <div class="modal tools-modal" role="dialog" aria-modal="true">
       <div class="modal-header">
-        <h3>Materials &amp; Tools</h3>
+        <h3>{toolMachineId ? `Tools for ${machines.find((machine) => String(machine.id) === String(toolMachineId))?.name || 'Machine'}` : 'Materials & Tools'}</h3>
         <button type="button" class="modal-close-button" aria-label="Close" on:click={() => (showToolsModal = false)}><X size={18} /></button>
       </div>
       <div class="modal-body">
         <div class="profiles-grid">
+          {#if !toolMachineId}
           <div class="profile-col">
             <h3>Materials</h3>
             {#each materials as m}
@@ -890,10 +966,11 @@
               <button class="btn btn-sm btn-nowrap" on:click={addMaterial}>Add</button>
             </div>
           </div>
+          {/if}
 
           <div class="profile-col">
-            <h3>Tools</h3>
-            {#each tools as t}
+            <h3>{toolMachineId ? 'Installed tools' : 'Tools'}</h3>
+            {#each (toolMachineId ? toolsForMachine(toolMachineId) : tools) as t}
               <div class="profile-row" class:disabled={!t.enabled}>
                 <span>{t.name}{t.diameter ? ` (${t.diameter}" dia)` : ''}{t.nose_radius ? ` R${t.nose_radius}` : ''}{t.tool_number ? ` - T${t.tool_number}` : ''}</span>
                 <button class="btn btn-ghost btn-sm" on:click={() => toggleEnabled('cam_tools', t)}>{t.enabled ? 'Disable' : 'Enable'}</button>
@@ -1245,7 +1322,7 @@
           <CamParamFields operation="tubestock" bind:params={tubestockParams} mode="job" />
         {:else}
           <CamParamFields operation="routing" bind:params={routingParams} mode="job" />
-          <RoutingToolSequence {tools} bind:sequence={routingParams.toolSequence} />
+          <RoutingToolSequence tools={selectedMachineTools} bind:sequence={routingParams.toolSequence} />
         {/if}
 
         <div class="form-row">
@@ -1260,15 +1337,6 @@
             <p class="text-muted">Fills in conservative starting feeds/speeds for this material below - still yours to tune.</p>
           </div>
           <div class="form-group">
-            <label class="form-label" for="job-tool">Tool</label>
-            <select id="job-tool" class="form-select" bind:value={selectedToolId}>
-              <option value="">Unspecified</option>
-              {#each tools.filter((t) => t.enabled) as t}
-                <option value={t.id}>{t.name}</option>
-              {/each}
-            </select>
-          </div>
-          <div class="form-group">
             <label class="form-label" for="job-machine">Machine Profile</label>
             <select id="job-machine" class="form-select" bind:value={selectedMachineId} on:change={() => applyMachineDefaults(selectedMachineId)}>
               <option value="">Unspecified</option>
@@ -1276,7 +1344,26 @@
                 <option value={mc.id}>{mc.name}</option>
               {/each}
             </select>
-            <p class="cam-form-hint">Loads that machine's saved defaults below.</p>
+            <p class="cam-form-hint">Loads the machine defaults and its installed tools.</p>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="job-tool">Tool / End Mill</label>
+            <div class="input-group tool-picker-row">
+              <select id="job-tool" class="form-select" value={selectedToolId} on:change={(event) => selectNewJobTool(event.currentTarget.value)} disabled={!!selectedMachineId && selectedMachineTools.length === 0}>
+                <option value="">Unspecified</option>
+                {#each selectedMachineTools as t}
+                  <option value={t.id}>{t.name}{t.diameter ? ` (${t.diameter}\" dia)` : ''}</option>
+                {/each}
+              </select>
+              {#if selectedMachineId}
+                <button type="button" class="btn btn-secondary btn-sm btn-nowrap" on:click={() => openToolsModal(selectedMachineId)} title="Create an end mill for this machine"><Plus size={15} /> Add tool</button>
+              {/if}
+            </div>
+            {#if selectedMachineId && selectedMachineTools.length === 0}
+              <p class="cam-form-hint">No tools are installed on this machine yet. Add the first one here.</p>
+            {:else if selectedMachineId}
+              <p class="cam-form-hint">Only tools installed on this machine are available.</p>
+            {/if}
           </div>
         </div>
 
@@ -1373,7 +1460,7 @@
           <CamParamFields operation="tubestock" bind:params={editParams} mode="job" />
         {:else}
           <CamParamFields operation="routing" bind:params={editParams} mode="job" />
-          <RoutingToolSequence {tools} bind:sequence={editParams.toolSequence} />
+          <RoutingToolSequence tools={editMachineTools} bind:sequence={editParams.toolSequence} />
         {/if}
 
         <div class="form-row">
@@ -1387,20 +1474,20 @@
             </select>
           </div>
           <div class="form-group">
-            <label class="form-label" for="edit-job-tool">Tool</label>
-            <select id="edit-job-tool" class="form-select" bind:value={editToolId}>
+            <label class="form-label" for="edit-job-machine">Machine Profile</label>
+            <select id="edit-job-machine" class="form-select" value={editMachineId} on:change={(event) => selectEditMachine(event.currentTarget.value)}>
               <option value="">Unspecified</option>
-              {#each tools.filter((t) => t.enabled) as t}
-                <option value={t.id}>{t.name}</option>
+              {#each machines.filter((mc) => mc.enabled && mc.operation_type === editingJob.operation_type) as mc}
+                <option value={mc.id}>{mc.name}</option>
               {/each}
             </select>
           </div>
           <div class="form-group">
-            <label class="form-label" for="edit-job-machine">Machine Profile</label>
-            <select id="edit-job-machine" class="form-select" bind:value={editMachineId}>
+            <label class="form-label" for="edit-job-tool">Tool / End Mill</label>
+            <select id="edit-job-tool" class="form-select" value={editToolId} on:change={(event) => selectEditJobTool(event.currentTarget.value)} disabled={!!editMachineId && editMachineTools.length === 0}>
               <option value="">Unspecified</option>
-              {#each machines.filter((mc) => mc.enabled && mc.operation_type === editingJob.operation_type) as mc}
-                <option value={mc.id}>{mc.name}</option>
+              {#each editMachineTools as t}
+                <option value={t.id}>{t.name}{t.diameter ? ` (${t.diameter}\" dia)` : ''}</option>
               {/each}
             </select>
           </div>
@@ -1589,6 +1676,19 @@
           {/if}
         </div>
 
+        <fieldset class="form-group machine-tools-fieldset">
+          <legend class="form-label">Installed Tools</legend>
+          <div class="machine-tool-options">
+            {#each tools.filter((tool) => tool.enabled) as tool}
+              <label class="machine-tool-option">
+                <input type="checkbox" bind:group={machineForm.tool_ids} value={tool.id} />
+                <span>{tool.name}{tool.diameter ? ` (${tool.diameter}\" dia)` : ''}</span>
+              </label>
+            {/each}
+          </div>
+          <p class="cam-form-hint">Only these tools appear after this machine is selected for an AutoCAM job. The default tool is always included when saved.</p>
+        </fieldset>
+
         <div class="form-row">
           <div class="form-group">
             <label class="form-label" for="mp-drive-folder">Drive Auto-Trigger Folder ID (input) <span class="text-muted">(optional)</span></label>
@@ -1730,6 +1830,33 @@
   }
 
   .tools-modal { width: min(800px, 95vw); max-width: 95vw; }
+  .tool-picker-row { margin-top: 0; }
+  .tool-picker-row .form-select { flex: 1 1 180px; min-width: 0; }
+  .machine-tools-fieldset {
+    min-width: 0;
+    margin: 0 0 1rem;
+    padding: 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 4px);
+  }
+  .machine-tools-fieldset .form-label { padding: 0 0.3rem; }
+  .machine-tool-options {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
+    gap: 0.45rem;
+  }
+  .machine-tool-option {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    min-width: 0;
+    padding: 0.45rem 0.55rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 4px);
+    background: var(--surface-1, var(--primary));
+    font-size: var(--font-sm, 0.9rem);
+  }
+  .machine-tool-option span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   .name-line {
     display: flex;
