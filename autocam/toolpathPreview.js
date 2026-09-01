@@ -677,6 +677,87 @@ export function buildRoutingHeightmap(moves, {
 }
 
 /**
+ * One edge-preserving smoothing pass for the *rendered* routing surface.
+ *
+ * The heightmap remains the exact per-column material-removal state used by
+ * gouge detection. Rendering it with averaged vertex normals, though, makes
+ * tiny grid quantization differences read as faceted ridges. Averaging only
+ * neighbours that are already nearly coplanar removes that visual noise
+ * without blending across a real pocket/profile depth change; those changes
+ * are reconstructed as vertical walls by the simulator.
+ */
+export function smoothRoutingHeightmap(heights, {
+  nx,
+  ny,
+  epsilon = 0.001
+} = {}) {
+  const smoothed = new Float32Array(heights);
+  if (!heights || nx < 2 || ny < 2) return smoothed;
+
+  for (let iy = 0; iy < ny; iy += 1) {
+    for (let ix = 0; ix < nx; ix += 1) {
+      const index = iy * nx + ix;
+      const center = heights[index];
+      let sum = center;
+      let count = 1;
+      let neighbour;
+      if (ix > 0) {
+        neighbour = heights[index - 1];
+        if (Math.abs(neighbour - center) <= epsilon) { sum += neighbour; count += 1; }
+      }
+      if (ix + 1 < nx) {
+        neighbour = heights[index + 1];
+        if (Math.abs(neighbour - center) <= epsilon) { sum += neighbour; count += 1; }
+      }
+      if (iy > 0) {
+        neighbour = heights[index - nx];
+        if (Math.abs(neighbour - center) <= epsilon) { sum += neighbour; count += 1; }
+      }
+      if (iy + 1 < ny) {
+        neighbour = heights[index + nx];
+        if (Math.abs(neighbour - center) <= epsilon) { sum += neighbour; count += 1; }
+      }
+      smoothed[index] = sum / count;
+    }
+  }
+  return smoothed;
+}
+
+/**
+ * Find the internal boundaries between two routing heightmap columns whose
+ * heights differ enough to be a machined wall rather than render noise.
+ * `axis: 'x'` is a wall on the boundary between adjacent X columns; `axis:
+ * 'y'` is the corresponding boundary between Y rows. Consumers can turn
+ * these compact records into vertical quads without changing the heightmap
+ * contract used by routing gouge detection.
+ */
+export function findRoutingHeightmapWalls(heights, {
+  nx,
+  ny,
+  epsilon = 0.001
+} = {}) {
+  const walls = [];
+  if (!heights || nx < 2 || ny < 2) return walls;
+  const at = (ix, iy) => heights[iy * nx + ix];
+
+  for (let iy = 0; iy < ny; iy += 1) {
+    for (let ix = 0; ix < nx - 1; ix += 1) {
+      const a = at(ix, iy);
+      const b = at(ix + 1, iy);
+      if (Math.abs(a - b) > epsilon) walls.push({ axis: 'x', ix, iy, a, b });
+    }
+  }
+  for (let iy = 0; iy < ny - 1; iy += 1) {
+    for (let ix = 0; ix < nx; ix += 1) {
+      const a = at(ix, iy);
+      const b = at(ix, iy + 1);
+      if (Math.abs(a - b) > epsilon) walls.push({ axis: 'y', ix, iy, a, b });
+    }
+  }
+  return walls;
+}
+
+/**
  * Tube stock (rotary 4th-axis drilling - see tubestock.js) geometry model.
  *
  * The real machine's rotary axis (A) physically spins the tube to present

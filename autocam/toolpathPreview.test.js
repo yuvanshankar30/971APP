@@ -13,6 +13,8 @@ import {
   turningProfileToLathePoints,
   buildTurningStockRings,
   buildRoutingHeightmap,
+  smoothRoutingHeightmap,
+  findRoutingHeightmapWalls,
   tubeLocalPoint,
   tubeWallNormal,
   projectTubestockToolpath,
@@ -561,6 +563,34 @@ describe('buildRoutingHeightmap', () => {
       uptoMoveIndex: moves.length
     });
     expect(Math.min(...heights)).toBeCloseTo(-0.2, 2);
+  });
+
+  it('keeps a pocket depth discontinuity sharp while smoothing only near-coplanar render noise', () => {
+    const raw = new Float32Array([
+      0, -0.0004, -0.2,
+      0, 0.0004, -0.2,
+      0, 0, -0.2
+    ]);
+    const smoothed = smoothRoutingHeightmap(raw, { nx: 3, ny: 3, epsilon: 0.001 });
+    expect(Math.abs(smoothed[0])).toBeLessThan(0.001);
+    expect(Math.abs(smoothed[1])).toBeLessThan(0.001);
+    // The pocket floor must not get blended toward uncut stock.
+    expect(smoothed[2]).toBeCloseTo(-0.2, 5);
+    expect(smoothed[5]).toBeCloseTo(-0.2, 5);
+  });
+
+  it('finds every internal edge of a rectangular pocket as a wall, without flagging coplanar cells', () => {
+    const heights = new Float32Array([
+      0, 0, 0, 0,
+      0, -0.25, -0.25, 0,
+      0, -0.25, -0.25, 0,
+      0, 0, 0, 0
+    ]);
+    const walls = findRoutingHeightmapWalls(heights, { nx: 4, ny: 4, epsilon: 0.001 });
+    expect(walls).toHaveLength(8);
+    expect(walls.every((wall) => Math.abs(wall.a - wall.b) > 0.001)).toBe(true);
+    expect(walls.filter((wall) => wall.axis === 'x')).toHaveLength(4);
+    expect(walls.filter((wall) => wall.axis === 'y')).toHaveLength(4);
   });
 });
 
