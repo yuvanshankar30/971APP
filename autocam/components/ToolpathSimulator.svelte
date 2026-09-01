@@ -127,7 +127,7 @@
   $: activeSequenceDiameter = Number(toolSequence?.[activeToolIndex]?.toolDiameter) || null;
   $: singleToolDiameter = Number(toolDiameter) || null;
   $: cutterDiameter = activeSequenceDiameter || singleToolDiameter || Number(cutterDiameterInput) || null;
-  $: speedProgress = Math.max(0, Math.min(100, ((Number(playbackSpeed) - 0.25) / 3.75) * 100));
+  $: speedProgress = Math.max(0, Math.min(100, ((Number(playbackSpeed) - 0.25) / 9.75) * 100));
   $: canAnimate = isTurning || isTubestock || !!cutterDiameter;
   $: moveCounts = KINDS.reduce((counts, kind) => {
     counts[kind] = moves.filter((move) => move.kind === kind).length;
@@ -1049,7 +1049,7 @@
       </label>
       <label class="speed-control">
         <span>Simulation speed</span>
-        <input class="speed-slider" type="range" min="0.25" max="4" step="0.25" value={playbackSpeed} style={`--speed-progress: ${speedProgress}%`} on:input={(event) => (playbackSpeed = Number(event.currentTarget.value))} disabled={!moves.length} />
+        <input class="speed-slider" type="range" min="0.25" max="10" step="0.25" value={playbackSpeed} style={`--speed-progress: ${speedProgress}%`} on:input={(event) => (playbackSpeed = Number(event.currentTarget.value))} disabled={!moves.length} />
         <output>{speedLabel(playbackSpeed)}</output>
       </label>
     </div>
