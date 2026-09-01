@@ -1,5 +1,6 @@
 <script>
   import { requestConfirmation } from '$lib/confirmation.js';
+  import { page } from '$app/stores';
   import { onMount } from 'svelte';
   import { supabase } from '$lib/supabase.js';
   import { userStore, loadUserFromUUID } from '$lib/stores/user.js';
@@ -243,6 +244,9 @@
       requesterById = new Map((profiles || []).map((p) => [p.id, p]));
     }
     jobs = (data || []).map((j) => ({ ...j, requester: j.requested_by ? requesterById.get(j.requested_by) || null : null }));
+    const requestedJobId = $page.url.searchParams.get('job');
+    const requestedJob = requestedJobId && jobs.find((job) => String(job.id) === requestedJobId);
+    if (requestedJob && !showJobDetailModal) openJobDetail(requestedJob);
   }
 
   async function loadReferenceData() {
