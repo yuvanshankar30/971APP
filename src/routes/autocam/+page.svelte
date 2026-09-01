@@ -415,7 +415,7 @@
   // {toolId, toolNumber, label, noseRadius} object, and drilling (turning
   // centerline drilling) is one {toolNumber, label, diameter, depth,
   // peckDepth, feedRate, rpm} object - all three must pass through untouched.
-  const NON_NUMERIC_PARAM_KEYS = new Set(['toolSequence', 'setupMode', 'finishTool', 'automaticToolChanger', 'stockShape', 'drilling']);
+  const NON_NUMERIC_PARAM_KEYS = new Set(['toolSequence', 'setupMode', 'finishTool', 'automaticToolChanger', 'stockShape', 'drilling', 'stockCatalogId']);
 
   function serializeParams(raw) {
     const params = {};
