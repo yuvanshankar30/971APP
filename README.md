@@ -72,6 +72,8 @@ browser confirmation or prompt popups.
   team-view, and scouting-admin tooling with drag-and-drop team-to-scout
   assignment drafting and explicit publishing, plus form/config editing -
   integrates with The Blue Alliance API for competition data.
+  The signed-in home dashboard is a scouting workspace with assignment,
+  field-scouting, and event-analysis shortcuts rather than CAD/build links.
 - **Vision Scouting**: a real Competition-folder nav tab, open to every
   approved user like the rest of Competition (no special permission needed),
   running post-match, multi-camera ML processing at `/scouting/vision` for
