@@ -14,6 +14,10 @@
   let quantity = 1;
   let stockAssignment = '';
   let customStock = '';
+  let savedStockOptions = [];
+  let newStockDescription = '';
+  let isAddingStock = false;
+  let stockOptionError = '';
   let uploadedFile = null;
   let uploadedStepFile = null;
   let camJobName = ''; // optional AutoCAM job name for router/lathe
@@ -41,6 +45,20 @@
     }
   }
 
+  async function loadSavedStockOptions() {
+    const { data, error } = await supabase
+      .from('manufacturing_stock_options')
+      .select('id, workflow, description')
+      .order('description');
+    if (error) {
+      // Keep the bundled catalog usable before the migration reaches an
+      // environment or during a temporary database failure.
+      console.warn('Could not load shared stock options:', error.message);
+      return;
+    }
+    savedStockOptions = data || [];
+  }
+
   onMount(() => {
     const unsubscribe = userStore.subscribe((value) => {
       user = value;
@@ -48,6 +66,7 @@
         requesterName = value.full_name;
       }
     });
+    loadSavedStockOptions();
     loadUserFromUUID(supabase);
     return () => unsubscribe();
   });
@@ -90,7 +109,48 @@
   $: selectedWorkflow = workflows.find(w => w.id === workflow);
   $: requiredFileType = selectedWorkflow?.fileType || '';
   import stockData from '$lib/stock.json';
-  $: stockOptions = workflow ? (stockData[workflow] || []) : [];
+  $: stockOptions = workflow
+    ? [
+        ...(stockData[workflow] || []),
+        ...savedStockOptions
+          .filter((option) => option.workflow === workflow)
+          .map((option) => ({ ...option, dimensions: 'Custom' }))
+      ]
+    : [];
+
+  async function addStockOption() {
+    const description = newStockDescription.trim();
+    stockOptionError = '';
+    if (!workflow || !description) {
+      stockOptionError = 'Enter a stock name.';
+      return;
+    }
+    if (stockOptions.some((option) => option.description.toLowerCase() === description.toLowerCase())) {
+      stockOptionError = 'That stock option already exists for this process.';
+      return;
+    }
+    if (!user?.id) {
+      stockOptionError = 'You must be signed in to add a shared stock option.';
+      return;
+    }
+
+    isAddingStock = true;
+    const { data, error } = await supabase
+      .from('manufacturing_stock_options')
+      .insert({ workflow, description, created_by: user.id })
+      .select('id, workflow, description')
+      .single();
+    isAddingStock = false;
+    if (error) {
+      stockOptionError = error.code === '23505'
+        ? 'That stock option already exists for this process.'
+        : error.message;
+      return;
+    }
+    savedStockOptions = [...savedStockOptions, data];
+    stockAssignment = data.description;
+    newStockDescription = '';
+  }
 
   // No material field: parts list only tracks stock_assignment.
 
@@ -194,7 +254,7 @@
   function sanitizeName(n) { return (n || 'part').replace(/[^a-zA-Z0-9]/g, '_'); }
 
   async function handleSubmitGeneric() {
-    const effectiveStock = stockAssignment === '__other__' ? customStock.trim() : stockAssignment;
+    const effectiveStock = stockAssignment === '__other__' ? customStock.trim() : (stockAssignment === '__add__' ? '' : stockAssignment);
     if (!partName || !requesterName || !workflow || !uploadedFile || !quantity || quantity < 1 || !effectiveStock) {
       alert('Please fill in all fields, select a stock, upload a file, and specify a valid quantity.');
       return;
@@ -254,7 +314,7 @@
   }
 
   async function handleSubmitRouter() {
-    const effectiveStock = stockAssignment === '__other__' ? customStock.trim() : stockAssignment;
+    const effectiveStock = stockAssignment === '__other__' ? customStock.trim() : (stockAssignment === '__add__' ? '' : stockAssignment);
     if (!partName || !requesterName || !workflow || !quantity || quantity < 1 || !effectiveStock) {
       alert('Please fill in all fields and specify a valid quantity.');
       return;
@@ -329,7 +389,7 @@
   }
 
   async function handleSubmitLathe() {
-    const effectiveStock = stockAssignment === '__other__' ? customStock.trim() : stockAssignment;
+    const effectiveStock = stockAssignment === '__other__' ? customStock.trim() : (stockAssignment === '__add__' ? '' : stockAssignment);
     if (!partName || !requesterName || !workflow || !quantity || quantity < 1 || !effectiveStock) {
       alert('Please fill in all fields and specify a valid quantity.');
       return;
@@ -499,7 +559,7 @@
                 type="radio" 
                 bind:group={workflow} 
                 value={workflowOption.id}
-                on:change={() => { stockAssignment = ''; customStock = ''; uploadedFile = null; uploadedStepFile = null; camJobName = ''; }}
+                on:change={() => { stockAssignment = ''; customStock = ''; newStockDescription = ''; stockOptionError = ''; uploadedFile = null; uploadedStepFile = null; camJobName = ''; }}
               />
               <div class="workflow-content">
                 <svelte:component this={workflowOption.icon} size={24} />
@@ -522,9 +582,21 @@
               {#each stockOptions as s}
                 <option value={s.description}>{s.description}</option>
               {/each}
+              <option value="__add__">Add stock option...</option>
               <option value="__other__">Other...</option>
             </select>
           </div>
+          {#if stockAssignment === '__add__'}
+            <div class="form-group">
+              <label for="newStockDescription">New reusable stock option</label>
+              <div class="stock-option-add-row">
+                <input id="newStockDescription" type="text" maxlength="120" bind:value={newStockDescription} placeholder={'e.g. 1/8" SRPP Sheet'} on:input={() => (stockOptionError = '')} />
+                <button type="button" class="btn btn-secondary" on:click={addStockOption} disabled={isAddingStock || !newStockDescription.trim()}>{isAddingStock ? 'Adding...' : 'Add stock'}</button>
+              </div>
+              <p class="form-hint">Saved for everyone using this manufacturing process.</p>
+              {#if stockOptionError}<p class="form-error" role="alert">{stockOptionError}</p>{/if}
+            </div>
+          {/if}
           {#if stockAssignment === '__other__'}
             <div class="form-group">
               <label for="customStock">Custom Stock</label>
@@ -734,6 +806,11 @@
   .optional-label { font-weight: 400; color: var(--text-muted); }
   .form-group input, .form-group select { width: 100%; border: 1px solid var(--border); }
   .form-group input:focus, .form-group select:focus { outline: none; border-color: var(--accent); }
+  .stock-option-add-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.6rem; align-items: center; }
+  .stock-option-add-row input { min-width: 0; }
+  .stock-option-add-row button { white-space: nowrap; }
+  .form-hint { margin: 0.45rem 0 0; color: var(--text-muted); font-size: 0.85rem; }
+  .form-error { margin: 0.45rem 0 0; color: var(--danger, #b42318); font-size: 0.85rem; }
   .workflow-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem; }
   .workflow-card { display: block; padding: 1rem; border: 1px solid var(--border); border-radius: 4px; cursor: pointer; position: relative; background: var(--primary); }
   .workflow-card input { position: absolute; opacity: 0; pointer-events: none; }
@@ -767,5 +844,8 @@
   .submit-btn:hover:not(:disabled) { opacity: 0.9; }
   .submit-btn:active:not(:disabled) { transform: scale(0.99); }
   .submit-btn:disabled { background: var(--neutral-300); cursor: not-allowed; }
-  @media (max-width: 640px) { .workflow-grid { grid-template-columns: 1fr; } }
+  @media (max-width: 640px) {
+    .workflow-grid { grid-template-columns: 1fr; }
+    .stock-option-add-row { grid-template-columns: 1fr; }
+  }
 </style>
