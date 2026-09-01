@@ -5,6 +5,7 @@
   import { getAuthHeader } from '$lib/supabase.js';
   import { FRC_TEAMS } from '$lib/permissions.js';
   import ScoutAssignmentPanel from '$lib/components/ScoutAssignmentPanel.svelte';
+  import PitAssignmentPanel from '$lib/components/PitAssignmentPanel.svelte';
   import { fetchAvailableScoutingEvents } from '$lib/scoutingEvent.js';
   import SeasonFilter from '$lib/components/SeasonFilter.svelte';
 
@@ -604,6 +605,7 @@
       <ScoutAssignmentPanel scoutingType="data" />
       <ScoutAssignmentPanel scoutingType="note" />
       <ScoutAssignmentPanel scoutingType="quick" />
+      <PitAssignmentPanel />
     </div>
 
     <details class="role-accordion">
