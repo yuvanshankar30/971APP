@@ -35,6 +35,8 @@
   let lastUserId = null;
   let draggingTeamKey = '';
   let dropTargetUserId = '';
+  let dragClientX = 0;
+  let dragClientY = 0;
   let scoutFilter = '';
 
   async function authFetch(url, options = {}) {
@@ -91,7 +93,7 @@
     };
     stageAssignments(
       nextAssignments,
-      'Assignment drafts are staged locally. Publish assignments to send notifications.'
+      'Assignment drafts are staged locally. Publish when the assignments are ready.'
     );
   }
 
@@ -113,7 +115,7 @@
     if (matchCount) {
       stageAssignments(
         nextAssignments,
-        `Team ${displayTeam(teamKey)} is staged for ${findUserName(userId) || 'that scout'} across ${matchCount} match${matchCount === 1 ? '' : 'es'}. Publish assignments to notify scouts.`
+        `Team ${displayTeam(teamKey)} is staged for ${findUserName(userId) || 'that scout'} across ${matchCount} match${matchCount === 1 ? '' : 'es'}. Publish when the assignments are ready.`
       );
     }
   }
@@ -123,9 +125,19 @@
       event.preventDefault();
       return;
     }
+    event.preventDefault();
     draggingTeamKey = teamKey;
-    event.dataTransfer.effectAllowed = 'move';
-    event.dataTransfer.setData('text/plain', teamKey);
+    dragClientX = event.clientX;
+    dragClientY = event.clientY;
+  }
+
+  function updateTeamDrag(event) {
+    if (!draggingTeamKey) return;
+    dragClientX = event.clientX;
+    dragClientY = event.clientY;
+    const hovered = document.elementFromPoint(event.clientX, event.clientY);
+    const zone = hovered?.closest?.('[data-scout-drop-user]');
+    dropTargetUserId = zone?.dataset?.scoutDropUser || '';
   }
 
   function finishTeamDrag() {
@@ -133,10 +145,10 @@
     dropTargetUserId = '';
   }
 
-  function dropTeamOnScout(event, userId) {
-    event.preventDefault();
-    const teamKey = draggingTeamKey || event.dataTransfer.getData('text/plain');
-    stageRobotAssignment(teamKey, userId);
+  function finishPointerTeamDrag(event) {
+    if (!draggingTeamKey) return;
+    updateTeamDrag(event);
+    if (dropTargetUserId) stageRobotAssignment(draggingTeamKey, dropTargetUserId);
     finishTeamDrag();
   }
 
@@ -398,6 +410,8 @@
   });
 </script>
 
+<svelte:window on:pointermove={updateTeamDrag} on:pointerup={finishPointerTeamDrag} on:pointercancel={finishTeamDrag} />
+
 <details class="assignment-accordion" bind:open={panelOpen}>
   <summary class="summary-row">
     <div class="summary-title">
@@ -454,11 +468,10 @@
                 <button
                   class="team-chip"
                   class:assigned={!!teamOwner[teamKey]}
+                  class:dragging={draggingTeamKey === teamKey}
                   type="button"
-                  draggable="true"
                   title={teamOwner[teamKey] ? `Assigned to ${findUserName(teamOwner[teamKey]) || 'a scout'}; drag to reassign` : 'Drag to assign'}
-                  on:dragstart={(event) => startTeamDrag(event, teamKey)}
-                  on:dragend={finishTeamDrag}
+                  on:pointerdown={(event) => startTeamDrag(event, teamKey)}
                 >
                   #{displayTeam(teamKey)}
                 </button>
@@ -477,16 +490,13 @@
               class="scout-drop-zone"
               class:drop-target={dropTargetUserId === scout.id}
               role="group"
+              data-scout-drop-user={scout.id}
               aria-label={`Drop teams onto ${scout.full_name || scout.email}`}
-              on:dragenter={() => (dropTargetUserId = scout.id)}
-              on:dragleave={() => (dropTargetUserId = '')}
-              on:dragover|preventDefault
-              on:drop={(event) => dropTeamOnScout(event, scout.id)}
             >
               <div class="scout-drop-name">{scout.full_name || scout.email}</div>
               <div class="team-chip-list">
                 {#each scheduledTeamKeys.filter((teamKey) => teamOwner[teamKey] === scout.id) as teamKey}
-                  <button class="team-chip assigned" type="button" draggable="true" on:dragstart={(event) => startTeamDrag(event, teamKey)} on:dragend={finishTeamDrag}>
+                  <button class="team-chip assigned" class:dragging={draggingTeamKey === teamKey} type="button" on:pointerdown={(event) => startTeamDrag(event, teamKey)}>
                     {displayTeam(teamKey)}
                   </button>
                 {/each}
@@ -501,6 +511,10 @@
           {/if}
         </div>
       </section>
+    {/if}
+
+    {#if draggingTeamKey}
+      <div class="team-drag-ghost" style={`left:${dragClientX + 12}px;top:${dragClientY + 12}px`} aria-hidden="true">#{displayTeam(draggingTeamKey)}</div>
     {/if}
 
     <div class="scroll-x">
@@ -768,11 +782,28 @@
     font-size: var(--font-xs);
     font-weight: 700;
     cursor: grab;
+    touch-action: none;
   }
 
   .team-chip:active { cursor: grabbing; }
+  .team-chip.dragging { opacity: 0.4; }
   .team-chip.assigned { background: var(--accent-subtle, #fff4cf); }
   .assignment-empty { font-size: var(--font-xs); color: var(--text-muted); }
+  .team-drag-ghost {
+    position: fixed;
+    z-index: 1000;
+    min-width: 2.35rem;
+    min-height: 1.7rem;
+    padding: 0.1rem 0.35rem;
+    border: 1px solid var(--accent-strong, #b8860b);
+    border-radius: var(--radius-sm);
+    background: var(--accent-subtle, #fff4cf);
+    color: var(--text);
+    font-size: var(--font-xs);
+    font-weight: 700;
+    pointer-events: none;
+    box-shadow: var(--shadow-md);
+  }
 
   /* Assignment table */
   .scroll-x {
