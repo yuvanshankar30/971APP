@@ -177,6 +177,7 @@
     </div>
     <div class="cam-param-section">
       <h4>Feeds &amp; Speed</h4>
+      <p class="cam-form-hint">Dry router workflow: no coolant commands are emitted. Selecting a stock material applies its feed, plunge, and spindle starting values. Verify the cutter manufacturer's chart and machine setup before running a part.</p>
       <div class="form-row">
         <div class="form-group">
           <label class="form-label" for="cf-feed-rate">Feed rate (in/min)</label>

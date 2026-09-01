@@ -5,6 +5,14 @@ import { getSupabase } from '$lib/server/971bot.js';
 import { notifyScoutAssignment } from '$lib/server/slack_notifications.js';
 
 const SCOUTING_TYPES = new Set(['data', 'note', 'quick']);
+// Assignment publishing is ready to fan out to Slack, but DMs remain disabled
+// until scouting leadership approves the notification rollout.
+const SCOUT_ASSIGNMENT_SLACK_DMS_ENABLED = false;
+
+async function notifyPublishedScoutAssignment(assignment) {
+  if (!SCOUT_ASSIGNMENT_SLACK_DMS_ENABLED) return { ok: false, reason: 'disabled' };
+  return notifyScoutAssignment(assignment);
+}
 
 const getClientFromRequest = (request) => {
   const auth = request?.headers?.get('authorization') || '';
@@ -311,7 +319,7 @@ export async function POST({ request, url }) {
       if (error) return json({ error: error.message }, { status: 500 });
 
       if (upserted?.assigned_user && upserted.assigned_user !== existing?.assigned_user) {
-        await notifyScoutAssignment({
+        await notifyPublishedScoutAssignment({
           assignmentId: upserted.id,
           userId: upserted.assigned_user,
           matchKey: match_key,
@@ -353,7 +361,7 @@ export async function POST({ request, url }) {
 
         const prev = prevMap.get(`${row.match_key}:${team_key}`)?.assigned_user;
         if (upserted?.assigned_user && upserted.assigned_user !== prev) {
-          await notifyScoutAssignment({
+          await notifyPublishedScoutAssignment({
             assignmentId: upserted.id,
             userId: upserted.assigned_user,
             matchKey: row.match_key,
@@ -401,7 +409,7 @@ export async function POST({ request, url }) {
       for (const row of updatedRows || []) {
         const prev = prevMap.get(`${row.match_key}:${row.team_key}`)?.assigned_user;
         if (row.assigned_user && row.assigned_user !== prev) {
-          await notifyScoutAssignment({
+          await notifyPublishedScoutAssignment({
             assignmentId: row.id,
             userId: row.assigned_user,
             matchKey: row.match_key,

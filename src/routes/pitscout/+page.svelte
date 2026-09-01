@@ -15,6 +15,7 @@
   const MAX_AUTO_NAME_LENGTH = 60;
   const MAX_AUTO_DESCRIPTION_LENGTH = 220;
   const MAX_BREAKING_COMPONENT_LENGTH = 240;
+  const ESTIMATED_BPS_SLIDER_MAX = 5;
   const PIT_STATUS = Object.freeze({
     pending: { label: 'Pending', className: 'status-pending', sort: 0 },
     needs_photo: { label: 'Needs photo', className: 'status-needs-photo', sort: 1 },
@@ -225,7 +226,7 @@
 
   function topicProgress(topicId, details, core, climb, autos, photos, pending) {
     if (topicId === 'basics') {
-      const values = [core.scout_name, core.drivebase_type, core.shooter_type, core.hopper_type, core.human_player_balls_in_auto, climb, autos];
+      const values = [core.scout_name, core.drivebase_type, core.shooter_type, core.hopper_type, climb, autos];
       return { done: values.filter(answered).length, total: values.length };
     }
     if (topicId === 'photos') {
@@ -242,7 +243,7 @@
 
   $: coreAnswers = {
     scout_name,
-    drivebase_type, shooter_type, hopper_type, human_player_balls_in_auto,
+    drivebase_type, shooter_type, hopper_type,
     estimated_bps, likely_breaking_component
   };
   $: topicStates = TOPICS.map((topic) => ({
@@ -365,6 +366,18 @@
 
   function hasEstimatedBps(value) {
     return value !== '' && value !== null && value !== undefined && Number.isFinite(Number(value));
+  }
+
+  // Drives the slider's thumb from whatever is currently in estimated_bps -
+  // clamped into the slider's own range so a value a scout typed above the
+  // slider's max (there is no server-side ceiling, only min 0) still shows
+  // the thumb pinned at the end rather than off the track.
+  function estimatedBpsSliderValue(value) {
+    return hasEstimatedBps(value) ? Math.max(0, Math.min(ESTIMATED_BPS_SLIDER_MAX, Number(value))) : 0;
+  }
+
+  function setEstimatedBpsFromSlider(rawValue) {
+    estimated_bps = Math.round(Number(rawValue) * 100) / 100;
   }
 
   function displayTeam(teamKey) {
@@ -1169,15 +1182,6 @@
       </select>
     </div>
 
-    <div class="form-group">
-      <label class="form-label" for="humanPlayerBallsSelect">Human Player Balls In Auto</label>
-      <select id="humanPlayerBallsSelect" class="form-select" bind:value={human_player_balls_in_auto}>
-        <option value="">-- Select --</option>
-        {#each HUMAN_PLAYER_AUTO_OPTIONS as option}
-          <option value={option}>{option}</option>
-        {/each}
-      </select>
-    </div>
 {/if}
 
     {#if pitSchema.robot_archetype}
@@ -1613,6 +1617,18 @@
           bind:value={estimated_bps}
           placeholder="e.g. 2.4"
         />
+        <div class="estimated-bps-slider">
+          <input
+            type="range"
+            min="0"
+            max={ESTIMATED_BPS_SLIDER_MAX}
+            step="0.1"
+            value={estimatedBpsSliderValue(estimated_bps)}
+            aria-label="Estimated BPS"
+            on:input={(event) => setEstimatedBpsFromSlider(event.currentTarget.value)}
+          />
+          <output>{hasEstimatedBps(estimated_bps) ? Number(estimated_bps).toFixed(1) : '0.0'}</output>
+        </div>
       </div>
     {/if}
 
@@ -2187,6 +2203,25 @@
   .break-risk-input {
     min-height: 88px;
     resize: vertical;
+  }
+
+  .estimated-bps-slider {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: var(--gap-3, 0.75rem);
+    margin-top: 0.4rem;
+  }
+  .estimated-bps-slider input[type='range'] {
+    width: 100%;
+    accent-color: var(--brand-gold, #f1c331);
+  }
+  .estimated-bps-slider output {
+    min-width: 2.6rem;
+    text-align: right;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
   }
 
   .climb-options-grid {

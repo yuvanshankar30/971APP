@@ -2085,9 +2085,9 @@
           <th class:hidden={assignMode}>Qty</th>
           <th class:hidden={assignMode}>Stock</th>
           <th class="source-col" class:hidden={assignMode}>Source</th>
-          <th>Status</th>
-          <th class:hidden={assignMode}>Due</th>
-          <th class:hidden={assignMode}>Created</th>
+          <th class="metadata-col">Status</th>
+          <th class="metadata-col" class:hidden={assignMode}>Due</th>
+          <th class="metadata-col" class:hidden={assignMode}>Created</th>
           <th class:hidden={assignMode}>Actions</th>
         </tr>
       </thead>
@@ -2215,23 +2215,29 @@
                 <span class="text-muted">-</span>
               {/if}
             </td>
-            <td>
-              <span class="status-badge {getBadgeClass(part.status, getRouterMeta(part))} status-table status-fade">{getStatusDisplay(part)}</span>
-              {#if part.workflow === 'router' && getRouterProgressSummary(part)}
-                <div class="router-progress-note">{getRouterProgressSummary(part)}</div>
-              {/if}
+            <td class="metadata-col">
+              <div class="metadata-value">
+                <span class="status-badge {getBadgeClass(part.status, getRouterMeta(part))} status-table status-fade">{getStatusDisplay(part)}</span>
+                {#if part.workflow === 'router' && getRouterProgressSummary(part)}
+                  <div class="router-progress-note">{getRouterProgressSummary(part)}</div>
+                {/if}
+              </div>
             </td>
             <!-- svelte-ignore a11y_no_static_element_interactions -->
-            <td class:hidden={assignMode} on:click|stopPropagation on:keydown|stopPropagation>
-              <PartDueDate {part} on:update={() => loadParts()} />
+            <td class="metadata-col" class:hidden={assignMode} on:click|stopPropagation on:keydown|stopPropagation>
+              <div class="metadata-value">
+                <PartDueDate {part} on:update={() => loadParts()} />
+              </div>
             </td>
-            <td class:hidden={assignMode}>
-              {formatDate(part.created_at)}
-              {#if getSeasonBucket(part.created_at)}
-                <span class="tag season-tag {getSeasonBucket(part.created_at).isOffseason ? 'tag-offseason' : 'tag-season'}">
-                  {getSeasonBucket(part.created_at).label}
-                </span>
-              {/if}
+            <td class="metadata-col" class:hidden={assignMode}>
+              <div class="metadata-value metadata-created">
+                <span>{formatDate(part.created_at)}</span>
+                {#if getSeasonBucket(part.created_at)}
+                  <span class="tag season-tag {getSeasonBucket(part.created_at).isOffseason ? 'tag-offseason' : 'tag-season'}">
+                    {getSeasonBucket(part.created_at).label}
+                  </span>
+                {/if}
+              </div>
             </td>
             <td class:hidden={assignMode}>
               <div class="row-actions">
@@ -2860,6 +2866,27 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  .table th.metadata-col,
+  .table td.metadata-col {
+    width: 12rem;
+    min-width: 12rem;
+    max-width: 12rem;
+    vertical-align: middle;
+  }
+  .metadata-value {
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    min-height: 2.75rem;
+    width: 100%;
+  }
+  .metadata-created {
+    flex-wrap: wrap;
+    align-content: center;
+    gap: 0.3rem 0.45rem;
+  }
+  .metadata-col :global(.due-date) { width: 100%; }
+  .metadata-col :global(.due-input) { box-sizing: border-box; width: 100%; }
 
   .name-line {
     display: inline-flex;

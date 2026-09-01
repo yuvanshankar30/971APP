@@ -4,18 +4,22 @@ Live checklist. The *why* behind each decision lives in
 [`toolpath-simulation-plan.md`](toolpath-simulation-plan.md); this file is the
 running state of the work.
 
-**Scope:** the shared path renderer and playback controls support routing and
-turning. Routing's material-removal is a heightmap (2.5D - exact for a flat
-end mill on flat stock); turning's is a 1D radius-per-axial-position profile
-revolved into a solid (exact for a solid of revolution) - see each function's
-own doc comment in `toolpathPreview.js`.
+**Scope:** the shared path renderer and playback controls support routing,
+turning, and tube stock. Routing's material-removal is a heightmap (2.5D -
+exact for a flat end mill on flat stock); turning's is a 1D
+radius-per-axial-position profile revolved into a solid (exact for a solid
+of revolution); tube stock's is a static box in the tube's own local frame
+with real drilled-hole geometry cut into it as playback reaches each hole -
+see each function's own doc comment in `toolpathPreview.js`.
 
-**Status (2026-08-31):** Phases 0, 1, 3, 4, 5, and 6 complete, for both
-routing and turning. Phase 2 has move-class rendering and the Toolpath/Tool/
-Stock/Model visibility toggles; only per-tool colour mode remains open there.
-Phase 7 hasn't had a dedicated, recorded measurement pass, though the
-implementation already uses typed arrays throughout and disposes geometries/
-materials/the renderer on destroy.
+**Status (2026-08-31):** Phases 0, 1, 3, 4, 5, and 6 complete for routing and
+turning, plus a tube-stock 3D simulator (see its own section below - this
+was previously listed under "Explicitly not doing" but was built after all).
+Phase 2 has move-class rendering and the Toolpath/Tool/Stock/Model visibility
+toggles; only per-tool colour mode remains open there. Phase 7 hasn't had a
+dedicated, recorded measurement pass, though the implementation already uses
+typed arrays throughout and disposes geometries/materials/the renderer on
+destroy.
 
 **Phase 5 caught a real bug on first use.** The gouge check (comparing the
 live cut state against the STEP-derived target, independent ground truth the
@@ -154,8 +158,9 @@ comment.
 
 - [x] Mounted beside the existing 2D preview (`2D Preview` / `3D Toolpath`
       tabs) in `autocam/+page.svelte`
-- [x] Both routing and turning jobs get the 3D view now (tube-stock jobs
-      keep the 2D-only viewer - see "Explicitly not doing")
+- [x] Routing and turning jobs get the tabbed 2D/3D view; tube-stock jobs
+      (no real 2D representation of a rotary-axis program) go straight to
+      3D - see the tube-stock simulator section below
 - [x] Responsive layout (`.simulator-controls` wraps, mobile breakpoints in
       `ToolpathSimulator.svelte`'s own `<style>`)
 
@@ -188,11 +193,48 @@ comment.
 - [x] Hex stock shape (across-flats sizing, across-corners clearance)
 - [x] Centerline drilling, rendered as a real bore once cut
 
+## Tube stock simulator ✅
+
+Unlike routing/turning, this doesn't animate the tube physically rotating on
+its rotary A axis - see `projectTubestockToolpath`'s own doc comment in
+`toolpathPreview.js` for why (same "static projection, not a literal
+animation" philosophy `projectTurningToolpath` already uses for the lathe's
+diameter-mode X).
+
+- [x] `parseToolpath3D` tracks the A-axis rotary index per move (routing/
+      turning G-code never commands A, so this is a no-op for them)
+- [x] `tubeLocalPoint` / `tubeWallNormal` / `projectTubestockToolpath` place
+      every move onto the tube's own static local 3D frame (X = length,
+      Y/Z = the two cross-section axes), using the exact same wall-angle
+      convention (0/90/180/270) as `extractTubeFeaturesFromMeshes` so the
+      toolpath and the hole geometry below can't disagree about which wall
+      is which
+- [x] `matchTubestockHolesToMoves` joins each real hole (from
+      `generateTubestockGcode`'s `stats.crossSection`/`stats.walls`, echoed
+      the same way routing.js echoes `stats.edgeShiftX`/`edgeShiftY`) to the
+      G-code move that drills it
+- [x] Stock renders as a real box with 4 drillable walls + end caps; each
+      hole is a real flat opening cut into the wall's surface plus a dark
+      bore cylinder, both growing in as playback scrubs past the hole's own
+      plunge move - not just a static "all holes always drilled" model
+- [x] Tool renders as a drill oriented into whichever wall the current move
+      is on (`tubeWallNormal`), not a fixed-orientation cylinder
+- [x] Verified against real generated G-code in `toolpathPreview.test.js`
+      (`tube-05x05-square.step`, ~376 real holes, 0 unmatched) and manually
+      in-browser, isolating the stock to confirm holes reveal progressively
+      rather than all appearing at once
+
+**Known gap:** no ghost-part overlay or gouge detection for tube stock (Phase
+5's equivalent) - `extractTurningProfileFromMeshes`/
+`extractRoutingContoursFromMeshes` don't understand rectangular-tube-with-
+holes geometry, and the sim is fully usable without it.
+
+---
+
 ## Explicitly not doing
 
 | | Why |
 |---|---|
-| Tube-stock simulation | Different rotary-axis machine model and tool orientation |
 | Holder & fixture collision | We model neither, so claiming Fusion's collision check would be false |
 | Machining-time estimate | Needs acceleration modelling; a naive distance÷feed number would be confidently wrong |
 | Ball-nose / V-bit profiles | Routing only generates flat end mill paths today |
@@ -213,6 +255,8 @@ comment.
 - **Lead-in/out colouring.** `routing.js` has a lead-in/out zone but doesn't
   mark it in the output, so those moves read as ordinary cuts. Worth emitting a
   marker for full Fusion colour parity — a generator change, not a viewer one.
-- **Phases 0-6 are all done now** (Phase 5 landed 2026-08-31). What's left:
-  per-tool colour mode (Phase 2) and a dedicated Phase 7 measurement/
-  performance pass - neither blocking, both quality-of-life.
+- **Phases 0-6 are all done now, plus the tube-stock simulator** (Phase 5
+  landed 2026-08-31; tube stock landed the same day). What's left: per-tool
+  colour mode (Phase 2), a dedicated Phase 7 measurement/performance pass,
+  and a ghost-part/gouge-check equivalent for tube stock - none blocking,
+  all quality-of-life.

@@ -99,7 +99,10 @@
     return { stockDiameter: '', stockShape: 'round', stepDown: 0.05, finishAllowance: 0.02, feedRough: 0.008, feedFinish: 0.004, surfaceSpeed: 150, maxRpm: 2500, setupMode: 'single', flipAt: '', finishTool: null, automaticToolChanger: false, drilling: null };
   }
   function emptyRoutingParams() {
-    return { toolDiameter: 0.25, stepDown: 0.1, targetDepth: '', tabWidth: 0.25, tabHeight: 0.06, tabSpacing: 6, feedRate: 40, plungeRate: 15, spindleSpeed: 16000, edgeMargin: 0.5, toolSequence: [] };
+    // Unspecified stock must not inherit the old wood-friendly 40/15/16k
+    // settings. Material presets replace these with their own published
+    // starting values as soon as a stock is selected.
+    return { toolDiameter: 0.25, stepDown: 0.03, targetDepth: '', tabWidth: 0.25, tabHeight: 0.06, tabSpacing: 6, feedRate: 25, plungeRate: 8, spindleSpeed: 14000, edgeMargin: 0.5, toolSequence: [] };
   }
   function emptyTubestockParams() {
     return { holeDepth: '', safeZ: 0.25, feedRate: 8, spindleSpeed: 8000 };
@@ -145,6 +148,7 @@
   let showJobCadModal = false;
   let showJobToolpathModal = false;
   let toolpathView = '3d';
+  let toolpathPreviewParams = null;
   let ToolpathSimulator = null;
   let toolpathSimulatorLoading = false;
   let showNcviewerModal = false;
@@ -495,8 +499,9 @@
     editingJob = job;
     showJobCadModal = true;
   }
-  async function openToolpathPreview(job) {
+  async function openToolpathPreview(job, previewParams = job.params) {
     editingJob = job;
+    toolpathPreviewParams = previewParams;
     // Tube stock moves in X/Y/Z plus a rotary A axis the 2D preview can't
     // represent at all - it only ever has a 3D view, so go straight there.
     toolpathView = ['routing', 'turning', 'tubestock'].includes(job.operation_type) ? '3d' : '2d';
@@ -518,8 +523,9 @@
       toolpathSimulatorLoading = false;
     }
   }
-  async function open3DToolpathPreview(job) {
+  async function open3DToolpathPreview(job, previewParams = job.params) {
     editingJob = job;
+    toolpathPreviewParams = previewParams;
     toolpathView = '3d';
     showJobToolpathModal = true;
     await loadToolpathSimulator();
@@ -1344,11 +1350,11 @@
           <button class="btn btn-secondary btn-sm" on:click={() => (showJobCadModal = true)} disabled={!editingJob.step_file_name}>
             <Box size={14} /> View CAD
           </button>
-          <button class="btn btn-secondary btn-sm" on:click={() => openToolpathPreview(editingJob)} disabled={editingJob.status !== 'completed' || !editingJob.gcode} title={editingJob.status !== 'completed' ? 'Only available once the job has completed' : ''}>
+          <button class="btn btn-secondary btn-sm" on:click={() => openToolpathPreview(editingJob, editParams)} disabled={editingJob.status !== 'completed' || !editingJob.gcode} title={editingJob.status !== 'completed' ? 'Only available once the job has completed' : ''}>
             <Route size={14} /> View {operationLabel(editingJob.operation_type)} Toolpath
           </button>
           {#if editingJob.operation_type === 'routing'}
-            <button class="btn btn-secondary btn-sm" on:click={() => open3DToolpathPreview(editingJob)} disabled={editingJob.status !== 'completed' || !editingJob.gcode}>
+            <button class="btn btn-secondary btn-sm" on:click={() => open3DToolpathPreview(editingJob, editParams)} disabled={editingJob.status !== 'completed' || !editingJob.gcode}>
               <Route size={14} /> 3D Toolpath
             </button>
           {/if}
@@ -1439,7 +1445,7 @@
         {#if editingJob.operation_type === 'routing' || editingJob.operation_type === 'turning'}
           <div class="toolpath-view-tabs" role="tablist" aria-label="Toolpath view">
             <button type="button" role="tab" aria-selected={toolpathView === '2d'} class:active={toolpathView === '2d'} on:click={() => (toolpathView = '2d')}>2D Preview</button>
-            <button type="button" role="tab" aria-selected={toolpathView === '3d'} class:active={toolpathView === '3d'} on:click={() => open3DToolpathPreview(editingJob)}>3D Toolpath</button>
+            <button type="button" role="tab" aria-selected={toolpathView === '3d'} class:active={toolpathView === '3d'} on:click={() => open3DToolpathPreview(editingJob, toolpathPreviewParams || editingJob.params)}>3D Toolpath</button>
           </div>
         {/if}
         {#if toolpathView === '3d' && (editingJob.operation_type === 'routing' || editingJob.operation_type === 'turning' || editingJob.operation_type === 'tubestock')}
@@ -1448,12 +1454,12 @@
               this={ToolpathSimulator}
               gcode={editingJob.gcode}
               operationType={editingJob.operation_type}
-              toolDiameter={Number(editingJob.params?.toolDiameter) || null}
-              toolSequence={editingJob.params?.toolSequence || []}
-              stockDiameter={Number(editingJob.params?.stockDiameter) || null}
-              stockShape={editingJob.params?.stockShape || 'round'}
-              noseRadius={Number(editingJob.params?.finishTool?.noseRadius ?? editingJob.params?.noseRadius) || null}
-              drillDiameter={Number(editingJob.params?.drilling?.diameter) || null}
+              toolDiameter={Number((toolpathPreviewParams || editingJob.params)?.toolDiameter) || null}
+              toolSequence={(toolpathPreviewParams || editingJob.params)?.toolSequence || []}
+              stockDiameter={Number((toolpathPreviewParams || editingJob.params)?.stockDiameter) || null}
+              stockShape={(toolpathPreviewParams || editingJob.params)?.stockShape || 'round'}
+              noseRadius={Number((toolpathPreviewParams || editingJob.params)?.finishTool?.noseRadius ?? (toolpathPreviewParams || editingJob.params)?.noseRadius) || null}
+              drillDiameter={Number((toolpathPreviewParams || editingJob.params)?.drilling?.diameter) || null}
               stepFileName={editingJob.step_file_name || null}
               edgeShiftX={Number(editingJob.stats?.edgeShiftX) || 0}
               edgeShiftY={Number(editingJob.stats?.edgeShiftY) || 0}

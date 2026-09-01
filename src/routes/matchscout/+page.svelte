@@ -23,7 +23,7 @@
     ['human player', 'Human player'],
     ['floor', 'Loose fuel / floor']
   ];
-  const AUTO_POINT_EXAMPLES = ['0', '20-40', '50-75', '100+'];
+  const AUTO_POINTS_SLIDER_MAX = 500;
 
   let phase = 'prematch';
   let matchNumber = '';
@@ -69,6 +69,15 @@
   $: autoPointsEstimate = parseAutoPointsEstimate(autoPoints);
   $: ballsEstimate = ballsScored ? parseAutoPointsEstimate(ballsScored) : null;
   $: autoPointsInvalid = Boolean(autoPoints.trim()) && !autoPointsEstimate;
+  // Drives the slider's thumb position from whatever is currently typed -
+  // an exact number sits at its own value, a range/lower-bound sits at its
+  // midpoint-or-min estimate, and an empty/unparseable field sits at 0.
+  $: autoPointsSliderValue = Math.max(0, Math.min(AUTO_POINTS_SLIDER_MAX, Math.round(autoPointsEstimate?.average ?? 0)));
+
+  function setAutoPointsFromSlider(rawValue) {
+    const value = Number(rawValue);
+    autoPoints = value >= AUTO_POINTS_SLIDER_MAX ? `${AUTO_POINTS_SLIDER_MAX}+` : String(value);
+  }
 
   function selectPhase(nextPhase) {
     phase = nextPhase;
@@ -417,7 +426,7 @@
             <div class="control-group"><span class="field-label">Did autonomous run?</span><div class="segmented"><button class:chosen={autoMoved === 'ran'} on:click={() => autoMoved = 'ran'}>Yes</button><button class:chosen={autoMoved === 'did-not-run'} on:click={() => autoMoved = 'did-not-run'}>No</button></div></div>
             <div class="control-group auto-points-control">
               <label for="auto-points-estimate" class="field-label">Estimated points scored</label>
-              <small class="field-help">Enter an exact estimate, a range such as 40-60, or a lower bound such as 100+. Optional.</small>
+              <small class="field-help">Drag to estimate, or type an exact number, a range such as 40-60, or a lower bound such as 100+. Optional.</small>
               <input
                 id="auto-points-estimate"
                 class="form-input auto-points-input"
@@ -426,10 +435,17 @@
                 placeholder="e.g. 40-60 or 100+"
                 bind:value={autoPoints}
               />
-              <div class="choice-grid point-examples" aria-label="Quick auto point estimates">
-                {#each AUTO_POINT_EXAMPLES as example}
-                  <button class:chosen={autoPoints === example} on:click={() => autoPoints = example}>{example}</button>
-                {/each}
+              <div class="auto-points-slider">
+                <input
+                  type="range"
+                  min="0"
+                  max={AUTO_POINTS_SLIDER_MAX}
+                  step="5"
+                  value={autoPointsSliderValue}
+                  aria-label="Estimated points scored"
+                  on:input={(event) => setAutoPointsFromSlider(event.currentTarget.value)}
+                />
+                <output for="auto-points-estimate">{autoPointsSliderValue >= AUTO_POINTS_SLIDER_MAX ? `${AUTO_POINTS_SLIDER_MAX}+` : autoPointsSliderValue}</output>
               </div>
               {#if autoPointsEstimate?.kind === 'range'}
                 <small class="estimate-result">Analytics estimate: <strong>{autoPointsEstimate.average} points</strong> (midpoint of {autoPointsEstimate.input}).</small>
@@ -609,7 +625,9 @@
   .auto-points-input { margin-top:var(--space-2); font-size:1.1rem; font-variant-numeric:tabular-nums; }
   .auto-points-input.invalid { border-color:var(--danger); }
   .balls-control { display:grid; gap:4px; margin-bottom:var(--space-4); max-width:22rem; }
-  .point-examples { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); }
+  .auto-points-slider { display:grid; grid-template-columns:1fr auto; align-items:center; gap:var(--gap-3); margin-top:var(--space-2); }
+  .auto-points-slider input[type="range"] { width:100%; accent-color:var(--brand-gold); }
+  .auto-points-slider output { min-width:3rem; text-align:right; color:var(--text); font-variant-numeric:tabular-nums; font-weight:600; }
   .estimate-result { color:var(--text-muted); }
   .estimate-result strong { color:var(--text); }
   .estimate-error { color:var(--danger); }
@@ -666,7 +684,7 @@
   }
   .submitted-state { min-height:32rem; display:grid; place-content:center; justify-items:center; gap:var(--space-3); text-align:center; } .submitted-state p { margin:0; color:var(--text-muted); } .submitted-icon { display:grid; place-items:center; width:3.5rem; height:3.5rem; background:var(--green-soft); color:var(--green-strong); border-radius:50%; }
   @media (max-width:850px) { .scouting-shell { grid-template-columns:1fr; } .stage-nav { position:static; grid-template-columns:repeat(4,1fr); } .stage-nav button { flex-direction:column; justify-content:center; text-align:center; padding:var(--space-2); } .assignment-grid,.post-grid,.auto-layout,.intake-observations { grid-template-columns:1fr; } .position-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
-  @media (max-width:560px) { .match-scouting-page { padding:var(--space-3); } .page-header { align-items:flex-start; } .assignment-chip { width:100%; justify-content:space-between; } .stage-nav { grid-template-columns:repeat(2,1fr); } .rating-row,.ratings-heading { align-items:flex-start; flex-direction:column; } .point-examples,.role-grid,.saved-path-controls { grid-template-columns:repeat(1,1fr); } .persistent-status { align-items:stretch; flex-direction:column; } }
+  @media (max-width:560px) { .match-scouting-page { padding:var(--space-3); } .page-header { align-items:flex-start; } .assignment-chip { width:100%; justify-content:space-between; } .stage-nav { grid-template-columns:repeat(2,1fr); } .rating-row,.ratings-heading { align-items:flex-start; flex-direction:column; } .role-grid,.saved-path-controls { grid-template-columns:repeat(1,1fr); } .persistent-status { align-items:stretch; flex-direction:column; } }
 
   /* Match Scouting intentionally shares Pit Scouting's focused field-workspace language. */
   .match-scouting-page { max-width:1160px; }
