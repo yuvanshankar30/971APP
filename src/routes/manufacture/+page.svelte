@@ -2338,31 +2338,31 @@
             <td class="quantity-col" class:hidden={assignMode}>{getQuantitySummary(part)}</td>
             <td class="stock-col text-muted" class:hidden={assignMode}>{part.stock_assignment || '-'}</td>
             <td class="metadata-col">
-              <div class="metadata-value metadata-status">
+              <div class="metadata-line">
                 <span class="status-badge {getBadgeClass(part.status, getRouterMeta(part))} status-table status-fade">{getStatusDisplay(part)}</span>
-                {#if part.workflow === 'router' && getRouterProgressSummary(part)}
-                  <div class="router-progress-note">{getRouterProgressSummary(part)}</div>
-                {/if}
               </div>
+              {#if part.workflow === 'router' && getRouterProgressSummary(part)}
+                <div class="metadata-sub router-progress-note">{getRouterProgressSummary(part)}</div>
+              {/if}
             </td>
             <!-- svelte-ignore a11y_no_static_element_interactions -->
             <td class="metadata-col" class:hidden={assignMode} on:click|stopPropagation on:keydown|stopPropagation>
-              <div class="metadata-value">
+              <div class="metadata-line">
                 <PartDueDate {part} on:update={() => loadParts()} />
               </div>
             </td>
             <td class="metadata-col" class:hidden={assignMode}>
-              <div class="metadata-value metadata-created">
-                <span>{formatDate(part.created_at)}</span>
-                {#if getSeasonBucket(part.created_at)}
+              <div class="metadata-line">{formatDate(part.created_at)}</div>
+              {#if getSeasonBucket(part.created_at)}
+                <div class="metadata-sub">
                   <span class="tag season-tag {getSeasonBucket(part.created_at).isOffseason ? 'tag-offseason' : 'tag-season'}">
                     {getSeasonBucket(part.created_at).label}
                   </span>
-                {/if}
-              </div>
+                </div>
+              {/if}
             </td>
             <td class="requester-col" class:hidden={assignMode} title={part.requester || 'Requester not recorded'}>
-              {part.requester || '—'}
+              <div class="metadata-line requester-line"><span class="requester-text">{part.requester || '—'}</span></div>
             </td>
             <td class="actions-table-col" class:hidden={assignMode}>
               <div class="row-actions">
@@ -3225,12 +3225,16 @@
 
   .table th.name-col,
   .table td.name-col {
-    width: 10rem;
-    min-width: 10rem;
-    max-width: 10rem;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    width: 12rem;
+    min-width: 12rem;
+    max-width: 12rem;
+    /* Part names wrap onto a second line rather than being cut off with
+       an ellipsis - a truncated "P006950_Rev_x60 stiffn..." hides exactly
+       the part of the name that distinguishes it from its neighbours.
+       overflow-wrap: anywhere (not break-word) because these names are
+       one long token with no spaces to break at. */
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
   .table {
     table-layout: fixed;
@@ -3274,28 +3278,37 @@
     max-width: 12rem;
     vertical-align: top;
   }
-  .metadata-value {
+  /* One shared first line for Status / Due / Created / Requested By. A
+     pill badge, a date input and plain text all have different intrinsic
+     box heights, so left to themselves they each sit at a different
+     vertical position even in cells that are all vertical-align: top.
+     Giving each one the same fixed-height line box and centering inside
+     it puts all four on the same horizontal level. */
+  .metadata-line {
     box-sizing: border-box;
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     justify-content: center;
-    min-height: 2.75rem;
+    min-height: var(--control-height);
     width: 100%;
   }
-  .metadata-status {
-    flex-direction: column;
-    align-items: center;
-    gap: 0.65rem;
+  .requester-line {
+    justify-content: flex-start;
   }
-
-  .metadata-status .router-progress-note {
-    margin-top: 0;
+  .requester-text {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
-  .metadata-created {
-    flex-wrap: wrap;
-    align-content: flex-start;
+  /* Secondary content (season tag, router progress) goes on its own line
+     underneath, where it can't nudge the primary line out of alignment -
+     it used to share the primary line's flex container and wrap. */
+  .metadata-sub {
+    display: flex;
     justify-content: center;
-    gap: 0.3rem 0.45rem;
+    width: 100%;
+    margin-top: 0.25rem;
   }
   .metadata-col :global(.due-date) { width: 100%; }
   .metadata-col :global(.due-input) { box-sizing: border-box; width: 100%; }
@@ -3339,9 +3352,10 @@
   }
 
   .name-line {
-    display: inline-flex;
+    display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 0.4rem;
+    gap: 0.3rem 0.4rem;
   }
 
   .notes-indicator {
