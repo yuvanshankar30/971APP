@@ -61,8 +61,8 @@ browser confirmation or prompt popups.
   structured auto collision/fuel-source plus intake-speed/jam observations,
   and an explicit named autonomous-path file library with “Save as new file”
   and “Load file” actions independent of report submission, a 29-by-29-inch
-  robot footprint, centerline-conflict marking, and hub/trench collision
-  prevention,
+  robot footprint, centerline-conflict marking, and hub collision
+  prevention (trenches render but don't block - a robot drives under one),
   data scouting, free-form notes,
   an Event Analysis view in Data Scouting that consolidates submitted data
   observations (including released vision observations), match reports, pit

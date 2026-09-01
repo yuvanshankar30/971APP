@@ -109,9 +109,12 @@ describe('autonomous robot footprint', () => {
     expect(bounds.height).toBeCloseTo(AUTO_ROBOT_SIZE.height, 6);
   });
 
-  it('rejects robot positions that overlap a hub or protected trench', () => {
+  it('rejects robot positions that overlap a hub', () => {
     expect(autoRobotCollision([29.2, 50])?.id).toBe('own-hub');
-    expect(autoRobotCollision([27.7, 8.5])?.id).toBe('own-top-trench');
+  });
+
+  it('allows a robot position over a trench - terrain a robot drives under, not a wall like a hub', () => {
+    expect(autoRobotCollision([27.7, 8.5])).toBeNull();
   });
 
   it('does not let a fast path extension jump through a hub', () => {
