@@ -2176,7 +2176,6 @@
           <th class="project-col mono" class:hidden={assignMode}>Project ID</th>
           <th class="quantity-col" class:hidden={assignMode}>Qty</th>
           <th class="stock-col" class:hidden={assignMode}>Stock</th>
-          <th class="source-col" class:hidden={assignMode}>Source</th>
           <th class="metadata-col">Status</th>
           <th class="metadata-col" class:hidden={assignMode}>Due</th>
           <th class="metadata-col" class:hidden={assignMode}>Created</th>
@@ -2236,78 +2235,6 @@
             <td class="project-col mono" class:hidden={assignMode}>{part.project_id}</td>
             <td class="quantity-col" class:hidden={assignMode}>{getQuantitySummary(part)}</td>
             <td class="stock-col text-muted" class:hidden={assignMode}>{part.stock_assignment || '-'}</td>
-            <td class="source-col" class:hidden={assignMode}>
-              {#if part.source_type === 'onshape_api'}
-                <div class="source-cell" class:multi-files={part.workflow === 'router'}>
-                  {#if part.workflow === 'laser-cut'}
-                    <button
-                      type="button"
-                      class="tag tag-source tag-action"
-                      aria-label="Download SVG"
-                      title="Download SVG"
-                      on:click|stopPropagation={() => downloadFile(part, part.status)}
-                    >
-                      <Download size={14} />
-                      SVG
-                    </button>
-                  {:else if part.workflow === 'lathe' || part.workflow === 'mill'}
-                    <button
-                      type="button"
-                      class="tag tag-source tag-action"
-                      aria-label="Open document"
-                      title="Open document"
-                      on:click|stopPropagation={() => openSubsystemDocument(part)}
-                    >
-                      <ExternalLink size={14} />
-                      PDF
-                    </button>
-                  {:else if !canViewCad(part)}
-                    <button
-                      type="button"
-                      class="tag tag-source tag-action"
-                      aria-label="Download STEP file"
-                      title="Download STEP"
-                      on:click|stopPropagation={() => downloadStepFromOnshape(part)}
-                    >
-                      <Download size={14} />
-                      STEP
-                    </button>
-                  {/if}
-                </div>
-              {:else if part.workflow === 'router'}
-                {#await Promise.resolve((() => { try { return JSON.parse(part.file_url || '{}') } catch { return {} } })()) then meta}
-                  <div class="source-cell multi-files">
-                    {#if meta.step_file && !canViewCad(part)}
-                      <button
-                        type="button"
-                        class="tag tag-source tag-action"
-                        aria-label="Download STEP file"
-                        title="Download STEP"
-                        on:click|stopPropagation={() => downloadFromStorage(meta.step_file, part.id)}
-                      >
-                        <Download size={14} />
-                        STEP
-                      </button>
-                    {/if}
-                    {#if !meta.step_file}
-                      <span class="file-label">{part.file_name}</span>
-                      <button class="btn btn-secondary btn-icon" aria-label="Download" title="Download" on:click|stopPropagation={() => downloadFromStorage(part.file_name, part.id)}>
-                        <Download size={16} />
-                      </button>
-                    {/if}
-                  </div>
-                {/await}
-              {:else if part.file_name && !canViewCad(part)}
-                <div class="source-cell">
-                  <span class="file-label">{part.file_name}</span>
-                  <button class="btn btn-secondary btn-icon" aria-label="Download" title="Download" on:click|stopPropagation={() => downloadFromStorage(part.file_name, part.id)}>
-                    <Download size={16} />
-                  </button>
-                </div>
-              {:else if !canViewCad(part)}
-                <span class="text-muted">-</span>
-              {/if}
-            </td>
             <td class="metadata-col">
               <div class="metadata-value metadata-status">
                 <span class="status-badge {getBadgeClass(part.status, getRouterMeta(part))} status-table status-fade">{getStatusDisplay(part)}</span>
@@ -2340,44 +2267,46 @@
                 {#if canViewCad(part)}
                   {@const camJob = camJobsByPart[part.id]}
                   {@const camCapable = !!WORKFLOW_OPERATION_TYPE[part.workflow]}
-                  <div class="cad-action-grid" on:click|stopPropagation on:keydown|stopPropagation role="presentation">
-                    <button class="btn btn-secondary btn-sm" on:click={() => openCadViewer(part)} title="View 3D model">
-                      <Box size={14} /> View CAD
+                  <div class="cad-action-grid desktop-cad-actions" on:click|stopPropagation on:keydown|stopPropagation role="presentation">
+                    <button class="btn btn-secondary action-icon" on:click={() => openCadViewer(part)} aria-label="View 3D model" title="View CAD">
+                      <Box size={15} />
                     </button>
                     {#if camCapable}
-                      <button class="btn btn-secondary btn-sm" disabled={camJob?.status !== 'completed'} on:click={() => openToolpathModal(camJob)} title={camJob?.status === 'completed' ? 'Preview the generated toolpath' : 'Generate G-code first'}>
-                        <Route size={14} /> View Toolpath
+                      <button class="btn btn-secondary action-icon" disabled={camJob?.status !== 'completed'} on:click={() => openToolpathModal(camJob)} aria-label="View toolpath" title={camJob?.status === 'completed' ? 'View Toolpath' : 'Generate G-code first'}>
+                        <Route size={15} />
                       </button>
                     {/if}
-                    <button class="btn btn-secondary btn-sm" on:click={() => installCadStepFile(part)} title="Download STEP file">
-                      <Download size={14} /> Install CAD
+                    <button class="btn btn-secondary action-icon" on:click={() => installCadStepFile(part)} aria-label="Download STEP file" title="Install CAD">
+                      <Download size={15} />
                     </button>
                     {#if camCapable}
                       {#if isCamJobActive(camJob)}
-                        <span class="btn btn-secondary btn-sm autocam-running" title="AutoCAM is processing this part">
-                          <span class="autocam-spinner"></span> {camJobStatusLabel(camJob.status)}
+                        <span class="btn btn-secondary action-icon autocam-running" aria-label="AutoCAM is processing this part" title={camJobStatusLabel(camJob.status)}>
+                          <span class="autocam-spinner"></span>
                         </span>
                       {:else if camJob?.status === 'completed'}
-                        <button class="btn btn-secondary btn-sm" on:click={() => downloadGcodeBlob(camJob)} title="Download G-code">
-                          <Download size={14} /> Install NGC
+                        <button class="btn btn-secondary action-icon" on:click={() => downloadGcodeBlob(camJob)} aria-label="Download G-code" title="Install NGC">
+                          <Download size={15} />
                         </button>
                       {:else if camJob?.status === 'failed'}
                         <button
-                          class="btn btn-secondary btn-sm"
+                          class="btn btn-secondary action-icon"
                           disabled={queuingCamJobForPartId === part.id}
+                          aria-label="Retry AutoCAM"
                           title={`AutoCAM failed: ${camJob.errors?.[0] || 'unknown error'} - click to retry`}
                           on:click={() => retryAutocam(part)}
                         >
-                          <Zap size={14} /> Retry AutoCAM
+                          <Zap size={15} />
                         </button>
                       {:else}
                         <button
-                          class="btn btn-secondary btn-sm"
+                          class="btn btn-secondary action-icon"
                           disabled={queuingCamJobForPartId === part.id}
+                          aria-label="Generate G-code"
                           title="Generate G-code from this part's STEP file"
                           on:click={() => generateAutocam(part)}
                         >
-                          <Zap size={14} /> Generate G-code
+                          <Zap size={15} />
                         </button>
                       {/if}
                     {/if}
@@ -2387,32 +2316,33 @@
                   {/if}
                 {:else if WORKFLOW_OPERATION_TYPE[part.workflow]}
                   <button
-                    class="btn btn-secondary btn-sm"
+                    class="btn btn-secondary action-icon"
                     on:click={() => openCamProfileModal(part)}
+                    aria-label="Attach STEP file"
                     title="This part was created before STEP was required for its workflow - attach one to unlock the 3D viewer and AutoCAM"
                   >
-                    <Upload size={14} /> Attach STEP
+                    <Upload size={15} />
                   </button>
                 {/if}
               </div>
               {#if part.status === 'pending'}
                 {#if part.workflow === 'router'}
                 <button
-                  class="btn btn-secondary btn-sm"
+                  class="btn btn-secondary action-icon"
                   on:click={async () => { await updatePartStatus(part.id, 'in-progress'); await updateRouterMeta(part, { step: 'cam_ing' }); setLocalStatus(part.id, 'in-progress'); setLocalRouterMeta(part.id, { step: 'cam_ing' }); }}
+                  aria-label="Start"
                   title="Start"
                 >
-                  <Clock size={14} />
-                  Start
+                  <Clock size={15} />
                 </button>
                 {:else}
                 <button
-                  class="btn btn-secondary btn-sm"
+                  class="btn btn-secondary action-icon"
                   on:click={async () => { await updatePartStatus(part.id, 'in-progress'); setLocalStatus(part.id, 'in-progress'); }}
+                  aria-label="Start work"
                   title="Start Work"
                 >
-                  <Clock size={14} />
-                  Start
+                  <Clock size={15} />
                 </button>
                 {/if}
                 {#if camJobsByPart[part.id]}
@@ -2975,16 +2905,20 @@
 
   .cad-action-grid {
     display: grid;
-    grid-template-columns: repeat(2, minmax(7.5rem, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.4rem;
   }
-  .cad-action-grid .btn {
+  .desktop-cad-actions {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.25rem;
+  }
+  .action-icon {
+    width: 2rem;
+    min-width: 2rem;
+    height: 2rem;
+    min-height: 2rem;
+    padding: 0;
     justify-content: center;
-    text-align: center;
-    white-space: nowrap;
-    line-height: 1.2;
-    font-size: var(--font-xs, 0.75rem);
-    padding: 0.35rem 0.5rem;
   }
 
   .toolpath-modal { width: min(700px, 95vw); max-width: 95vw; }
@@ -3032,7 +2966,7 @@
   }
   .table {
     table-layout: fixed;
-    min-width: 138rem;
+    min-width: 120rem;
   }
   .table th.workflow-col,
   .table td.workflow-col {
@@ -3049,15 +2983,6 @@
   .table th.stock-col,
   .table td.stock-col {
     width: 11rem;
-  }
-  .table th.source-col,
-  .table td.source-col {
-    min-width: 140px;
-    max-width: 200px;
-    width: 1%;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
   .table th.metadata-col,
   .table td.metadata-col {
@@ -3103,8 +3028,8 @@
     box-sizing: border-box;
     position: sticky;
     right: 0;
-    width: 17rem;
-    min-width: 17rem;
+    width: 10.5rem;
+    min-width: 10.5rem;
     background: var(--surface-1);
     box-shadow: -1px 0 0 var(--border);
   }
@@ -3142,35 +3067,11 @@
     font-family: inherit;
   }
 
-  .source-cell {
-    display: flex;
-    align-items: center;
-    gap: var(--gap-2);
-    min-width: 0;
-    flex-wrap: wrap;
-  }
-
-  .source-cell .file-label {
-    flex: 1 1 140px;
-    min-width: 0;
-  }
-
-  .source-cell.multi-files {
-    justify-content: flex-start;
-  }
-
   .version-text {
     font-size: 0.75rem;
     color: var(--neutral-500);
   }
 
-  .file-label {
-    display: block;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    min-width: 0;
-  }
 
   .actions-col {
     display: flex;
@@ -3266,11 +3167,6 @@
     height: 16px;
   }
 
-  .source-col .source-cell .btn.btn-icon :global(svg) {
-    width: 16px !important;
-    height: 16px !important;
-    min-width: 16px; min-height: 16px; transform: none !important; flex: 0 0 auto;
-  }
   :global(.actions-col .btn svg), :global(.kitting-inline .btn svg) { width: 18px; height: 18px; }
   .file-input-hidden { display: none; }
   .table thead th { background: var(--background); color: var(--text); font-weight: 600; border-bottom: none; }
@@ -3485,7 +3381,6 @@
     .actions-col { min-width: auto; }
     .table th.name-col, .table td.name-col { min-width: 80px; max-width: 100px; }
     .cam-setup-grid { grid-template-columns: 1fr; }
-    .table th.source-col, .table td.source-col { min-width: 70px; max-width: 100px; }
     
     .content-layout {
       flex-direction: column;
