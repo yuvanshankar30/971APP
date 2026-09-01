@@ -176,6 +176,15 @@
     if (payload.fromType === 'top') {
       draggedItem = header_tabs[payload.idx];
       header_tabs.splice(payload.idx, 1);
+      // target.idx/folderIdx were read off HeaderPreview's own {#each} loop
+      // before this removal - every position after the dragged item's
+      // original slot just shifted down by one in header_tabs, so a
+      // same-array target index needs the same correction, or the drop
+      // consistently lands one slot further right than where the user
+      // actually dropped it (dropping an item back on itself even visibly
+      // reorders it, since the neighbor it "landed on" also shifted).
+      if (target.type === 'index' && target.idx > payload.idx) target.idx -= 1;
+      if (target.type === 'folder' && target.folderIdx > payload.idx) target.folderIdx -= 1;
     } else if (payload.fromType === 'child') {
       const folder = header_tabs[payload.folderIdx];
       if (folder && Array.isArray(folder.children)) {
