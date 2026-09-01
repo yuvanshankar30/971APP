@@ -67,7 +67,7 @@
       </div>
     </div>
   </details>
-  <p class="text-muted">Rotary 4th-axis indexed drilling - no specific real machine has been confirmed against this yet. Verify the A-axis direction, rotary-center offset, and Z=0 reference before running on material.</p>
+  <p class="text-muted">Runs on a standard 3-axis router, not a rotary/4th-axis machine - each face is a separately-runnable program and the operator manually flips the tube stock and re-zeros between faces. No specific real machine has been confirmed against this yet - verify the flip/re-zero procedure and Z=0 reference before running on material.</p>
 {:else if operation === 'turning'}
   <div class="form-group">
     <label class="form-label" for="cf-setup-mode">Setup</label>

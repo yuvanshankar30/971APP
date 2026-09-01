@@ -617,6 +617,30 @@ describe('parseToolpath3D - tube stock A-axis tracking', () => {
     expect(secondPlunge.angleDeg).toBe(90);
   });
 
+  it('tags each move using the newer (FACE A..) comment tag - no real rotary axis, so no live A word is ever commanded', () => {
+    const program = gcode(
+      'G20',
+      'G90',
+      'S8000 M03',
+      '(FACE A0 - FLIP TUBE to Top face and RE-ZERO Z before resuming - no rotary axis on this machine)',
+      'M00 (FLIP TUBE to Top face (0.0 deg from Top) and RE-ZERO Z before resuming - no rotary axis on this machine)',
+      'G00 X1.0 Y0.0',
+      'G00 Z0.25',
+      'G01 Z-0.15 F8',
+      'G00 Z0.25',
+      '(FACE A90 - FLIP TUBE to Right side face and RE-ZERO Z before resuming - no rotary axis on this machine)',
+      'M00 (FLIP TUBE to Right side face (90.0 deg from Top) and RE-ZERO Z before resuming - no rotary axis on this machine)',
+      'G00 X2.0 Y0.1',
+      'G00 Z0.25',
+      'G01 Z-0.15 F8'
+    );
+    const { moves } = parseToolpath3D(program);
+    const firstPlunge = moves.find((m) => m.kind === 'ramp' && m.to.x === 1);
+    const secondPlunge = moves.find((m) => m.kind === 'ramp' && m.to.x === 2);
+    expect(firstPlunge.angleDeg).toBe(0);
+    expect(secondPlunge.angleDeg).toBe(90);
+  });
+
   it('routing/turning G-code (no A word ever appears) defaults every move to angleDeg 0', () => {
     const contour = [{ points: [{ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 2 }, { x: 0, y: 2 }], isHole: false }];
     const { gcode: programText } = generateRoutingGcode(contour, { toolDiameter: 0.25, targetDepth: 0.1 });

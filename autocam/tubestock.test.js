@@ -31,10 +31,10 @@ describe('generateTubestockGcode', () => {
     expect(result.gcodeFiles.map((file) => file.angleDeg)).toEqual([0, 90]);
     expect(result.gcodeFiles.map((file) => file.label)).toEqual(['Top', 'Right side']);
     expect(result.stats.facePrograms).toHaveLength(2);
-    expect(result.gcodeFiles[0].gcode).toContain('Top (A0.0)');
-    expect(result.gcodeFiles[0].gcode).not.toContain('A90.0');
-    expect(result.gcodeFiles[1].gcode).toContain('Right side (A90.0)');
-    expect(result.gcodeFiles[1].gcode).not.toContain('A0.0');
+    expect(result.gcodeFiles[0].gcode).toContain('Top (0.0 deg from Top)');
+    expect(result.gcodeFiles[0].gcode).not.toContain('90.0 deg from Top');
+    expect(result.gcodeFiles[1].gcode).toContain('Right side (90.0 deg from Top)');
+    expect(result.gcodeFiles[1].gcode).not.toContain('(0.0 deg from Top)');
     expect(result.gcodeFiles.every((file) => file.gcode.includes('M30 (program end)'))).toBe(true);
   });
 
@@ -52,7 +52,7 @@ describe('generateTubestockGcode', () => {
     expect(result.gcodeFiles.map((file) => file.label)).toEqual(['Top', 'Right side', 'Bottom', 'Left side']);
   });
 
-  it('emits one program for equivalent rotary angles on the same face', () => {
+  it('emits one program for equivalent face angles (0 and 360) on the same face', () => {
     const duplicateTop = {
       tubeLength: 12,
       walls: [
@@ -104,12 +104,25 @@ describe('generateTubestockGcode', () => {
     expect(pauseCount).toBe(1); // 2 distinct diameters -> exactly 1 change
   });
 
-  it('indexes the rotary axis (A) once per wall, not once per hole', () => {
+  it('prompts to flip the tube once per wall in the combined program, not once per hole', () => {
     const result = generateTubestockGcode(twoWallTube(), baseParams);
-    const indexCount = (result.gcode.match(/index rotary axis/g) || []).length;
-    // T1 (0.375" @ 90deg, 1 hole) -> 1 index. T2 (0.25" @ 0deg, 2 holes,
-    // same wall) -> 1 index. Total 2, not 3 (one per hole would be wrong).
-    expect(indexCount).toBe(2);
+    // Each flip emits both a machine-readable (FACE A..) comment tag (for
+    // the 3D preview) and an M00 pause instructing the operator - one pair
+    // per wall change, not per hole.
+    const tagCount = (result.gcode.match(/\(FACE A/g) || []).length;
+    const pauseCount = (result.gcode.match(/M00 \(FLIP TUBE/g) || []).length;
+    // T1 (0.375" @ 90deg, 1 hole) -> 1 flip. T2 (0.25" @ 0deg, 2 holes,
+    // same wall) -> 1 flip. Total 2, not 3 (one per hole would be wrong) -
+    // and no rotary axis, so this is a manual pause, not an axis move.
+    expect(tagCount).toBe(2);
+    expect(pauseCount).toBe(2);
+  });
+
+  it('never prompts to flip the tube within a single-face program - it only ever covers one already-fixtured face', () => {
+    const result = generateTubestockGcode(twoWallTube(), baseParams);
+    for (const file of result.gcodeFiles) {
+      expect(file.gcode).not.toMatch(/FLIP TUBE|index rotary axis/);
+    }
   });
 
   it('plunges to the negative of holeDepth and retracts to +safeZ', () => {
