@@ -21,11 +21,20 @@
   let uploadedFile = null;
   let uploadedStepFile = null;
   let camJobName = ''; // optional AutoCAM job name for router/lathe
+  let camFolderPath = '';
   let notes = '';
   let isSubmitting = false;
   let user = null;
 
   $: supportsAutocam = !!WORKFLOW_OPERATION_TYPE[workflow];
+
+  function routerPartNotes() {
+    const path = camFolderPath.trim();
+    return [
+      notes.trim(),
+      path ? `CAM folder path: ${path}` : ''
+    ].filter(Boolean).join('\n\n') || null;
+  }
 
   // Fire-and-forget: queues + generates the CAM job right after the part is
   // created, straight from the STEP file that was just uploaded (required
@@ -302,6 +311,7 @@
   customStock = '';
       uploadedFile = null;
       camJobName = '';
+      camFolderPath = '';
       notes = '';
 
       goto('/manufacture');
@@ -354,7 +364,7 @@
           file_name: stepName, // keep for backward compat
           file_url: JSON.stringify(fileMeta),
           status: 'pending',
-          notes: notes.trim() || null,
+          notes: routerPartNotes(),
           frc_team: user?.frc_team || null
         }])
         .select('id')
@@ -377,6 +387,7 @@
       uploadedStepFile = null;
       uploadedFile = null;
       camJobName = '';
+      camFolderPath = '';
       notes = '';
 
       goto('/manufacture');
@@ -559,7 +570,7 @@
                 type="radio" 
                 bind:group={workflow} 
                 value={workflowOption.id}
-                on:change={() => { stockAssignment = ''; customStock = ''; newStockDescription = ''; stockOptionError = ''; uploadedFile = null; uploadedStepFile = null; camJobName = ''; }}
+                on:change={() => { stockAssignment = ''; customStock = ''; newStockDescription = ''; stockOptionError = ''; uploadedFile = null; uploadedStepFile = null; camJobName = ''; camFolderPath = ''; }}
               />
               <div class="workflow-content">
                 <svelte:component this={workflowOption.icon} size={24} />
@@ -766,6 +777,13 @@
             <label for="camJobName">CAM Job Name <span class="optional-label">(optional, defaults to part name)</span></label>
             <input id="camJobName" type="text" bind:value={camJobName} placeholder={partName || 'Job name'} />
           </div>
+          {#if workflow === 'router'}
+            <div class="form-group">
+              <label for="camFolderPath">CAM Folder Path <span class="optional-label">(optional)</span></label>
+              <input id="camFolderPath" type="text" maxlength="500" bind:value={camFolderPath} placeholder="e.g. Router / 2026 Offseason / Gearbox" />
+              <p class="form-hint">Saved with this part as a note for the machining team.</p>
+            </div>
+          {/if}
         </div>
       {/if}
 
