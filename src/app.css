@@ -823,6 +823,11 @@ textarea:focus,
   font-weight: 600;
   text-transform: uppercase;
   box-sizing: border-box;
+  /* A fixed height plus wrapped text is worse than either alone - the
+     second line just gets clipped against that height. Badges are short,
+     known-vocabulary labels (status names) - they should never wrap,
+     regardless of how narrow their container gets. */
+  white-space: nowrap;
 }
 
 /* Each router/CAM pipeline stage gets its own muted, warm-toned hue instead
