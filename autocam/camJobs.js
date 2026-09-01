@@ -387,11 +387,17 @@ export function partHasStepFile(part) {
 /** Trigger a browser download of a completed job's G-code (always .ngc). */
 export function downloadGcodeBlob(job) {
   if (!job?.gcode) return;
-  const blob = new Blob([job.gcode], { type: 'text/plain' });
+  downloadGcodeText(job.gcode, job.gcode_file_name || `output.${CAM_GCODE_FORMAT}`);
+}
+
+/** Download a generated G-code artifact, including an individual tube face. */
+export function downloadGcodeText(gcode, fileName) {
+  if (!gcode) return;
+  const blob = new Blob([gcode], { type: 'text/plain' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = job.gcode_file_name || `output.${CAM_GCODE_FORMAT}`;
+  a.download = fileName || `output.${CAM_GCODE_FORMAT}`;
   a.click();
   URL.revokeObjectURL(url);
 }

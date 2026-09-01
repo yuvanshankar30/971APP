@@ -33,7 +33,10 @@ browser confirmation or prompt popups.
   manually queued from `/autocam` or auto-triggered by dropping a CAD file
   into a machine's watched Google Drive folder (turning/routering only; tube
   stock is standalone-upload only, no manufacturing-request workflow maps to
-  it yet). No external CAM software involved (pure JS geometry math). Real
+  it yet). Tube-stock jobs retain a combined program for simulation and also
+  produce one self-contained G-code file per drilled tube face, available for
+  individual download and machine-folder delivery. No external CAM software
+  involved (pure JS geometry math). Real
   3-axis milling (contoured toolpaths a flat 2.5D profile can't represent)
   is a separate sub-section, **Fusion CAM** (`/autocam/fusion`), backed by
   an actual Fusion 360 Runner rather than in-process math; it is intentionally
