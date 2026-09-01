@@ -21,6 +21,11 @@ const savedNav = () => [
 ];
 
 describe('defaultHeaderTabs', () => {
+  it('puts Manufacturing and Competition before CAD and Purchasing', () => {
+    const order = defaultHeaderTabs().map((tab) => tab.key || tab.label);
+    expect(order).toEqual(['Manufacturing', 'Competition', 'CAD', 'purchasing', 'docs']);
+  });
+
   it('includes Power Rankings and Scouting Admin in the Competition folder', () => {
     const children = competitionChildren(defaultHeaderTabs());
     expect(children).toContainEqual({ key: 'powerrankings', label: 'Power Rankings' });

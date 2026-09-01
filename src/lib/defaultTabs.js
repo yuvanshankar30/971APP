@@ -7,8 +7,9 @@
 // Grouped into three real sections (folders - a fully-supported existing nav
 // concept, see buildNavItems/toLinkItem in +layout.svelte, not new UI) per
 // direct feedback that a flat list of ~10 top-level tabs read as clutter for
-// anyone not touching most of them day to day. Order (Home, Purchasing,
-// Manufacturing, CAD, Competition, Docs, Admin) is also per direct feedback:
+// anyone not touching most of them day to day. Order (Home, Manufacturing,
+// Competition, CAD, Purchasing, Docs, Admin) keeps the team's primary daily
+// workflows at the front of the header.
 //   - Manufacturing: the shop-floor tools (manufacture tracking, AutoCAM,
 //     Kitting, COTS Stocking) - "whatever else we add" here later just needs
 //     a new entry in manufacturingChildren below.
@@ -22,7 +23,7 @@
 //     Match Scouting is listed again: #89 removed the route wholesale, and it
 //     has been restored and rewired to api/matchscout instead of the
 //     browser-local storage it originally used.
-//   - Purchasing and Docs: stand alone.
+//   - Purchasing and Docs: stand alone after the team-workflow folders.
 //
 // Home is rendered separately and always first; Admin is appended for
 // admins by the layout, always last. Planner/Tasks/etc. remain opt-in via
@@ -38,8 +39,6 @@ import navigation from '$lib/navigation.json';
 export function defaultHeaderTabs(navConfig = navigation) {
   const tabs = [];
 
-  tabs.push({ type: 'tab', key: 'purchasing', label: 'Purchasing' });
-
   const manufacturingChildren = [];
   if (navConfig?.tabs?.manufacture !== false) manufacturingChildren.push({ key: 'manufacture', label: 'Manufacture' });
   if (navConfig?.tabs?.autocam !== false) manufacturingChildren.push({ key: 'autocam', label: 'AutoCAM' });
@@ -48,10 +47,6 @@ export function defaultHeaderTabs(navConfig = navigation) {
   if (manufacturingChildren.length) {
     tabs.push({ type: 'folder', label: 'Manufacturing', children: manufacturingChildren });
   }
-
-  const cadChildren = [{ key: 'cad', label: 'CAD' }];
-  if (navConfig?.tabs?.build !== false) cadChildren.push({ key: 'build', label: 'Build' });
-  tabs.push({ type: 'folder', label: 'CAD', children: cadChildren });
 
   tabs.push({
     type: 'folder',
@@ -65,6 +60,12 @@ export function defaultHeaderTabs(navConfig = navigation) {
       { key: 'scouting-admin', label: 'Scouting Admin' }
     ]
   });
+
+  const cadChildren = [{ key: 'cad', label: 'CAD' }];
+  if (navConfig?.tabs?.build !== false) cadChildren.push({ key: 'build', label: 'Build' });
+  tabs.push({ type: 'folder', label: 'CAD', children: cadChildren });
+
+  tabs.push({ type: 'tab', key: 'purchasing', label: 'Purchasing' });
 
   tabs.push({ type: 'tab', key: 'docs', label: 'Docs' });
 

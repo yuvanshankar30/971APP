@@ -124,6 +124,9 @@ browser confirmation or prompt popups.
   palette-coordinated dark surfaces without changing their meanings. The page
   is divided into direct-linkable Account, Appearance, Navigation, and
   Notifications panels instead of one continuous settings scroll.
+- **Default navigation**: Home is always first, followed by Manufacturing,
+  Competition, CAD, and Purchasing. Members can still customize this order in
+  their Account navigation settings.
 - **Pick List** (`scouting/`): a team-comparison / pick-list workspace for the
   active event. Named for what it produces: it was previously labelled "Data
   Scouting" in the nav, which collided with the separate `datascout` route and
