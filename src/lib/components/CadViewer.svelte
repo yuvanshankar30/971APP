@@ -82,7 +82,13 @@
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         container.appendChild(renderer.domElement);
 
-        const material = new THREE.MeshStandardMaterial({ color: 0xf1c331, metalness: 0.25, roughness: 0.55 });
+        // Gray, not the brand-gold accent color - this is the actual stock
+        // material being viewed, not a highlight/accent element. Matches
+        // the same gray + metalness/roughness the 3D toolpath simulator
+        // uses for its own stock (autocam/components/ToolpathSimulator.svelte's
+        // createStockMaterial) so a part looks the same color whether it's
+        // open here or in the toolpath sim.
+        const material = new THREE.MeshStandardMaterial({ color: 0xb8bcc2, metalness: 0.75, roughness: 0.42 });
         const group = new THREE.Group();
         for (const geometry of geometries) {
           group.add(new THREE.Mesh(geometry, material));
