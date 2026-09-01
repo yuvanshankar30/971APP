@@ -678,13 +678,11 @@
   .star-legend-value { font-variant-numeric:tabular-nums; font-weight:600; color:var(--text); }
   .star-legend-row.unrated .star-legend-value { color:var(--text-muted); font-weight:400; }
   .star-empty { color:var(--text-muted); font-size:.85rem; }
-  @media (max-width:560px) {
+  @media (max-width:480px) {
     .rating-star { grid-template-columns:1fr; justify-items:center; }
     .star-legend { width:min(260px, 80vw); }
   }
   .submitted-state { min-height:32rem; display:grid; place-content:center; justify-items:center; gap:var(--space-3); text-align:center; } .submitted-state p { margin:0; color:var(--text-muted); } .submitted-icon { display:grid; place-items:center; width:3.5rem; height:3.5rem; background:var(--green-soft); color:var(--green-strong); border-radius:50%; }
-  @media (max-width:850px) { .scouting-shell { grid-template-columns:1fr; } .stage-nav { position:static; grid-template-columns:repeat(4,1fr); } .stage-nav button { flex-direction:column; justify-content:center; text-align:center; padding:var(--space-2); } .assignment-grid,.post-grid,.auto-layout,.intake-observations { grid-template-columns:1fr; } .position-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
-  @media (max-width:560px) { .match-scouting-page { padding:var(--space-3); } .page-header { align-items:flex-start; } .assignment-chip { width:100%; justify-content:space-between; } .stage-nav { grid-template-columns:repeat(2,1fr); } .rating-row,.ratings-heading { align-items:flex-start; flex-direction:column; } .role-grid,.saved-path-controls { grid-template-columns:repeat(1,1fr); } .persistent-status { align-items:stretch; flex-direction:column; } }
 
   /* Match Scouting intentionally shares Pit Scouting's focused field-workspace language. */
   .match-scouting-page { max-width:1160px; }
@@ -717,14 +715,47 @@
   .post-grid { padding:var(--space-4); border:1px solid var(--border); background:var(--surface-2); }
   .post-grid { grid-template-columns:1fr; }
   .submitted-state { background:var(--surface-2); }
-  @media (max-width:850px) {
+  @media (max-width:960px) {
     .scouting-shell { grid-template-columns:1fr; }
+    .stage-nav { position:static; grid-template-columns:repeat(4,minmax(0,1fr)); }
     .stage-nav button { grid-template-columns:1fr; justify-items:center; text-align:center; }
     .stage-nav button small { display:none; }
+    .match-workspace { min-height:0; }
   }
-  @media (max-width:560px) {
+  @media (max-width:768px) {
+    .match-scouting-page { padding:var(--space-3); }
+    .match-scouting-page .page-header { align-items:flex-start; flex-direction:column; gap:var(--space-3); }
+    .assignment-chip { width:100%; justify-content:space-between; }
+    .stage-nav { grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--space-2); padding:var(--space-2); }
+    .stage-nav button { min-height:3.5rem; }
     .match-workspace { padding:var(--space-4); }
     .assignment-grid { grid-template-columns:1fr; }
     .start-position-block { padding:var(--space-3); }
+    .position-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .auto-layout,.intake-observations { grid-template-columns:1fr; }
+    .saved-path-controls { grid-template-columns:1fr; }
+    .role-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .ratings-heading,.rating-row,.persistent-status { align-items:flex-start; flex-direction:column; }
+    .rating-row { gap:var(--space-3); }
+    .rating-buttons { width:100%; }
+    .rating-buttons button { flex:1 1 2.5rem; min-height:2.75rem; }
+    .section-footer { flex-wrap:wrap; gap:var(--space-2); }
+    .section-footer > button { flex:1 1 10rem; min-height:3rem; }
+    .choice-grid button,.segmented button,.position-grid button { min-height:2.75rem; }
+    .path-panel,.auto-layout,.ratings-grid,.notes-label,.post-grid { padding:var(--space-3); }
+  }
+  @media (max-width:480px) {
+    .match-scouting-page { padding:var(--space-2); }
+    .match-workspace { padding:var(--space-3); }
+    .stage-nav { gap:var(--space-1); }
+    .stage-nav button { min-height:3.25rem; padding:var(--space-2); }
+    .section-heading { align-items:flex-start; gap:var(--space-2); margin-bottom:var(--space-4); }
+    .section-heading h2 { font-size:var(--font-lg); }
+    .position-grid,.role-grid { grid-template-columns:1fr; }
+    .auto-source-grid { grid-template-columns:1fr; }
+    .path-file-actions { display:grid; grid-template-columns:1fr; }
+    .path-file-actions .btn { min-height:3rem; }
+    .rating-buttons.large button { min-height:2.75rem; width:auto; }
+    .submitted-state { min-height:24rem; padding:var(--space-4) var(--space-2); }
   }
 </style>
