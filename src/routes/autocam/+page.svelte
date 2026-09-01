@@ -1937,7 +1937,14 @@
   }
 
   .cad-modal { width: min(900px, 95vw); max-width: 95vw; }
-  .toolpath-modal { width: min(1100px, 95vw); max-width: 95vw; }
+  .toolpath-modal {
+    width: min(1500px, 98vw);
+    max-width: 98vw;
+    height: min(94vh, 1100px);
+    max-height: 94vh;
+    overflow: hidden;
+  }
+  .toolpath-modal .modal-body { min-height: 0; overflow: auto; }
   .toolpath-simulator-loading { min-height: 320px; display: flex; align-items: center; justify-content: center; gap: 0.65rem; color: var(--text-muted); }
   .toolpath-simulator-loading .loading-spinner { width: 1.25rem; height: 1.25rem; border-width: 2px; }
   .toolpath-view-tabs { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; border-bottom: 1px solid var(--border); }
