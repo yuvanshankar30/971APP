@@ -18,10 +18,11 @@ browser confirmation or prompt popups.
 - **Manufacturing/CAM**: part tracking through the manufacturing pipeline
   (queued → in-progress → completed), STEP file 3D viewing, BOM and build
   tracking, kitting, bins, post-processing, router-specific workflows,
-  optional notes on a request (visible/editable both at creation and from
-  the manufacture list), plus an optional router CAM-folder path that is
-  saved as part of the request note for the machining team. Slack-DMs the relevant lead(s) when a new request
-  is created for a workflow they're assigned to (admin-configurable per
+  optional notes on a request (visible/editable both at creation and inline
+  on each request in its manufacturing workflow tab), plus an optional router
+  CAM-folder path that is saved as part of the request note for the machining
+  team. Slack-DMs the relevant lead(s) when a new request is created for a
+  workflow they're assigned to (admin-configurable per
   user, per workflow - see **Admin & permissions** below), and again for
   Router leads specifically as a router part moves through its pipeline
   (CAM review, CAM reviewed, postprocessed, jprogged, machined, kitted -

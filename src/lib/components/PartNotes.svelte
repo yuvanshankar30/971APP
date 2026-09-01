@@ -2,12 +2,12 @@
   import { createEventDispatcher } from 'svelte';
   import { supabase } from '$lib/supabase.js';
 
-  // Reusable notes control: a single link that opens a centered modal with an
-  // editable textbox. The link reads "Add note" when no note exists, and
-  // "Click to view note" once a note has been saved.
+  // Reusable notes control. Notes can either open from a compact link or be
+  // rendered inline while retaining the modal editor.
   export let item;                 // row object containing { id, notes }
   export let table = 'parts';      // 'parts' (manufacturing) or 'purchasing'
   export let editable = true;
+  export let inline = false;
 
   const dispatch = createEventDispatcher();
 
@@ -46,16 +46,32 @@
 <!-- stopPropagation so clicking here never triggers the parent row/card -->
 <div class="part-notes" on:click|stopPropagation on:keydown|stopPropagation role="presentation">
   {#if item?.notes}
-    <button type="button" class="view-note-link" on:click={openModal}>
-      <svg class="note-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"
-        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-        <polyline points="14 2 14 8 20 8" />
-        <line x1="8" y1="13" x2="16" y2="13" />
-        <line x1="8" y1="17" x2="13" y2="17" />
-      </svg>
-      View note
-    </button>
+    {#if inline}
+      <div class="inline-note">
+        <svg class="note-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <polyline points="14 2 14 8 20 8" />
+          <line x1="8" y1="13" x2="16" y2="13" />
+          <line x1="8" y1="17" x2="13" y2="17" />
+        </svg>
+        <span class="inline-note-text"><span class="inline-note-label">Note:</span> {item.notes}</span>
+        {#if editable}
+          <button type="button" class="edit-note-link" on:click={openModal} aria-label="Edit note">Edit</button>
+        {/if}
+      </div>
+    {:else}
+      <button type="button" class="view-note-link" on:click={openModal}>
+        <svg class="note-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <polyline points="14 2 14 8 20 8" />
+          <line x1="8" y1="13" x2="16" y2="13" />
+          <line x1="8" y1="17" x2="13" y2="17" />
+        </svg>
+        View note
+      </button>
+    {/if}
   {:else if editable}
     <button type="button" class="view-note-link" on:click={openModal}>
       Add note
@@ -124,6 +140,43 @@
   .view-note-link:hover { opacity: 0.8; }
 
   .note-icon { flex: 0 0 auto; }
+
+  .inline-note {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.35rem;
+    min-width: 0;
+    color: var(--text-muted, #64748b);
+    font-size: 0.78rem;
+    line-height: 1.4;
+  }
+
+  .inline-note .note-icon { margin-top: 0.1rem; }
+
+  .inline-note-text {
+    min-width: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .inline-note-label {
+    color: var(--text, #1f2933);
+    font-weight: 700;
+  }
+
+  .edit-note-link {
+    flex: 0 0 auto;
+    border: none;
+    background: none;
+    padding: 0;
+    color: var(--accent-strong, #1d4ed8);
+    font: inherit;
+    font-weight: 700;
+    text-decoration: underline;
+    cursor: pointer;
+  }
+
+  .edit-note-link:hover { opacity: 0.8; }
 
   .note-modal-backdrop {
     position: fixed;
