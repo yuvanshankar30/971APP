@@ -195,6 +195,14 @@
     }
   }
 
+  // A cutting move that hasn't removed material yet sits exactly on the
+  // stock's current surface (routing's Z=0 top face, or the not-yet-cut
+  // radius of a turned solid) - a line and a mesh face at the identical
+  // depth z-fight, flickering and reading as the toolpath "merging into"
+  // the part. Lifting the line a hair off that surface (imperceptible at
+  // real part scale) keeps it a clean, separate visual layer instead.
+  const TOOLPATH_Z_LIFT = 0.01;
+
   function rebuildToolpath() {
     if (!scene) return;
     disposeToolpath();
@@ -205,7 +213,10 @@
     for (const kind of KINDS) buffers[kind] = [];
     for (const move of moves) {
       const target = buffers[move.kind] || buffers.cut;
-      target.push(move.from.x, move.from.y, move.from.z, move.to.x, move.to.y, move.to.z);
+      target.push(
+        move.from.x, move.from.y, move.from.z + TOOLPATH_Z_LIFT,
+        move.to.x, move.to.y, move.to.z + TOOLPATH_Z_LIFT
+      );
     }
 
     for (const kind of KINDS) {
@@ -316,7 +327,16 @@
 
     ghostMesh = new THREE.Group();
     const material = new THREE.MeshPhongMaterial({
-      color: 0xf1c331, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false
+      color: 0xf1c331, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false,
+      // Where the source part's real surface and the simulated cut surface
+      // coincide (the common, good case - it means the cut matched the
+      // design), two coplanar meshes at the same depth flicker/z-fight.
+      // polygonOffset nudges this mesh's depth-buffer value, not its actual
+      // geometry, so it reads as sitting cleanly on top without displacing
+      // it from the stock it's supposed to be verified against.
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1
     });
     for (const { position, index } of ghostGeometryData) {
       const geometry = new THREE.BufferGeometry();
@@ -566,7 +586,15 @@
   // shipped) - a heightmap-displaced plate, rebuilt every playback position
   // from buildRoutingHeightmap. See that function's own comment for why a
   // grid is exact for a 2.5D router cut, unlike turning's radius profile.
-  const HEIGHTMAP_MAX_GRID = 160;
+  // Capped resolution is a real tradeoff (this grid is rebuilt on every
+  // scrub frame): too coarse relative to the cutter radius and the swept
+  // capsule's own circular boundary aliases into a visible staircase -
+  // "ridges" that aren't a real machining feature, just quantization at the
+  // cell size buildRoutingHeightmap uses (see its own comment on why the
+  // sweep math itself is otherwise exact). 320 keeps that aliasing below
+  // what's visible at normal zoom for typical FRC-part-sized stock while
+  // staying well inside what the GPU/rebuild-on-scrub cost can absorb.
+  const HEIGHTMAP_MAX_GRID = 320;
   const HEIGHTMAP_MARGIN_FACTOR = 0.06;
 
   function routingCutterRadius(move) {
@@ -632,14 +660,69 @@
     posAttr.needsUpdate = true;
     geometry.computeVertexNormals();
 
-    const solid = new THREE.Mesh(
-      geometry,
-      new THREE.MeshPhongMaterial({ color: 0xb8bcc2, side: THREE.DoubleSide })
-    );
+    const material = new THREE.MeshPhongMaterial({ color: 0xb8bcc2, side: THREE.DoubleSide });
+    const solid = new THREE.Mesh(geometry, material);
+
     stockMesh = new THREE.Group();
     stockMesh.add(solid);
+    stockMesh.add(new THREE.Mesh(
+      buildRoutingStockSkirt(heights, nx, ny, gridMinX, gridMinY, cellSize, floorZ),
+      material
+    ));
     stockMesh.visible = stockVisible;
     scene.add(stockMesh);
+  }
+
+  // The top surface alone is a zero-thickness shell - from the side it reads
+  // as a flat 2D sheet rather than a real block of material. Closes it into
+  // an actual solid: a flat bottom cap at floorZ, plus 4 vertical walls
+  // connecting the (irregular, cut) top edge down to that flat bottom -
+  // sharing exact vertex positions with the top surface's own edge cells
+  // (same gridMinX/cellSize formula updateRoutingStock uses) so there's no
+  // seam gap between this and the heightmap mesh.
+  function buildRoutingStockSkirt(heights, nx, ny, gridMinX, gridMinY, cellSize, floorZ) {
+    const vx = (ix) => gridMinX + cellSize * (ix + 0.5);
+    const vy = (iy) => gridMinY + cellSize * (iy + 0.5);
+    const topAt = (ix, iy) => heights[iy * nx + ix];
+
+    const positions = [];
+    const quad = (a, b, c, d) => {
+      positions.push(...a, ...b, ...c, ...a, ...c, ...d);
+    };
+
+    // Bottom cap.
+    const minX = vx(0), maxX = vx(nx - 1), minY = vy(0), maxY = vy(ny - 1);
+    quad([minX, minY, floorZ], [maxX, minY, floorZ], [maxX, maxY, floorZ], [minX, maxY, floorZ]);
+
+    // -Y and +Y walls.
+    for (let ix = 0; ix < nx - 1; ix += 1) {
+      const x0 = vx(ix), x1 = vx(ix + 1);
+      quad(
+        [x0, minY, floorZ], [x1, minY, floorZ],
+        [x1, minY, topAt(ix + 1, 0)], [x0, minY, topAt(ix, 0)]
+      );
+      quad(
+        [x1, maxY, floorZ], [x0, maxY, floorZ],
+        [x0, maxY, topAt(ix, ny - 1)], [x1, maxY, topAt(ix + 1, ny - 1)]
+      );
+    }
+    // -X and +X walls.
+    for (let iy = 0; iy < ny - 1; iy += 1) {
+      const y0 = vy(iy), y1 = vy(iy + 1);
+      quad(
+        [minX, y1, floorZ], [minX, y0, floorZ],
+        [minX, y0, topAt(0, iy)], [minX, y1, topAt(0, iy + 1)]
+      );
+      quad(
+        [maxX, y0, floorZ], [maxX, y1, floorZ],
+        [maxX, y1, topAt(nx - 1, iy + 1)], [maxX, y0, topAt(nx - 1, iy)]
+      );
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geometry.computeVertexNormals();
+    return geometry;
   }
 
   function updateTool() {

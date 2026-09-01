@@ -646,14 +646,46 @@
 
   let showToolpathModal = false;
   let toolpathModalJob = null;
+  let toolpathView3D = false;
+  let ToolpathSimulator = null;
+  let toolpathSimulator3DLoading = false;
+
   function openToolpathModal(job) {
     if (!job?.gcode) return;
     toolpathModalJob = job;
+    toolpathView3D = false;
     showToolpathModal = true;
   }
+
+  async function loadToolpathSimulator3D() {
+    if (ToolpathSimulator || toolpathSimulator3DLoading) return;
+    toolpathSimulator3DLoading = true;
+    try {
+      // Kept out of this page's normal load path (same reasoning as
+      // /autocam's own dynamic import) - Three.js is only needed once a
+      // completed job's 3D view is actually opened.
+      ToolpathSimulator = (await import('$autocam/components/ToolpathSimulator.svelte')).default;
+    } catch (error) {
+      console.error('Could not load the 3D toolpath simulator:', error);
+      showToastMessage('Could not load the 3D toolpath simulator.', 'error');
+      toolpathView3D = false;
+    } finally {
+      toolpathSimulator3DLoading = false;
+    }
+  }
+
+  async function open3DToolpathModal(job) {
+    if (!job?.gcode) return;
+    toolpathModalJob = job;
+    toolpathView3D = true;
+    showToolpathModal = true;
+    await loadToolpathSimulator3D();
+  }
+
   function closeToolpathModal() {
     showToolpathModal = false;
     toolpathModalJob = null;
+    toolpathView3D = false;
   }
 
   async function sendNotification(type, payload = {}) {
@@ -2059,6 +2091,11 @@
                   <Route size={14} /> View Toolpath
                 </button>
               {/if}
+              {#if camCapable && camJob?.status === 'completed'}
+                <button class="btn btn-secondary btn-sm" on:click={() => open3DToolpathModal(camJob)} title="Show the 3D toolpath simulation">
+                  <Route size={14} /> Show 3D Toolpath
+                </button>
+              {/if}
               <button class="btn btn-secondary btn-sm" on:click={() => installCadStepFile(part)} title="Download STEP file">
                 <Download size={14} /> Install CAD
               </button>
@@ -2277,6 +2314,11 @@
                         <Route size={13} /> View Toolpath
                       </button>
                     {/if}
+                    {#if camCapable && camJob?.status === 'completed'}
+                      <button class="btn btn-secondary btn-sm" on:click={() => open3DToolpathModal(camJob)} title="Show the 3D toolpath simulation">
+                        <Route size={13} /> Show 3D Toolpath
+                      </button>
+                    {/if}
                     <button class="btn btn-secondary btn-sm" on:click={() => installCadStepFile(part)} title="Download STEP file">
                       <Download size={13} /> Install CAD
                     </button>
@@ -2326,7 +2368,7 @@
               {#if part.status === 'pending'}
                 {#if part.workflow === 'router'}
                 <button
-                  class="btn btn-secondary btn-sm"
+                  class="btn btn-primary btn-sm"
                   on:click={async () => { await updatePartStatus(part.id, 'in-progress'); await updateRouterMeta(part, { step: 'cam_ing' }); setLocalStatus(part.id, 'in-progress'); setLocalRouterMeta(part.id, { step: 'cam_ing' }); }}
                   title="Start"
                 >
@@ -2334,7 +2376,7 @@
                 </button>
                 {:else}
                 <button
-                  class="btn btn-secondary btn-sm"
+                  class="btn btn-primary btn-sm"
                   on:click={async () => { await updatePartStatus(part.id, 'in-progress'); setLocalStatus(part.id, 'in-progress'); }}
                   title="Start Work"
                 >
@@ -2353,7 +2395,7 @@
                   {#if !getRouterMeta(part).step || getRouterMeta(part).step === 'cam_ing'}
                   <div class="actions-col">
                     <button
-                      class="btn btn-secondary btn-sm"
+                      class="btn btn-primary btn-sm"
                       on:click={async () => { await updateRouterMeta(part, { step: 'cam_review' }); setLocalRouterMeta(part.id, { step: 'cam_review' }); }}
                       title="CAM Done"
                     >
@@ -2364,7 +2406,7 @@
                   {#if canCamReview}
                     <div class="actions-col">
                       <button
-                        class="btn btn-secondary btn-sm"
+                        class="btn btn-primary btn-sm"
                         on:click={async () => { await updatePartStatus(part.id, 'cammed'); await updateRouterMeta(part, { step: 'cammed' }); setLocalStatus(part.id, 'cammed'); setLocalRouterMeta(part.id, { step: 'cammed' }); }}
                         title={BUTTONS.CAM_REVIEWED}
                       >
@@ -2378,7 +2420,7 @@
                 {#if part.workflow === 'router'}
                   <div class="actions-col">
                     <button
-                      class="btn btn-secondary btn-sm"
+                      class="btn btn-primary btn-sm"
                       on:click={() => markPartMachined(part)}
                       title="Machine"
                     >
@@ -2838,7 +2880,7 @@
     tabindex="0"
     on:keydown={(e) => { if (e.key === 'Escape') { e.preventDefault(); closeToolpathModal(); } }}
   >
-    <div class="modal toolpath-modal" role="dialog" aria-modal="true">
+    <div class="modal toolpath-modal" class:toolpath-modal-3d={toolpathView3D} role="dialog" aria-modal="true">
       <div class="modal-header">
         <h3>Toolpath Preview</h3>
         <button type="button" class="modal-close-button" aria-label="Close dialog" on:click={closeToolpathModal}>
@@ -2846,7 +2888,30 @@
         </button>
       </div>
       <div class="modal-body">
-        <ToolpathViewer gcode={toolpathModalJob.gcode} operationType={toolpathModalJob.operation_type} />
+        {#if toolpathView3D}
+          {#if ToolpathSimulator}
+            <svelte:component
+              this={ToolpathSimulator}
+              gcode={toolpathModalJob.gcode}
+              operationType={toolpathModalJob.operation_type}
+              toolDiameter={Number(toolpathModalJob.params?.toolDiameter) || null}
+              toolSequence={toolpathModalJob.params?.toolSequence || []}
+              stockDiameter={Number(toolpathModalJob.params?.stockDiameter) || null}
+              stockShape={toolpathModalJob.params?.stockShape || 'round'}
+              noseRadius={Number(toolpathModalJob.params?.finishTool?.noseRadius ?? toolpathModalJob.params?.noseRadius) || null}
+              drillDiameter={Number(toolpathModalJob.params?.drilling?.diameter) || null}
+              stepFileName={toolpathModalJob.step_file_name || null}
+              edgeShiftX={Number(toolpathModalJob.stats?.edgeShiftX) || 0}
+              edgeShiftY={Number(toolpathModalJob.stats?.edgeShiftY) || 0}
+              crossSection={toolpathModalJob.stats?.crossSection || null}
+              walls={toolpathModalJob.stats?.walls || []}
+            />
+          {:else}
+            <div class="toolpath-simulator-loading" aria-busy="true"><span class="loading-spinner"></span> Loading 3D toolpath...</div>
+          {/if}
+        {:else}
+          <ToolpathViewer gcode={toolpathModalJob.gcode} operationType={toolpathModalJob.operation_type} />
+        {/if}
       </div>
     </div>
   </div>
@@ -2914,6 +2979,9 @@
   }
 
   .toolpath-modal { width: min(700px, 95vw); max-width: 95vw; }
+  .toolpath-modal-3d { width: min(1100px, 95vw); }
+  .toolpath-simulator-loading { min-height: 320px; display: flex; align-items: center; justify-content: center; gap: 0.65rem; color: var(--text-muted); }
+  .toolpath-simulator-loading .loading-spinner { width: 1.25rem; height: 1.25rem; border-width: 2px; }
 
   .deep-link-highlight {
     animation: deep-link-flash 2.5s ease-out 1;
@@ -2958,7 +3026,15 @@
   }
   .table {
     table-layout: fixed;
-    width: 100%;
+    /* Sized to the sum of each column's own fixed width below, not
+       stretched to fill whatever container width happens to be available -
+       keeps every column's width (and the table's overall size) identical
+       across screen sizes instead of growing/reflowing on a wider monitor. */
+    width: max-content;
+    /* max-content also stops the table filling its container, which would
+       otherwise leave it pinned flush-left with a large empty gap on wide
+       screens - center it instead. */
+    margin: 0 auto;
   }
   .table th.workflow-col,
   .table td.workflow-col {
@@ -2987,11 +3063,13 @@
     box-sizing: border-box;
     display: flex;
     align-items: flex-start;
+    justify-content: center;
     min-height: 2.75rem;
     width: 100%;
   }
   .metadata-status {
     flex-direction: column;
+    align-items: center;
     gap: 0.65rem;
   }
 
@@ -3001,6 +3079,7 @@
   .metadata-created {
     flex-wrap: wrap;
     align-content: flex-start;
+    justify-content: center;
     gap: 0.3rem 0.45rem;
   }
   .metadata-col :global(.due-date) { width: 100%; }
@@ -3013,7 +3092,11 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    vertical-align: middle;
+    /* Matches the row's other cells (metadata-col, name-col) - middle
+       alignment made this float oddly against neighboring cells whenever a
+       row grew taller than one line (a name with badges, stacked action
+       buttons, etc). */
+    vertical-align: top;
   }
   .table th.actions-table-col,
   .table td.actions-table-col {
