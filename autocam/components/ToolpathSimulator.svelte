@@ -113,8 +113,12 @@
   function createStockMaterial(color = 0xb8bcc2) {
     return new THREE.MeshStandardMaterial({
       color,
-      metalness: 0.75,
-      roughness: 0.42,
+      // Lower metalness/higher roughness than a mirror-polish part - with
+      // no environment map, a highly metallic, low-roughness surface under
+      // a single strong directional key light reads as an overblown hard
+      // specular hotspot rather than machined aluminum's actual soft sheen.
+      metalness: 0.6,
+      roughness: 0.55,
       side: THREE.DoubleSide
     });
   }
@@ -500,7 +504,7 @@
     updateRoutingStock();
   }
 
-  // Tube stock (rotary 4th-axis drilling): a static box in the tube's own
+  // Tube stock (3-axis router, manual flip between faces): a static box in the tube's own
   // local frame (see projectTubestockToolpath's own doc comment for why
   // this isn't animated as a literal rotation), with each wall built as a
   // flat surface that a hole is cut into the instant playback reaches its
@@ -609,10 +613,14 @@
   // capsule's own circular boundary aliases into a visible staircase -
   // "ridges" that aren't a real machining feature, just quantization at the
   // cell size buildRoutingHeightmap uses (see its own comment on why the
-  // sweep math itself is otherwise exact). 320 keeps that aliasing below
-  // what's visible at normal zoom for typical FRC-part-sized stock while
-  // staying well inside what the GPU/rebuild-on-scrub cost can absorb.
-  const HEIGHTMAP_MAX_GRID = 320;
+  // sweep math itself is otherwise exact). 320 visibly faceted small
+  // features (a #10 clearance hole, ~0.2" diameter) on stock much wider
+  // than that - the width/HEIGHTMAP_MAX_GRID performance floor was
+  // overriding the tool-diameter-driven targetCellSize below it, capping
+  // resolution well below what a small hole needs even though the sweep
+  // math itself has plenty of headroom left. 480 still stays well inside
+  // what the GPU/rebuild-on-scrub cost can absorb.
+  const HEIGHTMAP_MAX_GRID = 480;
   const HEIGHTMAP_MARGIN_FACTOR = 0.06;
 
   function routingCutterRadius(move) {
@@ -1000,7 +1008,7 @@
         // direction) plus a stronger key light and a dimmer fill from the
         // opposite side so no face of the part ever goes fully black.
         scene.add(new THREE.HemisphereLight(0xf5f3ea, 0x35342c, 0.55));
-        const keyLight = new THREE.DirectionalLight(0xffffff, 1.6);
+        const keyLight = new THREE.DirectionalLight(0xffffff, 1.2);
         keyLight.position.set(3, -4, 5);
         scene.add(keyLight);
         const fillLight = new THREE.DirectionalLight(0xffffff, 0.5);
