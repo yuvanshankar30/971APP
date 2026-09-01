@@ -1890,7 +1890,7 @@
           <span class="status-badge {getBadgeClass(part.status, getRouterMeta(part))}">{getStatusDisplay(part)}</span>
         </div>
 
-        <PartNotes item={part} table="parts" on:update={() => loadParts()} />
+        <PartNotes item={part} table="parts" inline on:update={() => loadParts()} />
 
         <div class="part-card-meta">
           <span class={`tag workflow-tag ${getWorkflowClass(part.workflow)}`}>
@@ -2132,7 +2132,7 @@
                   <span class="tag tag-warning" title="The uploaded STEP file failed validation">⚠ Bad STEP</span>
                 {/if}
               </div>
-              <PartNotes item={part} table="parts" on:update={() => loadParts()} />
+              <PartNotes item={part} table="parts" inline on:update={() => loadParts()} />
               {#if part.assigned_to}
                  <span class="assigned-user-badge pill pill-soft pill-assigned">
                    {assignedUserNames[part.assigned_to] || 'Assigned'}
