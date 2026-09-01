@@ -2278,7 +2278,7 @@
           <th class="project-col mono" class:hidden={assignMode}>Project ID</th>
           <th class="quantity-col" class:hidden={assignMode}>Qty</th>
           <th class="stock-col" class:hidden={assignMode}>Stock</th>
-          <th class="metadata-col status-col">Status</th>
+          <th class="metadata-col">Status</th>
           <th class="metadata-col" class:hidden={assignMode}>Due</th>
           <th class="metadata-col" class:hidden={assignMode}>Created</th>
           <th class="requester-col" class:hidden={assignMode}>Requested By</th>
@@ -2337,7 +2337,7 @@
             <td class="project-col mono" class:hidden={assignMode}>{part.project_id}</td>
             <td class="quantity-col" class:hidden={assignMode}>{getQuantitySummary(part)}</td>
             <td class="stock-col text-muted" class:hidden={assignMode}>{part.stock_assignment || '-'}</td>
-            <td class="metadata-col status-col">
+            <td class="metadata-col">
               <div class="metadata-value metadata-status">
                 <span class="status-badge {getBadgeClass(part.status, getRouterMeta(part))} status-table status-fade">{getStatusDisplay(part)}</span>
                 {#if part.workflow === 'router' && getRouterProgressSummary(part)}
@@ -3263,21 +3263,16 @@
   .table td.stock-col {
     width: 7.5rem;
   }
+  /* Status, Due, and Created all share this width so the three columns
+     stay horizontally even with equal spacing - sized to the longest real
+     content across the three ("CAM Review Pending" measures ~160px
+     rendered), not just Status's own longest label. */
   .table th.metadata-col,
   .table td.metadata-col {
-    width: 8rem;
-    min-width: 8rem;
-    max-width: 8rem;
-    vertical-align: top;
-  }
-  /* Status specifically needs more room than Due/Created - the real
-     longest status label ("CAM Review Pending") measures ~160px rendered,
-     which never fit in the shared metadata-col width. */
-  .table th.status-col,
-  .table td.status-col {
     width: 12rem;
     min-width: 12rem;
     max-width: 12rem;
+    vertical-align: top;
   }
   .metadata-value {
     box-sizing: border-box;
@@ -3325,13 +3320,21 @@
     right: 0;
     width: 15.5rem;
     min-width: 15.5rem;
-    background: var(--surface-1);
     box-shadow: -1px 0 0 var(--border);
   }
   .table thead th.actions-table-col {
+    /* Match the rest of the header bar (.table thead th's own
+       var(--background)) instead of the body's sticky-cover shade below -
+       otherwise Actions reads as a different color than Name/Workflow/etc
+       on the header row. */
+    background: var(--background);
     z-index: 3;
   }
   .table tbody td.actions-table-col {
+    /* Opaque cover so scrolled-under cell content doesn't show through
+       this sticky column in the body rows - the header has no scrolled
+       content beneath it, so it doesn't need this. */
+    background: var(--surface-1);
     z-index: 2;
   }
 
