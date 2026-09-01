@@ -46,14 +46,33 @@ function dwellLine(isWinCNC, seconds, comment) {
   return `G04 ${word}${fmt(seconds, 1)} (${comment})`;
 }
 
+/** Normalize rotary angles so 0, 360, and -360 identify the same tube face. */
+export function normalizeTubestockFaceAngle(angleDeg) {
+  const normalized = ((Number(angleDeg) || 0) % 360 + 360) % 360;
+  return Number(normalized.toFixed(4));
+}
+
+/** Human-readable face name for standard rectangular tube orientations. */
+export function tubestockFaceLabel(angleDeg) {
+  const angle = normalizeTubestockFaceAngle(angleDeg);
+  const cardinalLabels = {
+    0: 'Top',
+    90: 'Right side',
+    180: 'Bottom',
+    270: 'Left side'
+  };
+  return cardinalLabels[angle] || `Face A${angle}`;
+}
+
 /** Name a separately-runnable program for one rotary-indexed tube face. */
 export function tubestockFaceFileName(gcodeFileName, angleDeg) {
   const source = String(gcodeFileName || 'tube-stock.ngc');
   const extensionMatch = source.match(/(\.[a-z0-9]+)$/i);
   const extension = extensionMatch?.[1] || '.ngc';
   const base = extensionMatch ? source.slice(0, -extension.length) : source;
-  const angle = String(Number(angleDeg) || 0).replace(/\./g, '_').replace(/-/g, 'neg');
-  return `${base}-face-a${angle}${extension}`;
+  const angle = String(normalizeTubestockFaceAngle(angleDeg)).replace(/\./g, '_');
+  const label = tubestockFaceLabel(angleDeg).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  return `${base}-${label}-a${angle}${extension}`;
 }
 
 /**
@@ -94,7 +113,7 @@ function wallsWithHolesByFace(walls) {
   const faces = new Map();
   for (const wall of walls) {
     if (!wall.holes?.length) continue;
-    const angleDeg = Number(wall.angleDeg) || 0;
+    const angleDeg = normalizeTubestockFaceAngle(wall.angleDeg);
     if (!faces.has(angleDeg)) faces.set(angleDeg, []);
     faces.get(angleDeg).push(...wall.holes);
   }
@@ -103,7 +122,7 @@ function wallsWithHolesByFace(walls) {
     .map(([angleDeg, holes]) => ({ angleDeg, holes }));
 }
 
-function generateProgram(walls, params, { faceAngleDeg = null, programNumber }) {
+function generateProgram(walls, params, { faceAngleDeg = null, faceLabel = null, programNumber }) {
   const {
     holeDepth,
     safeZ = 0.25,
@@ -118,14 +137,15 @@ function generateProgram(walls, params, { faceAngleDeg = null, programNumber }) 
   const totalHoles = walls.reduce((sum, wall) => sum + wall.holes.length, 0);
 
   const lines = [...HEADER_WARNING, ''];
-  lines.push(faceAngleDeg === null
+  const faceDescription = faceAngleDeg === null ? null : `${faceLabel || tubestockFaceLabel(faceAngleDeg)} (A${fmt(faceAngleDeg, 1)})`;
+  lines.push(faceDescription === null
     ? '(*** TUBE STOCK: rotary 4th-axis indexed drilling - verify A-axis ***)'
-    : `(** TUBE STOCK FACE A${fmt(faceAngleDeg, 1)}: rotary 4th-axis indexed drilling - verify A-axis **)`);
+    : `(** TUBE STOCK ${faceDescription}: rotary 4th-axis indexed drilling - verify A-axis **)`);
   lines.push('(direction/rotary-center offset and Z=0 reference against the real machine)');
   lines.push('(before running - see tubestock.js file header. Round holes only, each)');
   lines.push('(drilled straight in from whichever wall it is on.)');
   lines.push('%');
-  lines.push(`O${programNumber} (AUTOCAM TUBE STOCK${faceAngleDeg === null ? '' : ` FACE A${fmt(faceAngleDeg, 1)}`})`);
+  lines.push(`O${programNumber} (AUTOCAM TUBE STOCK${faceDescription === null ? '' : ` ${faceDescription}`})`);
   if (isWinCNC) {
     lines.push(units === 'mm' ? 'G22 (metric - mm; NOTE: G21 means cm on WinCNC, G22 is used for mm here)' : 'G20 (inch)');
   } else {
@@ -234,12 +254,15 @@ export function generateTubestockGcode(tubeFeatures, params = {}) {
 
   const combined = generateProgram(walls, params, { programNumber });
   const facePrograms = wallsWithHolesByFace(walls).map((wall, index) => {
+    const label = tubestockFaceLabel(wall.angleDeg);
     const faceProgram = generateProgram([wall], params, {
       faceAngleDeg: wall.angleDeg,
+      faceLabel: label,
       programNumber: Number(programNumber) + index
     });
     return {
       angleDeg: wall.angleDeg,
+      label,
       holeCount: faceProgram.totalHoles,
       programNumber: Number(programNumber) + index,
       gcode: faceProgram.gcode

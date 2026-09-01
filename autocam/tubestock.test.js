@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateTubestockGcode } from './tubestock.js';
+import { generateTubestockGcode, tubestockFaceFileName } from './tubestock.js';
 
 // Synthetic tube features matching extractTubeFeaturesFromMeshes' output
 // shape directly - 2 holes on one wall (0.25"), 1 on another (0.375"), 2
@@ -29,10 +29,11 @@ describe('generateTubestockGcode', () => {
     const result = generateTubestockGcode(twoWallTube(), baseParams);
     expect(result.gcodeFiles).toHaveLength(2);
     expect(result.gcodeFiles.map((file) => file.angleDeg)).toEqual([0, 90]);
+    expect(result.gcodeFiles.map((file) => file.label)).toEqual(['Top', 'Right side']);
     expect(result.stats.facePrograms).toHaveLength(2);
-    expect(result.gcodeFiles[0].gcode).toContain('FACE A0.0');
+    expect(result.gcodeFiles[0].gcode).toContain('Top (A0.0)');
     expect(result.gcodeFiles[0].gcode).not.toContain('A90.0');
-    expect(result.gcodeFiles[1].gcode).toContain('FACE A90.0');
+    expect(result.gcodeFiles[1].gcode).toContain('Right side (A90.0)');
     expect(result.gcodeFiles[1].gcode).not.toContain('A0.0');
     expect(result.gcodeFiles.every((file) => file.gcode.includes('M30 (program end)'))).toBe(true);
   });
@@ -48,6 +49,23 @@ describe('generateTubestockGcode', () => {
     const result = generateTubestockGcode(fourFaceTube, baseParams);
     expect(result.gcodeFiles).toHaveLength(4);
     expect(result.gcodeFiles.map((file) => file.angleDeg)).toEqual([0, 90, 180, 270]);
+    expect(result.gcodeFiles.map((file) => file.label)).toEqual(['Top', 'Right side', 'Bottom', 'Left side']);
+  });
+
+  it('emits one program for equivalent rotary angles on the same face', () => {
+    const duplicateTop = {
+      tubeLength: 12,
+      walls: [
+        { angleDeg: 0, holes: [{ position: 2, lateralOffset: 0, diameter: 0.25 }] },
+        { angleDeg: 360, holes: [{ position: 8, lateralOffset: 0, diameter: 0.25 }] }
+      ]
+    };
+    const result = generateTubestockGcode(duplicateTop, baseParams);
+    expect(result.gcodeFiles).toHaveLength(1);
+    expect(result.gcodeFiles[0].label).toBe('Top');
+    expect(result.gcodeFiles[0].gcode).toContain('X2.0000');
+    expect(result.gcodeFiles[0].gcode).toContain('X8.0000');
+    expect(tubestockFaceFileName('tube.ngc', 360)).toBe('tube-top-a0.ngc');
   });
 
   it('rejects tube features with no walls', () => {
