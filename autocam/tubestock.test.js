@@ -25,6 +25,31 @@ describe('generateTubestockGcode', () => {
     expect(result.gcode).toContain('%');
   });
 
+  it('creates one self-contained program for each drilled face', () => {
+    const result = generateTubestockGcode(twoWallTube(), baseParams);
+    expect(result.gcodeFiles).toHaveLength(2);
+    expect(result.gcodeFiles.map((file) => file.angleDeg)).toEqual([0, 90]);
+    expect(result.stats.facePrograms).toHaveLength(2);
+    expect(result.gcodeFiles[0].gcode).toContain('FACE A0.0');
+    expect(result.gcodeFiles[0].gcode).not.toContain('A90.0');
+    expect(result.gcodeFiles[1].gcode).toContain('FACE A90.0');
+    expect(result.gcodeFiles[1].gcode).not.toContain('A0.0');
+    expect(result.gcodeFiles.every((file) => file.gcode.includes('M30 (program end)'))).toBe(true);
+  });
+
+  it('creates four files when all four tube faces contain holes', () => {
+    const fourFaceTube = {
+      tubeLength: 12,
+      walls: [0, 90, 180, 270].map((angleDeg, index) => ({
+        angleDeg,
+        holes: [{ position: index + 1, lateralOffset: 0, diameter: 0.25 }]
+      }))
+    };
+    const result = generateTubestockGcode(fourFaceTube, baseParams);
+    expect(result.gcodeFiles).toHaveLength(4);
+    expect(result.gcodeFiles.map((file) => file.angleDeg)).toEqual([0, 90, 180, 270]);
+  });
+
   it('rejects tube features with no walls', () => {
     expect(() => generateTubestockGcode({ walls: [] }, baseParams)).toThrow(/at least one wall/);
   });

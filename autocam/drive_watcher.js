@@ -426,23 +426,31 @@ export async function runDriveWatcherSweep({ appOrigin } = {}) {
  * must not affect the job's status or the response to whoever triggered
  * generation. Safe with zero configuration (returns a clear skip reason).
  *
- * @param {Object} job - a cam_jobs row with gcode/gcode_file_name populated
+ * @param {Object} job - a cam_jobs row with gcode/gcode_file_name populated;
+ *   tube jobs may additionally supply gcode_files for one output per face.
  * @param {Object} machine - the linked cam_machines row (needs drive_output_folder_id)
  */
 export async function deliverJobToDrive(job, machine) {
   if (!machine?.drive_output_folder_id) return { delivered: false, reason: 'not_configured' };
   const serviceAccountJson = env.GOOGLE_DRIVE_SERVICE_ACCOUNT_KEY;
   if (!serviceAccountJson) return { delivered: false, reason: 'not_configured' };
-  if (!job?.gcode) return { delivered: false, reason: 'no_gcode' };
+  const outputs = Array.isArray(job?.gcode_files) && job.gcode_files.length
+    ? job.gcode_files
+    : (job?.gcode ? [{ gcode: job.gcode, gcode_file_name: job.gcode_file_name }] : []);
+  if (!outputs.length) return { delivered: false, reason: 'no_gcode' };
 
   try {
     const accessToken = await getServiceAccountAccessToken(serviceAccountJson);
     const driveId = await getFileDriveId(accessToken, machine.drive_output_folder_id);
     const dateFolderName = todayDriveDateFolderName();
     const dateFolderId = await findOrCreateDateFolder(accessToken, machine.drive_output_folder_id, dateFolderName, driveId);
-    const filename = driveDeliveryFileName(job, machine);
-    await uploadFileToDriveFolder(accessToken, dateFolderId, filename, job.gcode, 'text/plain');
-    return { delivered: true, dateFolder: dateFolderName, filename };
+    const filenames = [];
+    for (const output of outputs) {
+      const filename = driveDeliveryFileName({ ...job, ...output }, machine);
+      await uploadFileToDriveFolder(accessToken, dateFolderId, filename, output.gcode, 'text/plain');
+      filenames.push(filename);
+    }
+    return { delivered: true, dateFolder: dateFolderName, filenames };
   } catch (e) {
     const message = e?.message || String(e);
     console.error(`Drive watcher: delivery failed for job ${job.id} (machine "${machine.name}")`, message);

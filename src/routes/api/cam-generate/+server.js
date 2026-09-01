@@ -4,7 +4,7 @@ import { PUBLIC_SUPABASE_ANON_KEY, PUBLIC_SUPABASE_URL, PUBLIC_APP_ORIGIN, PUBLI
 import { readStepMeshes, extractTurningProfileFromMeshes, extractRoutingContoursFromMeshes, extractTubeFeaturesFromMeshes } from '$autocam/stepProfile.js';
 import { generateTurningGcode } from '$autocam/turning.js';
 import { generateRoutingGcode } from '$autocam/routing.js';
-import { generateTubestockGcode } from '$autocam/tubestock.js';
+import { generateTubestockGcode, tubestockFaceFileName } from '$autocam/tubestock.js';
 import { deliverJobToDrive } from '$autocam/drive_watcher.js';
 // Vite-built asset URL for occt-import-js's WASM binary - the same one
 // CadViewer.svelte already fetches successfully client-side. Fetching it
@@ -202,6 +202,15 @@ export async function POST({ request, url }) {
       result = generateRoutingGcode(contours, params);
     }
 
+    const gcodeFileName = job.gcode_file_name || 'output.ngc';
+    const facePrograms = (result.gcodeFiles || []).map((file) => ({
+      ...file,
+      fileName: tubestockFaceFileName(gcodeFileName, file.angleDeg)
+    }));
+    const stats = facePrograms.length
+      ? { ...result.stats, facePrograms }
+      : result.stats;
+
     // Conditioned on status still being 'processing' (compare-and-swap) so a
     // cancel that lands in the split second between the last check above and
     // this write can never get silently clobbered back to "completed". No
@@ -212,9 +221,9 @@ export async function POST({ request, url }) {
       .update({
         status: 'completed',
         gcode: result.gcode,
-        gcode_file_name: job.gcode_file_name || 'output.ngc',
+        gcode_file_name: gcodeFileName,
         params, // includes any auto-derived values (e.g. targetDepth from STEP thickness)
-        stats: result.stats,
+        stats,
         progress: 100,
         progress_message: 'Done'
       })
@@ -228,11 +237,16 @@ export async function POST({ request, url }) {
     // 'completed' status or this response. See deliverJobToDrive's own doc
     // comment and autocam/docs/direct-machine-file-transfer-plan.md.
     await deliverJobToDrive(
-      { id: jobId, gcode: result.gcode, gcode_file_name: job.gcode_file_name || 'output.ngc' },
+      {
+        id: jobId,
+        gcode: result.gcode,
+        gcode_file_name: gcodeFileName,
+        gcode_files: facePrograms.map((file) => ({ gcode: file.gcode, gcode_file_name: file.fileName }))
+      },
       job.cam_machines
     );
 
-    return json({ success: true, jobId, stats: result.stats });
+    return json({ success: true, jobId, stats });
   } catch (e) {
     if (e instanceof CancelledError) {
       // The job's status already reflects whatever cancelled it (set by the

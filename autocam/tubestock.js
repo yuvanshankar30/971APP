@@ -46,6 +46,16 @@ function dwellLine(isWinCNC, seconds, comment) {
   return `G04 ${word}${fmt(seconds, 1)} (${comment})`;
 }
 
+/** Name a separately-runnable program for one rotary-indexed tube face. */
+export function tubestockFaceFileName(gcodeFileName, angleDeg) {
+  const source = String(gcodeFileName || 'tube-stock.ngc');
+  const extensionMatch = source.match(/(\.[a-z0-9]+)$/i);
+  const extension = extensionMatch?.[1] || '.ngc';
+  const base = extensionMatch ? source.slice(0, -extension.length) : source;
+  const angle = String(Number(angleDeg) || 0).replace(/\./g, '_').replace(/-/g, 'neg');
+  return `${base}-face-a${angle}${extension}`;
+}
+
 /**
  * Groups every hole across every wall by drill diameter (largest first,
  * matching routing.js's multi-tool convention: primary/most-common tool
@@ -78,6 +88,103 @@ function groupHolesByDiameter(walls) {
       diameter,
       holes: [...holes].sort((a, b) => (a.angleDeg - b.angleDeg) || (a.position - b.position) || (a.lateralOffset - b.lateralOffset))
     }));
+}
+
+function wallsWithHolesByFace(walls) {
+  const faces = new Map();
+  for (const wall of walls) {
+    if (!wall.holes?.length) continue;
+    const angleDeg = Number(wall.angleDeg) || 0;
+    if (!faces.has(angleDeg)) faces.set(angleDeg, []);
+    faces.get(angleDeg).push(...wall.holes);
+  }
+  return [...faces.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([angleDeg, holes]) => ({ angleDeg, holes }));
+}
+
+function generateProgram(walls, params, { faceAngleDeg = null, programNumber }) {
+  const {
+    holeDepth,
+    safeZ = 0.25,
+    feedRate = 8,
+    spindleSpeed = 8000,
+    spindleDwellSeconds = 2,
+    controller = 'linuxcnc',
+    units = 'in'
+  } = params;
+  const isWinCNC = controller === 'wincnc';
+  const groups = groupHolesByDiameter(walls);
+  const totalHoles = walls.reduce((sum, wall) => sum + wall.holes.length, 0);
+
+  const lines = [...HEADER_WARNING, ''];
+  lines.push(faceAngleDeg === null
+    ? '(*** TUBE STOCK: rotary 4th-axis indexed drilling - verify A-axis ***)'
+    : `(** TUBE STOCK FACE A${fmt(faceAngleDeg, 1)}: rotary 4th-axis indexed drilling - verify A-axis **)`);
+  lines.push('(direction/rotary-center offset and Z=0 reference against the real machine)');
+  lines.push('(before running - see tubestock.js file header. Round holes only, each)');
+  lines.push('(drilled straight in from whichever wall it is on.)');
+  lines.push('%');
+  lines.push(`O${programNumber} (AUTOCAM TUBE STOCK${faceAngleDeg === null ? '' : ` FACE A${fmt(faceAngleDeg, 1)}`})`);
+  if (isWinCNC) {
+    lines.push(units === 'mm' ? 'G22 (metric - mm; NOTE: G21 means cm on WinCNC, G22 is used for mm here)' : 'G20 (inch)');
+  } else {
+    lines.push(units === 'mm' ? 'G21 (metric)' : 'G20 (inch)');
+  }
+  lines.push('G90 (absolute)');
+  lines.push('G94 (feed per minute)');
+  if (isWinCNC) {
+    lines.push('(*** VERIFY MACHINE ZERO BEFORE RUNNING ***)');
+    lines.push('(Jog to the tube face/rotary-center origin and zero the controller (G92) BEFORE)');
+    lines.push('(running this file - WinCNC has no G54-style stored work offset this program)');
+    lines.push('(can select for you; it has to be set interactively, right before.)');
+  } else {
+    lines.push('G54 (work offset - verify before running)');
+    lines.push('G80 G40 G49 (cancel canned cycle / cutter comp / tool length offset - defensive, in case a prior program on this machine left one active)');
+  }
+
+  lines.push('(--- TOOL PLAN - stage these before starting ---)');
+  groups.forEach((group, index) => {
+    lines.push(`(  ${index + 1}. ${fmt(group.diameter, 3)}" drill (T${index + 1}) - ${group.holes.length} hole${group.holes.length === 1 ? '' : 's'} )`);
+  });
+
+  let toolChanges = 0;
+  groups.forEach((group, toolIndex) => {
+    if (toolIndex === 0) {
+      lines.push(`(--- TOOL 1: ${fmt(group.diameter, 3)}" drill (T1) - load before starting ---)`);
+      lines.push(`S${spindleSpeed} M03 (spindle on)`);
+      if (spindleDwellSeconds > 0) lines.push(dwellLine(isWinCNC, spindleDwellSeconds, 'wait for spindle to reach speed'));
+    } else {
+      toolChanges += 1;
+      lines.push('G00 Z' + fmt(safeZ) + ' (retract clear before tool change)');
+      lines.push('M05 (spindle off)');
+      lines.push(pauseLine(isWinCNC, `TOOL CHANGE: load ${fmt(group.diameter, 3)}" drill - T${toolIndex + 1}, then RE-TOUCH OFF Z0 before resuming - no automatic tool length compensation assumed`));
+      lines.push(`S${spindleSpeed} M03 (spindle back on)`);
+      if (spindleDwellSeconds > 0) lines.push(dwellLine(isWinCNC, spindleDwellSeconds, 'wait for spindle to reach speed'));
+    }
+
+    let currentAngle = null;
+    for (const hole of group.holes) {
+      if (hole.angleDeg !== currentAngle) {
+        lines.push(`G00 Z${fmt(safeZ)} (retract clear before indexing)`);
+        lines.push(`G00 A${fmt(hole.angleDeg, 1)} (index rotary axis to this wall)`);
+        currentAngle = hole.angleDeg;
+      }
+      lines.push(`G00 X${fmt(hole.position)} Y${fmt(hole.lateralOffset)} (rapid to hole position)`);
+      lines.push(`G00 Z${fmt(safeZ)} (rapid to clearance above wall)`);
+      lines.push(`G01 Z${fmt(-holeDepth)} F${fmt(feedRate, 2)} (drill)`);
+      lines.push(`G00 Z${fmt(safeZ)} (retract)`);
+    }
+  });
+
+  lines.push(`G00 Z${fmt(safeZ)} (final retract)`);
+  lines.push('M05 (spindle off)');
+  lines.push(isWinCNC ? '(PROGRAM END)' : 'M30 (program end)');
+  if (!isWinCNC) lines.push('%');
+
+  let gcode = lines.join('\n');
+  if (isWinCNC) gcode = gcode.replace(/\(/g, '[').replace(/\)/g, ']');
+  return { gcode, totalHoles, toolsUsed: groups.length, toolChanges };
 }
 
 /**
@@ -125,77 +232,23 @@ export function generateTubestockGcode(tubeFeatures, params = {}) {
   if (!holeDepth || holeDepth <= 0) throw new Error('holeDepth is required and must be > 0');
   if (safeZ <= 0) throw new Error('safeZ must be > 0');
 
-  const isWinCNC = controller === 'wincnc';
-  const groups = groupHolesByDiameter(walls);
-
-  const lines = [...HEADER_WARNING, ''];
-  lines.push('(*** TUBE STOCK: rotary 4th-axis indexed drilling - verify A-axis ***)');
-  lines.push('(direction/rotary-center offset and Z=0 reference against the real machine)');
-  lines.push('(before running - see tubestock.js file header. Round holes only, each)');
-  lines.push('(drilled straight in from whichever wall it is on.)');
-  lines.push('%');
-  lines.push(`O${programNumber} (AUTOCAM TUBE STOCK)`);
-  if (isWinCNC) {
-    lines.push(units === 'mm' ? 'G22 (metric - mm; NOTE: G21 means cm on WinCNC, G22 is used for mm here)' : 'G20 (inch)');
-  } else {
-    lines.push(units === 'mm' ? 'G21 (metric)' : 'G20 (inch)');
-  }
-  lines.push('G90 (absolute)');
-  lines.push('G94 (feed per minute)');
-  if (isWinCNC) {
-    lines.push('(*** VERIFY MACHINE ZERO BEFORE RUNNING ***)');
-    lines.push('(Jog to the tube face/rotary-center origin and zero the controller (G92) BEFORE)');
-    lines.push('(running this file - WinCNC has no G54-style stored work offset this program)');
-    lines.push('(can select for you; it has to be set interactively, right before.)');
-  } else {
-    lines.push('G54 (work offset - verify before running)');
-    lines.push('G80 G40 G49 (cancel canned cycle / cutter comp / tool length offset - defensive, in case a prior program on this machine left one active)');
-  }
-
-  lines.push('(--- TOOL PLAN - stage these before starting ---)');
-  groups.forEach((g, i) => {
-    lines.push(`(  ${i + 1}. ${fmt(g.diameter, 3)}" drill (T${i + 1}) - ${g.holes.length} hole${g.holes.length === 1 ? '' : 's'} )`);
+  const combined = generateProgram(walls, params, { programNumber });
+  const facePrograms = wallsWithHolesByFace(walls).map((wall, index) => {
+    const faceProgram = generateProgram([wall], params, {
+      faceAngleDeg: wall.angleDeg,
+      programNumber: Number(programNumber) + index
+    });
+    return {
+      angleDeg: wall.angleDeg,
+      holeCount: faceProgram.totalHoles,
+      programNumber: Number(programNumber) + index,
+      gcode: faceProgram.gcode
+    };
   });
-
-  let toolChanges = 0;
-  groups.forEach((group, toolIndex) => {
-    if (toolIndex === 0) {
-      lines.push(`(--- TOOL 1: ${fmt(group.diameter, 3)}" drill (T1) - load before starting ---)`);
-      lines.push(`S${spindleSpeed} M03 (spindle on)`);
-      if (spindleDwellSeconds > 0) lines.push(dwellLine(isWinCNC, spindleDwellSeconds, 'wait for spindle to reach speed'));
-    } else {
-      toolChanges += 1;
-      lines.push('G00 Z' + fmt(safeZ) + ' (retract clear before tool change)');
-      lines.push('M05 (spindle off)');
-      lines.push(pauseLine(isWinCNC, `TOOL CHANGE: load ${fmt(group.diameter, 3)}" drill - T${toolIndex + 1}, then RE-TOUCH OFF Z0 before resuming - no automatic tool length compensation assumed`));
-      lines.push(`S${spindleSpeed} M03 (spindle back on)`);
-      if (spindleDwellSeconds > 0) lines.push(dwellLine(isWinCNC, spindleDwellSeconds, 'wait for spindle to reach speed'));
-    }
-
-    let currentAngle = null;
-    for (const hole of group.holes) {
-      if (hole.angleDeg !== currentAngle) {
-        lines.push(`G00 Z${fmt(safeZ)} (retract clear before indexing)`);
-        lines.push(`G00 A${fmt(hole.angleDeg, 1)} (index rotary axis to this wall)`);
-        currentAngle = hole.angleDeg;
-      }
-      lines.push(`G00 X${fmt(hole.position)} Y${fmt(hole.lateralOffset)} (rapid to hole position)`);
-      lines.push(`G00 Z${fmt(safeZ)} (rapid to clearance above wall)`);
-      lines.push(`G01 Z${fmt(-holeDepth)} F${fmt(feedRate, 2)} (drill)`);
-      lines.push(`G00 Z${fmt(safeZ)} (retract)`);
-    }
-  });
-
-  lines.push(`G00 Z${fmt(safeZ)} (final retract)`);
-  lines.push('M05 (spindle off)');
-  lines.push(isWinCNC ? '(PROGRAM END)' : 'M30 (program end)');
-  if (!isWinCNC) lines.push('%');
-
-  let gcode = lines.join('\n');
-  if (isWinCNC) gcode = gcode.replace(/\(/g, '[').replace(/\)/g, ']');
 
   return {
-    gcode,
+    gcode: combined.gcode,
+    gcodeFiles: facePrograms,
     stats: {
       tubeLength: tubeFeatures.tubeLength ?? null,
       // Echoed straight from extractTubeFeaturesFromMeshes so a client-side
@@ -204,10 +257,11 @@ export function generateTubestockGcode(tubeFeatures, params = {}) {
       // same reasoning as routing.js's stats.edgeShiftX/edgeShiftY.
       crossSection: tubeFeatures.crossSection ?? null,
       walls,
-      wallsUsed: [...new Set(groups.flatMap((g) => g.holes.map((h) => h.angleDeg)))].length,
+      wallsUsed: facePrograms.length,
       totalHoles,
-      toolsUsed: groups.length,
-      toolChanges
+      toolsUsed: combined.toolsUsed,
+      toolChanges: combined.toolChanges,
+      facePrograms
     }
   };
 }

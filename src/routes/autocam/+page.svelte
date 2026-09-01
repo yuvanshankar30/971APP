@@ -32,10 +32,12 @@
     camJobStatusLabel,
     jobDisplayName,
     downloadGcodeBlob,
+    downloadGcodeText,
     downloadStepFile,
     partHasStepFile,
     CAM_GCODE_FORMAT
   } from '$autocam/camJobs.js';
+  import { tubestockFaceFileName } from '$autocam/tubestock.js';
   import { Cpu, Upload, Package, Settings, Download, AlertTriangle, X, Link as LinkIcon, Plus, Wrench, Layers, CheckCircle2, Loader2, Search, Filter, Box, Route, ExternalLink, Copy } from 'lucide-svelte';
 
   let user = null;
@@ -720,6 +722,14 @@
   function operationLabel(operationType) {
     return OPERATION_LABEL[operationType] || operationType || '—';
   }
+  function tubeFaceFileName(job, faceProgram) {
+    return faceProgram.fileName || tubestockFaceFileName(job.gcode_file_name, faceProgram.angleDeg);
+  }
+
+  function downloadTubeFaceProgram(job, faceProgram) {
+    downloadGcodeText(faceProgram.gcode, tubeFaceFileName(job, faceProgram));
+  }
+
   const OPERATION_TAG_CLASS = { turning: 'tag-season', milling: 'tag-mentor', tubestock: 'tag-9584' };
   function operationTagClass(operationType) {
     return OPERATION_TAG_CLASS[operationType] || 'tag-971';
@@ -1159,6 +1169,18 @@
                     <button class="btn btn-secondary btn-sm" title={job.gcode_file_name || 'output.ngc'} on:click={() => downloadGcodeBlob(job)}>
                       <Download size={14} /> Install NGC
                     </button>
+                    {#if job.operation_type === 'tubestock' && job.stats?.facePrograms?.length}
+                      <details class="tube-face-files">
+                        <summary class="btn btn-secondary btn-sm"><Download size={14} /> Face files ({job.stats.facePrograms.length})</summary>
+                        <div class="tube-face-files-list">
+                          {#each job.stats.facePrograms as faceProgram}
+                            <button class="btn btn-secondary btn-sm" title={tubeFaceFileName(job, faceProgram)} on:click={() => downloadTubeFaceProgram(job, faceProgram)}>
+                              <Download size={14} /> Face A{faceProgram.angleDeg}
+                            </button>
+                          {/each}
+                        </div>
+                      </details>
+                    {/if}
                     <button class="btn btn-icon" data-tooltip="Open ncviewer.com" aria-label="Open ncviewer.com with the G-code copied to your clipboard" on:click={() => openNcviewer(job)}><ExternalLink size={15} /></button>
                   </span>
                 {/if}
@@ -1453,6 +1475,13 @@
             <button class="btn btn-secondary btn-sm" on:click={() => openNcviewer(editingJob)}>
               <ExternalLink size={14} /> Open ncviewer.com
             </button>
+          {/if}
+          {#if editingJob.operation_type === 'tubestock' && editingJob.stats?.facePrograms?.length}
+            {#each editingJob.stats.facePrograms as faceProgram}
+              <button class="btn btn-secondary btn-sm" title={tubeFaceFileName(editingJob, faceProgram)} on:click={() => downloadTubeFaceProgram(editingJob, faceProgram)}>
+                <Download size={14} /> Download Face A{faceProgram.angleDeg}
+              </button>
+            {/each}
           {/if}
         </div>
 
@@ -2008,6 +2037,23 @@
     display: inline-flex;
     align-items: center;
     gap: 0.3rem;
+  }
+  .tube-face-files { position: relative; }
+  .tube-face-files summary { list-style: none; }
+  .tube-face-files summary::-webkit-details-marker { display: none; }
+  .tube-face-files-list {
+    position: absolute;
+    top: calc(100% + 0.35rem);
+    right: 0;
+    z-index: 25;
+    display: grid;
+    gap: 0.3rem;
+    min-width: max-content;
+    padding: 0.4rem;
+    background: var(--surface-1, #fff);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 4px);
+    box-shadow: var(--shadow-md);
   }
 
   /* Small hover tooltip for icon-only buttons - the native title attribute
