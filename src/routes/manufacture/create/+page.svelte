@@ -28,6 +28,38 @@
 
   $: supportsAutocam = !!WORKFLOW_OPERATION_TYPE[workflow];
 
+  async function resolveAutocamMachineDefaults() {
+    const operationType = WORKFLOW_OPERATION_TYPE[workflow];
+    if (!operationType) return {};
+
+    const { data: machines, error } = await supabase
+      .from('cam_machines')
+      .select('id, name, default_tool_id, default_params, gcode_extension')
+      .eq('operation_type', operationType)
+      .eq('enabled', true)
+      .order('name');
+    if (error || !machines?.length) {
+      throw new Error(`No enabled ${operationType} machine profile is configured for AutoCAM`);
+    }
+
+    // Router requests default to the shop's UNC Router rather than whichever
+    // router happens to sort first in the machine profile list.
+    const machine = workflow === 'router'
+      ? machines.find((candidate) => candidate.name === 'UNC Router') || machines[0]
+      : machines[0];
+
+    if (!machine.default_tool_id) {
+      throw new Error(`${machine.name} needs a default tool before AutoCAM jobs can be queued`);
+    }
+
+    return {
+      machineId: machine.id,
+      toolId: machine.default_tool_id,
+      params: machine.default_params || {},
+      gcodeExtension: machine.gcode_extension || 'ngc'
+    };
+  }
+
   function routerPartNotes() {
     const path = camFolderPath.trim();
     return [
@@ -44,9 +76,10 @@
   async function triggerAutocamFromStep(newPartId, stepFileName) {
     if (!supportsAutocam || !stepFileName) return;
     try {
+      const machineDefaults = await resolveAutocamMachineDefaults();
       const result = await queueCamJobForPart(
         { id: newPartId, name: partName, workflow, file_name: stepFileName },
-        { userId: user?.id || null, name: camJobName.trim() || null }
+        { userId: user?.id || null, name: camJobName.trim() || null, ...machineDefaults }
       );
       if (!result.success) console.error('AutoCAM generation failed:', result.error);
     } catch (e) {
