@@ -1126,7 +1126,7 @@
                 }
               >
                 {#if approveMode && canApprovePurchases(user)}
-                  <td on:click|stopPropagation>
+                  <td class="selection-cell" on:click|stopPropagation>
                     {#if !part.approved && (part.status || 'pending').toString().toLowerCase() !== 'rejected'}
                       <input
                         type="checkbox"
@@ -1137,7 +1137,7 @@
                   </td>
                 {/if}
                 {#if orderMode}
-                  <td on:click|stopPropagation>
+                  <td class="selection-cell" on:click|stopPropagation>
                     <input
                       type="checkbox" 
                       checked={selectedItems.has(part.id)}
@@ -1145,7 +1145,7 @@
                     />
                   </td>
                 {/if}
-                <td class="part-name">
+                <td class="part-name" data-label="Name">
                   <div class="name-cell">
                     {part.name}
                   </div>
@@ -1153,13 +1153,13 @@
                     <PartNotes item={part} table="purchasing" on:update={() => loadParts()} />
                   {/if}
                 </td>
-                <td class="material">
+                <td class="material" data-label="Vendor">
                   {part.vendor || '—'}
                 </td>
-                <td class="project-id">
+                <td class="project-id" data-label="Project ID">
                   {part.project_id || '-'}
                 </td>
-                <td class="requester">
+                <td class="requester" data-label="Requester">
                   <div class="requester-content">
                     <span>{(part.requester || 'Unknown').split(' ')[0]}</span>
                     {#if isTeam9584(part.frc_team)}
@@ -1167,10 +1167,10 @@
                     {/if}
                   </div>
                 </td>
-                <td class="quantity">
+                <td class="quantity" data-label="Quantity">
                   {part.quantity || 1}
                 </td>
-                <td class="price">
+                <td class="price" data-label="Price">
                   {#if orderMode || (part.price !== null && part.price !== undefined)}
                     <div>${(part.price || 0).toFixed(2)}</div>
                   {:else}
@@ -1190,7 +1190,7 @@
                   {/if}
                 </td>
                 {#if !orderMode}
-                <td class="download">
+                <td class="download" data-label="Vendor link">
                   <button class="btn btn-secondary btn-sm" on:click={() => {
                       if (part.url) {
                         downloadPart(part);
@@ -1205,7 +1205,7 @@
                     <LinkIcon size={16} />
                   </button>
                 </td>
-                <td class="approved">
+                <td class="approved" data-label="Approval">
                   {#if part.approved}
                     <div class="approved-info">
                       <span class="approver-name">{part.approver ? part.approver.split(' ')[0] : 'Approved'}</span>
@@ -1227,7 +1227,7 @@
                     {/if}
                   {/if}
                 </td>
-                <td class="status">
+                <td class="status" data-label="Status">
                   <!-- Show an 'Approved' disabled placeholder when the part is approved or in a state after approval
                        (so the green approved badge is visible). Use the actual status value when possible so the select
                        doesn't show a blank value. -->
@@ -1288,7 +1288,7 @@
                     {/if}
                   </select>
                 </td>
-                <td class="shipping">
+                <td class="shipping" data-label="Shipping">
                   {#if part.shipping_cost_allocated && part.shipping_cost_allocated > 0}
                     <span style="color: var(--text-secondary); font-size: 12px;">
                       +${part.shipping_cost_allocated.toFixed(2)}
@@ -1297,7 +1297,7 @@
                     <span style="color: var(--text-secondary); font-size: 12px;">—</span>
                   {/if}
                 </td>
-                <td class="delivery">
+                <td class="delivery" data-label="Created">
                   <span class="date-value">{formatPacificDate(part.created_at)}</span>
                   {#if getSeasonBucket(part.created_at)}
                     <span class="tag season-tag {getSeasonBucket(part.created_at).isOffseason ? 'tag-offseason' : 'tag-season'}">
@@ -1305,7 +1305,7 @@
                     </span>
                   {/if}
                 </td>
-                <td class="kit">
+                <td class="kit" data-label="Kit location">
                   <div class="kit-inline">
                     <input 
                       type="text" 
@@ -1318,7 +1318,7 @@
                   </div>
                 </td>
                 {:else}
-                  <td class="price">
+                  <td class="price" data-label="Total">
                     <strong>${((part.price || 0) * (part.quantity || 1)).toFixed(2)}</strong>
                   </td>
                 {/if}
@@ -2085,6 +2085,93 @@
     .parts-container { margin: 1rem; padding: 0; } 
     .page-header { padding: 1.5rem; } 
     .header-content { flex-direction: column; align-items: flex-start; }
+  }
+
+  @media (max-width: 760px) {
+    .parts-container { margin: 0.75rem auto 1.25rem; padding: 0; }
+    .page-header { padding: 1.25rem; margin-bottom: 1rem; }
+    .header-content h1 { font-size: var(--font-xl); }
+    .header-content p { font-size: var(--font-base); }
+
+    .filters { display: grid; grid-template-columns: 1fr; gap: 0.75rem; }
+    .filters .form-group { margin: 0; }
+    .team-filter-row { margin-top: 0.75rem; }
+
+    .table-container {
+      margin: 0;
+      width: 100%;
+      overflow: visible;
+      background: transparent;
+      border: 0;
+      box-shadow: none;
+    }
+    .table-container .table,
+    .table-container .table tbody,
+    .table-container .table tr,
+    .table-container .table td { display: block; width: 100%; }
+    .table-container .table {
+      font-size: var(--font-sm);
+      border-collapse: collapse;
+      border-spacing: 0;
+    }
+    .table-container .table thead { display: none; }
+    .table-container .table tbody { display: grid; gap: 0.75rem; }
+    .table-container .table tr {
+      position: relative;
+      padding: 0.9rem;
+      background: var(--surface-1);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      box-shadow: var(--shadow-sm);
+    }
+    .table-container .table td {
+      display: grid;
+      grid-template-columns: minmax(6.75rem, 42%) minmax(0, 1fr);
+      align-items: center;
+      gap: 0.65rem;
+      min-height: 2.25rem;
+      padding: 0.35rem 0;
+      border: 0;
+      text-align: left;
+      white-space: normal;
+    }
+    .table-container .table td::before {
+      content: attr(data-label);
+      color: var(--text-muted);
+      font-family: var(--font-mono-stack);
+      font-size: 0.66rem;
+      font-weight: 600;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+    }
+    .table-container .table td.part-name {
+      display: block;
+      min-height: 0;
+      padding: 0 2.5rem 0.65rem 0;
+      font-size: var(--font-base);
+      font-weight: 700;
+      border-bottom: 1px solid var(--border);
+    }
+    .table-container .table td.part-name::before { display: none; }
+    .table-container .table td.part-name .name-cell { max-width: 100%; }
+    .table-container .table td.selection-cell {
+      position: absolute;
+      top: 0.85rem;
+      right: 0.85rem;
+      display: flex;
+      width: auto;
+      min-height: 0;
+      padding: 0;
+    }
+    .table-container .table td.selection-cell::before { display: none; }
+    .table-container .table td.selection-cell input { width: 1.15rem; height: 1.15rem; }
+    .table-container .table td .status-select,
+    .table-container .table td .kit-input,
+    .table-container .table td .price-input { width: 100%; min-width: 0; }
+    .table-container .table td .approved-info { justify-content: flex-start; }
+    .table-container .table td.download .btn { justify-self: start; }
+    .table-container .table td.delivery { align-items: start; }
+    .table-container .table td.delivery .season-tag { justify-self: start; }
   }
 
   .team-filter-row {
