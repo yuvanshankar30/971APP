@@ -2084,10 +2084,10 @@
             </th>
           {/if}
           <th class="name-col">Name</th>
-          <th>Workflow</th>
-          <th class="mono" class:hidden={assignMode}>Project ID</th>
-          <th class:hidden={assignMode}>Qty</th>
-          <th class:hidden={assignMode}>Stock</th>
+          <th class="workflow-col">Workflow</th>
+          <th class="project-col mono" class:hidden={assignMode}>Project ID</th>
+          <th class="quantity-col" class:hidden={assignMode}>Qty</th>
+          <th class="stock-col" class:hidden={assignMode}>Stock</th>
           <th class="source-col" class:hidden={assignMode}>Source</th>
           <th class="metadata-col">Status</th>
           <th class="metadata-col" class:hidden={assignMode}>Due</th>
@@ -2140,14 +2140,14 @@
                  </span>
               {/if}
             </td>
-            <td>
+            <td class="workflow-col">
               <span class={`tag workflow-tag ${getWorkflowClass(part.workflow)}`}>
                 {getWorkflowLabel(part.workflow)}
               </span>
             </td>
-            <td class="mono" class:hidden={assignMode}>{part.project_id}</td>
-            <td class:hidden={assignMode}>{getQuantitySummary(part)}</td>
-            <td class="text-muted" class:hidden={assignMode}>{part.stock_assignment || '-'}</td>
+            <td class="project-col mono" class:hidden={assignMode}>{part.project_id}</td>
+            <td class="quantity-col" class:hidden={assignMode}>{getQuantitySummary(part)}</td>
+            <td class="stock-col text-muted" class:hidden={assignMode}>{part.stock_assignment || '-'}</td>
             <td class="source-col" class:hidden={assignMode}>
               {#if part.source_type === 'onshape_api'}
                 <div class="source-cell" class:multi-files={part.workflow === 'router'}>
@@ -2864,6 +2864,26 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  .table {
+    table-layout: fixed;
+    min-width: 138rem;
+  }
+  .table th.workflow-col,
+  .table td.workflow-col {
+    width: 8.5rem;
+  }
+  .table th.project-col,
+  .table td.project-col {
+    width: 9rem;
+  }
+  .table th.quantity-col,
+  .table td.quantity-col {
+    width: 3.5rem;
+  }
+  .table th.stock-col,
+  .table td.stock-col {
+    width: 11rem;
   }
   .table th.source-col,
   .table td.source-col {
