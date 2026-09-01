@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { supabase, getAuthHeader } from '$lib/supabase.js';
   import { initAuth, userStore, signOut, authReady as authReadyStore, user as authUserStore } from '$lib/stores/auth.js';
-  import { LogIn, UserPlus, Mail, Lock, User, Shield, Briefcase, CheckCircle, AlertCircle, LogOut, Users, Layers, Receipt, Clock, GripVertical, X, Plus, LayoutGrid } from 'lucide-svelte';
+  import { LogIn, UserPlus, Mail, Lock, User, Shield, CheckCircle, AlertCircle, LogOut, Users, GripVertical, X, Plus, LayoutGrid, ClipboardCheck, Camera, Eye, Trophy, BarChart3, ListChecks } from 'lucide-svelte';
   import { goto } from '$app/navigation';
   import { FRC_TEAMS, hasPermission } from '$lib/permissions.js';
   import { theme, setTheme } from '$lib/stores/theme.js';
@@ -17,17 +17,7 @@
   let loading = true;
   // Keep spinner while auth is ready but profile hasn't loaded yet
   $: isLoading = loading || (authUser !== null && user === null);
-  // New state for user-specific lists
-  let subsystems = [];
-  let subsystemsLoading = false;
-  let builds = [];
-  let buildsLoading = false;
-  let purchases = [];
-  let purchasesLoading = false;
-
-  // At-a-glance dashboard stats
-  $: pendingPurchases = purchases.filter(p => (p.status || 'pending') === 'pending').length;
-  let listsLoaded = false;
+  let scoutingLoaded = false;
 
   // --- Home dashboard section customization (drag to reorder, delete, restore) ---
   // Mirrors the header_tabs pattern in +layout.svelte: a nullable JSONB column
@@ -37,12 +27,16 @@
   // be dragged/removed like anything else) rather than pinned like the top
   // nav's Admin tab, since admins always retain nav access regardless.
   const ALL_DASHBOARD_SECTIONS = [
-    { key: 'stats', label: 'Stats Overview' },
-    { key: 'quick-actions', label: 'Quick Actions' },
-    { key: 'subsystems', label: 'Your Subsystems' },
-    { key: 'builds', label: 'Your Builds' },
-    { key: 'purchases', label: 'Your Purchase Requests' }
+    { key: 'stats', label: 'Scouting Overview' },
+    { key: 'quick-actions', label: 'Field Scouting' },
+    { key: 'assignment-queue', label: 'Your Assignments' },
+    { key: 'analysis', label: 'Scouting Analysis' }
   ];
+  const LEGACY_SECTION_MIGRATIONS = Object.freeze({
+    subsystems: 'assignment-queue',
+    builds: 'analysis',
+    purchases: 'analysis'
+  });
 
   function sectionLabel(key) {
     if (key === 'admin') return 'Admin Panel';
@@ -54,7 +48,8 @@
     const seen = new Set();
     const out = [];
     for (const entry of raw) {
-      const key = typeof entry === 'string' ? entry : entry?.key;
+      const rawKey = typeof entry === 'string' ? entry : entry?.key;
+      const key = LEGACY_SECTION_MIGRATIONS[rawKey] || rawKey;
       if (!key || seen.has(key)) continue;
       seen.add(key);
       out.push(key);
@@ -162,6 +157,30 @@
     return 'datascout';
   }
 
+  function compareScoutAssignmentMatches(left, right) {
+    // TBA match keys use qualification/playoff prefixes such as qm12,
+    // qf1m2, sf2m1, and f1m1. Compare their numeric components rather than
+    // their raw strings so qm10 correctly follows qm2.
+    const parse = (matchKey) => {
+      const suffix = String(matchKey || '').split('_').pop().toLowerCase();
+      const match = suffix.match(/^(qm|qf|sf|f)(\d+)(?:m(\d+))?$/);
+      const phase = { qm: 0, qf: 1, sf: 2, f: 3 }[match?.[1]] ?? 4;
+      return {
+        phase,
+        set: Number(match?.[2]) || 0,
+        round: Number(match?.[3]) || 0,
+        raw: suffix
+      };
+    };
+    const a = parse(left?.match_key);
+    const b = parse(right?.match_key);
+    return a.phase - b.phase
+      || a.set - b.set
+      || a.round - b.round
+      || a.raw.localeCompare(b.raw)
+      || String(left?.team_key || '').localeCompare(String(right?.team_key || ''));
+  }
+
   async function loadScoutAssignments(){
     if(!user?.id) return;
     try {
@@ -182,8 +201,9 @@
       const rows = [].concat(js1?.data||[], js2?.data||[], js3?.data||[]);
       // Filter incomplete
       const incomplete = rows.filter(r => !r.completed_at);
-      myScoutAssignments = incomplete;
-      nextScoutAssignment = incomplete.sort((a,b)=> a.match_key.localeCompare(b.match_key))[0] || null;
+      const sortedIncomplete = [...incomplete].sort(compareScoutAssignmentMatches);
+      myScoutAssignments = sortedIncomplete;
+      nextScoutAssignment = sortedIncomplete[0] || null;
     }catch(e){ /* ignore */ }
   }
 
@@ -197,101 +217,9 @@
     return () => { unsub?.(); unsubAuthUser?.(); unsubReady?.(); uninit?.(); };
   });
 
-  async function loadUserLists() {
-    try {
-      subsystemsLoading = true;
-      buildsLoading = true;
-      purchasesLoading = true;
-
-      // Load subsystems where the user is a member
-      try {
-        const { data: subs, error: subErr } = await supabase
-          .from('subsystem_members')
-          .select('subsystems(*)')
-          .eq('user_id', user.id);
-        if (!subErr && Array.isArray(subs)) {
-          subsystems = subs.map(r => r.subsystems).filter(Boolean);
-        } else {
-          subsystems = [];
-        }
-      } catch (e) {
-        console.error('Failed loading subsystems:', e);
-        subsystems = [];
-      } finally {
-        subsystemsLoading = false;
-      }
-
-      // Load builds tied to those subsystems (limit to recent 20)
-      try {
-        const subsystemIds = subsystems.map(s => s.id).filter(Boolean);
-        if (subsystemIds.length > 0) {
-          const { data: bdata, error: bErr } = await supabase
-            .from('builds')
-            .select(`*, subsystems(name)`)
-            .in('subsystem_id', subsystemIds)
-            .order('created_at', { ascending: false })
-            .limit(20);
-          if (!bErr) builds = bdata || [];
-          else builds = [];
-        } else {
-          builds = [];
-        }
-      } catch (e) {
-        console.error('Failed loading builds:', e);
-        builds = [];
-      } finally {
-        buildsLoading = false;
-      }
-
-      // Load purchases associated with this user.
-      // Prefer the `purchaser` UUID column (new), fall back to legacy `requester` text matches.
-      try {
-        const results = [];
-        // Primary: rows explicitly linked to the user's UUID
-        if (user.id) {
-          const r = await supabase.from('purchasing').select('*').eq('purchaser', user.id);
-          if (r && Array.isArray(r.data)) results.push(...r.data);
-        }
-
-        // Legacy compatibility: include rows where requester matches full name, email, or contains the email
-        if (user.full_name) {
-          const r = await supabase.from('purchasing').select('*').eq('requester', user.full_name);
-          if (r && Array.isArray(r.data)) results.push(...r.data);
-        }
-        if (user.email) {
-          const r1 = await supabase.from('purchasing').select('*').eq('requester', user.email);
-          if (r1 && Array.isArray(r1.data)) results.push(...r1.data);
-          const r2 = await supabase.from('purchasing').select('*').ilike('requester', `%${user.email}%`);
-          if (r2 && Array.isArray(r2.data)) results.push(...r2.data);
-        }
-
-        // Some older rows may have stored the UUID string in requester; include those too
-        if (user.id) {
-          const r3 = await supabase.from('purchasing').select('*').eq('requester', user.id);
-          if (r3 && Array.isArray(r3.data)) results.push(...r3.data);
-        }
-
-        // Merge unique by id and sort by created_at desc
-        const merged = {};
-        for (const r of results) {
-          if (r && r.id) merged[r.id] = r;
-        }
-        purchases = Object.values(merged).sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
-      } catch (e) {
-        console.error('Failed loading purchases:', e);
-        purchases = [];
-      } finally {
-        purchasesLoading = false;
-      }
-    } catch (err) {
-      console.error('Error in loadUserLists:', err);
-    }
-  }
-
-  // Reactive one-time loader: when user becomes available, load lists once
-  $: if (user && !listsLoaded) {
-    listsLoaded = true;
-    loadUserLists();
+  // The scouting landing page only needs the signed-in scout's own queue.
+  $: if (user && !scoutingLoaded) {
+    scoutingLoaded = true;
     loadScoutAssignments();
   }
 
@@ -431,7 +359,7 @@
     <div class="user-welcome">
       <h2>Welcome back, {user.full_name || user.email}!</h2>
       <!-- Simplified header: we no longer show individual info boxes here -->
-      <p class="muted">Quick access to your CAD subsystems, builds, and purchases.</p>
+      <p class="muted">Your competition scouting workspace: assignments, field notes, and event analysis.</p>
     </div>
 
     {#if showScoutAlert && myScoutAssignments.length>0}
@@ -486,6 +414,7 @@
       <div class="dashboard-sections">
         {#each visibleSections as section (section.key)}
           <div
+            id={section.key === 'assignment-queue' ? 'assignment-queue' : undefined}
             class="dashboard-section"
             class:editing={editMode}
             class:dragging={draggedSectionKey === section.key}
@@ -511,48 +440,58 @@
             {#if section.key === 'stats'}
               <!-- At-a-glance stats -->
               <div class="stat-grid">
-                <a href="/cad" class="stat-card">
-                  <div class="stat-icon"><Layers size={20} /></div>
+                <a href="#assignment-queue" class="stat-card">
+                  <div class="stat-icon"><ClipboardCheck size={20} /></div>
                   <div class="stat-body">
-                    <span class="stat-value">{subsystemsLoading ? '—' : subsystems.length}</span>
-                    <span class="stat-label">Your Subsystems</span>
+                    <span class="stat-value">{myScoutAssignments.length}</span>
+                    <span class="stat-label">Open Assignments</span>
                   </div>
                 </a>
-                <a href="/cad/build" class="stat-card">
-                  <div class="stat-icon"><Briefcase size={20} /></div>
+                <a href={nextScoutAssignment ? `/${scoutAssignmentRoute(nextScoutAssignment.scouting_type)}` : '#assignment-queue'} class="stat-card">
+                  <div class="stat-icon"><ListChecks size={20} /></div>
                   <div class="stat-body">
-                    <span class="stat-value">{buildsLoading ? '—' : builds.length}</span>
-                    <span class="stat-label">Your Builds</span>
+                    <span class="stat-value">{nextScoutAssignment ? `#${nextScoutAssignment.match_key.split('_').pop()}` : '—'}</span>
+                    <span class="stat-label">Next Match</span>
                   </div>
                 </a>
-                <a href="/cad/purchasing" class="stat-card">
-                  <div class="stat-icon"><Receipt size={20} /></div>
+                <a href="/pitscout" class="stat-card">
+                  <div class="stat-icon"><Camera size={20} /></div>
                   <div class="stat-body">
-                    <span class="stat-value">{purchasesLoading ? '—' : purchases.length}</span>
-                    <span class="stat-label">Purchase Requests</span>
+                    <span class="stat-value">Pit</span>
+                    <span class="stat-label">Robot Profiles</span>
                   </div>
                 </a>
-                <a href="/cad/purchasing" class="stat-card" class:stat-card-alert={pendingPurchases > 0}>
-                  <div class="stat-icon"><Clock size={20} /></div>
+                <a href="/scouting/vision" class="stat-card">
+                  <div class="stat-icon"><Eye size={20} /></div>
                   <div class="stat-body">
-                    <span class="stat-value">{purchasesLoading ? '—' : pendingPurchases}</span>
-                    <span class="stat-label">Pending Approval</span>
+                    <span class="stat-value">Vision</span>
+                    <span class="stat-label">Match Review</span>
                   </div>
                 </a>
               </div>
             {:else if section.key === 'quick-actions'}
               <div class="dashboard-actions">
-                <h3>Quick Actions</h3>
+                <h3>Field Scouting</h3>
                 <div class="action-grid">
-                  <a href="/cad" class="action-card">
-                    <User size={24} />
-                    <h4>CAD Design</h4>
-                    <p>Work with CAD files and designs</p>
+                  <a href="/matchscout" class="action-card">
+                    <ClipboardCheck size={24} />
+                    <h4>Match Scouting</h4>
+                    <p>Record pre-match, auto, teleop, and post-match observations</p>
                   </a>
-                  <a href="/cad/build" class="action-card">
-                    <Briefcase size={24} />
-                    <h4>Builds</h4>
-                    <p>View builds you are involved with</p>
+                  <a href="/pitscout" class="action-card">
+                    <Camera size={24} />
+                    <h4>Pit Scouting</h4>
+                    <p>Capture robot construction, contacts, and pit notes</p>
+                  </a>
+                  <a href="/datascout" class="action-card">
+                    <BarChart3 size={24} />
+                    <h4>Data Scouting</h4>
+                    <p>Review event data and submitted scouting observations</p>
+                  </a>
+                  <a href="/scouting/vision" class="action-card">
+                    <Eye size={24} />
+                    <h4>Vision Scouting</h4>
+                    <p>Review vision observations and match footage</p>
                   </a>
                 </div>
               </div>
@@ -567,75 +506,42 @@
                   </a>
                 </div>
               </div>
-            {:else if section.key === 'subsystems'}
+            {:else if section.key === 'assignment-queue'}
               <div class="user-lists">
-                <h4>Your Subsystems</h4>
-                {#if subsystemsLoading}
-                  <div class="loading-spinner small"></div>
-                {:else if subsystems.length === 0}
-                  <p class="muted">You are not a member of any subsystems yet.</p>
+                <h4>Your Assignments</h4>
+                {#if myScoutAssignments.length === 0}
+                  <p class="muted">No open scouting assignments right now.</p>
                 {:else}
                   <div class="card-grid">
-                    {#each subsystems as s}
-                      <a class="subsystem-card" href={`/cad/${s.id}`}>
-                        <h5>{s.name}</h5>
-                        <p class="muted">{s.description || 'No description'}</p>
+                    {#each myScoutAssignments.slice(0, 8) as assignment}
+                      <a class="assignment-card" href={`/${scoutAssignmentRoute(assignment.scouting_type)}`}>
+                        <h5>{assignment.scouting_type} scouting - Match #{assignment.match_key.split('_').pop()}</h5>
+                        <p class="muted">Team {String(assignment.team_key || '').replace(/^frc/i, '')}</p>
                       </a>
                     {/each}
                   </div>
                 {/if}
               </div>
-            {:else if section.key === 'builds'}
-              <div class="user-lists">
-                <h4>Your Builds</h4>
-                {#if buildsLoading}
-                  <div class="loading-spinner small"></div>
-                {:else if builds.length === 0}
-                  <p class="muted">No builds found for your subsystems.</p>
-                {:else}
-                  <div class="card-grid">
-                    {#each builds as b}
-                      <a class="build-card" href={`/cad/build/${b.id}`}>
-                        <h5>{b.release_name || b.name || `Build ${b.id}`}</h5>
-                        <p class="muted">{b.subsystems?.name || 'Project'}</p>
-                      </a>
-                    {/each}
-                  </div>
-                {/if}
-              </div>
-            {:else if section.key === 'purchases'}
-              <div class="user-lists">
-                <h4>Your Purchase Requests</h4>
-                {#if purchasesLoading}
-                  <div class="loading-spinner small"></div>
-                {:else if purchases.length === 0}
-                  <p class="muted">You haven't requested any purchases yet.</p>
-                {:else}
-                  <div class="table-container">
-                    <table class="table">
-                      <thead>
-                        <tr>
-                          <th>Name</th>
-                          <th>Quantity</th>
-                          <th>Price</th>
-                          <th>Status</th>
-                          <th>Project</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {#each purchases as p}
-                          <tr>
-                            <td>{p.name}</td>
-                            <td>{p.quantity || 1}</td>
-                            <td>{p.price !== null && p.price !== undefined ? `$${p.price.toFixed(2)}` : '—'}</td>
-                            <td>{p.status || 'pending'}</td>
-                            <td>{p.project_id || '-'}</td>
-                          </tr>
-                        {/each}
-                      </tbody>
-                    </table>
-                  </div>
-                {/if}
+            {:else if section.key === 'analysis'}
+              <div class="dashboard-actions">
+                <h3>Scouting Analysis</h3>
+                <div class="action-grid">
+                  <a href="/teamview" class="action-card">
+                    <Users size={24} />
+                    <h4>Team View</h4>
+                    <p>Compare robot profiles, match data, and field notes</p>
+                  </a>
+                  <a href="/powerrankings" class="action-card">
+                    <Trophy size={24} />
+                    <h4>Power Rankings</h4>
+                    <p>Build an event pick list with head-to-head comparisons</p>
+                  </a>
+                  <a href="/datascout" class="action-card">
+                    <BarChart3 size={24} />
+                    <h4>Event Analysis</h4>
+                    <p>Export collected scouting information and reports</p>
+                  </a>
+                </div>
               </div>
             {/if}
           </div>
@@ -1462,15 +1368,6 @@
     text-overflow: ellipsis;
   }
 
-  .stat-card-alert .stat-icon {
-    background: var(--red-soft, #fee2e2);
-    color: var(--red-strong, #991b1b);
-  }
-
-  .stat-card-alert .stat-value {
-    color: var(--red-strong, #991b1b);
-  }
-
   .pending-notice {
     display: flex;
     align-items: flex-start;
@@ -1558,8 +1455,7 @@
     margin-top: var(--space-2);
   }
 
-  .subsystem-card,
-  .build-card {
+  .assignment-card {
     display: block;
     text-decoration: none;
     color: inherit;
@@ -1570,16 +1466,13 @@
     transition: border-color 0.1s ease, background-color 0.1s ease;
   }
 
-  .subsystem-card:hover,
-  .build-card:hover {
+  .assignment-card:hover {
     background: var(--surface-2);
     border-color: var(--accent-strong);
   }
 
-  .subsystem-card h5,
-  .build-card h5 { margin: 0 0 var(--space-1) 0; color: var(--secondary); }
-  .subsystem-card p,
-  .build-card p { margin: 0; color: var(--neutral-500); font-size: var(--font-xs); }
+  .assignment-card h5 { margin: 0 0 var(--space-1) 0; color: var(--secondary); }
+  .assignment-card p { margin: 0; color: var(--neutral-500); font-size: var(--font-xs); }
 
   /* Mobile Responsive Styles */
   @media (max-width: 768px) {
@@ -1604,11 +1497,6 @@
     }
     .card-grid {
       grid-template-columns: 1fr;
-    }
-    .table-container {
-      overflow-x: auto;
-      margin: 0 -var(--space-3);
-      padding: 0 var(--space-3);
     }
   }
 
