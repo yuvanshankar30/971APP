@@ -1254,8 +1254,8 @@
   /* ========== DESKTOP POLISH (>=769px) ========== */
   @media (min-width: 769px) {
     .nav-header {
-      --desktop-header-height: 64px;
-      --desktop-nav-item-height: 38px;
+      --desktop-header-height: 68px;
+      --desktop-nav-item-height: 42px;
       --desktop-underline-thickness: 3px;
       --desktop-underline-offset: calc(((var(--desktop-header-height) - var(--desktop-nav-item-height)) / 2) + 1px);
       --desktop-underline-inset: 0.35rem;
@@ -1265,14 +1265,15 @@
     }
 
     .nav-container {
+      max-width: 1760px;
       min-height: var(--desktop-header-height);
-      padding: 0 clamp(0.75rem, 2vw, 1.75rem);
-      gap: var(--gap-3);
+      padding: 0 clamp(1rem, 2vw, 2rem);
+      gap: var(--gap-4);
     }
 
     .brand {
-      margin-right: var(--space-2);
-      padding: 0.35rem 0.5rem;
+      margin-right: var(--space-3);
+      padding: 0.4rem 0.6rem;
       border-radius: var(--radius-sm);
       border: 1px solid transparent;
       font-weight: 600;
@@ -1284,12 +1285,13 @@
     }
 
     .brand-name {
-      font-size: var(--font-md);
+      font-size: var(--font-lg);
       letter-spacing: 0;
     }
 
     .desktop-nav {
-      gap: 0.12rem;
+      gap: var(--space-2);
+      flex: 0 1 auto;
       padding: 0;
       border: none;
       border-radius: 0;
@@ -1302,15 +1304,15 @@
     }
 
     .nav-item {
-      gap: 0.3rem;
-      padding: 0.5rem 0.5rem;
+      gap: 0.4rem;
+      padding: 0.5rem 0.65rem;
       min-height: var(--desktop-nav-item-height);
       height: var(--desktop-nav-item-height);
       border: 1px solid transparent;
       border-radius: var(--radius-sm);
       background: transparent;
       color: var(--secondary);
-      font-size: 0.8rem;
+      font-size: var(--font-base);
       font-weight: 600;
       line-height: 1;
     }
@@ -1428,9 +1430,9 @@
     }
 
     .desktop-profile {
-      margin-left: var(--space-2);
-      min-height: 38px;
-      padding: 0.45rem 0.65rem;
+      margin-left: var(--space-3);
+      min-height: var(--desktop-nav-item-height);
+      padding: 0.5rem 0.75rem;
       border-radius: var(--radius-sm);
       background: var(--surface-1);
       border-color: var(--border);
