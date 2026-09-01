@@ -28,10 +28,12 @@
     getPartStepFileName,
     loadLatestCamJobsForParts,
     downloadGcodeBlob,
+    downloadGcodeText,
     camJobStatusLabel,
     isCamJobActive,
     WORKFLOW_OPERATION_TYPE
   } from '$autocam/camJobs.js';
+  import { tubestockFaceFileName, tubestockFaceLabel } from '$autocam/tubestock.js';
 
   const LAST_SUBSYSTEM_STORAGE_KEY = '971hub:lastSubsystem';
   const QUICK_PRINT_STOCK_OPTIONS = stockData['3d-print'] || [];
@@ -686,6 +688,31 @@
     showToolpathModal = false;
     toolpathModalJob = null;
     toolpathView3D = false;
+  }
+
+  let showTubeFaceFilesModal = false;
+  let tubeFaceFilesJob = null;
+  let selectedTubeFaceProgram = null;
+
+  function tubeFaceProgramLabel(faceProgram) {
+    return faceProgram?.label || tubestockFaceLabel(faceProgram?.angleDeg);
+  }
+
+  function tubeFaceProgramFileName(job, faceProgram) {
+    return faceProgram?.fileName || tubestockFaceFileName(job?.gcode_file_name, faceProgram?.angleDeg);
+  }
+
+  function openTubeFaceFilesModal(job) {
+    if (job?.operation_type !== 'tubestock' || !job.stats?.facePrograms?.length) return;
+    tubeFaceFilesJob = job;
+    selectedTubeFaceProgram = job.stats.facePrograms[0];
+    showTubeFaceFilesModal = true;
+  }
+
+  function closeTubeFaceFilesModal() {
+    showTubeFaceFilesModal = false;
+    tubeFaceFilesJob = null;
+    selectedTubeFaceProgram = null;
   }
 
   async function sendNotification(type, payload = {}) {
@@ -2105,9 +2132,15 @@
                     <span class="autocam-spinner"></span> {camJobStatusLabel(camJob.status)}
                   </span>
                 {:else if camJob?.status === 'completed'}
-                  <button class="btn btn-secondary btn-sm" on:click={() => downloadGcodeBlob(camJob)} title="Download G-code">
-                    <Download size={14} /> Install NGC
-                  </button>
+                  {#if camJob.operation_type === 'tubestock' && camJob.stats?.facePrograms?.length}
+                    <button class="btn btn-secondary btn-sm" on:click={() => openTubeFaceFilesModal(camJob)} title="View and install the generated program for each tube face">
+                      <FileText size={14} /> View all G-code
+                    </button>
+                  {:else}
+                    <button class="btn btn-secondary btn-sm" on:click={() => downloadGcodeBlob(camJob)} title="Download G-code">
+                      <Download size={14} /> Install NGC
+                    </button>
+                  {/if}
                 {:else if camJob?.status === 'failed'}
                   <button
                     class="btn btn-secondary btn-sm"
@@ -2328,9 +2361,15 @@
                           <span class="autocam-spinner"></span> {camJobStatusLabel(camJob.status)}
                         </span>
                       {:else if camJob?.status === 'completed'}
-                        <button class="btn btn-secondary btn-sm" on:click={() => downloadGcodeBlob(camJob)} title="Download G-code">
-                          <Download size={13} /> Install NGC
-                        </button>
+                        {#if camJob.operation_type === 'tubestock' && camJob.stats?.facePrograms?.length}
+                          <button class="btn btn-secondary btn-sm" on:click={() => openTubeFaceFilesModal(camJob)} title="View and install the generated program for each tube face">
+                            <FileText size={13} /> View all G-code
+                          </button>
+                        {:else}
+                          <button class="btn btn-secondary btn-sm" on:click={() => downloadGcodeBlob(camJob)} title="Download G-code">
+                            <Download size={13} /> Install NGC
+                          </button>
+                        {/if}
                       {:else if camJob?.status === 'failed'}
                         <button
                           class="btn btn-secondary btn-sm"
@@ -2872,6 +2911,63 @@
   </div>
 {/if}
 
+{#if showTubeFaceFilesModal && tubeFaceFilesJob}
+  <div
+    class="modal-backdrop"
+    on:click|self={closeTubeFaceFilesModal}
+    role="button"
+    tabindex="0"
+    on:keydown={(e) => { if (e.key === 'Escape') { e.preventDefault(); closeTubeFaceFilesModal(); } }}
+  >
+    <div class="modal tube-face-files-modal" role="dialog" aria-modal="true" aria-label="Tube stock G-code files">
+      <div class="modal-header">
+        <div>
+          <h3>Tube Stock G-code</h3>
+          <p class="tube-face-files-subtitle">{tubeFaceFilesJob.name || tubeFaceFilesJob.parts?.name || 'Tube stock job'}: one program for each drilled face.</p>
+        </div>
+        <button type="button" class="modal-close-button" aria-label="Close dialog" on:click={closeTubeFaceFilesModal}>
+          <X size={18} />
+        </button>
+      </div>
+      <div class="modal-body tube-face-files-body">
+        <div class="tube-face-program-list" aria-label="Generated face programs">
+          {#each tubeFaceFilesJob.stats.facePrograms as faceProgram}
+            <button
+              type="button"
+              class:active={selectedTubeFaceProgram === faceProgram}
+              class="tube-face-program"
+              on:click={() => (selectedTubeFaceProgram = faceProgram)}
+            >
+              <span>
+                <strong>{tubeFaceProgramLabel(faceProgram)}</strong>
+                <small>A{faceProgram.angleDeg} · {faceProgram.holeCount} hole{faceProgram.holeCount === 1 ? '' : 's'}</small>
+              </span>
+              <span class="tube-face-program-file">{tubeFaceProgramFileName(tubeFaceFilesJob, faceProgram)}</span>
+            </button>
+          {/each}
+        </div>
+        {#if selectedTubeFaceProgram}
+          <section class="tube-face-program-preview" aria-label={`${tubeFaceProgramLabel(selectedTubeFaceProgram)} G-code`}>
+            <div class="tube-face-program-preview-header">
+              <div>
+                <h4>{tubeFaceProgramLabel(selectedTubeFaceProgram)}</h4>
+                <p>{tubeFaceProgramFileName(tubeFaceFilesJob, selectedTubeFaceProgram)}</p>
+              </div>
+              <button
+                class="btn btn-primary btn-sm"
+                on:click={() => downloadGcodeText(selectedTubeFaceProgram.gcode, tubeFaceProgramFileName(tubeFaceFilesJob, selectedTubeFaceProgram))}
+              >
+                <Download size={14} /> Install this file
+              </button>
+            </div>
+            <pre>{selectedTubeFaceProgram.gcode || 'This saved job does not contain the face program text. Regenerate it to create individual files.'}</pre>
+          </section>
+        {/if}
+      </div>
+    </div>
+  </div>
+{/if}
+
 {#if showToolpathModal && toolpathModalJob}
   <div
     class="modal-backdrop"
@@ -2982,6 +3078,83 @@
   .toolpath-modal-3d { width: min(1100px, 95vw); }
   .toolpath-simulator-loading { min-height: 320px; display: flex; align-items: center; justify-content: center; gap: 0.65rem; color: var(--text-muted); }
   .toolpath-simulator-loading .loading-spinner { width: 1.25rem; height: 1.25rem; border-width: 2px; }
+
+  .tube-face-files-modal { width: min(1100px, 96vw); max-width: 96vw; }
+  .tube-face-files-modal .modal-header { align-items: flex-start; }
+  .tube-face-files-modal h3 { margin: 0; }
+  .tube-face-files-subtitle { margin: 0.25rem 0 0; color: var(--text-muted); font-size: var(--font-sm, 0.9rem); }
+  .tube-face-files-body {
+    display: grid;
+    grid-template-columns: minmax(14rem, 0.75fr) minmax(0, 1.6fr);
+    gap: 1rem;
+    min-height: 28rem;
+  }
+  .tube-face-program-list {
+    display: grid;
+    align-content: start;
+    gap: 0.5rem;
+  }
+  .tube-face-program {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
+    width: 100%;
+    padding: 0.7rem;
+    color: var(--text);
+    text-align: left;
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 4px);
+    cursor: pointer;
+  }
+  .tube-face-program:hover,
+  .tube-face-program.active { border-color: var(--accent-strong); background: var(--surface-2); }
+  .tube-face-program strong,
+  .tube-face-program small { display: block; }
+  .tube-face-program small { margin-top: 0.2rem; color: var(--text-muted); }
+  .tube-face-program-file {
+    max-width: 10rem;
+    overflow: hidden;
+    color: var(--text-muted);
+    font-family: var(--font-mono-stack);
+    font-size: var(--font-xs, 0.75rem);
+    text-align: right;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .tube-face-program-preview {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    min-width: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 4px);
+    overflow: hidden;
+  }
+  .tube-face-program-preview-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.75rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .tube-face-program-preview h4,
+  .tube-face-program-preview p { margin: 0; }
+  .tube-face-program-preview p { margin-top: 0.2rem; color: var(--text-muted); font-family: var(--font-mono-stack); font-size: var(--font-xs, 0.75rem); }
+  .tube-face-program-preview pre {
+    min-width: 0;
+    max-height: 31rem;
+    margin: 0;
+    padding: 0.85rem;
+    overflow: auto;
+    background: var(--surface-2);
+    color: var(--text);
+    font-family: var(--font-mono-stack);
+    font-size: var(--font-xs, 0.75rem);
+    line-height: 1.5;
+    white-space: pre;
+  }
 
   .deep-link-highlight {
     animation: deep-link-flash 2.5s ease-out 1;
@@ -3334,6 +3507,12 @@
   .cam-setup-modal { width: min(34rem, 94vw); }
   .cam-setup-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
   .cam-setup-error { color: var(--red-strong, #b4232e); margin: 1rem 0 0; }
+
+  @media (max-width: 700px) {
+    .tube-face-files-body { grid-template-columns: 1fr; min-height: 0; }
+    .tube-face-program-preview { min-height: 20rem; }
+    .tube-face-program-preview-header { align-items: flex-start; flex-direction: column; }
+  }
 
   /* Mobile Responsive Styles */
   

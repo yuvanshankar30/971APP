@@ -37,7 +37,7 @@
     partHasStepFile,
     CAM_GCODE_FORMAT
   } from '$autocam/camJobs.js';
-  import { tubestockFaceFileName } from '$autocam/tubestock.js';
+  import { tubestockFaceFileName, tubestockFaceLabel } from '$autocam/tubestock.js';
   import { Cpu, Upload, Package, Settings, Download, AlertTriangle, X, Link as LinkIcon, Plus, Wrench, Layers, CheckCircle2, Loader2, Search, Filter, Box, Route, ExternalLink, Copy } from 'lucide-svelte';
 
   let user = null;
@@ -726,6 +726,10 @@
     return faceProgram.fileName || tubestockFaceFileName(job.gcode_file_name, faceProgram.angleDeg);
   }
 
+  function tubeFaceLabel(faceProgram) {
+    return faceProgram.label || tubestockFaceLabel(faceProgram.angleDeg);
+  }
+
   function downloadTubeFaceProgram(job, faceProgram) {
     downloadGcodeText(faceProgram.gcode, tubeFaceFileName(job, faceProgram));
   }
@@ -1175,7 +1179,7 @@
                         <div class="tube-face-files-list">
                           {#each job.stats.facePrograms as faceProgram}
                             <button class="btn btn-secondary btn-sm" title={tubeFaceFileName(job, faceProgram)} on:click={() => downloadTubeFaceProgram(job, faceProgram)}>
-                              <Download size={14} /> Face A{faceProgram.angleDeg}
+                              <Download size={14} /> {tubeFaceLabel(faceProgram)}
                             </button>
                           {/each}
                         </div>
@@ -1479,7 +1483,7 @@
           {#if editingJob.operation_type === 'tubestock' && editingJob.stats?.facePrograms?.length}
             {#each editingJob.stats.facePrograms as faceProgram}
               <button class="btn btn-secondary btn-sm" title={tubeFaceFileName(editingJob, faceProgram)} on:click={() => downloadTubeFaceProgram(editingJob, faceProgram)}>
-                <Download size={14} /> Download Face A{faceProgram.angleDeg}
+                <Download size={14} /> Download {tubeFaceLabel(faceProgram)}
               </button>
             {/each}
           {/if}
