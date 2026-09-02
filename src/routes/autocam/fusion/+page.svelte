@@ -137,10 +137,10 @@
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    background-image: linear-gradient(135deg, #f5f5f5, #e6dd5e);
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
+    /* Was a hardcoded off-white -> acid-yellow gradient clipped to the text,
+       a colour pair the rest of the app never uses and which ignored the
+       theme entirely. Plain brand gold reads the same emphasis without it. */
+    color: var(--brand-gold-strong);
   }
 
   .fusion-cam-theme :global(.card),

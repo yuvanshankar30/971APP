@@ -1846,7 +1846,8 @@
   }
 
   .parts-container {
-    max-width: 1600px;
+    /* Shared page width rather than a third bespoke value. */
+    max-width: var(--page-max-width);
     margin: 2rem auto;
     padding: 0 1rem;
   }

@@ -1977,13 +1977,6 @@
 {/if}
 
 <style>
-  /* AutoCAM has a denser operational table than the rest of the app. Give it
-     room on desktop, then switch to labeled records before the columns would
-     require a horizontal scrollbar. */
-  :global(main.container.page-container:has(.autocam-page-header)) {
-    max-width: 1800px;
-  }
-
   .page-subtitle {
     color: var(--text-muted);
     margin: -0.5rem 0 1rem;
@@ -2143,7 +2136,9 @@
   .job-part-link:hover { text-decoration: underline; }
 
   .status-badge.status-running { background: var(--purple-soft); color: var(--purple-strong); border-color: var(--purple-soft); }
-  .status-badge.status-complete { background: var(--green-soft); color: var(--green-strong); border-color: var(--green-soft); }
+  /* No local override - the shared status palette in app.css already
+     renders Completed, and a solid --green-soft here sat visibly brighter
+     than the tinted chips beside it. */
   .status-badge.status-error { background: var(--red-soft); color: var(--red-strong); border-color: var(--red-soft); }
 
   .job-error {
@@ -2315,9 +2310,16 @@
   .output-cell { min-width: 0; white-space: normal; }
   .output-actions {
     display: flex;
-    flex-wrap: nowrap;
+    /* Wraps onto a second line rather than forcing the cell wider than its
+       column. The container above is deliberately overflow: visible (so the
+       Face-files dropdown isn't clipped), which meant a nowrap row here
+       pushed the whole PAGE into a horizontal scroll on anything narrower
+       than a very wide monitor - the table scrolling would have been bad
+       enough; the page scrolling took the nav with it. */
+    flex-wrap: wrap;
     align-items: center;
     gap: 0.45rem;
+    row-gap: 0.35rem;
     white-space: nowrap;
   }
   .output-action-group {
