@@ -623,26 +623,38 @@ describe('generateRoutingGcode - seam tab is not silently cut to half width (rea
     expect(tabLines.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('buildTabZones\' wraparound reports 2 zone pieces for the seam-centered zone, on top of recommendTabCount\'s minimum-2 floor', () => {
+  it('no longer puts a tab on the seam at all, because the seam is a corner', () => {
+    // This used to report 3 pieces: tab i=0 was placed at path distance 0
+    // unconditionally - the closed contour's seam, which on a rectangle is
+    // a corner - and wrapped into 2 pieces. Tabs are now placed on flat
+    // runs, so nothing lands on the corner and nothing has to wrap.
     const part = [{ points: square(0, 0, 4), isHole: false }];
-    // tabSpacing 20 alone would round to 1 zone; recommendTabCount's floor
-    // bumps that to 2 real zones (i=0 seam, i=1 normal) - i=0 then wraps
-    // into 2 pieces, i=1 stays 1 piece, so stats.tabZones (which counts
-    // pieces, not configured zones) reports 3.
     const result = generateRoutingGcode(part, { toolDiameter: 0.25, targetDepth: 0.25, tabHeight: 0.06, tabWidth: 0.25, tabSpacing: 20 });
-    expect(result.stats.tabZones).toBe(3);
+    expect(result.stats.tabZones).toBe(2);
   });
 
-  it('a non-seam tab (i=1, center away from distance 0) is unaffected - only the seam tab (i=0) splits into 2 pieces', () => {
+  it('still splits a seam-straddling tab into two pieces when one genuinely lands there', () => {
+    // The wraparound is still needed on the fallback path: a fully round
+    // profile has no flat to place tabs on, so they fall back to even
+    // spacing, which does put one at distance 0. Four tabs, one straddling
+    // the seam, is five pieces.
+    const round = [{ points: [...Array(65)].map((_, i) => ({
+      x: 2 + 2 * Math.cos((i / 64) * 2 * Math.PI),
+      y: 2 + 2 * Math.sin((i / 64) * 2 * Math.PI)
+    })), isHole: false }];
+    const result = generateRoutingGcode(round, { toolDiameter: 0.25, targetDepth: 0.25, tabHeight: 0.06, tabWidth: 0.25, tabCount: 4 });
+    expect(result.stats.tabZones).toBe(5);
+    expect(result.gcode).toContain('ON A CURVED EDGE');
+  });
+
+  it('places both tabs mid-edge, so neither straddles the seam', () => {
     const rect = [{ x: -2.5, y: -2.5 }, { x: 2.5, y: -2.5 }, { x: 2.5, y: 2.5 }, { x: -2.5, y: 2.5 }, { x: -2.5, y: -2.5 }];
     const part = [{ points: rect, isHole: false }];
-    // perimeter ~20.9" (after offset) / spacing 10 -> 2 zones: i=0 is
-    // always at the seam (center = (perimeter/count)*0 = 0, regardless of
-    // count) and wraps into 2 pieces; i=1 lands mid-edge and stays 1 piece.
-    // Total reported zones = 3, not 2 - the regression guard that only the
-    // seam-adjacent zone is affected by the wraparound fix.
+    // Both tabs now land mid-edge on flat runs, so neither wraps and the
+    // count is exactly the number of tabs. Previously i=0 sat on the seam
+    // corner and split, reporting 3 for 2 tabs.
     const result = generateRoutingGcode(part, { toolDiameter: 0.25, targetDepth: 0.2, tabHeight: 0.05, tabWidth: 0.25, tabSpacing: 10 });
-    expect(result.stats.tabZones).toBe(3);
+    expect(result.stats.tabZones).toBe(2);
   });
 });
 
@@ -1124,7 +1136,8 @@ describe('generateRoutingGcode - tab reporting', () => {
     const { moves } = parseToolpath3D(gcode);
     const deepest = Math.min(...moves.map((m) => Math.min(m.from.z, m.to.z)));
     expect(deepest).toBeCloseTo(-0.25, 6);
-    // targetDepth - tabHeight: material left under the cutter at each tab.
-    expect(moves.some((m) => Math.abs(Math.min(m.from.z, m.to.z) - -0.19) < 1e-6)).toBe(true);
+    // targetDepth - tabHeight: the cutter RISES to this over each tab, so
+    // it is the endpoint of the move, not the deepest point of it.
+    expect(moves.some((m) => Math.abs(m.to.z - -0.19) < 1e-6)).toBe(true);
   });
 });

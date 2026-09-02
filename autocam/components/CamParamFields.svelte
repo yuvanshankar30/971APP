@@ -217,6 +217,11 @@
           <input id="cf-tab-height" class="form-input" type="number" step="0.01" bind:value={params.tabHeight} title="Material left uncut at each tab" />
         </div>
         <div class="form-group">
+          <label class="form-label" for="cf-tab-count">Number of tabs <span class="text-muted">(auto if blank)</span></label>
+          <input id="cf-tab-count" class="form-input" type="number" min="0" step="1" bind:value={params.tabCount} placeholder="From spacing" />
+          <p class="text-muted">Set this to hold the part with a specific number of tabs instead of deriving the count from spacing. Tabs are placed on the profile's flat edges - never on an arc or fillet, where the web holds unevenly and tears a finished edge on break-out. A profile with no long enough flat falls back to even spacing and says so in the program, since no tabs at all would let the part come loose.</p>
+        </div>
+        <div class="form-group">
           <label class="form-label" for="cf-tab-spacing">Tab spacing (in)</label>
           <input id="cf-tab-spacing" class="form-input" type="number" step="0.5" bind:value={params.tabSpacing} title="0 = no tabs" />
         </div>
