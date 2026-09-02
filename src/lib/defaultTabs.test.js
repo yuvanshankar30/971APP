@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { defaultHeaderTabs, ensurePowerRankingsTab, ensureScoutingAdminTab } from './defaultTabs.js';
+import { defaultHeaderTabs, ensurePowerRankingsTab, ensureScoutingAdminTab, ensureDataScoutTab } from './defaultTabs.js';
 
 const enabled = { tabs: { powerrankings: true } };
 
@@ -30,6 +30,22 @@ describe('defaultHeaderTabs', () => {
     const children = competitionChildren(defaultHeaderTabs());
     expect(children).toContainEqual({ key: 'powerrankings', label: 'Power Rankings' });
     expect(children.at(-1)).toEqual({ key: 'scouting-admin', label: 'Scouting Admin' });
+  });
+
+  it('orders the scouting surfaces the way the team asked for them', () => {
+    // Deliberate order, not incidental: match -> pit -> rankings -> vision
+    // -> data, with the Pick List and the admin surface after them.
+    const keys = competitionChildren(defaultHeaderTabs()).map((child) => child.key);
+    expect(keys).toEqual([
+      'matchscout', 'pitscout', 'powerrankings', 'vision', 'datascout', 'scouting', 'scouting-admin'
+    ]);
+  });
+
+  it('gives Data Scouting a nav entry at all', () => {
+    // /datascout is a real page that previously had no entry anywhere in
+    // the nav - it was reachable only by typing the URL.
+    const keys = competitionChildren(defaultHeaderTabs()).map((child) => child.key);
+    expect(keys).toContain('datascout');
   });
 
   it('keeps the other active scouting surfaces alongside it', () => {
@@ -107,5 +123,34 @@ describe('ensurePowerRankingsTab', () => {
     expect(competitionChildren(ensurePowerRankingsTab(oddFolder, enabled))).toEqual([
       { key: 'powerrankings', label: 'Power Rankings' }
     ]);
+  });
+});
+
+describe('ensureDataScoutTab', () => {
+  it('appends Data Scouting to an existing Competition folder', () => {
+    const tabs = [{ type: 'folder', label: 'Competition', children: [{ key: 'pitscout', label: 'Pit Scouting' }] }];
+    const out = ensureDataScoutTab(tabs);
+    expect(out[0].children.map((c) => c.key)).toEqual(['pitscout', 'datascout']);
+  });
+
+  it('leaves a nav that already has it completely alone', () => {
+    const tabs = [{ type: 'folder', label: 'Competition', children: [{ key: 'datascout', label: 'Renamed By User' }] }];
+    expect(ensureDataScoutTab(tabs)).toBe(tabs);
+  });
+
+  it('falls back to a top-level tab when there is no Competition folder', () => {
+    const tabs = [{ type: 'tab', key: 'docs', label: 'Docs' }];
+    const out = ensureDataScoutTab(tabs);
+    expect(out.at(-1)).toEqual({ type: 'tab', key: 'datascout', label: 'Data Scouting' });
+  });
+
+  it('never reorders or removes what is already there', () => {
+    const tabs = [
+      { type: 'tab', key: 'docs', label: 'Docs' },
+      { type: 'folder', label: 'Competition', children: [{ key: 'matchscout', label: 'Match Scouting' }] }
+    ];
+    const out = ensureDataScoutTab(tabs);
+    expect(out[0]).toEqual(tabs[0]);
+    expect(out[1].children[0]).toEqual(tabs[1].children[0]);
   });
 });

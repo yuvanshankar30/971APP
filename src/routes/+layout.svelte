@@ -6,7 +6,7 @@
   import { supabase } from '$lib/supabase.js';
   import { fetchActiveScoutingEventKey } from '$lib/scoutingEvent.js';
   import navConfig from '$lib/navigation.json';
-  import { defaultHeaderTabs, ensurePowerRankingsTab, ensureScoutingAdminTab } from '$lib/defaultTabs.js';
+  import { defaultHeaderTabs, ensureDataScoutTab, ensurePowerRankingsTab, ensureScoutingAdminTab } from '$lib/defaultTabs.js';
   import { Move3d, Hammer, Wrench, Receipt, Home, Briefcase, Coins, Package, User, ChevronDown, Menu, X, Camera, CalendarDays, Cpu, FileText, Trophy, Eye, ClipboardCheck, ListChecks } from 'lucide-svelte';
   import { goto, afterNavigate } from '$app/navigation';
   import { page } from '$app/stores';
@@ -459,7 +459,7 @@
   // Power Rankings is appended for anyone whose saved header_tabs predates it,
   // so a customized nav still surfaces the feature. Purely additive - see
   // ensurePowerRankingsTab().
-  $: baseNavTabs = addAdminTabIfAllowed(ensureScoutingAdminTab(ensurePowerRankingsTab(effectiveTabs, navConfig)), canViewAdmin);
+  $: baseNavTabs = addAdminTabIfAllowed(ensureScoutingAdminTab(ensureDataScoutTab(ensurePowerRankingsTab(effectiveTabs, navConfig))), canViewAdmin);
   $: navItems = isApproved ? buildNavItems(baseNavTabs) : [];
 
   // Drag-to-reorder for the desktop nav's top-level tabs/folders. Home is
