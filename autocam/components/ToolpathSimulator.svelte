@@ -695,6 +695,12 @@
   // what the GPU/rebuild-on-scrub cost can absorb.
   const HEIGHTMAP_MAX_GRID = 480;
   const HEIGHTMAP_MARGIN_FACTOR = 0.06;
+  // How close to the underside counts as "cut through". A physical
+  // tolerance, not a float-noise one: auto-derived depth equals the measured
+  // thickness exactly, so the cut lands ON floorZ and a 1e-6 test would let
+  // rounding decide whether the part is perforated. A ten-thousandth of an
+  // inch short of the underside has, in any real sense, gone through.
+  const CUT_THROUGH_EPSILON = 1e-4;
 
   function routingCutterRadius(move) {
     const seqDiameter = Number(toolSequence?.[move.toolIndex || 0]?.toolDiameter);
@@ -765,6 +771,31 @@
       posAttr.setZ(i, surfaceHeights[iy * nx + ix]);
     }
     posAttr.needsUpdate = true;
+
+    // A cut that reaches the underside of the stock has removed the material
+    // there - the part should be a hole you can see through, not a patch of
+    // surface lying flat at floor level. Drop every top-surface triangle
+    // whose cell was cut clean through; the bottom cap below skips the same
+    // cells, and the wall quads at the depth discontinuity already close the
+    // opening's sides.
+    //
+    // Only meaningful when the real material thickness is known (floorZ is
+    // the measured underside). Without it floorZ sits below the deepest cut
+    // by construction, nothing reaches it, and this is inert - which is the
+    // honest outcome, since nothing then says the cut went through.
+    if (routingTargetThickness != null && geometry.index) {
+      const index = geometry.index.array;
+      const kept = [];
+      for (let t = 0; t < index.length; t += 3) {
+        const a = index[t], b = index[t + 1], c = index[t + 2];
+        const throughAll =
+          posAttr.getZ(a) <= floorZ + CUT_THROUGH_EPSILON &&
+          posAttr.getZ(b) <= floorZ + CUT_THROUGH_EPSILON &&
+          posAttr.getZ(c) <= floorZ + CUT_THROUGH_EPSILON;
+        if (!throughAll) kept.push(a, b, c);
+      }
+      geometry.setIndex(kept);
+    }
     geometry.computeVertexNormals();
 
     const material = createStockMaterial();
@@ -797,9 +828,20 @@
       positions.push(...a, ...b, ...c, ...a, ...c, ...d);
     };
 
-    // Bottom cap.
+    // Bottom cap, one quad per cell rather than a single sheet, so a cut
+    // that went clean through leaves a real opening in the underside
+    // instead of a solid plate you cannot see through from below.
     const minX = vx(0), maxX = vx(nx - 1), minY = vy(0), maxY = vy(ny - 1);
-    quad([minX, minY, floorZ], [maxX, minY, floorZ], [maxX, maxY, floorZ], [minX, maxY, floorZ]);
+    const cutThrough = (ix, iy) => heights[iy * nx + ix] <= floorZ + CUT_THROUGH_EPSILON;
+    for (let ix = 0; ix < nx - 1; ix += 1) {
+      for (let iy = 0; iy < ny - 1; iy += 1) {
+        // Only skip where the whole cell is gone - a partly-cut cell still
+        // has material under it.
+        if (cutThrough(ix, iy) && cutThrough(ix + 1, iy) && cutThrough(ix + 1, iy + 1) && cutThrough(ix, iy + 1)) continue;
+        const x0 = vx(ix), x1 = vx(ix + 1), y0 = vy(iy), y1 = vy(iy + 1);
+        quad([x0, y0, floorZ], [x1, y0, floorZ], [x1, y1, floorZ], [x0, y1, floorZ]);
+      }
+    }
 
     // -Y and +Y walls.
     for (let ix = 0; ix < nx - 1; ix += 1) {
