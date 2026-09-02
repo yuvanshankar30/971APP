@@ -536,10 +536,19 @@
 
   .team-drag-bar {
     display: flex;
+    /* Wraps instead of scrolling sideways. A single non-wrapping row put a
+       third of a 43-team event off-screen behind a horizontal scrollbar in a
+       34px strip - you cannot drag a team you cannot see, and nothing
+       indicated there were more. Every team is now a visible box. */
+    flex-wrap: wrap;
+    align-content: flex-start;
     gap: 0.3rem;
     min-height: 2.1rem;
-    overflow-x: auto;
-    padding: 0.1rem;
+    /* Still bounded, so a large event cannot push the drop zones off the
+       page - but it scrolls in the direction the eye already expects. */
+    max-height: 11rem;
+    overflow-y: auto;
+    padding: 0.25rem;
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     background: var(--surface-1);
@@ -583,9 +592,9 @@
   }
 
   .team-chip {
-    min-width: 2.35rem;
-    min-height: 1.7rem;
-    padding: 0.1rem 0.35rem;
+    min-width: 3rem;
+    min-height: 1.9rem;
+    padding: 0.15rem 0.5rem;
     border: 1px solid var(--accent-strong, #b8860b);
     border-radius: var(--radius-sm);
     background: var(--surface-1);
