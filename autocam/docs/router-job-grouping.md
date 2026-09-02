@@ -13,13 +13,19 @@ cutter geometry between parts.
 
 ## Placement and clearance
 
-`autocam/nesting.js` measures the real XY cutting envelope from each completed
-program and uses deterministic first-fit-decreasing shelf packing. The packer
-keeps a configurable stock edge margin and a conservative cut-path clearance:
+`autocam/nesting.js` measures the real XY material-removing envelope from each
+completed program, excluding rapids and coordinates in comments, and uses
+deterministic first-fit-decreasing shelf packing. The packer keeps a
+configurable stock edge margin and a conservative cut-path clearance:
 
 ```
 clearance = end-mill diameter + (2 * tolerance allowance)
 ```
+
+The stock edge margin is measured from the **edge of the cut**, not the cutter
+centerline. Internally the packer reserves `edge margin + cutter radius` around
+the centerline envelope. The grouped-program header prints both values so an
+operator can verify clamp placement against the same geometry the packer used.
 
 The envelope approach is intentionally conservative for irregular parts: it
 does not pack one part into an empty concavity of another. This costs some
@@ -29,11 +35,12 @@ work, not implied behavior.
 
 ## G-code generation
 
-`autocam/groupedGcode.js` translates absolute `X` and `Y` words for each
-source program to its saved placement. Relative `I` and `J` arc centers are
-not modified, so translated arcs remain correct. It removes each source
-program's setup/end block, inserts safe-height moves between parts, and emits
-one shared spindle/setup block and one program end.
+`autocam/groupedGcode.js` translates absolute `X` and `Y` motion words for each
+source program to its saved placement. It leaves comment text and WinCNC's
+`G04 X<seconds>` dwell word untouched. Relative `I` and `J` arc centers are not
+modified, so translated arcs remain correct. It removes each source program's
+setup/end block, inserts safe-height moves between parts, and emits one shared
+spindle/setup block and one program end.
 
 The group must be reviewed in AutoCAM's 3D toolpath simulator before cutting.
 The group view intentionally omits CAD viewing because there is no single CAD

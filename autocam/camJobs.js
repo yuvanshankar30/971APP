@@ -100,9 +100,26 @@ const PROGRESS_TIMEOUT_MS = 75000;
  * Returns the job row after generation (status will be 'completed' or
  * 'failed' by the time this resolves).
  */
-async function triggerGenerationAndRefetch(jobId, onProgress) {
+async function markCamJobFailed(jobId, message) {
+  const failure = { status: 'failed', errors: [message], progress_message: message };
+  try {
+    const { error } = await supabase.from('cam_jobs').update(failure).eq('id', jobId);
+    if (error) console.error('Could not persist terminal CAM job status', error);
+  } catch (error) {
+    // The caller still receives a terminal result even if the same database
+    // outage that broke polling also prevents this best-effort status write.
+    console.error('Could not persist terminal CAM job status', error);
+  }
+  return { id: jobId, ...failure };
+}
+
+export async function triggerGenerationAndRefetch(jobId, onProgress, {
+  pollMs = PROGRESS_POLL_MS,
+  timeoutMs = PROGRESS_TIMEOUT_MS
+} = {}) {
   let fetchError = null;
   let fetchSettled = false;
+  let pollError = null;
 
   // The endpoint builds its own Supabase client from whatever Authorization
   // header this request carries (src/routes/api/cam-generate/+server.js) -
@@ -113,43 +130,74 @@ async function triggerGenerationAndRefetch(jobId, onProgress) {
   // watches the database row, not this response) - so the job just sits at
   // "queued" forever until the timeout below gives up. Real bug, not a
   // hypothetical: this is what was actually causing every failure tonight.
-  const { data: sessionData } = await supabase.auth.getSession();
-  const accessToken = sessionData?.session?.access_token;
+  let accessToken;
+  try {
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError) throw new Error(sessionError.message);
+    accessToken = sessionData?.session?.access_token;
+  } catch (error) {
+    return markCamJobFailed(jobId, `Could not read the current session: ${error.message}`);
+  }
 
   // Fired but deliberately not awaited directly - the server writes progress
   // and the final status straight to the job row as it goes, so polling that
   // row is what actually drives this function, not this promise. Awaiting it
   // directly would risk hanging forever if the request itself never settles.
-  fetch('/api/cam-generate', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {})
-    },
-    body: JSON.stringify({ jobId })
-  })
-    .catch((e) => { fetchError = e; console.error('CAM generation request failed', e); })
-    .finally(() => { fetchSettled = true; });
+  try {
+    fetch('/api/cam-generate', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {})
+      },
+      body: JSON.stringify({ jobId })
+    })
+      .then(async (response) => {
+        if (response.ok) return;
+        let detail = '';
+        try { detail = (await response.json())?.error || ''; } catch { /* response body is optional */ }
+        throw new Error(detail || `Generation server returned HTTP ${response.status}`);
+      })
+      .catch((error) => { fetchError = error; console.error('CAM generation request failed', error); })
+      .finally(() => { fetchSettled = true; });
+  } catch (error) {
+    fetchError = error;
+    fetchSettled = true;
+  }
 
   const pollStart = Date.now();
   while (true) {
-    await new Promise((r) => setTimeout(r, PROGRESS_POLL_MS));
-    const { data } = await supabase.from('cam_jobs').select('*').eq('id', jobId).single();
-    if (data && onProgress) onProgress(data);
-    if (data && TERMINAL_STATUSES.includes(data.status)) return data;
+    await new Promise((r) => setTimeout(r, pollMs));
+    let result;
+    try {
+      result = await supabase.from('cam_jobs').select('*').eq('id', jobId).single();
+    } catch (error) {
+      pollError = error;
+      break;
+    }
+    const { data, error } = result || {};
+    if (error || !data) {
+      pollError = new Error(error?.message || 'The queued CAM job could not be found while generation was running');
+      break;
+    }
+    if (onProgress) {
+      try { onProgress(data); } catch (error) { console.error('CAM progress callback failed', error); }
+    }
+    if (TERMINAL_STATUSES.includes(data.status)) return data;
     // A network-level failure (not just a slow server) - no point waiting out the full timeout.
     if (fetchSettled && fetchError) break;
-    if (Date.now() - pollStart > PROGRESS_TIMEOUT_MS) break;
+    if (Date.now() - pollStart >= timeoutMs) break;
   }
 
   // Still not terminal - the server never finished writing a result. Surface
   // a clear, specific failure here instead of leaving the job (and the UI)
   // spinning on "Generating CAM" forever with no explanation.
-  const message = fetchError
-    ? `Could not reach the generation server: ${fetchError.message}`
-    : `Generation did not finish within ${PROGRESS_TIMEOUT_MS / 1000}s - the server may have hit its execution time limit, crashed, or lost its database connection mid-request. On Vercel, check the deployment's function logs for /api/cam-generate; locally, check the terminal running "npm run dev".`;
-  await supabase.from('cam_jobs').update({ status: 'failed', errors: [message], progress_message: message }).eq('id', jobId);
-  return { id: jobId, status: 'failed', errors: [message] };
+  const message = pollError
+    ? `Could not read CAM generation progress: ${pollError.message}`
+    : fetchError
+      ? `Could not reach the generation server: ${fetchError.message}`
+      : `Generation did not finish within ${timeoutMs / 1000}s - the server may have hit its execution time limit, crashed, or lost its database connection mid-request. On Vercel, check the deployment's function logs for /api/cam-generate; locally, check the terminal running "npm run dev".`;
+  return markCamJobFailed(jobId, message);
 }
 
 /**

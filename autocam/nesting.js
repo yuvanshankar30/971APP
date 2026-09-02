@@ -8,25 +8,18 @@
  * API or generated-program contract.
  */
 
-const WORD = /([XY])\s*([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)/g;
+import { parseToolpath3D } from './toolpathPreview.js';
 
 export function gcodeBounds(gcode) {
-  let x = 0;
-  let y = 0;
+  const cuttingMoves = parseToolpath3D(String(gcode || '')).moves.filter((move) => move.kind !== 'rapid');
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const line of String(gcode || '').split(/\r?\n/)) {
-    let matched = false;
-    for (const match of line.matchAll(WORD)) {
-      matched = true;
-      if (match[1] === 'X') x = Number(match[2]);
-      else y = Number(match[2]);
-    }
-    if (matched && Number.isFinite(x) && Number.isFinite(y)) {
-      minX = Math.min(minX, x); maxX = Math.max(maxX, x);
-      minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+  for (const move of cuttingMoves) {
+    for (const point of [move.from, move.to]) {
+      minX = Math.min(minX, point.x); maxX = Math.max(maxX, point.x);
+      minY = Math.min(minY, point.y); maxY = Math.max(maxY, point.y);
     }
   }
-  if (!Number.isFinite(minX)) throw new Error('This G-code contains no X/Y motion to nest');
+  if (!Number.isFinite(minX)) throw new Error('This G-code contains no cutting X/Y motion to nest');
   return { minX, minY, maxX, maxY, width: maxX - minX, height: maxY - minY };
 }
 
@@ -46,10 +39,14 @@ export function minimumPartClearance(toolDiameter, tolerance = 0.01) {
  * envelope* corner, not a CAD corner, which makes it correct for jobs that
  * applied their own edgeShift before generation.
  */
-export function packRects(items, { stockWidth, stockHeight, edgeMargin = 0.5, clearance }) {
-  const width = Number(stockWidth), height = Number(stockHeight), margin = Number(edgeMargin);
+export function packRects(items, { stockWidth, stockHeight, edgeMargin = 0.5, clearance, toolDiameter = 0 }) {
+  const width = Number(stockWidth), height = Number(stockHeight), requestedMargin = Number(edgeMargin), diameter = Number(toolDiameter);
   if (!(width > 0 && height > 0)) throw new Error('Stock width and height must be positive');
-  if (!(margin >= 0 && clearance >= 0)) throw new Error('Margin and clearance must be zero or greater');
+  if (!(requestedMargin >= 0 && clearance >= 0)) throw new Error('Margin and clearance must be zero or greater');
+  if (!(diameter >= 0) || !Number.isFinite(diameter)) throw new Error('Tool diameter must be zero or greater');
+  // Bounds describe the cutter centerline. Add the cutter radius so the
+  // requested edge margin describes material left between the cut and sheet.
+  const margin = requestedMargin + diameter / 2;
   const usableWidth = width - margin * 2;
   const usableHeight = height - margin * 2;
   if (!(usableWidth > 0 && usableHeight > 0)) throw new Error('Stock is smaller than its edge margins');
@@ -77,7 +74,7 @@ export function packRects(items, { stockWidth, stockHeight, edgeMargin = 0.5, cl
     shelf.cursorX += itemWidth + clearance;
   }
   const usedHeight = shelves.length ? shelves[shelves.length - 1].y + shelves[shelves.length - 1].height : 0;
-  return { placements, usedWidth: Math.max(0, ...shelves.map((s) => s.cursorX - clearance)), usedHeight, utilization: (placements.reduce((sum, p) => sum + p.bounds.width * p.bounds.height, 0) / (width * height)) || 0 };
+  return { placements, usedWidth: Math.max(0, ...shelves.map((s) => s.cursorX - clearance)), usedHeight, utilization: (placements.reduce((sum, p) => sum + p.bounds.width * p.bounds.height, 0) / (width * height)) || 0, edgeMargin: requestedMargin, centerlineMargin: margin };
 }
 
 export function planJobNesting(jobs, options) {
