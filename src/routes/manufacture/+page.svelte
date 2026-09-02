@@ -3326,12 +3326,18 @@
      the Status badge sat ~12px above the Due input beside it instead of
      level with it. Out of flow, every primary line lands on the row's
      centre regardless of what hangs underneath. */
-  .metadata-sub {
+  /* Scoped to the cell (two classes) so it outranks .router-progress-note,
+     which the status sub-line also carries. That rule's own
+     `margin-top: 0.35rem` appears later in this stylesheet and was winning,
+     so the offset here resolved to 5.6px instead of ~19px and "1 Pending"
+     sat 8px inside the badge above it. The offset now lives in `top`, where
+     a margin from a content class cannot quietly replace it. */
+  .metadata-col .metadata-sub {
     position: absolute;
     left: 0;
     right: 0;
-    top: 50%;
-    margin-top: calc(var(--control-height) / 2 + 0.3rem);
+    top: calc(50% + (var(--control-height) / 2) + 0.3rem);
+    margin-top: 0;
     display: flex;
     justify-content: center;
     /* Keeps the season tag off the column edge so it never reads as though
