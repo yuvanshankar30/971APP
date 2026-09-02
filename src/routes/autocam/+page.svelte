@@ -1596,8 +1596,11 @@
       <div class="modal-body">
         {#if editingJob.operation_type === 'routing' || editingJob.operation_type === 'turning'}
           <div class="toolpath-view-tabs" role="tablist" aria-label="Toolpath view">
-            <button type="button" role="tab" aria-selected={toolpathView === '2d'} class:active={toolpathView === '2d'} on:click={() => (toolpathView = '2d')}>2D Preview</button>
+            <!-- 3D first: it's the default view and the one people actually
+                 read a toolpath in, so it leads the tab strip here the same
+                 way it already does on the manufacture page's own dialog. -->
             <button type="button" role="tab" aria-selected={toolpathView === '3d'} class:active={toolpathView === '3d'} on:click={() => open3DToolpathPreview(editingJob, toolpathPreviewParams || editingJob.params)}>3D Toolpath</button>
+            <button type="button" role="tab" aria-selected={toolpathView === '2d'} class:active={toolpathView === '2d'} on:click={() => (toolpathView = '2d')}>2D Preview</button>
           </div>
         {/if}
         {#if toolpathView === '3d' && (editingJob.operation_type === 'routing' || editingJob.operation_type === 'turning' || editingJob.operation_type === 'tubestock')}
