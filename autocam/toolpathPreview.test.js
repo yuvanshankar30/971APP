@@ -993,7 +993,11 @@ describe('estimateMachiningTime', () => {
   });
 
   it('estimates a real generated turning program, which is feed-per-rev', () => {
-    const profile = [{ z: 0, radius: 0.5 }, { z: -1, radius: 0.5 }, { z: -1, radius: 0.375 }, { z: -2, radius: 0.375 }];
+    // {z, x} with x as the RADIUS - the shape extractTurningProfileFromMeshes
+    // actually produces (stepProfile.js). Passing {z, radius} here instead
+    // leaves x undefined, which makes every X word 'XNaN' and quietly
+    // exercises a degenerate program rather than a real one.
+    const profile = [{ z: 0, x: 0.5 }, { z: -1, x: 0.5 }, { z: -1, x: 0.375 }, { z: -2, x: 0.375 }];
     const { gcode: program } = generateTurningGcode(profile, { stockDiameter: 1.25 });
     const parsed = parseToolpath3D(program);
     const projected = projectTurningToolpath(parsed);
