@@ -13,6 +13,8 @@ import {
   turningProfileToLathePoints,
   buildTurningStockRings,
   buildRoutingHeightmap,
+  estimateMachiningTime,
+  formatMachiningTime,
   smoothRoutingHeightmap,
   findRoutingHeightmapWalls,
   tubeLocalPoint,
@@ -767,5 +769,124 @@ describe('matchTubestockHolesToMoves', () => {
       const distanceFromAxis = Math.hypot(drilledPoint.y, drilledPoint.z);
       expect(distanceFromAxis).toBeLessThanOrEqual(Math.max(features.crossSection.a, features.crossSection.b) / 2 + 1e-6);
     }
+  });
+});
+
+describe('parseToolpath3D - dwells are not motion', () => {
+  it('does not read a wincnc dwell (G04 X<seconds>) as a move to X=<seconds>', () => {
+    // Real bug: `G04 X2.0` emitted a phantom 2" rapid to X=2 and left the
+    // machine position wrong for every move after it, in the 2D preview and
+    // the 3D sim alike, for every program generated in the wincnc dialect.
+    const { moves, dwellSeconds } = parseToolpath3D(gcode(
+      'G20', 'G90',
+      'G00 X0 Y0 Z1',
+      'S8000 M03',
+      'G04 X2.0 (wait for spindle to reach speed)',
+      'G01 X1 Y0 Z-0.1 F20'
+    ));
+    expect(moves).toHaveLength(1);
+    expect(moves[0].from).toEqual({ x: 0, y: 0, z: 1 });
+    expect(moves[0].to).toEqual({ x: 1, y: 0, z: -0.1 });
+    expect(dwellSeconds).toBe(2);
+  });
+
+  it('reads a linuxcnc dwell (G04 P<seconds>) as time too', () => {
+    const { moves, dwellSeconds } = parseToolpath3D(gcode('G20', 'G90', 'G00 X0 Y0 Z1', 'G04 P1.5', 'G01 X1 F20'));
+    expect(dwellSeconds).toBe(1.5);
+    expect(moves).toHaveLength(1);
+  });
+});
+
+describe('estimateMachiningTime', () => {
+  it('times a feed-per-minute (G94) cut as distance / feed', () => {
+    const { moves } = parseToolpath3D(gcode('G20', 'G90', 'G94', 'G00 X0 Y0 Z0', 'G01 X10 Y0 F20'));
+    const est = estimateMachiningTime(moves);
+    expect(est.cuttingSeconds).toBeCloseTo(30, 6); // 10in at 20in/min
+    expect(est.unknownFeedMoves).toBe(0);
+  });
+
+  it('times rapids at the rapid rate, not the cutting feed', () => {
+    const { moves } = parseToolpath3D(gcode('G20', 'G90', 'G94', 'G00 X0 Y0 Z0', 'G01 X1 F1', 'G00 X101'));
+    const est = estimateMachiningTime(moves, { rapidRate: 200 });
+    expect(est.cuttingSeconds).toBeCloseTo(60, 6);  // 1in at 1in/min
+    expect(est.rapidSeconds).toBeCloseTo(30, 6);    // 100in at 200in/min
+  });
+
+  it('converts feed per revolution (G95) using the spindle speed', () => {
+    // G97 S1000 with F0.005 in/rev = 5 in/min, so 10in takes 2 minutes.
+    const { moves } = parseToolpath3D(gcode('G20', 'G90', 'G95', 'G97 S1000 M03', 'G00 X0 Z0', 'G01 Z-10 F0.005'));
+    const est = estimateMachiningTime(moves);
+    expect(est.cuttingSeconds).toBeCloseTo(120, 6);
+  });
+
+  it('derives RPM from the diameter under G96 constant surface speed', () => {
+    // At 2" diameter, 100 SFM -> 100*12/(pi*2) = 190.99 rpm.
+    // F0.01 in/rev -> 1.9099 in/min, so a 1" cut takes 31.416s.
+    const { moves } = parseToolpath3D(gcode('G20', 'G90', 'G95', 'G96 S100 M03', 'G00 X2 Z0', 'G01 Z-1 F0.01'));
+    const est = estimateMachiningTime(moves);
+    expect(est.cuttingSeconds).toBeCloseTo(60 / ((100 * 12) / (Math.PI * 2) * 0.01), 4);
+  });
+
+  it('honours the G50 max-RPM clamp instead of the surface-speed formula', () => {
+    // At 0.05" diameter the G96 formula demands ~7639 rpm; G50 caps it at 500.
+    const { moves } = parseToolpath3D(gcode('G20', 'G90', 'G95', 'G50 S500', 'G96 S100 M03', 'G00 X0.05 Z0', 'G01 Z-1 F0.01'));
+    const cut = moves.find((m) => m.kind !== 'rapid');
+    expect(cut.rpm).toBe(500);
+    expect(estimateMachiningTime(moves).cuttingSeconds).toBeCloseTo(60 / (500 * 0.01), 6);
+  });
+
+  it('counts dwell time but leaves human pauses out of the total', () => {
+    // An M00 waits on a person - there is no defensible number of seconds
+    // for it, so it is reported as a count rather than invented.
+    const parsed = parseToolpath3D(gcode(
+      'G20', 'G90', 'G94', 'G00 X0 Y0 Z0',
+      'G04 P3',
+      'M00 (TOOL CHANGE: load 0.125" endmill)',
+      'G01 X10 F20'
+    ));
+    const est = estimateMachiningTime(parsed.moves, { dwellSeconds: parsed.dwellSeconds, pauseCount: parsed.pauseCount });
+    expect(est.dwellSeconds).toBe(3);
+    expect(est.pauseCount).toBe(1);
+    expect(est.totalSeconds).toBeCloseTo(30 + 3, 6);
+  });
+
+  it('reports moves it cannot time rather than guessing a feed for them', () => {
+    const { moves } = parseToolpath3D(gcode('G20', 'G90', 'G94', 'G00 X0 Y0 Z0', 'G01 X5'));
+    const est = estimateMachiningTime(moves);
+    expect(est.unknownFeedMoves).toBe(1);
+    expect(est.cuttingSeconds).toBe(0);
+  });
+
+  it('estimates a real generated routing program end to end', () => {
+    const square = [{ points: [{ x: 0, y: 0 }, { x: 6, y: 0 }, { x: 6, y: 4 }, { x: 0, y: 4 }], isHole: false }];
+    const { gcode: program } = generateRoutingGcode(square, { toolDiameter: 0.25, targetDepth: 0.25 });
+    const parsed = parseToolpath3D(program);
+    const est = estimateMachiningTime(parsed.moves, { dwellSeconds: parsed.dwellSeconds, pauseCount: parsed.pauseCount });
+    // Every move in this app's own output carries a feed - nothing untimed.
+    expect(est.unknownFeedMoves).toBe(0);
+    expect(est.totalSeconds).toBeGreaterThan(0);
+    expect(est.cuttingSeconds).toBeGreaterThan(est.rapidSeconds);
+  });
+
+  it('estimates a real generated turning program, which is feed-per-rev', () => {
+    const profile = [{ z: 0, radius: 0.5 }, { z: -1, radius: 0.5 }, { z: -1, radius: 0.375 }, { z: -2, radius: 0.375 }];
+    const { gcode: program } = generateTurningGcode(profile, { stockDiameter: 1.25 });
+    const parsed = parseToolpath3D(program);
+    const projected = projectTurningToolpath(parsed);
+    const est = estimateMachiningTime(projected.moves, { dwellSeconds: parsed.dwellSeconds });
+    expect(est.unknownFeedMoves).toBe(0);
+    expect(est.cuttingSeconds).toBeGreaterThan(0);
+    // Feed-per-rev survives the projection that rewrites the axes.
+    expect(projected.moves.some((m) => m.feedPerRev && m.rpm > 0)).toBe(true);
+  });
+});
+
+describe('formatMachiningTime', () => {
+  it('reads as a duration a machinist can scan', () => {
+    expect(formatMachiningTime(48)).toBe('48s');
+    expect(formatMachiningTime(252)).toBe('4m 12s');
+    expect(formatMachiningTime(3780)).toBe('1h 03m');
+    expect(formatMachiningTime(0)).toBe('—');
+    expect(formatMachiningTime(null)).toBe('—');
   });
 });
