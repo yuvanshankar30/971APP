@@ -8,6 +8,7 @@ import {
 } from '$lib/planner/constants.js';
 import { canPlannerReactionUpdateStatus } from '$lib/planner/status.js';
 import { ensureApproverDmChannel, getSlackClient, getSupabase, slackUserIdForEmail } from '$lib/server/971bot.js';
+import { recordSlackActivity } from '$lib/server/slack_activity.js';
 import { fetchPlannerSnapshot } from '$lib/server/planner_data.js';
 import { formatPacific } from '$lib/timezone.js';
 
@@ -208,6 +209,16 @@ export async function sendPlannerPrompt({ item, ownerId, checkpoint, scheduledFo
     return { ok: false, reason: 'post-failed' };
   }
 
+  await recordSlackActivity(supa, {
+    text: isDrivePracticePrompt
+      ? drivePracticePromptText({ item, scheduledFor, ownerName: user.full_name || user.email || null })
+      : promptText({ item, checkpoint, scheduledFor, ownerName: user.full_name || user.email || null }),
+    channel: response.channel,
+    ts: response.ts,
+    recipient: user.full_name || user.email || null,
+    category: 'Planner prompt'
+  });
+
   if (!isDrivePracticePrompt) {
     const seededReactions = Array.from(new Set(Object.values(PLANNER_STATUS_TO_REACTION)));
     for (const checkpointReaction of seededReactions) {
@@ -257,6 +268,14 @@ export async function broadcastPlannerRedAlert({ item, checkpoint, reactionUserI
     channel: alertChannel,
     text: `Planner alert: ${item.title} was marked RED during ${checkpointLabel(checkpoint)}. Updated by ${actorLabel}. ${getPlannerLink(item.id)}`
   });
+  if (response?.ok) {
+    await recordSlackActivity(supa, {
+      text: `Planner alert: ${item.title} was marked RED during ${checkpointLabel(checkpoint)}. Updated by ${actorLabel}. ${getPlannerLink(item.id)}`,
+      channel: response.channel || alertChannel,
+      ts: response.ts || null,
+      category: 'Planner alert'
+    });
+  }
   return { ok: !!response?.ok };
 }
 

@@ -3,6 +3,7 @@ import { WebClient } from '@slack/web-api';
 import { env } from '$env/dynamic/private';
 import { env as publicEnv } from '$env/dynamic/public';
 import { canApprovePurchases } from '$lib/permissions.js';
+import { recordSlackActivity } from '$lib/server/slack_activity.js';
 
 // Lazy initialization to avoid throwing at module import time (build-time).
 let _supabaseClient = null;
@@ -299,6 +300,12 @@ export async function postPurchaseRequestMessage(requester, itemName, projectId,
       purchaseId,
       textPreview: text.substring(0, 100)
     });
+    await recordSlackActivity(getSupabase(), {
+      text,
+      channel: resp.channel || channel,
+      ts: resp.ts || null,
+      category: 'Purchase approval request'
+    });
 
     // If we posted successfully and have a purchaseId, record the mapping in memory
     if (resp && resp.ok && resp.ts && purchaseId) {
@@ -346,6 +353,14 @@ export async function postBuildApprovalRequest(build, requesterName = 'Unknown')
   try {
     const client = getSlackClient();
     const resp = await client.chat.postMessage({ channel, text });
+    if (resp?.ok) {
+      await recordSlackActivity(getSupabase(), {
+        text,
+        channel: resp.channel || channel,
+        ts: resp.ts || null,
+        category: 'Build approval request'
+      });
+    }
     if (resp && resp.ok && resp.ts && buildId) {
       try {
         const supa = getSupabase();
@@ -406,6 +421,12 @@ export async function postUserApprovalNeeded(name) {
     const resp = await client.chat.postMessage({ channel, text });
     if (resp.ok) {
       console.log('User approval message posted successfully');
+      await recordSlackActivity(getSupabase(), {
+        text,
+        channel: resp.channel || channel,
+        ts: resp.ts || null,
+        category: 'User approval request'
+      });
     } else {
       console.error('Failed to post user approval message:', resp);
     }
