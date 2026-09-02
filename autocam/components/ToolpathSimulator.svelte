@@ -742,17 +742,25 @@
     const moveIndex = toolPosition?.moveIndex ?? 0;
     const progress = toolPosition?.progress ?? 0;
 
+    // Two outputs from one sweep: `heights` is the exact, binary simulation
+    // state, and `surfaceRaw` is the same cut carried to sub-cell accuracy at
+    // the boundary. Testing only a cell's centre makes every cell
+    // all-or-nothing, which is what turned curved boundaries into a
+    // staircase of cell-sized steps - the faceted bore walls and radial
+    // ridges on a pocket.
+    const surfaceRaw = new Float32Array(nx * ny);
     const heights = buildRoutingHeightmap(moves, {
       nx, ny, minX: gridMinX, minY: gridMinY, cellSize, topZ: 0, floorZ,
       cutterRadiusForMove: routingCutterRadius,
       uptoMoveIndex: moveIndex,
-      partialProgress: progress
+      partialProgress: progress,
+      surfaceOut: surfaceRaw
     });
     routingHeights = heights;
     // The raw heightmap remains the simulation state for gouge detection.
     // The top mesh gets a shallow, edge-preserving pass so grid noise does
     // not show up as lighting facets; actual depth steps become wall quads.
-    const surfaceHeights = smoothRoutingHeightmap(heights, {
+    const surfaceHeights = smoothRoutingHeightmap(surfaceRaw, {
       nx,
       ny,
       epsilon: Math.max(cellSize * 0.08, 0.0005)
@@ -880,7 +888,13 @@
     // and profile walls now read as real machined walls instead of a sloped
     // interpolation between the two grid samples.
     const wallEpsilon = Math.max(cellSize * 0.08, 0.0005);
-    for (const wall of findRoutingHeightmapWalls(heights, { nx, ny, epsilon: wallEpsilon })) {
+    // Scanned on the displayed surface rather than the raw state: with
+    // sub-cell coverage the boundary already ramps across roughly one cell,
+    // so emitting hard quads at the raw quantised steps would draw a
+    // staircase over the very ramp that smooths it. Genuine depth changes
+    // (a pocket floor against the top face) still exceed the epsilon and
+    // still get a crisp wall.
+    for (const wall of findRoutingHeightmapWalls(surfaceHeights, { nx, ny, epsilon: wallEpsilon })) {
       if (wall.axis === 'x') {
         const x = gridMinX + cellSize * (wall.ix + 1);
         const y0 = vy(wall.iy);

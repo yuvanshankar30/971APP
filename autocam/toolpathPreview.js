@@ -747,9 +747,23 @@ export function buildRoutingHeightmap(moves, {
   floorZ = -1,
   cutterRadiusForMove,
   uptoMoveIndex = moves.length,
-  partialProgress = 1
+  partialProgress = 1,
+  surfaceOut = null
 } = {}) {
   const heights = new Float32Array(nx * ny).fill(topZ);
+  // Optional second output: the same cut, but with sub-cell accuracy at the
+  // boundary. See the coverage blend below for why the two differ and which
+  // one is safe to display.
+  const surface = surfaceOut && surfaceOut.length === nx * ny ? surfaceOut : null;
+  const halfCell = cellSize / 2;
+  // Coverage has to be accumulated and applied ONCE at the end, not blended
+  // per move. A bore is traced by hundreds of overlapping arc moves; blending
+  // each one in turn and keeping the minimum lets them compound, which just
+  // pushes the boundary outward by half a cell instead of sharpening it.
+  // Per cell: the deepest Z any move reached, and the greatest fraction of
+  // the cell any single move covered.
+  const coverDepth = surface ? new Float32Array(nx * ny).fill(topZ) : null;
+  const coverAmount = surface ? new Float32Array(nx * ny) : null;
 
   const applyMove = (move, progress) => {
     if (!move || move.kind === 'rapid') return;
@@ -763,10 +777,14 @@ export function buildRoutingHeightmap(moves, {
     const fromY = move.from.y;
     const fromZ = move.from.z;
 
-    const ixStart = Math.max(0, Math.floor((Math.min(fromX, toX) - radius - minX) / cellSize));
-    const ixEnd = Math.min(nx - 1, Math.ceil((Math.max(fromX, toX) + radius - minX) / cellSize));
-    const iyStart = Math.max(0, Math.floor((Math.min(fromY, toY) - radius - minY) / cellSize));
-    const iyEnd = Math.min(ny - 1, Math.ceil((Math.max(fromY, toY) + radius - minY) / cellSize));
+    // Widened by half a cell when a surface is being built, so the cells the
+    // cutter only partly covers are visited too - they are exactly the ones
+    // that carry the boundary.
+    const reach = radius + (surface ? halfCell : 0);
+    const ixStart = Math.max(0, Math.floor((Math.min(fromX, toX) - reach - minX) / cellSize));
+    const ixEnd = Math.min(nx - 1, Math.ceil((Math.max(fromX, toX) + reach - minX) / cellSize));
+    const iyStart = Math.max(0, Math.floor((Math.min(fromY, toY) - reach - minY) / cellSize));
+    const iyEnd = Math.min(ny - 1, Math.ceil((Math.max(fromY, toY) + reach - minY) / cellSize));
 
     const dx = toX - fromX;
     const dy = toY - fromY;
@@ -781,10 +799,33 @@ export function buildRoutingHeightmap(moves, {
         t = Math.max(0, Math.min(1, t));
         const px = fromX + dx * t;
         const py = fromY + dy * t;
-        if (Math.hypot(cx - px, cy - py) > radius) continue;
+        const dist = Math.hypot(cx - px, cy - py);
+        if (dist > radius + (surface ? halfCell : 0)) continue;
         const z = Math.max(fromZ + (toZ - fromZ) * t, floorZ);
         const cell = rowOffset + ix;
-        if (z < heights[cell]) heights[cell] = z;
+
+        // Simulation state: a cell is cut only if its centre is inside the
+        // swept cutter, and it takes the full depth. Deliberately binary and
+        // deepest-wins - this is what the gouge check reads, and a partial
+        // value there could report a cut shallower than the deepest material
+        // actually removed inside that cell.
+        if (dist <= radius && z < heights[cell]) heights[cell] = z;
+
+        // Display surface: the same cut with sub-cell accuracy. Testing the
+        // centre alone makes every cell all-or-nothing, so a curved boundary
+        // renders as a staircase of cell-sized steps - the faceted bore walls
+        // and radial ridges you see on a pocket. Blending by how much of the
+        // cell the cutter actually covers puts the wall where the tool really
+        // was, between the two grid samples.
+        if (surface) {
+          // Linear ramp across the cell, centred on the true boundary:
+          // fully covered half a cell inside it, zero half a cell outside.
+          const coverage = Math.min(1, Math.max(0, (radius + halfCell - dist) / cellSize));
+          if (coverage > 0) {
+            if (coverage > coverAmount[cell]) coverAmount[cell] = coverage;
+            if (z < coverDepth[cell]) coverDepth[cell] = z;
+          }
+        }
       }
     }
   };
@@ -792,6 +833,12 @@ export function buildRoutingHeightmap(moves, {
   const fullCount = Math.max(0, Math.min(uptoMoveIndex, moves.length));
   for (let m = 0; m < fullCount; m += 1) applyMove(moves[m], 1);
   if (moves[fullCount] && partialProgress > 0) applyMove(moves[fullCount], partialProgress);
+
+  if (surface) {
+    for (let i = 0; i < surface.length; i += 1) {
+      surface[i] = topZ + (coverDepth[i] - topZ) * coverAmount[i];
+    }
+  }
 
   return heights;
 }
