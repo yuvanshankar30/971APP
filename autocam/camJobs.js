@@ -432,7 +432,9 @@ export async function loadLatestCamJobsForParts(partIds = []) {
 
   const { data, error } = await supabase
     .from('cam_jobs')
-    .select('*')
+    // cam_machines.rapid_rate rides along so the 3D sim can time G00 moves
+    // at the machine's own traverse rate rather than a generic assumption.
+    .select('*, cam_machines(name, rapid_rate)')
     .in('part_id', ids)
     .order('created_at', { ascending: false });
 

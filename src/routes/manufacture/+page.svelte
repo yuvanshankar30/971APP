@@ -3033,6 +3033,7 @@
               gcode={toolpathModalJob.gcode}
               operationType={toolpathModalJob.operation_type}
               toolDiameter={Number(toolpathModalJob.params?.toolDiameter) || null}
+              rapidRate={toolpathModalJob.cam_machines?.rapid_rate ?? null}
               toolSequence={toolpathModalJob.params?.toolSequence || []}
               stockDiameter={Number(toolpathModalJob.params?.stockDiameter) || null}
               stockShape={toolpathModalJob.params?.stockShape || 'round'}
