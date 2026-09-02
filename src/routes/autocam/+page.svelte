@@ -2123,14 +2123,24 @@
 
   .name-line {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 0.4rem;
-    max-width: 320px;
+    /* No max-width: the Job column already has a share of a proportional
+       table, so capping the line here only clipped it earlier than the
+       column required. min-width: 0 so the name wraps INSIDE the column
+       rather than forcing the column (and the page) wider - a flex item
+       will not shrink below its min-content width without it. */
+    min-width: 0;
   }
   .name-line strong {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    /* Wrap rather than ellipsise. The part of these names that tells them
+       apart is at the END - P006950_Rev_x60 vs P006951_Rev_x44 differ in
+       exactly the characters an ellipsis eats - so truncating can render
+       two different jobs as visually identical rows. overflow-wrap:
+       anywhere because they are one long token with no spaces to break at,
+       matching how the manufacture table handles the same strings. */
+    white-space: normal;
+    overflow-wrap: anywhere;
     min-width: 0;
   }
 
