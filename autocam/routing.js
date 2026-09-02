@@ -1052,6 +1052,15 @@ export function generateRoutingGcode(contours, params = {}) {
   if (edgeMargin > 0) {
     lines.push(`(Part positioned ${fmt(edgeMargin, 2)}" clear of X0/Y0 - keep clamps/nails/fasteners outside that boundary)`);
   }
+  // See src/routes/api/cam-generate: set when the selected material has no
+  // verified feeds/speeds for this operation, so the numbers below are the
+  // generator's generic fallback rather than anything measured for it.
+  if (params.materialFeedsUnverified) {
+    lines.push('(*** FEEDS AND SPEEDS ARE NOT VERIFIED FOR THIS MATERIAL ***)');
+    lines.push(`(No feeds/speeds are on record for ${params.materialName || 'the selected material'} in routering, so the)`);
+    lines.push('(generic defaults were used - they are tuned for aluminum. Check feed rate, step-down)');
+    lines.push('(and spindle speed against this material before running.)');
+  }
   // State the stock this program was built for, so the operator can check
   // what is on the table against what the depths below assume.
   if (stockThickness > 0) {

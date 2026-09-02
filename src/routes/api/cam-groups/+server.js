@@ -61,16 +61,17 @@ export async function POST({ request }) {
     return json({ error: 'Grouped jobs must all use the same units' }, { status: 400 });
   }
   const toolDiameter = Number(body.toolDiameter || first.cam_tools?.diameter || first.params?.toolDiameter);
-  const params = { ...(first.params || {}), toolDiameter, safeZ: body.safeZ ?? first.params?.safeZ, controller: first.cam_machines?.controller || first.params?.controller };
+  const edgeMargin = Number(body.edgeMargin ?? 0.5);
+  const params = { ...(first.params || {}), toolDiameter, edgeMargin, safeZ: body.safeZ ?? first.params?.safeZ, controller: first.cam_machines?.controller || first.params?.controller };
   try {
-    const plan = planJobNesting(jobs, { stockWidth: body.stockWidth, stockHeight: body.stockHeight, edgeMargin: body.edgeMargin ?? 0.5, tolerance: body.tolerance ?? 0.01, clearance: body.clearance, toolDiameter });
+    const plan = planJobNesting(jobs, { stockWidth: body.stockWidth, stockHeight: body.stockHeight, edgeMargin, tolerance: body.tolerance ?? 0.01, clearance: body.clearance, toolDiameter });
     const placements = plan.placements.map((placement) => ({ ...placement, gcode: jobs.find((job) => job.id === placement.id).gcode }));
     const name = String(body.name || `Grouped router sheet ${new Date().toLocaleDateString('en-CA')}`).trim();
     const gcode = generateGroupedRoutingGcode({ name, placements, params });
     const { data: auth } = await supabase.auth.getUser();
     const { data: group, error: groupError } = await supabase.from('cam_job_groups').insert({
       name, project_id: body.projectId || first.parts?.project_id || null, material_id: first.material_id, tool_id: first.tool_id, machine_id: first.machine_id,
-      stock_width: Number(body.stockWidth), stock_height: Number(body.stockHeight), edge_margin: Number(body.edgeMargin ?? 0.5), tolerance: Number(body.tolerance ?? 0.01), clearance: plan.clearance,
+      stock_width: Number(body.stockWidth), stock_height: Number(body.stockHeight), edge_margin: edgeMargin, tolerance: Number(body.tolerance ?? 0.01), clearance: plan.clearance,
       params, gcode, gcode_file_name: gcodeFileNameFor(name), created_by: auth.user?.id || null
     }).select().single();
     if (groupError) throw new Error(groupError.message);

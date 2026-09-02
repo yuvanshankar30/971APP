@@ -7,6 +7,11 @@ import { generateRoutingGcode } from '$autocam/routing.js';
 import { generateTubestockGcode, tubestockFaceFileName } from '$autocam/tubestock.js';
 import { deliverJobToDrive } from '$autocam/drive_watcher.js';
 import stockData from '$lib/stock.json';
+
+// How far past the underside an auto-derived through cut reaches, so the
+// part actually separates. Matches routing.js's own allowance, which is what
+// its too-deep refusal already permits.
+const THROUGH_CUT_ALLOWANCE = 0.02;
 // Vite-built asset URL for occt-import-js's WASM binary - the same one
 // CadViewer.svelte already fetches successfully client-side. Fetching it
 // over HTTP (below) instead of reading it off disk sidesteps Vercel's
@@ -127,7 +132,7 @@ export async function POST({ request, url }) {
   try {
     const { data: job, error: loadError } = await supabase
       .from('cam_jobs')
-      .select('*, cam_tools(nose_radius, diameter), cam_machines(name, controller, drive_output_folder_id)')
+      .select('*, cam_tools(nose_radius, diameter), cam_machines(name, controller, drive_output_folder_id), cam_materials(name, default_params)')
       .eq('id', jobId)
       .single();
 
@@ -187,6 +192,16 @@ export async function POST({ request, url }) {
     // always targets the Haas TL-1's Fanuc-dialect control - see turning.js).
     if (job.cam_machines?.controller && params.controller === undefined) params.controller = job.cam_machines.controller;
 
+    // A material with no default_params for THIS operation contributed
+    // nothing: applyMaterialDefaults is a silent no-op in that case, so the
+    // job kept the generator's own generic fallback, which is tuned for
+    // aluminum. The job form warns about it, but the person who fills in the
+    // form is not necessarily the person standing at the machine - so the
+    // generated program says it too, where it cannot be missed.
+    const materialDefaults = job.cam_materials?.default_params?.[job.operation_type];
+    params.materialName = job.cam_materials?.name || null;
+    params.materialFeedsUnverified = !!job.cam_materials && !(materialDefaults && Object.keys(materialDefaults).length > 0);
+
     let result;
     if (job.operation_type === 'turning') {
       const profile = extractTurningProfileFromMeshes(meshes);
@@ -220,9 +235,20 @@ export async function POST({ request, url }) {
         routingParams.stockThickness = selectedSheet.thickness;
         // Through-cut the real stock, with enough break-through to actually
         // free the part, rather than stopping at the model's own thickness.
-        if (params.targetDepth === undefined) routingParams.targetDepth = selectedSheet.thickness + 0.02;
+        if (params.targetDepth === undefined) routingParams.targetDepth = selectedSheet.thickness + THROUGH_CUT_ALLOWANCE;
       } else if (params.targetDepth === undefined && thickness) {
-        routingParams.targetDepth = thickness;
+        // Same break-through allowance as the stock path above, for the same
+        // reason. Auto-derived depth means "cut this part out", and stopping
+        // exactly ON the underside does not reliably free it: sheets are not
+        // perfectly flat, spoilboards are not perfectly level, and Z-zero
+        // carries setup error. Measured on four real jobs, every one had its
+        // cut depth equal to the measured thickness to six decimal places -
+        // zero margin on all of them.
+        //
+        // Cutting a hair into the spoilboard is what a spoilboard is for. A
+        // depth entered by hand is left exactly as entered, since that is a
+        // deliberate number and may well be a pocket rather than a profile.
+        routingParams.targetDepth = thickness + THROUGH_CUT_ALLOWANCE;
       }
       await setProgress(supabase, jobId, 80, 'Generating routing G-code...');
       result = generateRoutingGcode(contours, routingParams);

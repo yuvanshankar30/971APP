@@ -227,7 +227,7 @@
   // Machine profile editor
   let showMachineModal = false;
   let editingMachineId = null;
-  let machineForm = { name: '', description: '', operation_type: 'routing', default_material_id: '', default_tool_id: '', tool_ids: [], gcode_extension: 'ngc', controller: 'linuxcnc', drive_folder_id: '', drive_output_folder_id: '', params: emptyRoutingParams() };
+  let machineForm = { name: '', description: '', operation_type: 'routing', default_material_id: '', default_tool_id: '', tool_ids: [], gcode_extension: 'ngc', controller: 'linuxcnc', rapid_rate: '', drive_folder_id: '', drive_output_folder_id: '', params: emptyRoutingParams() };
   let savingMachine = false;
 
   $: canManageProfiles = canManageCamProfiles(user);
@@ -275,7 +275,7 @@
   async function loadJobs() {
     const { data, error } = await supabase
       .from('cam_jobs')
-      .select('*, parts(name, project_id), cam_materials(name), cam_tools(name), cam_machines(name)')
+      .select('*, parts(name, project_id), cam_materials(name), cam_tools(name), cam_machines(name, rapid_rate)')
       .order('created_at', { ascending: false })
       .limit(200);
     if (error) return;
@@ -953,6 +953,7 @@
         tool_ids: machineTools.filter((link) => String(link.machine_id) === String(machine.id)).map((link) => link.tool_id),
         gcode_extension: machine.gcode_extension || 'ngc',
         controller: machine.controller || 'linuxcnc',
+        rapid_rate: machine.rapid_rate ?? '',
         drive_folder_id: machine.drive_folder_id || '',
         drive_output_folder_id: machine.drive_output_folder_id || '',
         params: {
@@ -962,7 +963,7 @@
       };
     } else {
       editingMachineId = null;
-      machineForm = { name: '', description: '', operation_type: 'routing', default_material_id: '', default_tool_id: '', tool_ids: [], gcode_extension: 'ngc', controller: 'linuxcnc', drive_folder_id: '', drive_output_folder_id: '', params: emptyRoutingParams() };
+      machineForm = { name: '', description: '', operation_type: 'routing', default_material_id: '', default_tool_id: '', tool_ids: [], gcode_extension: 'ngc', controller: 'linuxcnc', rapid_rate: '', drive_folder_id: '', drive_output_folder_id: '', params: emptyRoutingParams() };
     }
     showMachineModal = true;
   }
@@ -991,6 +992,9 @@
         // Tube stock reuses routing.js's linuxcnc/wincnc dialect conventions
         // (see tubestock.js file header) - same controller choice as routing.
         controller: (machineForm.operation_type === 'routing' || machineForm.operation_type === 'tubestock') ? (machineForm.controller || 'linuxcnc') : 'linuxcnc',
+        // Blank stays NULL rather than becoming 0 - "not measured yet" is a
+        // real state the estimate reports differently from a real figure.
+        rapid_rate: machineForm.rapid_rate === '' || machineForm.rapid_rate == null ? null : Number(machineForm.rapid_rate),
         drive_folder_id: machineForm.drive_folder_id?.trim() || null,
         drive_output_folder_id: machineForm.drive_output_folder_id?.trim() || null,
         default_params: serializeParams(machineForm.params)
@@ -1588,8 +1592,12 @@
             <label class="form-label" for="job-material">Material</label>
             <select id="job-material" class="form-select" bind:value={selectedMaterialId} on:change={() => { materialChosenByHand = true; applyMaterialDefaults(selectedMaterialId); }}>
               <option value="">Unspecified</option>
+              <!-- Marked, not hidden. A material with no feeds for this
+                   operation is still a legitimate pick for someone entering
+                   numbers by hand; what is not legitimate is picking it
+                   without knowing that nothing will be filled in. -->
               {#each materials.filter((m) => m.enabled) as m}
-                <option value={m.id}>{m.name}</option>
+                <option value={m.id}>{m.name}{materialWithoutFeeds(m.id, newJobOperation) ? ' - no feeds on record' : ''}</option>
               {/each}
             </select>
             {#if newJobMaterialWithoutFeeds}
@@ -1812,6 +1820,7 @@
               gcode={editingJob.gcode}
               operationType={editingJob.operation_type}
               toolDiameter={Number((toolpathPreviewParams || editingJob.params)?.toolDiameter) || null}
+              rapidRate={editingJob.cam_machines?.rapid_rate ?? null}
               toolSequence={(toolpathPreviewParams || editingJob.params)?.toolSequence || []}
               stockDiameter={Number((toolpathPreviewParams || editingJob.params)?.stockDiameter) || null}
               stockShape={(toolpathPreviewParams || editingJob.params)?.stockShape || 'round'}
@@ -1944,6 +1953,11 @@
               <p class="cam-form-hint">WinCNC uses a genuinely different G-code dialect (comments, units, tool-change pause) - see routing.js. Pick wrong and the file may not run on the real machine.</p>
             </div>
           {/if}
+          <div class="form-group">
+            <label class="form-label" for="mp-rapid-rate">Rapid traverse (in/min) <span class="text-muted">(optional)</span></label>
+            <input id="mp-rapid-rate" class="form-input" type="number" min="1" step="10" bind:value={machineForm.rapid_rate} placeholder="Not measured" />
+            <p class="cam-form-hint">Used only to time G00 moves in the run-time estimate, never to generate G-code. Left blank, the estimate falls back to a conservative 200 in/min and says so on hover.</p>
+          </div>
         </div>
 
         <fieldset class="form-group machine-tools-fieldset">
@@ -2130,14 +2144,24 @@
 
   .name-line {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 0.4rem;
-    max-width: 320px;
+    /* No max-width: the Job column already has a share of a proportional
+       table, so capping the line here only clipped it earlier than the
+       column required. min-width: 0 so the name wraps INSIDE the column
+       rather than forcing the column (and the page) wider - a flex item
+       will not shrink below its min-content width without it. */
+    min-width: 0;
   }
   .name-line strong {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    /* Wrap rather than ellipsise. The part of these names that tells them
+       apart is at the END - P006950_Rev_x60 vs P006951_Rev_x44 differ in
+       exactly the characters an ellipsis eats - so truncating can render
+       two different jobs as visually identical rows. overflow-wrap:
+       anywhere because they are one long token with no spaces to break at,
+       matching how the manufacture table handles the same strings. */
+    white-space: normal;
+    overflow-wrap: anywhere;
     min-width: 0;
   }
 
