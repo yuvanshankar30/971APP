@@ -31,10 +31,11 @@ describe('generateTubestockGcode', () => {
     expect(result.gcodeFiles.map((file) => file.angleDeg)).toEqual([0, 90]);
     expect(result.gcodeFiles.map((file) => file.label)).toEqual(['Top', 'Right side']);
     expect(result.stats.facePrograms).toHaveLength(2);
-    expect(result.gcodeFiles[0].gcode).toContain('Top (0.0 deg from Top)');
-    expect(result.gcodeFiles[0].gcode).not.toContain('90.0 deg from Top');
-    expect(result.gcodeFiles[1].gcode).toContain('Right side (90.0 deg from Top)');
-    expect(result.gcodeFiles[1].gcode).not.toContain('(0.0 deg from Top)');
+    expect(result.gcodeFiles[0].gcode).toContain('Top 0.0 deg from Top');
+    expect(result.gcodeFiles[0].gcode).not.toContain('Right side 90.0 deg');
+    expect(result.gcodeFiles[1].gcode).toContain('Right side 90.0 deg from Top');
+    // Not a bare '0.0 deg' - '90.0 deg' contains that as a substring.
+    expect(result.gcodeFiles[1].gcode).not.toContain('Top 0.0 deg');
     expect(result.gcodeFiles.every((file) => file.gcode.includes('M30 (program end)'))).toBe(true);
   });
 
@@ -92,8 +93,10 @@ describe('generateTubestockGcode', () => {
     expect(result.stats.toolChanges).toBe(1);
     expect(result.stats.wallsUsed).toBe(2);
     // 0.375" (T1, 1 hole) listed before 0.25" (T2, 2 holes) in the tool plan.
-    const planIdx375 = result.gcode.indexOf('0.375" drill (T1)');
-    const planIdx250 = result.gcode.indexOf('0.250" drill (T2)');
+    // Comment text carries no parentheses - see autocam/gcodeComments.js,
+    // which strips them so a comment cannot close itself early.
+    const planIdx375 = result.gcode.indexOf('0.375" drill T1');
+    const planIdx250 = result.gcode.indexOf('0.250" drill T2');
     expect(planIdx375).toBeGreaterThan(-1);
     expect(planIdx250).toBeGreaterThan(planIdx375);
   });

@@ -60,6 +60,8 @@
  *                 Z0 at the new face. See generateFlipTurningGcode below.
  */
 
+import { normalizeGcodeComments } from './gcodeComments.js';
+
 export const HEADER_WARNING = [
   '(===================================================================)',
   '(  AUTOCAM-GENERATED G-CODE - NOT VERIFIED ON REAL HARDWARE OR A   )',
@@ -555,7 +557,10 @@ export function generateTurningGcode(profile, params = {}) {
   lines.push('%');
 
   return {
-    gcode: lines.join('\n'),
+    // Well-formed comments - a comment whose own text contains a
+    // parenthesis closes early and leaves live code behind it. See
+    // autocam/gcodeComments.js.
+    gcode: normalizeGcodeComments(lines.join('\n')),
     stats: {
       roughingPasses: passCount,
       profilePoints: profile.length,
@@ -660,7 +665,10 @@ function generateFlipTurningGcode(profile, params) {
 
   const maxProfileRadius = Math.max(...profile.map((p) => p.x));
   return {
-    gcode: lines.join('\n'),
+    // Well-formed comments - a comment whose own text contains a
+    // parenthesis closes early and leaves live code behind it. See
+    // autocam/gcodeComments.js.
+    gcode: normalizeGcodeComments(lines.join('\n')),
     stats: {
       roughingPasses: pass1 + pass2,
       profilePoints: profile.length,

@@ -126,6 +126,7 @@
  * block below) needs revisiting.
  */
 
+import { normalizeGcodeComments } from './gcodeComments.js';
 import { HEADER_WARNING } from './turning.js';
 import { recommendTabCount } from './tabPlanner.js';
 
@@ -1150,20 +1151,22 @@ export function generateRoutingGcode(contours, params = {}) {
     stats = { contours: contours.length, tabZones: totalTabZones, targetDepth, toolChanges, toolsUsed: [...new Set(assignments.map((a) => a.toolIndex))].length, edgeShiftX, edgeShiftY };
   }
 
-  // WinCNC comments are "[...]", not "(...)" - see file header comment. Every
-  // paren character above (including inside HEADER_WARNING, imported from
-  // turning.js) gets swapped here in one pass rather than threading a
-  // per-dialect wrapper through every single lines.push() call above - a
-  // blind per-character swap (not a balanced-pair regex) is deliberate:
-  // HEADER_WARNING's own text has an inline parenthetical ("...simulator
-  // (e.g. ncviewer.com, CAMotics) and...") whose open/close split across
-  // two array entries, which a "(...)"-matching regex handles wrong (it
-  // pairs the inner parens across the line instead of the outer ones,
-  // leaving stray unconverted characters). A dumb per-character swap has no
-  // such failure mode, and WinCNC's own manual documents unbalanced "["
-  // brackets as fine ("a closing bracket is optional") - so a "[" with no
-  // matching "]" is valid WinCNC comment syntax, not a bug.
-  if (isWinCNC) gcode = gcode.replace(/\(/g, '[').replace(/\)/g, ']');
+  // Renders every comment in the controller's own syntax and, just as
+  // importantly, makes each one well-formed - see autocam/gcodeComments.js.
+  //
+  // This replaced a blind per-character "(" -> "[" swap. That swap was
+  // chosen over a balanced-pair regex for a good reason (HEADER_WARNING's
+  // inline parenthetical splits its open/close across two array entries,
+  // which a "(...)"-matching regex pairs wrong), and it is true that WinCNC
+  // treats an unbalanced "[" as fine. But the failure it missed is an early
+  // CLOSE: swapping the inner ")" of "...(e.g. ncviewer.com, CAMotics) and
+  // ..." produced "...CAMotics] and do a supervised air-cut...]", ending the
+  // comment mid-sentence and leaving the rest of the line as live code. One
+  // real line came out as "[G92] BEFORE running this file - WinCNC has no
+  // G54-style stored work offset]", putting a bare G54 on a controller that
+  // comment says has no G54. normalizeGcodeComments works per line rather
+  // than by pairing delimiters, so it has neither failure mode.
+  gcode = normalizeGcodeComments(gcode, { dialect: isWinCNC ? 'wincnc' : 'linuxcnc' });
 
   return { gcode, stats };
 }

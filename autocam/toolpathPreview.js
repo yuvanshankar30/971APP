@@ -111,7 +111,9 @@ export function parseToolpath3D(gcode, { chordTolerance = DEFAULT_CHORD_TOLERANC
   };
 
   for (const rawLine of (gcode || '').split('\n')) {
-    if (/\(TOOL CHANGE:/i.test(rawLine)) {
+    // Comments are "(...)" on linuxcnc and "[...]" on WinCNC - both dialects
+    // are generated here, so both are recognised everywhere below.
+    if (/[([]TOOL CHANGE:/i.test(rawLine)) {
       toolIndex += 1;
       toolChangeIndices.push(moves.length);
     }
@@ -121,10 +123,16 @@ export function parseToolpath3D(gcode, { chordTolerance = DEFAULT_CHORD_TOLERANC
     // (never a live G-code word - see tubestock.js's own comment at the
     // call site) rather than an actual `A90` motion word. Read it before
     // the comment-stripping below, which would otherwise discard it.
-    const faceTagMatch = rawLine.match(/\(FACE A(-?[\d.]+)/);
+    const faceTagMatch = rawLine.match(/[([]FACE A(-?[\d.]+)/);
     if (faceTagMatch) cur.a = Number(faceTagMatch[1]);
 
-    const line = rawLine.replace(/\(.*?\)/g, '').trim();
+    // Strip comments in BOTH dialects. Stripping only "(...)" meant every
+    // bracket comment in a WinCNC program stayed in the line and its text was
+    // then read as axis words: "[-- pass at Z-0.0300, ramped entry over
+    // 0.20" --]" became a Z move to -0.03, and "[Part positioned 0.50" clear
+    // of X0/Y0 ...]" became a move to X0 Y0. A WinCNC program parsed to 45
+    // moves where the identical linuxcnc program parsed to 38.
+    const line = rawLine.replace(/\(.*?\)/g, '').replace(/\[.*?\]/g, '').replace(/[([].*$/, '').trim();
     if (!line || line.startsWith('%') || line.startsWith('O')) continue;
 
     if (/\bG9\s*0\b|\bG90\b/.test(line)) incremental = false;

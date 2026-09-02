@@ -409,7 +409,7 @@ describe('generateTurningGcode - drilling', () => {
 
   it('appends a centerline peck-drilling section after OD turning, retracting fully after every peck', () => {
     const result = generateTurningGcode(shaftProfile(), { ...baseParams, drilling: drillParams });
-    expect(result.gcode).toContain('(--- DRILLING (centerline, from the face) ---)');
+    expect(result.gcode).toContain('(--- DRILLING centerline, from the face ---)');
     expect(result.gcode).toContain('G97 S800 M03');
     expect(result.gcode).toContain('T0303 (drill - verify tool/offset number)');
 

@@ -773,6 +773,53 @@ describe('matchTubestockHolesToMoves', () => {
   });
 });
 
+describe('parseToolpath3D - WinCNC bracket comments', () => {
+  it('strips [...] comments instead of reading their text as axis words', () => {
+    // Real bug: comments are "[...]" in the wincnc dialect, but only "(...)"
+    // was stripped - so "[-- pass at Z-0.0300, ramped entry over 0.20" --]"
+    // parsed as a Z move to -0.03, and "[Part positioned 0.50" clear of
+    // X0/Y0 ...]" as a move to X0 Y0.
+    const { moves } = parseToolpath3D(gcode(
+      'G20', 'G90',
+      'G00 X1 Y1 Z0.25',
+      '[Part positioned 0.50" clear of X0/Y0 - keep clamps outside that boundary]',
+      'G01 X2 Y1 Z-0.03 F20',
+      '[-- pass at Z-0.0300, ramped entry over 0.20" --]',
+      'G01 X3 Y1 F20'
+    ));
+    // Exactly the two commanded moves - no move to X0 Y0 from the first
+    // comment, and no plunge to Z-0.03 from the second.
+    expect(moves).toHaveLength(2);
+    expect(moves[0].to).toEqual({ x: 2, y: 1, z: -0.03 });
+    expect(moves[1].to).toEqual({ x: 3, y: 1, z: -0.03 });
+  });
+
+  it('reads a tool change and a tube-stock face tag in either dialect', () => {
+    const wincnc = parseToolpath3D(gcode(
+      'G20', 'G90', 'G00 X0 Y0 Z1',
+      '[FACE A90 - FLIP TUBE to Right side face and RE-ZERO Z]',
+      'G01 X1 F20',
+      '[TOOL CHANGE: load 0.25" drill]',
+      'G01 X2 F20'
+    ));
+    expect(wincnc.toolChangeIndices).toEqual([1]);
+    expect(wincnc.moves[1].angleDeg).toBe(90);
+  });
+
+  it('parses a real wincnc program to exactly the same geometry as its linuxcnc twin', () => {
+    const square = [{ points: [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 }], isHole: false }];
+    const build = (controller) => parseToolpath3D(
+      generateRoutingGcode(square, { toolDiameter: 0.25, targetDepth: 0.2, controller }).gcode
+    );
+    const linuxcnc = build('linuxcnc');
+    const wincnc = build('wincnc');
+    // Same part, same params - only the comment syntax differs, so the
+    // toolpath the operator previews must be identical.
+    expect(wincnc.moves).toHaveLength(linuxcnc.moves.length);
+    expect(wincnc.totalDistance).toBeCloseTo(linuxcnc.totalDistance, 9);
+  });
+});
+
 describe('inferRoutingEdgeShift - recovering the edge margin for legacy jobs', () => {
   // A square part, cut with cutter compensation offsetting the profile
   // outward by the tool radius, then shifted clear of X0/Y0 the way
