@@ -2,20 +2,32 @@ import { normalizeGcodeComments } from './gcodeComments.js';
 
 function format(value) { return Number(value).toFixed(4).replace(/\.?0+$/, ''); }
 
+const COMMENT_SPAN = /(\([^)]*\)|\[[^\]]*\])/g;
+
+function codeOutsideComments(line) {
+  return line.replace(COMMENT_SPAN, '').replace(/[([].*$/, '');
+}
+
 /** Translate absolute XY words. I/J arc centers remain untouched because
  * they are relative offsets, so circular moves stay geometrically correct. */
 export function translateRoutingGcode(gcode, offsetX, offsetY) {
-  return String(gcode || '').split(/\r?\n/).map((line) => line
-    .replace(/\bX\s*([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)/gi, (_, value) => `X${format(Number(value) + offsetX)}`)
-    .replace(/\bY\s*([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)/gi, (_, value) => `Y${format(Number(value) + offsetY)}`)
-  ).join('\n');
+  return String(gcode || '').split(/\r?\n/).map((line) => {
+    // WinCNC spells a dwell as G04 X<seconds>. That X is time, not an axis.
+    if (/\bG0?4\b/i.test(codeOutsideComments(line))) return line;
+    return line.split(COMMENT_SPAN).map((span) => {
+      if (span.startsWith('(') || span.startsWith('[')) return span;
+      return span
+        .replace(/\bX\s*([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)/gi, (_, value) => `X${format(Number(value) + offsetX)}`)
+        .replace(/\bY\s*([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)/gi, (_, value) => `Y${format(Number(value) + offsetY)}`);
+    }).join('');
+  }).join('\n');
 }
 
-function programBody(gcode) {
+export function programBody(gcode) {
   return String(gcode || '').split(/\r?\n/).filter((line) => {
     const trimmed = line.trim();
     return trimmed !== '%' && !/^M30\b/i.test(trimmed) && !/^M02\b/i.test(trimmed) && !/^M05\b/i.test(trimmed)
-      && !/^G(?:20|21|90|17|94|54)\b/i.test(trimmed) && !/^S\d+(?:\.\d+)?\s+M0?3\b/i.test(trimmed);
+      && !/^G(?:20|21|90|17|94|54)\b/i.test(trimmed) && !/^S\d+(?:\.\d+)?\s*M0?3\b/i.test(trimmed);
   });
 }
 
@@ -24,10 +36,16 @@ export function generateGroupedRoutingGcode({ name, placements, params = {} }) {
   if (!placements?.length) throw new Error('Select at least one completed router job');
   const safeZ = Number(params.safeZ) || 0.25;
   const spindleSpeed = Number(params.spindleSpeed) || 14000;
+  const edgeMargin = Number(params.edgeMargin ?? 0.5);
+  const toolDiameter = Number(params.toolDiameter);
+  if (!(edgeMargin >= 0)) throw new Error('Edge margin must be zero or greater');
+  if (!(toolDiameter > 0)) throw new Error('A positive end-mill diameter is required for grouped G-code');
+  const centerlineMargin = edgeMargin + toolDiameter / 2;
   const controller = params.controller === 'wincnc' ? 'wincnc' : 'linuxcnc';
   const lines = [
     `(GROUPED ROUTER PROGRAM: ${name || 'unnamed group'})`,
     `(VERIFY STOCK, WORK ZERO, CLAMPS, AND THE NESTING PREVIEW BEFORE RUNNING)`,
+    `(SHEET EDGE CLEARANCE: ${format(edgeMargin)} in from cut edge; toolpath centerline margin ${format(centerlineMargin)} in for ${format(toolDiameter)} in cutter)`,
     controller === 'wincnc' ? 'G20 (inch)' : 'G20 (inch)',
     'G90 (absolute)',
     ...(controller === 'wincnc' ? [] : ['G17 (XY plane)', 'G94 (feed per minute)', 'G54 (work offset - verify before running)', 'G80 G40 G49 (defensive reset)']),

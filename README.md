@@ -64,8 +64,9 @@ browser confirmation or prompt popups.
   Completed router jobs with the same machine, end mill, and material can also
   be grouped into one shared-sheet router program. Grouping is AutoCAM-only:
   it preserves each source job, carries the manufacturing project ID into the
-  AutoCAM filter/group record, packs measured cutting envelopes with a
-  cutter- and tolerance-aware clearance, and exposes the combined program in
+  AutoCAM filter/group record, packs material-removing envelopes with
+  cutter- and tolerance-aware part clearance plus cutter-radius-aware sheet
+  edge clearance, and exposes the combined program in
   the same 3D-first toolpath viewer. Manufacturing only shows a green grouped
   status/link beside AutoCAM completed. See
   `autocam/docs/router-job-grouping.md` for the deliberate conservative
