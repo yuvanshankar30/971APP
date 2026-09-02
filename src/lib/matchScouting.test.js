@@ -113,8 +113,12 @@ describe('autonomous robot footprint', () => {
     expect(autoRobotCollision([29.2, 50])?.id).toBe('own-hub');
   });
 
-  it('allows a robot position over a trench - terrain a robot drives under, not a wall like a hub', () => {
-    expect(autoRobotCollision([27.7, 8.5])).toBeNull();
+  it('allows blue-alliance routes through either trench', () => {
+    // The field map is alliance-relative: blue's alliance wall is rendered on
+    // the left, but a route may still cross both the near and far trenches.
+    // Verify the complete 29-inch footprint can travel across each one.
+    expect(canExtendAutoPath([[20, 8.5]], [35, 8.5]).allowed).toBe(true);
+    expect(canExtendAutoPath([[65, 8.5]], [80, 8.5]).allowed).toBe(true);
   });
 
   it('does not let a fast path extension jump through a hub', () => {
