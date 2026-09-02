@@ -40,6 +40,7 @@
   import { tubestockFaceFileName, tubestockFaceLabel } from '$autocam/tubestock.js';
   import stockData from '$lib/stock.json';
   import { buildStockMaterialIndex, materialIdForStockAssignment as resolveMaterialIdForStockAssignment } from '$autocam/stockMaterial.js';
+  import { minimumPartClearance } from '$autocam/nesting.js';
   import { Cpu, Upload, Package, Settings, Download, AlertTriangle, X, Link as LinkIcon, Plus, Wrench, Layers, CheckCircle2, Loader2, Search, Filter, Box, Route, ExternalLink, Copy } from 'lucide-svelte';
 
   let user = null;
@@ -91,6 +92,8 @@
   $: groupCandidates = completedRouterJobs.filter((job) => !groupProjectFilter || job.parts?.project_id === groupProjectFilter);
   $: selectedGroupJobs = groupCandidates.filter((job) => groupSelectedJobIds.includes(job.id));
   $: groupCompatibilityError = selectedGroupJobs.length > 1 && selectedGroupJobs.some((job) => String(job.machine_id || '') !== String(selectedGroupJobs[0].machine_id || '') || String(job.tool_id || '') !== String(selectedGroupJobs[0].tool_id || '') || String(job.material_id || '') !== String(selectedGroupJobs[0].material_id || ''));
+  $: groupToolDiameter = Number(selectedGroupJobs[0]?.cam_tools?.diameter || selectedGroupJobs[0]?.params?.toolDiameter || 0);
+  $: groupClearance = groupToolDiameter > 0 ? minimumPartClearance(groupToolDiameter, Number(groupTolerance) || 0) : null;
   $: jobCreators = [...new Map(jobs.filter((j) => j.requester).map((j) => [j.requester.id, j.requester])).values()]
     .sort((a, b) => (a.full_name || a.email || '').localeCompare(b.full_name || b.email || ''));
   $: filteredJobs = jobs.filter((j) => {
@@ -1363,9 +1366,13 @@
   <div class="modal-backdrop" on:click|self={() => (showGroupModal = false)} role="button" tabindex="0" on:keydown={(e) => { if (e.key === 'Escape') showGroupModal = false; }}>
     <div class="modal group-modal" role="dialog" aria-modal="true">
       <div class="modal-header"><h3>Group Router Jobs</h3><button type="button" class="modal-close-button" aria-label="Close" on:click={() => (showGroupModal = false)}><X size={18} /></button></div>
-      <div class="modal-body">
-        <p class="cam-form-hint">Creates one router program. Only completed jobs with the same machine, end mill, and material can share a sheet. Placements use measured toolpath bounds and preserve a cutter- and tolerance-aware web between cuts.</p>
-        <div class="form-row two-col">
+      <div class="modal-body group-modal-body">
+        <div class="group-intro">
+          <Layers size={20} />
+          <div><strong>Shared-sheet router program</strong><span>Completed router jobs only. Machine, end mill, and material must match.</span></div>
+          <span class="tag tag-success">Router only</span>
+        </div>
+        <div class="group-setup-grid">
           <div class="form-group"><label class="form-label" for="group-name">Group name</label><input id="group-name" class="form-input" bind:value={groupName} placeholder="e.g. P006950 router sheet" /></div>
           <div class="form-group"><label class="form-label" for="group-project">Project ID</label><select id="group-project" class="form-select" bind:value={groupProjectFilter}><option value="">All projects</option>{#each jobProjectIds as projectId}<option value={projectId}>{projectId}</option>{/each}</select></div>
           <div class="form-group"><label class="form-label" for="group-stock-width">Usable stock width (in)</label><input id="group-stock-width" class="form-input" type="number" min="0.1" step="0.125" bind:value={groupStockWidth} /></div>
@@ -1373,21 +1380,25 @@
           <div class="form-group"><label class="form-label" for="group-edge-margin">Edge margin (in)</label><input id="group-edge-margin" class="form-input" type="number" min="0" step="0.01" bind:value={groupEdgeMargin} /></div>
           <div class="form-group"><label class="form-label" for="group-tolerance">Tolerance allowance (in)</label><input id="group-tolerance" class="form-input" type="number" min="0" step="0.001" bind:value={groupTolerance} /></div>
         </div>
-        <div class="part-picker group-picker">
+        <div class="group-selection-heading"><strong>Select completed jobs</strong><span>{selectedGroupJobs.length} selected</span></div>
+        <div class="part-picker group-picker" aria-label="Completed router jobs available for grouping">
           {#if groupCandidates.length === 0}<p class="text-muted">No completed router jobs match this project filter.</p>{/if}
           {#each groupCandidates as job (job.id)}
             <label class="part-picker-row">
               <input type="checkbox" checked={groupSelectedJobIds.includes(job.id)} on:change={(event) => toggleGroupJob(job.id, event.currentTarget.checked)} />
-              <span class="part-picker-name">{jobDisplayName(job)}</span>
-              <span class="part-picker-tag">{job.cam_machines?.name || 'No machine'}</span>
-              <span class="part-picker-tag">{job.cam_tools?.name || 'No tool'}</span>
+              <span class="part-picker-name"><strong>{jobDisplayName(job)}</strong>{#if job.parts?.project_id}<small>{job.parts.project_id}</small>{/if}</span>
+              <span class="group-job-setup">{job.cam_machines?.name || 'No machine'}<small>{job.cam_tools?.name || 'No tool'}</small></span>
             </label>
           {/each}
         </div>
         {#if groupCompatibilityError}<p class="cam-form-warning"><AlertTriangle size={14} /> Select jobs that use the same machine, tool, and material.</p>{/if}
-        <p class="cam-form-hint">{selectedGroupJobs.length} selected. The final clearance is calculated as end-mill diameter + twice the tolerance allowance.</p>
+        <div class="group-clearance-summary">
+          <span>Required path clearance</span>
+          <strong>{groupClearance ? `${groupClearance.toFixed(4)} in` : 'Select a job'}</strong>
+          <small>{groupClearance ? `${groupToolDiameter.toFixed(4)} in end mill + twice tolerance` : 'Calculated from the selected router tool and tolerance.'}</small>
+        </div>
       </div>
-      <div class="modal-footer-actions"><span class="text-muted">Router only</span><button class="btn btn-primary" disabled={creatingGroup || selectedGroupJobs.length < 2 || groupCompatibilityError} on:click={createGroup}>{creatingGroup ? 'Creating…' : 'Create grouped G-code'}</button></div>
+      <div class="modal-footer-actions group-modal-footer"><span class="text-muted">Review the 3D toolpath before cutting.</span><button class="btn btn-primary" disabled={creatingGroup || selectedGroupJobs.length < 2 || groupCompatibilityError} on:click={createGroup}><Layers size={15} /> {creatingGroup ? 'Creating…' : 'Create grouped G-code'}</button></div>
     </div>
   </div>
 {/if}
@@ -2444,7 +2455,16 @@
     padding: 0.25rem 0.5rem;
     margin-bottom: 1rem;
   }
-  .group-picker { max-height: 300px; }
+  .autocam-page-header .page-actions {
+    align-items: center;
+    justify-content: flex-end;
+  }
+  .group-picker {
+    max-height: 260px;
+    margin: 0;
+    padding: 0.2rem 0.65rem;
+    background: var(--surface-2, #fafafa);
+  }
   .grouped-link {
     display: inline-flex;
     align-items: center;
@@ -2459,12 +2479,55 @@
     cursor: pointer;
   }
   .groups-modal { width: min(720px, calc(100vw - 2rem)); }
-  .group-modal { width: min(760px, calc(100vw - 2rem)); }
-  .group-summary { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; margin-bottom: 1rem; color: var(--text-muted); }
+  .group-modal { width: min(820px, calc(100vw - 2rem)); }
+  .group-modal-body { display: grid; gap: var(--space-4, 1rem); }
+  .group-intro {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.75rem;
+    border-left: 3px solid var(--green-base, #22c55e);
+    background: var(--green-soft, #dcfce7);
+    color: var(--green-strong, #15803d);
+  }
+  .group-intro > div { display: grid; gap: 0.15rem; }
+  .group-intro span:not(.tag) { font-size: var(--font-sm, 0.875rem); color: var(--text-muted); }
+  .group-setup-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) repeat(4, minmax(108px, 0.7fr));
+    gap: var(--space-3, 0.75rem);
+    align-items: end;
+  }
+  .group-setup-grid .form-group { margin: 0; min-width: 0; }
+  .group-selection-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; margin-bottom: -0.45rem; }
+  .group-selection-heading span { color: var(--text-muted); font-size: var(--font-sm, 0.875rem); }
+  .group-picker .part-picker-row { min-height: 3.25rem; padding: 0.4rem 0.2rem; }
+  .group-picker .part-picker-name { display: grid; gap: 0.1rem; white-space: normal; }
+  .group-picker .part-picker-name small, .group-job-setup small { color: var(--text-muted); font-size: var(--font-xs, 0.75rem); }
+  .group-job-setup { display: grid; justify-items: end; gap: 0.1rem; text-align: right; font-size: var(--font-sm, 0.875rem); color: var(--text); }
+  .group-clearance-summary {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.1rem 1rem;
+    align-items: baseline;
+    padding: 0.65rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 4px);
+    background: var(--surface-2, #fafafa);
+  }
+  .group-clearance-summary span, .group-clearance-summary small { color: var(--text-muted); font-size: var(--font-sm, 0.875rem); }
+  .group-clearance-summary small { grid-column: 1 / -1; font-size: var(--font-xs, 0.75rem); }
+  .group-clearance-summary strong { color: var(--green-strong, #15803d); font-variant-numeric: tabular-nums; }
+  .group-modal-footer { gap: 1rem; }
+  .groups-modal .modal-body { display: grid; gap: 1rem; }
+  .group-summary { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin: 0; color: var(--text-muted); }
+  .group-summary > span:not(.tag) { padding-left: 0.5rem; border-left: 1px solid var(--border); font-size: var(--font-sm, 0.875rem); }
   .group-item-list { display: grid; gap: 0.5rem; }
   .group-item-list > div, .group-list-row { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; padding: 0.65rem 0.75rem; border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); }
   .group-item-list > div span { color: var(--text-muted); font-size: var(--font-sm, 0.875rem); }
   .group-list-row { width: 100%; background: var(--surface-1, #fff); text-align: left; cursor: pointer; font: inherit; }
+  .group-list-row:hover, .group-list-row:focus-visible { border-color: var(--green-base, #22c55e); outline: none; }
   .group-list-row small { display: block; margin-top: 0.15rem; color: var(--text-muted); }
 
   .part-picker-row {
@@ -2529,6 +2592,19 @@
   }
   .form-row.two-col {
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  }
+  @media (max-width: 900px) {
+    .group-setup-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 600px) {
+    .group-modal, .groups-modal { width: min(100vw - 1rem, 720px); }
+    .group-intro { grid-template-columns: auto minmax(0, 1fr); }
+    .group-intro .tag { grid-column: 2; justify-self: start; }
+    .group-setup-grid { grid-template-columns: 1fr; }
+    .group-picker .part-picker-row { align-items: flex-start; }
+    .group-job-setup { display: none; }
+    .group-modal-footer { align-items: stretch; flex-direction: column; }
+    .group-modal-footer .btn { width: 100%; justify-content: center; }
   }
   @media (max-width: 1260px) {
     .autocam-jobs-container {
