@@ -1300,7 +1300,7 @@
               {/if}
             </td>
             <td data-label="Created">
-              {formatPacificDateTimeWithZone(job.created_at)}
+              <span class="job-created-date">{formatPacificDateTimeWithZone(job.created_at)}</span>
               {#if bucket}
                 <span class="tag season-tag {bucket.isOffseason ? 'tag-offseason' : 'tag-season'}">{bucket.label}</span>
               {/if}
@@ -2281,16 +2281,16 @@
      hard enough to wrap. Rebalanced so Tool ("UNC Router 0.1575 in Flat
      End Mill") and Created ("Aug 31, 2026, 11:36 PM PT") lay out across
      the row instead of stacking into a tall vertical column. */
-  .autocam-jobs-table th:nth-child(1) { width: 13%; }
+  .autocam-jobs-table th:nth-child(1) { width: 12%; }
   .autocam-jobs-table th:nth-child(2) { width: 7%; }
-  .autocam-jobs-table th:nth-child(3) { width: 8%; }
+  .autocam-jobs-table th:nth-child(3) { width: 7%; }
   .autocam-jobs-table th:nth-child(4) { width: 10%; }
   .autocam-jobs-table th:nth-child(5) { width: 7%; }
   .autocam-jobs-table th:nth-child(6) { width: 7%; }
   .autocam-jobs-table th:nth-child(7) { width: 8%; }
-  .autocam-jobs-table th:nth-child(8) { width: 10%; }
+  .autocam-jobs-table th:nth-child(8) { width: 13%; }
   .autocam-jobs-table th:nth-child(9) { width: 8%; }
-  .autocam-jobs-table th:nth-child(10) { width: 22%; }
+  .autocam-jobs-table th:nth-child(10) { width: 21%; }
   .autocam-jobs-table td {
     vertical-align: top;
   }
@@ -2306,6 +2306,10 @@
      just gets clipped against that height. Same reasoning as
      .status-badge's own white-space: nowrap in app.css. */
   .autocam-jobs-table .tag {
+    white-space: nowrap;
+  }
+  .job-created-date {
+    display: inline-block;
     white-space: nowrap;
   }
   .output-cell { min-width: 0; white-space: normal; }
