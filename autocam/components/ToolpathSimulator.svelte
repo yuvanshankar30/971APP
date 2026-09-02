@@ -190,12 +190,24 @@
   // ground truth (the STEP file, not the G-code replaying itself) is the
   // whole reason this needs the ghost part loaded first - comparing the
   // program's own output against itself would be tautological.
+  // Math.min(...array) passes every element as a separate function argument,
+  // which blows the call stack once the array is large. The routing heightmap
+  // is nx*ny cells - 230k of them at the current grid resolution - so
+  // spreading it threw RangeError and took the gouge check (a safety
+  // readout, not a cosmetic one) down with it. Same hazard for a long
+  // toolpath's coordinate list.
+  function minOf(values) {
+    let min = Infinity;
+    for (const value of values) if (value < min) min = value;
+    return min;
+  }
+
   const GOUGE_TOLERANCE = 0.01;
   $: turningGouge = isTurning && turningTargetProfile && stockOuterProfile
     ? detectTurningGouge(stockOuterProfile, turningTargetProfile)
     : false;
   $: routingGouge = !isTurning && routingTargetThickness != null && routingHeights
-    ? Math.min(...routingHeights) < -routingTargetThickness - GOUGE_TOLERANCE
+    ? minOf(routingHeights) < -routingTargetThickness - GOUGE_TOLERANCE
     : false;
   $: gougeDetected = turningGouge || routingGouge;
 
@@ -431,7 +443,11 @@
       if (!(Number(stockDiameter) > 0)) return;
 
       const initialOuterRadius = stockEnvelopeRadius(Number(stockDiameter), stockShape);
-      const rawAxialMin = Math.min(...moves.flatMap((move) => [move.from.x, move.to.x]));
+      let rawAxialMin = Infinity;
+      for (const move of moves) {
+        if (move.from.x < rawAxialMin) rawAxialMin = move.from.x;
+        if (move.to.x < rawAxialMin) rawAxialMin = move.to.x;
+      }
       const margin = initialOuterRadius * 0.08;
       // Z=0 is always the face (turning.js's own normalization convention) -
       // nothing physically exists past it. Clamping here (rather than at the
