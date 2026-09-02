@@ -112,9 +112,13 @@
   const MOVE_STYLES = {
     rapid: { color: 0xd8b400, label: 'Rapid', opacity: 0.55 },
     cut: { color: 0x2f6fd0, label: 'Cutting', opacity: 1 },
-    ramp: { color: 0xd0342c, label: 'Ramp / plunge', opacity: 1 }
+    ramp: { color: 0xd0342c, label: 'Ramp / plunge', opacity: 1 },
+    // Not a Fusion move class - this app's own. Tabs are the only thing
+    // holding the part down on the final pass, so where they are is worth
+    // seeing at a glance rather than inferring from a shallower Z.
+    tab: { color: 0x2f9e44, label: 'Tab', opacity: 1 }
   };
-  const KINDS = ['rapid', 'cut', 'ramp'];
+  const KINDS = ['rapid', 'cut', 'ramp', 'tab'];
 
   // Real material, not flat plastic: MeshPhongMaterial has no physical
   // basis for metalness/roughness, so no amount of light tuning makes it
@@ -135,7 +139,7 @@
     });
   }
 
-  let visible = { rapid: true, cut: true, ramp: true };
+  let visible = { rapid: true, cut: true, ramp: true, tab: true };
   let toolpathVisible = true;
   let toolVisible = true;
   let stockVisible = true;
@@ -197,7 +201,12 @@
   $: speedProgress = Math.max(0, Math.min(100, ((Number(playbackSpeed) - 0.25) / 9.75) * 100));
   $: canAnimate = isTurning || isTubestock || !!cutterDiameter;
   $: moveCounts = KINDS.reduce((counts, kind) => {
-    counts[kind] = moves.filter((move) => move.kind === kind).length;
+    // Tabs are counted as tabs rather than twice - a tab move is drawn in
+    // the tab group, so counting it under 'cut' as well would make the
+    // legend disagree with what is on screen.
+    counts[kind] = kind === 'tab'
+      ? moves.filter((move) => move.isTab).length
+      : moves.filter((move) => move.kind === kind && !move.isTab).length;
     return counts;
   }, {});
   // Tube stock: joins each real hole (walls, from generateTubestockGcode's
@@ -297,7 +306,9 @@
     const buffers = {};
     for (const kind of KINDS) buffers[kind] = [];
     for (const move of moves) {
-      const target = buffers[move.kind] || buffers.cut;
+      // A tab move is still a cut; it is drawn separately so the operator
+      // can see where the part stays attached.
+      const target = (move.isTab ? buffers.tab : buffers[move.kind]) || buffers.cut;
       target.push(
         move.from.x, move.from.y, move.from.z + TOOLPATH_Z_LIFT,
         move.to.x, move.to.y, move.to.z + TOOLPATH_Z_LIFT

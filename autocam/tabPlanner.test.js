@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { recommendTabCount, MIN_TABS, MAX_TABS, DEFAULT_SPACING } from './tabPlanner.js';
+import { recommendTabCount, MIN_TABS, MAX_TABS, DEFAULT_SPACING, findStraightRuns, planTabPositions } from './tabPlanner.js';
 
 describe('recommendTabCount - minimum floor (real bug: a single tab is a pivot point, not real holding)', () => {
   it('a perimeter that would naively give 1 tab (or 0) is bumped up to the minimum of 2', () => {
@@ -68,5 +68,58 @@ describe('recommendTabCount - invalid input', () => {
     expect(recommendTabCount(-5)).toBe(0);
     expect(recommendTabCount(10, { spacing: 0 })).toBe(0);
     expect(recommendTabCount(10, { spacing: -1 })).toBe(0);
+  });
+});
+
+describe('planTabPositions - tabs go on flats, not curves', () => {
+  const rect = [{ x: 0, y: 0 }, { x: 6, y: 0 }, { x: 6, y: 4 }, { x: 0, y: 4 }, { x: 0, y: 0 }];
+  const circle = (r, n) => [...Array(n + 1)].map((_, i) => ({ x: r * Math.cos((i / n) * 2 * Math.PI), y: r * Math.sin((i / n) * 2 * Math.PI) }));
+
+  it('finds one run per edge on a rectangle', () => {
+    expect(findStraightRuns(rect)).toHaveLength(4);
+  });
+
+  it('places every tab on a flat, on a rectangle', () => {
+    expect(planTabPositions(rect, { count: 4, width: 0.25 })).toHaveLength(4);
+  });
+
+  it('refuses to place a tab anywhere on a circle', () => {
+    // The discriminator has to be curvature, not per-segment turn: each
+    // chord of a finely tessellated arc looks perfectly straight on its own.
+    expect(planTabPositions(circle(2, 64), { count: 4, width: 0.25 })).toHaveLength(0);
+  });
+
+  it('gives the same answer however finely the arc is tessellated', () => {
+    for (const segments of [32, 64, 256]) {
+      expect(planTabPositions(circle(2, segments), { count: 4, width: 0.25 }), `${segments} chords`).toHaveLength(0);
+    }
+  });
+
+  it('treats a very large radius as flat, because it is', () => {
+    // A 30" radius is flatter than most stock. Refusing here would be
+    // pedantry, not safety.
+    expect(planTabPositions(circle(30, 256), { count: 4, width: 0.25 }).length).toBeGreaterThan(0);
+  });
+
+  it('keeps tabs off the fillets of a rounded rectangle', () => {
+    const fillet = [];
+    for (let i = 0; i <= 16; i += 1) {
+      const a = Math.PI * 1.5 + (i / 16) * (Math.PI / 2);
+      fillet.push({ x: 5 + Math.cos(a), y: 1 + Math.sin(a) });
+    }
+    const rounded = [{ x: 1, y: 0 }, { x: 5, y: 0 }, ...fillet, { x: 6, y: 3 }, { x: 0, y: 3 }, { x: 0, y: 1 }, { x: 1, y: 0 }];
+    const width = 0.25;
+    const flats = findStraightRuns(rounded).filter((r) => r.end - r.start >= width * 3);
+    const tabs = planTabPositions(rounded, { count: 4, width });
+    expect(tabs.length).toBeGreaterThan(0);
+    for (const centre of tabs) {
+      const held = flats.some((r) => centre - width / 2 >= r.start - 1e-6 && centre + width / 2 <= r.end + 1e-6);
+      expect(held, `tab at ${centre.toFixed(2)} is wholly on a flat`).toBe(true);
+    }
+  });
+
+  it('never stacks two tabs on the same spot', () => {
+    const tabs = planTabPositions(rect, { count: 12, width: 0.25 });
+    for (let i = 1; i < tabs.length; i += 1) expect(tabs[i] - tabs[i - 1]).toBeGreaterThanOrEqual(0.25);
   });
 });

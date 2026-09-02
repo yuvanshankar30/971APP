@@ -73,6 +73,7 @@ export function parseToolpath3D(gcode, { chordTolerance = DEFAULT_CHORD_TOLERANC
   let maxRpm = null;       // G50 S clamp
   let dwellSeconds = 0;
   let pauseCount = 0;
+  let inTab = false;
 
   // An axis never commanded stays at 0, the way a machine sits at its origin
   // until told otherwise. This matters for turning, which uses X/Z and never
@@ -105,7 +106,8 @@ export function parseToolpath3D(gcode, { chordTolerance = DEFAULT_CHORD_TOLERANC
     moves.push({
       from, to, kind, toolIndex, length, startDistance: totalDistance,
       angleDeg: angleDeg ?? 0,
-      feed, feedPerRev, rpm: rpmForMove(rawFrom, rawTo)
+      feed, feedPerRev, rpm: rpmForMove(rawFrom, rawTo),
+      isTab: inTab
     });
     totalDistance += length;
   };
@@ -125,6 +127,12 @@ export function parseToolpath3D(gcode, { chordTolerance = DEFAULT_CHORD_TOLERANC
     // the comment-stripping below, which would otherwise discard it.
     const faceTagMatch = rawLine.match(/[([]FACE A(-?[\d.]+)/);
     if (faceTagMatch) cur.a = Number(faceTagMatch[1]);
+
+    // Tabs are bracketed by comment markers routing.js emits, so a consumer
+    // can show where the part is held without re-deriving it from depths it
+    // would have to guess the tab height to interpret.
+    if (/[([]-- tab:/.test(rawLine)) inTab = true;
+    else if (/[([]-- end tab --/.test(rawLine)) inTab = false;
 
     // Strip comments in BOTH dialects. Stripping only "(...)" meant every
     // bracket comment in a WinCNC program stayed in the line and its text was

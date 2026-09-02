@@ -128,7 +128,7 @@
 
 import { normalizeGcodeComments } from './gcodeComments.js';
 import { HEADER_WARNING } from './turning.js';
-import { recommendTabCount } from './tabPlanner.js';
+import { recommendTabCount, planTabPositions, planEvenTabPositions } from './tabPlanner.js';
 
 function fmt(n, decimals = 4) {
   return Number(n).toFixed(decimals);
@@ -453,17 +453,33 @@ function pathLength(path) {
 // workholding weak point, not cosmetic. Same wraparound applies (in theory)
 // if a zone's high end overshoots `perimeter`, though centers are spaced
 // starting from 0 so in practice only the first zone ever needs it.
-function buildTabZones(perimeter, width, spacing, thickness) {
+function buildTabZones(path, perimeter, width, spacing, thickness, requestedCount) {
   if (perimeter <= 0) return [];
   // A zero-width tab holds nothing. Without this, tabWidth: 0 still produced
   // one [center, center] zone per tab and stats.tabZones reported them, so a
   // part cut completely free was described as held by four tabs - and that
   // count is exactly what a consumer would trust to say the part is secure.
   if (!(width > 0)) return [];
-  const count = recommendTabCount(perimeter, { spacing, thickness });
+  // An explicit per-job count wins over the perimeter/spacing recommendation.
+  const count = requestedCount > 0 ? Math.floor(requestedCount) : recommendTabCount(perimeter, { spacing, thickness });
+  // Placed on the flats. planTabPositions keeps a tab off arcs and fillets -
+  // a tab on a curve leaves a wedge-shaped web that holds unevenly, makes
+  // the cutter step up mid-direction-change, and tears a finished edge when
+  // it is knocked out. It returns fewer positions than asked for rather than
+  // putting one on a curve, so a part with few flats is reported honestly.
+  let centers = planTabPositions(path, { count, width });
+  let onCurves = false;
+  if (!centers.length && count > 0) {
+    // No flat long enough anywhere - a fully round profile, say. Holding it
+    // badly beats not holding it at all: a part with no tabs comes loose on
+    // the final pass. Flagged so the program can tell the operator the tabs
+    // sit on a curved edge and will need more care to clean up.
+    centers = planEvenTabPositions(perimeter, { count, width });
+    onCurves = true;
+  }
   const zones = [];
-  for (let i = 0; i < count; i += 1) {
-    const center = (perimeter / count) * i;
+  zones.onCurves = onCurves;
+  for (const center of centers) {
     const start = center - width / 2;
     const end = center + width / 2;
     if (start < 0) {
@@ -666,12 +682,20 @@ function emitContourPass(lines, path, prevDepth, passDepth, targetDepth, tabZone
       // commented for whoever is at the machine; the tabs - the only thing
       // stopping the part lifting mid-cut - were not, so they could not be
       // located by reading the file or checked against the material.
-      if (inTab && !wasInTab) lines.push(`(-- tab: holding ${fmt(tabHeight, 3)}" of material here --)`);
+      if (inTab && !wasInTab) {
+        lines.push(tabZones.onCurves
+          ? `(-- tab: holding ${fmt(tabHeight, 3)}" here - ON A CURVED EDGE, this profile has no flat long enough for a tab; expect a rougher break-out --)`
+          : `(-- tab: holding ${fmt(tabHeight, 3)}" of material here --)`);
+      }
+      // Closing marker so a reader - the 3D sim included - can tell where
+      // the tab ends, not just where it starts.
+      if (!inTab && wasInTab) lines.push('(-- end tab --)');
       wasInTab = inTab;
       lines.push(`G01 X${fmt(point.x)} Y${fmt(point.y)} Z${fmt(-cutDepth)} F${fmt(feed, 5)}`);
       dist = cutDist;
     }
   }
+  if (wasInTab) lines.push('(-- end tab --)');
 }
 
 // Cuts a genuinely circular contour (see fitCircle) with true G02/G03
@@ -739,7 +763,7 @@ function checkHoleFits(points, toolRadius) {
 // Cuts one contour (all step-down passes + tabs) with one tool's params.
 // Shared by both the single-tool and multi-tool code paths.
 function cutContour(lines, contour, toolRadius, toolParams, safeZ) {
-  const { stepDown, targetDepth, tabWidth, tabHeight, tabSpacing, feedRate, plungeRate } = toolParams;
+  const { stepDown, targetDepth, tabWidth, tabHeight, tabSpacing, tabCount, feedRate, plungeRate } = toolParams;
   const path = contour.isHole ? checkHoleFits(contour.points, toolRadius) : offsetPolygon(contour.points, toolRadius);
   const perimeter = pathLength(path);
   // Tabs only ever apply to the OUTER contour - a hole isn't a piece that
@@ -754,7 +778,7 @@ function cutContour(lines, contour, toolRadius, toolParams, safeZ) {
   // targetDepth doubles as the thickness hint here - for a single-tool
   // through-cut routing job (the only kind that gets tabs at all - see
   // above), the outer profile's cut depth IS the material thickness.
-  const tabZones = (!contour.isHole && tabSpacing > 0) ? buildTabZones(perimeter, tabWidth, tabSpacing, targetDepth) : [];
+  const tabZones = (!contour.isHole && (tabSpacing > 0 || tabCount > 0)) ? buildTabZones(path, perimeter, tabWidth, tabSpacing, targetDepth, tabCount) : [];
 
   const circle = fitCircle(path);
   const isCircular = circle.maxDeviation <= CIRCLE_FIT_TOLERANCE;
@@ -1066,6 +1090,16 @@ export function generateRoutingGcode(contours, params = {}) {
   if (edgeMargin > 0) {
     lines.push(`(Part positioned ${fmt(edgeMargin, 2)}" clear of X0/Y0 - keep clamps/nails/fasteners outside that boundary)`);
   }
+  // Which corner work zero is, and which way the axes run from it. The
+  // generator already shifts every contour into the +X/+Y quadrant (see
+  // edgeShiftX/edgeShiftY above), so both axes point from the origin corner
+  // INTO the part - but nothing said so, and an operator zeroing on the
+  // wrong corner mirrors the whole job without any of it looking wrong
+  // until the cut is already in the material.
+  lines.push('(WORK ZERO: the corner of the stock nearest you on the left - set X0 Y0 there.)');
+  lines.push('(+X runs to the right and +Y runs away from you, both INTO the part,)');
+  lines.push('(so every coordinate in this file is positive. If a move goes negative, the)');
+  lines.push('(wrong corner was zeroed - stop and re-zero rather than running it.)');
   // See src/routes/api/cam-generate: set when the selected material has no
   // verified feeds/speeds for this operation, so the numbers below are the
   // generator's generic fallback rather than anything measured for it.
@@ -1094,7 +1128,7 @@ export function generateRoutingGcode(contours, params = {}) {
 
   if (!hasSequence) {
     // Single-tool path, unchanged from before multi-tool support existed.
-    const { toolDiameter, stepDown = 0.03, tabWidth = 0.25, tabHeight = 0.06, tabSpacing = 6, feedRate = 25, plungeRate = 8, spindleSpeed = 14000 } = params;
+    const { toolDiameter, stepDown = 0.03, tabWidth = 0.25, tabHeight = 0.06, tabSpacing = 6, tabCount = 0, feedRate = 25, plungeRate = 8, spindleSpeed = 14000 } = params;
     if (!toolDiameter || toolDiameter <= 0) throw new Error('toolDiameter is required and must be > 0');
     // No T-code / M06 here on purpose - these routers have no automatic
     // tool changer (see toolchange-gcode-plan.md: tool changes are
@@ -1135,7 +1169,7 @@ export function generateRoutingGcode(contours, params = {}) {
     const orderedContours = [...contours].sort((a, b) => Number(b.isHole) - Number(a.isHole));
     let totalTabZones = 0;
     for (const contour of orderedContours) {
-      const { tabZoneCount } = cutContour(lines, contour, toolDiameter / 2, { stepDown, targetDepth, tabWidth, tabHeight, tabSpacing, feedRate, plungeRate }, safeZ);
+      const { tabZoneCount } = cutContour(lines, contour, toolDiameter / 2, { stepDown, targetDepth, tabWidth, tabHeight, tabSpacing, tabCount, feedRate, plungeRate }, safeZ);
       totalTabZones += tabZoneCount;
     }
     lines.push('M05 (spindle off)');
@@ -1144,7 +1178,7 @@ export function generateRoutingGcode(contours, params = {}) {
     stats = { contours: contours.length, tabZones: totalTabZones, pockets: pockets.length, pocketRings: totalPocketRings, targetDepth, toolChanges: 0, edgeShiftX, edgeShiftY };
   } else {
     // Multi-tool path.
-    const toolSequence = params.toolSequence.map((t) => ({ ...TOOL_STEP_DEFAULTS, ...t }));
+    const toolSequence = params.toolSequence.map((t) => ({ ...TOOL_STEP_DEFAULTS, tabCount: params.tabCount ?? 0, ...t }));
     for (const t of toolSequence) {
       if (!t.toolDiameter || t.toolDiameter <= 0) throw new Error('Every tool in the sequence needs a toolDiameter > 0');
     }
