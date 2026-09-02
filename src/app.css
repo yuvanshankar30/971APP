@@ -95,14 +95,21 @@
      status chip - was teal / magenta / terracotta / olive, four hues the
      rest of the app never uses. Ordered by workflow rather than by hue:
      waiting -> in flight -> act now -> done. */
-  --status-approved-bg: color-mix(in srgb, var(--brand-gold-base) 16%, transparent);
-  --status-approved-text: var(--brand-gold-strong);
+  /* Approved is a green light, so it reads as one. */
+  --status-approved-bg: color-mix(in srgb, var(--green-base) 15%, transparent);
+  --status-approved-text: var(--green-strong);
   --status-ordered-bg: color-mix(in srgb, var(--blue-base) 14%, transparent);
   --status-ordered-text: var(--blue-strong);
   --status-pickup-bg: color-mix(in srgb, var(--orange-base) 16%, transparent);
   --status-pickup-text: var(--orange-strong);
   --status-delivered-bg: color-mix(in srgb, var(--green-base) 15%, transparent);
   --status-delivered-text: var(--green-strong);
+  /* Kitted is the end of the line - packed away, nothing left to act on.
+     It used to share Delivered's green, which made the last two stages of
+     the pipeline indistinguishable; neutral reads as "filed" rather than
+     as another thing that just succeeded. */
+  --status-kitted-bg: color-mix(in srgb, var(--text-muted) 14%, transparent);
+  --status-kitted-text: var(--text-muted);
 
   /* Scouting chart categories (datascout, teamview) - qualitative/categorical
      colors for match-role and climb-level charts, genuinely global (not
