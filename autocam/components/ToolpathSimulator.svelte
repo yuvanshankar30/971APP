@@ -163,6 +163,14 @@
   // conservative figure, and the tooltip says which of the two it used -
   // an unconfigured machine should look unconfigured rather than quietly
   // assumed.
+  //
+  // Declared next to its only use, deliberately. It previously lived ~550
+  // lines away beside HEIGHTMAP_MAX_GRID; two branches then edited the text
+  // around that constant, git merged both cleanly, and this declaration was
+  // dropped in the process - leaving a ReferenceError that stopped the whole
+  // simulator mounting. Nothing distant needs it, so nothing distant should
+  // hold it.
+  const DEFAULT_RAPID_RATE = 200;
   $: rapidRateIsMeasured = Number(rapidRate) > 0;
   $: effectiveRapidRate = rapidRateIsMeasured ? Number(rapidRate) : DEFAULT_RAPID_RATE;
   $: machiningTime = estimateMachiningTime(moves, {
