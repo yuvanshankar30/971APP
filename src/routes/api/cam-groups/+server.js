@@ -35,6 +35,31 @@ export async function POST({ request }) {
   if (jobs.some((job) => String(job.machine_id || '') !== String(first.machine_id || '') || String(job.tool_id || '') !== String(first.tool_id || '') || String(job.material_id || '') !== String(first.material_id || ''))) {
     return json({ error: 'Grouped jobs must use the same machine, tool, and material' }, { status: 400 });
   }
+  // Same material is NOT the same stock. cam_materials says what the stock
+  // is, never how thick it is - "Aluminum 6061" covers 1/16" through 3/8"
+  // sheet in this team's own catalog - so two jobs can match on all three
+  // fields above and still have been generated for different thicknesses.
+  // Combined onto one sheet, either the deeper job cuts past the material
+  // into the spoilboard, or the shallower one never cuts through and its
+  // part stays attached. generateRoutingGcode enforces depth against stock
+  // per job, but a group is assembled from already-generated G-code and
+  // never revisits it.
+  const depthOf = (job) => Number(job.params?.stockThickness ?? job.params?.targetDepth ?? job.stats?.targetDepth ?? NaN);
+  const firstDepth = depthOf(first);
+  if (Number.isFinite(firstDepth) && jobs.some((job) => {
+    const depth = depthOf(job);
+    return !Number.isFinite(depth) || Math.abs(depth - firstDepth) > 1e-6;
+  })) {
+    return json({ error: 'Grouped jobs must be cut to the same depth on the same stock thickness - one sheet cannot serve two different thicknesses' }, { status: 400 });
+  }
+  // Units are stripped from each part's body (programBody drops G20/G21) and
+  // the group header hardcodes inches, so a millimetre job silently becomes
+  // an inch job. Nothing in the UI exposes units today, which is exactly why
+  // this needs a guard rather than an assumption.
+  const unitsOf = (job) => String(job.params?.units || 'in').toLowerCase();
+  if (jobs.some((job) => unitsOf(job) !== unitsOf(first))) {
+    return json({ error: 'Grouped jobs must all use the same units' }, { status: 400 });
+  }
   const toolDiameter = Number(body.toolDiameter || first.cam_tools?.diameter || first.params?.toolDiameter);
   const edgeMargin = Number(body.edgeMargin ?? 0.5);
   const params = { ...(first.params || {}), toolDiameter, edgeMargin, safeZ: body.safeZ ?? first.params?.safeZ, controller: first.cam_machines?.controller || first.params?.controller };

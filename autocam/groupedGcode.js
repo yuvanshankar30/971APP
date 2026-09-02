@@ -42,9 +42,17 @@ export function generateGroupedRoutingGcode({ name, placements, params = {} }) {
   if (!(toolDiameter > 0)) throw new Error('A positive end-mill diameter is required for grouped G-code');
   const centerlineMargin = edgeMargin + toolDiameter / 2;
   const controller = params.controller === 'wincnc' ? 'wincnc' : 'linuxcnc';
+  // Stated so the operator can check the sheet on the table against what
+  // every part in this program was cut for. The group only forms when all
+  // its jobs agree on this (see the depth check in /api/cam-groups), so one
+  // number is the truth for the whole sheet.
+  const stockThickness = Number(params.stockThickness ?? params.targetDepth);
   const lines = [
     `(GROUPED ROUTER PROGRAM: ${name || 'unnamed group'})`,
     `(VERIFY STOCK, WORK ZERO, CLAMPS, AND THE NESTING PREVIEW BEFORE RUNNING)`,
+    // What the sheet is, then how the parts sit on it - both are things the
+    // operator checks against the material in front of them before starting.
+    ...(stockThickness > 0 ? [`(EVERY PART HERE IS CUT TO ${format(stockThickness)}" - CONFIRM THE SHEET MATCHES)`] : []),
     `(SHEET EDGE CLEARANCE: ${format(edgeMargin)} in from cut edge; toolpath centerline margin ${format(centerlineMargin)} in for ${format(toolDiameter)} in cutter)`,
     controller === 'wincnc' ? 'G20 (inch)' : 'G20 (inch)',
     'G90 (absolute)',
