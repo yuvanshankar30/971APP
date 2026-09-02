@@ -13,6 +13,7 @@ import {
   turningProfileToLathePoints,
   buildTurningStockRings,
   buildRoutingHeightmap,
+  inferRoutingEdgeShift,
   smoothRoutingHeightmap,
   findRoutingHeightmapWalls,
   tubeLocalPoint,
@@ -767,5 +768,82 @@ describe('matchTubestockHolesToMoves', () => {
       const distanceFromAxis = Math.hypot(drilledPoint.y, drilledPoint.z);
       expect(distanceFromAxis).toBeLessThanOrEqual(Math.max(features.crossSection.a, features.crossSection.b) / 2 + 1e-6);
     }
+  });
+});
+
+describe('inferRoutingEdgeShift - recovering the edge margin for legacy jobs', () => {
+  // A square part, cut with cutter compensation offsetting the profile
+  // outward by the tool radius, then shifted clear of X0/Y0 the way
+  // generateRoutingGcode does.
+  const squareToolpath = (shiftX, shiftY, radius) => {
+    const x0 = shiftX - radius, x1 = shiftX + 2 + radius;
+    const y0 = shiftY - radius, y1 = shiftY + 2 + radius;
+    return parseToolpath3D(gcode(
+      'G20', 'G90',
+      `G00 X${x0} Y${y0} Z0.25`,
+      'G01 Z-0.1 F20',
+      `G01 X${x1} Y${y0}`,
+      `G01 X${x1} Y${y1}`,
+      `G01 X${x0} Y${y1}`,
+      `G01 X${x0} Y${y0}`,
+      'G00 Z0.25'
+    )).moves;
+  };
+  // The same part in raw, pre-shift coordinates: a 2x2 square at the origin.
+  const rawBounds = { min: { x: 0, y: 0, z: -0.1 }, max: { x: 2, y: 2, z: 0 } };
+
+  it('recovers the shift that was applied, cancelling out the cutter radius', () => {
+    const shift = inferRoutingEdgeShift(squareToolpath(4.25, 2.75, 0.125), rawBounds);
+    expect(shift.x).toBeCloseTo(4.25, 9);
+    expect(shift.y).toBeCloseTo(2.75, 9);
+  });
+
+  it('is independent of the tool radius, since compensation is symmetric', () => {
+    for (const radius of [0.0625, 0.125, 0.25, 0.5]) {
+      const shift = inferRoutingEdgeShift(squareToolpath(3, 1.5, radius), rawBounds);
+      expect(shift.x, `radius ${radius}`).toBeCloseTo(3, 9);
+      expect(shift.y, `radius ${radius}`).toBeCloseTo(1.5, 9);
+    }
+  });
+
+  it('ignores rapids, which retract to positions unrelated to where the part sits', () => {
+    const withStrayRapid = parseToolpath3D(gcode(
+      'G20', 'G90',
+      'G00 X0 Y0 Z1',            // a park position far from the part
+      'G00 X50 Y50 Z1',          // and a stray rapid way off to one side
+      'G00 X3.875 Y1.375 Z0.25',
+      'G01 Z-0.1 F20',
+      'G01 X6.125 Y1.375',
+      'G01 X6.125 Y3.625',
+      'G01 X3.875 Y3.625',
+      'G01 X3.875 Y1.375',
+      'G00 Z1'
+    )).moves;
+    const shift = inferRoutingEdgeShift(withStrayRapid, rawBounds);
+    expect(shift.x).toBeCloseTo(4, 9);
+    expect(shift.y).toBeCloseTo(1.5, 9);
+  });
+
+  it('returns no shift rather than a wrong one when it cannot tell', () => {
+    expect(inferRoutingEdgeShift([], rawBounds)).toEqual({ x: 0, y: 0 });
+    expect(inferRoutingEdgeShift(squareToolpath(3, 3, 0.125), null)).toEqual({ x: 0, y: 0 });
+    // Rapids only - nothing was actually cut.
+    const rapidsOnly = parseToolpath3D(gcode('G20', 'G90', 'G00 X0 Y0 Z1', 'G00 X5 Y5 Z1')).moves;
+    expect(inferRoutingEdgeShift(rapidsOnly, rawBounds)).toEqual({ x: 0, y: 0 });
+    // A degenerate part with no extent to line up against.
+    const degenerate = { min: { x: 1, y: 1, z: 0 }, max: { x: 1, y: 1, z: 0 } };
+    expect(inferRoutingEdgeShift(squareToolpath(3, 3, 0.125), degenerate)).toEqual({ x: 0, y: 0 });
+  });
+
+  it('matches the real edgeShift generateRoutingGcode reports for the same part', () => {
+    // End to end against the real generator rather than a hand-built path.
+    const square = [{ points: [{ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 2 }, { x: 0, y: 2 }], isHole: false }];
+    const { gcode: program, stats } = generateRoutingGcode(square, { toolDiameter: 0.25, targetDepth: 0.1, edgeMargin: 1 });
+    expect(stats.edgeShiftX).toBeGreaterThan(0);
+
+    const { moves } = parseToolpath3D(program);
+    const shift = inferRoutingEdgeShift(moves, rawBounds);
+    expect(shift.x).toBeCloseTo(stats.edgeShiftX, 6);
+    expect(shift.y).toBeCloseTo(stats.edgeShiftY, 6);
   });
 });
