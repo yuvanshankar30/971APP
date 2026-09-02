@@ -101,7 +101,12 @@
 
   .due-input {
     font-size: 0.78rem;
-    padding: 0.25rem 0.4rem;
+    /* Same height as .status-badge and every other control, so a row of
+       Status / Due / Created reads as one line instead of three boxes at
+       slightly different heights. */
+    height: var(--control-height);
+    box-sizing: border-box;
+    padding: 0 0.4rem;
     border: 1px solid var(--border, #d1d5db);
     border-radius: var(--radius-sm, 4px);
     background: var(--surface-1, #fff);
