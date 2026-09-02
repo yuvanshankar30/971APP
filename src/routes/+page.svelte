@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { supabase, getAuthHeader } from '$lib/supabase.js';
   import { initAuth, userStore, signOut, authReady as authReadyStore, user as authUserStore } from '$lib/stores/auth.js';
-  import { LogIn, UserPlus, Mail, Lock, User, Shield, CheckCircle, AlertCircle, LogOut, Users, GripVertical, X, Plus, LayoutGrid, ClipboardCheck, Camera, Eye, Trophy, BarChart3, ListChecks } from 'lucide-svelte';
+  import { LogIn, UserPlus, Mail, Lock, User, Shield, CheckCircle, AlertCircle, LogOut, Users, GripVertical, X, Plus, LayoutGrid, ClipboardCheck, Factory, ShoppingCart, ListChecks } from 'lucide-svelte';
   import { goto } from '$app/navigation';
   import { FRC_TEAMS, hasPermission } from '$lib/permissions.js';
   import { theme, setTheme } from '$lib/stores/theme.js';
@@ -27,15 +27,16 @@
   // be dragged/removed like anything else) rather than pinned like the top
   // nav's Admin tab, since admins always retain nav access regardless.
   const ALL_DASHBOARD_SECTIONS = [
-    { key: 'stats', label: 'Scouting Overview' },
-    { key: 'quick-actions', label: 'Field Scouting' },
-    { key: 'assignment-queue', label: 'Your Assignments' },
-    { key: 'analysis', label: 'Scouting Analysis' }
+    { key: 'workspace', label: 'Team Workspace' },
+    { key: 'assignment-queue', label: 'Your Scouting Assignments' }
   ];
   const LEGACY_SECTION_MIGRATIONS = Object.freeze({
-    subsystems: 'assignment-queue',
-    builds: 'analysis',
-    purchases: 'analysis'
+    stats: 'workspace',
+    'quick-actions': 'workspace',
+    analysis: 'workspace',
+    subsystems: 'workspace',
+    builds: 'workspace',
+    purchases: 'workspace'
   });
 
   function sectionLabel(key) {
@@ -359,7 +360,7 @@
     <div class="user-welcome">
       <h2>Welcome back, {user.full_name || user.email}!</h2>
       <!-- Simplified header: we no longer show individual info boxes here -->
-      <p class="muted">Your competition scouting workspace: assignments, field notes, and event analysis.</p>
+      <p class="muted">Your workspace for manufacturing, purchasing, and competition scouting.</p>
     </div>
 
     {#if showScoutAlert && myScoutAssignments.length>0}
@@ -437,61 +438,24 @@
               </div>
             {/if}
 
-            {#if section.key === 'stats'}
-              <!-- At-a-glance stats -->
-              <div class="stat-grid">
-                <a href="#assignment-queue" class="stat-card">
-                  <div class="stat-icon"><ClipboardCheck size={20} /></div>
-                  <div class="stat-body">
-                    <span class="stat-value">{myScoutAssignments.length}</span>
-                    <span class="stat-label">Open Assignments</span>
-                  </div>
-                </a>
-                <a href={nextScoutAssignment ? `/${scoutAssignmentRoute(nextScoutAssignment.scouting_type)}` : '#assignment-queue'} class="stat-card">
-                  <div class="stat-icon"><ListChecks size={20} /></div>
-                  <div class="stat-body">
-                    <span class="stat-value">{nextScoutAssignment ? `#${nextScoutAssignment.match_key.split('_').pop()}` : '—'}</span>
-                    <span class="stat-label">Next Match</span>
-                  </div>
-                </a>
-                <a href="/pitscout" class="stat-card">
-                  <div class="stat-icon"><Camera size={20} /></div>
-                  <div class="stat-body">
-                    <span class="stat-value">Pit</span>
-                    <span class="stat-label">Robot Profiles</span>
-                  </div>
-                </a>
-                <a href="/scouting/vision" class="stat-card">
-                  <div class="stat-icon"><Eye size={20} /></div>
-                  <div class="stat-body">
-                    <span class="stat-value">Vision</span>
-                    <span class="stat-label">Match Review</span>
-                  </div>
-                </a>
-              </div>
-            {:else if section.key === 'quick-actions'}
+            {#if section.key === 'workspace'}
               <div class="dashboard-actions">
-                <h3>Field Scouting</h3>
-                <div class="action-grid">
-                  <a href="/matchscout" class="action-card">
+                <h3>Team Workspace</h3>
+                <div class="workspace-grid">
+                  <a href="/manufacture" class="workspace-card">
+                    <Factory size={24} />
+                    <h4>Manufacturing</h4>
+                    <p>Manage active parts, production work, and AutoCAM jobs</p>
+                  </a>
+                  <a href="/cad/purchasing" class="workspace-card">
+                    <ShoppingCart size={24} />
+                    <h4>Purchasing</h4>
+                    <p>Review purchase requests, orders, and needed components</p>
+                  </a>
+                  <a href="/scouting" class="workspace-card">
                     <ClipboardCheck size={24} />
-                    <h4>Match Scouting</h4>
-                    <p>Record pre-match, auto, teleop, and post-match observations</p>
-                  </a>
-                  <a href="/pitscout" class="action-card">
-                    <Camera size={24} />
-                    <h4>Pit Scouting</h4>
-                    <p>Capture robot construction, contacts, and pit notes</p>
-                  </a>
-                  <a href="/datascout" class="action-card">
-                    <BarChart3 size={24} />
-                    <h4>Data Scouting</h4>
-                    <p>Review event data and submitted scouting observations</p>
-                  </a>
-                  <a href="/scouting/vision" class="action-card">
-                    <Eye size={24} />
-                    <h4>Vision Scouting</h4>
-                    <p>Review vision observations and match footage</p>
+                    <h4>Scouting</h4>
+                    <p>Open competition assignments, scouting forms, and event analysis</p>
                   </a>
                 </div>
               </div>
@@ -508,7 +472,16 @@
               </div>
             {:else if section.key === 'assignment-queue'}
               <div class="user-lists">
-                <h4>Your Assignments</h4>
+                <div class="assignment-heading">
+                  <div>
+                    <h4>Your Scouting Assignments</h4>
+                    <p class="muted">Only assignments assigned to you are shown here.</p>
+                  </div>
+                  <a href="/scouting" class="btn btn-outline btn-sm">
+                    <ListChecks size={14} />
+                    Open Scouting
+                  </a>
+                </div>
                 {#if myScoutAssignments.length === 0}
                   <p class="muted">No open scouting assignments right now.</p>
                 {:else}
@@ -521,27 +494,6 @@
                     {/each}
                   </div>
                 {/if}
-              </div>
-            {:else if section.key === 'analysis'}
-              <div class="dashboard-actions">
-                <h3>Scouting Analysis</h3>
-                <div class="action-grid">
-                  <a href="/teamview" class="action-card">
-                    <Users size={24} />
-                    <h4>Team View</h4>
-                    <p>Compare robot profiles, match data, and field notes</p>
-                  </a>
-                  <a href="/powerrankings" class="action-card">
-                    <Trophy size={24} />
-                    <h4>Power Rankings</h4>
-                    <p>Build an event pick list with head-to-head comparisons</p>
-                  </a>
-                  <a href="/datascout" class="action-card">
-                    <BarChart3 size={24} />
-                    <h4>Event Analysis</h4>
-                    <p>Export collected scouting information and reports</p>
-                  </a>
-                </div>
               </div>
             {/if}
           </div>
@@ -1306,68 +1258,6 @@
     color: var(--text-muted);
   }
 
-  .stat-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: var(--gap-3);
-  }
-
-  /* Instrument-readout cards: mono label over a big tabular number, flat hover */
-  .stat-card {
-    display: flex;
-    align-items: center;
-    gap: var(--gap-3);
-    background: var(--primary);
-    border: 1px solid var(--border);
-    border-radius: var(--home-radius, var(--radius-lg));
-    padding: var(--space-4) var(--space-5);
-    text-decoration: none;
-    color: inherit;
-    transition: border-color 0.1s ease, background-color 0.1s ease;
-  }
-
-  .stat-card:hover {
-    background: var(--surface-2);
-    border-color: var(--accent-strong);
-  }
-
-  .stat-icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 34px;
-    height: 34px;
-    flex-shrink: 0;
-    border-radius: var(--radius-sm);
-    background: var(--brand-gold-soft);
-    color: var(--brand-gold-strong);
-  }
-
-  .stat-body {
-    display: flex;
-    flex-direction: column-reverse; /* label reads first, number below */
-    min-width: 0;
-  }
-
-  .stat-value {
-    font-family: var(--font-mono-stack);
-    font-size: 1.6rem;
-    font-weight: 600;
-    line-height: 1.1;
-    color: var(--secondary);
-  }
-
-  .stat-label {
-    font-family: var(--font-mono-stack);
-    font-size: 0.62rem;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
   .pending-notice {
     display: flex;
     align-items: flex-start;
@@ -1397,13 +1287,19 @@
     font-size: var(--font-xl);
   }
 
+  .workspace-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--gap-3);
+  }
+
   .action-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
     gap: var(--gap-3);
   }
 
-  /* Compact horizontal action rows: gold icon tile beside title + description */
+  .workspace-card,
   .action-card {
     display: grid;
     grid-template-columns: auto 1fr;
@@ -1418,11 +1314,13 @@
     transition: border-color 0.1s ease, background-color 0.1s ease;
   }
 
+  .workspace-card:hover,
   .action-card:hover {
     background: var(--surface-2);
     border-color: var(--accent-strong);
   }
 
+  .workspace-card :global(svg),
   .action-card :global(svg) {
     grid-row: 1 / span 2;
     width: 22px;
@@ -1433,6 +1331,7 @@
     color: var(--brand-gold-strong);
   }
 
+  .workspace-card h4,
   .action-card h4 {
     grid-column: 2;
     margin: 0;
@@ -1440,6 +1339,7 @@
     font-size: var(--font-md);
   }
 
+  .workspace-card p,
   .action-card p {
     grid-column: 2;
     margin: 0;
@@ -1485,8 +1385,8 @@
     .dashboard-container { margin: var(--space-4) 0; padding: 0 var(--space-3); }
     .user-welcome { padding: var(--space-6); }
     .user-welcome h2 { font-size: var(--font-md); margin-bottom: var(--space-3); }
-    .action-grid { grid-template-columns: 1fr; gap: var(--gap-4); }
-    .action-card { padding: var(--space-4); }
+    .workspace-grid, .action-grid { grid-template-columns: 1fr; gap: var(--gap-3); }
+    .workspace-card, .action-card { padding: var(--space-4); }
     .pending-notice {
       flex-direction: column;
       gap: var(--gap-3);
@@ -1579,6 +1479,31 @@
     border-bottom: 2px solid var(--neutral-800);
     padding-bottom: var(--space-2);
     margin: 0 0 var(--space-3);
+  }
+
+  .assignment-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--gap-4);
+    margin-bottom: var(--space-3);
+  }
+
+  .assignment-heading h4 {
+    margin-bottom: var(--space-1);
+  }
+
+  .assignment-heading .muted {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: var(--font-xs);
+  }
+
+  .assignment-heading .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--gap-2);
+    flex-shrink: 0;
   }
 
   /* ===== Home dashboard customization: toolbar, hidden tray, sections ===== */
@@ -1722,6 +1647,17 @@
     margin: 0;
     color: var(--text-muted);
     font-size: 0.85rem;
+  }
+
+  @media (max-width: 480px) {
+    .assignment-heading {
+      align-items: stretch;
+      flex-direction: column;
+    }
+
+    .assignment-heading .btn {
+      justify-content: center;
+    }
   }
 
 </style>
