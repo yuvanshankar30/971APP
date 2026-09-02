@@ -19,6 +19,7 @@
     turningProfileToLathePoints,
     buildTurningStockRings,
     buildRoutingHeightmap,
+    inferRoutingEdgeShift,
     estimateMachiningTime,
     formatMachiningTime,
     smoothRoutingHeightmap,
@@ -336,6 +337,21 @@
   // produced - see docs/toolpath-simulation-plan.md. Fetch + parse doesn't
   // touch the scene, so this can run before the scene exists (or while the
   // job is still being edited) without racing updateStock()/rebuildToolpath().
+  /** Bounding box of raw ghost geometry, in the same shape toolpathBounds3D returns. */
+  function boundsOfGeometryData(geometryData) {
+    const min = { x: Infinity, y: Infinity, z: Infinity };
+    const max = { x: -Infinity, y: -Infinity, z: -Infinity };
+    for (const { position } of geometryData || []) {
+      for (let i = 0; i < position.length; i += 3) {
+        for (const [axis, value] of [['x', position[i]], ['y', position[i + 1]], ['z', position[i + 2]]]) {
+          if (value < min[axis]) min[axis] = value;
+          if (value > max[axis]) max[axis] = value;
+        }
+      }
+    }
+    return Number.isFinite(min.x) ? { min, max } : null;
+  }
+
   async function loadGhostPart() {
     ghostGeometryData = null;
     turningTargetProfile = null;
@@ -363,11 +379,23 @@
         // u/v coordinates - generateRoutingGcode shifted the actual toolpath
         // by edgeShiftX/edgeShiftY to keep it clear of X0/Y0, so the ghost
         // part needs the identical shift to land in the same place.
-        if (edgeShiftX || edgeShiftY) {
+        //
+        // Jobs generated before those values were recorded in stats have no
+        // shift to hand us, and skipping it left the ghost rendering as a
+        // translucent slab floating off to one side of the stock. Recover it
+        // from the toolpath's own geometry in that case - see
+        // inferRoutingEdgeShift.
+        let shiftX = edgeShiftX;
+        let shiftY = edgeShiftY;
+        if (!shiftX && !shiftY) {
+          const rawBounds = boundsOfGeometryData(ghostGeometryData);
+          ({ x: shiftX, y: shiftY } = inferRoutingEdgeShift(parsed.moves, rawBounds));
+        }
+        if (shiftX || shiftY) {
           for (const { position } of ghostGeometryData) {
             for (let i = 0; i < position.length; i += 3) {
-              position[i] += edgeShiftX;
-              position[i + 1] += edgeShiftY;
+              position[i] += shiftX;
+              position[i + 1] += shiftY;
             }
           }
         }

@@ -669,6 +669,48 @@ export function toolpathBounds3D(moves) {
 }
 
 /**
+ * Recovers the XY shift generateRoutingGcode applied to keep the toolpath
+ * clear of X0/Y0, for jobs whose stats predate edgeShiftX/edgeShiftY being
+ * recorded at all.
+ *
+ * Those older jobs have no shift to hand the 3D sim, so the ghost part
+ * (rebuilt from the STEP file in raw, pre-shift coordinates) used to render
+ * offset from the stock it's supposed to be overlaid on - a translucent
+ * slab floating off to one side of the part, see the very first routing job
+ * in this app's own history.
+ *
+ * The recovery is geometric, not a guess: cutter compensation offsets the
+ * outer profile outward by exactly the tool radius on every side, so the
+ * bounding-box CENTER of the cutting moves is unchanged by it and still
+ * coincides with the part's own center. The difference between that center
+ * and the raw geometry's center is the shift that was applied.
+ *
+ * Only cutting moves count - rapids retract to clearance positions that
+ * have nothing to do with where the part sits.
+ *
+ * @returns {{x: number, y: number}} the shift, or {x:0,y:0} when it can't be
+ *   determined (no cutting moves, or degenerate geometry), which leaves the
+ *   ghost exactly where it would have been anyway.
+ */
+export function inferRoutingEdgeShift(moves, rawBounds) {
+  const cutting = (moves || []).filter((m) => m.kind !== 'rapid');
+  if (!cutting.length || !rawBounds) return { x: 0, y: 0 };
+
+  const cut = toolpathBounds3D(cutting);
+  const spanOf = (b, axis) => b.max[axis] - b.min[axis];
+  // A degenerate span on either side means there's nothing to line up.
+  for (const axis of ['x', 'y']) {
+    if (!(spanOf(cut, axis) > 0) || !(spanOf(rawBounds, axis) > 0)) return { x: 0, y: 0 };
+  }
+
+  const centerOf = (b, axis) => (b.min[axis] + b.max[axis]) / 2;
+  return {
+    x: centerOf(cut, 'x') - centerOf(rawBounds, 'x'),
+    y: centerOf(cut, 'y') - centerOf(rawBounds, 'y')
+  };
+}
+
+/**
  * Material-removal heightmap for the routing 3D sim - Phase 4 of
  * docs/toolpath-simulation-plan.md, deferred when the sim first shipped.
  * A router cut is inherently 2.5D (flat plate stock, vertical spindle,
