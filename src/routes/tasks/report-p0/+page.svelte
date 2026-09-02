@@ -657,7 +657,10 @@
 
 <style>
   .report-page { padding-top: var(--space-6); padding-bottom: var(--space-7); display: grid; gap: var(--gap-4); max-width: 1040px; }
-  .hero-card { background: linear-gradient(135deg, rgba(9, 38, 66, 0.96), rgba(15, 61, 76, 0.92)); color: white; }
+  /* Was a hardcoded navy -> teal gradient with white ink: a card that
+     ignored the theme and went dark on a light page. Uses the app's own
+     raised surface instead. */
+  .hero-card { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); }
   .eyebrow { margin: 0 0 var(--space-2); font-size: var(--font-xs); text-transform: uppercase; letter-spacing: 0.12em; opacity: 0.74; }
   .hero-card h1, .issue-head h2 { margin: 0; }
   .hero-copy { margin: var(--space-2) 0 0; }
