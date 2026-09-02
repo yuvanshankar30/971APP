@@ -1040,7 +1040,9 @@
                 {problemsByTeam[teamKey].length} to inspect
               </span>
             {/if}
-            <span class={getPitScoutStatusClass(entriesByTeam[teamKey])}>{getPitScoutStatusLabel(entriesByTeam[teamKey])}</span>
+            <span class={`team-status ${getPitScoutStatusClass(entriesByTeam[teamKey])}`}>
+              {getPitScoutStatusLabel(entriesByTeam[teamKey])}
+            </span>
           </button>
         {/each}
       </div>
@@ -1946,22 +1948,37 @@
     font-weight: 600;
   }
 
+  .team-status {
+    display: inline-flex;
+    align-items: center;
+    flex: 0 0 auto;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    padding: 0.23rem 0.52rem;
+    font-family: var(--font-mono-stack);
+    font-size: 0.64rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    line-height: 1.15;
+    text-transform: uppercase;
+  }
+
   .status-pending {
-    color: var(--danger);
-    font-weight: 600;
-    font-size: 0.85rem;
+    background: var(--surface-2);
+    border-color: var(--border);
+    color: var(--text-muted);
   }
 
   .status-needs-photo {
-    color: var(--warning);
-    font-weight: 600;
-    font-size: 0.85rem;
+    background: var(--brand-gold-soft);
+    border-color: var(--orange-soft);
+    color: var(--brand-gold-strong);
   }
 
   .status-complete {
-    color: var(--success);
-    font-weight: 600;
-    font-size: 0.85rem;
+    background: var(--green-soft);
+    border-color: var(--green-base);
+    color: var(--green-strong);
   }
 
   .entry-header {
