@@ -543,11 +543,16 @@
 {#if authReady && isAuthenticated}
   <header class="nav-header">
     <div class="nav-container">
-      <!-- Brand -->
-      <a href="/" class="brand" on:click={closeDesktopFolders}>
-        <span class="brand-mark" aria-hidden="true"></span>
-        <span class="brand-name">Spartans Hub</span>
-      </a>
+      <!-- Brand. The side slots are equal-weight flex items, which is what
+           lets the nav between them sit on the page's true centre rather
+           than merely centred in the leftover space - the brand is much
+           wider than Account, so those two are not the same thing. -->
+      <div class="nav-side nav-side-left">
+        <a href="/" class="brand" on:click={closeDesktopFolders}>
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span class="brand-name">Spartans Hub</span>
+        </a>
+      </div>
 
       <!-- Desktop Nav -->
       <nav class="desktop-nav" aria-label="Primary navigation" bind:this={navEl}>
@@ -627,10 +632,12 @@
 
       <!-- Account is a stable destination; using the person's name here made
            it read like identity chrome rather than an actual navigation tab. -->
-      <a href="/profile" class="desktop-profile" class:active={isActive('/profile')} aria-label="Account settings" on:click={closeDesktopFolders}>
-        <User size={16} />
-        <span class="profile-name">Account</span>
-      </a>
+      <div class="nav-side nav-side-right">
+        <a href="/profile" class="desktop-profile" class:active={isActive('/profile')} aria-label="Account settings" on:click={closeDesktopFolders}>
+          <User size={16} />
+          <span class="profile-name">Account</span>
+        </a>
+      </div>
 
       <!-- Mobile Menu Toggle -->
       <button class="mobile-toggle" on:click={toggleMobileMenu} aria-expanded={mobileMenuOpen} aria-label="Toggle menu">
@@ -747,6 +754,19 @@
   }
 
   /* ========== BRAND ========== */
+  .nav-side {
+    display: flex;
+    align-items: center;
+    /* Equal basis on both sides so the centred nav lands on the page's
+       centre line, not just midway between two unequal neighbours. */
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .nav-side-right {
+    justify-content: flex-end;
+  }
+
   .brand {
     display: flex;
     align-items: center;
@@ -776,8 +796,12 @@
   .desktop-nav {
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: var(--gap-1);
-    flex: 1;
+    /* Intrinsic width (still shrinkable, so the horizontal-scroll fallback
+       below keeps working) rather than flex: 1 filling the bar - filling it
+       is what left the links bunched against the brand. */
+    flex: 0 1 auto;
     min-width: 0;
     padding: 0;
     overflow-x: auto;
@@ -1202,6 +1226,12 @@
     .desktop-nav,
     .desktop-profile {
       display: none;
+    }
+
+    /* The wrappers themselves vanish from layout, so the brand and the
+       menu toggle sit exactly as they did before the slots existed. */
+    .nav-side {
+      display: contents;
     }
 
     .mobile-toggle {
