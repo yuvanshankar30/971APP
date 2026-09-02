@@ -358,9 +358,26 @@
   <!-- User Dashboard -->
   <div class="dashboard-container">
     <div class="user-welcome">
-      <h2>Welcome back, {user.full_name || user.email}!</h2>
-      <!-- Simplified header: we no longer show individual info boxes here -->
-      <p class="muted">Your workspace for manufacturing, purchasing, and competition scouting.</p>
+      <div class="user-welcome-text">
+        <h2>Welcome back, {user.full_name || user.email}!</h2>
+        <!-- Simplified header: we no longer show individual info boxes here -->
+        <p class="muted">Your workspace for manufacturing, purchasing, and competition scouting.</p>
+      </div>
+      <!-- Sits with the greeting rather than in a full-width bar of its own
+           below it - it is a single occasional control, and a whole toolbar
+           row for one button read as an empty strip across the page. Same
+           permission guard it had there. -->
+      {#if can('CAN_SEE_ROUTES')}
+        <button type="button" class="btn btn-outline btn-sm layout-toggle" on:click={() => editMode = !editMode}>
+          {#if editMode}
+            <CheckCircle size={14} />
+            Done
+          {:else}
+            <LayoutGrid size={14} />
+            Customize Layout
+          {/if}
+        </button>
+      {/if}
     </div>
 
     {#if showScoutAlert && myScoutAssignments.length>0}
@@ -388,18 +405,6 @@
         </div>
       </div>
     {:else}
-      <div class="dashboard-toolbar">
-        <button type="button" class="btn btn-outline btn-sm layout-toggle" on:click={() => editMode = !editMode}>
-          {#if editMode}
-            <CheckCircle size={14} />
-            Done
-          {:else}
-            <LayoutGrid size={14} />
-            Customize Layout
-          {/if}
-        </button>
-      </div>
-
       {#if editMode && hiddenSections.length > 0}
         <div class="hidden-sections-tray">
           <span class="tray-label">Hidden:</span>
@@ -445,7 +450,7 @@
                   <a href="/manufacture" class="workspace-card">
                     <Factory size={24} />
                     <h4>Manufacturing</h4>
-                    <p>Manage active parts, production work, and AutoCAM jobs</p>
+                    <p>Manage active parts and production work</p>
                   </a>
                   <a href="/cad/purchasing" class="workspace-card">
                     <ShoppingCart size={24} />
@@ -501,7 +506,7 @@
 
         {#if visibleSections.length === 0}
           <div class="dashboard-section-empty">
-            <p class="muted">All dashboard sections are hidden. Use "Customize Layout" above to bring them back.</p>
+            <p class="muted">All dashboard sections are hidden. Use "Customize Layout" at the top to bring them back.</p>
           </div>
         {/if}
       </div>
@@ -1244,6 +1249,15 @@
     border-radius: var(--home-radius, var(--radius-lg));
     padding: var(--space-5) var(--space-6);
     margin-bottom: var(--space-6);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
+    flex-wrap: wrap;
+  }
+
+  .user-welcome-text {
+    min-width: 0;
   }
 
   .user-welcome h2 {
@@ -1507,12 +1521,6 @@
   }
 
   /* ===== Home dashboard customization: toolbar, hidden tray, sections ===== */
-  .dashboard-toolbar {
-    display: flex;
-    justify-content: flex-end;
-    margin-bottom: var(--space-4);
-  }
-
   .layout-toggle {
     display: inline-flex;
     align-items: center;
