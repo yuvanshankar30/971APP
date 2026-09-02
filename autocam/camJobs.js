@@ -443,3 +443,19 @@ export async function loadLatestCamJobsForParts(partIds = []) {
   }
   return map;
 }
+
+/** Returns a map of completed CAM job id to its grouped router program. */
+export async function loadCamGroupsForJobs(jobIds = []) {
+  const ids = [...new Set((jobIds || []).filter(Boolean))];
+  const map = new Map();
+  if (!ids.length) return map;
+  const { data, error } = await supabase
+    .from('cam_job_group_items')
+    .select('cam_job_id, cam_job_groups(id, name, project_id)')
+    .in('cam_job_id', ids);
+  if (error) return map;
+  for (const item of data || []) {
+    if (item.cam_job_groups) map.set(item.cam_job_id, item.cam_job_groups);
+  }
+  return map;
+}

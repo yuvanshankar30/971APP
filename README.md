@@ -61,6 +61,15 @@ browser confirmation or prompt popups.
   material the source part actually needed, checked against that
   independent STEP-derived ground truth rather than the G-code comparing
   itself to itself.
+  Completed router jobs with the same machine, end mill, and material can also
+  be grouped into one shared-sheet router program. Grouping is AutoCAM-only:
+  it preserves each source job, carries the manufacturing project ID into the
+  AutoCAM filter/group record, packs measured cutting envelopes with a
+  cutter- and tolerance-aware clearance, and exposes the combined program in
+  the same 3D-first toolpath viewer. Manufacturing only shows a green grouped
+  status/link beside AutoCAM completed. See
+  `autocam/docs/router-job-grouping.md` for the deliberate conservative
+  placement and program-composition rules.
 - **Scouting**: pit scouting (a topic-at-a-time form with per-topic
   completion counts, scout/contact attribution, and up to three robot photos,
   built for filling in a noisy pit on a phone while a team answers out of
@@ -307,6 +316,9 @@ own docs are all together in one place instead of scattered across
   toolpath for the 2D preview and 3D simulator, including a cumulative-distance
   interpolation helper for playback (`autocam/components/ToolpathViewer.svelte`,
   `autocam/components/ToolpathSimulator.svelte`).
+- **`autocam/nesting.js`** / **`autocam/groupedGcode.js`** - deterministic,
+  conservative router-job placement from real G-code bounds and one-program
+  composition for grouped sheets; see `autocam/docs/router-job-grouping.md`.
 - **`autocam/drive_watcher.js`** - Google Drive input-sweep (`cad` →
   auto-queue) and output-delivery (finished G-code → dated `cammed`
   subfolder) - see `autocam/docs/drive-watcher-folder-layout.md` for the real folder

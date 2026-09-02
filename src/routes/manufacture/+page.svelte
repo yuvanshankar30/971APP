@@ -27,6 +27,7 @@
     updateCamJobAndRegenerate,
     getPartStepFileName,
     loadLatestCamJobsForParts,
+    loadCamGroupsForJobs,
     downloadGcodeBlob,
     downloadGcodeText,
     camJobStatusLabel,
@@ -54,6 +55,7 @@
   let toastTone = 'neutral';
   let showToast = false;
   let camJobsByPart = {};
+  let camGroupsByJob = {};
   let queuingCamJobForPartId = null;
   let showCamSetupModal = false;
   let camSetupPart = null;
@@ -481,6 +483,8 @@
     const byPart = {};
     for (const [partId, job] of jobsMap.entries()) byPart[partId] = job;
     camJobsByPart = byPart;
+    const groupsMap = await loadCamGroupsForJobs([...jobsMap.values()].map((job) => job.id));
+    camGroupsByJob = Object.fromEntries(groupsMap);
   }
 
   $: selectedCamSetupMachine = camSetupMachines.find((machine) => String(machine.id) === String(camSetupMachineId));
@@ -2195,6 +2199,9 @@
             </div>
             {#if camJob?.status === 'completed'}
               <span class="autocam-completed part-card-autocam-status"><CircleCheck size={14} /> AutoCAM completed</span>
+              {#if camGroupsByJob[camJob.id]}
+                <a class="autocam-completed part-card-autocam-status grouped-status" href={`/autocam?group=${camGroupsByJob[camJob.id].id}`}><CircleCheck size={14} /> Grouped</a>
+              {/if}
             {/if}
           {:else if WORKFLOW_OPERATION_TYPE[part.workflow]}
             <button
@@ -2419,6 +2426,9 @@
                   </div>
                   {#if camJob?.status === 'completed'}
                     <span class="autocam-completed"><CircleCheck size={14} /> AutoCAM completed</span>
+                    {#if camGroupsByJob[camJob.id]}
+                      <a class="autocam-completed grouped-status" href={`/autocam?group=${camGroupsByJob[camJob.id].id}`}><CircleCheck size={14} /> Grouped</a>
+                    {/if}
                   {/if}
                 {:else if WORKFLOW_OPERATION_TYPE[part.workflow]}
                   <button
