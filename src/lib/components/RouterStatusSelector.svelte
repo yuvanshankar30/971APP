@@ -139,8 +139,12 @@
 </script>
 
 <div class="status-selector">
+  <!-- The shortcut for the obvious next step, where there is one. This used
+       to REPLACE the dropdown rather than sit beside it, which made
+       Autocammed, CAM-ing and CAM Review one-way doors: the only control on
+       screen moved the part forward, so a status set by mistake could not be
+       undone from here at all. -->
   {#if isAutocammed}
-    <!-- Autocammed parts show Review Autocam button -->
     <button class="btn btn-autocam cam-btn" on:click={handleReviewAutocam}>
       <Zap size={14} /> Review Autocam
     </button>
@@ -150,18 +154,22 @@
     {:else}
       <button class="btn btn-primary cam-btn" on:click={handleCamDone}>CAM Done</button>
     {/if}
-  {:else}
-    <select class="status-select {badgeClass}" value={currentDisplay} on:change={handleChange}>
-      {#each DISPLAY_ORDER as statusLabel}
-        <option value={statusLabel}>{statusLabel}</option>
-      {/each}
-    </select>
   {/if}
+
+  <!-- Always present, so any status stays reachable in either direction. -->
+  <select class="status-select {badgeClass}" value={currentDisplay} on:change={handleChange}>
+    {#each DISPLAY_ORDER as statusLabel}
+      <option value={statusLabel}>{statusLabel}</option>
+    {/each}
+  </select>
 </div>
 
 <style>
   .status-selector {
     display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-wrap: wrap;
   }
 
   select.status-select {

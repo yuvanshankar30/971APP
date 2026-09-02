@@ -3285,7 +3285,13 @@
   .table th.metadata-col,
   .table td.metadata-col {
     width: 11.5%;
-    vertical-align: top;
+    /* Centred, like every other column in the row (app.css's .table td
+       default). These four were the only cells pinned to the top, so on a
+       tall row - one with the full CAD action grid - Status, Due and
+       Created floated up against the top edge while the part name, workflow
+       tag and stock beside them sat centred. */
+    vertical-align: middle;
+    position: relative;
   }
   /* One shared first line for Status / Due / Created / Requested By. A
      pill badge, a date input and plain text all have different intrinsic
@@ -3313,11 +3319,20 @@
   /* Secondary content (season tag, router progress) goes on its own line
      underneath, where it can't nudge the primary line out of alignment -
      it used to share the primary line's flex container and wrap. */
+  /* Hangs below the primary line without being part of what gets centred.
+     Only two of these four cells have a sub-line ("1 Pending", the season
+     tag); leaving them in flow made those cells centre the whole block, so
+     the Status badge sat ~12px above the Due input beside it instead of
+     level with it. Out of flow, every primary line lands on the row's
+     centre regardless of what hangs underneath. */
   .metadata-sub {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    margin-top: calc(var(--control-height) / 2 + 0.3rem);
     display: flex;
     justify-content: center;
-    width: 100%;
-    margin-top: 0.35rem;
     /* Keeps the season tag off the column edge so it never reads as though
        it belongs to the neighbouring column's controls. */
     padding: 0 0.35rem;
@@ -3331,11 +3346,12 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    /* Matches the row's other cells (metadata-col, name-col) - middle
-       alignment made this float oddly against neighboring cells whenever a
-       row grew taller than one line (a name with badges, stacked action
-       buttons, etc). */
-    vertical-align: top;
+    /* Centred with the rest of the row. This was pinned to the top back
+       when each of these cells rendered a differently-sized box and top
+       alignment was the only thing keeping them level with each other;
+       they now share one fixed-height line box (.metadata-line), so they
+       stay level with each other AND with the row. */
+    vertical-align: middle;
   }
   .table th.actions-table-col,
   .table td.actions-table-col {
@@ -3456,6 +3472,12 @@
 
   .parts-row {
     cursor: pointer;
+    /* A minimum, not a fixed height - CSS treats `height` on a table row as
+       a floor, so taller rows are unaffected. Guarantees room beneath the
+       centred primary line for the out-of-flow sub-line (the season tag,
+       the progress note), which otherwise spilled ~10px into the next row
+       on the shortest rows. */
+    height: 6rem;
   }
 
   .assigned-user-badge {

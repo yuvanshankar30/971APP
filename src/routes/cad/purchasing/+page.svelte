@@ -2002,11 +2002,15 @@
   }
   /* Delivered / Picked Up / Kitted: forest green — the "received" family */
   .status-select.colorful[data-status="delivered"],
-  .status-select.colorful[data-status="picked_up"],
-  .status-select.colorful[data-status="kitted"] {
+  .status-select.colorful[data-status="picked_up"] {
     background: var(--status-delivered-bg);
     color: var(--status-delivered-text);
     border-color: color-mix(in srgb, var(--status-delivered-text) 32%, transparent);
+  }
+  .status-select.colorful[data-status="kitted"] {
+    background: var(--status-kitted-bg);
+    color: var(--status-kitted-text);
+    border-color: color-mix(in srgb, var(--status-kitted-text) 32%, transparent);
   }
   .status-select.colorful[data-status="rejected"] {
     background: var(--red-soft);
@@ -2030,11 +2034,15 @@
     border-color: color-mix(in srgb, var(--status-pickup-text) 50%, transparent);
   }
   :global([data-theme="modern-dark"]) .status-select.colorful[data-status="delivered"],
-  :global([data-theme="modern-dark"]) .status-select.colorful[data-status="picked_up"],
-  :global([data-theme="modern-dark"]) .status-select.colorful[data-status="kitted"] {
+  :global([data-theme="modern-dark"]) .status-select.colorful[data-status="picked_up"] {
     background: var(--status-delivered-bg);
     color: var(--status-delivered-text);
     border-color: color-mix(in srgb, var(--status-delivered-text) 50%, transparent);
+  }
+  :global([data-theme="modern-dark"]) .status-select.colorful[data-status="kitted"] {
+    background: var(--status-kitted-bg);
+    color: var(--status-kitted-text);
+    border-color: color-mix(in srgb, var(--status-kitted-text) 50%, transparent);
   }
 
   .status-select.colorful option[value="pending"] { background: var(--brand-gold-soft); }
@@ -2044,7 +2052,7 @@
   .status-select.colorful option[value="pickup"] { background: var(--status-pickup-bg); }
   .status-select.colorful option[value="delivered"] { background: var(--status-delivered-bg); }
   .status-select.colorful option[value="picked_up"] { background: var(--status-delivered-bg); }
-  .status-select.colorful option[value="kitted"] { background: var(--status-delivered-bg); }
+  .status-select.colorful option[value="kitted"] { background: var(--status-kitted-bg); }
 
   .kit-inline { display: flex; align-items: center; gap: 0.5rem; }
   .kit-input { min-width: 140px; }
