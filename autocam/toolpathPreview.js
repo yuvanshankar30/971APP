@@ -748,9 +748,15 @@ export function buildRoutingHeightmap(moves, {
   cutterRadiusForMove,
   uptoMoveIndex = moves.length,
   partialProgress = 1,
-  surfaceOut = null
+  surfaceOut = null,
+  heightsOut = null,
+  scratch = null
 } = {}) {
-  const heights = new Float32Array(nx * ny).fill(topZ);
+  // A caller that rebuilds this every animation frame (the 3D simulator) can
+  // hand in its own buffers, rather than making the collector free several
+  // megabytes of Float32Array per frame.
+  const heights = heightsOut && heightsOut.length === nx * ny ? heightsOut : new Float32Array(nx * ny);
+  heights.fill(topZ);
   // Optional second output: the same cut, but with sub-cell accuracy at the
   // boundary. See the coverage blend below for why the two differ and which
   // one is safe to display.
@@ -762,8 +768,23 @@ export function buildRoutingHeightmap(moves, {
   // pushes the boundary outward by half a cell instead of sharpening it.
   // Per cell: the deepest Z any move reached, and the greatest fraction of
   // the cell any single move covered.
-  const coverDepth = surface ? new Float32Array(nx * ny).fill(topZ) : null;
-  const coverAmount = surface ? new Float32Array(nx * ny) : null;
+  let coverDepth = null;
+  let coverAmount = null;
+  if (surface) {
+    if (scratch) {
+      if (!scratch.coverDepth || scratch.coverDepth.length !== nx * ny) {
+        scratch.coverDepth = new Float32Array(nx * ny);
+        scratch.coverAmount = new Float32Array(nx * ny);
+      }
+      coverDepth = scratch.coverDepth;
+      coverAmount = scratch.coverAmount;
+      coverAmount.fill(0);
+    } else {
+      coverDepth = new Float32Array(nx * ny);
+      coverAmount = new Float32Array(nx * ny);
+    }
+    coverDepth.fill(topZ);
+  }
 
   const applyMove = (move, progress) => {
     if (!move || move.kind === 'rapid') return;
