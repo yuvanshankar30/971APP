@@ -1014,3 +1014,27 @@ describe('formatMachiningTime', () => {
     expect(formatMachiningTime(null)).toBe('—');
   });
 });
+
+describe('buildRoutingHeightmap - the cutter radius really does shape the stock', () => {
+  it('carves materially different stock for a different cutter radius', () => {
+    // Guards the consequence behind a real bug in ToolpathSimulator: the
+    // reactive statement driving updateStock() listed every input EXCEPT the
+    // cutter diameter, so changing the tool resized the on-screen bit while
+    // the simulated cut kept the old width. This shows how much that hides -
+    // a sim showing a cut the displayed tool could not have made.
+    const square = [{ points: [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 }], isHole: false }];
+    const { gcode: program } = generateRoutingGcode(square, { toolDiameter: 0.25, targetDepth: 0.2 });
+    const { moves } = parseToolpath3D(program);
+    const options = { nx: 120, ny: 100, minX: -1, minY: -1, cellSize: 0.06, topZ: 0, floorZ: -0.25, uptoMoveIndex: moves.length, partialProgress: 1 };
+    const carve = (radius) => buildRoutingHeightmap(moves, { ...options, cutterRadiusForMove: () => radius });
+
+    const narrow = carve(0.125);
+    const wide = carve(0.5);
+    let differing = 0;
+    for (let i = 0; i < narrow.length; i += 1) {
+      if (Math.abs(narrow[i] - wide[i]) > 1e-9) differing += 1;
+    }
+    // Over a quarter of the grid - not a rounding difference.
+    expect(differing / narrow.length).toBeGreaterThan(0.2);
+  });
+});

@@ -205,7 +205,13 @@
   $: if (scene && moves) rebuildToolpath();
   $: if (scene && toolpathVisible !== undefined) applyVisibility(visible);
   $: if (scene && toolPosition && cutterDiameter !== undefined && toolVisible !== undefined && isTurning !== undefined && isTubestock !== undefined && noseRadius !== undefined) updateTool();
-  $: if (scene && moves && toolPosition && stockVisible !== undefined && stockDiameter !== undefined && isTurning !== undefined && isTubestock !== undefined && drilledHoleIndex !== undefined) updateStock();
+  // cutterDiameter/toolSequence belong in here, not just in updateTool's own
+  // list above: the routing heightmap carves the stock with the cutter's
+  // radius (routingCutterRadius), so leaving them out meant changing the
+  // tool resized the on-screen bit while the simulated cut kept the OLD
+  // width - a sim showing a cut the displayed tool could not have made,
+  // which is worse than not updating at all.
+  $: if (scene && moves && toolPosition && stockVisible !== undefined && stockDiameter !== undefined && isTurning !== undefined && isTubestock !== undefined && drilledHoleIndex !== undefined && cutterDiameter !== undefined && toolSequence !== undefined) updateStock();
 
   // Ghost part (Phase 5): fetch + parse doesn't need the scene, so it's
   // decoupled from scene readiness - only actually adding the mesh does.
