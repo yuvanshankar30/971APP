@@ -1014,3 +1014,58 @@ describe('cornerFeedScale (corner feed-rate slowdown)', () => {
     expect(result.gcode).toContain('F24.00000');
   });
 });
+
+describe('generateRoutingGcode - real stock thickness', () => {
+  const square = [{ points: [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 }], isHole: false }];
+
+  it('refuses a depth that would cut past the stock into the spoilboard', () => {
+    // Not a worse part - the cutter goes through the workpiece and into the
+    // machine bed at full depth. There is no reading of this that is correct.
+    expect(() => generateRoutingGcode(square, { toolDiameter: 0.25, targetDepth: 0.25, stockThickness: 0.125 }))
+      .toThrow(/deeper than the selected stock.*spoilboard/s);
+  });
+
+  it('allows a through cut that only reaches the break-through allowance', () => {
+    const { gcode } = generateRoutingGcode(square, { toolDiameter: 0.25, targetDepth: 0.14, stockThickness: 0.125 });
+    expect(gcode).toContain('Stock: 0.125" thick - cutting to 0.140"');
+  });
+
+  it('states the stock the program assumes, so it can be checked against the table', () => {
+    const { gcode } = generateRoutingGcode(square, { toolDiameter: 0.25, targetDepth: 0.1, stockThickness: 0.25 });
+    expect(gcode).toMatch(/Stock: 0\.250" thick/);
+  });
+
+  it('flags a model/stock thickness disagreement without blocking it', () => {
+    // Nominal sheet sizes legitimately differ from actual, and a pocket is
+    // meant to be shallower than its stock - the operator judges this one.
+    const { gcode } = generateRoutingGcode(square, {
+      toolDiameter: 0.25, targetDepth: 0.1, stockThickness: 0.125, measuredThickness: 0.25
+    });
+    expect(gcode).toContain('CHECK STOCK');
+    expect(gcode).toMatch(/Model measures 0\.250" but the selected stock is 0\.125"/);
+  });
+
+  it('does not flag a nominal-vs-actual sheet difference inside tolerance', () => {
+    // 1/4" birch ply routinely measures ~0.22" - that is not a mistake.
+    const { gcode } = generateRoutingGcode(square, {
+      toolDiameter: 0.25, targetDepth: 0.2, stockThickness: 0.25, measuredThickness: 0.22
+    });
+    expect(gcode).not.toContain('CHECK STOCK');
+  });
+
+  it('is inert when no stock is selected', () => {
+    const { gcode } = generateRoutingGcode(square, { toolDiameter: 0.25, targetDepth: 0.5 });
+    expect(gcode).not.toContain('Stock:');
+    expect(gcode).not.toContain('CHECK STOCK');
+  });
+
+  it('gives thicker stock more depth passes than thinner stock', () => {
+    // The whole point: a different sheet has to produce different G-code.
+    const passesFor = (targetDepth, stockThickness) => (generateRoutingGcode(square, {
+      toolDiameter: 0.25, targetDepth, stockThickness, stepDown: 0.03
+    }).gcode.match(/pass at Z/g) || []).length;
+    const thin = passesFor(0.0825, 0.0625);
+    const thick = passesFor(0.395, 0.375);
+    expect(thick).toBeGreaterThan(thin);
+  });
+});

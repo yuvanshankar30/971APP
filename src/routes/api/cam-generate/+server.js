@@ -208,9 +208,27 @@ export async function POST({ request, url }) {
       result = generateTubestockGcode(features, tubestockParams);
     } else {
       const { contours, thickness } = extractRoutingContoursFromMeshes(meshes);
-      if (params.targetDepth === undefined && thickness) params.targetDepth = thickness;
+      // The operator's pick from this team's real sheet stock (the routing
+      // "Stock" select in CamParamFields). Its thickness is what is actually
+      // on the table, so it outranks the CAD model for deciding how deep to
+      // cut - and generateRoutingGcode refuses outright if the programmed
+      // depth would reach past it into the spoilboard. Optional: with no
+      // stock picked this behaves exactly as before, off the STEP thickness.
+      const selectedSheet = (stockData.router || []).find((s) => !s.isTube && s.id === params.stockCatalogId);
+      const routingParams = { ...params, measuredThickness: thickness };
+      if (selectedSheet?.thickness > 0) {
+        routingParams.stockThickness = selectedSheet.thickness;
+        // Through-cut the real stock, with enough break-through to actually
+        // free the part, rather than stopping at the model's own thickness.
+        if (params.targetDepth === undefined) routingParams.targetDepth = selectedSheet.thickness + 0.02;
+      } else if (params.targetDepth === undefined && thickness) {
+        routingParams.targetDepth = thickness;
+      }
       await setProgress(supabase, jobId, 80, 'Generating routing G-code...');
-      result = generateRoutingGcode(contours, params);
+      result = generateRoutingGcode(contours, routingParams);
+      // Recorded so the job row shows the depth that was actually used.
+      params.targetDepth = routingParams.targetDepth;
+      params.stockThickness = routingParams.stockThickness;
     }
 
     const gcodeFileName = job.gcode_file_name || 'output.ngc';
