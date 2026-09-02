@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { normalizeP0BugStatus, plannerTeamEnabled } from './planner_data.js';
+import { describe, expect, it } from 'vitest';
+import { fetchPlannerSnapshot, normalizeP0BugStatus, plannerTeamEnabled } from './planner_data.js';
 
 describe('normalizeP0BugStatus', () => {
   it('passes through the canonical statuses unchanged', () => {
@@ -53,5 +53,44 @@ describe('plannerTeamEnabled', () => {
   it('disables any other team', () => {
     expect(plannerTeamEnabled('254')).toBe(false);
     expect(plannerTeamEnabled(undefined)).toBe(false);
+  });
+});
+
+function legacyQuery(result) {
+  return {
+    select: () => legacyQuery(result),
+    eq: () => legacyQuery(result),
+    neq: () => legacyQuery(result),
+    order: () => legacyQuery(result),
+    then: (resolve) => Promise.resolve(result).then(resolve)
+  };
+}
+
+describe('fetchPlannerSnapshot legacy schema fallback', () => {
+  it('uses planner_item_owners when the modern item columns are not deployed', async () => {
+    const database = {
+      from(table) {
+        if (table === 'planner_items') return legacyQuery(table === 'planner_items' ? { data: null, error: { code: '42703', message: 'column item_type does not exist' } } : {});
+        const rows = {
+          planner_dependencies: [], planner_calendar_rules: [], planner_item_owners: [{ planner_item_id: 'item-1', user_id: 'owner-1', owner_type: 'owner' }], planner_item_p0_bugs: [], planner_calendar_rule_recipients: []
+        };
+        return legacyQuery({ data: rows[table] || [], error: null });
+      }
+    };
+    // The legacy item request is the second planner_items call.
+    let itemCalls = 0;
+    database.from = (table) => {
+      if (table === 'planner_items') {
+        itemCalls += 1;
+        return legacyQuery(itemCalls === 1
+          ? { data: null, error: { code: '42703', message: 'column item_type does not exist' } }
+          : { data: [{ id: 'item-1', frc_team: '971', kind: 'task', title: 'Legacy task', category: 'cad', status: 'green' }], error: null });
+      }
+      const rows = { planner_dependencies: [], planner_calendar_rules: [], planner_item_owners: [{ planner_item_id: 'item-1', user_id: 'owner-1', owner_type: 'owner' }], planner_item_p0_bugs: [], planner_calendar_rule_recipients: [] };
+      return legacyQuery({ data: rows[table] || [], error: null });
+    };
+    const snapshot = await fetchPlannerSnapshot(database, '971');
+    expect(snapshot.items[0]).toMatchObject({ id: 'item-1', item_type: 'task', details: null });
+    expect(snapshot.owner_rows).toEqual([expect.objectContaining({ user_id: 'owner-1', owner_type: 'owner' })]);
   });
 });

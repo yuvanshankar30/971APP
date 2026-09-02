@@ -52,6 +52,33 @@ const PLANNER_ITEM_SELECT = `
   state_before_auto_complete
 `;
 
+// The hosted production database still has the pre-merge planner schema on
+// some installations: planner_items uses kind/notes/category and ownership
+// lives in planner_item_owners. Keep server-side notification sweeps working
+// during that migration window instead of turning a schema mismatch into a
+// 500 every fifteen minutes.
+const LEGACY_PLANNER_ITEM_SELECT = `
+  id,
+  frc_team,
+  kind,
+  title,
+  notes,
+  category,
+  status,
+  critical_level,
+  duration_minutes,
+  requested_duration_minutes,
+  min_duration_minutes,
+  manual_start_at,
+  scheduled_start_at,
+  scheduled_end_at,
+  sort_order,
+  created_by,
+  created_at,
+  updated_at,
+  task_mode
+`;
+
 const P0_STATUS_ORDER = new Map([
   ['red', 0],
   ['yellow', 1],
@@ -123,6 +150,30 @@ function withLegacyPlannerAliases(row) {
     category: legacyCategory,
     notes: row?.details || null
   };
+}
+
+function isMissingPlannerSchemaError(error) {
+  return ['42P01', '42703', 'PGRST204'].includes(error?.code)
+    || /does not exist|could not find.*column/i.test(String(error?.message || ''));
+}
+
+function modernizeLegacyPlannerItem(row) {
+  const itemType = row?.kind === 'milestone' ? 'milestone' : 'task';
+  return withLegacyPlannerAliases({
+    ...row,
+    item_type: itemType,
+    details: row?.notes || null,
+    work_category: row?.category || null,
+    scope: null,
+    general_type: null,
+    subsystem_id: null,
+    needs_manufacturing: false,
+    attachment_path: null,
+    attachment_name: null,
+    attachment_uploaded_at: null,
+    auto_completed_from_parts: false,
+    state_before_auto_complete: null
+  });
 }
 
 function withLegacyP0Aliases(row, owner = null, creator = null, subsystem = null, partIds = [], reportedDrivePractices = []) {
@@ -386,7 +437,10 @@ export async function fetchPlannerSnapshot(db, team) {
       .eq('frc_team', team)
   ]);
 
-  if (itemsResult.error) throw itemsResult.error;
+  if (itemsResult.error) {
+    if (!isMissingPlannerSchemaError(itemsResult.error)) throw itemsResult.error;
+    return fetchLegacyPlannerSnapshot(db, team);
+  }
   if (dependenciesResult.error) throw dependenciesResult.error;
   if (rulesResult.error) throw rulesResult.error;
   if (peopleResult.error) throw peopleResult.error;
@@ -406,6 +460,30 @@ export async function fetchPlannerSnapshot(db, team) {
       ...row,
       owner_type: 'owner'
     })),
+    p0_bug_link_rows: p0LinkRows,
+    rule_recipient_rows: ruleRecipientsResult.data || [],
+    drive_practice_bug_report_rows: p0LinkRows.filter((row) => !!row?.report_area)
+  };
+}
+
+async function fetchLegacyPlannerSnapshot(db, team) {
+  const [itemsResult, dependenciesResult, rulesResult, ownersResult, p0BugLinksResult, ruleRecipientsResult] = await Promise.all([
+    db.from('planner_items').select(LEGACY_PLANNER_ITEM_SELECT).eq('frc_team', team).order('sort_order', { ascending: true }).order('created_at', { ascending: true }),
+    db.from('planner_dependencies').select('id, frc_team, predecessor_item_id, successor_item_id, created_by, created_at').eq('frc_team', team),
+    db.from('planner_calendar_rules').select('id, frc_team, rule_type, label, weekday, specific_date, starts_at, ends_at, enabled, is_default, created_by, created_at, updated_at').eq('frc_team', team).order('specific_date', { ascending: true, nullsFirst: true }).order('weekday', { ascending: true, nullsFirst: true }).order('starts_at', { ascending: true }),
+    db.from('planner_item_owners').select('id, frc_team, planner_item_id, user_id, owner_type, created_at').eq('frc_team', team),
+    db.from('planner_item_p0_bugs').select('id, frc_team, planner_item_id, p0_bug_item_id, report_area, created_by, created_at').eq('frc_team', team),
+    db.from('planner_calendar_rule_recipients').select('id, frc_team, planner_calendar_rule_id, user_id, created_at').eq('frc_team', team)
+  ]);
+  for (const result of [itemsResult, dependenciesResult, rulesResult, ownersResult, p0BugLinksResult, ruleRecipientsResult]) {
+    if (result.error) throw result.error;
+  }
+  const p0LinkRows = (p0BugLinksResult.data || []).map((row) => ({ ...row, task_id: row.p0_bug_item_id }));
+  return {
+    items: (itemsResult.data || []).map(modernizeLegacyPlannerItem),
+    dependencies: dependenciesResult.data || [],
+    calendar_rules: rulesResult.data || [],
+    owner_rows: (ownersResult.data || []).map((row) => ({ ...row, owner_type: row.owner_type || 'owner' })),
     p0_bug_link_rows: p0LinkRows,
     rule_recipient_rows: ruleRecipientsResult.data || [],
     drive_practice_bug_report_rows: p0LinkRows.filter((row) => !!row?.report_area)
