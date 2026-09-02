@@ -52,11 +52,18 @@ export function defaultHeaderTabs(navConfig = navigation) {
     type: 'folder',
     label: 'Competition',
     children: [
-      { key: 'scouting', label: 'Pick List' },
-      { key: 'pitscout', label: 'Pit Scouting' },
       { key: 'matchscout', label: 'Match Scouting' },
-      { key: 'vision', label: 'Vision Scouting' },
+      { key: 'pitscout', label: 'Pit Scouting' },
       { key: 'powerrankings', label: 'Power Rankings' },
+      { key: 'vision', label: 'Vision Scouting' },
+      // /datascout is a real page that had no nav entry at all - it was
+      // only reachable by typing the URL. Not to be confused with
+      // 'scouting', which is the Pick List (see its own <title>).
+      { key: 'datascout', label: 'Data Scouting' },
+      // Kept rather than dropped: /scouting is a working page, and losing
+      // its only nav entry would strand it the way Data Scouting was.
+      // It sits before Scouting Admin so the admin surface stays last.
+      { key: 'scouting', label: 'Pick List' },
       { key: 'scouting-admin', label: 'Scouting Admin' }
     ]
   });
@@ -105,6 +112,36 @@ export function ensurePowerRankingsTab(tabs, navConfig = navigation) {
   if (containsTabKey(tabs, 'powerrankings')) return tabs;
 
   const entry = { key: 'powerrankings', label: 'Power Rankings' };
+  const folderIndex = tabs.findIndex(
+    (item) => item?.type === 'folder' && item?.label === COMPETITION_FOLDER_LABEL
+  );
+  if (folderIndex === -1) return [...tabs, { type: 'tab', ...entry }];
+
+  const folder = tabs[folderIndex];
+  const next = [...tabs];
+  next[folderIndex] = {
+    ...folder,
+    children: [...(Array.isArray(folder.children) ? folder.children : []), entry]
+  };
+  return next;
+}
+
+/**
+ * Put Data Scouting in someone's Competition folder, same contract as
+ * ensurePowerRankingsTab above: append-only, never reorders or removes, and
+ * a no-op once the tab is present anywhere.
+ *
+ * /datascout is a real page that had no nav entry at all - not in the
+ * defaults and not in anyone's saved header - so it was reachable only by
+ * typing the URL. Adding it to the defaults alone would not have fixed that
+ * for anyone who has ever customized their nav, which is most people who
+ * would use it.
+ */
+export function ensureDataScoutTab(tabs) {
+  if (!Array.isArray(tabs)) return tabs;
+  if (containsTabKey(tabs, 'datascout')) return tabs;
+
+  const entry = { key: 'datascout', label: 'Data Scouting' };
   const folderIndex = tabs.findIndex(
     (item) => item?.type === 'folder' && item?.label === COMPETITION_FOLDER_LABEL
   );
