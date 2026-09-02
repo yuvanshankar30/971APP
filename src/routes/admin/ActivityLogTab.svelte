@@ -35,7 +35,8 @@
     cam_jobs: 'AutoCAM Job',
     cam_materials: 'AutoCAM Material',
     cam_tools: 'AutoCAM Tool',
-    cam_machines: 'AutoCAM Machine'
+    cam_machines: 'AutoCAM Machine',
+    slack_messages: 'Slack message'
   };
 
   function tableLabel(t) { return TABLE_LABELS[t] || t; }
@@ -48,8 +49,17 @@
   // A short, human label for the affected row.
   function rowLabel(entry) {
     const data = entry.new_data || entry.old_data || {};
+    if (entry.table_name === 'slack_messages') return data.message || 'Message sent';
     return data.name || data.full_name || data.release_name || data.email
       || data.part_name || (entry.row_id ? `#${entry.row_id}` : '');
+  }
+
+  function operationLabel(entry) {
+    return entry.table_name === 'slack_messages' ? 'Sent' : entry.operation;
+  }
+
+  function slackRecipient(entry) {
+    return entry.table_name === 'slack_messages' ? entry.new_data?.recipient : null;
   }
 
   function formatTime(ts) {
@@ -116,7 +126,7 @@
   <div class="activity-header">
     <div>
       <h3>Activity Log</h3>
-      <p class="muted">Every create / edit / delete across the site, in real time.</p>
+      <p class="muted">Every create, edit, delete, and sent Slack message across the site, in real time.</p>
     </div>
     <div class="activity-status">
       <span class="live-dot" class:on={live}></span>
@@ -135,7 +145,7 @@
     <div class="activity-list">
       {#each entries as e (e.id)}
         <div class="activity-row">
-          <span class="op-badge op-{e.operation.toLowerCase()}">{e.operation}</span>
+          <span class="op-badge op-{operationLabel(e).toLowerCase()}">{operationLabel(e)}</span>
           <div class="activity-main">
             <div class="activity-line">
               <strong>{tableLabel(e.table_name)}</strong>
@@ -144,6 +154,10 @@
             </div>
             <div class="activity-meta">
               <span class="activity-actor">{actorName(e.actor)}</span>
+              {#if slackRecipient(e)}
+                <span class="activity-dot">·</span>
+                <span>to {slackRecipient(e)}</span>
+              {/if}
               <span class="activity-dot">·</span>
               <span class="activity-time">{formatTime(e.created_at)}</span>
             </div>
@@ -209,10 +223,12 @@
   .op-insert { background: #dcfce7; color: var(--green-strong); }
   .op-update { background: var(--blue-soft); color: #1e40af; }
   .op-delete { background: #fee2e2; color: #991b1b; }
+  .op-sent { background: var(--blue-soft); color: var(--blue-base); }
 
   .activity-main { min-width: 0; flex: 1; }
   .activity-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.4rem; font-size: 0.85rem; }
   .activity-target { color: var(--text); font-weight: 500; }
+  .op-sent + .activity-main .activity-target { font-weight: 400; }
   .activity-changed { color: var(--text-muted); font-size: 0.75rem; }
   .activity-meta { display: flex; align-items: center; gap: 0.4rem; font-size: 0.72rem; color: var(--text-muted); margin-top: 0.15rem; }
 </style>

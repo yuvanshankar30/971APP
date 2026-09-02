@@ -1,4 +1,5 @@
 import { getSupabase, getSlackClient, slackUserIdForEmail } from '$lib/server/971bot';
+import { recordSlackActivity } from '$lib/server/slack_activity.js';
 import { NOTIFICATION_KEYS } from '$lib/notifications/constants.js';
 import { mergeNotificationSettings } from '$lib/notifications/settings.js';
 import { formatPacificDateTimeWithZone, formatPacificTimeWithZone, formatPacificDate } from '$lib/timezone.js';
@@ -98,6 +99,16 @@ async function dispatchNotification({ userId, notificationKey, entityKey = null,
 
   const client = getSlackClient();
   const response = await client.chat.postMessage({ channel, text, blocks });
+  if (response?.ok) {
+    await recordSlackActivity(supa, {
+      text,
+      channel: response.channel || channel,
+      ts: response.ts || null,
+      recipient: user.full_name || user.email || null,
+      category: 'Notification',
+      notificationKey
+    });
+  }
   return {
     ok: !!response?.ok,
     channel: response?.channel || channel,
