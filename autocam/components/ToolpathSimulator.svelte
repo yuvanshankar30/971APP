@@ -87,6 +87,8 @@
 
   let container;
   let renderer, scene, camera, controls, frameId, resizeObserver, grid, axes, toolMesh, stockMesh, ghostMesh;
+  // Cached per-grid geometry/buffers for the routing stock - see buildRoutingGrid.
+  let routingGrid = null;
   let disposed = false;
   let loading = true;
   let error = '';
@@ -692,14 +694,24 @@
   // capsule's own circular boundary aliases into a visible staircase -
   // "ridges" that aren't a real machining feature, just quantization at the
   // cell size buildRoutingHeightmap uses (see its own comment on why the
-  // sweep math itself is otherwise exact). 320 visibly faceted small
-  // features (a #10 clearance hole, ~0.2" diameter) on stock much wider
-  // than that - the width/HEIGHTMAP_MAX_GRID performance floor was
-  // overriding the tool-diameter-driven targetCellSize below it, capping
-  // resolution well below what a small hole needs even though the sweep
-  // math itself has plenty of headroom left. 480 still stays well inside
-  // what the GPU/rebuild-on-scrub cost can absorb.
-  const HEIGHTMAP_MAX_GRID = 480;
+  // sweep math itself is otherwise exact).
+  //
+  // Back to 320 from 480. The bump to 480 was chasing smooth curves on small
+  // features, but sub-cell coverage blending (buildRoutingHeightmap's
+  // surfaceOut) now delivers that directly - it puts the boundary between
+  // two grid samples instead of on one - so the resolution no longer has to
+  // buy it. 480 meant a 230k-vertex mesh whose positions and normals were
+  // re-uploaded every animation frame, which is most of why playback ran at
+  // 3fps; 320 is 2.25x less of everything, at no visible cost now that
+  // smoothness comes from coverage rather than cell count.
+  const HEIGHTMAP_MAX_GRID = 320;
+  // While the animation is running the surface is moving, and a moving
+  // surface does not show fine detail - but it does cost the same to draw.
+  // Measured on a real job: the stock mesh alone was the difference between
+  // 6fps and 30fps, so it is drawn at a quarter of the cell count while
+  // playing and rebuilt at full resolution the moment playback stops, which
+  // is when detail is actually being looked at.
+  const HEIGHTMAP_PLAYBACK_GRID = 160;
   const HEIGHTMAP_MARGIN_FACTOR = 0.06;
   // How close to the underside counts as "cut through". A physical
   // tolerance, not a float-noise one: auto-derived depth equals the measured
@@ -727,7 +739,8 @@
     const resolvedDiameters = [Number(toolDiameter), ...(toolSequence || []).map((t) => Number(t.toolDiameter))].filter((d) => d > 0);
     const minToolDiameter = resolvedDiameters.length ? Math.min(...resolvedDiameters) : 0.25;
     const targetCellSize = minToolDiameter / 6;
-    const cellSize = Math.max(targetCellSize, width / HEIGHTMAP_MAX_GRID, heightSpan / HEIGHTMAP_MAX_GRID);
+    const maxGrid = isPlaying ? HEIGHTMAP_PLAYBACK_GRID : HEIGHTMAP_MAX_GRID;
+    const cellSize = Math.max(targetCellSize, width / maxGrid, heightSpan / maxGrid);
     const nx = Math.max(10, Math.ceil(width / cellSize) + 1);
     const ny = Math.max(10, Math.ceil(heightSpan / cellSize) + 1);
 
@@ -748,41 +761,61 @@
     // all-or-nothing, which is what turned curved boundaries into a
     // staircase of cell-sized steps - the faceted bore walls and radial
     // ridges on a pocket.
-    const surfaceRaw = new Float32Array(nx * ny);
+    // Everything below is rebuilt on every animation frame during playback,
+    // so nothing here may allocate per frame. The grid only changes when the
+    // program, tool or stock changes; while it holds, the buffers, the plane
+    // geometry and the vertex -> cell mapping are all reused and written in
+    // place. Rebuilding them each frame cost ~317ms/frame (3.2fps) on a real
+    // job - several megabytes of Float32Array, a fresh 230k-vertex
+    // PlaneGeometry, and ~690k attribute accessor calls, every frame.
+    const gridKey = `${nx}|${ny}|${cellSize}|${gridMinX}|${gridMinY}|${floorZ}`;
+    if (!routingGrid || routingGrid.key !== gridKey) {
+      routingGrid = buildRoutingGrid(gridKey, nx, ny, gridMinX, gridMinY, cellSize);
+    }
+    const grid = routingGrid;
+
     const heights = buildRoutingHeightmap(moves, {
       nx, ny, minX: gridMinX, minY: gridMinY, cellSize, topZ: 0, floorZ,
       cutterRadiusForMove: routingCutterRadius,
       uptoMoveIndex: moveIndex,
       partialProgress: progress,
-      surfaceOut: surfaceRaw
+      surfaceOut: grid.surfaceRaw,
+      heightsOut: grid.heights,
+      scratch: grid.scratch
     });
     routingHeights = heights;
+    const surfaceRaw = grid.surfaceRaw;
     // The raw heightmap remains the simulation state for gouge detection.
     // The top mesh gets a shallow, edge-preserving pass so grid noise does
     // not show up as lighting facets; actual depth steps become wall quads.
-    const surfaceHeights = smoothRoutingHeightmap(surfaceRaw, {
+    const smoothedOut = smoothRoutingHeightmap(surfaceRaw, {
       nx,
       ny,
       epsilon: Math.max(cellSize * 0.08, 0.0005)
     });
+    grid.smoothed.set(smoothedOut);
+    const surfaceHeights = grid.smoothed;
 
-    const geomWidth = (nx - 1) * cellSize;
-    const geomHeight = (ny - 1) * cellSize;
-    const geometry = new THREE.PlaneGeometry(geomWidth, geomHeight, nx - 1, ny - 1);
-    const centerX = gridMinX + cellSize / 2 + geomWidth / 2;
-    const centerY = gridMinY + cellSize / 2 + geomHeight / 2;
-    geometry.translate(centerX, centerY, 0);
+    // Counted here so the skirt can tell whether the cut actually changed
+    // shape, rather than being rebuilt unconditionally every frame.
+    let cutThroughCount = 0;
+    if (routingTargetThickness != null) {
+      const limit = floorZ + CUT_THROUGH_EPSILON;
+      for (let i = 0; i < heights.length; i += 1) if (heights[i] <= limit) cutThroughCount += 1;
+    }
+    grid.cutThroughCount = cutThroughCount;
 
-    // Look up each vertex's own (x,y) rather than assuming PlaneGeometry's
-    // internal iteration order matches the heightmap's (ix,iy) indexing -
-    // correct regardless of that internal convention, at negligible cost.
+    const geometry = grid.geometry;
     const posAttr = geometry.attributes.position;
-    for (let i = 0; i < posAttr.count; i += 1) {
-      const vx = posAttr.getX(i);
-      const vy = posAttr.getY(i);
-      const ix = Math.max(0, Math.min(nx - 1, Math.round((vx - gridMinX) / cellSize - 0.5)));
-      const iy = Math.max(0, Math.min(ny - 1, Math.round((vy - gridMinY) / cellSize - 0.5)));
-      posAttr.setZ(i, surfaceHeights[iy * nx + ix]);
+    // Straight into the underlying Float32Array using the vertex -> cell map
+    // computed once per grid. The mapping itself is unchanged: each vertex
+    // still resolves its own (x,y) to a cell rather than assuming
+    // PlaneGeometry's internal ordering - that lookup just no longer runs
+    // 230k times a frame.
+    const posArray = posAttr.array;
+    const cellOfVertex = grid.cellOfVertex;
+    for (let i = 0, z = 2; i < cellOfVertex.length; i += 1, z += 3) {
+      posArray[z] = surfaceHeights[cellOfVertex[i]];
     }
     posAttr.needsUpdate = true;
 
@@ -797,32 +830,118 @@
     // the measured underside). Without it floorZ sits below the deepest cut
     // by construction, nothing reaches it, and this is inert - which is the
     // honest outcome, since nothing then says the cut went through.
-    if (routingTargetThickness != null && geometry.index) {
-      const index = geometry.index.array;
-      const kept = [];
-      for (let t = 0; t < index.length; t += 3) {
-        const a = index[t], b = index[t + 1], c = index[t + 2];
-        const throughAll =
-          posAttr.getZ(a) <= floorZ + CUT_THROUGH_EPSILON &&
-          posAttr.getZ(b) <= floorZ + CUT_THROUGH_EPSILON &&
-          posAttr.getZ(c) <= floorZ + CUT_THROUGH_EPSILON;
-        if (!throughAll) kept.push(a, b, c);
+    if (routingTargetThickness != null) {
+      // Same rule as before - drop a triangle only when all three of its
+      // vertices reached the underside - but written into a preallocated
+      // index buffer rather than pushing onto a fresh JS array of up to
+      // ~1.4M entries every frame.
+      const src = grid.fullIndex;
+      const dst = grid.keptIndex;
+      const limit = floorZ + CUT_THROUGH_EPSILON;
+      let n = 0;
+      for (let t = 0; t < src.length; t += 3) {
+        const a = src[t], b = src[t + 1], c = src[t + 2];
+        if (posArray[a * 3 + 2] <= limit && posArray[b * 3 + 2] <= limit && posArray[c * 3 + 2] <= limit) continue;
+        dst[n] = a; dst[n + 1] = b; dst[n + 2] = c; n += 3;
       }
-      geometry.setIndex(kept);
+      geometry.index.array.set(dst.subarray(0, n));
+      geometry.index.needsUpdate = true;
+      geometry.setDrawRange(0, n);
+    } else {
+      // Restore the unfiltered index - a previous frame may have written a
+      // filtered one into this same buffer.
+      geometry.index.array.set(grid.fullIndex);
+      geometry.index.needsUpdate = true;
+      geometry.setDrawRange(0, grid.fullIndex.length);
     }
-    geometry.computeVertexNormals();
+    computeHeightmapNormals(geometry, grid, nx, ny, cellSize);
 
-    const material = createStockMaterial();
-    const solid = new THREE.Mesh(geometry, material);
-
-    stockMesh = new THREE.Group();
-    stockMesh.add(solid);
-    stockMesh.add(new THREE.Mesh(
-      buildRoutingStockSkirt(heights, surfaceHeights, nx, ny, gridMinX, gridMinY, cellSize, floorZ),
-      material
-    ));
+    if (!stockMesh || stockMesh.userData.gridKey !== gridKey) {
+      disposeStock();
+      const material = createStockMaterial();
+      stockMesh = new THREE.Group();
+      stockMesh.userData.gridKey = gridKey;
+      stockMesh.add(new THREE.Mesh(geometry, material));
+      stockMesh.add(new THREE.Mesh(new THREE.BufferGeometry(), material));
+      scene.add(stockMesh);
+    }
+    // The skirt only changes shape when the cut does, so it is rebuilt on a
+    // real change rather than unconditionally every frame.
+    // Throttled deliberately. The skirt is the stock's sides and underside;
+    // it changes as the cut progresses, but rebuilding it every frame means
+    // a fresh BufferGeometry (and its normals, bounding sphere and GPU
+    // upload) 60 times a second - it was the largest single JS cost in the
+    // profile. Refreshing it when the through-cut set changes, and otherwise
+    // at ~12Hz, is indistinguishable while playing and exact once paused.
+    const now = performance.now();
+    const skirtKey = `${grid.cutThroughCount}`;
+    const skirtStale = stockMesh.userData.skirtKey !== skirtKey
+      || !isPlaying
+      || now - (stockMesh.userData.skirtAt || 0) > 80;
+    if (skirtStale) {
+      stockMesh.userData.skirtAt = now;
+      stockMesh.userData.skirtKey = skirtKey;
+      const skirtMesh = stockMesh.children[1];
+      skirtMesh.geometry.dispose();
+      skirtMesh.geometry = buildRoutingStockSkirt(heights, surfaceHeights, nx, ny, gridMinX, gridMinY, cellSize, floorZ);
+    }
     stockMesh.visible = stockVisible;
-    scene.add(stockMesh);
+  }
+
+  /** Geometry + buffers for one grid, built once and then written in place. */
+  function buildRoutingGrid(key, nx, ny, gridMinX, gridMinY, cellSize) {
+    const geomWidth = (nx - 1) * cellSize;
+    const geomHeight = (ny - 1) * cellSize;
+    const geometry = new THREE.PlaneGeometry(geomWidth, geomHeight, nx - 1, ny - 1);
+    geometry.translate(gridMinX + cellSize / 2 + geomWidth / 2, gridMinY + cellSize / 2 + geomHeight / 2, 0);
+
+    // Resolve every vertex to its cell ONCE. This is the same lookup the
+    // per-frame loop used to do; it just does not depend on anything that
+    // changes between frames.
+    const posAttr = geometry.attributes.position;
+    const cellOfVertex = new Int32Array(posAttr.count);
+    for (let i = 0; i < posAttr.count; i += 1) {
+      const ix = Math.max(0, Math.min(nx - 1, Math.round((posAttr.getX(i) - gridMinX) / cellSize - 0.5)));
+      const iy = Math.max(0, Math.min(ny - 1, Math.round((posAttr.getY(i) - gridMinY) / cellSize - 0.5)));
+      cellOfVertex[i] = iy * nx + ix;
+    }
+    const fullIndex = Int32Array.from(geometry.index.array);
+    return {
+      key, geometry, cellOfVertex, fullIndex,
+      keptIndex: new Int32Array(fullIndex.length),
+      heights: new Float32Array(nx * ny),
+      surfaceRaw: new Float32Array(nx * ny),
+      smoothed: new Float32Array(nx * ny),
+      scratch: {},
+      cutThroughCount: 0
+    };
+  }
+
+  /** Normals straight from the heightmap's own slope - the same result as
+   *  computeVertexNormals for a height field, without the generic
+   *  per-face accumulate/normalise pass over 230k vertices every frame. */
+  function computeHeightmapNormals(geometry, grid, nx, ny, cellSize) {
+    const normal = geometry.attributes.normal;
+    const arr = normal.array;
+    const h = grid.smoothed;
+    const cellOfVertex = grid.cellOfVertex;
+    const twoCell = cellSize * 2;
+    for (let i = 0, o = 0; i < cellOfVertex.length; i += 1, o += 3) {
+      const cell = cellOfVertex[i];
+      const ix = cell % nx;
+      const iy = (cell - ix) / nx;
+      const xPrev = h[cell - (ix > 0 ? 1 : 0)];
+      const xNext = h[cell + (ix < nx - 1 ? 1 : 0)];
+      const yPrev = h[cell - (iy > 0 ? nx : 0)];
+      const yNext = h[cell + (iy < ny - 1 ? nx : 0)];
+      const dzdx = (xNext - xPrev) / twoCell;
+      const dzdy = (yNext - yPrev) / twoCell;
+      const len = Math.hypot(dzdx, dzdy, 1) || 1;
+      arr[o] = -dzdx / len;
+      arr[o + 1] = -dzdy / len;
+      arr[o + 2] = 1 / len;
+    }
+    normal.needsUpdate = true;
   }
 
   // The top surface alone is a zero-thickness shell - from the side it reads
@@ -1212,6 +1331,7 @@
 
   onDestroy(() => {
     disposed = true;
+    routingGrid = null;
     if (frameId) cancelAnimationFrame(frameId);
     resizeObserver?.disconnect();
     if (scene) {
