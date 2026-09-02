@@ -1014,3 +1014,97 @@ describe('formatMachiningTime', () => {
     expect(formatMachiningTime(null)).toBe('—');
   });
 });
+
+describe('buildRoutingHeightmap - sub-cell boundary for the displayed surface', () => {
+  // A 1.0" circular bore traced by 720 short arc moves with a 0.25" cutter.
+  const bore = () => {
+    const cx = 3, cy = 3, R = 1.0, depth = -0.25, N = 720;
+    const moves = [];
+    for (let i = 0; i < N; i += 1) {
+      const a0 = (2 * Math.PI * i) / N;
+      const a1 = (2 * Math.PI * (i + 1)) / N;
+      const from = { x: cx + R * Math.cos(a0), y: cy + R * Math.sin(a0), z: depth };
+      const to = { x: cx + R * Math.cos(a1), y: cy + R * Math.sin(a1), z: depth };
+      moves.push({ from, to, kind: 'cut', length: Math.hypot(to.x - from.x, to.y - from.y) });
+    }
+    return { cx, cy, R, depth, moves };
+  };
+  const GRID = { nx: 300, ny: 300, minX: 0, minY: 0, cellSize: 0.02, topZ: 0 };
+
+  // Bilinear, matching what the rendered mesh interpolates between vertices.
+  const sampler = (field) => (x, y) => {
+    const gx = (x - GRID.minX) / GRID.cellSize - 0.5;
+    const gy = (y - GRID.minY) / GRID.cellSize - 0.5;
+    const i0 = Math.floor(gx), j0 = Math.floor(gy);
+    const tx = gx - i0, ty = gy - j0;
+    const at = (i, j) => field[Math.max(0, Math.min(GRID.ny - 1, j)) * GRID.nx + Math.max(0, Math.min(GRID.nx - 1, i))];
+    return (at(i0, j0) * (1 - tx) + at(i0 + 1, j0) * tx) * (1 - ty)
+         + (at(i0, j0 + 1) * (1 - tx) + at(i0 + 1, j0 + 1) * tx) * ty;
+  };
+
+  // Radius at which the surface crosses half depth, swept around the bore.
+  const boundaryRadii = (field, { cx, cy, R, depth }) => {
+    const sample = sampler(field);
+    const radii = [];
+    for (let k = 0; k < 720; k += 1) {
+      const a = (2 * Math.PI * k) / 720;
+      let prevR = null, prevV = null;
+      for (let r = R; r <= R + 0.4; r += 0.0005) {
+        const v = sample(cx + r * Math.cos(a), cy + r * Math.sin(a));
+        if (prevV !== null && prevV <= depth / 2 && v > depth / 2) {
+          radii.push(prevR + (r - prevR) * ((depth / 2 - prevV) / (v - prevV)));
+          break;
+        }
+        prevR = r; prevV = v;
+      }
+    }
+    return radii;
+  };
+  const stdev = (values) => {
+    const mean = values.reduce((a, b) => a + b, 0) / values.length;
+    return { mean, sd: Math.sqrt(values.reduce((a, b) => a + (b - mean) ** 2, 0) / values.length) };
+  };
+
+  it('follows a circular bore far more closely than the cell-centre test alone', () => {
+    const geometry = bore();
+    const surface = new Float32Array(GRID.nx * GRID.ny);
+    const heights = buildRoutingHeightmap(geometry.moves, {
+      ...GRID, floorZ: geometry.depth, cutterRadiusForMove: () => 0.125,
+      uptoMoveIndex: geometry.moves.length, partialProgress: 1, surfaceOut: surface
+    });
+
+    const binary = stdev(boundaryRadii(heights, geometry));
+    const covered = stdev(boundaryRadii(surface, geometry));
+
+    // Testing only a cell's centre quantises the boundary to the grid, which
+    // is the staircase on a bore wall. Sub-cell coverage cuts that wobble to
+    // a fraction of a cell.
+    expect(covered.sd).toBeLessThan(binary.sd * 0.5);
+    expect(covered.sd).toBeLessThan(GRID.cellSize * 0.1);
+    // And it stays centred on the true boundary (bore radius + cutter radius)
+    // rather than dilating outward, which a per-move blend would do.
+    expect(covered.mean).toBeCloseTo(geometry.R + 0.125, 2);
+  });
+
+  it('leaves the simulation state binary and deepest-wins for the gouge check', () => {
+    const geometry = bore();
+    const surface = new Float32Array(GRID.nx * GRID.ny);
+    const heights = buildRoutingHeightmap(geometry.moves, {
+      ...GRID, floorZ: geometry.depth, cutterRadiusForMove: () => 0.125,
+      uptoMoveIndex: geometry.moves.length, partialProgress: 1, surfaceOut: surface
+    });
+    // Every raw cell is either untouched or at full depth - a partial value
+    // here could report a cut shallower than the material actually removed.
+    const distinct = new Set(Array.from(heights).map((v) => v.toFixed(6)));
+    expect(distinct.size).toBe(2);
+    expect(Math.min(...distinct.size ? Array.from(distinct).map(Number) : [0])).toBeCloseTo(geometry.depth, 6);
+  });
+
+  it('is unchanged when no surface output is requested', () => {
+    const geometry = bore();
+    const withSurface = new Float32Array(GRID.nx * GRID.ny);
+    const a = buildRoutingHeightmap(geometry.moves, { ...GRID, floorZ: geometry.depth, cutterRadiusForMove: () => 0.125, uptoMoveIndex: geometry.moves.length, partialProgress: 1 });
+    const b = buildRoutingHeightmap(geometry.moves, { ...GRID, floorZ: geometry.depth, cutterRadiusForMove: () => 0.125, uptoMoveIndex: geometry.moves.length, partialProgress: 1, surfaceOut: withSurface });
+    expect(Array.from(a)).toEqual(Array.from(b));
+  });
+});
