@@ -1571,8 +1571,12 @@
             <label class="form-label" for="job-material">Material</label>
             <select id="job-material" class="form-select" bind:value={selectedMaterialId} on:change={() => { materialChosenByHand = true; applyMaterialDefaults(selectedMaterialId); }}>
               <option value="">Unspecified</option>
+              <!-- Marked, not hidden. A material with no feeds for this
+                   operation is still a legitimate pick for someone entering
+                   numbers by hand; what is not legitimate is picking it
+                   without knowing that nothing will be filled in. -->
               {#each materials.filter((m) => m.enabled) as m}
-                <option value={m.id}>{m.name}</option>
+                <option value={m.id}>{m.name}{materialWithoutFeeds(m.id, newJobOperation) ? ' - no feeds on record' : ''}</option>
               {/each}
             </select>
             {#if newJobMaterialWithoutFeeds}

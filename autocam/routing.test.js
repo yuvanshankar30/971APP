@@ -1069,3 +1069,30 @@ describe('generateRoutingGcode - real stock thickness', () => {
     expect(thick).toBeGreaterThan(thin);
   });
 });
+
+describe('generateRoutingGcode - unverified material feeds', () => {
+  const square = [{ points: [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 }], isHole: false }];
+
+  it('tells the operator when the feeds are the generic fallback, and for which material', () => {
+    // The person who filled in the job form saw a warning there; the person
+    // at the machine did not, and they are the one who can still stop.
+    const { gcode } = generateRoutingGcode(square, {
+      toolDiameter: 0.25, targetDepth: 0.2, materialFeedsUnverified: true, materialName: 'PLA'
+    });
+    expect(gcode).toContain('FEEDS AND SPEEDS ARE NOT VERIFIED FOR THIS MATERIAL');
+    expect(gcode).toContain('PLA');
+  });
+
+  it('says nothing when the material has real feeds on record', () => {
+    const { gcode } = generateRoutingGcode(square, { toolDiameter: 0.25, targetDepth: 0.2 });
+    expect(gcode).not.toContain('FEEDS AND SPEEDS ARE NOT VERIFIED FOR THIS MATERIAL');
+  });
+
+  it('still names the notice when the material name is missing', () => {
+    const { gcode } = generateRoutingGcode(square, {
+      toolDiameter: 0.25, targetDepth: 0.2, materialFeedsUnverified: true
+    });
+    expect(gcode).toContain('FEEDS AND SPEEDS ARE NOT VERIFIED FOR THIS MATERIAL');
+    expect(gcode).toContain('the selected material');
+  });
+});
