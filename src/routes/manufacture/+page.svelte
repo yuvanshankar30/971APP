@@ -27,6 +27,7 @@
     updateCamJobAndRegenerate,
     getPartStepFileName,
     loadLatestCamJobsForParts,
+    loadCamGroupsForJobs,
     downloadGcodeBlob,
     downloadGcodeText,
     camJobStatusLabel,
@@ -54,6 +55,7 @@
   let toastTone = 'neutral';
   let showToast = false;
   let camJobsByPart = {};
+  let camGroupsByJob = {};
   let queuingCamJobForPartId = null;
   let showCamSetupModal = false;
   let camSetupPart = null;
@@ -481,6 +483,8 @@
     const byPart = {};
     for (const [partId, job] of jobsMap.entries()) byPart[partId] = job;
     camJobsByPart = byPart;
+    const groupsMap = await loadCamGroupsForJobs([...jobsMap.values()].map((job) => job.id));
+    camGroupsByJob = Object.fromEntries(groupsMap);
   }
 
   $: selectedCamSetupMachine = camSetupMachines.find((machine) => String(machine.id) === String(camSetupMachineId));
@@ -2195,6 +2199,9 @@
             </div>
             {#if camJob?.status === 'completed'}
               <span class="autocam-completed part-card-autocam-status"><CircleCheck size={14} /> AutoCAM completed</span>
+              {#if camGroupsByJob[camJob.id]}
+                <a class="autocam-completed part-card-autocam-status grouped-status" href={`/autocam?group=${camGroupsByJob[camJob.id].id}`}><CircleCheck size={14} /> Grouped</a>
+              {/if}
             {/if}
           {:else if WORKFLOW_OPERATION_TYPE[part.workflow]}
             <button
@@ -2419,6 +2426,9 @@
                   </div>
                   {#if camJob?.status === 'completed'}
                     <span class="autocam-completed"><CircleCheck size={14} /> AutoCAM completed</span>
+                    {#if camGroupsByJob[camJob.id]}
+                      <a class="autocam-completed grouped-status" href={`/autocam?group=${camGroupsByJob[camJob.id].id}`}><CircleCheck size={14} /> Grouped</a>
+                    {/if}
                   {/if}
                 {:else if WORKFLOW_OPERATION_TYPE[part.workflow]}
                   <button
@@ -3214,7 +3224,11 @@
   .cad-download-btn:hover { background: var(--surface-2, #f3f4f6); }
 
   .manufacture-page-container {
-    max-width: 1400px;
+    /* No cap of its own - the page shell already sets the shared width.
+       This used to be 1400px, narrower than the 1440px shell around it,
+       which made manufacture the tightest tab in the app and is why long
+       part names ran out of room first. */
+    width: 100%;
     margin: 0 auto;
   }
 
@@ -3225,9 +3239,9 @@
 
   .table th.name-col,
   .table td.name-col {
-    width: 12rem;
-    min-width: 12rem;
-    max-width: 12rem;
+    /* The largest share - part names are the longest real content here and
+       were the first thing to run out of room. */
+    width: 17%;
     /* Part names wrap onto a second line rather than being cut off with
        an ellipsis - a truncated "P006950_Rev_x60 stiffn..." hides exactly
        the part of the name that distinguishes it from its neighbours.
@@ -3238,34 +3252,31 @@
   }
   .table {
     table-layout: fixed;
-    /* Sized to the sum of each column's own fixed width below, not
-       stretched to fill whatever container width happens to be available -
-       keeps every column's width (and the table's overall size) identical
-       across screen sizes instead of growing/reflowing on a wider monitor. */
-    width: max-content;
-    /* max-content also stops the table filling its container, which would
-       otherwise leave it pinned flush-left with a large empty gap on wide
-       screens - center it instead. */
+    /* Fills the container and shares it out proportionally, rather than
+       being sized to the sum of fixed column widths. Those fixed widths
+       added up to ~1690px, so anything narrower than a very wide monitor
+       had to scroll sideways to reach the Actions column. Proportional
+       columns keep the same relative layout at every width and simply get
+       tighter, which is far better than hiding controls off-screen. */
+    width: 100%;
     margin: 0 auto;
   }
   .table th.workflow-col,
   .table td.workflow-col {
-    /* Wide enough for the real longest workflow label ("ROUTERING",
-       measured at ~103px rendered) plus cell padding - it was clipping/
-       wrapping at the old 6.5rem. */
-    width: 8rem;
+    width: 7.5%;
   }
   .table th.project-col,
   .table td.project-col {
-    width: 7rem;
+    width: 6.5%;
   }
   .table th.quantity-col,
   .table td.quantity-col {
-    width: 2.75rem;
+    width: 3%;
   }
   .table th.stock-col,
   .table td.stock-col {
-    width: 7.5rem;
+    /* Real values are full stock descriptions ('1/8" Polycarbonate Sheet'). */
+    width: 9%;
   }
   /* Status, Due, and Created all share this width so the three columns
      stay horizontally even with equal spacing - sized to the longest real
@@ -3273,9 +3284,7 @@
      rendered), not just Status's own longest label. */
   .table th.metadata-col,
   .table td.metadata-col {
-    width: 12rem;
-    min-width: 12rem;
-    max-width: 12rem;
+    width: 11.5%;
     vertical-align: top;
   }
   /* One shared first line for Status / Due / Created / Requested By. A
@@ -3308,15 +3317,17 @@
     display: flex;
     justify-content: center;
     width: 100%;
-    margin-top: 0.25rem;
+    margin-top: 0.35rem;
+    /* Keeps the season tag off the column edge so it never reads as though
+       it belongs to the neighbouring column's controls. */
+    padding: 0 0.35rem;
+    box-sizing: border-box;
   }
   .metadata-col :global(.due-date) { width: 100%; }
   .metadata-col :global(.due-input) { box-sizing: border-box; width: 100%; }
   .table th.requester-col,
   .table td.requester-col {
-    width: 5.5rem;
-    min-width: 5.5rem;
-    max-width: 5.5rem;
+    width: 7.5%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -3331,8 +3342,7 @@
     box-sizing: border-box;
     position: sticky;
     right: 0;
-    width: 15.5rem;
-    min-width: 15.5rem;
+    width: 15%;
     box-shadow: -1px 0 0 var(--border);
   }
   .table thead th.actions-table-col {
@@ -3437,33 +3447,12 @@
     color: var(--secondary);
   }
 
-  /* Same muted, warm-toned palette as the global .status-* chips (see
-     app.css) — kept in sync here since these .status-table selectors have
-     higher specificity and would otherwise shadow that palette on this
-     exact list view. */
-  .status-badge.status-table.status-pending { background: #ece7db; color: #5c5340; border-color: #cbbfa0; }
-  .status-badge.status-table.status-autocammed { background: var(--brand-gold-soft); color: var(--brand-gold-strong); border-color: color-mix(in srgb, var(--brand-gold-strong) 35%, transparent); }
-  .status-badge.status-table.status-progress { background: #dce7f0; color: #1d5f8f; border-color: #9dc2dc; }
-  .status-badge.status-table.status-cam-review { background: #f6ddc0; color: #a34a12; border-color: #e3ac6c; }
-  .status-badge.status-table.status-cammed { background: #f2dbe6; color: #9c2f5c; border-color: #dda2bf; }
-  .status-badge.status-table.status-postprocessed { background: #d3ece5; color: #0d7a68; border-color: #85cabb; }
-  .status-badge.status-table.status-jprogged { background: #f5e6b8; color: #8a6208; border-color: #ddbb5c; }
-  .status-badge.status-table.status-machined { background: #e2ddf2; color: #5545a0; border-color: #b7a8e0; }
-  .status-badge.status-table.status-complete,
-  .status-badge.status-table.status-travis { background: #dbe9c8; color: #4f7a2e; border-color: #a3c47a; }
-
-  /* Dark-mode equivalents — translucent tint + light ink, same hue mapping
-     as the light-mode rules above. Higher specificity than the base rules
-     (attribute selector), so these win regardless of source order. */
-  :global([data-theme='modern-dark']) .status-badge.status-table.status-pending { background: rgba(196, 182, 150, 0.2); color: #d4c7a5; border-color: rgba(196, 182, 150, 0.45); }
-  :global([data-theme='modern-dark']) .status-badge.status-table.status-progress { background: rgba(56, 138, 186, 0.22); color: #8fc4e3; border-color: rgba(56, 138, 186, 0.5); }
-  :global([data-theme='modern-dark']) .status-badge.status-table.status-cam-review { background: rgba(224, 148, 92, 0.22); color: #f5c393; border-color: rgba(224, 148, 92, 0.5); }
-  :global([data-theme='modern-dark']) .status-badge.status-table.status-cammed { background: rgba(199, 110, 150, 0.22); color: #edabc7; border-color: rgba(199, 110, 150, 0.5); }
-  :global([data-theme='modern-dark']) .status-badge.status-table.status-postprocessed { background: rgba(60, 180, 155, 0.22); color: #82dcc4; border-color: rgba(60, 180, 155, 0.5); }
-  :global([data-theme='modern-dark']) .status-badge.status-table.status-jprogged { background: rgba(214, 168, 50, 0.22); color: #edcd6f; border-color: rgba(214, 168, 50, 0.5); }
-  :global([data-theme='modern-dark']) .status-badge.status-table.status-machined { background: rgba(142, 120, 206, 0.22); color: #c3b2ea; border-color: rgba(142, 120, 206, 0.5); }
-  :global([data-theme='modern-dark']) .status-badge.status-table.status-complete,
-  :global([data-theme='modern-dark']) .status-badge.status-table.status-travis { background: rgba(130, 178, 80, 0.22); color: #b8d68f; border-color: rgba(130, 178, 80, 0.5); }
+  /* No per-status colours here. This block used to restate the entire
+     nine-hue palette (and a second modern-dark copy of it) purely because
+     these .status-table selectors outrank the global ones - a fourth and
+     fifth place the same colours had to be kept in sync. The shared palette
+     in app.css now covers every state in every theme, so this list view
+     just inherits it. */
 
   .parts-row {
     cursor: pointer;

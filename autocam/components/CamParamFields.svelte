@@ -17,6 +17,8 @@
   export let params = {};
   export let mode = 'job';
 
+  $: selectedSheet = routerSheetOptions.find((s) => s.id === params.stockCatalogId) || null;
+
   // Real tube/extrusion stock this team actually stocks (router.json entries
   // flagged isTube) - the STEP file's own measured geometry is still what
   // actually drives the G-code math (see extractTubeFeaturesFromMeshes), but
@@ -24,6 +26,12 @@
   // tube loaded vs. what the CAD model assumes) before it ever reaches the
   // machine - see /api/cam-generate's own stock-cross-section check.
   const tubeStockOptions = (stockData.router || []).filter((s) => s.isTube);
+  // Real sheet stock for routing, thinnest first - each entry carries its own
+  // thickness, which is what drives cut depth (and the too-deep refusal in
+  // generateRoutingGcode) rather than trusting the CAD model alone.
+  const routerSheetOptions = (stockData.router || [])
+    .filter((s) => !s.isTube && s.thickness > 0)
+    .sort((a, b) => a.thickness - b.thickness || a.description.localeCompare(b.description));
 </script>
 
 {#if operation === 'tubestock'}
@@ -158,10 +166,29 @@
     {#if mode === 'job'}
       <div class="form-group">
         <label class="form-label" for="cf-target-depth">Target depth (in) <span class="text-muted">(auto if blank)</span></label>
-        <input id="cf-target-depth" class="form-input" type="number" step="0.01" bind:value={params.targetDepth} placeholder="From STEP thickness" />
+        <input id="cf-target-depth" class="form-input" type="number" step="0.01" bind:value={params.targetDepth} placeholder={selectedSheet ? `Through ${selectedSheet.thickness}" stock` : 'From STEP thickness'} />
       </div>
     {/if}
   </div>
+
+  {#if mode === 'job'}
+    <div class="form-group">
+      <label class="form-label" for="cf-router-stock">Stock (sheet)</label>
+      <select id="cf-router-stock" class="form-select" bind:value={params.stockCatalogId}>
+        <option value="">Not specified (use the STEP file's own thickness)</option>
+        {#each routerSheetOptions as stock}
+          <option value={stock.id}>{stock.description}</option>
+        {/each}
+      </select>
+      <p class="text-muted">
+        {#if selectedSheet}
+          Cuts through {selectedSheet.thickness}" {selectedSheet.material} - depth, and the number of passes, come from this. Generation refuses a depth that would reach past the stock into the spoilboard.
+        {:else}
+          The sheet that will actually be on the table. Its thickness sets the cut depth and pass count, and blocks a program that would cut into the spoilboard.
+        {/if}
+      </p>
+    </div>
+  {/if}
 
   <details class="advanced-settings">
     <summary>Advanced settings</summary>

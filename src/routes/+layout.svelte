@@ -739,7 +739,7 @@
   .nav-container {
     display: flex;
     align-items: center;
-    max-width: 1440px;
+    max-width: var(--page-max-width);
     margin: 0 auto;
     padding: 0 clamp(0.75rem, 2vw, 1.75rem);
     min-height: 60px;
@@ -1123,7 +1123,7 @@
   main.container.page-container {
     flex: 1 0 auto;
     min-height: calc(100vh - 220px);
-    max-width: 1440px;
+    max-width: var(--page-max-width);
     margin: 0 auto;
     padding: 0 var(--space-4);
   }
@@ -1265,7 +1265,8 @@
     }
 
     .nav-container {
-      max-width: 1760px;
+      /* Same token as the content below it, so the two line up. */
+      max-width: var(--page-max-width);
       min-height: var(--desktop-header-height);
       padding: 0 clamp(1rem, 2vw, 2rem);
       gap: var(--gap-4);

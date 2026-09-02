@@ -608,7 +608,7 @@
     padding: var(--space-4);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    background: linear-gradient(180deg, var(--surface-1), var(--surface-2));
+    background: var(--surface-2);
   }
 
   .planner-admin-stat-label {

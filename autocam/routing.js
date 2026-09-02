@@ -558,6 +558,16 @@ const APPROACH_CLEARANCE = 0.02;
 // value for any specific hold-down pattern - real enough to clear a
 // typical nail/screw head with margin, adjustable per job via
 // params.edgeMargin (0 restores the old zero-offset behavior).
+// How far past the underside of the stock a through-cut is allowed to
+// reach. Enough to guarantee the part actually separates (and to absorb a
+// slightly out-of-flat sheet) without burying the cutter in the spoilboard.
+const THROUGH_CUT_ALLOWANCE = 0.02;
+
+// How far the CAD model's measured thickness may differ from the selected
+// stock before the header calls it out. Generous on purpose: nominal sheet
+// sizes are routinely off (1/4" birch ply often measures ~0.22").
+const STOCK_THICKNESS_TOLERANCE = 0.03;
+
 const DEFAULT_EDGE_MARGIN = 0.5;
 
 // Real bug, found from an actual generated file: a roughing loop written as
@@ -945,6 +955,29 @@ export function generateRoutingGcode(contours, params = {}) {
   const { targetDepth, safeZ = 0.25, units = 'in', controller = 'linuxcnc', spindleDwellSeconds = 2, edgeMargin = DEFAULT_EDGE_MARGIN } = params;
   if (!targetDepth || targetDepth <= 0) throw new Error('targetDepth is required and must be > 0');
   if (edgeMargin < 0) throw new Error('edgeMargin cannot be negative');
+
+  // Real-stock depth check. stockThickness is the operator's pick from this
+  // team's stock catalog (CamParamFields' routing "Stock" select, resolved
+  // to a thickness by the caller); measuredThickness is what the STEP model
+  // itself measures.
+  //
+  // Cutting deeper than the material that is actually on the table does not
+  // produce a worse part - it drives the cutter through the workpiece and
+  // into the spoilboard or the machine bed at full depth. That is a hard
+  // refusal, not a warning: there is no reading of it that is correct.
+  //
+  // A model/stock thickness DISAGREEMENT is different - nominal sheet sizes
+  // legitimately differ from actual (1/4" birch ply routinely measures
+  // ~0.22"), and a pocket is meant to be shallower than its stock - so that
+  // one is called out in the header for the operator to judge, not blocked.
+  const { stockThickness, measuredThickness } = params;
+  if (stockThickness > 0 && targetDepth > stockThickness + THROUGH_CUT_ALLOWANCE + DEPTH_EPSILON) {
+    throw new Error(
+      `Cut depth ${fmt(targetDepth, 3)}" is deeper than the selected stock (${fmt(stockThickness, 3)}" ` +
+      `plus a ${fmt(THROUGH_CUT_ALLOWANCE, 3)}" break-through allowance) - this would cut into the spoilboard. ` +
+      'Re-check the stock selection or the target depth before running this on material.'
+    );
+  }
   const isWinCNC = controller === 'wincnc';
   const hasSequence = Array.isArray(params.toolSequence) && params.toolSequence.length > 0;
   let pockets = Array.isArray(params.pockets) ? params.pockets : [];
@@ -1018,6 +1051,19 @@ export function generateRoutingGcode(contours, params = {}) {
   }
   if (edgeMargin > 0) {
     lines.push(`(Part positioned ${fmt(edgeMargin, 2)}" clear of X0/Y0 - keep clamps/nails/fasteners outside that boundary)`);
+  }
+  // State the stock this program was built for, so the operator can check
+  // what is on the table against what the depths below assume.
+  if (stockThickness > 0) {
+    lines.push(`(Stock: ${fmt(stockThickness, 3)}" thick - cutting to ${fmt(targetDepth, 3)}")`);
+    // Nominal sheet sizes legitimately differ from actual, and a pocket is
+    // meant to be shallower than its stock, so a disagreement is surfaced
+    // for the operator to judge rather than blocked.
+    if (measuredThickness > 0 && Math.abs(measuredThickness - stockThickness) > STOCK_THICKNESS_TOLERANCE) {
+      lines.push('(*** CHECK STOCK: the CAD model and the selected stock disagree on thickness ***)');
+      lines.push(`(Model measures ${fmt(measuredThickness, 3)}" but the selected stock is ${fmt(stockThickness, 3)}" -)`);
+      lines.push('(fine for a pocket or a nominal-vs-actual sheet size, wrong if this was meant to cut through.)');
+    }
   }
 
   let gcode;

@@ -40,6 +40,7 @@
   import { tubestockFaceFileName, tubestockFaceLabel } from '$autocam/tubestock.js';
   import stockData from '$lib/stock.json';
   import { buildStockMaterialIndex, materialIdForStockAssignment as resolveMaterialIdForStockAssignment } from '$autocam/stockMaterial.js';
+  import { minimumPartClearance } from '$autocam/nesting.js';
   import { Cpu, Upload, Package, Settings, Download, AlertTriangle, X, Link as LinkIcon, Plus, Wrench, Layers, CheckCircle2, Loader2, Search, Filter, Box, Route, ExternalLink, Copy } from 'lucide-svelte';
 
   let user = null;
@@ -49,6 +50,18 @@
   let tools = [];
   let machines = [];
   let machineTools = [];
+  let jobGroups = [];
+  let showGroupModal = false;
+  let showGroupsModal = false;
+  let groupProjectFilter = '';
+  let groupName = '';
+  let groupStockWidth = 48;
+  let groupStockHeight = 48;
+  let groupEdgeMargin = 0.5;
+  let groupTolerance = 0.01;
+  let groupSelectedJobIds = [];
+  let creatingGroup = false;
+  let selectedGroup = null;
 
   // Jobs list filters - mirrors the filter bar on /manufacture (search,
   // status, project-like dropdowns, season) adapted to what a CAM job
@@ -70,9 +83,17 @@
   let jobFilterMachine = '';
   let jobFilterCreatedBy = '';
   let jobFilterSeason = '';
+  let jobFilterProject = '';
   let showMoreFilters = false;
   $: jobSeasonOptions = getAllSeasonBuckets(jobs);
-  $: moreFiltersActive = !!(jobFilterMaterial || jobFilterTool || jobFilterMachine || jobFilterCreatedBy || jobFilterSeason);
+  $: moreFiltersActive = !!(jobFilterMaterial || jobFilterTool || jobFilterMachine || jobFilterCreatedBy || jobFilterSeason || jobFilterProject);
+  $: jobProjectIds = Array.from(new Set(jobs.map((job) => job.parts?.project_id).filter(Boolean))).sort();
+  $: completedRouterJobs = jobs.filter((job) => job.operation_type === 'routing' && job.status === 'completed' && job.gcode);
+  $: groupCandidates = completedRouterJobs.filter((job) => !groupProjectFilter || job.parts?.project_id === groupProjectFilter);
+  $: selectedGroupJobs = groupCandidates.filter((job) => groupSelectedJobIds.includes(job.id));
+  $: groupCompatibilityError = selectedGroupJobs.length > 1 && selectedGroupJobs.some((job) => String(job.machine_id || '') !== String(selectedGroupJobs[0].machine_id || '') || String(job.tool_id || '') !== String(selectedGroupJobs[0].tool_id || '') || String(job.material_id || '') !== String(selectedGroupJobs[0].material_id || ''));
+  $: groupToolDiameter = Number(selectedGroupJobs[0]?.cam_tools?.diameter || selectedGroupJobs[0]?.params?.toolDiameter || 0);
+  $: groupClearance = groupToolDiameter > 0 ? minimumPartClearance(groupToolDiameter, Number(groupTolerance) || 0) : null;
   $: jobCreators = [...new Map(jobs.filter((j) => j.requester).map((j) => [j.requester.id, j.requester])).values()]
     .sort((a, b) => (a.full_name || a.email || '').localeCompare(b.full_name || b.email || ''));
   $: filteredJobs = jobs.filter((j) => {
@@ -85,7 +106,8 @@
     const matchesMachine = !jobFilterMachine || j.machine_id === jobFilterMachine;
     const matchesCreatedBy = !jobFilterCreatedBy || j.requested_by === jobFilterCreatedBy;
     const matchesSeason = passesSeasonFilter(j.created_at, jobFilterSeason);
-    return matchesSearch && matchesOperation && matchesStatus && matchesMaterial && matchesTool && matchesMachine && matchesCreatedBy && matchesSeason;
+    const matchesProject = !jobFilterProject || j.parts?.project_id === jobFilterProject;
+    return matchesSearch && matchesOperation && matchesStatus && matchesMaterial && matchesTool && matchesMachine && matchesCreatedBy && matchesSeason && matchesProject;
   });
 
   // Same status set shown on /manufacture's filter bar (combined across all workflows).
@@ -216,7 +238,7 @@
     const unsub = userStore.subscribe((v) => { user = v; });
     (async () => {
       await loadUserFromUUID(supabase);
-      await Promise.all([loadJobs(), loadReferenceData()]);
+      await Promise.all([loadJobs(), loadReferenceData(), loadGroups()]);
       loading = false;
     })();
     return unsub;
@@ -254,6 +276,65 @@
     const requestedJobId = $page.url.searchParams.get('job');
     const requestedJob = requestedJobId && jobs.find((job) => String(job.id) === requestedJobId);
     if (requestedJob && !showJobDetailModal) openJobDetail(requestedJob);
+  }
+
+  async function loadGroups() {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const response = await fetch('/api/cam-groups', { headers: sessionData?.session?.access_token ? { authorization: `Bearer ${sessionData.session.access_token}` } : {} });
+    if (!response.ok) return;
+    const payload = await response.json();
+    jobGroups = payload.groups || [];
+    const requestedGroupId = $page.url.searchParams.get('group');
+    const requestedGroup = requestedGroupId && jobGroups.find((group) => String(group.id) === requestedGroupId);
+    if (requestedGroup) {
+      selectedGroup = requestedGroup;
+      showGroupsModal = true;
+    }
+  }
+
+  function openGroupModal() {
+    groupName = '';
+    groupProjectFilter = '';
+    groupSelectedJobIds = [];
+    groupStockWidth = 48;
+    groupStockHeight = 48;
+    groupEdgeMargin = 0.5;
+    groupTolerance = 0.01;
+    showGroupModal = true;
+  }
+
+  function toggleGroupJob(jobId, checked) {
+    groupSelectedJobIds = checked ? [...groupSelectedJobIds, jobId] : groupSelectedJobIds.filter((id) => id !== jobId);
+  }
+
+  async function createGroup() {
+    if (selectedGroupJobs.length < 2) { toastActions.show('Select at least two completed router jobs'); return; }
+    if (groupCompatibilityError) { toastActions.show('Selected jobs must share a machine, tool, and material'); return; }
+    creatingGroup = true;
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const response = await fetch('/api/cam-groups', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...(sessionData?.session?.access_token ? { authorization: `Bearer ${sessionData.session.access_token}` } : {}) },
+        body: JSON.stringify({ name: groupName, projectId: groupProjectFilter || selectedGroupJobs[0]?.parts?.project_id || null, jobIds: groupSelectedJobIds, stockWidth: Number(groupStockWidth), stockHeight: Number(groupStockHeight), edgeMargin: Number(groupEdgeMargin), tolerance: Number(groupTolerance) })
+      });
+      const payload = await response.json();
+      if (!response.ok) { toastActions.show(payload.error || 'Could not create grouped program'); return; }
+      toastActions.show('Grouped router program created');
+      showGroupModal = false;
+      await Promise.all([loadGroups(), loadJobs()]);
+      selectedGroup = payload.group;
+      showGroupsModal = true;
+    } finally { creatingGroup = false; }
+  }
+
+  function groupForJob(jobId) {
+    return jobGroups.find((group) => group.cam_job_group_items?.some((item) => String(item.cam_job_id) === String(jobId)));
+  }
+
+  async function openGroupToolpath(group) {
+    editingJob = { ...group, operation_type: 'routing', params: group.params || {}, stats: {} };
+    await openToolpathPreview(editingJob, editingJob.params);
   }
 
   async function loadReferenceData() {
@@ -927,6 +1008,12 @@
     <a class="btn btn-secondary" href="/autocam/fusion">
       <Layers size={16} /> Fusion CAM
     </a>
+    <button class="btn btn-secondary" on:click={openGroupModal} title="Create one router program for multiple compatible completed jobs">
+      <Layers size={16} /> Group Jobs
+    </button>
+    <button class="btn btn-secondary" on:click={() => (showGroupsModal = true)} title="View grouped router programs">
+      <Route size={16} /> View Groups
+    </button>
     {#if canManageProfiles}
       <button class="btn btn-secondary" on:click={() => (showProfilesPanel = !showProfilesPanel)}>
         <Settings size={16} /> {showProfilesPanel ? 'Hide' : 'Manage'} Profiles
@@ -1105,6 +1192,13 @@
           </select>
         </div>
         <div class="form-group">
+          <label class="form-label"><Filter size={16} /> Project ID</label>
+          <select class="form-select" bind:value={jobFilterProject}>
+            <option value="">All Projects</option>
+            {#each jobProjectIds as projectId}<option value={projectId}>{projectId}</option>{/each}
+          </select>
+        </div>
+        <div class="form-group">
           <label class="form-label"><Filter size={16} /> Tool</label>
           <select class="form-select" bind:value={jobFilterTool}>
             <option value="">All Tools</option>
@@ -1181,6 +1275,11 @@
                   <LinkIcon size={12} /> {job.parts?.name || `Part #${job.part_id}`}
                 </a>
               {/if}
+              {#if groupForJob(job.id)}
+                <button class="grouped-link" type="button" on:click|stopPropagation={() => { selectedGroup = groupForJob(job.id); showGroupsModal = true; }}>
+                  <CheckCircle2 size={12} /> Grouped: {groupForJob(job.id).name}
+                </button>
+              {/if}
             </td>
             <td data-label="Operation">
               <span class="tag {operationTagClass(job.operation_type)}">{operationLabel(job.operation_type)}</span>
@@ -1201,7 +1300,7 @@
               {/if}
             </td>
             <td data-label="Created">
-              {formatPacificDateTimeWithZone(job.created_at)}
+              <span class="job-created-date">{formatPacificDateTimeWithZone(job.created_at)}</span>
               {#if bucket}
                 <span class="tag season-tag {bucket.isOffseason ? 'tag-offseason' : 'tag-season'}">{bucket.label}</span>
               {/if}
@@ -1260,6 +1359,68 @@
         {/each}
       </tbody>
     </table>
+  </div>
+{/if}
+
+{#if showGroupModal}
+  <div class="modal-backdrop" on:click|self={() => (showGroupModal = false)} role="button" tabindex="0" on:keydown={(e) => { if (e.key === 'Escape') showGroupModal = false; }}>
+    <div class="modal group-modal" role="dialog" aria-modal="true">
+      <div class="modal-header"><h3>Group Router Jobs</h3><button type="button" class="modal-close-button" aria-label="Close" on:click={() => (showGroupModal = false)}><X size={18} /></button></div>
+      <div class="modal-body group-modal-body">
+        <div class="group-intro">
+          <Layers size={20} />
+          <div><strong>Shared-sheet router program</strong><span>Completed router jobs only. Machine, end mill, and material must match.</span></div>
+          <span class="tag tag-success">Router only</span>
+        </div>
+        <div class="group-setup-grid">
+          <div class="form-group"><label class="form-label" for="group-name">Group name</label><input id="group-name" class="form-input" bind:value={groupName} placeholder="e.g. P006950 router sheet" /></div>
+          <div class="form-group"><label class="form-label" for="group-project">Project ID</label><select id="group-project" class="form-select" bind:value={groupProjectFilter}><option value="">All projects</option>{#each jobProjectIds as projectId}<option value={projectId}>{projectId}</option>{/each}</select></div>
+          <div class="form-group"><label class="form-label" for="group-stock-width">Usable stock width (in)</label><input id="group-stock-width" class="form-input" type="number" min="0.1" step="0.125" bind:value={groupStockWidth} /></div>
+          <div class="form-group"><label class="form-label" for="group-stock-height">Usable stock height (in)</label><input id="group-stock-height" class="form-input" type="number" min="0.1" step="0.125" bind:value={groupStockHeight} /></div>
+          <div class="form-group"><label class="form-label" for="group-edge-margin">Edge margin (in)</label><input id="group-edge-margin" class="form-input" type="number" min="0" step="0.01" bind:value={groupEdgeMargin} /></div>
+          <div class="form-group"><label class="form-label" for="group-tolerance">Tolerance allowance (in)</label><input id="group-tolerance" class="form-input" type="number" min="0" step="0.001" bind:value={groupTolerance} /></div>
+        </div>
+        <div class="group-selection-heading"><strong>Select completed jobs</strong><span>{selectedGroupJobs.length} selected</span></div>
+        <div class="part-picker group-picker" aria-label="Completed router jobs available for grouping">
+          {#if groupCandidates.length === 0}<p class="text-muted">No completed router jobs match this project filter.</p>{/if}
+          {#each groupCandidates as job (job.id)}
+            <label class="part-picker-row">
+              <input type="checkbox" checked={groupSelectedJobIds.includes(job.id)} on:change={(event) => toggleGroupJob(job.id, event.currentTarget.checked)} />
+              <span class="part-picker-name"><strong>{jobDisplayName(job)}</strong>{#if job.parts?.project_id}<small>{job.parts.project_id}</small>{/if}</span>
+              <span class="group-job-setup">{job.cam_machines?.name || 'No machine'}<small>{job.cam_tools?.name || 'No tool'}</small></span>
+            </label>
+          {/each}
+        </div>
+        {#if groupCompatibilityError}<p class="cam-form-warning"><AlertTriangle size={14} /> Select jobs that use the same machine, tool, and material.</p>{/if}
+        <div class="group-clearance-summary">
+          <span>Required path clearance</span>
+          <strong>{groupClearance ? `${groupClearance.toFixed(4)} in` : 'Select a job'}</strong>
+          <small>{groupClearance ? `${groupToolDiameter.toFixed(4)} in end mill + twice tolerance` : 'Calculated from the selected router tool and tolerance.'}</small>
+        </div>
+      </div>
+      <div class="modal-footer-actions group-modal-footer"><span class="text-muted">Review the 3D toolpath before cutting.</span><button class="btn btn-primary" disabled={creatingGroup || selectedGroupJobs.length < 2 || groupCompatibilityError} on:click={createGroup}><Layers size={15} /> {creatingGroup ? 'Creating…' : 'Create grouped G-code'}</button></div>
+    </div>
+  </div>
+{/if}
+
+{#if showGroupsModal}
+  <div class="modal-backdrop" on:click|self={() => { showGroupsModal = false; selectedGroup = null; }} role="button" tabindex="0" on:keydown={(e) => { if (e.key === 'Escape') { showGroupsModal = false; selectedGroup = null; } }}>
+    <div class="modal groups-modal" role="dialog" aria-modal="true">
+      <div class="modal-header"><h3>{selectedGroup ? selectedGroup.name : 'Grouped Router Programs'}</h3><button type="button" class="modal-close-button" aria-label="Close" on:click={() => { showGroupsModal = false; selectedGroup = null; }}><X size={18} /></button></div>
+      <div class="modal-body">
+        {#if selectedGroup}
+          <div class="group-summary"><span class="tag tag-success">Grouped</span><span>{selectedGroup.stock_width}" x {selectedGroup.stock_height}" stock</span><span>{selectedGroup.clearance}" path clearance</span></div>
+          <div class="group-item-list">
+            {#each selectedGroup.cam_job_group_items || [] as item}<div><strong>{item.cam_jobs?.parts?.name || item.cam_jobs?.name || 'Router job'}</strong><span> X{Number(item.offset_x).toFixed(3)} Y{Number(item.offset_y).toFixed(3)}</span></div>{/each}
+          </div>
+          <div class="modal-footer-actions"><button class="btn btn-secondary" on:click={() => openGroupToolpath(selectedGroup)}><Route size={15} /> Show Toolpath</button><button class="btn btn-primary" on:click={() => downloadGcodeText(selectedGroup.gcode, selectedGroup.gcode_file_name)}><Download size={15} /> Install NGC</button></div>
+        {:else}
+          <div class="form-group"><label class="form-label" for="view-group-project">Project ID</label><select id="view-group-project" class="form-select" bind:value={groupProjectFilter} on:change={loadGroups}><option value="">All projects</option>{#each jobProjectIds as projectId}<option value={projectId}>{projectId}</option>{/each}</select></div>
+          {#if jobGroups.length === 0}<p class="text-muted">No grouped router programs yet.</p>{/if}
+          <div class="group-item-list">{#each jobGroups.filter((group) => !groupProjectFilter || group.project_id === groupProjectFilter) as group}<button type="button" class="group-list-row" on:click={() => (selectedGroup = group)}><span><strong>{group.name}</strong><small>{group.project_id || 'No project'} · {group.cam_job_group_items?.length || 0} parts</small></span><span class="tag tag-success">Grouped</span></button>{/each}</div>
+        {/if}
+      </div>
+    </div>
   </div>
 {/if}
 
@@ -1816,13 +1977,6 @@
 {/if}
 
 <style>
-  /* AutoCAM has a denser operational table than the rest of the app. Give it
-     room on desktop, then switch to labeled records before the columns would
-     require a horizontal scrollbar. */
-  :global(main.container.page-container:has(.autocam-page-header)) {
-    max-width: 1800px;
-  }
-
   .page-subtitle {
     color: var(--text-muted);
     margin: -0.5rem 0 1rem;
@@ -1982,7 +2136,9 @@
   .job-part-link:hover { text-decoration: underline; }
 
   .status-badge.status-running { background: var(--purple-soft); color: var(--purple-strong); border-color: var(--purple-soft); }
-  .status-badge.status-complete { background: var(--green-soft); color: var(--green-strong); border-color: var(--green-soft); }
+  /* No local override - the shared status palette in app.css already
+     renders Completed, and a solid --green-soft here sat visibly brighter
+     than the tinted chips beside it. */
   .status-badge.status-error { background: var(--red-soft); color: var(--red-strong); border-color: var(--red-soft); }
 
   .job-error {
@@ -2120,16 +2276,16 @@
      hard enough to wrap. Rebalanced so Tool ("UNC Router 0.1575 in Flat
      End Mill") and Created ("Aug 31, 2026, 11:36 PM PT") lay out across
      the row instead of stacking into a tall vertical column. */
-  .autocam-jobs-table th:nth-child(1) { width: 13%; }
+  .autocam-jobs-table th:nth-child(1) { width: 12%; }
   .autocam-jobs-table th:nth-child(2) { width: 7%; }
-  .autocam-jobs-table th:nth-child(3) { width: 8%; }
+  .autocam-jobs-table th:nth-child(3) { width: 7%; }
   .autocam-jobs-table th:nth-child(4) { width: 10%; }
   .autocam-jobs-table th:nth-child(5) { width: 7%; }
   .autocam-jobs-table th:nth-child(6) { width: 7%; }
   .autocam-jobs-table th:nth-child(7) { width: 8%; }
-  .autocam-jobs-table th:nth-child(8) { width: 10%; }
+  .autocam-jobs-table th:nth-child(8) { width: 13%; }
   .autocam-jobs-table th:nth-child(9) { width: 8%; }
-  .autocam-jobs-table th:nth-child(10) { width: 22%; }
+  .autocam-jobs-table th:nth-child(10) { width: 21%; }
   .autocam-jobs-table td {
     vertical-align: top;
   }
@@ -2147,12 +2303,23 @@
   .autocam-jobs-table .tag {
     white-space: nowrap;
   }
+  .job-created-date {
+    display: inline-block;
+    white-space: nowrap;
+  }
   .output-cell { min-width: 0; white-space: normal; }
   .output-actions {
     display: flex;
-    flex-wrap: nowrap;
+    /* Wraps onto a second line rather than forcing the cell wider than its
+       column. The container above is deliberately overflow: visible (so the
+       Face-files dropdown isn't clipped), which meant a nowrap row here
+       pushed the whole PAGE into a horizontal scroll on anything narrower
+       than a very wide monitor - the table scrolling would have been bad
+       enough; the page scrolling took the nav with it. */
+    flex-wrap: wrap;
     align-items: center;
     gap: 0.45rem;
+    row-gap: 0.35rem;
     white-space: nowrap;
   }
   .output-action-group {
@@ -2294,6 +2461,80 @@
     padding: 0.25rem 0.5rem;
     margin-bottom: 1rem;
   }
+  .autocam-page-header .page-actions {
+    align-items: center;
+    justify-content: flex-end;
+  }
+  .group-picker {
+    max-height: 260px;
+    margin: 0;
+    padding: 0.2rem 0.65rem;
+    background: var(--surface-2, #fafafa);
+  }
+  .grouped-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    margin-top: 0.35rem;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--green-strong, #15803d);
+    font: inherit;
+    font-size: var(--font-xs, 0.75rem);
+    cursor: pointer;
+  }
+  .groups-modal { width: min(720px, calc(100vw - 2rem)); }
+  .group-modal { width: min(820px, calc(100vw - 2rem)); }
+  .group-modal-body { display: grid; gap: var(--space-4, 1rem); }
+  .group-intro {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.75rem;
+    border-left: 3px solid var(--green-base, #22c55e);
+    background: var(--green-soft, #dcfce7);
+    color: var(--green-strong, #15803d);
+  }
+  .group-intro > div { display: grid; gap: 0.15rem; }
+  .group-intro span:not(.tag) { font-size: var(--font-sm, 0.875rem); color: var(--text-muted); }
+  .group-setup-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) repeat(4, minmax(108px, 0.7fr));
+    gap: var(--space-3, 0.75rem);
+    align-items: end;
+  }
+  .group-setup-grid .form-group { margin: 0; min-width: 0; }
+  .group-selection-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; margin-bottom: -0.45rem; }
+  .group-selection-heading span { color: var(--text-muted); font-size: var(--font-sm, 0.875rem); }
+  .group-picker .part-picker-row { min-height: 3.25rem; padding: 0.4rem 0.2rem; }
+  .group-picker .part-picker-name { display: grid; gap: 0.1rem; white-space: normal; }
+  .group-picker .part-picker-name small, .group-job-setup small { color: var(--text-muted); font-size: var(--font-xs, 0.75rem); }
+  .group-job-setup { display: grid; justify-items: end; gap: 0.1rem; text-align: right; font-size: var(--font-sm, 0.875rem); color: var(--text); }
+  .group-clearance-summary {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.1rem 1rem;
+    align-items: baseline;
+    padding: 0.65rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 4px);
+    background: var(--surface-2, #fafafa);
+  }
+  .group-clearance-summary span, .group-clearance-summary small { color: var(--text-muted); font-size: var(--font-sm, 0.875rem); }
+  .group-clearance-summary small { grid-column: 1 / -1; font-size: var(--font-xs, 0.75rem); }
+  .group-clearance-summary strong { color: var(--green-strong, #15803d); font-variant-numeric: tabular-nums; }
+  .group-modal-footer { gap: 1rem; }
+  .groups-modal .modal-body { display: grid; gap: 1rem; }
+  .group-summary { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin: 0; color: var(--text-muted); }
+  .group-summary > span:not(.tag) { padding-left: 0.5rem; border-left: 1px solid var(--border); font-size: var(--font-sm, 0.875rem); }
+  .group-item-list { display: grid; gap: 0.5rem; }
+  .group-item-list > div, .group-list-row { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; padding: 0.65rem 0.75rem; border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); }
+  .group-item-list > div span { color: var(--text-muted); font-size: var(--font-sm, 0.875rem); }
+  .group-list-row { width: 100%; background: var(--surface-1, #fff); text-align: left; cursor: pointer; font: inherit; }
+  .group-list-row:hover, .group-list-row:focus-visible { border-color: var(--green-base, #22c55e); outline: none; }
+  .group-list-row small { display: block; margin-top: 0.15rem; color: var(--text-muted); }
 
   .part-picker-row {
     display: flex;
@@ -2357,6 +2598,19 @@
   }
   .form-row.two-col {
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  }
+  @media (max-width: 900px) {
+    .group-setup-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 600px) {
+    .group-modal, .groups-modal { width: min(100vw - 1rem, 720px); }
+    .group-intro { grid-template-columns: auto minmax(0, 1fr); }
+    .group-intro .tag { grid-column: 2; justify-self: start; }
+    .group-setup-grid { grid-template-columns: 1fr; }
+    .group-picker .part-picker-row { align-items: flex-start; }
+    .group-job-setup { display: none; }
+    .group-modal-footer { align-items: stretch; flex-direction: column; }
+    .group-modal-footer .btn { width: 100%; justify-content: center; }
   }
   @media (max-width: 1260px) {
     .autocam-jobs-container {

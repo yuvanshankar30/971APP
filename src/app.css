@@ -64,17 +64,20 @@
   --warning: var(--brand-gold-base);
   --info: var(--blue-base);
 
-  --status-pending-bg: var(--brand-gold-soft);
-  --status-pending-border: var(--brand-gold-base);
+  /* Same tint recipe as the .status-* chips, so a component driven by these
+     tokens and one driven by the classes render identically rather than two
+     slightly different greens sitting next to each other. */
+  --status-pending-bg: color-mix(in srgb, var(--brand-gold-base) 16%, transparent);
+  --status-pending-border: color-mix(in srgb, var(--brand-gold-base) 38%, transparent);
   --status-pending-text: var(--brand-gold-strong);
-  --status-progress-bg: var(--blue-soft);
-  --status-progress-border: var(--blue-base);
-  --status-progress-text: var(--blue-base);
-  --status-ready-bg: var(--green-soft);
-  --status-ready-border: var(--green-base);
+  --status-progress-bg: color-mix(in srgb, var(--blue-base) 14%, transparent);
+  --status-progress-border: color-mix(in srgb, var(--blue-base) 34%, transparent);
+  --status-progress-text: var(--blue-strong);
+  --status-ready-bg: color-mix(in srgb, var(--green-base) 15%, transparent);
+  --status-ready-border: color-mix(in srgb, var(--green-base) 36%, transparent);
   --status-ready-text: var(--green-strong);
-  --status-risk-bg: var(--red-soft);
-  --status-risk-border: var(--red-base);
+  --status-risk-bg: color-mix(in srgb, var(--red-base) 14%, transparent);
+  --status-risk-border: color-mix(in srgb, var(--red-base) 34%, transparent);
   --status-risk-text: var(--red-strong);
 
   /* Purchasing-specific statuses (cad/purchasing) - deliberately distinct
@@ -88,14 +91,18 @@
      rationale comments (kept there, not duplicated here).
      Approved: emerald-teal. Ordered: berry-plum. Pickup: terracotta.
      Delivered/Picked Up/Kitted: forest green. */
-  --status-approved-bg: #d3ece5;
-  --status-approved-text: #0d7a68;
-  --status-ordered-bg: #f2dbe6;
-  --status-ordered-text: #9c2f5c;
-  --status-pickup-bg: #f6ddc0;
-  --status-pickup-text: #a34a12;
-  --status-delivered-bg: #dbe9c8;
-  --status-delivered-text: #4f7a2e;
+  /* Purchasing's own lifecycle, on the same five families as every other
+     status chip - was teal / magenta / terracotta / olive, four hues the
+     rest of the app never uses. Ordered by workflow rather than by hue:
+     waiting -> in flight -> act now -> done. */
+  --status-approved-bg: color-mix(in srgb, var(--brand-gold-base) 16%, transparent);
+  --status-approved-text: var(--brand-gold-strong);
+  --status-ordered-bg: color-mix(in srgb, var(--blue-base) 14%, transparent);
+  --status-ordered-text: var(--blue-strong);
+  --status-pickup-bg: color-mix(in srgb, var(--orange-base) 16%, transparent);
+  --status-pickup-text: var(--orange-strong);
+  --status-delivered-bg: color-mix(in srgb, var(--green-base) 15%, transparent);
+  --status-delivered-text: var(--green-strong);
 
   /* Scouting chart categories (datascout, teamview) - qualitative/categorical
      colors for match-role and climb-level charts, genuinely global (not
@@ -162,6 +169,16 @@
   --shadow-sm: none;
   --shadow-md: none;
   --shadow-lg: 0 8px 24px rgba(16, 24, 40, 0.16);
+
+  /* ===== PAGE WIDTH =====
+     One value for every full-width surface - the nav bar, the page shell,
+     and any page that used to cap itself. Before this, five different
+     widths were in play (nav 1440/1760, page shell 1440, manufacture 1400,
+     purchasing 1600, autocam 1800), so the content column visibly changed
+     size from tab to tab and sat narrower than the nav above it. Anything
+     that needs to be narrower should constrain its own content, not the
+     page. */
+  --page-max-width: 1440px;
 
   /* ===== CONTROL + COMPONENT TOKENS ===== */
   --control-height: 28px;  /* Unified height for all buttons, tags, dropdowns, inputs */
@@ -372,7 +389,7 @@ h2, h3, h4 { font-weight: 600; }
 table { font-variant-numeric: tabular-nums; }
 
 .container {
-  max-width: 1440px;
+  max-width: var(--page-max-width);
   margin: 0 auto;
   padding: 0 var(--space-4);
   width: 100%;
@@ -830,92 +847,70 @@ textarea:focus,
   white-space: nowrap;
 }
 
-/* Each router/CAM pipeline stage gets its own muted, warm-toned hue instead
-   of stock saturated Tailwind swatches — reads as a considered progression
-   (stone → blue → gold → terracotta → plum → teal → ochre → indigo → sage)
-   rather than a candy-colored rainbow, and stays legible against the warm
-   paper background instead of clashing with it. */
-.status-pending {
-  background: #ece7db;
-  color: #5c5340;
-  border: 1px solid #cbbfa0;
-}
+/* FIVE semantic states, not nine bespoke hues.
+   This used to be a hand-picked pastel per pipeline stage - the comment here
+   literally described it as "stone -> blue -> gold -> terracotta -> plum ->
+   teal -> ochre -> indigo -> sage" - written as hardcoded hex, then
+   re-hardcoded a second time for modern-dark and a third time for the
+   gallery themes. Nine hues is more colour than the information carries:
+   every chip already spells its state out in text, so hue only needs to
+   answer "is this waiting, moving, mine to action, done, or broken?".
 
-/* Autocammed: brand gold — "awaiting review" ties into the same gold
-   vocabulary used for Pending elsewhere in the app */
-.status-autocammed {
-  background: var(--brand-gold-soft);
-  color: var(--brand-gold-strong);
-  border: 1px solid color-mix(in srgb, var(--brand-gold-strong) 35%, transparent);
-}
+   Grouped onto the app's own themed colour scales (so every theme follows
+   automatically, and no chip invents a colour the rest of the app never
+   uses), and tinted rather than filled - a passive label reads better as a
+   wash than as a saturated block.
 
-/* In Progress: azure — saturated at mid-lightness so it reads as an
-   active/working color, not a dusty pastel */
-.status-in-progress, /* alias */
-.status-progress {
-  background: #dce7f0;
-  color: #1d5f8f;
-  border: 1px solid #9dc2dc;
-}
+     gold   waiting, nothing to do yet
+     blue   in flight, somewhere in the pipeline
+     orange needs a person to act
+     green  done
+     red    failed or rejected  */
 
-/* CAM Review Pending: terracotta — a human needs to act now */
-.status-cam-review {
-  background: #f6ddc0;
-  color: #a34a12;
-  border: 1px solid #e3ac6c;
-}
-
-/* CAM Reviewed: berry-plum — handed off to the next stage */
-.status-cammed {
-  background: #f2dbe6;
-  color: #9c2f5c;
-  border: 1px solid #dda2bf;
-}
-
-/* Postprocessed: emerald-teal — verified sub-step complete */
-.status-postprocessed {
-  background: #d3ece5;
-  color: #0d7a68;
-  border: 1px solid #85cabb;
-}
-
-/* Jprogged: mustard-gold */
+.status-pending,
+.status-autocammed,
 .status-jprogged {
-  background: #f5e6b8;
-  color: #8a6208;
-  border: 1px solid #ddbb5c;
+  background: color-mix(in srgb, var(--brand-gold-base) 16%, transparent);
+  color: var(--brand-gold-strong);
+  border: 1px solid color-mix(in srgb, var(--brand-gold-base) 38%, transparent);
 }
 
-/* Machined: indigo-violet */
-.status-machined {
-  background: #e2ddf2;
-  color: #5545a0;
-  border: 1px solid #b7a8e0;
-}
-
-/* Kitted / Complete: forest green — the "done" family */
-.status-complete {
-  background: #dbe9c8;
-  color: #4f7a2e;
-  border: 1px solid #a3c47a;
-}
-
-/* Travis-progged (queued) badge alias: forest green, matches Complete */
-.status-travis {
-  background: #dbe9c8;
-  color: #4f7a2e;
-  border-color: #a3c47a;
-}
-
-/* Additional status helpers for consistency across pages */
+.status-in-progress, /* alias */
+.status-progress,
+.status-cammed,
+.status-postprocessed,
 .status-ordered {
-  background: var(--info);
-  color: var(--primary);
+  background: color-mix(in srgb, var(--blue-base) 14%, transparent);
+  color: var(--blue-strong);
+  border: 1px solid color-mix(in srgb, var(--blue-base) 34%, transparent);
 }
 
-.status-delivered, .status-ready { /* treat delivered as success */
-  background: var(--success);
-  color: var(--primary);
+/* The one group that means "a human must do something now" - kept visually
+   distinct from plain waiting, which is the whole point of separating it. */
+.status-cam-review,
+.status-pickup {
+  background: color-mix(in srgb, var(--orange-base) 16%, transparent);
+  color: var(--orange-strong);
+  border: 1px solid color-mix(in srgb, var(--orange-base) 38%, transparent);
+}
+
+.status-complete,
+.status-travis,
+.status-machined,
+.status-delivered,
+.status-ready,
+.status-approved {
+  background: color-mix(in srgb, var(--green-base) 15%, transparent);
+  color: var(--green-strong);
+  border: 1px solid color-mix(in srgb, var(--green-base) 36%, transparent);
+}
+
+.status-error,
+.status-rejected,
+.status-risk {
+  background: color-mix(in srgb, var(--red-base) 14%, transparent);
+  color: var(--red-strong);
+  border: 1px solid color-mix(in srgb, var(--red-base) 34%, transparent);
 }
 
 /* Icon bubbles */
@@ -1508,7 +1503,10 @@ textarea:focus,
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
   padding: var(--space-6);
-  background: linear-gradient(135deg, var(--surface-1), var(--surface-2));
+  /* Flat, like every other surface in this app - the theme's own comment
+     at the top of this file states surfaces are defined by hairlines, not
+     shading. */
+  background: var(--surface-2);
   box-shadow: var(--shadow-md);
 }
 
@@ -2225,41 +2223,9 @@ textarea:focus,
 /* Older pipeline badges predate the semantic status tokens. Normalize them
    only under gallery themes so their nine light pastels do not clash with the
    dark palette while their labels and workflow meanings stay intact. */
-[data-theme^="theme-"] .status-pending,
-[data-theme^="theme-"] .status-autocammed,
-[data-theme^="theme-"] .status-jprogged {
-  background: var(--status-pending-bg);
-  color: var(--status-pending-text);
-  border-color: var(--status-pending-border);
-}
-[data-theme^="theme-"] .status-in-progress,
-[data-theme^="theme-"] .status-progress,
-[data-theme^="theme-"] .status-postprocessed {
-  background: var(--status-progress-bg);
-  color: var(--status-progress-text);
-  border-color: var(--status-progress-border);
-}
-[data-theme^="theme-"] .status-complete,
-[data-theme^="theme-"] .status-travis,
-[data-theme^="theme-"] .status-delivered,
-[data-theme^="theme-"] .status-ready {
-  background: var(--status-ready-bg);
-  color: var(--status-ready-text);
-  border-color: var(--status-ready-border);
-}
-[data-theme^="theme-"] .status-error,
-[data-theme^="theme-"] .status-rejected {
-  background: var(--status-risk-bg);
-  color: var(--status-risk-text);
-  border-color: var(--status-risk-border);
-}
-[data-theme^="theme-"] .status-cam-review,
-[data-theme^="theme-"] .status-cammed,
-[data-theme^="theme-"] .status-machined {
-  background: var(--purple-soft);
-  color: var(--purple-strong);
-  border-color: var(--purple-base);
-}
+/* No per-theme status overrides needed any more: the chip rules above are
+   built from the app's own colour scales, which every theme already
+   redefines, so the five states follow the active theme on their own. */
 
 [data-theme^="theme-"] .brand-mark { background-image:url('/spartan-helmet-dark.png'); }
 
@@ -2309,14 +2275,8 @@ textarea:focus,
   --purple-strong: #d8b4fe;
   --orange-strong: #fdba74;
 
-  --status-approved-bg: rgba(60, 180, 155, 0.22);
-  --status-approved-text: #82dcc4;
-  --status-ordered-bg: rgba(199, 110, 150, 0.22);
-  --status-ordered-text: #edabc7;
-  --status-pickup-bg: rgba(224, 148, 92, 0.22);
-  --status-pickup-text: #f5c393;
-  --status-delivered-bg: rgba(130, 178, 80, 0.22);
-  --status-delivered-text: #b8d68f;
+  /* The base definitions are built from themed scales, so they already
+     follow modern-dark - no separate hardcoded set needed here. */
 
   --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.55);
 
@@ -2338,59 +2298,6 @@ textarea:focus,
    every chip becomes a translucent tint with a light text tone. Light
    themes (legacy and modern) are untouched.
    ======================================================================== */
-
-[data-theme="modern-dark"] .status-pending {
-  background: rgba(196, 182, 150, 0.2);
-  color: #d4c7a5;
-  border-color: rgba(196, 182, 150, 0.45);
-}
-
-/* Autocammed uses --brand-gold-soft/strong directly, which already have
-   modern-dark overrides above — no separate dark rule needed here. */
-
-[data-theme="modern-dark"] .status-in-progress,
-[data-theme="modern-dark"] .status-progress {
-  background: rgba(56, 138, 186, 0.22);
-  color: #8fc4e3;
-  border-color: rgba(56, 138, 186, 0.5);
-}
-
-[data-theme="modern-dark"] .status-cam-review {
-  background: rgba(224, 148, 92, 0.22);
-  color: #f5c393;
-  border-color: rgba(224, 148, 92, 0.5);
-}
-
-[data-theme="modern-dark"] .status-cammed {
-  background: rgba(199, 110, 150, 0.22);
-  color: #edabc7;
-  border-color: rgba(199, 110, 150, 0.5);
-}
-
-[data-theme="modern-dark"] .status-postprocessed {
-  background: rgba(60, 180, 155, 0.22);
-  color: #82dcc4;
-  border-color: rgba(60, 180, 155, 0.5);
-}
-
-[data-theme="modern-dark"] .status-jprogged {
-  background: rgba(214, 168, 50, 0.22);
-  color: #edcd6f;
-  border-color: rgba(214, 168, 50, 0.5);
-}
-
-[data-theme="modern-dark"] .status-machined {
-  background: rgba(142, 120, 206, 0.22);
-  color: #c3b2ea;
-  border-color: rgba(142, 120, 206, 0.5);
-}
-
-[data-theme="modern-dark"] .status-complete,
-[data-theme="modern-dark"] .status-travis {
-  background: rgba(130, 178, 80, 0.22);
-  color: #b8d68f;
-  border-color: rgba(130, 178, 80, 0.5);
-}
 
 /* Workflow tags otherwise render with a fully-opaque brightened border
    (e.g. --purple-base) around a near-transparent fill — reads as a harsh
@@ -2441,4 +2348,12 @@ textarea:focus,
 [data-theme="modern-dark"] .btn-warning {
   --btn-color: var(--on-primary);
   --btn-hover-color: var(--primary);
+}
+
+/* Wider content on anything desktop-sized. The nav already grew to 1760px
+   here while the page below it stayed at 1440px; both now use the same
+   token, so the content column lines up with the nav instead of sitting
+   inset from it, and every tab gets the same width. */
+@media (min-width: 769px) {
+  :root { --page-max-width: 1800px; }
 }
