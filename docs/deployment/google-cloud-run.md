@@ -33,7 +33,7 @@ Done and verified live:
   status-checking alone wasn't a reliable signal that it was safe to consider done.
   Worth remembering for any future domain-mapping move.
 - 8 Secret Manager secrets created and wired to the Cloud Run runtime service account
-  (`536793099017-compute@developer.gserviceaccount.com`) via
+  (`819718873862-compute@developer.gserviceaccount.com`) via
   `roles/secretmanager.secretAccessor`, scoped per-secret: `SUPABASE_SERVICE_KEY`,
   `SUPABASE_ANON_KEY`, `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`, `SLACK_USER_TOKEN`,
   `TBA_API_KEY`, `ONSHAPE_ACCESS_KEY`, `ONSHAPE_SECRET_KEY`. The Onshape pair is
@@ -84,7 +84,7 @@ Done and verified live:
   ```bash
   gcloud secrets create CRON_NOTIFICATION_TOKEN --project=spartanshub --data-file=-
   gcloud secrets add-iam-policy-binding CRON_NOTIFICATION_TOKEN --project=spartanshub \
-    --member="serviceAccount:536793099017-compute@developer.gserviceaccount.com" \
+    --member="serviceAccount:819718873862-compute@developer.gserviceaccount.com" \
     --role="roles/secretmanager.secretAccessor"
   ```
 
@@ -180,7 +180,7 @@ gcloud secrets create CRON_NOTIFICATION_TOKEN --data-file=-
 
 Grant the Cloud Run runtime service account access to just these secrets (Compute
 Engine default SA unless you create a dedicated one, which is the better long-term
-choice — for `spartanshub` this is `536793099017-compute@developer.gserviceaccount.com`,
+choice — for `spartanshub` this is `819718873862-compute@developer.gserviceaccount.com`,
 project-number-specific, so it'll differ in any other project):
 
 ```bash
