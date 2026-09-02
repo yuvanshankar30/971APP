@@ -32,6 +32,7 @@
  * two dialects this switches between.
  */
 import { HEADER_WARNING } from './turning.js';
+import { normalizeGcodeComments } from './gcodeComments.js';
 
 function fmt(n, decimals = 4) {
   return Number(n).toFixed(decimals);
@@ -218,8 +219,10 @@ function generateProgram(walls, params, { faceAngleDeg = null, faceLabel = null,
   lines.push(isWinCNC ? '(PROGRAM END)' : 'M30 (program end)');
   if (!isWinCNC) lines.push('%');
 
-  let gcode = lines.join('\n');
-  if (isWinCNC) gcode = gcode.replace(/\(/g, '[').replace(/\)/g, ']');
+  // Comments in the controller's own syntax, and well-formed - a comment
+  // whose own text contains a parenthesis used to close early and leave the
+  // rest of its line as live code. See autocam/gcodeComments.js.
+  const gcode = normalizeGcodeComments(lines.join('\n'), { dialect: isWinCNC ? 'wincnc' : 'linuxcnc' });
   return { gcode, totalHoles, toolsUsed: groups.length, toolChanges };
 }
 
