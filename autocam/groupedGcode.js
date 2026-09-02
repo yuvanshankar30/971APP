@@ -25,9 +25,15 @@ export function generateGroupedRoutingGcode({ name, placements, params = {} }) {
   const safeZ = Number(params.safeZ) || 0.25;
   const spindleSpeed = Number(params.spindleSpeed) || 14000;
   const controller = params.controller === 'wincnc' ? 'wincnc' : 'linuxcnc';
+  // Stated so the operator can check the sheet on the table against what
+  // every part in this program was cut for. The group only forms when all
+  // its jobs agree on this (see the depth check in /api/cam-groups), so one
+  // number is the truth for the whole sheet.
+  const stockThickness = Number(params.stockThickness ?? params.targetDepth);
   const lines = [
     `(GROUPED ROUTER PROGRAM: ${name || 'unnamed group'})`,
     `(VERIFY STOCK, WORK ZERO, CLAMPS, AND THE NESTING PREVIEW BEFORE RUNNING)`,
+    ...(stockThickness > 0 ? [`(EVERY PART HERE IS CUT TO ${format(stockThickness)}" - CONFIRM THE SHEET MATCHES)`] : []),
     controller === 'wincnc' ? 'G20 (inch)' : 'G20 (inch)',
     'G90 (absolute)',
     ...(controller === 'wincnc' ? [] : ['G17 (XY plane)', 'G94 (feed per minute)', 'G54 (work offset - verify before running)', 'G80 G40 G49 (defensive reset)']),

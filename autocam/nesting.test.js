@@ -17,3 +17,23 @@ describe('router job grouping', () => {
     expect((gcode.match(/M30/g) || []).length).toBe(1);
   });
 });
+
+describe('grouped program header', () => {
+  it('states the depth every part was cut to, so the sheet can be checked against it', () => {
+    const gcode = generateGroupedRoutingGcode({
+      name: 'Sheet 1',
+      placements: [{ name: 'A', gcode: 'G20\nG90\nG01 X1 Y2 F20', offsetX: 0, offsetY: 0 }],
+      params: { safeZ: 0.25, stockThickness: 0.125 }
+    });
+    expect(gcode).toContain('EVERY PART HERE IS CUT TO 0.125" - CONFIRM THE SHEET MATCHES');
+  });
+
+  it('says nothing about thickness when the group does not know it', () => {
+    const gcode = generateGroupedRoutingGcode({
+      name: 'Sheet 1',
+      placements: [{ name: 'A', gcode: 'G20\nG90\nG01 X1 Y2 F20', offsetX: 0, offsetY: 0 }],
+      params: { safeZ: 0.25 }
+    });
+    expect(gcode).not.toContain('CONFIRM THE SHEET MATCHES');
+  });
+});

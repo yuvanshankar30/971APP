@@ -91,7 +91,24 @@
   $: completedRouterJobs = jobs.filter((job) => job.operation_type === 'routing' && job.status === 'completed' && job.gcode);
   $: groupCandidates = completedRouterJobs.filter((job) => !groupProjectFilter || job.parts?.project_id === groupProjectFilter);
   $: selectedGroupJobs = groupCandidates.filter((job) => groupSelectedJobIds.includes(job.id));
-  $: groupCompatibilityError = selectedGroupJobs.length > 1 && selectedGroupJobs.some((job) => String(job.machine_id || '') !== String(selectedGroupJobs[0].machine_id || '') || String(job.tool_id || '') !== String(selectedGroupJobs[0].tool_id || '') || String(job.material_id || '') !== String(selectedGroupJobs[0].material_id || ''));
+  // Mirrors the server's check (src/routes/api/cam-groups/+server.js), which
+  // stays the real guard - this only spares the round trip. Depth/thickness
+  // is here because same material is not same stock: cam_materials says what
+  // the stock is, never how thick, so two jobs can match on machine/tool/
+  // material and still be cut for different sheets.
+  const groupDepthOf = (job) => Number(job.params?.stockThickness ?? job.params?.targetDepth ?? job.stats?.targetDepth ?? NaN);
+  const groupUnitsOf = (job) => String(job.params?.units || 'in').toLowerCase();
+  $: groupCompatibilityError = selectedGroupJobs.length > 1 && selectedGroupJobs.some((job) => {
+    const first = selectedGroupJobs[0];
+    if (String(job.machine_id || '') !== String(first.machine_id || '')) return true;
+    if (String(job.tool_id || '') !== String(first.tool_id || '')) return true;
+    if (String(job.material_id || '') !== String(first.material_id || '')) return true;
+    if (groupUnitsOf(job) !== groupUnitsOf(first)) return true;
+    const firstDepth = groupDepthOf(first);
+    const depth = groupDepthOf(job);
+    if (Number.isFinite(firstDepth) && (!Number.isFinite(depth) || Math.abs(depth - firstDepth) > 1e-6)) return true;
+    return false;
+  });
   $: groupToolDiameter = Number(selectedGroupJobs[0]?.cam_tools?.diameter || selectedGroupJobs[0]?.params?.toolDiameter || 0);
   $: groupClearance = groupToolDiameter > 0 ? minimumPartClearance(groupToolDiameter, Number(groupTolerance) || 0) : null;
   $: jobCreators = [...new Map(jobs.filter((j) => j.requester).map((j) => [j.requester.id, j.requester])).values()]
@@ -309,7 +326,7 @@
 
   async function createGroup() {
     if (selectedGroupJobs.length < 2) { toastActions.show('Select at least two completed router jobs'); return; }
-    if (groupCompatibilityError) { toastActions.show('Selected jobs must share a machine, tool, and material'); return; }
+    if (groupCompatibilityError) { toastActions.show('Selected jobs must share a machine, tool, material, units, and cut depth'); return; }
     creatingGroup = true;
     try {
       const { data: sessionData } = await supabase.auth.getSession();
