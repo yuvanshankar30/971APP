@@ -60,6 +60,20 @@ export function parseToolpath3D(gcode, { chordTolerance = DEFAULT_CHORD_TOLERANC
   let cur = { x: null, y: null, z: null, a: 0 };
   let motion = null; // 0 rapid, 1 feed, 2 arc CW, 3 arc CCW
 
+  // Modal feed/spindle state, carried onto every move so a consumer can
+  // work out how long the program actually takes (see estimateMachiningTime).
+  // routing.js/tubestock.js run G94 (feed per minute); turning.js runs G95
+  // (feed per REVOLUTION) under G96 constant surface speed, where the RPM -
+  // and therefore the real feed per minute - changes with the diameter being
+  // cut. Tracking both modes here is what lets one estimator serve both.
+  let feed = null;
+  let feedPerRev = false;
+  let spindleRpm = null;
+  let surfaceSpeed = null; // G96 S, in SFM (this app is always G20/inch)
+  let maxRpm = null;       // G50 S clamp
+  let dwellSeconds = 0;
+  let pauseCount = 0;
+
   // An axis never commanded stays at 0, the way a machine sits at its origin
   // until told otherwise. This matters for turning, which uses X/Z and never
   // mentions Y - gating on "we know X and Y" would emit nothing at all for a
@@ -71,12 +85,28 @@ export function parseToolpath3D(gcode, { chordTolerance = DEFAULT_CHORD_TOLERANC
   // a tube-stock consumer can place it on the right wall (routing/turning
   // never command A, so this is always 0 for them - see
   // projectTubestockToolpath, the only reader that cares).
+  // Under G96 the spindle holds a constant surface speed, so RPM is a
+  // function of the diameter being cut right now - resolved per move here,
+  // while X is still the raw diameter word (projectTurningToolpath later
+  // rewrites the axes, at which point the diameter is no longer recoverable).
+  const rpmForMove = (rawFrom, rawTo) => {
+    if (!(surfaceSpeed > 0)) return spindleRpm;
+    const diameter = Math.abs(((rawFrom.x ?? 0) + (rawTo.x ?? 0)) / 2);
+    if (!(diameter > 0)) return maxRpm;
+    const rpm = (surfaceSpeed * 12) / (Math.PI * diameter); // SFM -> RPM, inch
+    return maxRpm > 0 ? Math.min(rpm, maxRpm) : rpm;
+  };
+
   const push = (rawFrom, rawTo, kind, angleDeg) => {
     const from = at(rawFrom);
     const to = at(rawTo);
     const length = Math.hypot(to.x - from.x, to.y - from.y, to.z - from.z);
     if (!(length > 0)) return; // a repeated coordinate is not a move
-    moves.push({ from, to, kind, toolIndex, length, startDistance: totalDistance, angleDeg: angleDeg ?? 0 });
+    moves.push({
+      from, to, kind, toolIndex, length, startDistance: totalDistance,
+      angleDeg: angleDeg ?? 0,
+      feed, feedPerRev, rpm: rpmForMove(rawFrom, rawTo)
+    });
     totalDistance += length;
   };
 
@@ -99,6 +129,37 @@ export function parseToolpath3D(gcode, { chordTolerance = DEFAULT_CHORD_TOLERANC
 
     if (/\bG9\s*0\b|\bG90\b/.test(line)) incremental = false;
     if (/\bG91\b/.test(line)) incremental = true;
+    if (/\bG94\b/.test(line)) feedPerRev = false;
+    if (/\bG95\b/.test(line)) feedPerRev = true;
+    if (/\bM0?0\b|\bM0?1\b/.test(line)) pauseCount += 1;
+
+    const sWord = num(line.match(/S(-?[\d.]+)/));
+    if (/\bG50\b/.test(line)) {
+      // G50 S is a max-RPM clamp for constant surface speed, not a commanded
+      // spindle speed - reading it as one would peg every G96 move at the
+      // clamp instead of the diameter-dependent RPM the machine really runs.
+      if (sWord !== null) maxRpm = sWord;
+    } else if (/\bG96\b/.test(line)) {
+      surfaceSpeed = sWord;
+    } else if (/\bG97\b/.test(line)) {
+      spindleRpm = sWord;
+      surfaceSpeed = null;
+    } else if (sWord !== null) {
+      spindleRpm = sWord;
+    }
+
+    const fWord = num(line.match(/F(-?[\d.]+)/));
+    if (fWord !== null && fWord > 0) feed = fWord;
+
+    // G04 is a dwell, not motion: its P (linuxcnc) or X (wincnc) word is a
+    // TIME IN SECONDS, not a coordinate. Falling through to the axis-word
+    // extraction below read `G04 X2.0` as a move to X=2.0 - a phantom rapid
+    // that also left the machine position wrong for every move after it.
+    if (/\bG0?4\b/.test(line)) {
+      const seconds = num(line.match(/[PX](-?[\d.]+)/));
+      if (seconds > 0) dwellSeconds += seconds;
+      continue;
+    }
 
     const motionMatch = line.match(/G0?([0123])\b/);
     if (motionMatch) motion = Number(motionMatch[1]);
@@ -158,7 +219,7 @@ export function parseToolpath3D(gcode, { chordTolerance = DEFAULT_CHORD_TOLERANC
     cur = next;
   }
 
-  return { moves, toolChangeIndices, totalDistance };
+  return { moves, toolChangeIndices, totalDistance, dwellSeconds, pauseCount };
 }
 
 /**
@@ -959,4 +1020,76 @@ export function matchTubestockHolesToMoves(walls, rawMoves) {
     }
   }
   return result;
+}
+
+/**
+ * Estimates how long a program actually takes to run.
+ *
+ * Time per move is distance / feed rate, which needs the feed mode the
+ * program is running in - and the two generators here differ:
+ *   - routing.js / tubestock.js emit G94, feed per MINUTE, so the F word is
+ *     already in/min.
+ *   - turning.js emits G95, feed per REVOLUTION, under G96 constant surface
+ *     speed - so the real in/min is F x RPM, and RPM itself changes with the
+ *     diameter being cut. parseToolpath3D resolves that per move.
+ *
+ * Rapids are timed at the machine's rapid rate rather than the cutting feed,
+ * which is the difference between a plausible number and a wildly
+ * pessimistic one on a program full of retracts.
+ *
+ * Deliberately excluded from the total: M00/M01 tool-change and setup
+ * pauses, which wait on a human and have no defensible duration. They are
+ * returned as a count so a caller can say "plus 3 tool changes" rather than
+ * quietly inventing seconds for them.
+ *
+ * Moves whose feed cannot be determined are counted in `unknownFeedMoves`
+ * rather than guessed at, so a caller can tell a real estimate from a
+ * partial one.
+ *
+ * @param {Array} moves from parseToolpath3D (or projectTurningToolpath,
+ *   which carries the feed/rpm fields through)
+ * @param {object} [options]
+ * @param {number} [options.rapidRate=200] machine rapid traverse, in/min. A
+ *   real figure for a mid-size CNC router; a lathe or a fast gantry differs,
+ *   so pass the machine's own number where it is known.
+ * @param {number} [options.dwellSeconds=0] from parseToolpath3D
+ * @param {number} [options.pauseCount=0] from parseToolpath3D
+ */
+export function estimateMachiningTime(moves, { rapidRate = 200, dwellSeconds = 0, pauseCount = 0 } = {}) {
+  let cuttingSeconds = 0;
+  let rapidSeconds = 0;
+  let unknownFeedMoves = 0;
+
+  for (const move of moves || []) {
+    if (!(move.length > 0)) continue;
+    if (move.kind === 'rapid') {
+      if (rapidRate > 0) rapidSeconds += (move.length / rapidRate) * 60;
+      continue;
+    }
+    const inchesPerMinute = move.feedPerRev ? move.feed * move.rpm : move.feed;
+    if (!(inchesPerMinute > 0)) { unknownFeedMoves += 1; continue; }
+    cuttingSeconds += (move.length / inchesPerMinute) * 60;
+  }
+
+  const dwell = dwellSeconds > 0 ? dwellSeconds : 0;
+  return {
+    cuttingSeconds,
+    rapidSeconds,
+    dwellSeconds: dwell,
+    totalSeconds: cuttingSeconds + rapidSeconds + dwell,
+    pauseCount,
+    unknownFeedMoves
+  };
+}
+
+/** '4m 12s' / '1h 03m' / '48s' - a duration a machinist can read at a glance. */
+export function formatMachiningTime(seconds) {
+  if (!(seconds > 0)) return '—';
+  const total = Math.round(seconds);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  if (h > 0) return `${h}h ${String(m).padStart(2, '0')}m`;
+  if (m > 0) return `${m}m ${String(s).padStart(2, '0')}s`;
+  return `${s}s`;
 }

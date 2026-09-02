@@ -38,6 +38,8 @@
     CAM_GCODE_FORMAT
   } from '$autocam/camJobs.js';
   import { tubestockFaceFileName, tubestockFaceLabel } from '$autocam/tubestock.js';
+  import stockData from '$lib/stock.json';
+  import { buildStockMaterialIndex, materialIdForStockAssignment as resolveMaterialIdForStockAssignment } from '$autocam/stockMaterial.js';
   import { Cpu, Upload, Package, Settings, Download, AlertTriangle, X, Link as LinkIcon, Plus, Wrench, Layers, CheckCircle2, Loader2, Search, Filter, Box, Route, ExternalLink, Copy } from 'lucide-svelte';
 
   let user = null;
@@ -131,6 +133,9 @@
   let selectedPartIds = []; // batchMode only - queue one job per checked part, same material/tool/machine/params
   let batchProgress = null; // { index, total, partName } while a batch is running
   let selectedMaterialId = '';
+  // Set once the user picks a material by hand, so the part-linked
+  // carry-over below never overwrites a deliberate choice.
+  let materialChosenByHand = false;
   let selectedToolId = '';
   let selectedMachineId = '';
   let submitting = false;
@@ -303,7 +308,9 @@
     try {
       const { data, error } = await supabase
         .from('parts')
-        .select('id, name, project_id, workflow, status, created_at, frc_team, file_name, file_url')
+        // stock_assignment is what the request recorded the part as being
+        // made of - it's what carries the material into the job below.
+        .select('id, name, project_id, workflow, status, created_at, frc_team, file_name, file_url, stock_assignment')
         .order('created_at', { ascending: false })
         .limit(500);
       eligibleParts = error ? [] : (data || []);
@@ -325,6 +332,7 @@
     selectedPartIds = [];
     batchProgress = null;
     selectedMaterialId = '';
+    materialChosenByHand = false;
     selectedToolId = '';
     selectedMachineId = '';
     turningParams = emptyTurningParams();
@@ -377,6 +385,29 @@
     const defaults = material?.default_params?.[editingJob?.operation_type];
     if (!defaults) return;
     editParams = { ...editParams, ...defaults };
+  }
+
+  // A manufacturing request already records the real stock the part gets
+  // cut from - parts.stock_assignment holds stock.json's own `description`
+  // string ('1/8" Aluminum Sheet', '1/4" SRPP'). AutoCAM stores material
+  // as a cam_materials row instead, so a job created from a linked part
+  // used to start with no material at all - and none of that material's
+  // feeds/speeds defaults - even though the request that spawned it
+  // already recorded what the part is made of. See autocam/stockMaterial.js
+  // for how the two naming conventions are bridged.
+  const stockMaterialIndex = buildStockMaterialIndex(stockData);
+  const materialIdForStockAssignment = (stockAssignment) =>
+    resolveMaterialIdForStockAssignment(stockMaterialIndex, materials, stockAssignment, stockData);
+
+  // Carry the picked part's own recorded stock material into the job -
+  // but never over a material the user set by hand.
+  $: if (newJobSource === 'part' && !batchMode && selectedPartId && materials.length && !materialChosenByHand) {
+    const pickedPart = eligibleParts.find((p) => String(p.id) === String(selectedPartId));
+    const carried = pickedPart ? materialIdForStockAssignment(pickedPart.stock_assignment) : '';
+    if (carried && String(carried) !== String(selectedMaterialId)) {
+      selectedMaterialId = carried;
+      applyMaterialDefaults(carried);
+    }
   }
 
   // Selecting a machine profile pulls in its saved defaults so settings
@@ -461,6 +492,11 @@
         batchProgress = { index: 0, total: parts.length, partName: parts[0].name };
         const results = await queueCamJobsForParts(parts, {
           ...baseOptions,
+          // Each part carries its own recorded stock material where it has
+          // one; the form's choice is the fallback for the rest.
+          materialIdForPart: materialChosenByHand
+            ? null
+            : (part) => materialIdForStockAssignment(part.stock_assignment),
           onPartStart: (part, i, total) => { batchProgress = { index: i, total, partName: part.name }; },
           onProgress: patchJobInList,
           onQueued: () => loadJobs() // live-refresh the list as each part lands, same as the single-job path
@@ -708,7 +744,7 @@
     return 'status-running';
   }
 
-  const MACHINE_TYPE_LABEL = { turning: 'Lathe', routing: 'Router', milling: 'Mill', tubestock: 'Router (manual flip)' };
+  const MACHINE_TYPE_LABEL = { turning: 'Lathe', routing: 'Router', milling: 'Mill', tubestock: 'Router' };
   function machineTypeLabel(operationType) {
     return MACHINE_TYPE_LABEL[operationType] || operationType || '—';
   }
@@ -1355,7 +1391,7 @@
         <div class="form-row">
           <div class="form-group">
             <label class="form-label" for="job-material">Material</label>
-            <select id="job-material" class="form-select" bind:value={selectedMaterialId} on:change={() => applyMaterialDefaults(selectedMaterialId)}>
+            <select id="job-material" class="form-select" bind:value={selectedMaterialId} on:change={() => { materialChosenByHand = true; applyMaterialDefaults(selectedMaterialId); }}>
               <option value="">Unspecified</option>
               {#each materials.filter((m) => m.enabled) as m}
                 <option value={m.id}>{m.name}</option>
@@ -1560,8 +1596,11 @@
       <div class="modal-body">
         {#if editingJob.operation_type === 'routing' || editingJob.operation_type === 'turning'}
           <div class="toolpath-view-tabs" role="tablist" aria-label="Toolpath view">
-            <button type="button" role="tab" aria-selected={toolpathView === '2d'} class:active={toolpathView === '2d'} on:click={() => (toolpathView = '2d')}>2D Preview</button>
+            <!-- 3D first: it's the default view and the one people actually
+                 read a toolpath in, so it leads the tab strip here the same
+                 way it already does on the manufacture page's own dialog. -->
             <button type="button" role="tab" aria-selected={toolpathView === '3d'} class:active={toolpathView === '3d'} on:click={() => open3DToolpathPreview(editingJob, toolpathPreviewParams || editingJob.params)}>3D Toolpath</button>
+            <button type="button" role="tab" aria-selected={toolpathView === '2d'} class:active={toolpathView === '2d'} on:click={() => (toolpathView = '2d')}>2D Preview</button>
           </div>
         {/if}
         {#if toolpathView === '3d' && (editingJob.operation_type === 'routing' || editingJob.operation_type === 'turning' || editingJob.operation_type === 'tubestock')}
@@ -1663,7 +1702,7 @@
           <div class="source-toggle" id="mp-operation">
             <button class="btn btn-sm" class:btn-primary={machineForm.operation_type === 'turning'} class:btn-secondary={machineForm.operation_type !== 'turning'} on:click={() => setMachineFormOperation('turning')}>Turning (Lathe)</button>
             <button class="btn btn-sm" class:btn-primary={machineForm.operation_type === 'routing'} class:btn-secondary={machineForm.operation_type !== 'routing'} on:click={() => setMachineFormOperation('routing')}>Routering (Router)</button>
-            <button class="btn btn-sm" class:btn-primary={machineForm.operation_type === 'tubestock'} class:btn-secondary={machineForm.operation_type !== 'tubestock'} on:click={() => setMachineFormOperation('tubestock')}>Tube Stock (Router, manual flip)</button>
+            <button class="btn btn-sm" class:btn-primary={machineForm.operation_type === 'tubestock'} class:btn-secondary={machineForm.operation_type !== 'tubestock'} on:click={() => setMachineFormOperation('tubestock')}>Tube Stock (Router)</button>
           </div>
         </div>
 
@@ -2042,19 +2081,37 @@
   .autocam-jobs-table {
     table-layout: fixed;
   }
-  .autocam-jobs-table th:nth-child(1) { width: 12%; }
-  .autocam-jobs-table th:nth-child(2) { width: 6%; }
-  .autocam-jobs-table th:nth-child(3) { width: 7%; }
-  .autocam-jobs-table th:nth-child(4) { width: 5%; }
-  .autocam-jobs-table th:nth-child(5) { width: 6%; }
-  .autocam-jobs-table th:nth-child(6) { width: 6%; }
-  .autocam-jobs-table th:nth-child(7) { width: 7%; }
-  .autocam-jobs-table th:nth-child(8) { width: 9%; }
+  /* Output was 34% - far wider than its own button row needs, which left a
+     big empty gap on the right while every content column was squeezed
+     hard enough to wrap. Rebalanced so Tool ("UNC Router 0.1575 in Flat
+     End Mill") and Created ("Aug 31, 2026, 11:36 PM PT") lay out across
+     the row instead of stacking into a tall vertical column. */
+  .autocam-jobs-table th:nth-child(1) { width: 13%; }
+  .autocam-jobs-table th:nth-child(2) { width: 7%; }
+  .autocam-jobs-table th:nth-child(3) { width: 8%; }
+  .autocam-jobs-table th:nth-child(4) { width: 10%; }
+  .autocam-jobs-table th:nth-child(5) { width: 7%; }
+  .autocam-jobs-table th:nth-child(6) { width: 7%; }
+  .autocam-jobs-table th:nth-child(7) { width: 8%; }
+  .autocam-jobs-table th:nth-child(8) { width: 10%; }
   .autocam-jobs-table th:nth-child(9) { width: 8%; }
-  .autocam-jobs-table th:nth-child(10) { width: 34%; }
+  .autocam-jobs-table th:nth-child(10) { width: 22%; }
   .autocam-jobs-table td {
-    overflow-wrap: anywhere;
     vertical-align: top;
+  }
+  /* Only the job-name column holds long unbroken tokens
+     ("P006946_Rev_SLAPDIH") that genuinely have to break mid-word.
+     Applying overflow-wrap: anywhere to every cell broke short,
+     known-vocabulary labels too - "ROUTERING" came out as "ROUTER / ING"
+     and "TURNING" as "TURNIN / G". */
+  .autocam-jobs-table td:first-child {
+    overflow-wrap: anywhere;
+  }
+  /* Tags are fixed-height pills (--control-height): a wrapped second line
+     just gets clipped against that height. Same reasoning as
+     .status-badge's own white-space: nowrap in app.css. */
+  .autocam-jobs-table .tag {
+    white-space: nowrap;
   }
   .output-cell { min-width: 0; white-space: normal; }
   .output-actions {

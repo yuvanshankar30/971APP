@@ -20,6 +20,8 @@
     buildTurningStockRings,
     buildRoutingHeightmap,
     inferRoutingEdgeShift,
+    estimateMachiningTime,
+    formatMachiningTime,
     smoothRoutingHeightmap,
     findRoutingHeightmapWalls,
     projectTubestockToolpath,
@@ -40,6 +42,13 @@
   export let operationType = 'routing';
   /** Cutter diameter in program units for single-tool jobs. */
   export let toolDiameter = null;
+  /**
+   * Machine rapid traverse in in/min, used to time G00 moves for the run-time
+   * estimate. Defaults to a real figure for a mid-size CNC router; pass the
+   * machine's own number where it is known, since a lathe or a fast gantry
+   * differs and rapids are a large share of a hole-heavy program.
+   */
+  export let rapidRate = 200;
   /** Ordered routing tool sequence, when a job uses more than one cutter. */
   export let toolSequence = [];
   export let stockDiameter = null;
@@ -144,6 +153,26 @@
     : (isTubestock && crossSection ? projectTubestockToolpath(rawParsed, { crossSection }) : rawParsed);
   $: moves = parsed.moves;
   $: bounds = toolpathBounds3D(moves);
+
+  // How long this program actually takes on the machine. Excludes M00 tool
+  // change / setup pauses, which wait on a person - those are reported
+  // separately rather than given an invented duration.
+  $: machiningTime = estimateMachiningTime(moves, {
+    rapidRate,
+    dwellSeconds: rawParsed.dwellSeconds,
+    pauseCount: rawParsed.pauseCount
+  });
+  $: machiningTimeTitle = [
+    `Cutting ${formatMachiningTime(machiningTime.cuttingSeconds)}`,
+    `rapids ${formatMachiningTime(machiningTime.rapidSeconds)} at ${rapidRate} in/min`,
+    machiningTime.dwellSeconds > 0 ? `dwells ${formatMachiningTime(machiningTime.dwellSeconds)}` : null,
+    machiningTime.pauseCount > 0
+      ? `plus ${machiningTime.pauseCount} tool-change/setup pause${machiningTime.pauseCount === 1 ? '' : 's'} that wait on the operator (not counted)`
+      : null,
+    machiningTime.unknownFeedMoves > 0
+      ? `${machiningTime.unknownFeedMoves} move(s) had no feed rate and could not be timed`
+      : null
+  ].filter(Boolean).join(' - ');
   $: toolPosition = toolpathPositionAtDistance(moves, playbackDistance);
   $: activeToolIndex = toolPosition?.moveIndex === undefined ? 0 : (moves[toolPosition.moveIndex]?.toolIndex || 0);
   $: activeSequenceDiameter = Number(toolSequence?.[activeToolIndex]?.toolDiameter) || null;
@@ -191,12 +220,24 @@
   // ground truth (the STEP file, not the G-code replaying itself) is the
   // whole reason this needs the ghost part loaded first - comparing the
   // program's own output against itself would be tautological.
+  // Math.min(...array) passes every element as a separate function argument,
+  // which blows the call stack once the array is large. The routing heightmap
+  // is nx*ny cells - 230k of them at the current grid resolution - so
+  // spreading it threw RangeError and took the gouge check (a safety
+  // readout, not a cosmetic one) down with it. Same hazard for a long
+  // toolpath's coordinate list.
+  function minOf(values) {
+    let min = Infinity;
+    for (const value of values) if (value < min) min = value;
+    return min;
+  }
+
   const GOUGE_TOLERANCE = 0.01;
   $: turningGouge = isTurning && turningTargetProfile && stockOuterProfile
     ? detectTurningGouge(stockOuterProfile, turningTargetProfile)
     : false;
   $: routingGouge = !isTurning && routingTargetThickness != null && routingHeights
-    ? Math.min(...routingHeights) < -routingTargetThickness - GOUGE_TOLERANCE
+    ? minOf(routingHeights) < -routingTargetThickness - GOUGE_TOLERANCE
     : false;
   $: gougeDetected = turningGouge || routingGouge;
 
@@ -459,7 +500,11 @@
       if (!(Number(stockDiameter) > 0)) return;
 
       const initialOuterRadius = stockEnvelopeRadius(Number(stockDiameter), stockShape);
-      const rawAxialMin = Math.min(...moves.flatMap((move) => [move.from.x, move.to.x]));
+      let rawAxialMin = Infinity;
+      for (const move of moves) {
+        if (move.from.x < rawAxialMin) rawAxialMin = move.from.x;
+        if (move.to.x < rawAxialMin) rawAxialMin = move.to.x;
+      }
       const margin = initialOuterRadius * 0.08;
       // Z=0 is always the face (turning.js's own normalization convention) -
       // nothing physically exists past it. Clamping here (rather than at the
@@ -1152,6 +1197,12 @@
         <input type="range" min="0" max={parsed.totalDistance || 0} step="any" value={playbackDistance} on:input={(event) => seek(event.currentTarget.value)} disabled={!moves.length} />
         <output>{playbackDistance.toFixed(2)} / {parsed.totalDistance.toFixed(2)} in</output>
       </label>
+      <div class="run-time" title={machiningTimeTitle}>
+        <span>Est. run time</span>
+        <output>
+          {formatMachiningTime(machiningTime.totalSeconds)}{#if machiningTime.pauseCount > 0}<span class="run-time-note"> + {machiningTime.pauseCount} pause{machiningTime.pauseCount === 1 ? '' : 's'}</span>{/if}
+        </output>
+      </div>
       <label class="speed-control">
         <span>Simulation speed</span>
         <input class="speed-slider" type="range" min="0.25" max="10" step="0.25" value={playbackSpeed} style={`--speed-progress: ${speedProgress}%`} on:input={(event) => (playbackSpeed = Number(event.currentTarget.value))} disabled={!moves.length} />
@@ -1262,6 +1313,16 @@
   .scrub-control { display: grid; grid-template-columns: auto minmax(9rem, 1fr) auto; align-items: center; flex: 1 1 24rem; gap: 0.55rem; font-size: 0.82rem; color: var(--text-muted); }
   .scrub-control input { min-width: 0; width: 100%; }
   .scrub-control output { min-width: 7.7rem; color: var(--text); font-variant-numeric: tabular-nums; }
+  .run-time {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    white-space: nowrap;
+  }
+  .run-time span { font-size: 0.7rem; color: var(--text-muted); }
+  .run-time output { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .run-time-note { font-weight: 400; color: var(--text-muted); font-size: 0.75rem; }
+
   .speed-control { display: grid; grid-template-columns: auto minmax(7rem, 1fr) auto; align-items: center; flex: 0 1 18rem; gap: 0.55rem; font-size: 0.82rem; color: var(--text-muted); }
   .speed-control input { min-width: 7rem; width: 100%; }
   .speed-control .speed-slider {
