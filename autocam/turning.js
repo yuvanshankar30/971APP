@@ -531,6 +531,14 @@ export function generateTurningGcode(profile, params = {}) {
   if (spindleDwellSeconds > 0) lines.push(`G04 P${fmt(spindleDwellSeconds, 1)} (wait for spindle to reach speed)`);
   lines.push('G95 (feed per revolution)');
 
+  // Same notice as routing.js - the operator at the machine should know the
+  // numbers below are a generic fallback, not measured for this material.
+  if (params.materialFeedsUnverified) {
+    lines.push('(*** FEEDS AND SPEEDS ARE NOT VERIFIED FOR THIS MATERIAL ***)');
+    lines.push(`(No feeds/speeds are on record for ${params.materialName || 'the selected material'} in turning, so the)`);
+    lines.push('(generic defaults were used. Check surface speed and feed against this material first.)');
+  }
+
   if (setupMode === 'tailstock') {
     const length = Math.abs(profile[profile.length - 1].z - profile[0].z);
     lines.push('(*** TAILSTOCK REQUIRED ***)');

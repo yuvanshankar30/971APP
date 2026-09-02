@@ -127,7 +127,7 @@ export async function POST({ request, url }) {
   try {
     const { data: job, error: loadError } = await supabase
       .from('cam_jobs')
-      .select('*, cam_tools(nose_radius, diameter), cam_machines(name, controller, drive_output_folder_id)')
+      .select('*, cam_tools(nose_radius, diameter), cam_machines(name, controller, drive_output_folder_id), cam_materials(name, default_params)')
       .eq('id', jobId)
       .single();
 
@@ -186,6 +186,16 @@ export async function POST({ request, url }) {
     // Profile, same as gcode_extension. Turning has no dialect switch (it
     // always targets the Haas TL-1's Fanuc-dialect control - see turning.js).
     if (job.cam_machines?.controller && params.controller === undefined) params.controller = job.cam_machines.controller;
+
+    // A material with no default_params for THIS operation contributed
+    // nothing: applyMaterialDefaults is a silent no-op in that case, so the
+    // job kept the generator's own generic fallback, which is tuned for
+    // aluminum. The job form warns about it, but the person who fills in the
+    // form is not necessarily the person standing at the machine - so the
+    // generated program says it too, where it cannot be missed.
+    const materialDefaults = job.cam_materials?.default_params?.[job.operation_type];
+    params.materialName = job.cam_materials?.name || null;
+    params.materialFeedsUnverified = !!job.cam_materials && !(materialDefaults && Object.keys(materialDefaults).length > 0);
 
     let result;
     if (job.operation_type === 'turning') {
