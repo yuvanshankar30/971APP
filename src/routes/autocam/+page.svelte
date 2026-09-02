@@ -38,6 +38,8 @@
     CAM_GCODE_FORMAT
   } from '$autocam/camJobs.js';
   import { tubestockFaceFileName, tubestockFaceLabel } from '$autocam/tubestock.js';
+  import stockData from '$lib/stock.json';
+  import { buildStockMaterialIndex, materialIdForStockAssignment as resolveMaterialIdForStockAssignment } from '$autocam/stockMaterial.js';
   import { Cpu, Upload, Package, Settings, Download, AlertTriangle, X, Link as LinkIcon, Plus, Wrench, Layers, CheckCircle2, Loader2, Search, Filter, Box, Route, ExternalLink, Copy } from 'lucide-svelte';
 
   let user = null;
@@ -131,6 +133,9 @@
   let selectedPartIds = []; // batchMode only - queue one job per checked part, same material/tool/machine/params
   let batchProgress = null; // { index, total, partName } while a batch is running
   let selectedMaterialId = '';
+  // Set once the user picks a material by hand, so the part-linked
+  // carry-over below never overwrites a deliberate choice.
+  let materialChosenByHand = false;
   let selectedToolId = '';
   let selectedMachineId = '';
   let submitting = false;
@@ -303,7 +308,9 @@
     try {
       const { data, error } = await supabase
         .from('parts')
-        .select('id, name, project_id, workflow, status, created_at, frc_team, file_name, file_url')
+        // stock_assignment is what the request recorded the part as being
+        // made of - it's what carries the material into the job below.
+        .select('id, name, project_id, workflow, status, created_at, frc_team, file_name, file_url, stock_assignment')
         .order('created_at', { ascending: false })
         .limit(500);
       eligibleParts = error ? [] : (data || []);
@@ -325,6 +332,7 @@
     selectedPartIds = [];
     batchProgress = null;
     selectedMaterialId = '';
+    materialChosenByHand = false;
     selectedToolId = '';
     selectedMachineId = '';
     turningParams = emptyTurningParams();
@@ -377,6 +385,29 @@
     const defaults = material?.default_params?.[editingJob?.operation_type];
     if (!defaults) return;
     editParams = { ...editParams, ...defaults };
+  }
+
+  // A manufacturing request already records the real stock the part gets
+  // cut from - parts.stock_assignment holds stock.json's own `description`
+  // string ('1/8" Aluminum Sheet', '1/4" SRPP'). AutoCAM stores material
+  // as a cam_materials row instead, so a job created from a linked part
+  // used to start with no material at all - and none of that material's
+  // feeds/speeds defaults - even though the request that spawned it
+  // already recorded what the part is made of. See autocam/stockMaterial.js
+  // for how the two naming conventions are bridged.
+  const stockMaterialIndex = buildStockMaterialIndex(stockData);
+  const materialIdForStockAssignment = (stockAssignment) =>
+    resolveMaterialIdForStockAssignment(stockMaterialIndex, materials, stockAssignment, stockData);
+
+  // Carry the picked part's own recorded stock material into the job -
+  // but never over a material the user set by hand.
+  $: if (newJobSource === 'part' && !batchMode && selectedPartId && materials.length && !materialChosenByHand) {
+    const pickedPart = eligibleParts.find((p) => String(p.id) === String(selectedPartId));
+    const carried = pickedPart ? materialIdForStockAssignment(pickedPart.stock_assignment) : '';
+    if (carried && String(carried) !== String(selectedMaterialId)) {
+      selectedMaterialId = carried;
+      applyMaterialDefaults(carried);
+    }
   }
 
   // Selecting a machine profile pulls in its saved defaults so settings
@@ -461,6 +492,11 @@
         batchProgress = { index: 0, total: parts.length, partName: parts[0].name };
         const results = await queueCamJobsForParts(parts, {
           ...baseOptions,
+          // Each part carries its own recorded stock material where it has
+          // one; the form's choice is the fallback for the rest.
+          materialIdForPart: materialChosenByHand
+            ? null
+            : (part) => materialIdForStockAssignment(part.stock_assignment),
           onPartStart: (part, i, total) => { batchProgress = { index: i, total, partName: part.name }; },
           onProgress: patchJobInList,
           onQueued: () => loadJobs() // live-refresh the list as each part lands, same as the single-job path
@@ -1355,7 +1391,7 @@
         <div class="form-row">
           <div class="form-group">
             <label class="form-label" for="job-material">Material</label>
-            <select id="job-material" class="form-select" bind:value={selectedMaterialId} on:change={() => applyMaterialDefaults(selectedMaterialId)}>
+            <select id="job-material" class="form-select" bind:value={selectedMaterialId} on:change={() => { materialChosenByHand = true; applyMaterialDefaults(selectedMaterialId); }}>
               <option value="">Unspecified</option>
               {#each materials.filter((m) => m.enabled) as m}
                 <option value={m.id}>{m.name}</option>

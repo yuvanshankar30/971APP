@@ -229,7 +229,13 @@ export async function queueCamJobsForParts(parts, options = {}) {
   for (let i = 0; i < total; i += 1) {
     const part = parts[i];
     if (options.onPartStart) options.onPartStart(part, i, total);
-    const result = await queueCamJobForPart(part, options);
+    // A batch shares one material choice, except where the part itself
+    // already records what it's made of - see the /autocam page's
+    // materialIdForStockAssignment. Falls back to the batch-wide choice
+    // for any part whose stock doesn't resolve to a known material.
+    const result = await queueCamJobForPart(part, options.materialIdForPart
+      ? { ...options, materialId: options.materialIdForPart(part) || options.materialId }
+      : options);
     results.push({ part, success: result.success, job: result.job, error: result.error });
     if (options.onPartDone) options.onPartDone(part, i, total, result);
   }
