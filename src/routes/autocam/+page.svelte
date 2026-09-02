@@ -410,6 +410,23 @@
     }
   }
 
+  // A material with no default_params for the operation being run is not a
+  // neutral choice: applyMaterialDefaults is a silent no-op, so the job
+  // keeps the generator's own generic fallback (routing.js
+  // TOOL_STEP_DEFAULTS - feed 25 in/min, stepDown 0.03, spindle 14000,
+  // which are aluminum's numbers). Running plywood or soft plastic on those
+  // is slow and burns; running a harder material on them is how a bit
+  // breaks. Say so rather than letting it pass unnoticed.
+  function materialWithoutFeeds(materialId, operation) {
+    if (!materialId || !operation) return null;
+    const material = materials.find((m) => String(m.id) === String(materialId));
+    if (!material) return null;
+    const defaults = material.default_params?.[operation];
+    return defaults && Object.keys(defaults).length > 0 ? null : material;
+  }
+  $: newJobMaterialWithoutFeeds = materialWithoutFeeds(selectedMaterialId, newJobOperation);
+  $: editMaterialWithoutFeeds = materialWithoutFeeds(editMaterialId, editingJob?.operation_type);
+
   // Selecting a machine profile pulls in its saved defaults so settings
   // don't have to be re-entered every time - the whole point of profiles.
   function applyMachineDefaults(machineId) {
@@ -1397,7 +1414,14 @@
                 <option value={m.id}>{m.name}</option>
               {/each}
             </select>
-            <p class="text-muted">Fills in conservative starting feeds/speeds for this material below - still yours to tune.</p>
+            {#if newJobMaterialWithoutFeeds}
+              <p class="cam-form-warning">
+                <AlertTriangle size={14} />
+                No verified feeds/speeds for {newJobMaterialWithoutFeeds.name} in {operationLabel(newJobOperation).toLowerCase()} - the generic defaults below were kept, and they are tuned for aluminum. Check feed rate, step-down and spindle speed before running this on material.
+              </p>
+            {:else}
+              <p class="text-muted">Fills in conservative starting feeds/speeds for this material below - still yours to tune.</p>
+            {/if}
           </div>
           <div class="form-group">
             <label class="form-label" for="job-machine">Machine Profile</label>
@@ -2073,6 +2097,16 @@
     gap: 0.5rem;
     flex-wrap: wrap;
     margin-top: 0.4rem;
+  }
+
+  .cam-form-warning {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.4rem;
+    margin: 0.35rem 0 0;
+    font-size: 0.8rem;
+    line-height: 1.35;
+    color: var(--status-risk-text, #92400e);
   }
 
   .autocam-jobs-container {
