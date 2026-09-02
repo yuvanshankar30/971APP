@@ -708,7 +708,7 @@
     return 'status-running';
   }
 
-  const MACHINE_TYPE_LABEL = { turning: 'Lathe', routing: 'Router', milling: 'Mill', tubestock: 'Router (manual flip)' };
+  const MACHINE_TYPE_LABEL = { turning: 'Lathe', routing: 'Router', milling: 'Mill', tubestock: 'Router' };
   function machineTypeLabel(operationType) {
     return MACHINE_TYPE_LABEL[operationType] || operationType || '—';
   }
@@ -1663,7 +1663,7 @@
           <div class="source-toggle" id="mp-operation">
             <button class="btn btn-sm" class:btn-primary={machineForm.operation_type === 'turning'} class:btn-secondary={machineForm.operation_type !== 'turning'} on:click={() => setMachineFormOperation('turning')}>Turning (Lathe)</button>
             <button class="btn btn-sm" class:btn-primary={machineForm.operation_type === 'routing'} class:btn-secondary={machineForm.operation_type !== 'routing'} on:click={() => setMachineFormOperation('routing')}>Routering (Router)</button>
-            <button class="btn btn-sm" class:btn-primary={machineForm.operation_type === 'tubestock'} class:btn-secondary={machineForm.operation_type !== 'tubestock'} on:click={() => setMachineFormOperation('tubestock')}>Tube Stock (Router, manual flip)</button>
+            <button class="btn btn-sm" class:btn-primary={machineForm.operation_type === 'tubestock'} class:btn-secondary={machineForm.operation_type !== 'tubestock'} on:click={() => setMachineFormOperation('tubestock')}>Tube Stock (Router)</button>
           </div>
         </div>
 
@@ -2042,19 +2042,37 @@
   .autocam-jobs-table {
     table-layout: fixed;
   }
-  .autocam-jobs-table th:nth-child(1) { width: 12%; }
-  .autocam-jobs-table th:nth-child(2) { width: 6%; }
-  .autocam-jobs-table th:nth-child(3) { width: 7%; }
-  .autocam-jobs-table th:nth-child(4) { width: 5%; }
-  .autocam-jobs-table th:nth-child(5) { width: 6%; }
-  .autocam-jobs-table th:nth-child(6) { width: 6%; }
-  .autocam-jobs-table th:nth-child(7) { width: 7%; }
-  .autocam-jobs-table th:nth-child(8) { width: 9%; }
+  /* Output was 34% - far wider than its own button row needs, which left a
+     big empty gap on the right while every content column was squeezed
+     hard enough to wrap. Rebalanced so Tool ("UNC Router 0.1575 in Flat
+     End Mill") and Created ("Aug 31, 2026, 11:36 PM PT") lay out across
+     the row instead of stacking into a tall vertical column. */
+  .autocam-jobs-table th:nth-child(1) { width: 13%; }
+  .autocam-jobs-table th:nth-child(2) { width: 7%; }
+  .autocam-jobs-table th:nth-child(3) { width: 8%; }
+  .autocam-jobs-table th:nth-child(4) { width: 10%; }
+  .autocam-jobs-table th:nth-child(5) { width: 7%; }
+  .autocam-jobs-table th:nth-child(6) { width: 7%; }
+  .autocam-jobs-table th:nth-child(7) { width: 8%; }
+  .autocam-jobs-table th:nth-child(8) { width: 10%; }
   .autocam-jobs-table th:nth-child(9) { width: 8%; }
-  .autocam-jobs-table th:nth-child(10) { width: 34%; }
+  .autocam-jobs-table th:nth-child(10) { width: 22%; }
   .autocam-jobs-table td {
-    overflow-wrap: anywhere;
     vertical-align: top;
+  }
+  /* Only the job-name column holds long unbroken tokens
+     ("P006946_Rev_SLAPDIH") that genuinely have to break mid-word.
+     Applying overflow-wrap: anywhere to every cell broke short,
+     known-vocabulary labels too - "ROUTERING" came out as "ROUTER / ING"
+     and "TURNING" as "TURNIN / G". */
+  .autocam-jobs-table td:first-child {
+    overflow-wrap: anywhere;
+  }
+  /* Tags are fixed-height pills (--control-height): a wrapped second line
+     just gets clipped against that height. Same reasoning as
+     .status-badge's own white-space: nowrap in app.css. */
+  .autocam-jobs-table .tag {
+    white-space: nowrap;
   }
   .output-cell { min-width: 0; white-space: normal; }
   .output-actions {
