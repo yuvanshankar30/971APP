@@ -7,6 +7,11 @@ import { generateRoutingGcode } from '$autocam/routing.js';
 import { generateTubestockGcode, tubestockFaceFileName } from '$autocam/tubestock.js';
 import { deliverJobToDrive } from '$autocam/drive_watcher.js';
 import stockData from '$lib/stock.json';
+
+// How far past the underside an auto-derived through cut reaches, so the
+// part actually separates. Matches routing.js's own allowance, which is what
+// its too-deep refusal already permits.
+const THROUGH_CUT_ALLOWANCE = 0.02;
 // Vite-built asset URL for occt-import-js's WASM binary - the same one
 // CadViewer.svelte already fetches successfully client-side. Fetching it
 // over HTTP (below) instead of reading it off disk sidesteps Vercel's
@@ -230,9 +235,20 @@ export async function POST({ request, url }) {
         routingParams.stockThickness = selectedSheet.thickness;
         // Through-cut the real stock, with enough break-through to actually
         // free the part, rather than stopping at the model's own thickness.
-        if (params.targetDepth === undefined) routingParams.targetDepth = selectedSheet.thickness + 0.02;
+        if (params.targetDepth === undefined) routingParams.targetDepth = selectedSheet.thickness + THROUGH_CUT_ALLOWANCE;
       } else if (params.targetDepth === undefined && thickness) {
-        routingParams.targetDepth = thickness;
+        // Same break-through allowance as the stock path above, for the same
+        // reason. Auto-derived depth means "cut this part out", and stopping
+        // exactly ON the underside does not reliably free it: sheets are not
+        // perfectly flat, spoilboards are not perfectly level, and Z-zero
+        // carries setup error. Measured on four real jobs, every one had its
+        // cut depth equal to the measured thickness to six decimal places -
+        // zero margin on all of them.
+        //
+        // Cutting a hair into the spoilboard is what a spoilboard is for. A
+        // depth entered by hand is left exactly as entered, since that is a
+        // deliberate number and may well be a pocket rather than a profile.
+        routingParams.targetDepth = thickness + THROUGH_CUT_ALLOWANCE;
       }
       await setProgress(supabase, jobId, 80, 'Generating routing G-code...');
       result = generateRoutingGcode(contours, routingParams);
