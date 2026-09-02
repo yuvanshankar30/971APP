@@ -1136,3 +1136,24 @@ describe('buildRoutingHeightmap - the cutter radius really does shape the stock'
     expect(differing / narrow.length).toBeGreaterThan(0.2);
   });
 });
+
+describe('estimateMachiningTime - rapid rate comes from the machine', () => {
+  const program = () => parseToolpath3D(gcode('G20', 'G90', 'G94', 'G00 X0 Y0 Z0', 'G01 X1 F60', 'G00 X101'));
+
+  it('times the same rapids differently for different machines', () => {
+    const { moves } = program();
+    const slow = estimateMachiningTime(moves, { rapidRate: 100 });
+    const fast = estimateMachiningTime(moves, { rapidRate: 400 });
+    expect(slow.rapidSeconds).toBeCloseTo(60, 6);   // 100in at 100in/min
+    expect(fast.rapidSeconds).toBeCloseTo(15, 6);   // 100in at 400in/min
+    // Only the rapids move - the cut is the machine-independent part.
+    expect(slow.cuttingSeconds).toBeCloseTo(fast.cuttingSeconds, 9);
+  });
+
+  it('still estimates when a machine has no measured rate', () => {
+    const { moves } = program();
+    const est = estimateMachiningTime(moves);
+    expect(est.rapidSeconds).toBeCloseTo(30, 6);    // the 200in/min fallback
+    expect(est.totalSeconds).toBeGreaterThan(0);
+  });
+});

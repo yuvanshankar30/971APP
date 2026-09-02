@@ -48,7 +48,7 @@
    * machine's own number where it is known, since a lathe or a fast gantry
    * differs and rapids are a large share of a hole-heavy program.
    */
-  export let rapidRate = 200;
+  export let rapidRate = null;
   /** Ordered routing tool sequence, when a job uses more than one cutter. */
   export let toolSequence = [];
   export let stockDiameter = null;
@@ -157,14 +157,20 @@
   // How long this program actually takes on the machine. Excludes M00 tool
   // change / setup pauses, which wait on a person - those are reported
   // separately rather than given an invented duration.
+  // A machine that has not had its rapid rate measured falls back to a
+  // conservative figure, and the tooltip says which of the two it used -
+  // an unconfigured machine should look unconfigured rather than quietly
+  // assumed.
+  $: rapidRateIsMeasured = Number(rapidRate) > 0;
+  $: effectiveRapidRate = rapidRateIsMeasured ? Number(rapidRate) : DEFAULT_RAPID_RATE;
   $: machiningTime = estimateMachiningTime(moves, {
-    rapidRate,
+    rapidRate: effectiveRapidRate,
     dwellSeconds: rawParsed.dwellSeconds,
     pauseCount: rawParsed.pauseCount
   });
   $: machiningTimeTitle = [
     `Cutting ${formatMachiningTime(machiningTime.cuttingSeconds)}`,
-    `rapids ${formatMachiningTime(machiningTime.rapidSeconds)} at ${rapidRate} in/min`,
+    `rapids ${formatMachiningTime(machiningTime.rapidSeconds)} at ${effectiveRapidRate} in/min${rapidRateIsMeasured ? ' (this machine)' : ' (assumed - no rapid rate set on this machine)'}`,
     machiningTime.dwellSeconds > 0 ? `dwells ${formatMachiningTime(machiningTime.dwellSeconds)}` : null,
     machiningTime.pauseCount > 0
       ? `plus ${machiningTime.pauseCount} tool-change/setup pause${machiningTime.pauseCount === 1 ? '' : 's'} that wait on the operator (not counted)`
