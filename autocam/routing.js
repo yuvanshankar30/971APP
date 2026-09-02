@@ -455,6 +455,11 @@ function pathLength(path) {
 // starting from 0 so in practice only the first zone ever needs it.
 function buildTabZones(perimeter, width, spacing, thickness) {
   if (perimeter <= 0) return [];
+  // A zero-width tab holds nothing. Without this, tabWidth: 0 still produced
+  // one [center, center] zone per tab and stats.tabZones reported them, so a
+  // part cut completely free was described as held by four tabs - and that
+  // count is exactly what a consumer would trust to say the part is secure.
+  if (!(width > 0)) return [];
   const count = recommendTabCount(perimeter, { spacing, thickness });
   const zones = [];
   for (let i = 0; i < count; i += 1) {
@@ -607,6 +612,9 @@ const DEPTH_EPSILON = 1e-6;
 // depth, not the whole original segment.
 function emitContourPass(lines, path, prevDepth, passDepth, targetDepth, tabZones, tabHeight, feedRate, plungeRate, rampDistance) {
   const isFinalPass = passDepth >= targetDepth - 1e-9;
+  // Tracks tab entry so the note above is emitted once per tab rather than
+  // once per sub-move inside it.
+  let wasInTab = false;
   const n = path.length; // path is closed: path[0] === path[n-1]
   const tabCutDepth = Math.max(0, targetDepth - tabHeight);
 
@@ -654,6 +662,12 @@ function emitContourPass(lines, path, prevDepth, passDepth, targetDepth, tabZone
       const cutDepth = inTab ? tabCutDepth : rampedDepthAt(cutDist);
       const inRamp = rampDistance > 0 && dist < rampDistance;
       const feed = (inRamp ? plungeRate : feedRate) * (atVertexB ? cornerScale : 1);
+      // Say where the part is held. Everything else in this program is
+      // commented for whoever is at the machine; the tabs - the only thing
+      // stopping the part lifting mid-cut - were not, so they could not be
+      // located by reading the file or checked against the material.
+      if (inTab && !wasInTab) lines.push(`(-- tab: holding ${fmt(tabHeight, 3)}" of material here --)`);
+      wasInTab = inTab;
       lines.push(`G01 X${fmt(point.x)} Y${fmt(point.y)} Z${fmt(-cutDepth)} F${fmt(feed, 5)}`);
       dist = cutDist;
     }

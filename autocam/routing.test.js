@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { parseToolpath3D } from './toolpathPreview.js';
 import { generateRoutingGcode, offsetPolygon, cornerFeedScale } from './routing.js';
 
 function square(cx, cy, size) {
@@ -1094,5 +1095,36 @@ describe('generateRoutingGcode - unverified material feeds', () => {
     });
     expect(gcode).toContain('FEEDS AND SPEEDS ARE NOT VERIFIED FOR THIS MATERIAL');
     expect(gcode).toContain('the selected material');
+  });
+});
+
+describe('generateRoutingGcode - tab reporting', () => {
+  const square = [{ points: [{ x: 0, y: 0 }, { x: 6, y: 0 }, { x: 6, y: 4 }, { x: 0, y: 4 }], isHole: false }];
+
+  it('reports no tabs when tabs are switched off', () => {
+    // A zero-width tab holds nothing, but each one still produced a
+    // [center, center] zone that stats counted - so a part cut completely
+    // free was described as held by four tabs, which is the one number a
+    // consumer would trust to say it is secure.
+    const { stats, gcode } = generateRoutingGcode(square, { toolDiameter: 0.25, targetDepth: 0.25, tabWidth: 0 });
+    expect(stats.tabZones).toBe(0);
+    expect(gcode).not.toContain('-- tab:');
+  });
+
+  it('leaves real material at each tab and says so', () => {
+    const { stats, gcode } = generateRoutingGcode(square, { toolDiameter: 0.25, targetDepth: 0.25, tabHeight: 0.06 });
+    expect(stats.tabZones).toBeGreaterThan(0);
+    // One note per tab, not one per sub-move inside it.
+    expect((gcode.match(/-- tab:/g) || []).length).toBe(stats.tabZones);
+    expect(gcode).toContain('holding 0.060" of material here');
+  });
+
+  it('actually holds the part at tab depth, not just in the comment', () => {
+    const { gcode } = generateRoutingGcode(square, { toolDiameter: 0.25, targetDepth: 0.25, tabHeight: 0.06 });
+    const { moves } = parseToolpath3D(gcode);
+    const deepest = Math.min(...moves.map((m) => Math.min(m.from.z, m.to.z)));
+    expect(deepest).toBeCloseTo(-0.25, 6);
+    // targetDepth - tabHeight: material left under the cutter at each tab.
+    expect(moves.some((m) => Math.abs(Math.min(m.from.z, m.to.z) - -0.19) < 1e-6)).toBe(true);
   });
 });
