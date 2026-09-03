@@ -85,11 +85,7 @@ browser confirmation or prompt popups.
   autonomous path also uploads as a rendered field-map image to that shared
   Google Drive folder using the existing service account; see
   `implementations/scouting-auto-path-drive-export.md` for setup.
-  data scouting, free-form notes,
-  an Event Analysis view in Data Scouting that consolidates submitted data
-  observations (including released vision observations), match reports, pit
-  profiles, notes, and ACE Team problem reports into coverage graphs and a
-  shareable Google Docs report for the signed-in scout,
+  free-form notes,
   cross-team data discovery and analysis (`discover/`), a consolidated
   team-view, and scouting-admin tooling with drag-and-drop team-to-scout
   assignment drafting and explicit publishing, plus form/config editing -
@@ -97,8 +93,10 @@ browser confirmation or prompt popups.
   The signed-in home dashboard balances direct links to Manufacturing,
   Purchasing, and Scouting, while keeping each scout's personal assignment
   queue available without filling the page with duplicate scouting tools.
-  The **Strategy** view (`/strategy`) replaces Data Scouting in Competition
-  navigation as the decision board: it combines the
+  The **Strategy** view (`/strategy`) leads the Competition folder as the
+  decision board, and replaced the Data Scouting page outright - that page is
+  gone, though `/datascout` remains as the endpoint that reads and writes
+  `scout_data_events`. Strategy combines the
   event's data observations, match reports, pit profiles, free-form notes,
   named autonomous routes, and open ACE issues into comparable team rows and
   focused team briefs without duplicating data entry.
@@ -196,10 +194,10 @@ browser confirmation or prompt popups.
   open-ended `500+` bucket, storing the selected label and parsed bounds for
   later analytics. It adds optional observed-role tags and five quick ratings while keeping every
   subjective input skippable; teleop and post-match prose areas are deliberately
-  large enough for real scout observations. The live
-  Data Scouting form deliberately omits shift toggles and subjective speed/
-  accuracy grading: scouts record timed robot actions, tap once per scored fuel,
-  choose the objective endgame result, and may add an optional note.
+  large enough for real scout observations. Timed robot actions, per-fuel
+  taps and the objective endgame result are recorded through Quick Scout
+  (`quickscout/`), which writes the same `scout_data_events` the removed
+  Data Scouting page did.
 - **Power Rankings** (`powerrankings/`): the last item in the Competition nav
   folder - its own page rather than a mode of the Pick List workspace, so it
   never gets confused with that page's comparison table. An event-relative
@@ -417,7 +415,7 @@ own docs are all together in one place instead of scattered across
   (`wx-svelte-gantt`), Slack-driven prompts/notifications
   (`src/lib/server/planner_notifications.js`, `971bot.js`), driven by a
   Supabase `pg_cron` job every 15 minutes.
-- **`strategy/`, `matchscout/`, `pitscout/`, `datascout/`, `notescout/`, `scouting-admin/`,
+- **`strategy/`, `matchscout/`, `pitscout/`, `notescout/`, `scouting-admin/`,
   `teamview/`, `discover/`, `powerrankings/`** - FRC competition scouting:
   pit scouting forms, match data scouting, notes, cross-team data
   discovery/analysis, the cross-source strategy board, and the local-scouting power rankings + persisted human

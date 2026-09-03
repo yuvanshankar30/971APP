@@ -25,7 +25,8 @@
 
   let mode = "scout"; // scout | review
 
-  // --- Match / team picker (duplicated from datascout - own small page,
+  // --- Match / team picker (originally duplicated from the Data Scouting
+  // page, which has since been removed - own small page,
   // not worth a shared lib for ~40 lines, matching notescout's convention) ---
   let matches = [];
   let teamsCurrentMatch = [];
