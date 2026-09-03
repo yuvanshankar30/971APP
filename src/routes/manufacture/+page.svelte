@@ -34,7 +34,7 @@
     isCamJobActive,
     WORKFLOW_OPERATION_TYPE
   } from '$autocam/camJobs.js';
-  import { tubestockFaceFileName, tubestockFaceLabel } from '$autocam/tubestock.js';
+  import { tubestockFaceFileName, tubestockFaceLabel, tubestockFaceGroupFileName, tubestockFaceGroupLabel } from '$autocam/tubestock.js';
 
   const LAST_SUBSYSTEM_STORAGE_KEY = '971hub:lastSubsystem';
   const QUICK_PRINT_STOCK_OPTIONS = stockData['3d-print'] || [];
@@ -703,11 +703,13 @@
   // writes these numbers on the tube. The stored value is still the fallback
   // for a record with no angle on it.
   function tubeFaceProgramLabel(faceProgram) {
+    if (faceProgram?.angleDegs?.length > 1) return tubestockFaceGroupLabel(faceProgram.angleDegs);
     if (Number.isFinite(faceProgram?.angleDeg)) return tubestockFaceLabel(faceProgram.angleDeg);
     return faceProgram?.label || tubestockFaceLabel(faceProgram?.angleDeg);
   }
 
   function tubeFaceProgramFileName(job, faceProgram) {
+    if (faceProgram?.angleDegs?.length > 1) return tubestockFaceGroupFileName(job?.gcode_file_name, faceProgram.angleDegs);
     if (Number.isFinite(faceProgram?.angleDeg)) return tubestockFaceFileName(job?.gcode_file_name, faceProgram.angleDeg);
     return faceProgram?.fileName || tubestockFaceFileName(job?.gcode_file_name, faceProgram?.angleDeg);
   }
@@ -2985,7 +2987,7 @@
             >
               <span>
                 <strong>{tubeFaceProgramLabel(faceProgram)}</strong>
-                <small>A{faceProgram.angleDeg} · {faceProgram.holeCount} hole{faceProgram.holeCount === 1 ? '' : 's'}</small>
+                <small>{faceProgram.holeCount} hole{faceProgram.holeCount === 1 ? '' : 's'}</small>
               </span>
               <span class="tube-face-program-file">{tubeFaceProgramFileName(tubeFaceFilesJob, faceProgram)}</span>
             </button>

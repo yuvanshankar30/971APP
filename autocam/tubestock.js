@@ -170,6 +170,42 @@ export function tubestockFaceFileName(gcodeFileName, angleDeg) {
 }
 
 /**
+ * Label/file name for a program that covers MORE THAN ONE physical face -
+ * two or more walls whose drilling turned out to be identical, so they
+ * share one file instead of two nearly-duplicate ones. See
+ * groupIdenticalFaces. "or" rather than "and": the operator runs this file
+ * once per face, on whichever one is fixtured, not both at once.
+ */
+// Ordered by clock number (3, 6, 9, 12), not by raw angleDeg (0, 90, 180,
+// 270) - the clock number is what the operator actually reads off the
+// tube, and "Side 12 or Side 6" reads backwards next to "Side 6 or Side
+// 12" even though both describe the identical pair of faces.
+function byClockAscending(angleDegs) {
+  return [...angleDegs].sort((a, b) => {
+    const clockA = tubestockFaceClock(a);
+    const clockB = tubestockFaceClock(b);
+    if (clockA === null || clockB === null) return a - b;
+    return clockA - clockB;
+  });
+}
+
+export function tubestockFaceGroupLabel(angleDegs) {
+  return byClockAscending(angleDegs).map((angle) => tubestockFaceLabel(angle)).join(' or ');
+}
+
+export function tubestockFaceGroupFileName(gcodeFileName, angleDegs) {
+  const source = String(gcodeFileName || 'tube-stock.ngc');
+  const extensionMatch = source.match(/(\.[a-z0-9]+)$/i);
+  const extension = extensionMatch?.[1] || '.ngc';
+  const base = extensionMatch ? source.slice(0, -extension.length) : source;
+  const parts = byClockAscending(angleDegs).map((angle) => {
+    const clock = tubestockFaceClock(angle);
+    return clock === null ? `a${String(normalizeTubestockFaceAngle(angle)).replace(/\./g, '_')}` : clock;
+  });
+  return `${base}-side-${parts.join('-')}${extension}`;
+}
+
+/**
  * Builds the cutoff toolpath from job params, or returns null when no
  * cutoff was asked for.
  *
@@ -238,6 +274,56 @@ function buildCutoffFeature(walls, params) {
 }
 
 /**
+ * Builds a millable contour for every non-round feature across every wall
+ * (extractTubeFeaturesFromMeshes' wall.profiles), or records why a specific
+ * one couldn't be milled.
+ *
+ * Never throws for one profile's own sake - the same "don't fail every
+ * real hole on the tube over one shape" reasoning that already governs
+ * extraction (see stepProfile.js's own history: a real 24.5" tube with 388
+ * real holes and 2 non-round witness marks used to lose all 388 to a throw
+ * over the 2). A tube with a real functional slot but no end mill selected
+ * for the job still drills every hole it has; the slot itself is reported
+ * as unmachined instead of blocking the rest of the tube.
+ *
+ * @param {Array} walls tubeFeatures.walls
+ * @param {Object} params - reads toolDiameter (the job's one selected end
+ *   mill - milling has no per-feature diameter concept the way drilling's
+ *   groupHolesByDiameter does, since a profile's own boundary is whatever
+ *   shape it is, not a size to match a bit to)
+ * @returns {{
+ *   millable: Array<{angleDeg: number, position: number, lateralOffset: number, path: Array<{x,y}>}>,
+ *   unmachined: Array<{angleDeg: number, position: number, lateralOffset: number, reason: string}>
+ * }}
+ */
+function buildMillableProfiles(walls, params) {
+  const toolDiameter = Number(params.toolDiameter);
+  const millable = [];
+  const unmachined = [];
+  for (const wall of walls) {
+    for (const profile of wall.profiles || []) {
+      const base = { angleDeg: wall.angleDeg, position: profile.position, lateralOffset: profile.lateralOffset };
+      if (!(toolDiameter > 0)) {
+        unmachined.push({ ...base, reason: 'no end mill selected for this job' });
+        continue;
+      }
+      try {
+        // Same cutter-compensation reuse as the cutoff line, and the same
+        // reason: offsetPolygon already refuses a tool too large for the
+        // shape ("Feature is too small for this tool"), so that judgment
+        // is made once, not duplicated here with a chance to disagree.
+        const path = offsetPolygon(profile.points, -toolDiameter / 2);
+        millable.push({ ...base, path });
+      } catch (error) {
+        unmachined.push({ ...base, reason: error.message });
+      }
+    }
+  }
+  millable.sort((a, b) => (a.angleDeg - b.angleDeg) || (a.position - b.position));
+  return { millable, unmachined };
+}
+
+/**
  * Groups every hole across every wall by drill diameter (largest first,
  * matching routing.js's multi-tool convention: primary/most-common tool
  * first, detail tools after), keeping each diameter's holes ordered by
@@ -271,27 +357,79 @@ function groupHolesByDiameter(walls) {
     }));
 }
 
-function wallsWithHolesByFace(walls, forceIncludeAngleDeg = null) {
-  const forced = forceIncludeAngleDeg === null ? null : normalizeTubestockFaceAngle(forceIncludeAngleDeg);
+function wallsWithHolesByFace(walls, forceIncludeAngleDegs = []) {
+  const forced = new Set(forceIncludeAngleDegs.map((angle) => normalizeTubestockFaceAngle(angle)));
   const faces = new Map();
   for (const wall of walls) {
     const angleDeg = normalizeTubestockFaceAngle(wall.angleDeg);
     // A wall with no holes normally gets no separately-runnable file - there
-    // is nothing to drill on it. The cutoff wall is the one exception: it
-    // can carry a cutoff line and nothing else, and that still needs its
-    // own file.
-    if (!wall.holes?.length && angleDeg !== forced) continue;
-    if (!faces.has(angleDeg)) faces.set(angleDeg, { holes: [], skippedFeatures: [] });
+    // is nothing to drill on it. The cutoff wall and any wall carrying a
+    // millable profile are the exceptions: either can put real machining
+    // on a wall with zero drilled holes, and that still needs its own file.
+    if (!wall.holes?.length && !forced.has(angleDeg)) continue;
+    if (!faces.has(angleDeg)) faces.set(angleDeg, { holes: [] });
     const bucket = faces.get(angleDeg);
     bucket.holes.push(...wall.holes);
-    bucket.skippedFeatures.push(...(wall.skippedFeatures || []));
   }
   return [...faces.entries()]
     .sort(([a], [b]) => a - b)
-    .map(([angleDeg, { holes, skippedFeatures }]) => ({ angleDeg, holes, skippedFeatures }));
+    .map(([angleDeg, { holes }]) => ({ angleDeg, holes }));
 }
 
-function generateProgram(walls, params, { faceAngleDeg = null, faceLabel = null, programNumber, cutoffFeature = null }) {
+/**
+ * Merges wallsWithHolesByFace's per-face buckets when two or more faces
+ * need the exact same program, so the operator gets one file to run on
+ * whichever face is up rather than two nearly-identical ones with
+ * different names for content that is actually identical.
+ *
+ * Deliberately narrow about what can merge: only the drilled holes are
+ * compared, and a face carrying the cutoff or any non-round feature is
+ * never a merge candidate. The cutoff is fixture-relative - correct on
+ * exactly the one wall it was computed for, never interchangeable with
+ * another face even if the hole pattern happened to match. A milled
+ * profile would need comparing full polygons rather than a hole list to
+ * merge safely, for a combination (two different walls both drilled
+ * identically AND carrying the same non-round shape) real jobs are
+ * unlikely to hit - excluded rather than half-supported.
+ *
+ * @param {Array<{angleDeg, holes}>} faces wallsWithHolesByFace's output
+ * @param {(angleDeg: number) => boolean} hasProfileActivity true when
+ *   that wall has a millable or unmachined profile - excludes it from
+ *   merging regardless of its hole content
+ * @param {number|null} cutoffAngleDeg the one wall the cutoff (if any) is
+ *   on - excludes it from merging
+ * @returns {Array<{angleDegs: number[], holes: Array}>} one entry per
+ *   distinct program, angleDegs length 1 in the common (nothing merged)
+ *   case
+ */
+function groupIdenticalFaces(faces, hasProfileActivity, cutoffAngleDeg) {
+  const cutoffAngle = cutoffAngleDeg == null ? null : normalizeTubestockFaceAngle(cutoffAngleDeg);
+  // Defaults lateralOffset to 0 the same way groupHolesByDiameter does -
+  // hand-built tubeFeatures that predate that field never set it.
+  const contentKey = (holes) => JSON.stringify(
+    [...holes]
+      .map((h) => [Number(h.position.toFixed(4)), Number((h.lateralOffset ?? 0).toFixed(4)), Number(h.diameter.toFixed(4))])
+      .sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2])
+  );
+
+  const groups = new Map(); // content key -> { angleDegs: [], holes }
+  const singles = [];
+  for (const face of faces) {
+    const isCutoffFace = cutoffAngle !== null && normalizeTubestockFaceAngle(face.angleDeg) === cutoffAngle;
+    if (isCutoffFace || hasProfileActivity(face.angleDeg) || !face.holes.length) {
+      singles.push({ angleDegs: [face.angleDeg], holes: face.holes });
+      continue;
+    }
+    const key = contentKey(face.holes);
+    if (!groups.has(key)) groups.set(key, { angleDegs: [], holes: face.holes });
+    groups.get(key).angleDegs.push(face.angleDeg);
+  }
+  return [...singles, ...groups.values()].sort(
+    (a, b) => Math.min(...a.angleDegs) - Math.min(...b.angleDegs)
+  );
+}
+
+function generateProgram(walls, params, { faceAngleDeg = null, faceLabel = null, programNumber, cutoffFeature = null, profileFeatures = null }) {
   const {
     holeDepth,
     safeZ = 0.25,
@@ -305,6 +443,14 @@ function generateProgram(walls, params, { faceAngleDeg = null, faceLabel = null,
   const groups = groupHolesByDiameter(walls);
   const totalHoles = walls.reduce((sum, wall) => sum + wall.holes.length, 0);
 
+  // Only the profile activity relevant to the wall(s) THIS program call
+  // actually covers - the combined program (faceAngleDeg === null) covers
+  // every wall, a per-face program covers exactly one, and each should
+  // only list/report what is really on it.
+  const coveredAngle = (angleDeg) => faceAngleDeg === null || normalizeTubestockFaceAngle(angleDeg) === normalizeTubestockFaceAngle(faceAngleDeg);
+  const millableProfiles = (profileFeatures?.millable || []).filter((p) => coveredAngle(p.angleDeg));
+  const unmachinedProfiles = (profileFeatures?.unmachined || []).filter((p) => coveredAngle(p.angleDeg));
+
   const lines = [...HEADER_WARNING, ''];
   // No parentheses in here: this goes inside a comment, and a comment ends
   // at the first ")" - see gcodeComments.js. The clock number is what the
@@ -317,8 +463,8 @@ function generateProgram(walls, params, { faceAngleDeg = null, faceLabel = null,
     ? '(*** TUBE STOCK: standard 3-axis router, NOT rotary - manual flip between faces ***)'
     : `(** TUBE STOCK ${faceDescription}: standard 3-axis router - fixture this face, verify Z=0, then run **)`);
   lines.push('(Verify the fixture centerline offset and Z=0 reference against the real machine)');
-  lines.push('(before running - see tubestock.js file header. Round holes only, each)');
-  lines.push('(drilled straight in from whichever wall it is on.)');
+  lines.push('(before running - see tubestock.js file header. Round holes are drilled)');
+  lines.push('(straight in; a non-round feature is milled as a contour - see TOOL PLAN.)');
   lines.push('%');
   lines.push(`O${programNumber} (AUTOCAM TUBE STOCK${faceDescription === null ? '' : ` ${faceDescription}`})`);
   if (isWinCNC) {
@@ -349,20 +495,23 @@ function generateProgram(walls, params, { faceAngleDeg = null, faceLabel = null,
   groups.forEach((group, index) => {
     lines.push(`(  ${index + 1}. ${fmt(group.diameter, 3)}" drill (T${index + 1}) - ${group.holes.length} hole${group.holes.length === 1 ? '' : 's'} )`);
   });
+  if (millableProfiles.length > 0) {
+    lines.push(`(  ${groups.length + 1}. ${fmt(Number(params.toolDiameter), 3)}" end mill - ${millableProfiles.length} milled feature${millableProfiles.length === 1 ? '' : 's'}, not round )`);
+  }
   if (cutoffFeature) {
-    lines.push(`(  ${groups.length + 1}. ${fmt(cutoffFeature.toolDiameter, 3)}" end mill - cutoff line, one pass through this wall )`);
+    lines.push(`(  ${groups.length + (millableProfiles.length > 0 ? 2 : 1)}. ${fmt(cutoffFeature.toolDiameter, 3)}" end mill - cutoff line, one pass through this wall )`);
   }
 
-  // A feature that wasn't round was skipped rather than drilled - see
-  // extractTubeFeaturesFromMeshes' skippedFeatures. Surfaced here, in the
-  // program itself, because the person running this file is not
-  // necessarily the person who queued it - same reasoning as the
-  // materialFeedsUnverified notice elsewhere in this app.
-  const skipped = walls.flatMap((wall) => (wall.skippedFeatures || []).map((feature) => ({ ...feature, angleDeg: wall.angleDeg })));
-  if (skipped.length > 0) {
-    lines.push(`(*** ${skipped.length} feature${skipped.length === 1 ? '' : 's'} on this tube ${skipped.length === 1 ? 'was' : 'were'} not round and NOT machined - check the CAD model before running ***)`);
-    for (const feature of skipped) {
-      lines.push(`(  SKIPPED: ${tubestockFaceLabel(feature.angleDeg)} near X${fmt(feature.position)} Y${fmt(feature.lateralOffset)}, roughly ${fmt(feature.meanRadius * 2, 2)}" across )`);
+  // A non-round feature that couldn't be milled - no tool selected for the
+  // job, or the tool selected is too large for it - is reported rather
+  // than silently dropped. Surfaced here, in the program itself, because
+  // the person running this file is not necessarily the person who queued
+  // it - same reasoning as the materialFeedsUnverified notice elsewhere in
+  // this app.
+  if (unmachinedProfiles.length > 0) {
+    lines.push(`(*** ${unmachinedProfiles.length} feature${unmachinedProfiles.length === 1 ? '' : 's'} on this tube ${unmachinedProfiles.length === 1 ? 'was' : 'were'} not round and could NOT be machined - check the CAD model before running ***)`);
+    for (const feature of unmachinedProfiles) {
+      lines.push(`(  NOT MACHINED: ${tubestockFaceLabel(feature.angleDeg)} near X${fmt(feature.position)} Y${fmt(feature.lateralOffset)} - ${feature.reason} )`);
     }
   }
 
@@ -411,13 +560,73 @@ function generateProgram(walls, params, { faceAngleDeg = null, faceLabel = null,
     }
   });
 
-  // The cutoff is its own pass, after every hole, rather than woven into
-  // groups.forEach above: it uses whatever end mill was chosen for it,
-  // never one of the drill diameters, and it belongs on exactly one wall
-  // regardless of how many tool groups touched that wall while drilling.
+  // True once anything has actually started cutting - drilling, milled
+  // profiles, or (further down) the cutoff. Distinct from groups.length:
+  // a tube with no round holes but a real profile to mill still needs its
+  // FIRST tool staged as "load and start the spindle," not as a "tool
+  // change" implying something was already running.
+  let hasStartedCutting = groups.length > 0;
+
+  // Milled features are their own pass, after every hole, rather than
+  // woven into groups.forEach above: they use whatever end mill was
+  // chosen for the job, never one of the drill diameters, and each one
+  // belongs on a specific wall regardless of how many tool groups touched
+  // that wall while drilling.
+  if (millableProfiles.length > 0) {
+    const profileToolLabel = `${fmt(Number(params.toolDiameter), 3)}" end mill`;
+    const featureWord = millableProfiles.length === 1 ? 'feature' : 'features';
+    if (!hasStartedCutting) {
+      lines.push(`(--- TOOL: ${profileToolLabel} (milled ${featureWord}) - load before starting ---)`);
+      lines.push(`S${spindleSpeed} M03 (spindle on)`);
+      if (spindleDwellSeconds > 0) lines.push(dwellLine(isWinCNC, spindleDwellSeconds, 'wait for spindle to reach speed'));
+    } else {
+      toolChanges += 1;
+      lines.push(`G00 Z${fmt(safeZ)} (retract clear before tool change)`);
+      lines.push('M05 (spindle off)');
+      lines.push(pauseLine(isWinCNC, `TOOL CHANGE: load ${profileToolLabel} for the milled ${featureWord}, then RE-TOUCH OFF Z0 before resuming - no automatic tool length compensation assumed`));
+      lines.push(`S${spindleSpeed} M03 (spindle back on)`);
+      if (spindleDwellSeconds > 0) lines.push(dwellLine(isWinCNC, spindleDwellSeconds, 'wait for spindle to reach speed'));
+    }
+    hasStartedCutting = true;
+
+    let profileAngle = null;
+    for (const profile of millableProfiles) {
+      if (profile.angleDeg !== profileAngle) {
+        // Same reasoning as the hole loop above: only the combined program
+        // can span more than one face within a single run, so only it
+        // needs to stop and prompt for a flip.
+        if (faceAngleDeg === null) {
+          lines.push(`G00 Z${fmt(safeZ)} (retract clear before flipping tube)`);
+          lines.push(`(FACE A${fmt(profile.angleDeg, 1)} - FLIP TUBE so ${tubestockFaceLabel(profile.angleDeg)} faces up, then RE-ZERO Z before resuming - the operator turns the tube by hand, there is no rotary axis on this machine)`);
+          lines.push(pauseLine(isWinCNC, `FLIP TUBE to ${tubestockFaceLabel(profile.angleDeg)} face for the milled feature, and RE-ZERO Z before resuming - no rotary axis on this machine`));
+        }
+        profileAngle = profile.angleDeg;
+      }
+      // One pass, straight in, same depth as a drilled hole through this
+      // same wall - through the near wall only, never the far one. A
+      // closed profile's own slug behaves exactly like a round hole's:
+      // it falls into the tube once freed, which is already accepted
+      // practice here since every drilled hole already does the same.
+      lines.push(`(--- MILLED FEATURE near X${fmt(profile.position)} Y${fmt(profile.lateralOffset)} - not round, cut as a contour rather than drilled ---)`);
+      const [start, ...rest] = profile.path;
+      lines.push(`G00 X${fmt(start.x)} Y${fmt(start.y)} (rapid to feature start)`);
+      lines.push(`G00 Z${fmt(safeZ)} (rapid to clearance above wall)`);
+      lines.push(`G01 Z${fmt(-holeDepth)} F${fmt(feedRate, 2)} (plunge)`);
+      for (const point of rest) {
+        lines.push(`G01 X${fmt(point.x)} Y${fmt(point.y)} F${fmt(feedRate, 2)} (feature contour)`);
+      }
+      lines.push(`G00 Z${fmt(safeZ)} (retract)`);
+    }
+  }
+
+  // The cutoff is its own pass, after every hole and every milled profile,
+  // rather than woven into groups.forEach above: it uses whatever end mill
+  // was chosen for it, never one of the drill diameters, and it belongs on
+  // exactly one wall regardless of how many tool groups touched that wall
+  // while drilling.
   if (cutoffFeature && (faceAngleDeg === null || normalizeTubestockFaceAngle(faceAngleDeg) === normalizeTubestockFaceAngle(cutoffFeature.angleDeg))) {
     const cutoffToolLabel = `${fmt(cutoffFeature.toolDiameter, 3)}" end mill`;
-    if (groups.length === 0) {
+    if (!hasStartedCutting) {
       lines.push(`(--- TOOL: ${cutoffToolLabel} (cutoff line) - load before starting ---)`);
       lines.push(`S${spindleSpeed} M03 (spindle on)`);
       if (spindleDwellSeconds > 0) lines.push(dwellLine(isWinCNC, spindleDwellSeconds, 'wait for spindle to reach speed'));
@@ -464,14 +673,16 @@ function generateProgram(walls, params, { faceAngleDeg = null, faceLabel = null,
   // whose own text contains a parenthesis used to close early and leave the
   // rest of its line as live code. See autocam/gcodeComments.js.
   const gcode = normalizeGcodeComments(lines.join('\n'), { dialect: isWinCNC ? 'wincnc' : 'linuxcnc' });
-  return { gcode, totalHoles, toolsUsed: groups.length + (cutoffFeature ? 1 : 0), toolChanges };
+  return { gcode, totalHoles, toolsUsed: groups.length + (millableProfiles.length > 0 ? 1 : 0) + (cutoffFeature ? 1 : 0), toolChanges };
 }
 
 /**
- * @param {{ tubeLength: number, walls: Array<{angleDeg, holes: Array<{position, lateralOffset, diameter}>, skippedFeatures?: Array}> }} tubeFeatures
+ * @param {{ tubeLength: number, walls: Array<{angleDeg, holes: Array<{position, lateralOffset, diameter}>, profiles?: Array<{position, lateralOffset, points}>}> }} tubeFeatures
  *   Shape matches extractTubeFeaturesFromMeshes' return value directly -
  *   tubeLength isn't actually used for toolpath generation (every hole
  *   already carries its own absolute position), only echoed into stats.
+ *   Each wall's profiles (non-round features) are milled as a contour when
+ *   params.toolDiameter fits them - see buildMillableProfiles.
  * @param {Object} params
  *   holeDepth (required, inches) - how deep to plunge past the wall's
  *     outer surface. No auto-detection from geometry (this generator has
@@ -553,18 +764,42 @@ export function generateTubestockGcode(tubeFeatures, params = {}) {
     }
   }
 
-  const combined = generateProgram(walls, params, { programNumber, cutoffFeature });
-  const facePrograms = wallsWithHolesByFace(walls, cutoffFeature?.angleDeg).map((wall, index) => {
-    const label = tubestockFaceLabel(wall.angleDeg);
-    const isCutoffFace = cutoffFeature && normalizeTubestockFaceAngle(wall.angleDeg) === normalizeTubestockFaceAngle(cutoffFeature.angleDeg);
+  const profileFeatures = buildMillableProfiles(walls, params);
+  const forceIncludeAngleDegs = [
+    cutoffFeature?.angleDeg,
+    ...profileFeatures.millable.map((p) => p.angleDeg),
+    ...profileFeatures.unmachined.map((p) => p.angleDeg)
+  ].filter((angle) => angle !== undefined);
+
+  const combined = generateProgram(walls, params, { programNumber, cutoffFeature, profileFeatures });
+
+  const profileAngles = new Set([
+    ...profileFeatures.millable.map((p) => normalizeTubestockFaceAngle(p.angleDeg)),
+    ...profileFeatures.unmachined.map((p) => normalizeTubestockFaceAngle(p.angleDeg))
+  ]);
+  const rawFaces = wallsWithHolesByFace(walls, forceIncludeAngleDegs);
+  const groupedFaces = groupIdenticalFaces(
+    rawFaces,
+    (angleDeg) => profileAngles.has(normalizeTubestockFaceAngle(angleDeg)),
+    cutoffFeature?.angleDeg
+  );
+
+  const facePrograms = groupedFaces.map((group, index) => {
+    const representativeAngle = group.angleDegs[0];
+    const isMerged = group.angleDegs.length > 1;
+    const label = isMerged ? tubestockFaceGroupLabel(group.angleDegs) : tubestockFaceLabel(representativeAngle);
+    const isCutoffFace = cutoffFeature && normalizeTubestockFaceAngle(representativeAngle) === normalizeTubestockFaceAngle(cutoffFeature.angleDeg);
+    const wall = { angleDeg: representativeAngle, holes: group.holes };
     const faceProgram = generateProgram([wall], params, {
-      faceAngleDeg: wall.angleDeg,
+      faceAngleDeg: representativeAngle,
       faceLabel: label,
       programNumber: Number(programNumber) + index,
-      cutoffFeature: isCutoffFace ? cutoffFeature : null
+      cutoffFeature: isCutoffFace ? cutoffFeature : null,
+      profileFeatures
     });
     return {
-      angleDeg: wall.angleDeg,
+      angleDeg: representativeAngle,
+      angleDegs: group.angleDegs,
       label,
       holeCount: faceProgram.totalHoles,
       hasCutoff: !!isCutoffFace,
@@ -572,13 +807,6 @@ export function generateTubestockGcode(tubeFeatures, params = {}) {
       gcode: faceProgram.gcode
     };
   });
-
-  // Flattened across every wall, with the wall attached to each entry, for
-  // a consumer that wants "what got skipped" without re-walking
-  // stats.walls itself. Empty rather than absent when nothing was skipped.
-  const skippedFeatures = walls.flatMap((wall) =>
-    (wall.skippedFeatures || []).map((feature) => ({ ...feature, angleDeg: wall.angleDeg }))
-  );
 
   return {
     gcode: combined.gcode,
@@ -595,7 +823,15 @@ export function generateTubestockGcode(tubeFeatures, params = {}) {
       totalHoles,
       toolsUsed: combined.toolsUsed,
       toolChanges: combined.toolChanges,
-      skippedFeatures,
+      // Real toolpaths, milled as a contour rather than drilled - not a
+      // report, an actual cut. See buildMillableProfiles.
+      milledProfiles: profileFeatures.millable,
+      // The opposite: detected, but nothing here could cut them (no tool
+      // selected, or the selected one doesn't fit). Renamed from the
+      // earlier skippedFeatures - that field meant "detected and always
+      // left alone"; this one means "attempted, and here is why it
+      // didn't happen," which is a meaningfully different claim.
+      unmachinedFeatures: profileFeatures.unmachined,
       cutoff: cutoffFeature
         ? { angleDeg: cutoffFeature.angleDeg, position: cutoffFeature.position, width: DEFAULT_CUTOFF_WIDTH, length: DEFAULT_CUTOFF_LENGTH }
         : null,

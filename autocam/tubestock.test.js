@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateTubestockGcode, tubestockFaceFileName, tubestockFaceLabel, tubestockFaceClock, holeDepthForWall, DEFAULT_CUTOFF_WIDTH, DEFAULT_CUTOFF_LENGTH, DEFAULT_BANDSAW_KERF } from './tubestock.js';
+import { generateTubestockGcode, tubestockFaceFileName, tubestockFaceLabel, tubestockFaceClock, tubestockFaceGroupLabel, tubestockFaceGroupFileName, holeDepthForWall, DEFAULT_CUTOFF_WIDTH, DEFAULT_CUTOFF_LENGTH, DEFAULT_BANDSAW_KERF } from './tubestock.js';
 import { lintGcode } from './gcodeLint.js';
 
 // Synthetic tube features matching extractTubeFeaturesFromMeshes' output
@@ -469,8 +469,16 @@ describe('the tube stock cutoff line', () => {
   });
 });
 
-describe('skipped (non-round) features surface instead of silently vanishing', () => {
-  function tubeWithSkippedFeature() {
+describe('non-round features are milled when a tool fits, reported when it cannot', () => {
+  // A 1" x 0.3" rectangular profile centered at position=6, lateralOffset
+  // 0.1 - in the same (x=position, y=lateralOffset) coordinates a hole
+  // uses, exactly what stepProfile.js now hands off (see its own
+  // 'gives a profile its full boundary' test).
+  const RECT_PROFILE = { position: 6, lateralOffset: 0.1, points: [
+    { x: 5.5, y: -0.05 }, { x: 6.5, y: -0.05 }, { x: 6.5, y: 0.25 }, { x: 5.5, y: 0.25 }
+  ] };
+
+  function tubeWithProfile() {
     return {
       tubeLength: 12,
       walls: [
@@ -478,44 +486,187 @@ describe('skipped (non-round) features surface instead of silently vanishing', (
         {
           angleDeg: 180,
           holes: [{ position: 3, lateralOffset: 0, diameter: 0.25 }],
-          skippedFeatures: [{ position: 6, lateralOffset: 0.1, meanRadius: 0.4, maxDeviation: 0.22 }]
+          profiles: [RECT_PROFILE]
         }
       ]
     };
   }
 
-  it('flows a wall\'s skippedFeatures into stats, with the wall it came from attached', () => {
-    const result = generateTubestockGcode(tubeWithSkippedFeature(), baseParams);
-    expect(result.stats.skippedFeatures.length).toBe(1);
-    expect(result.stats.skippedFeatures[0].angleDeg).toBe(180);
-    expect(result.stats.skippedFeatures[0].position).toBe(6);
+  describe('when a tool is selected and fits', () => {
+    const params = { ...baseParams, toolDiameter: 0.1575 };
+
+    it('actually mills it - a real toolpath, not just a report', () => {
+      const result = generateTubestockGcode(tubeWithProfile(), params);
+      expect(result.stats.milledProfiles.length).toBe(1);
+      expect(result.stats.milledProfiles[0].angleDeg).toBe(180);
+      expect(result.stats.unmachinedFeatures).toEqual([]);
+      expect(result.gcode).toContain('MILLED FEATURE');
+      // A real contour, not a single point.
+      expect(result.stats.milledProfiles[0].path.length).toBeGreaterThan(3);
+    });
+
+    it('goes through this wall only, at the same depth as a drilled hole', () => {
+      const result = generateTubestockGcode(tubeWithProfile(), params);
+      const contourPlunges = result.gcode.split('\n').filter((l) => l.includes('MILLED FEATURE') === false && l.includes('(plunge)'));
+      expect(contourPlunges.some((l) => l.includes(`Z-${baseParams.holeDepth.toFixed(4)}`))).toBe(true);
+    });
+
+    it('surfaces on that wall\'s own per-face file too, not just the combined program', () => {
+      const result = generateTubestockGcode(tubeWithProfile(), params);
+      const side6 = result.gcodeFiles.find((f) => f.label === 'Side 6');
+      expect(side6.gcode).toContain('MILLED FEATURE');
+    });
+
+    it('does not appear on a face that has nothing non-round', () => {
+      const result = generateTubestockGcode(tubeWithProfile(), params);
+      const side12 = result.gcodeFiles.find((f) => f.label === 'Side 12');
+      expect(side12.gcode).not.toContain('MILLED FEATURE');
+    });
+
+    it('stages the milling end mill as its own tool stage', () => {
+      const result = generateTubestockGcode(tubeWithProfile(), params);
+      expect(result.gcode).toContain('milled feature');
+    });
+
+    it('is lint-clean end to end', () => {
+      const result = generateTubestockGcode(tubeWithProfile(), params);
+      expect(lintGcode(result.gcode).errors).toEqual([]);
+      for (const file of result.gcodeFiles) expect(lintGcode(file.gcode).errors, file.label).toEqual([]);
+    });
   });
 
-  it('is empty, not absent, when nothing was skipped', () => {
+  describe('when no tool is selected for the job', () => {
+    it('reports it as unmachined rather than crashing the whole tube over it', () => {
+      const result = generateTubestockGcode(tubeWithProfile(), baseParams);
+      expect(result.stats.milledProfiles).toEqual([]);
+      expect(result.stats.unmachinedFeatures.length).toBe(1);
+      expect(result.stats.unmachinedFeatures[0].reason).toMatch(/no end mill/);
+      // The real round holes on the SAME tube still drilled successfully.
+      expect(result.stats.totalHoles).toBe(2);
+    });
+
+    it('says so directly in the program, since whoever runs the file may not be who queued it', () => {
+      const result = generateTubestockGcode(tubeWithProfile(), baseParams);
+      expect(result.gcode).toContain('not round and could NOT be machined');
+      expect(result.gcode).toContain('NOT MACHINED');
+    });
+  });
+
+  describe('when the selected tool does not fit the profile', () => {
+    it('reports it with offsetPolygon\'s own cutter-fit reason', () => {
+      const result = generateTubestockGcode(tubeWithProfile(), { ...baseParams, toolDiameter: 1.0 });
+      expect(result.stats.milledProfiles).toEqual([]);
+      expect(result.stats.unmachinedFeatures.length).toBe(1);
+      expect(result.stats.unmachinedFeatures[0].reason).toMatch(/too small for this tool/);
+    });
+  });
+
+  it('is empty, not absent, when nothing is non-round', () => {
     const result = generateTubestockGcode(twoWallTube(), baseParams);
-    expect(result.stats.skippedFeatures).toEqual([]);
+    expect(result.stats.milledProfiles).toEqual([]);
+    expect(result.stats.unmachinedFeatures).toEqual([]);
   });
 
-  it('says so directly in the program, since whoever runs the file may not be who queued it', () => {
-    const result = generateTubestockGcode(tubeWithSkippedFeature(), baseParams);
-    expect(result.gcode).toContain('not round and NOT machined');
-    expect(result.gcode).toContain('SKIPPED');
-  });
-
-  it('surfaces on that wall\'s own per-face file too, not just the combined program', () => {
-    const result = generateTubestockGcode(tubeWithSkippedFeature(), baseParams);
-    const side6 = result.gcodeFiles.find((f) => f.label === 'Side 6');
-    expect(side6.gcode).toContain('SKIPPED');
-  });
-
-  it('does not appear on a face that had nothing skipped', () => {
-    const result = generateTubestockGcode(tubeWithSkippedFeature(), baseParams);
-    const side12 = result.gcodeFiles.find((f) => f.label === 'Side 12');
-    expect(side12.gcode).not.toContain('SKIPPED');
-  });
-
-  it('tolerates a hand-built tube with no skippedFeatures field at all', () => {
+  it('tolerates a hand-built tube with no profiles field at all', () => {
     // twoWallTube() predates this field entirely on its wall objects.
     expect(() => generateTubestockGcode(twoWallTube(), baseParams)).not.toThrow();
+  });
+});
+
+describe('faces with identical drilling share one file', () => {
+  function tubeWithDuplicateFaces() {
+    return {
+      tubeLength: 12,
+      walls: [
+        { angleDeg: 0, holes: [{ position: 2, lateralOffset: 0, diameter: 0.25 }, { position: 5, lateralOffset: 0.1, diameter: 0.375 }] },
+        { angleDeg: 180, holes: [{ position: 2, lateralOffset: 0, diameter: 0.25 }, { position: 5, lateralOffset: 0.1, diameter: 0.375 }] },
+        { angleDeg: 90, holes: [{ position: 3, lateralOffset: 0, diameter: 0.5 }] }
+      ]
+    };
+  }
+
+  it('merges two faces drilled exactly the same into one file, and leaves the different one alone', () => {
+    const result = generateTubestockGcode(tubeWithDuplicateFaces(), baseParams);
+    expect(result.gcodeFiles.length).toBe(2);
+    const merged = result.gcodeFiles.find((f) => f.angleDegs.length > 1);
+    expect(merged.angleDegs.sort((a, b) => a - b)).toEqual([0, 180]);
+    expect(merged.label).toBe('Side 6 or Side 12');
+    const solo = result.gcodeFiles.find((f) => f.angleDegs.length === 1);
+    expect(solo.angleDegs).toEqual([90]);
+  });
+
+  it('names the merged file after both faces', () => {
+    const result = generateTubestockGcode(tubeWithDuplicateFaces(), baseParams);
+    const merged = result.gcodeFiles.find((f) => f.angleDegs.length > 1);
+    expect(tubestockFaceGroupFileName('p006946.ngc', merged.angleDegs)).toBe('p006946-side-6-12.ngc');
+  });
+
+  it('counts both holes once, not doubled by the merge', () => {
+    const result = generateTubestockGcode(tubeWithDuplicateFaces(), baseParams);
+    const merged = result.gcodeFiles.find((f) => f.angleDegs.length > 1);
+    expect(merged.holeCount).toBe(2);
+  });
+
+  it('does not merge faces whose holes only look similar in count, not position', () => {
+    const tube = {
+      tubeLength: 12,
+      walls: [
+        { angleDeg: 0, holes: [{ position: 2, lateralOffset: 0, diameter: 0.25 }] },
+        { angleDeg: 180, holes: [{ position: 3, lateralOffset: 0, diameter: 0.25 }] }
+      ]
+    };
+    const result = generateTubestockGcode(tube, baseParams);
+    expect(result.gcodeFiles.every((f) => f.angleDegs.length === 1)).toBe(true);
+  });
+
+  it('never merges the cutoff face, even if its holes happen to match another face', () => {
+    const tube = {
+      tubeLength: 12,
+      walls: [
+        { angleDeg: 0, holes: [{ position: 2, lateralOffset: 0, diameter: 0.25 }] },
+        { angleDeg: 180, holes: [{ position: 2, lateralOffset: 0, diameter: 0.25 }] }
+      ]
+    };
+    // fixturePinFace 6 -> cutoff on the wall opposite it (angleDeg 0, Side 12).
+    const result = generateTubestockGcode(tube, { ...baseParams, finishedLength: 10, fixturePinFace: 6, toolDiameter: 0.1575 });
+    expect(result.gcodeFiles.every((f) => f.angleDegs.length === 1)).toBe(true);
+    expect(result.gcodeFiles.find((f) => f.hasCutoff).angleDegs).toEqual([0]);
+  });
+
+  it('never merges a face carrying a non-round feature, even if its holes match another face', () => {
+    const rectProfile = { position: 4, lateralOffset: 0, points: [{ x: 3.5, y: -0.1 }, { x: 4.5, y: -0.1 }, { x: 4.5, y: 0.1 }, { x: 3.5, y: 0.1 }] };
+    const tube = {
+      tubeLength: 12,
+      walls: [
+        { angleDeg: 0, holes: [{ position: 2, lateralOffset: 0, diameter: 0.25 }], profiles: [rectProfile] },
+        { angleDeg: 180, holes: [{ position: 2, lateralOffset: 0, diameter: 0.25 }] }
+      ]
+    };
+    const result = generateTubestockGcode(tube, { ...baseParams, toolDiameter: 0.1575 });
+    expect(result.gcodeFiles.every((f) => f.angleDegs.length === 1)).toBe(true);
+  });
+
+  it('is lint-clean and matches move-for-move whichever face happens to represent the group', () => {
+    const result = generateTubestockGcode(tubeWithDuplicateFaces(), baseParams);
+    for (const file of result.gcodeFiles) expect(lintGcode(file.gcode).errors, file.label).toEqual([]);
+  });
+
+  it('does nothing when every face is already unique - the common case', () => {
+    const result = generateTubestockGcode(twoWallTube(), baseParams);
+    expect(result.gcodeFiles.every((f) => f.angleDegs.length === 1)).toBe(true);
+  });
+});
+
+describe('tubestockFaceGroupLabel and tubestockFaceGroupFileName', () => {
+  it('orders faces by clock position regardless of input order', () => {
+    expect(tubestockFaceGroupLabel([180, 0])).toBe('Side 6 or Side 12');
+  });
+
+  it('joins clock numbers in the file name, sorted', () => {
+    expect(tubestockFaceGroupFileName('t.ngc', [270, 90])).toBe('t-side-3-9.ngc');
+  });
+
+  it('keeps the file extension it was given', () => {
+    expect(tubestockFaceGroupFileName('part.nc', [0, 180])).toBe('part-side-6-12.nc');
   });
 });
