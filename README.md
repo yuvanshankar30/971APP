@@ -29,8 +29,9 @@ browser confirmation or prompt popups.
   Router's the only workflow with this many distinct steps). See the
   **AutoCAM** section below for automatic G-code generation specifically.
 - **AutoCAM**: automatic STEP → G-code generation for lathe turning, router
-  routering, and rotary-4th-axis indexed tube-stock drilling jobs - either
-  manually queued from `/autocam` or auto-triggered by dropping a CAD file
+  routering, and indexed tube-stock drilling jobs run on the router with the
+  operator flipping the tube between faces by hand - either manually queued
+  from `/autocam` or auto-triggered by dropping a CAD file
   into a machine's watched Google Drive folder (turning/routering only; tube
   stock is standalone-upload only, no manufacturing-request workflow maps to
   it yet). Tube-stock jobs retain a combined program for simulation and also
@@ -46,10 +47,10 @@ browser confirmation or prompt popups.
   **AutoCAM** section below for the code-level detail on all three.
   Completed routering, turning, and tube-stock jobs all get a 3D toolpath
   simulator (routering/turning also get a switchable 2D preview; tube stock
-  has no 2D representation of a rotary-axis program, so it goes straight to
-  3D) with rapid/cutting/plunge paths distinguished, distance scrubbing, and
-  tool-change stepping. All three render real material removal as playback
-  scrubs, not a static stock model: routering displaces a heightmap plate
+  has no useful 2D representation of a per-face drilling program, so it goes
+  straight to 3D) with rapid/cutting/plunge paths distinguished, distance
+  scrubbing, and tool-change stepping. All three render real material removal
+  as playback scrubs, not a static stock model: routering displaces a heightmap plate
   under a moving flat end mill; turning projects diameter-mode X/Z into
   axial/radial coordinates and revolves the actual machined profile into a
   solid, animating the rotating stock and a turning insert along the
