@@ -20,6 +20,8 @@ import { describe, it, expect } from 'vitest';
 import { generateRoutingGcode } from './routing.js';
 import { generateTubestockGcode } from './tubestock.js';
 import { lintGcode } from './gcodeLint.js';
+import { generateGroupedRoutingGcode } from './groupedGcode.js';
+import { MAX_GCODE_LINE_LENGTH } from './gcodeComments.js';
 
 function square(cx, cy, size) {
   const h = size / 2;
@@ -91,4 +93,40 @@ describe('router programs load in LinuxCNC', () => {
       expect(lintGcode(gcode).repairedLines).toBe(0);
     });
   }
+});
+
+describe('unbounded names cannot make a program unloadable', () => {
+  // Group and part names go into header comments verbatim and have no
+  // length limit anywhere - the manufacture table already has to wrap
+  // rather than truncate them. A 227-character group name used to produce a
+  // 253-character line, one past what LinuxCNC will read, which makes it
+  // refuse the whole program rather than just that line.
+  const longName = 'p006946-rev-b-slapdih-lower-pivot-plate-left-hand-mirrored-2026-offseason-drivetrain-subassembly-weldment-bracket';
+  const body = generateRoutingGcode(outline, { toolDiameter: 0.25, targetDepth: 0.25 }).gcode;
+
+  const grouped = (name, partName) => generateGroupedRoutingGcode({
+    name,
+    placements: [{ name: partName, offsetX: 1, offsetY: 1, gcode: body }],
+    params: { toolDiameter: 0.25, targetDepth: 0.25, stockThickness: 0.25 }
+  });
+
+  for (const [label, name, partName] of [
+    ['short names', 'sheet-1', 'plate-a'],
+    ['a long part name', 'sheet-1', longName],
+    ['a long group name', `${longName}-${longName}`, 'plate-a'],
+    ['both long', `${longName}-${longName}`, `${longName}-${longName}`]
+  ]) {
+    it(`loads with ${label}`, () => {
+      const gcode = grouped(name, partName);
+      const result = lintGcode(gcode);
+      expect(result.errors, report(label, result)).toEqual([]);
+      const longest = Math.max(...gcode.split('\n').map((line) => line.length));
+      expect(longest).toBeLessThanOrEqual(MAX_GCODE_LINE_LENGTH);
+    });
+  }
+
+  it('keeps the part name readable rather than dropping the comment', () => {
+    const gcode = grouped('sheet-1', `${longName}-${longName}`);
+    expect(gcode).toMatch(/\(--- PART: p006946-rev-b-slapdih-lower-pivot-plate/);
+  });
 });

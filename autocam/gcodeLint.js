@@ -22,6 +22,8 @@
  * read as.
  */
 
+import { MAX_GCODE_LINE_LENGTH } from './gcodeComments.js';
+
 // Every letter A-Z is a legal word in RS274NGC, so there is no "unknown
 // letter" check worth making. These are the non-letter, non-digit
 // characters that may legally appear outside a comment: expression
@@ -167,6 +169,9 @@ export function lintGcode(text) {
   const codeByLine = [];
 
   lines.forEach((line, index) => {
+    if (line.length > MAX_GCODE_LINE_LENGTH) {
+      errors.push({ line: index + 1, message: `Line is ${line.length} characters. LinuxCNC reads at most ${MAX_GCODE_LINE_LENGTH} and rejects the whole program past that.` });
+    }
     const code = scanComments(line, index + 1, errors);
     codeByLine.push(code);
     const trimmed = code.trim();

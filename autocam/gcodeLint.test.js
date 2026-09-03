@@ -144,3 +144,22 @@ describe('repairGcodeComments', () => {
     expect(strip(repairGcodeComments(broken))).toBe(strip('(a)\nG1 X1 Y2 F10 (f)\nM2\n'));
   });
 });
+
+describe('lintGcode line length', () => {
+  const lineOf = (n) => `(${'x'.repeat(n - 2)})`;
+
+  it('accepts a line at the interpreter limit', () => {
+    const { errors } = lintGcode(`G21\n${lineOf(252)}\nM2\n`);
+    expect(errors).toEqual([]);
+  });
+
+  it('rejects the first line over it', () => {
+    const { errors } = lintGcode(`G21\n${lineOf(253)}\nM2\n`);
+    expect(messages(errors)).toMatch(/Line is 253 characters/);
+  });
+
+  it('reports the offending line number', () => {
+    const { errors } = lintGcode(`G21\n${lineOf(300)}\nM2\n`);
+    expect(errors[0].line).toBe(2);
+  });
+});

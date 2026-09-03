@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeGcodeComments } from './gcodeComments.js';
+import { normalizeGcodeComments, MAX_GCODE_LINE_LENGTH } from './gcodeComments.js';
 import { generateRoutingGcode } from './routing.js';
 import { generateTurningGcode } from './turning.js';
 import { generateTubestockGcode } from './tubestock.js';
@@ -131,5 +131,34 @@ describe('normalizeGcodeComments - cleaning an already-generated program', () =>
   it('leaves an already-clean comment exactly as it is', () => {
     const clean = 'G01 X1 Y2 F20 (rapid to hole position)';
     expect(normalizeGcodeComments(clean, { dialect: 'preserve' })).toBe(clean);
+  });
+});
+
+describe('normalizeGcodeComments line length', () => {
+  it('shortens a comment that would push the line past the interpreter limit', () => {
+    const line = `(GROUPED ROUTER PROGRAM: ${'part-name-'.repeat(30)})`;
+    expect(line.length).toBeGreaterThan(MAX_GCODE_LINE_LENGTH);
+    const out = normalizeGcodeComments(line);
+    expect(out.length).toBeLessThanOrEqual(MAX_GCODE_LINE_LENGTH);
+    expect(out.startsWith('(GROUPED ROUTER PROGRAM: part-name-')).toBe(true);
+    expect(out.endsWith(')')).toBe(true);
+  });
+
+  it('leaves the code before the comment untouched while shortening it', () => {
+    const out = normalizeGcodeComments(`G01 X1.5 Y2.5 F20 (${'reason '.repeat(60)})`);
+    expect(out.startsWith('G01 X1.5 Y2.5 F20 (')).toBe(true);
+    expect(out.length).toBeLessThanOrEqual(MAX_GCODE_LINE_LENGTH);
+  });
+
+  it('does not touch a comment that already fits', () => {
+    const line = 'G01 X1.5 Y2.5 F20 (feed move)';
+    expect(normalizeGcodeComments(line)).toBe(line);
+  });
+
+  it('shortens in the WinCNC dialect too', () => {
+    const out = normalizeGcodeComments(`(${'x'.repeat(400)})`, { dialect: 'wincnc' });
+    expect(out.length).toBeLessThanOrEqual(MAX_GCODE_LINE_LENGTH);
+    expect(out.startsWith('[')).toBe(true);
+    expect(out.endsWith(']')).toBe(true);
   });
 });
