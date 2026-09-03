@@ -892,6 +892,43 @@
     downloadGcodeText(faceProgram.gcode, tubeFaceFileName(job, faceProgram));
   }
 
+  // Tube stock is not one program. The operator turns the tube by hand and
+  // runs a separate file per face, so "Install NGC" handing over the
+  // combined program gave them the one file they cannot actually run as-is.
+  // It opens the face list instead; every other operation still downloads.
+  let showFaceFilesModal = false;
+  let faceFilesJob = null;
+
+  $: faceFilesPrograms = faceFilesJob?.stats?.facePrograms || [];
+
+  function hasFaceFiles(job) {
+    return job?.operation_type === 'tubestock' && job?.stats?.facePrograms?.length > 0;
+  }
+
+  function openFaceFilesModal(job) {
+    faceFilesJob = job;
+    showFaceFilesModal = true;
+  }
+
+  function closeFaceFilesModal() {
+    showFaceFilesModal = false;
+    faceFilesJob = null;
+  }
+
+  function installJobOutput(job) {
+    if (hasFaceFiles(job)) return openFaceFilesModal(job);
+    downloadGcodeBlob(job);
+  }
+
+  function installAllFaceFiles(job) {
+    for (const faceProgram of job?.stats?.facePrograms || []) downloadTubeFaceProgram(job, faceProgram);
+  }
+
+  function faceHoleSummary(faceProgram) {
+    const holes = faceProgram?.holeCount ?? 0;
+    return `${holes} hole${holes === 1 ? '' : 's'}`;
+  }
+
   const OPERATION_TAG_CLASS = { turning: 'tag-season', milling: 'tag-mentor', tubestock: 'tag-9584' };
   function operationTagClass(operationType) {
     return OPERATION_TAG_CLASS[operationType] || 'tag-971';
@@ -1347,21 +1384,13 @@
                     <button class="btn btn-secondary btn-sm" on:click={() => openToolpathPreview(job)}>
                       <Route size={14} /> Show Toolpath
                     </button>
-                    <button class="btn btn-secondary btn-sm" title={job.gcode_file_name || 'output.ngc'} on:click={() => downloadGcodeBlob(job)}>
-                      <Download size={14} /> Install NGC
+                    <button
+                      class="btn btn-secondary btn-sm"
+                      title={hasFaceFiles(job) ? `${job.stats.facePrograms.length} face programs - one per face` : (job.gcode_file_name || 'output.ngc')}
+                      on:click={() => installJobOutput(job)}
+                    >
+                      <Download size={14} /> Install NGC{hasFaceFiles(job) ? ` (${job.stats.facePrograms.length})` : ''}
                     </button>
-                    {#if job.operation_type === 'tubestock' && job.stats?.facePrograms?.length}
-                      <details class="tube-face-files">
-                        <summary class="btn btn-secondary btn-sm"><Download size={14} /> Face files ({job.stats.facePrograms.length})</summary>
-                        <div class="tube-face-files-list">
-                          {#each job.stats.facePrograms as faceProgram}
-                            <button class="btn btn-secondary btn-sm" title={tubeFaceFileName(job, faceProgram)} on:click={() => downloadTubeFaceProgram(job, faceProgram)}>
-                              <Download size={14} /> {tubeFaceLabel(faceProgram)}
-                            </button>
-                          {/each}
-                        </div>
-                      </details>
-                    {/if}
                     <button class="btn btn-icon" data-tooltip="Open ncviewer.com" aria-label="Open ncviewer.com with the G-code copied to your clipboard" on:click={() => openNcviewer(job)}><ExternalLink size={15} /></button>
                   </span>
                 {/if}
@@ -2014,7 +2043,105 @@
   </div>
 {/if}
 
+{#if showFaceFilesModal && faceFilesJob}
+  <div
+    class="modal-backdrop"
+    on:click|self={closeFaceFilesModal}
+    role="button"
+    tabindex="0"
+    on:keydown={(e) => { if (e.key === 'Escape') { e.preventDefault(); closeFaceFilesModal(); } }}
+  >
+    <div class="modal face-files-modal" role="dialog" aria-modal="true" aria-label="Tube stock face programs">
+      <div class="modal-header">
+        <div>
+          <h3>Install tube stock G-code</h3>
+          <p class="face-files-subtitle">
+            {faceFilesJob.name || faceFilesJob.parts?.name || 'Tube stock job'} &middot;
+            {faceFilesPrograms.length} face{faceFilesPrograms.length === 1 ? '' : 's'} to cut
+          </p>
+        </div>
+        <button type="button" class="modal-close-button" aria-label="Close dialog" on:click={closeFaceFilesModal}>
+          <X size={18} />
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="face-files-note">
+          <p>
+            One program per face. The tube does not rotate on this machine - run a file,
+            then turn the tube by hand so the next numbered face is up, re-zero Z, and run the next.
+          </p>
+          <p>
+            Faces are numbered by clock position, the same numbers written on the tube.
+            Only faces with something to cut get a file, so a tube drilled on two sides has two.
+          </p>
+          <p><strong>Every one of these runs in G55</strong>, the tube fixture's own work offset - it is selected in the file.</p>
+        </div>
+
+        <ul class="face-files-list">
+          {#each faceFilesPrograms as faceProgram}
+            <li class="face-file-row">
+              <div class="face-file-identity">
+                <strong>{tubeFaceLabel(faceProgram)}</strong>
+                <span class="face-file-meta">{faceHoleSummary(faceProgram)}</span>
+              </div>
+              <code class="face-file-name">{tubeFaceFileName(faceFilesJob, faceProgram)}</code>
+              <button
+                class="btn btn-primary btn-sm btn-nowrap"
+                disabled={!faceProgram.gcode}
+                title={faceProgram.gcode ? tubeFaceFileName(faceFilesJob, faceProgram) : 'This saved job has no text for this face - regenerate it'}
+                on:click={() => downloadTubeFaceProgram(faceFilesJob, faceProgram)}
+              >
+                <Download size={14} /> Install
+              </button>
+            </li>
+          {/each}
+        </ul>
+      </div>
+      <div class="modal-footer-actions">
+        <span class="text-muted">Turn the tube between files - cut them in order.</span>
+        <button class="btn btn-secondary" on:click={() => installAllFaceFiles(faceFilesJob)}>
+          <Download size={15} /> Install all {faceFilesPrograms.length}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
 <style>
+  .face-files-modal { max-width: 46rem; }
+  .face-files-subtitle { margin: 0.15rem 0 0; color: var(--text-muted); font-size: 0.85rem; }
+  .face-files-note {
+    margin-bottom: var(--space-4);
+    padding: var(--space-3) var(--space-4);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--surface-2);
+  }
+  .face-files-note p { margin: 0 0 0.4rem; font-size: 0.85rem; line-height: 1.5; }
+  .face-files-note p:last-child { margin-bottom: 0; }
+  .face-files-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 0.5rem; }
+  .face-file-row {
+    display: grid;
+    grid-template-columns: minmax(7rem, auto) minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--space-3);
+    padding: 0.6rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--surface-1);
+  }
+  .face-file-identity { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .face-file-meta { color: var(--text-muted); font-size: 0.75rem; }
+  .face-file-name {
+    font-family: var(--font-mono-stack, ui-monospace, monospace);
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    overflow-wrap: anywhere;
+  }
+  @media (max-width: 600px) {
+    .face-file-row { grid-template-columns: minmax(0, 1fr); }
+  }
+
   .page-subtitle {
     color: var(--text-muted);
     margin: -0.5rem 0 1rem;
@@ -2376,23 +2503,6 @@
     align-items: center;
     min-width: 0;
     gap: 0.4rem;
-  }
-  .tube-face-files { position: relative; }
-  .tube-face-files summary { list-style: none; }
-  .tube-face-files summary::-webkit-details-marker { display: none; }
-  .tube-face-files-list {
-    position: absolute;
-    top: calc(100% + 0.35rem);
-    right: 0;
-    z-index: 25;
-    display: grid;
-    gap: 0.3rem;
-    min-width: max-content;
-    padding: 0.4rem;
-    background: var(--surface-1, #fff);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm, 4px);
-    box-shadow: var(--shadow-md);
   }
 
   /* Small hover tooltip for icon-only buttons - the native title attribute
