@@ -155,7 +155,10 @@
     // Unspecified stock must not inherit the old wood-friendly 40/15/16k
     // settings. Material presets replace these with their own published
     // starting values as soon as a stock is selected.
-    return { toolDiameter: 0.25, stepDown: 0.03, targetDepth: '', tabWidth: 0.25, tabHeight: 0.06, tabSpacing: 6, tabCount: '', feedRate: 25, plungeRate: 8, spindleSpeed: 14000, edgeMargin: 0.5, toolSequence: [] };
+    // 0.1575" (4mm) - the team's actual standard end mill, per the router
+    // manual ("Team 971 primarily uses a 4mm, single flute, uncoated carbide
+    // end mill") and the real UNC Router tool already stocked in cam_tools.
+    return { toolDiameter: 0.1575, stepDown: 0.03, targetDepth: '', tabWidth: 0.25, tabHeight: 0.06, tabSpacing: 6, tabCount: '', feedRate: 25, plungeRate: 8, spindleSpeed: 14000, edgeMargin: 0.5, toolSequence: [] };
   }
   function emptyTubestockParams() {
     return { holeDepth: '', safeZ: 0.25, feedRate: 8, spindleSpeed: 8000, finishedLength: '', fixturePinFace: '' };
