@@ -160,7 +160,14 @@ function generateProgram(walls, params, { faceAngleDeg = null, faceLabel = null,
     lines.push('(running this file - WinCNC has no G54-style stored work offset this program)');
     lines.push('(can select for you; it has to be set interactively, right before.)');
   } else {
-    lines.push('G54 (work offset - verify before running)');
+    // G55, not G54. The tube stock fixture has its own work offset on this
+    // machine: the router manual has the operator type g55 into the MDI
+    // "before doing anything else", and repeats it in the tube stock
+    // checklist as something to redo for every cut. A file that selects it
+    // itself cannot be run in the sheet-setup coordinate system because
+    // somebody forgot that step, which would put the whole program in the
+    // wrong place on a fixture the tube is clamped into.
+    lines.push('G55 (tube stock fixture work offset - the tube fixture lives here, not in G54)');
     lines.push('G80 G40 G49 (cancel canned cycle / cutter comp / tool length offset - defensive, in case a prior program on this machine left one active)');
   }
 
