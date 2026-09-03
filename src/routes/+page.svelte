@@ -152,10 +152,12 @@
   let nextScoutAssignment = null; // { scouting_type, match_key, team_key }
   let showScoutAlert = true;
 
+  // Data assignments used to open /datascout. That page is gone, so they go
+  // to Quick Scout instead - it is the surviving surface that writes to the
+  // same /datascout endpoint, so the assignment still gets recorded.
   function scoutAssignmentRoute(scoutingType) {
     if (scoutingType === 'note') return 'notescout';
-    if (scoutingType === 'quick') return 'quickscout';
-    return 'datascout';
+    return 'quickscout';
   }
 
   function compareScoutAssignmentMatches(left, right) {

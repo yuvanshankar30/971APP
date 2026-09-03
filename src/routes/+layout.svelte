@@ -253,7 +253,6 @@
     if (compact.startsWith('build')) return 'build';
     if (compact.startsWith('purchase') || compact.startsWith('purchasing')) return 'purchasing';
     if (compact.startsWith('notescout')) return 'notescout';
-    if (compact.startsWith('datascout')) return 'datascout';
     if (compact.startsWith('teamview')) return 'teamview';
     if (compact.startsWith('pitscout')) return 'pitscout';
     if (compact.startsWith('matchscout')) return 'matchscout';
@@ -282,7 +281,6 @@
     notescout: '/notescout',
     tasks: '/tasks',
     teamview: '/teamview',
-    datascout: '/datascout',
     pitscout: '/pitscout',
     matchscout: '/matchscout',
     strategy: '/strategy',
@@ -308,7 +306,6 @@
     notescout: Coins,
     tasks: Briefcase,
     teamview: Coins,
-    datascout: Coins,
     pitscout: Camera,
     matchscout: ClipboardCheck,
     strategy: Target,
@@ -334,7 +331,6 @@
     notescout: 'Note Scouting',
     tasks: 'Tasks',
     teamview: 'Team View',
-    datascout: 'Data Scouting',
     pitscout: 'Pit Scouting',
     matchscout: 'Match Scouting',
     strategy: 'Strategy',

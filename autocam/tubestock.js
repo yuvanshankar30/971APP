@@ -48,21 +48,66 @@ function dwellLine(isWinCNC, seconds, comment) {
 }
 
 /** Normalize rotary angles so 0, 360, and -360 identify the same tube face. */
+/**
+ * How far past the wall's inner surface a hole is driven, so it actually
+ * breaks through. Same figure and same reasoning as routing.js's
+ * THROUGH_CUT_ALLOWANCE: enough to guarantee the hole clears the wall and to
+ * absorb a tube that is not perfectly straight, without driving the cutter
+ * deep into the cavity behind it.
+ */
+export const WALL_BREAKTHROUGH_ALLOWANCE = 0.02;
+
+/**
+ * Hole depth for a tube, derived from the stock rather than typed per job.
+ *
+ * Wall thickness is a property of the tube, not of the part: every hole in a
+ * given tube passes through the same wall, so there is exactly one correct
+ * depth per stock and nothing for an operator to decide. It used to be a
+ * free number field, which meant a job could be queued with a depth that did
+ * not match the tube actually loaded.
+ *
+ * @param {number} wallThickness inches, from the stock catalog entry
+ * @returns {number|null} depth in inches, or null when the stock has no
+ *   usable wall thickness recorded
+ */
+export function holeDepthForWall(wallThickness) {
+  const wall = Number(wallThickness);
+  if (!Number.isFinite(wall) || wall <= 0) return null;
+  return Number((wall + WALL_BREAKTHROUGH_ALLOWANCE).toFixed(4));
+}
+
 export function normalizeTubestockFaceAngle(angleDeg) {
   const normalized = ((Number(angleDeg) || 0) % 360 + 360) % 360;
   return Number(normalized.toFixed(4));
 }
 
 /** Human-readable face name for standard rectangular tube orientations. */
-export function tubestockFaceLabel(angleDeg) {
+/**
+ * Which clock position a wall sits at, as the shop labels tube faces.
+ *
+ * The router manual numbers tube sides 3, 6, 9 and 12 going clockwise, and
+ * the tube stock checklist has the operator write those numbers on the tube
+ * itself - "All sides of the tube are labeled 3, 6, 9, 12 according to the
+ * files". So the files have to use the same numbers, or the operator is
+ * translating between two schemes while standing at the machine with a tube
+ * clamped in the fixture.
+ *
+ * 12 is up, and the angles run the same way round as the clock does.
+ *
+ * @returns {number|null} 12, 3, 6 or 9, or null for a wall that is not on a
+ *   cardinal face (a rectangular tube has no such wall, so this only guards
+ *   against malformed input rather than describing a real case)
+ */
+export function tubestockFaceClock(angleDeg) {
   const angle = normalizeTubestockFaceAngle(angleDeg);
-  const cardinalLabels = {
-    0: 'Top',
-    90: 'Right side',
-    180: 'Bottom',
-    270: 'Left side'
-  };
-  return cardinalLabels[angle] || `Face A${angle}`;
+  const clockByAngle = { 0: 12, 90: 3, 180: 6, 270: 9 };
+  return clockByAngle[angle] ?? null;
+}
+
+export function tubestockFaceLabel(angleDeg) {
+  const clock = tubestockFaceClock(angleDeg);
+  if (clock === null) return `Face A${normalizeTubestockFaceAngle(angleDeg)}`;
+  return `Side ${clock}`;
 }
 
 /** Name a separately-runnable program for one rotary-indexed tube face. */
@@ -71,9 +116,14 @@ export function tubestockFaceFileName(gcodeFileName, angleDeg) {
   const extensionMatch = source.match(/(\.[a-z0-9]+)$/i);
   const extension = extensionMatch?.[1] || '.ngc';
   const base = extensionMatch ? source.slice(0, -extension.length) : source;
-  const angle = String(normalizeTubestockFaceAngle(angleDeg)).replace(/\./g, '_');
-  const label = tubestockFaceLabel(angleDeg).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  return `${base}-${label}-a${angle}${extension}`;
+  // Named for the clock position the operator writes on the tube, so the
+  // file they pick and the face in front of them carry the same number.
+  const clock = tubestockFaceClock(angleDeg);
+  if (clock === null) {
+    const angle = String(normalizeTubestockFaceAngle(angleDeg)).replace(/\./g, '_');
+    return `${base}-face-a${angle}${extension}`;
+  }
+  return `${base}-side-${clock}${extension}`;
 }
 
 /**
@@ -138,7 +188,13 @@ function generateProgram(walls, params, { faceAngleDeg = null, faceLabel = null,
   const totalHoles = walls.reduce((sum, wall) => sum + wall.holes.length, 0);
 
   const lines = [...HEADER_WARNING, ''];
-  const faceDescription = faceAngleDeg === null ? null : `${faceLabel || tubestockFaceLabel(faceAngleDeg)} (${fmt(faceAngleDeg, 1)} deg from Top)`;
+  // No parentheses in here: this goes inside a comment, and a comment ends
+  // at the first ")" - see gcodeComments.js. The clock number is what the
+  // operator has written on the tube, so it is what the face is called;
+  // stating the angle as well only invites the two to disagree.
+  const faceDescription = faceAngleDeg === null
+    ? null
+    : `${faceLabel || tubestockFaceLabel(faceAngleDeg)} - turn this face up`;
   lines.push(faceDescription === null
     ? '(*** TUBE STOCK: standard 3-axis router, NOT rotary - manual flip between faces ***)'
     : `(** TUBE STOCK ${faceDescription}: standard 3-axis router - fixture this face, verify Z=0, then run **)`);
@@ -160,7 +216,14 @@ function generateProgram(walls, params, { faceAngleDeg = null, faceLabel = null,
     lines.push('(running this file - WinCNC has no G54-style stored work offset this program)');
     lines.push('(can select for you; it has to be set interactively, right before.)');
   } else {
-    lines.push('G54 (work offset - verify before running)');
+    // G55, not G54. The tube stock fixture has its own work offset on this
+    // machine: the router manual has the operator type g55 into the MDI
+    // "before doing anything else", and repeats it in the tube stock
+    // checklist as something to redo for every cut. A file that selects it
+    // itself cannot be run in the sheet-setup coordinate system because
+    // somebody forgot that step, which would put the whole program in the
+    // wrong place on a fixture the tube is clamped into.
+    lines.push('G55 (tube stock fixture work offset - the tube fixture lives here, not in G54)');
     lines.push('G80 G40 G49 (cancel canned cycle / cutter comp / tool length offset - defensive, in case a prior program on this machine left one active)');
   }
 
@@ -202,7 +265,7 @@ function generateProgram(walls, params, { faceAngleDeg = null, faceLabel = null,
           // parseToolpath3D, which reads this combined multi-face program -
           // see gcode={job.gcode} in ToolpathSimulator's callers) can still
           // tell which physical face each subsequent move belongs to.
-          lines.push(`(FACE A${fmt(hole.angleDeg, 1)} - FLIP TUBE to ${tubestockFaceLabel(hole.angleDeg)} face and RE-ZERO Z before resuming - no rotary axis on this machine)`);
+          lines.push(`(FACE A${fmt(hole.angleDeg, 1)} - FLIP TUBE so ${tubestockFaceLabel(hole.angleDeg)} faces up, then RE-ZERO Z before resuming - the operator turns the tube by hand, there is no rotary axis on this machine)`);
           lines.push(pauseLine(isWinCNC, `FLIP TUBE to ${tubestockFaceLabel(hole.angleDeg)} face (${fmt(hole.angleDeg, 1)} deg from Top) and RE-ZERO Z before resuming - no rotary axis on this machine`));
         }
         currentAngle = hole.angleDeg;
