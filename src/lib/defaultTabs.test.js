@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { defaultHeaderTabs, ensurePowerRankingsTab, ensureScoutingAdminTab, ensureStrategyTab, ensureTextEngravingTab } from './defaultTabs.js';
+import { defaultHeaderTabs, ensurePowerRankingsTab, ensureScoutingAdminTab, ensureStrategyTab, ensureGcodeConverterTab } from './defaultTabs.js';
 
 const enabled = { tabs: { powerrankings: true } };
 
@@ -36,8 +36,8 @@ describe('defaultHeaderTabs', () => {
     expect(children.at(-1)).toEqual({ key: 'scouting-admin', label: 'Scouting Admin' });
   });
 
-  it('includes Text Engraving in the Manufacturing folder', () => {
-    expect(manufacturingChildren(defaultHeaderTabs())).toContainEqual({ key: 'text-engraving', label: 'Text Engraving' });
+  it('includes the raw G-code Converter in the Manufacturing folder', () => {
+    expect(manufacturingChildren(defaultHeaderTabs())).toContainEqual({ key: 'gcode-converter', label: 'G-code Converter' });
   });
 
   it('orders the scouting surfaces the way the team asked for them', () => {
@@ -65,16 +65,18 @@ describe('defaultHeaderTabs', () => {
   });
 });
 
-describe('ensureTextEngravingTab', () => {
-  it('adds Text Engraving to an existing Manufacturing folder', () => {
+describe('ensureGcodeConverterTab', () => {
+  it('adds G-code Converter to an existing Manufacturing folder', () => {
     const tabs = [{ type: 'folder', label: 'Manufacturing', children: [{ key: 'manufacture', label: 'Manufacture' }] }];
-    const result = ensureTextEngravingTab(tabs);
-    expect(manufacturingChildren(result).at(-1)).toEqual({ key: 'text-engraving', label: 'Text Engraving' });
+    const result = ensureGcodeConverterTab(tabs);
+    expect(manufacturingChildren(result).at(-1)).toEqual({ key: 'gcode-converter', label: 'G-code Converter' });
   });
 
-  it('does not duplicate a user-placed text engraving tab', () => {
-    const tabs = [{ type: 'tab', key: 'text-engraving', label: 'Engraving' }];
-    expect(ensureTextEngravingTab(tabs)).toBe(tabs);
+  it('replaces the mistaken Text Engraving entry in saved navigation', () => {
+    const tabs = [{ type: 'tab', key: 'text-engraving', label: 'Text Engraving' }];
+    const result = ensureGcodeConverterTab(tabs);
+    expect(result).toEqual([{ type: 'tab', key: 'gcode-converter', label: 'G-code Converter' }]);
+    expect(tabs[0].key).toBe('text-engraving');
   });
 });
 

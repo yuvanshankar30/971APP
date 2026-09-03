@@ -42,7 +42,7 @@ export function defaultHeaderTabs(navConfig = navigation) {
   const manufacturingChildren = [];
   if (navConfig?.tabs?.manufacture !== false) manufacturingChildren.push({ key: 'manufacture', label: 'Manufacture' });
   if (navConfig?.tabs?.autocam !== false) manufacturingChildren.push({ key: 'autocam', label: 'AutoCAM' });
-  if (navConfig?.tabs?.['text-engraving'] !== false) manufacturingChildren.push({ key: 'text-engraving', label: 'Text Engraving' });
+  if (navConfig?.tabs?.['gcode-converter'] !== false) manufacturingChildren.push({ key: 'gcode-converter', label: 'G-code Converter' });
   if (navConfig?.tabs?.kitting !== false) manufacturingChildren.push({ key: 'kitting', label: 'Kitting' });
   if (navConfig?.tabs?.['cots-stocking'] !== false) manufacturingChildren.push({ key: 'cots-stocking', label: 'COTS Stocking' });
   if (manufacturingChildren.length) {
@@ -157,10 +157,16 @@ export function ensureStrategyTab(tabs) {
   return next;
 }
 
-export function ensureTextEngravingTab(tabs, navConfig = navigation) {
-  if (navConfig?.tabs?.['text-engraving'] === false || !Array.isArray(tabs)) return tabs;
-  if (containsTabKey(tabs, 'text-engraving')) return tabs;
-  const entry = { key: 'text-engraving', label: 'Text Engraving' };
+export function ensureGcodeConverterTab(tabs, navConfig = navigation) {
+  if (navConfig?.tabs?.['gcode-converter'] === false || !Array.isArray(tabs)) return tabs;
+  if (containsTabKey(tabs, 'gcode-converter')) return tabs;
+  const entry = { key: 'gcode-converter', label: 'G-code Converter' };
+  const replaceTextEngraving = (items) => items.map((item) => {
+    if (!item || typeof item !== 'object') return item;
+    if (item.type === 'folder') return { ...item, children: replaceTextEngraving(Array.isArray(item.children) ? item.children : []) };
+    return item.key === 'text-engraving' ? { ...item, ...entry } : item;
+  });
+  if (containsTabKey(tabs, 'text-engraving')) return replaceTextEngraving(tabs);
   const folderIndex = tabs.findIndex((item) => item?.type === 'folder' && item?.label === MANUFACTURING_FOLDER_LABEL);
   if (folderIndex === -1) return [...tabs, { type: 'tab', ...entry }];
   const folder = tabs[folderIndex];

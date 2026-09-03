@@ -17,7 +17,7 @@
     "vision": true,
     "cots-stocking": true,
     "autocam": true,
-    "text-engraving": true,
+    "gcode-converter": true,
     "matchscout": true,
     "strategy": true
   }
