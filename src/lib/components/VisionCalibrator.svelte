@@ -15,7 +15,8 @@
   export let onSave = async () => {};
   export let busy = false;
 
-  // Exactly the values datascout's auto_start_position buttons write. Vision
+  // Exactly the values written for auto_start_position by the scouting
+  // surfaces that record it. Vision
   // has to speak the same vocabulary or the released event is unreadable
   // alongside hand-scouted matches.
   const START_POSITIONS = ['left trench', 'left mound', 'center', 'right mound', 'right trench'];

@@ -33,11 +33,13 @@ describe('defaultHeaderTabs', () => {
   });
 
   it('orders the scouting surfaces the way the team asked for them', () => {
-    // Deliberate order, not incidental: match -> pit -> strategy -> rankings
-    // -> vision, with the Pick List and admin surface after them.
+    // Deliberate order, not incidental: strategy leads as the board the team
+    // opens to decide something, then the collection surfaces that feed it
+    // (match -> pit -> rankings -> vision), with the Pick List and admin
+    // surface after them.
     const keys = competitionChildren(defaultHeaderTabs()).map((child) => child.key);
     expect(keys).toEqual([
-      'matchscout', 'pitscout', 'strategy', 'powerrankings', 'vision', 'scouting', 'scouting-admin'
+      'strategy', 'matchscout', 'pitscout', 'powerrankings', 'vision', 'scouting', 'scouting-admin'
     ]);
   });
 
