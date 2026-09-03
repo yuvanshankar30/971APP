@@ -54,15 +54,11 @@ export function defaultHeaderTabs(navConfig = navigation) {
     children: [
       { key: 'matchscout', label: 'Match Scouting' },
       { key: 'pitscout', label: 'Pit Scouting' },
+      { key: 'strategy', label: 'Strategy' },
       { key: 'powerrankings', label: 'Power Rankings' },
       { key: 'vision', label: 'Vision Scouting' },
-      // /datascout is a real page that had no nav entry at all - it was
-      // only reachable by typing the URL. Not to be confused with
-      // 'scouting', which is the Pick List (see its own <title>).
-      { key: 'datascout', label: 'Data Scouting' },
-      // Kept rather than dropped: /scouting is a working page, and losing
-      // its only nav entry would strand it the way Data Scouting was.
-      // It sits before Scouting Admin so the admin surface stays last.
+      // Pick List is kept rather than dropped: /scouting is a working page
+      // and this remains its sole default navigation entry.
       { key: 'scouting', label: 'Pick List' },
       { key: 'scouting-admin', label: 'Scouting Admin' }
     ]
@@ -126,33 +122,27 @@ export function ensurePowerRankingsTab(tabs, navConfig = navigation) {
   return next;
 }
 
-/**
- * Put Data Scouting in someone's Competition folder, same contract as
- * ensurePowerRankingsTab above: append-only, never reorders or removes, and
- * a no-op once the tab is present anywhere.
- *
- * /datascout is a real page that had no nav entry at all - not in the
- * defaults and not in anyone's saved header - so it was reachable only by
- * typing the URL. Adding it to the defaults alone would not have fixed that
- * for anyone who has ever customized their nav, which is most people who
- * would use it.
- */
-export function ensureDataScoutTab(tabs) {
+// Strategy replaces the former Data Scouting navigation destination. The data
+// collection route remains available at /datascout, but it should not compete
+// with the cross-source board in the everyday Competition menu. For saved
+// headers, preserve the user's placement while swapping that old entry once.
+export function ensureStrategyTab(tabs) {
   if (!Array.isArray(tabs)) return tabs;
-  if (containsTabKey(tabs, 'datascout')) return tabs;
-
-  const entry = { key: 'datascout', label: 'Data Scouting' };
+  if (containsTabKey(tabs, 'strategy')) return tabs;
+  const entry = { key: 'strategy', label: 'Strategy' };
+  const replaceDataScout = (items) => items.map((item) => {
+    if (!item || typeof item !== 'object') return item;
+    if (item.type === 'folder') return { ...item, children: replaceDataScout(Array.isArray(item.children) ? item.children : []) };
+    return item.key === 'datascout' ? { ...item, ...entry } : item;
+  });
+  if (containsTabKey(tabs, 'datascout')) return replaceDataScout(tabs);
   const folderIndex = tabs.findIndex(
     (item) => item?.type === 'folder' && item?.label === COMPETITION_FOLDER_LABEL
   );
   if (folderIndex === -1) return [...tabs, { type: 'tab', ...entry }];
-
   const folder = tabs[folderIndex];
   const next = [...tabs];
-  next[folderIndex] = {
-    ...folder,
-    children: [...(Array.isArray(folder.children) ? folder.children : []), entry]
-  };
+  next[folderIndex] = { ...folder, children: [...(Array.isArray(folder.children) ? folder.children : []), entry] };
   return next;
 }
 

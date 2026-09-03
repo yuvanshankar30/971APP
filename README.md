@@ -92,6 +92,11 @@ browser confirmation or prompt popups.
   The signed-in home dashboard balances direct links to Manufacturing,
   Purchasing, and Scouting, while keeping each scout's personal assignment
   queue available without filling the page with duplicate scouting tools.
+  The **Strategy** view (`/strategy`) replaces Data Scouting in Competition
+  navigation as the decision board: it combines the
+  event's data observations, match reports, pit profiles, free-form notes,
+  named autonomous routes, and open ACE issues into comparable team rows and
+  focused team briefs without duplicating data entry.
 - **Vision Scouting**: a real Competition-folder nav tab, open to every
   approved user like the rest of Competition (no special permission needed),
   running post-match, multi-camera ML processing at `/scouting/vision` for
@@ -397,10 +402,10 @@ own docs are all together in one place instead of scattered across
   (`wx-svelte-gantt`), Slack-driven prompts/notifications
   (`src/lib/server/planner_notifications.js`, `971bot.js`), driven by a
   Supabase `pg_cron` job every 15 minutes.
-- **`matchscout/`, `pitscout/`, `datascout/`, `notescout/`, `scouting-admin/`,
+- **`strategy/`, `matchscout/`, `pitscout/`, `datascout/`, `notescout/`, `scouting-admin/`,
   `teamview/`, `discover/`, `powerrankings/`** - FRC competition scouting:
   pit scouting forms, match data scouting, notes, cross-team data
-  discovery/analysis, and the local-scouting power rankings + persisted human
+  discovery/analysis, the cross-source strategy board, and the local-scouting power rankings + persisted human
   consensus + star-plot head-to-head comparison view (own top-level tab, not
   nested under `scouting/`).
 - **`scouting/vision/`, `scouting/vision/dashboard/`** - post-match
