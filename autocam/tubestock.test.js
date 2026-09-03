@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateTubestockGcode, tubestockFaceFileName, tubestockFaceLabel, tubestockFaceClock, holeDepthForWall, TUBESTOCK_CUTOFF_FACE_ANGLE_DEG, DEFAULT_CUTOFF_WIDTH, DEFAULT_CUTOFF_LENGTH, DEFAULT_BANDSAW_KERF } from './tubestock.js';
+import { generateTubestockGcode, tubestockFaceFileName, tubestockFaceLabel, tubestockFaceClock, holeDepthForWall, DEFAULT_CUTOFF_WIDTH, DEFAULT_CUTOFF_LENGTH, DEFAULT_BANDSAW_KERF } from './tubestock.js';
 import { lintGcode } from './gcodeLint.js';
 
 // Synthetic tube features matching extractTubeFeaturesFromMeshes' output
@@ -332,9 +332,12 @@ describe('holeDepthForWall', () => {
 });
 
 describe('the tube stock cutoff line', () => {
-  // twoWallTube() already has an angleDeg:180 wall with holes:[] - the
-  // wall opposite the zero face, and the one the cutoff always targets.
-  const cutoffParams = { ...baseParams, finishedLength: 10, toolDiameter: 0.1575 };
+  // twoWallTube() has walls at 0 and 180 - with fixturePinFace 12 (Side
+  // 12, angleDeg 0), the cutoff lands opposite it at Side 6 (angleDeg
+  // 180), which is what most of these tests exercise. Which physical wall
+  // is opposite the pin is a fact about how THIS tube got loaded into the
+  // fixture, not something the STEP model can know - see buildCutoffFeature.
+  const cutoffParams = { ...baseParams, finishedLength: 10, fixturePinFace: 12, toolDiameter: 0.1575 };
 
   it('does nothing at all when no finished length is given', () => {
     const result = generateTubestockGcode(twoWallTube(), baseParams);
@@ -359,14 +362,23 @@ describe('the tube stock cutoff line', () => {
     const result = generateTubestockGcode(twoWallTube(), cutoffParams);
     expect(result.stats.cutoff.width).toBe(DEFAULT_CUTOFF_WIDTH);
     expect(result.stats.cutoff.length).toBe(DEFAULT_CUTOFF_LENGTH);
-    expect(result.stats.cutoff.angleDeg).toBe(TUBESTOCK_CUTOFF_FACE_ANGLE_DEG);
   });
 
-  it('only ever goes on the wall opposite the zero face', () => {
-    const result = generateTubestockGcode(twoWallTube(), cutoffParams);
+  it.each([
+    [12, 180, 'Side 6'],
+    [3, 270, 'Side 9'],
+    [6, 0, 'Side 12'],
+    [9, 90, 'Side 3']
+  ])('goes on the wall opposite whatever face is stated as the fixture pin (pin Side %i -> %i deg, %s)', (pinFace, expectedAngle, expectedLabel) => {
+    const allFourWalls = {
+      tubeLength: 12,
+      walls: [0, 90, 180, 270].map((angleDeg) => ({ angleDeg, holes: [] }))
+    };
+    const result = generateTubestockGcode(allFourWalls, { ...cutoffParams, fixturePinFace: pinFace });
+    expect(result.stats.cutoff.angleDeg).toBe(expectedAngle);
     const cutoffFiles = result.gcodeFiles.filter((f) => f.hasCutoff);
     expect(cutoffFiles.length).toBe(1);
-    expect(cutoffFiles[0].label).toBe('Side 6');
+    expect(cutoffFiles[0].label).toBe(expectedLabel);
   });
 
   it('gives the cutoff-only face its own file even though it has no holes to drill', () => {
@@ -416,13 +428,23 @@ describe('the tube stock cutoff line', () => {
   });
 
   it('refuses to build a cutoff with no tool selected', () => {
-    expect(() => generateTubestockGcode(twoWallTube(), { ...baseParams, finishedLength: 10 }))
+    expect(() => generateTubestockGcode(twoWallTube(), { ...baseParams, finishedLength: 10, fixturePinFace: 12 }))
       .toThrow(/toolDiameter is required/);
   });
 
-  it('refuses a finished length with no wall opposite the zero face to cut it on', () => {
+  it('refuses a finished length with no fixture pin face stated', () => {
+    expect(() => generateTubestockGcode(twoWallTube(), { ...baseParams, finishedLength: 10, toolDiameter: 0.1575 }))
+      .toThrow(/fixture pin/);
+  });
+
+  it('refuses an invalid fixture pin face rather than silently picking a wall', () => {
+    expect(() => generateTubestockGcode(twoWallTube(), { ...cutoffParams, fixturePinFace: 5 }))
+      .toThrow(/fixture pin/);
+  });
+
+  it('refuses a finished length with no wall opposite the stated pin face to cut it on', () => {
     const oneWall = { tubeLength: 12, walls: [{ angleDeg: 0, holes: [{ position: 2, lateralOffset: 0, diameter: 0.25 }] }] };
-    expect(() => generateTubestockGcode(oneWall, cutoffParams)).toThrow(/no wall opposite the zero face/);
+    expect(() => generateTubestockGcode(oneWall, cutoffParams)).toThrow(/no wall there/);
   });
 
   it('refuses a tool too large for the cutoff width, the same way any other narrow feature would be refused', () => {

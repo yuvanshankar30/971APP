@@ -79,19 +79,27 @@ export function holeDepthForWall(wallThickness) {
 }
 
 /**
- * The wall a tube stock cutoff line goes on: the one wall opposite the
- * zero/reference face (angleDeg 0, the wall extractTubeFeaturesFromMeshes
- * always calls "A+" and labels Side 12 - see tubestockFaceClock).
+ * Only one wall ever gets a cutoff, never all four. This machine has no
+ * rotary axis and reaches one wall per fixture setup, so the router can
+ * never cut all the way around a tube's cross-section - the cutoff is a
+ * single-wall reference cut the operator then finishes by hand with a
+ * horizontal bandsaw, using the cut's two straight edges to align the
+ * blade across the whole tube. One wall's reference is enough for that; a
+ * second one would be redundant, not safer.
  *
- * Only one wall gets a cutoff, never all four. This machine has no rotary
- * axis and reaches one wall per fixture setup, so the router can never cut
- * all the way around a tube's cross-section - the cutoff is a single-wall
- * reference cut the operator then finishes by hand with a horizontal
- * bandsaw, using the cut's two straight edges to align the blade across
- * the whole tube. One wall's reference is enough for that; a second one
- * would be redundant, not safer.
+ * WHICH wall is the physical face opposite the fixture's registration pin
+ * - a fact about how this specific tube got loaded into the jaws, which
+ * the STEP model has no way to know. angleDeg 0 (this app's own "Side 12")
+ * is just whichever wall the extractor's own axis convention happens to
+ * detect first; it carries no relationship to the fixture at all. Used to
+ * be hardcoded to "the wall opposite Side 12" here, which was wrong - it
+ * assumed a CAD-modeling convention that was never actually established.
+ * See buildCutoffFeature: the operator states which face is against the
+ * pin (params.fixturePinFace), and the cutoff goes on whichever wall is
+ * opposite THAT.
  */
-export const TUBESTOCK_CUTOFF_FACE_ANGLE_DEG = 180;
+const CLOCK_TO_ANGLE_DEG = { 12: 0, 3: 90, 6: 180, 9: 270 };
+const OPPOSITE_CLOCK = { 12: 6, 3: 9, 6: 12, 9: 3 };
 
 /**
  * The cutoff obround's dimensions. Picked for what an operator does with it
@@ -176,21 +184,37 @@ export function tubestockFaceFileName(gcodeFileName, angleDeg) {
  * the physical length of the specific piece of tube sitting in the
  * fixture right now.
  *
+ * fixturePinFace is the same kind of fact, for the same reason: which
+ * physical wall sits against the fixture's registration pin depends on how
+ * THIS tube got loaded, which the STEP model cannot know either. The
+ * operator states it (as a clock number - 3, 6, 9 or 12, the same numbers
+ * already written on the tube) and the cutoff goes on the wall directly
+ * opposite it.
+ *
  * @param {Array} walls tubeFeatures.walls
  * @param {Object} params generateTubestockGcode's own params - reads
- *   finishedLength (required to build a feature at all) and toolDiameter
- *   (required once finishedLength is given)
+ *   finishedLength (required to build a feature at all), fixturePinFace
+ *   and toolDiameter (both required once finishedLength is given)
  * @returns {{angleDeg: number, position: number, path: Array<{x,y}>}|null}
  */
 function buildCutoffFeature(walls, params) {
   const finishedLength = Number(params.finishedLength);
   if (!Number.isFinite(finishedLength) || finishedLength <= 0) return null;
 
-  const wall = walls.find((w) => normalizeTubestockFaceAngle(w.angleDeg) === TUBESTOCK_CUTOFF_FACE_ANGLE_DEG);
+  const pinFace = Number(params.fixturePinFace);
+  if (!OPPOSITE_CLOCK[pinFace]) {
+    throw new Error(
+      'Which face sits against the fixture pin is required for the cutoff line - the STEP model has no way to ' +
+      'know how this tube is loaded, so pick Side 3, 6, 9 or 12 and the cutoff will go on the wall opposite it.'
+    );
+  }
+  const cutoffClock = OPPOSITE_CLOCK[pinFace];
+  const cutoffAngleDeg = CLOCK_TO_ANGLE_DEG[cutoffClock];
+
+  const wall = walls.find((w) => normalizeTubestockFaceAngle(w.angleDeg) === cutoffAngleDeg);
   if (!wall) {
     throw new Error(
-      `A finished length was given for the cutoff line, but this tube has no wall opposite the zero face ` +
-      `(Side ${tubestockFaceClock(TUBESTOCK_CUTOFF_FACE_ANGLE_DEG)}) to cut it on.`
+      `The cutoff goes on Side ${cutoffClock} (opposite the fixture pin face, Side ${pinFace}), but this tube has no wall there.`
     );
   }
 
@@ -467,12 +491,15 @@ function generateProgram(walls, params, { faceAngleDeg = null, faceLabel = null,
  *   controller: 'linuxcnc' (default) | 'wincnc', units: 'in' | 'mm' (default 'in')
  *   programNumber (default 1002 - 1000/1001 already used by turning.js/
  *     routing.js's own conventions elsewhere in this app, kept distinct)
- *   finishedLength (inches, optional) - cuts a bandsaw reference line on
- *     the wall opposite the zero face (Side 6) once the tube has been
- *     drilled to this length, so a stock piece longer than the finished
- *     part can be sawn to size. See buildCutoffFeature for why this is an
- *     operator-entered value rather than read from the CAD model. Leave
- *     unset to skip the cutoff entirely - not every job needs one.
+ *   finishedLength (inches, optional) - cuts a bandsaw reference line once
+ *     the tube has been drilled to this length, so a stock piece longer
+ *     than the finished part can be sawn to size. See buildCutoffFeature
+ *     for why this is an operator-entered value rather than read from the
+ *     CAD model. Leave unset to skip the cutoff entirely - not every job
+ *     needs one.
+ *   fixturePinFace (12, 3, 6 or 9) - which physical wall sits against the
+ *     fixture's registration pin for this specific tube. Required only
+ *     when finishedLength is set; the cutoff goes on the wall opposite it.
  *   toolDiameter (inches) - required only when finishedLength is set; the
  *     end mill that cuts the cutoff line.
  */

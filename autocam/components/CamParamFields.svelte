@@ -87,11 +87,27 @@
         <p class="text-muted">
           The stock loaded is whatever length that piece of extrusion happens to be, which is rarely the length
           the part needs and isn't something the CAD model can tell you - so this is entered here, not derived.
-          Set it and the program cuts a bandsaw reference line on the wall opposite the zero face (Side 6) once
-          drilling is done: one pass through that wall only, not a full separation - band-saw the tube to length
-          along the line's straight edges afterward.
+          Set it and the program cuts a bandsaw reference line once drilling is done: one pass through one wall
+          only, not a full separation - band-saw the tube to length along the line's straight edges afterward.
         </p>
       </div>
+      {#if params.finishedLength}
+        <div class="form-group">
+          <label class="form-label" for="cf-fixture-pin-face">Fixture pin face</label>
+          <select id="cf-fixture-pin-face" class="form-select" bind:value={params.fixturePinFace}>
+            <option value="">Select the face against the pin</option>
+            <option value={12}>Side 12</option>
+            <option value={3}>Side 3</option>
+            <option value={6}>Side 6</option>
+            <option value={9}>Side 9</option>
+          </select>
+          <p class="text-muted">
+            Which physical face is against the fixture's registration pin for this tube - the STEP model has no
+            way to know how it gets loaded, so this is entered too. The cutoff line goes on the wall directly
+            opposite it.
+          </p>
+        </div>
+      {/if}
     </div>
   {/if}
 
