@@ -19,9 +19,11 @@
 import { describe, it, expect } from 'vitest';
 import { generateRoutingGcode } from './routing.js';
 import { generateTubestockGcode } from './tubestock.js';
+import { generateTurningGcode } from './turning.js';
 import { lintGcode } from './gcodeLint.js';
 import { generateGroupedRoutingGcode } from './groupedGcode.js';
 import { MAX_GCODE_LINE_LENGTH } from './gcodeComments.js';
+import { interpreterCheck } from './gcodeInterpreter.js';
 
 function square(cx, cy, size) {
   const h = size / 2;
@@ -48,6 +50,19 @@ function tube() {
   };
 }
 
+// A rectangular non-round wall feature, real enough to be milled rather
+// than just detected - same shape/coordinates stepProfile.js now hands off
+// for a real slot. See autocam/tubestock.test.js's own fixture.
+const RECT_PROFILE = { position: 6, lateralOffset: 0.1, points: [
+  { x: 5.5, y: -0.05 }, { x: 6.5, y: -0.05 }, { x: 6.5, y: 0.25 }, { x: 5.5, y: 0.25 }
+] };
+
+function tubeWithProfile() {
+  const base = tube();
+  base.walls[2] = { ...base.walls[2], profiles: [RECT_PROFILE] };
+  return base;
+}
+
 const report = (name, result) => {
   const detail = [...result.errors, ...result.warnings]
     .map((entry) => `line ${entry.line}: ${entry.message}`)
@@ -68,7 +83,9 @@ const cases = [
   ['part with an internal hole', () => generateRoutingGcode(withHole, { toolDiameter: 0.25, targetDepth: 0.25 })],
   ['metric output', () => generateRoutingGcode(outline, { toolDiameter: 0.25, targetDepth: 0.25, units: 'mm' })],
   ['explicit stock thickness', () => generateRoutingGcode(outline, { toolDiameter: 0.25, targetDepth: 0.25, stockThickness: 0.25 })],
-  ['tube stock, all faces', () => generateTubestockGcode(tube(), { holeDepth: 0.15 })]
+  ['tube stock, all faces', () => generateTubestockGcode(tube(), { holeDepth: 0.15 })],
+  ['tube stock with a cutoff line', () => generateTubestockGcode(tube(), { holeDepth: 0.15, finishedLength: 10, fixturePinFace: 12, toolDiameter: 0.1575 })],
+  ['tube stock with a milled non-round feature', () => generateTubestockGcode(tubeWithProfile(), { holeDepth: 0.15, toolDiameter: 0.1575 })]
 ];
 
 describe('router programs load in LinuxCNC', () => {
@@ -228,5 +245,87 @@ describe('the tube stock program number stays a bare O-word', () => {
     const oLines = executableText(gcode).split('\n').map((l) => l.trim()).filter((l) => /^o/i.test(l));
     expect(oLines.length).toBeGreaterThan(0);
     for (const line of oLines) expect(line).toMatch(/^O\d+$/i);
+  });
+});
+
+/**
+ * Runs every case through a REAL, independently-implemented RS274NGC
+ * tokenizer (gcode-parser, from cncjs - a library that actually drives real
+ * machines, not a from-scratch reimplementation of the spec) rather than
+ * only trusting gcodeLint.js's own rules. gcodeLint.js was calibrated
+ * against this exact library by hand, once (see its file header and
+ * gcode_validation_approach in project memory) - this makes that
+ * comparison a standing check instead of a one-time fact, so gcodeLint.js
+ * and the real interpreter drifting apart gets caught here.
+ *
+ * Real LinuxCNC's own rs274 cannot be built on macOS - see
+ * gcodeInterpreter.js's own file header for why - so this is the practical
+ * substitute available in this environment.
+ */
+describe('every generated program agrees with a real interpreter, not just our own rules', () => {
+  for (const [name, generate] of cases) {
+    it(`${name}: no word outside A-Z, and gcodeLint.js agrees`, () => {
+      const generated = generate();
+      const gcode = typeof generated === 'string' ? generated : generated.gcode;
+      const real = interpreterCheck(gcode);
+      expect(real.invalidWords, `${name}: ${JSON.stringify(real.invalidWords)}`).toEqual([]);
+      // Cross-check: a program the real tokenizer finds clean should never
+      // be one gcodeLint.js reports errors on, and vice versa - either
+      // direction disagreeing means the two have drifted apart.
+      const ours = lintGcode(gcode);
+      expect(ours.errors, report(name, ours)).toEqual([]);
+    });
+  }
+
+  it('actually parses a real generated program into real command blocks, not zero', () => {
+    // A tokenizer that silently returns nothing on real input would make
+    // every check above vacuously true - this catches that failure mode.
+    const generated = generateRoutingGcode(outline, { toolDiameter: 0.25, targetDepth: 0.25 });
+    const real = interpreterCheck(generated.gcode);
+    expect(real.blockCount).toBeGreaterThan(10);
+    expect(real.commandWordCount).toBeGreaterThan(10);
+  });
+});
+
+/**
+ * Turning is deliberately NOT in the LinuxCNC-conformance suite above.
+ * turning.js's own file header is explicit: it targets a real Haas TL-1
+ * (Fanuc-dialect lathe control) - G50/G96/G97 constant-surface-speed with
+ * an RPM clamp, all standard Haas conventions. Checked directly against the
+ * LinuxCNC 2.7.15 source while writing this: G_50 (the RPM clamp) is
+ * #defined in interp_internal.hh but appears nowhere else in the 2.7.15
+ * rs274ngc interpreter - it is not actually implemented there. Adding
+ * turning's output to the LinuxCNC-specific checks above would fail it
+ * against a control system it was never written for.
+ *
+ * What still applies regardless of dialect: the tokenizer-level checks
+ * (comment nesting, valid word letters). Fanuc and LinuxCNC dialects both
+ * sit on the same RS274-family word structure at that level, so this part
+ * of gcode-parser's job is dialect-agnostic.
+ */
+describe('turning output is well-formed G-code (Fanuc dialect - not checked against LinuxCNC)', () => {
+  function shaftProfile() {
+    return [
+      { z: 0, x: 0.4 },
+      { z: 0.1, x: 0.5 },
+      { z: 1.9, x: 0.5 },
+      { z: 2.0, x: 0.4 }
+    ];
+  }
+  const turningParams = { stockDiameter: 1.1, stepDown: 0.05, finishAllowance: 0.02, feedRough: 0.008, feedFinish: 0.004 };
+
+  it('has no word outside A-Z and needs no comment repair', () => {
+    const { gcode } = generateTurningGcode(shaftProfile(), turningParams);
+    const real = interpreterCheck(gcode);
+    expect(real.invalidWords).toEqual([]);
+    expect(lintGcode(gcode).repairedLines).toBe(0);
+  });
+
+  it('really does use G50/G96/G97 - confirming the dialect distinction above is not hypothetical', () => {
+    const { gcode } = generateTurningGcode(shaftProfile(), turningParams);
+    const real = interpreterCheck(gcode);
+    expect(real.letters).toContain('G');
+    expect(gcode).toMatch(/\bG50\b/);
+    expect(gcode).toMatch(/\bG96\b/);
   });
 });
