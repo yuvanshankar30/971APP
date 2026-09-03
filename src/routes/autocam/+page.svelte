@@ -158,7 +158,7 @@
     return { toolDiameter: 0.25, stepDown: 0.03, targetDepth: '', tabWidth: 0.25, tabHeight: 0.06, tabSpacing: 6, tabCount: '', feedRate: 25, plungeRate: 8, spindleSpeed: 14000, edgeMargin: 0.5, toolSequence: [] };
   }
   function emptyTubestockParams() {
-    return { holeDepth: '', safeZ: 0.25, feedRate: 8, spindleSpeed: 8000 };
+    return { holeDepth: '', safeZ: 0.25, feedRate: 8, spindleSpeed: 8000, finishedLength: '' };
   }
   function emptyParamsFor(operationType) {
     if (operationType === 'turning') return emptyTurningParams();

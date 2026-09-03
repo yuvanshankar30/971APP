@@ -763,7 +763,7 @@ const MIN_TUBE_WALL_AREA_FRACTION = 0.3;
 const TUBE_WALL_ALIGNMENT_THRESHOLD = 0.9;
 // Real drilled holes tessellate as a clean circle - each boundary point sits
 // within this fraction of the mean radius from center. A slot, keyway, or
-// other non-round feature would read well outside this and must be rejected
+// other non-round feature would read well outside this and is skipped
 // rather than silently treated as "a hole of the average radius," which
 // would program the wrong tool/position for indexed drilling.
 const MAX_HOLE_RADIUS_VARIATION = 0.15;
@@ -781,18 +781,25 @@ const MAX_HOLE_RADIUS_VARIATION = 0.15;
  * detection also tries X/Y/Z directly rather than solving for an arbitrary
  * orientation), round holes only (see MAX_HOLE_RADIUS_VARIATION), drilled
  * straight through a single wall (not through both walls of the tube at
- * once, not angled). Round tube and non-round hole features are rejected,
- * not guessed at - this feeds indexed-drilling G-code for a real machine,
- * same reasoning as every other rejection-over-guessing check in this file.
+ * once, not angled). Round tube is rejected outright - there is no wall to
+ * find a normal for. A non-round hole feature is not rejected outright any
+ * more: it is skipped and reported (see skippedFeatures below) rather than
+ * failing every real round hole on the same tube over one shape this
+ * extractor has no way to represent - guessing at it would program the
+ * wrong tool/position, but refusing the whole tube over it is disproportionate
+ * when the tube also has real holes nothing here has trouble with.
  *
  * Returns { lengthAxis, tubeLength, crossSection: {a, b} (outer width along
  * the two cross-section axes), walls: [{ angleDeg, holes: [{position,
- * diameter}, ...] }, ...] } - walls sorted by angleDeg ascending, holes
- * within a wall sorted by position ascending. angleDeg is a rotary-axis
- * angle around lengthAxis (0/90/180/270 for a square tube's 4 faces,
- * measured so the two cross-section axes are 0deg and 90deg respectively -
- * ready to feed straight into tubestock.js's indexed drilling without the
- * caller needing to know which world axis was which.
+ * lateralOffset, diameter}, ...], skippedFeatures: [{position, lateralOffset,
+ * meanRadius, maxDeviation}, ...] }, ...] } - walls sorted by angleDeg
+ * ascending, holes within a wall sorted by position ascending.
+ * skippedFeatures is empty on a wall with nothing skipped, present so a
+ * caller doesn't have to special-case the field's absence. angleDeg is a
+ * rotary-axis angle around lengthAxis (0/90/180/270 for a square tube's 4
+ * faces, measured so the two cross-section axes are 0deg and 90deg
+ * respectively - ready to feed straight into tubestock.js's indexed
+ * drilling without the caller needing to know which world axis was which.
  */
 export function extractTubeFeaturesFromMeshes(meshes) {
   const bbox = meshesBoundingBox(meshes);
@@ -877,6 +884,18 @@ export function extractTubeFeaturesFromMeshes(meshes) {
     // First (largest) loop is the wall's own outer rectangle - not a hole.
     const holeLoops = withArea.slice(1);
 
+    // A loop that isn't round is skipped, not fatal. It is real geometry -
+    // a slot, a keyway, or a reference mark the CAD modeler drew for their
+    // own use - that indexed round-hole drilling has no way to represent.
+    // This used to throw and fail the whole tube over it. Found against a
+    // real part while building tube stock's cutoff feature: a 24.5" tube
+    // with 388 real round holes across its 4 walls also had 2 obround
+    // witness marks drawn into one wall, and the throw discarded all 388
+    // holes to refuse 2 shapes nothing here drills. Skipping the 2 and
+    // reporting them is what lets the other 388 actually get drilled - a
+    // human still has to look at what was skipped, which skippedFeatures
+    // is for.
+    const skippedFeatures = [];
     const holes = holeLoops.map(({ points }) => {
       let cu = 0, cv = 0;
       for (const p of points) { cu += p.x; cv += p.y; }
@@ -884,29 +903,24 @@ export function extractTubeFeaturesFromMeshes(meshes) {
       const radii = points.map((p) => Math.hypot(p.x - cu, p.y - cv));
       const meanRadius = radii.reduce((s, r) => s + r, 0) / radii.length;
       const maxDeviation = Math.max(...radii.map((r) => Math.abs(r - meanRadius) / meanRadius));
+      const position = cu - lengthMinByAxis[lengthAxis];
+      // Signed offset from the WALL's own centerline (not the loop's raw
+      // v-coordinate) - real bug found against a real AndyMark 2"x1" tube
+      // fixture (am-5180): the wide (2") face has multiple holes at the
+      // SAME position along the tube but different lateral offsets across
+      // its width (a real side-by-side hole pair, not a duplicate) - a
+      // narrower fixture built by hand never exercised more than one hole
+      // per position and never caught that this field was being computed
+      // (cv) and then silently dropped, which would have driven every
+      // hole on a wide face to the exact same G-code XY, redrilling one
+      // spot instead of drilling each real hole.
+      const lateralOffset = cv - wallWidth / 2;
       if (maxDeviation > MAX_HOLE_RADIUS_VARIATION) {
-        throw new Error(
-          `A feature on this tube isn't round (radius varies ${(maxDeviation * 100).toFixed(0)}% around its boundary) - ` +
-          `likely a slot, keyway, or other non-circular cutout that indexed round-hole drilling can't represent. ` +
-          `Check this part only has round holes through its walls.`
-        );
+        skippedFeatures.push({ position, lateralOffset, meanRadius, maxDeviation });
+        return null;
       }
-      return {
-        position: cu - lengthMinByAxis[lengthAxis],
-        // Signed offset from the WALL's own centerline (not the loop's raw
-        // v-coordinate) - real bug found against a real AndyMark 2"x1" tube
-        // fixture (am-5180): the wide (2") face has multiple holes at the
-        // SAME position along the tube but different lateral offsets across
-        // its width (a real side-by-side hole pair, not a duplicate) - a
-        // narrower fixture built by hand never exercised more than one hole
-        // per position and never caught that this field was being computed
-        // (cv) and then silently dropped, which would have driven every
-        // hole on a wide face to the exact same G-code XY, redrilling one
-        // spot instead of drilling each real hole.
-        lateralOffset: cv - wallWidth / 2,
-        diameter: meanRadius * 2
-      };
-    });
+      return { position, lateralOffset, diameter: meanRadius * 2 };
+    }).filter(Boolean);
     holes.sort((a, b) => (a.position - b.position) || (a.lateralOffset - b.lateralOffset));
 
     const angleRad = Math.atan2(
@@ -914,7 +928,7 @@ export function extractTubeFeaturesFromMeshes(meshes) {
       isAWall ? (key[1] === '+' ? 1 : -1) : 0
     );
     const angleDeg = ((angleRad * 180) / Math.PI + 360) % 360;
-    walls.push({ angleDeg, holes });
+    walls.push({ angleDeg, holes, skippedFeatures });
   }
 
   if (walls.length === 0) {

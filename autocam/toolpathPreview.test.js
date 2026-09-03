@@ -1157,3 +1157,34 @@ describe('estimateMachiningTime - rapid rate comes from the machine', () => {
     expect(est.totalSeconds).toBeGreaterThan(0);
   });
 });
+
+describe('the tube stock cutoff line reaches the 3D simulator', () => {
+  // ToolpathSimulator.svelte draws every parsed move as a colored line
+  // regardless of operation type - this only has to prove the cutoff's
+  // moves parse and land at the right depth, not the drawing itself.
+  it('parses as real cutting moves at the drilled depth, not rapids or a gap in the path', () => {
+    const walls = [
+      { angleDeg: 0, holes: [{ position: 2, lateralOffset: 0, diameter: 0.25 }] },
+      { angleDeg: 180, holes: [{ position: 3, lateralOffset: 0, diameter: 0.25 }] }
+    ];
+    const { gcode } = generateTubestockGcode(
+      { tubeLength: 12, walls },
+      { holeDepth: 0.145, finishedLength: 10, toolDiameter: 0.1575 }
+    );
+    const { moves } = parseToolpath3D(gcode);
+    const cutoffMoves = moves.filter((m) => Math.abs(m.to.z + 0.145) < 1e-6 && m.kind === 'cut');
+    // The offset obround has ~41 straight+arc segments (see tubeCutoff.js) -
+    // this only needs "clearly more than one," proving it is a traced
+    // contour and not a single point.
+    expect(cutoffMoves.length).toBeGreaterThan(10);
+    // Every one of those moves belongs to the wall it was cut on.
+    for (const move of cutoffMoves) expect(move.angleDeg).toBe(180);
+  });
+
+  it('is absent from the parsed moves when no cutoff was requested', () => {
+    const walls = [{ angleDeg: 0, holes: [{ position: 2, lateralOffset: 0, diameter: 0.25 }] }];
+    const { gcode } = generateTubestockGcode({ tubeLength: 12, walls }, { holeDepth: 0.145 });
+    const { moves } = parseToolpath3D(gcode);
+    expect(moves.some((m) => Math.abs((m.to.z ?? 0) + 0.145) < 1e-6 && Math.abs(m.to.x - 10) < 1)).toBe(false);
+  });
+});

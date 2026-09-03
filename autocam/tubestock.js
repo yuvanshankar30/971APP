@@ -33,6 +33,8 @@
  */
 import { HEADER_WARNING } from './turning.js';
 import { normalizeGcodeComments } from './gcodeComments.js';
+import { offsetPolygon } from './routing.js';
+import { tubeCutoffPath, tubeCutoffPosition } from './tubeCutoff.js';
 
 function fmt(n, decimals = 4) {
   return Number(n).toFixed(decimals);
@@ -75,6 +77,39 @@ export function holeDepthForWall(wallThickness) {
   if (!Number.isFinite(wall) || wall <= 0) return null;
   return Number((wall + WALL_BREAKTHROUGH_ALLOWANCE).toFixed(4));
 }
+
+/**
+ * The wall a tube stock cutoff line goes on: the one wall opposite the
+ * zero/reference face (angleDeg 0, the wall extractTubeFeaturesFromMeshes
+ * always calls "A+" and labels Side 12 - see tubestockFaceClock).
+ *
+ * Only one wall gets a cutoff, never all four. This machine has no rotary
+ * axis and reaches one wall per fixture setup, so the router can never cut
+ * all the way around a tube's cross-section - the cutoff is a single-wall
+ * reference cut the operator then finishes by hand with a horizontal
+ * bandsaw, using the cut's two straight edges to align the blade across
+ * the whole tube. One wall's reference is enough for that; a second one
+ * would be redundant, not safer.
+ */
+export const TUBESTOCK_CUTOFF_FACE_ANGLE_DEG = 180;
+
+/**
+ * The cutoff obround's dimensions. Picked for what an operator does with it
+ * afterward, not for any single existing job: a horizontal bandsaw needs a
+ * clear straight run to track, and whatever is left of the semicircular
+ * ends on each finished piece has to sand flush by hand. A narrow width
+ * keeps that remnant small; a modest overall length gives the saw blade a
+ * real straight edge to follow rather than a single point.
+ */
+export const DEFAULT_CUTOFF_WIDTH = 0.25;
+export const DEFAULT_CUTOFF_LENGTH = 0.75;
+
+/**
+ * A typical metal-cutting horizontal bandsaw blade's kerf. The cutoff line
+ * sits half a kerf past the finished length so the saw - which removes
+ * material as it cuts - doesn't leave the finished piece short.
+ */
+export const DEFAULT_BANDSAW_KERF = 0.035;
 
 export function normalizeTubestockFaceAngle(angleDeg) {
   const normalized = ((Number(angleDeg) || 0) % 360 + 360) % 360;
@@ -127,6 +162,58 @@ export function tubestockFaceFileName(gcodeFileName, angleDeg) {
 }
 
 /**
+ * Builds the cutoff toolpath from job params, or returns null when no
+ * cutoff was asked for.
+ *
+ * finishedLength does not come from the STEP model. The physical stock
+ * loaded on the machine is whatever length that piece of extrusion happens
+ * to be cut to, which the CAD model has no way to know and routinely
+ * disagrees with - the model represents the finished part, not the raw
+ * stock. So this is deliberately an operator-entered value, the same
+ * "state a real number, not get a guessed default" posture holeDepth used
+ * to have before it became derivable from the stock catalog - except this
+ * one never becomes derivable, because nothing in this app's data models
+ * the physical length of the specific piece of tube sitting in the
+ * fixture right now.
+ *
+ * @param {Array} walls tubeFeatures.walls
+ * @param {Object} params generateTubestockGcode's own params - reads
+ *   finishedLength (required to build a feature at all) and toolDiameter
+ *   (required once finishedLength is given)
+ * @returns {{angleDeg: number, position: number, path: Array<{x,y}>}|null}
+ */
+function buildCutoffFeature(walls, params) {
+  const finishedLength = Number(params.finishedLength);
+  if (!Number.isFinite(finishedLength) || finishedLength <= 0) return null;
+
+  const wall = walls.find((w) => normalizeTubestockFaceAngle(w.angleDeg) === TUBESTOCK_CUTOFF_FACE_ANGLE_DEG);
+  if (!wall) {
+    throw new Error(
+      `A finished length was given for the cutoff line, but this tube has no wall opposite the zero face ` +
+      `(Side ${tubestockFaceClock(TUBESTOCK_CUTOFF_FACE_ANGLE_DEG)}) to cut it on.`
+    );
+  }
+
+  // Only needed for this feature - drilling never has to know the tool's
+  // diameter, since a plunge doesn't need cutter compensation. A contour
+  // cut does: the toolpath has to sit inside the drawn line by one tool
+  // radius, or the finished slot comes out wider than asked for.
+  const toolDiameter = Number(params.toolDiameter);
+  if (!(toolDiameter > 0)) {
+    throw new Error('toolDiameter is required to mill the cutoff line - select an end mill for this job.');
+  }
+
+  const position = tubeCutoffPosition({ partEnd: finishedLength, kerf: DEFAULT_BANDSAW_KERF });
+  const outerPath = tubeCutoffPath({ position, width: DEFAULT_CUTOFF_WIDTH, length: DEFAULT_CUTOFF_LENGTH });
+  // offsetPolygon itself refuses a tool too large for the shape ("Feature
+  // is too small for this tool") - that check is reused here rather than
+  // duplicated, so cutter fit is one rule, not two that could disagree.
+  const path = offsetPolygon(outerPath, -toolDiameter / 2);
+
+  return { angleDeg: wall.angleDeg, position, toolDiameter, path };
+}
+
+/**
  * Groups every hole across every wall by drill diameter (largest first,
  * matching routing.js's multi-tool convention: primary/most-common tool
  * first, detail tools after), keeping each diameter's holes ordered by
@@ -160,20 +247,27 @@ function groupHolesByDiameter(walls) {
     }));
 }
 
-function wallsWithHolesByFace(walls) {
+function wallsWithHolesByFace(walls, forceIncludeAngleDeg = null) {
+  const forced = forceIncludeAngleDeg === null ? null : normalizeTubestockFaceAngle(forceIncludeAngleDeg);
   const faces = new Map();
   for (const wall of walls) {
-    if (!wall.holes?.length) continue;
     const angleDeg = normalizeTubestockFaceAngle(wall.angleDeg);
-    if (!faces.has(angleDeg)) faces.set(angleDeg, []);
-    faces.get(angleDeg).push(...wall.holes);
+    // A wall with no holes normally gets no separately-runnable file - there
+    // is nothing to drill on it. The cutoff wall is the one exception: it
+    // can carry a cutoff line and nothing else, and that still needs its
+    // own file.
+    if (!wall.holes?.length && angleDeg !== forced) continue;
+    if (!faces.has(angleDeg)) faces.set(angleDeg, { holes: [], skippedFeatures: [] });
+    const bucket = faces.get(angleDeg);
+    bucket.holes.push(...wall.holes);
+    bucket.skippedFeatures.push(...(wall.skippedFeatures || []));
   }
   return [...faces.entries()]
     .sort(([a], [b]) => a - b)
-    .map(([angleDeg, holes]) => ({ angleDeg, holes }));
+    .map(([angleDeg, { holes, skippedFeatures }]) => ({ angleDeg, holes, skippedFeatures }));
 }
 
-function generateProgram(walls, params, { faceAngleDeg = null, faceLabel = null, programNumber }) {
+function generateProgram(walls, params, { faceAngleDeg = null, faceLabel = null, programNumber, cutoffFeature = null }) {
   const {
     holeDepth,
     safeZ = 0.25,
@@ -231,6 +325,22 @@ function generateProgram(walls, params, { faceAngleDeg = null, faceLabel = null,
   groups.forEach((group, index) => {
     lines.push(`(  ${index + 1}. ${fmt(group.diameter, 3)}" drill (T${index + 1}) - ${group.holes.length} hole${group.holes.length === 1 ? '' : 's'} )`);
   });
+  if (cutoffFeature) {
+    lines.push(`(  ${groups.length + 1}. ${fmt(cutoffFeature.toolDiameter, 3)}" end mill - cutoff line, one pass through this wall )`);
+  }
+
+  // A feature that wasn't round was skipped rather than drilled - see
+  // extractTubeFeaturesFromMeshes' skippedFeatures. Surfaced here, in the
+  // program itself, because the person running this file is not
+  // necessarily the person who queued it - same reasoning as the
+  // materialFeedsUnverified notice elsewhere in this app.
+  const skipped = walls.flatMap((wall) => (wall.skippedFeatures || []).map((feature) => ({ ...feature, angleDeg: wall.angleDeg })));
+  if (skipped.length > 0) {
+    lines.push(`(*** ${skipped.length} feature${skipped.length === 1 ? '' : 's'} on this tube ${skipped.length === 1 ? 'was' : 'were'} not round and NOT machined - check the CAD model before running ***)`);
+    for (const feature of skipped) {
+      lines.push(`(  SKIPPED: ${tubestockFaceLabel(feature.angleDeg)} near X${fmt(feature.position)} Y${fmt(feature.lateralOffset)}, roughly ${fmt(feature.meanRadius * 2, 2)}" across )`);
+    }
+  }
 
   let toolChanges = 0;
   groups.forEach((group, toolIndex) => {
@@ -277,6 +387,50 @@ function generateProgram(walls, params, { faceAngleDeg = null, faceLabel = null,
     }
   });
 
+  // The cutoff is its own pass, after every hole, rather than woven into
+  // groups.forEach above: it uses whatever end mill was chosen for it,
+  // never one of the drill diameters, and it belongs on exactly one wall
+  // regardless of how many tool groups touched that wall while drilling.
+  if (cutoffFeature && (faceAngleDeg === null || normalizeTubestockFaceAngle(faceAngleDeg) === normalizeTubestockFaceAngle(cutoffFeature.angleDeg))) {
+    const cutoffToolLabel = `${fmt(cutoffFeature.toolDiameter, 3)}" end mill`;
+    if (groups.length === 0) {
+      lines.push(`(--- TOOL: ${cutoffToolLabel} (cutoff line) - load before starting ---)`);
+      lines.push(`S${spindleSpeed} M03 (spindle on)`);
+      if (spindleDwellSeconds > 0) lines.push(dwellLine(isWinCNC, spindleDwellSeconds, 'wait for spindle to reach speed'));
+    } else {
+      toolChanges += 1;
+      lines.push(`G00 Z${fmt(safeZ)} (retract clear before tool change)`);
+      lines.push('M05 (spindle off)');
+      lines.push(pauseLine(isWinCNC, `TOOL CHANGE: load ${cutoffToolLabel} for the cutoff line, then RE-TOUCH OFF Z0 before resuming - no automatic tool length compensation assumed`));
+      lines.push(`S${spindleSpeed} M03 (spindle back on)`);
+      if (spindleDwellSeconds > 0) lines.push(dwellLine(isWinCNC, spindleDwellSeconds, 'wait for spindle to reach speed'));
+    }
+    // Only the combined program can arrive here on a different face than
+    // the cutoff's own - a per-face program is by definition already
+    // fixtured on its one face, so it never needs this prompt.
+    if (faceAngleDeg === null) {
+      lines.push(`G00 Z${fmt(safeZ)} (retract clear before flipping tube)`);
+      lines.push(`(FACE A${fmt(cutoffFeature.angleDeg, 1)} - FLIP TUBE so ${tubestockFaceLabel(cutoffFeature.angleDeg)} faces up, then RE-ZERO Z before resuming - the operator turns the tube by hand, there is no rotary axis on this machine)`);
+      lines.push(pauseLine(isWinCNC, `FLIP TUBE to ${tubestockFaceLabel(cutoffFeature.angleDeg)} face for the cutoff line, and RE-ZERO Z before resuming - no rotary axis on this machine`));
+    }
+    // One pass, straight in, same depth as a drilled hole through this same
+    // wall - through the near wall only, never reaching for the far one.
+    // Not a full separation: the tube is only ever fixtured on one wall at
+    // a time on this machine, so nothing here can reach all the way around
+    // the tube's cross-section. What this cuts is a reference the operator
+    // finishes with a horizontal bandsaw, tracking the straight edges of
+    // the two long sides across the whole tube.
+    lines.push(`(--- CUTOFF LINE at X${fmt(cutoffFeature.position)} - one pass through this wall, not a full separation - band-saw the tube to length along its straight edges ---)`);
+    const [start, ...rest] = cutoffFeature.path;
+    lines.push(`G00 X${fmt(start.x)} Y${fmt(start.y)} (rapid to cutoff start)`);
+    lines.push(`G00 Z${fmt(safeZ)} (rapid to clearance above wall)`);
+    lines.push(`G01 Z${fmt(-holeDepth)} F${fmt(feedRate, 2)} (plunge)`);
+    for (const point of rest) {
+      lines.push(`G01 X${fmt(point.x)} Y${fmt(point.y)} F${fmt(feedRate, 2)} (cutoff contour)`);
+    }
+    lines.push(`G00 Z${fmt(safeZ)} (retract)`);
+  }
+
   lines.push(`G00 Z${fmt(safeZ)} (final retract)`);
   lines.push('M05 (spindle off)');
   lines.push(isWinCNC ? '(PROGRAM END)' : 'M30 (program end)');
@@ -286,11 +440,11 @@ function generateProgram(walls, params, { faceAngleDeg = null, faceLabel = null,
   // whose own text contains a parenthesis used to close early and leave the
   // rest of its line as live code. See autocam/gcodeComments.js.
   const gcode = normalizeGcodeComments(lines.join('\n'), { dialect: isWinCNC ? 'wincnc' : 'linuxcnc' });
-  return { gcode, totalHoles, toolsUsed: groups.length, toolChanges };
+  return { gcode, totalHoles, toolsUsed: groups.length + (cutoffFeature ? 1 : 0), toolChanges };
 }
 
 /**
- * @param {{ tubeLength: number, walls: Array<{angleDeg, holes: Array<{position, lateralOffset, diameter}>}> }} tubeFeatures
+ * @param {{ tubeLength: number, walls: Array<{angleDeg, holes: Array<{position, lateralOffset, diameter}>, skippedFeatures?: Array}> }} tubeFeatures
  *   Shape matches extractTubeFeaturesFromMeshes' return value directly -
  *   tubeLength isn't actually used for toolpath generation (every hole
  *   already carries its own absolute position), only echoed into stats.
@@ -301,15 +455,26 @@ function generateProgram(walls, params, { faceAngleDeg = null, faceLabel = null,
  *     real number, not get a guessed default" posture as routing.js's
  *     targetDepth. Too shallow won't clear the wall; too deep on a
  *     through-both-walls hole risks the far wall or a fixture behind it -
- *     verify against the real tube gauge before running.
+ *     verify against the real tube gauge before running. The cutoff line
+ *     (below) plunges to this same depth - through the wall it's on, not
+ *     both walls of the tube.
  *   safeZ (default 0.25) - retract height above the wall's outer surface.
  *   feedRate (in/min, default 8) - conservative default for drilling
  *     (much slower than routing.js's contour-following feedRate default of
  *     40; a straight plunge into solid material, not a light profile pass).
+ *     Also used for the cutoff line's contour pass - see buildCutoffFeature.
  *   spindleSpeed (rpm, default 8000), spindleDwellSeconds (default 2).
  *   controller: 'linuxcnc' (default) | 'wincnc', units: 'in' | 'mm' (default 'in')
  *   programNumber (default 1002 - 1000/1001 already used by turning.js/
  *     routing.js's own conventions elsewhere in this app, kept distinct)
+ *   finishedLength (inches, optional) - cuts a bandsaw reference line on
+ *     the wall opposite the zero face (Side 6) once the tube has been
+ *     drilled to this length, so a stock piece longer than the finished
+ *     part can be sawn to size. See buildCutoffFeature for why this is an
+ *     operator-entered value rather than read from the CAD model. Leave
+ *     unset to skip the cutoff entirely - not every job needs one.
+ *   toolDiameter (inches) - required only when finishedLength is set; the
+ *     end mill that cuts the cutoff line.
  */
 export function generateTubestockGcode(tubeFeatures, params = {}) {
   const walls = tubeFeatures?.walls;
@@ -317,8 +482,9 @@ export function generateTubestockGcode(tubeFeatures, params = {}) {
     throw new Error('Tube stock needs at least one wall with hole data');
   }
   const totalHoles = walls.reduce((sum, w) => sum + w.holes.length, 0);
-  if (totalHoles === 0) {
-    throw new Error('No holes found across any wall - nothing to drill');
+  const cutoffFeature = buildCutoffFeature(walls, params);
+  if (totalHoles === 0 && !cutoffFeature) {
+    throw new Error('No holes found across any wall, and no finished length was given for a cutoff - nothing to machine');
   }
 
   const {
@@ -360,22 +526,32 @@ export function generateTubestockGcode(tubeFeatures, params = {}) {
     }
   }
 
-  const combined = generateProgram(walls, params, { programNumber });
-  const facePrograms = wallsWithHolesByFace(walls).map((wall, index) => {
+  const combined = generateProgram(walls, params, { programNumber, cutoffFeature });
+  const facePrograms = wallsWithHolesByFace(walls, cutoffFeature?.angleDeg).map((wall, index) => {
     const label = tubestockFaceLabel(wall.angleDeg);
+    const isCutoffFace = cutoffFeature && normalizeTubestockFaceAngle(wall.angleDeg) === normalizeTubestockFaceAngle(cutoffFeature.angleDeg);
     const faceProgram = generateProgram([wall], params, {
       faceAngleDeg: wall.angleDeg,
       faceLabel: label,
-      programNumber: Number(programNumber) + index
+      programNumber: Number(programNumber) + index,
+      cutoffFeature: isCutoffFace ? cutoffFeature : null
     });
     return {
       angleDeg: wall.angleDeg,
       label,
       holeCount: faceProgram.totalHoles,
+      hasCutoff: !!isCutoffFace,
       programNumber: Number(programNumber) + index,
       gcode: faceProgram.gcode
     };
   });
+
+  // Flattened across every wall, with the wall attached to each entry, for
+  // a consumer that wants "what got skipped" without re-walking
+  // stats.walls itself. Empty rather than absent when nothing was skipped.
+  const skippedFeatures = walls.flatMap((wall) =>
+    (wall.skippedFeatures || []).map((feature) => ({ ...feature, angleDeg: wall.angleDeg }))
+  );
 
   return {
     gcode: combined.gcode,
@@ -392,6 +568,10 @@ export function generateTubestockGcode(tubeFeatures, params = {}) {
       totalHoles,
       toolsUsed: combined.toolsUsed,
       toolChanges: combined.toolChanges,
+      skippedFeatures,
+      cutoff: cutoffFeature
+        ? { angleDeg: cutoffFeature.angleDeg, position: cutoffFeature.position, width: DEFAULT_CUTOFF_WIDTH, length: DEFAULT_CUTOFF_LENGTH }
+        : null,
       facePrograms
     }
   };
