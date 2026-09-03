@@ -48,6 +48,34 @@ function dwellLine(isWinCNC, seconds, comment) {
 }
 
 /** Normalize rotary angles so 0, 360, and -360 identify the same tube face. */
+/**
+ * How far past the wall's inner surface a hole is driven, so it actually
+ * breaks through. Same figure and same reasoning as routing.js's
+ * THROUGH_CUT_ALLOWANCE: enough to guarantee the hole clears the wall and to
+ * absorb a tube that is not perfectly straight, without driving the cutter
+ * deep into the cavity behind it.
+ */
+export const WALL_BREAKTHROUGH_ALLOWANCE = 0.02;
+
+/**
+ * Hole depth for a tube, derived from the stock rather than typed per job.
+ *
+ * Wall thickness is a property of the tube, not of the part: every hole in a
+ * given tube passes through the same wall, so there is exactly one correct
+ * depth per stock and nothing for an operator to decide. It used to be a
+ * free number field, which meant a job could be queued with a depth that did
+ * not match the tube actually loaded.
+ *
+ * @param {number} wallThickness inches, from the stock catalog entry
+ * @returns {number|null} depth in inches, or null when the stock has no
+ *   usable wall thickness recorded
+ */
+export function holeDepthForWall(wallThickness) {
+  const wall = Number(wallThickness);
+  if (!Number.isFinite(wall) || wall <= 0) return null;
+  return Number((wall + WALL_BREAKTHROUGH_ALLOWANCE).toFixed(4));
+}
+
 export function normalizeTubestockFaceAngle(angleDeg) {
   const normalized = ((Number(angleDeg) || 0) % 360 + 360) % 360;
   return Number(normalized.toFixed(4));
