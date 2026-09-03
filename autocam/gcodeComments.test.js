@@ -96,3 +96,40 @@ describe('generated programs have well-formed comments', () => {
     expect(gcode).toMatch(/\[/);
   });
 });
+
+describe('normalizeGcodeComments - cleaning an already-generated program', () => {
+  const nestedLines = (gcode) => gcode.split('\n').filter((line) => {
+    const start = line.search(/[([]/);
+    return start !== -1 && /[([]/.test(line.slice(start + 1));
+  });
+
+  it("fixes a stored linuxcnc program without changing its dialect", () => {
+    // Verbatim line 4 of every job generated before the comment fix. A
+    // controller reports "nested comment found" and stops on it.
+    const stored = '(  CAMotics) and do a supervised air-cut before running on material. )\nG01 X1.5 Y2 F20';
+    const out = normalizeGcodeComments(stored, { dialect: 'preserve' });
+    expect(nestedLines(out)).toEqual([]);
+    expect(out).toContain('(  CAMotics and do a supervised air-cut before running on material.)');
+    expect(out).toContain('G01 X1.5 Y2 F20');
+  });
+
+  it('fixes a stored wincnc program and leaves it bracketed', () => {
+    // Looking only for "(" meant a WinCNC program passed through untouched,
+    // which is exactly the one that needed it most.
+    const stored = '[  SIMULATOR. Run this through a simulator [e.g. ncviewer.com,]\nG01 X1 Y2 F20';
+    const out = normalizeGcodeComments(stored, { dialect: 'preserve' });
+    expect(nestedLines(out)).toEqual([]);
+    expect(out).toContain('[');
+    expect(out).not.toContain('(');
+  });
+
+  it('never touches a command line', () => {
+    const program = ['%', 'G20', 'G90', 'G01 X1.5 Y-2.25 Z-0.1 F20', 'G02 X3 Y0 I-1 J0', 'M05', 'M30'].join('\n');
+    expect(normalizeGcodeComments(program, { dialect: 'preserve' })).toBe(program);
+  });
+
+  it('leaves an already-clean comment exactly as it is', () => {
+    const clean = 'G01 X1 Y2 F20 (rapid to hole position)';
+    expect(normalizeGcodeComments(clean, { dialect: 'preserve' })).toBe(clean);
+  });
+});
