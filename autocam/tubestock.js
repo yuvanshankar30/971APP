@@ -48,6 +48,34 @@ function dwellLine(isWinCNC, seconds, comment) {
 }
 
 /** Normalize rotary angles so 0, 360, and -360 identify the same tube face. */
+/**
+ * How far past the wall's inner surface a hole is driven, so it actually
+ * breaks through. Same figure and same reasoning as routing.js's
+ * THROUGH_CUT_ALLOWANCE: enough to guarantee the hole clears the wall and to
+ * absorb a tube that is not perfectly straight, without driving the cutter
+ * deep into the cavity behind it.
+ */
+export const WALL_BREAKTHROUGH_ALLOWANCE = 0.02;
+
+/**
+ * Hole depth for a tube, derived from the stock rather than typed per job.
+ *
+ * Wall thickness is a property of the tube, not of the part: every hole in a
+ * given tube passes through the same wall, so there is exactly one correct
+ * depth per stock and nothing for an operator to decide. It used to be a
+ * free number field, which meant a job could be queued with a depth that did
+ * not match the tube actually loaded.
+ *
+ * @param {number} wallThickness inches, from the stock catalog entry
+ * @returns {number|null} depth in inches, or null when the stock has no
+ *   usable wall thickness recorded
+ */
+export function holeDepthForWall(wallThickness) {
+  const wall = Number(wallThickness);
+  if (!Number.isFinite(wall) || wall <= 0) return null;
+  return Number((wall + WALL_BREAKTHROUGH_ALLOWANCE).toFixed(4));
+}
+
 export function normalizeTubestockFaceAngle(angleDeg) {
   const normalized = ((Number(angleDeg) || 0) % 360 + 360) % 360;
   return Number(normalized.toFixed(4));
@@ -188,7 +216,14 @@ function generateProgram(walls, params, { faceAngleDeg = null, faceLabel = null,
     lines.push('(running this file - WinCNC has no G54-style stored work offset this program)');
     lines.push('(can select for you; it has to be set interactively, right before.)');
   } else {
-    lines.push('G54 (work offset - verify before running)');
+    // G55, not G54. The tube stock fixture has its own work offset on this
+    // machine: the router manual has the operator type g55 into the MDI
+    // "before doing anything else", and repeats it in the tube stock
+    // checklist as something to redo for every cut. A file that selects it
+    // itself cannot be run in the sheet-setup coordinate system because
+    // somebody forgot that step, which would put the whole program in the
+    // wrong place on a fixture the tube is clamped into.
+    lines.push('G55 (tube stock fixture work offset - the tube fixture lives here, not in G54)');
     lines.push('G80 G40 G49 (cancel canned cycle / cutter comp / tool length offset - defensive, in case a prior program on this machine left one active)');
   }
 

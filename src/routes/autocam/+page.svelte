@@ -38,6 +38,7 @@
     CAM_GCODE_FORMAT
   } from '$autocam/camJobs.js';
   import { tubestockFaceFileName, tubestockFaceLabel } from '$autocam/tubestock.js';
+  import { machinesForOperation } from '$autocam/machineOptions.js';
   import stockData from '$lib/stock.json';
   import { normalizeGcodeComments } from '$autocam/gcodeComments.js';
 
@@ -248,7 +249,11 @@
     .filter((p) => !partFilterProject || p.project_id === partFilterProject)
     .filter((p) => passesSeasonFilter(p.created_at, partFilterSeason))
     .filter((p) => passesTeamFilter(p.frc_team, partShow971, partShow9584));
-  $: machinesForOperation = machines.filter((mc) => mc.enabled && mc.operation_type === newJobOperation);
+  $: newJobMachines = machinesForOperation(machines, newJobOperation);
+  // Hole depth comes from the tube's wall thickness now, so a tube stock job
+  // without a stock has no depth and would fail in the generator rather than
+  // here. Block it at the button instead.
+  $: missingTubeStock = newJobOperation === 'tubestock' && !tubestockParams.stockCatalogId;
   $: selectedMachineTools = toolsForMachine(selectedMachineId);
   $: editMachineTools = toolsForMachine(editMachineId);
   $: jobStats = {
@@ -1628,7 +1633,7 @@
             <label class="form-label" for="job-machine">Machine Profile</label>
             <select id="job-machine" class="form-select" bind:value={selectedMachineId} on:change={() => applyMachineDefaults(selectedMachineId)}>
               <option value="">Unspecified</option>
-              {#each machinesForOperation as mc}
+              {#each newJobMachines as mc}
                 <option value={mc.id}>{mc.name}</option>
               {/each}
             </select>
@@ -1658,7 +1663,7 @@
         <button
           class="btn btn-primary"
           on:click={submitNewJob}
-          disabled={submitting || (newJobSource === 'part' && batchMode && selectedPartIds.length === 0)}
+          disabled={submitting || missingTubeStock || (newJobSource === 'part' && batchMode && selectedPartIds.length === 0)}
         >
           {#if batchProgress}
             Generating {batchProgress.index + 1}/{batchProgress.total}: {batchProgress.partName}…
@@ -1671,7 +1676,9 @@
           {/if}
         </button>
         <p class="cam-form-hint">
-          {#if newJobSource === 'part' && batchMode}
+          {#if missingTubeStock}
+            Pick the tube stock above - it sets the hole depth.
+          {:else if newJobSource === 'part' && batchMode}
             Runs one part at a time - stays open until the whole batch finishes.
           {:else}
             Closes automatically once queued - track progress in the jobs list below.
@@ -1767,7 +1774,7 @@
             <label class="form-label" for="edit-job-machine">Machine Profile</label>
             <select id="edit-job-machine" class="form-select" value={editMachineId} on:change={(event) => selectEditMachine(event.currentTarget.value)}>
               <option value="">Unspecified</option>
-              {#each machines.filter((mc) => mc.enabled && mc.operation_type === editingJob.operation_type) as mc}
+              {#each machinesForOperation(machines, editingJob.operation_type) as mc}
                 <option value={mc.id}>{mc.name}</option>
               {/each}
             </select>
@@ -2331,17 +2338,24 @@
      big empty gap on the right while every content column was squeezed
      hard enough to wrap. Rebalanced so Tool ("UNC Router 0.1575 in Flat
      End Mill") and Created ("Aug 31, 2026, 11:36 PM PT") lay out across
-     the row instead of stacking into a tall vertical column. */
+     the row instead of stacking into a tall vertical column.
+     Operation, Machine Type and Status hold fixed-height pills that cannot
+     wrap, so their columns have to fit the widest label outright. They did
+     not: at 1600px "TUBE STOCK" overflowed its 7% column by 12px and
+     "AUTOCAM FAILED" its 8% column by 20px, and because the container is
+     deliberately overflow: visible the overflow was drawn on top of the
+     next column instead of being clipped. Measured at every width from
+     1600px down, not eyeballed. */
   .autocam-jobs-table th:nth-child(1) { width: 12%; }
-  .autocam-jobs-table th:nth-child(2) { width: 7%; }
-  .autocam-jobs-table th:nth-child(3) { width: 7%; }
+  .autocam-jobs-table th:nth-child(2) { width: 10%; }
+  .autocam-jobs-table th:nth-child(3) { width: 6%; }
   .autocam-jobs-table th:nth-child(4) { width: 10%; }
-  .autocam-jobs-table th:nth-child(5) { width: 7%; }
-  .autocam-jobs-table th:nth-child(6) { width: 7%; }
-  .autocam-jobs-table th:nth-child(7) { width: 8%; }
+  .autocam-jobs-table th:nth-child(5) { width: 6%; }
+  .autocam-jobs-table th:nth-child(6) { width: 8%; }
+  .autocam-jobs-table th:nth-child(7) { width: 12%; }
   .autocam-jobs-table th:nth-child(8) { width: 13%; }
-  .autocam-jobs-table th:nth-child(9) { width: 8%; }
-  .autocam-jobs-table th:nth-child(10) { width: 21%; }
+  .autocam-jobs-table th:nth-child(9) { width: 7%; }
+  .autocam-jobs-table th:nth-child(10) { width: 16%; }
   .autocam-jobs-table td {
     vertical-align: top;
   }
@@ -2668,7 +2682,9 @@
     .group-modal-footer { align-items: stretch; flex-direction: column; }
     .group-modal-footer .btn { width: 100%; justify-content: center; }
   }
-  @media (max-width: 1260px) {
+  /* Raised from 1260px: the pill columns above stop fitting before that,
+     so the card layout has to take over while they still fit. */
+  @media (max-width: 1400px) {
     .autocam-jobs-container {
       overflow: visible;
       border: none;

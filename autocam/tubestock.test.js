@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateTubestockGcode, tubestockFaceFileName, tubestockFaceLabel, tubestockFaceClock } from './tubestock.js';
+import { generateTubestockGcode, tubestockFaceFileName, tubestockFaceLabel, tubestockFaceClock, holeDepthForWall } from './tubestock.js';
 
 // Synthetic tube features matching extractTubeFeaturesFromMeshes' output
 // shape directly - 2 holes on one wall (0.25"), 1 on another (0.375"), 2
@@ -160,20 +160,20 @@ describe('generateTubestockGcode', () => {
   });
 
   describe('controller dialect (linuxcnc default vs wincnc)', () => {
-    it('defaults to linuxcnc: parenthesis comments, G54, M00 tool-change pause, M30 end', () => {
+    it('defaults to linuxcnc: parenthesis comments, G55, M00 tool-change pause, M30 end', () => {
       const result = generateTubestockGcode(twoWallTube(), baseParams);
-      expect(result.gcode).toContain('G54');
+      expect(result.gcode).toContain('G55');
       expect(result.gcode).toContain('M00 (TOOL CHANGE');
       expect(result.gcode).toContain('M30 (program end)');
       expect(result.gcode).not.toContain('[');
     });
 
-    it('wincnc: bracket comments, no G54, G4 dwell-pause instead of M00, no M30', () => {
+    it('wincnc: bracket comments, no stored work offset, G4 dwell-pause instead of M00, no M30', () => {
       const result = generateTubestockGcode(twoWallTube(), { ...baseParams, controller: 'wincnc' });
       // Not a blanket substring check - the WinCNC path's own explanatory
       // comment mentions "G54-style" prose, which would false-positive a
       // plain .not.toContain('G54') check without actually emitting the code.
-      expect(result.gcode.split('\n').some((l) => /^G54\b/.test(l))).toBe(false);
+      expect(result.gcode.split('\n').some((l) => /^G5[45]\b/.test(l))).toBe(false);
       expect(result.gcode).not.toContain('M00');
       expect(result.gcode).toContain('G4 [TOOL CHANGE');
       expect(result.gcode).not.toContain('M30');
@@ -263,5 +263,69 @@ describe('tube faces are numbered the way the shop numbers them', () => {
     expect(gcodeFiles.map((f) => f.label)).toEqual(['Side 12', 'Side 3', 'Side 6', 'Side 9']);
     const names = gcodeFiles.map((f) => tubestockFaceFileName('t.ngc', f.angleDeg));
     expect(new Set(names).size).toBe(4);
+  });
+});
+
+describe('tube stock work offset', () => {
+  // The router manual has the operator type g55 into the MDI "before doing
+  // anything else" for tube stock, and repeats it in the tube stock
+  // checklist as something to redo for every cut. Emitting it means the
+  // program cannot silently run in the sheet-setup coordinate system
+  // because that step was missed - on a fixture the tube is clamped into,
+  // that would put the entire program in the wrong place.
+  it('selects G55 rather than the sheet setup G54', () => {
+    const { gcode } = generateTubestockGcode(twoWallTube(), baseParams);
+    const codeLines = gcode.split('\n').map((line) => line.replace(/\(.*$/, '').trim());
+    expect(codeLines.some((line) => /^G55\b/.test(line))).toBe(true);
+    expect(codeLines.some((line) => /^G54\b/.test(line))).toBe(false);
+  });
+
+  it('selects it in every per-face program, not only the combined one', () => {
+    const { gcodeFiles } = generateTubestockGcode(twoWallTube(), baseParams);
+    expect(gcodeFiles.length).toBeGreaterThan(1);
+    for (const face of gcodeFiles) {
+      const codeLines = face.gcode.split('\n').map((line) => line.replace(/\(.*$/, '').trim());
+      expect(codeLines.some((line) => /^G55\b/.test(line)), face.label).toBe(true);
+    }
+  });
+
+  it('leaves routing alone - sheets are still set up in G54', async () => {
+    const { generateRoutingGcode } = await import('./routing.js');
+    const square = [{ points: [{x:0,y:0},{x:4,y:0},{x:4,y:4},{x:0,y:4},{x:0,y:0}], isHole: false }];
+    const { gcode } = generateRoutingGcode(square, { toolDiameter: 0.25, targetDepth: 0.25 });
+    expect(gcode.split('\n').some((line) => /^G54\b/.test(line.trim()))).toBe(true);
+  });
+});
+
+describe('holeDepthForWall', () => {
+  // Wall thickness is a property of the tube, so there is exactly one correct
+  // depth per stock. These are the two walls the team actually stocks.
+  it('adds the break-through allowance to a 1/16" wall', () => {
+    expect(holeDepthForWall(0.0625)).toBe(0.0825);
+  });
+
+  it('adds the break-through allowance to a 1/8" wall', () => {
+    expect(holeDepthForWall(0.125)).toBe(0.145);
+  });
+
+  it('always clears the wall it is drilling', () => {
+    for (const wall of [0.0625, 0.09, 0.125, 0.25]) {
+      expect(holeDepthForWall(wall)).toBeGreaterThan(wall);
+    }
+  });
+
+  it('produces a depth the generator accepts', () => {
+    const depth = holeDepthForWall(0.125);
+    const result = generateTubestockGcode(twoWallTube(), { holeDepth: depth });
+    const gcode = typeof result === 'string' ? result : result.gcode;
+    expect(gcode).toContain('Z-0.1450');
+  });
+
+  it('returns null rather than a guess when the stock has no wall recorded', () => {
+    expect(holeDepthForWall(undefined)).toBeNull();
+    expect(holeDepthForWall(null)).toBeNull();
+    expect(holeDepthForWall(0)).toBeNull();
+    expect(holeDepthForWall(-0.1)).toBeNull();
+    expect(holeDepthForWall('thin')).toBeNull();
   });
 });
