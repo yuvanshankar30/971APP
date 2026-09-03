@@ -10,6 +10,7 @@ import {
   requiresPitProblemReport,
   validatePitProblemHandoff
 } from '$lib/server/matchScoutingSchema.js';
+import { exportAutoPathImageToDrive } from '$lib/server/auto_path_drive_export.js';
 
 // Backend for match scouting and the pit-problem handoff.
 //
@@ -107,7 +108,8 @@ export async function POST({ request }) {
       return json({ error: 'You already have a saved path with that name for this team. Choose a new name.' }, { status: 409 });
     }
     if (error) return json({ error: error.message }, { status: 500 });
-    return json({ success: true, data });
+    const driveExport = await exportAutoPathImageToDrive(data);
+    return json({ success: true, data, drive_export: driveExport });
   }
 
   if (action === 'save-entry') {
