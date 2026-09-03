@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateTubestockGcode, tubestockFaceFileName } from './tubestock.js';
+import { generateTubestockGcode, tubestockFaceFileName, holeDepthForWall } from './tubestock.js';
 
 // Synthetic tube features matching extractTubeFeaturesFromMeshes' output
 // shape directly - 2 holes on one wall (0.25"), 1 on another (0.375"), 2
@@ -218,5 +218,38 @@ describe('generateTubestockGcode', () => {
       const result = generateTubestockGcode(tubeWithCrossSection(5, 5), baseParams);
       expect(result.gcode).toContain('M30');
     });
+  });
+});
+
+describe('holeDepthForWall', () => {
+  // Wall thickness is a property of the tube, so there is exactly one correct
+  // depth per stock. These are the two walls the team actually stocks.
+  it('adds the break-through allowance to a 1/16" wall', () => {
+    expect(holeDepthForWall(0.0625)).toBe(0.0825);
+  });
+
+  it('adds the break-through allowance to a 1/8" wall', () => {
+    expect(holeDepthForWall(0.125)).toBe(0.145);
+  });
+
+  it('always clears the wall it is drilling', () => {
+    for (const wall of [0.0625, 0.09, 0.125, 0.25]) {
+      expect(holeDepthForWall(wall)).toBeGreaterThan(wall);
+    }
+  });
+
+  it('produces a depth the generator accepts', () => {
+    const depth = holeDepthForWall(0.125);
+    const result = generateTubestockGcode(twoWallTube(), { holeDepth: depth });
+    const gcode = typeof result === 'string' ? result : result.gcode;
+    expect(gcode).toContain('Z-0.1450');
+  });
+
+  it('returns null rather than a guess when the stock has no wall recorded', () => {
+    expect(holeDepthForWall(undefined)).toBeNull();
+    expect(holeDepthForWall(null)).toBeNull();
+    expect(holeDepthForWall(0)).toBeNull();
+    expect(holeDepthForWall(-0.1)).toBeNull();
+    expect(holeDepthForWall('thin')).toBeNull();
   });
 });
