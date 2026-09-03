@@ -885,11 +885,19 @@
   function operationLabel(operationType) {
     return OPERATION_LABEL[operationType] || operationType || '—';
   }
+  // Derived from the angle rather than trusting the stored label/name.
+  // Jobs generated before tube faces were numbered by clock position carry
+  // the old "Top"/"Right side" text, and showing two schemes side by side is
+  // exactly the confusion the numbering is meant to remove - the operator
+  // writes these numbers on the tube. The stored value is still the fallback
+  // for a record with no angle on it.
   function tubeFaceFileName(job, faceProgram) {
+    if (Number.isFinite(faceProgram?.angleDeg)) return tubestockFaceFileName(job.gcode_file_name, faceProgram.angleDeg);
     return faceProgram.fileName || tubestockFaceFileName(job.gcode_file_name, faceProgram.angleDeg);
   }
 
   function tubeFaceLabel(faceProgram) {
+    if (Number.isFinite(faceProgram?.angleDeg)) return tubestockFaceLabel(faceProgram.angleDeg);
     return faceProgram.label || tubestockFaceLabel(faceProgram.angleDeg);
   }
 
