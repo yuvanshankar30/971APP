@@ -304,9 +304,10 @@ own docs are all together in one place instead of scattered across
   tube-wall hole geometry (`extractTubeFeaturesFromMeshes`) directly from a
   STEP file's triangulated mesh (via `occt-import-js`).
 - **`autocam/turning.js`** / **`autocam/routing.js`** / **`autocam/tubestock.js`**
-  - generate the actual G-code from that profile/geometry. Tube stock
-  targets a router with an added rotary 4th axis (indexed drilling, round
-  holes only) - see `autocam/docs/tubestock-feature.md` for the full design
+  - generate the actual G-code from that profile/geometry. Tube stock runs
+  on the router (round holes only), with the operator flipping the tube
+  between faces by hand - there is no rotary 4th axis, and a separate
+  program is emitted per face - see `autocam/docs/tubestock-feature.md` for the full design
   and real-fixture validation, including the one real bug it caught
   (`lateralOffset`) that a synthetic test alone never would have.
   Turning accepts only rotationally symmetric finished geometry; gears,
@@ -318,6 +319,17 @@ own docs are all together in one place instead of scattered across
   toolpath for the 2D preview and 3D simulator, including a cumulative-distance
   interpolation helper for playback (`autocam/components/ToolpathViewer.svelte`,
   `autocam/components/ToolpathSimulator.svelte`).
+- **`autocam/gcodeLint.js`** - checks a program against the conditions that
+  stop LinuxCNC loading it (nested/unclosed comments, characters that are
+  illegal outside a comment, words with no value) and repairs malformed
+  comments. `autocam/routingLinuxcnc.test.js` runs real generated router and
+  tube-stock output through it, so a generator change that emits something
+  LinuxCNC would reject fails the suite. Backs the **G-code Converter**
+  tab (`/manufacture/gcode-converter`), where a pasted program is checked
+  and exported as `.ngc`. The rules are calibrated against the cncjs
+  `gcode-parser` and `pygcode` interpreters, which agree with it
+  line-for-line on real generated programs; LinuxCNC's own `rs274` cannot
+  be built on macOS, so it is not part of the local loop.
 - **`autocam/nesting.js`** / **`autocam/groupedGcode.js`** - deterministic,
   conservative router-job placement from real G-code bounds and one-program
   composition for grouped sheets; see `autocam/docs/router-job-grouping.md`.
