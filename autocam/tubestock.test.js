@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { generateTubestockGcode, tubestockFaceFileName, tubestockFaceLabel, tubestockFaceClock, holeDepthForWall } from './tubestock.js';
+import { generateTubestockGcode, tubestockFaceFileName, tubestockFaceLabel, tubestockFaceClock, holeDepthForWall, TUBESTOCK_CUTOFF_FACE_ANGLE_DEG, DEFAULT_CUTOFF_WIDTH, DEFAULT_CUTOFF_LENGTH, DEFAULT_BANDSAW_KERF } from './tubestock.js';
+import { lintGcode } from './gcodeLint.js';
 
 // Synthetic tube features matching extractTubeFeaturesFromMeshes' output
 // shape directly - 2 holes on one wall (0.25"), 1 on another (0.375"), 2
@@ -327,5 +328,172 @@ describe('holeDepthForWall', () => {
     expect(holeDepthForWall(0)).toBeNull();
     expect(holeDepthForWall(-0.1)).toBeNull();
     expect(holeDepthForWall('thin')).toBeNull();
+  });
+});
+
+describe('the tube stock cutoff line', () => {
+  // twoWallTube() already has an angleDeg:180 wall with holes:[] - the
+  // wall opposite the zero face, and the one the cutoff always targets.
+  const cutoffParams = { ...baseParams, finishedLength: 10, toolDiameter: 0.1575 };
+
+  it('does nothing at all when no finished length is given', () => {
+    const result = generateTubestockGcode(twoWallTube(), baseParams);
+    expect(result.stats.cutoff).toBeNull();
+    expect(result.gcode).not.toContain('CUTOFF');
+    expect(result.gcodeFiles.every((f) => !f.hasCutoff)).toBe(true);
+  });
+
+  it('reuses the job\'s own hole depth for the cutoff plunge - through this wall only, not both', () => {
+    const result = generateTubestockGcode(twoWallTube(), cutoffParams);
+    const cutoffLines = result.gcode.split('\n').filter((l) => l.includes('(plunge)'));
+    expect(cutoffLines.length).toBe(1);
+    expect(cutoffLines[0]).toContain(`Z-${baseParams.holeDepth.toFixed(4)}`);
+  });
+
+  it('positions the line half a kerf past the finished length, so the saw does not leave the part short', () => {
+    const result = generateTubestockGcode(twoWallTube(), cutoffParams);
+    expect(result.stats.cutoff.position).toBeCloseTo(10 + DEFAULT_BANDSAW_KERF / 2, 6);
+  });
+
+  it('reports the dimensions it actually used', () => {
+    const result = generateTubestockGcode(twoWallTube(), cutoffParams);
+    expect(result.stats.cutoff.width).toBe(DEFAULT_CUTOFF_WIDTH);
+    expect(result.stats.cutoff.length).toBe(DEFAULT_CUTOFF_LENGTH);
+    expect(result.stats.cutoff.angleDeg).toBe(TUBESTOCK_CUTOFF_FACE_ANGLE_DEG);
+  });
+
+  it('only ever goes on the wall opposite the zero face', () => {
+    const result = generateTubestockGcode(twoWallTube(), cutoffParams);
+    const cutoffFiles = result.gcodeFiles.filter((f) => f.hasCutoff);
+    expect(cutoffFiles.length).toBe(1);
+    expect(cutoffFiles[0].label).toBe('Side 6');
+  });
+
+  it('gives the cutoff-only face its own file even though it has no holes to drill', () => {
+    const result = generateTubestockGcode(twoWallTube(), cutoffParams);
+    const side6 = result.gcodeFiles.find((f) => f.label === 'Side 6');
+    expect(side6).toBeTruthy();
+    expect(side6.holeCount).toBe(0);
+    expect(side6.gcode).toContain('CUTOFF LINE');
+  });
+
+  it('does not add a file for a wall with neither holes nor the cutoff', () => {
+    const result = generateTubestockGcode(twoWallTube(), cutoffParams);
+    expect(result.gcodeFiles.some((f) => f.label === 'Side 9')).toBe(false);
+  });
+
+  it('states plainly that this is one pass, not a full separation', () => {
+    const result = generateTubestockGcode(twoWallTube(), cutoffParams);
+    expect(result.gcode).toContain('not a full separation');
+  });
+
+  it('flips the tube to the cutoff face in the combined program', () => {
+    const result = generateTubestockGcode(twoWallTube(), cutoffParams);
+    const combinedLines = result.gcode.split('\n');
+    const cutoffIndex = combinedLines.findIndex((l) => l.includes('CUTOFF LINE'));
+    expect(cutoffIndex).toBeGreaterThan(0);
+    expect(combinedLines.slice(0, cutoffIndex).some((l) => l.includes('Side 6') && l.includes('FLIP TUBE'))).toBe(true);
+  });
+
+  it('does not repeat the flip prompt in a program already fixtured on that one face', () => {
+    const result = generateTubestockGcode(twoWallTube(), cutoffParams);
+    const side6 = result.gcodeFiles.find((f) => f.label === 'Side 6');
+    expect(side6.gcode).not.toContain('FLIP TUBE');
+  });
+
+  it('stages the cutoff end mill as its own tool, separate from the drills', () => {
+    const result = generateTubestockGcode(twoWallTube(), cutoffParams);
+    expect(result.gcode).toContain('0.158" end mill - cutoff line');
+    expect(result.gcode).toContain('load 0.158" end mill for the cutoff line');
+  });
+
+  it('is a lint-clean program end to end - combined and every face file', () => {
+    const result = generateTubestockGcode(twoWallTube(), cutoffParams);
+    expect(lintGcode(result.gcode).errors).toEqual([]);
+    for (const file of result.gcodeFiles) {
+      expect(lintGcode(file.gcode).errors, file.label).toEqual([]);
+    }
+  });
+
+  it('refuses to build a cutoff with no tool selected', () => {
+    expect(() => generateTubestockGcode(twoWallTube(), { ...baseParams, finishedLength: 10 }))
+      .toThrow(/toolDiameter is required/);
+  });
+
+  it('refuses a finished length with no wall opposite the zero face to cut it on', () => {
+    const oneWall = { tubeLength: 12, walls: [{ angleDeg: 0, holes: [{ position: 2, lateralOffset: 0, diameter: 0.25 }] }] };
+    expect(() => generateTubestockGcode(oneWall, cutoffParams)).toThrow(/no wall opposite the zero face/);
+  });
+
+  it('refuses a tool too large for the cutoff width, the same way any other narrow feature would be refused', () => {
+    expect(() => generateTubestockGcode(twoWallTube(), { ...cutoffParams, toolDiameter: 0.5 }))
+      .toThrow(/too small for this tool/);
+  });
+
+  it('lets a job be nothing but a cutoff - no holes anywhere, still something to machine', () => {
+    const noHoles = {
+      tubeLength: 12,
+      walls: [{ angleDeg: 0, holes: [] }, { angleDeg: 180, holes: [] }]
+    };
+    const result = generateTubestockGcode(noHoles, cutoffParams);
+    expect(result.stats.totalHoles).toBe(0);
+    expect(result.stats.cutoff).toBeTruthy();
+    expect(lintGcode(result.gcode).errors).toEqual([]);
+  });
+
+  it('still refuses a job with neither holes nor a finished length', () => {
+    const noHoles = { tubeLength: 12, walls: [{ angleDeg: 0, holes: [] }, { angleDeg: 180, holes: [] }] };
+    expect(() => generateTubestockGcode(noHoles, baseParams)).toThrow(/nothing to machine/);
+  });
+});
+
+describe('skipped (non-round) features surface instead of silently vanishing', () => {
+  function tubeWithSkippedFeature() {
+    return {
+      tubeLength: 12,
+      walls: [
+        { angleDeg: 0, holes: [{ position: 2, lateralOffset: 0, diameter: 0.25 }] },
+        {
+          angleDeg: 180,
+          holes: [{ position: 3, lateralOffset: 0, diameter: 0.25 }],
+          skippedFeatures: [{ position: 6, lateralOffset: 0.1, meanRadius: 0.4, maxDeviation: 0.22 }]
+        }
+      ]
+    };
+  }
+
+  it('flows a wall\'s skippedFeatures into stats, with the wall it came from attached', () => {
+    const result = generateTubestockGcode(tubeWithSkippedFeature(), baseParams);
+    expect(result.stats.skippedFeatures.length).toBe(1);
+    expect(result.stats.skippedFeatures[0].angleDeg).toBe(180);
+    expect(result.stats.skippedFeatures[0].position).toBe(6);
+  });
+
+  it('is empty, not absent, when nothing was skipped', () => {
+    const result = generateTubestockGcode(twoWallTube(), baseParams);
+    expect(result.stats.skippedFeatures).toEqual([]);
+  });
+
+  it('says so directly in the program, since whoever runs the file may not be who queued it', () => {
+    const result = generateTubestockGcode(tubeWithSkippedFeature(), baseParams);
+    expect(result.gcode).toContain('not round and NOT machined');
+    expect(result.gcode).toContain('SKIPPED');
+  });
+
+  it('surfaces on that wall\'s own per-face file too, not just the combined program', () => {
+    const result = generateTubestockGcode(tubeWithSkippedFeature(), baseParams);
+    const side6 = result.gcodeFiles.find((f) => f.label === 'Side 6');
+    expect(side6.gcode).toContain('SKIPPED');
+  });
+
+  it('does not appear on a face that had nothing skipped', () => {
+    const result = generateTubestockGcode(tubeWithSkippedFeature(), baseParams);
+    const side12 = result.gcodeFiles.find((f) => f.label === 'Side 12');
+    expect(side12.gcode).not.toContain('SKIPPED');
+  });
+
+  it('tolerates a hand-built tube with no skippedFeatures field at all', () => {
+    // twoWallTube() predates this field entirely on its wall objects.
+    expect(() => generateTubestockGcode(twoWallTube(), baseParams)).not.toThrow();
   });
 });

@@ -79,6 +79,22 @@
     </div>
   </div>
 
+  {#if mode === 'job'}
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label" for="cf-finished-length">Finished length (in) - optional</label>
+        <input id="cf-finished-length" class="form-input" type="number" step="0.1" bind:value={params.finishedLength} placeholder="Leave blank if this stock needs no cutoff" />
+        <p class="text-muted">
+          The stock loaded is whatever length that piece of extrusion happens to be, which is rarely the length
+          the part needs and isn't something the CAD model can tell you - so this is entered here, not derived.
+          Set it and the program cuts a bandsaw reference line on the wall opposite the zero face (Side 6) once
+          drilling is done: one pass through that wall only, not a full separation - band-saw the tube to length
+          along the line's straight edges afterward.
+        </p>
+      </div>
+    </div>
+  {/if}
+
   <details class="advanced-settings">
     <summary>Advanced settings</summary>
     <div class="cam-param-section">
