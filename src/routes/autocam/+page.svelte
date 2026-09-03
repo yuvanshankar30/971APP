@@ -1740,7 +1740,7 @@
 
 {#if showJobDetailModal && editingJob}
   <div class="modal-backdrop" on:click|self={closeJobDetailModal} role="button" tabindex="0" on:keydown={(e) => { if (e.key === 'Escape') closeJobDetailModal(); }}>
-    <div class="modal" role="dialog" aria-modal="true">
+    <div class="modal modal--wide" role="dialog" aria-modal="true">
       <div class="modal-header">
         <h3>Edit Job</h3>
         <button type="button" class="modal-close-button" aria-label="Close" on:click={closeJobDetailModal}><X size={18} /></button>
@@ -2427,6 +2427,13 @@
 
   .view-buttons-row {
     display: flex;
+    /* Grows one "Download Side N" button per tube face on top of View
+       CAD/Show Toolpath/ncviewer - unbounded nowrap forced the whole
+       modal wider than the viewport (real horizontal scroll, not just a
+       clipped row) on a tube with several faces. Wrapping is the fix
+       that holds regardless of face count; modal--wide above just gives
+       it more room to need wrapping less often. */
+    flex-wrap: wrap;
     gap: 0.5rem;
     margin: -0.5rem 0 1rem;
   }
