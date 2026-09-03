@@ -28,6 +28,9 @@ browser confirmation or prompt popups.
   (CAM review, CAM reviewed, postprocessed, jprogged, machined, kitted -
   Router's the only workflow with this many distinct steps). See the
   **AutoCAM** section below for automatic G-code generation specifically.
+  The Manufacturing folder also includes **Text Engraving**, a direct
+  single-line-text-to-`.ngc` utility with a live toolpath preview and
+  configurable engraving dimensions, depth, clearance, and feed rates.
 - **AutoCAM**: automatic STEP → G-code generation for lathe turning, router
   routering, and indexed tube-stock drilling jobs run on the router with the
   operator flipping the tube between faces by hand - either manually queued

@@ -42,6 +42,7 @@ export function defaultHeaderTabs(navConfig = navigation) {
   const manufacturingChildren = [];
   if (navConfig?.tabs?.manufacture !== false) manufacturingChildren.push({ key: 'manufacture', label: 'Manufacture' });
   if (navConfig?.tabs?.autocam !== false) manufacturingChildren.push({ key: 'autocam', label: 'AutoCAM' });
+  if (navConfig?.tabs?.['text-engraving'] !== false) manufacturingChildren.push({ key: 'text-engraving', label: 'Text Engraving' });
   if (navConfig?.tabs?.kitting !== false) manufacturingChildren.push({ key: 'kitting', label: 'Kitting' });
   if (navConfig?.tabs?.['cots-stocking'] !== false) manufacturingChildren.push({ key: 'cots-stocking', label: 'COTS Stocking' });
   if (manufacturingChildren.length) {
@@ -79,6 +80,7 @@ export function defaultHeaderTabs(navConfig = navigation) {
 
 
 const COMPETITION_FOLDER_LABEL = 'Competition';
+const MANUFACTURING_FOLDER_LABEL = 'Manufacturing';
 
 function containsTabKey(items, wantedKey) {
   if (!Array.isArray(items)) return false;
@@ -148,6 +150,18 @@ export function ensureStrategyTab(tabs) {
   const folderIndex = tabs.findIndex(
     (item) => item?.type === 'folder' && item?.label === COMPETITION_FOLDER_LABEL
   );
+  if (folderIndex === -1) return [...tabs, { type: 'tab', ...entry }];
+  const folder = tabs[folderIndex];
+  const next = [...tabs];
+  next[folderIndex] = { ...folder, children: [...(Array.isArray(folder.children) ? folder.children : []), entry] };
+  return next;
+}
+
+export function ensureTextEngravingTab(tabs, navConfig = navigation) {
+  if (navConfig?.tabs?.['text-engraving'] === false || !Array.isArray(tabs)) return tabs;
+  if (containsTabKey(tabs, 'text-engraving')) return tabs;
+  const entry = { key: 'text-engraving', label: 'Text Engraving' };
+  const folderIndex = tabs.findIndex((item) => item?.type === 'folder' && item?.label === MANUFACTURING_FOLDER_LABEL);
   if (folderIndex === -1) return [...tabs, { type: 'tab', ...entry }];
   const folder = tabs[folderIndex];
   const next = [...tabs];
