@@ -334,7 +334,9 @@ own docs are all together in one place instead of scattered across
   tube-stock output through it, so a generator change that emits something
   LinuxCNC would reject fails the suite. Backs the **G-code Converter**
   tab (`/manufacture/gcode-converter`), where a pasted program is checked
-  and exported as `.ngc`. The rules are calibrated against the cncjs
+  and exported as `.ngc` - see `implementations/manufacturing-text-to-ngc-converter.md`
+  for a design-only proposal to add a second input mode there (a plain
+  point list, not already-valid G-code). The rules are calibrated against the cncjs
   `gcode-parser` and `pygcode` interpreters, which agree with it
   line-for-line on real generated programs; LinuxCNC's own `rs274` cannot
   be built on macOS, so it is not part of the local loop.
