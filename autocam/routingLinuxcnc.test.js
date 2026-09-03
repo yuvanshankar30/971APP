@@ -146,7 +146,10 @@ describe('unbounded names cannot make a program unloadable', () => {
  */
 const SUPPORTED_SINCE_2_7 = new Set([
   'G0', 'G1', 'G2', 'G3', 'G4',
-  'G17', 'G20', 'G21', 'G40', 'G49', 'G54', 'G80', 'G90', 'G94',
+  // G54 and G55 are both handled in 2.7 by convert_coordinate_system, as
+  // "case 540:" and "case 550:" - tube stock runs in G55 because the tube
+  // fixture has its own work offset on this machine.
+  'G17', 'G20', 'G21', 'G40', 'G49', 'G54', 'G55', 'G80', 'G90', 'G94',
   'M0', 'M3', 'M5', 'M30'
 ]);
 
