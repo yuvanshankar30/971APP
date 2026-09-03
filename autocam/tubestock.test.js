@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateTubestockGcode, tubestockFaceFileName, tubestockFaceLabel, tubestockFaceClock, tubestockFaceGroupLabel, tubestockFaceGroupFileName, holeDepthForWall, DEFAULT_CUTOFF_WIDTH, DEFAULT_CUTOFF_LENGTH, DEFAULT_BANDSAW_KERF } from './tubestock.js';
+import { generateTubestockGcode, tubestockFaceFileName, tubestockFaceLabel, tubestockFaceClock, tubestockFaceGroupLabel, tubestockFaceGroupFileName, holeDepthForWall, DEFAULT_CUTOFF_KERF_WIDTH, DEFAULT_CUTOFF_EDGE_MARGIN, DEFAULT_CUTOFF_SPAN_LENGTH, DEFAULT_BANDSAW_KERF } from './tubestock.js';
 import { lintGcode } from './gcodeLint.js';
 
 // Synthetic tube features matching extractTubeFeaturesFromMeshes' output
@@ -360,10 +360,38 @@ describe('the tube stock cutoff line', () => {
     expect(result.stats.cutoff.position).toBeCloseTo(10 + DEFAULT_BANDSAW_KERF / 2, 6);
   });
 
-  it('reports the dimensions it actually used', () => {
+  it('reports the dimensions it actually used - kerf width across the tube-length axis, span across the wall', () => {
     const result = generateTubestockGcode(twoWallTube(), cutoffParams);
-    expect(result.stats.cutoff.width).toBe(DEFAULT_CUTOFF_WIDTH);
-    expect(result.stats.cutoff.length).toBe(DEFAULT_CUTOFF_LENGTH);
+    expect(result.stats.cutoff.width).toBe(DEFAULT_CUTOFF_KERF_WIDTH);
+    // twoWallTube() carries no crossSection, so this falls back to the
+    // fixed span rather than a real wall-width-derived one (see the next
+    // test for the crossSection-driven case).
+    expect(result.stats.cutoff.length).toBe(DEFAULT_CUTOFF_SPAN_LENGTH);
+  });
+
+  it('orients the slot ACROSS the tube (narrow along X, spanning the wall in Y) and sizes it from the wall\'s own real width - corrected against 3 real Fusion-cammed tube-side programs (SideTubes_12.ngc, Side Tubes_6.ngc, Side TUbes_3&9.ngc), which cut a narrow crosswise slot spanning most of each wall\'s width, not a long obround running along the tube', () => {
+    // A wall at angleDeg 0/180 draws its width from crossSection.b - see
+    // wallWidthForAngle, mirroring stepProfile.js's own isAWall convention.
+    const tube = { ...twoWallTube(), crossSection: { a: 1, b: 2 } };
+    const result = generateTubestockGcode(tube, cutoffParams);
+    const expectedSpan = 2 - 2 * DEFAULT_CUTOFF_EDGE_MARGIN;
+    expect(result.stats.cutoff.length).toBeCloseTo(expectedSpan, 6);
+    expect(result.stats.cutoff.width).toBe(DEFAULT_CUTOFF_KERF_WIDTH);
+
+    const cutoffLineIdx = result.gcode.split('\n').findIndex((l) => l.includes('CUTOFF LINE'));
+    const moveLines = result.gcode.split('\n').slice(cutoffLineIdx + 1, cutoffLineIdx + 60)
+      .filter((l) => /^G0[01] X/.test(l));
+    const xs = moveLines.map((l) => Number(l.match(/X(-?[\d.]+)/)[1]));
+    const ys = moveLines.map((l) => Number(l.match(/Y(-?[\d.]+)/)[1]));
+    const xSpan = Math.max(...xs) - Math.min(...xs);
+    const ySpan = Math.max(...ys) - Math.min(...ys);
+    // Narrow along X (the tube-length axis, around cutoffFeature.position -
+    // the tool-radius-offset toolpath is a little inside the full kerf
+    // width) and long along Y (across the wall) - the opposite of the old
+    // (wrong) orientation, which was long in X and narrow in Y.
+    expect(xSpan).toBeLessThan(DEFAULT_CUTOFF_KERF_WIDTH);
+    expect(ySpan).toBeGreaterThan(xSpan * 5);
+    expect(ySpan).toBeCloseTo(expectedSpan - cutoffParams.toolDiameter, 3);
   });
 
   it.each([
