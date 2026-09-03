@@ -3436,6 +3436,15 @@
     min-width: 110px;
   }
 
+  /* The CAD grid and workflow action (for example, Start) are separate
+     flex items in the sticky table cell. When the latter wraps below the
+     grid, the global compact row gap made the buttons appear joined. */
+  .table .row-actions {
+    align-items: flex-start;
+    column-gap: var(--gap-2);
+    row-gap: var(--space-3);
+  }
+
   .quick-print-modal {
     max-width: 560px;
   }
