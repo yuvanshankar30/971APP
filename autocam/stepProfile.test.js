@@ -681,25 +681,44 @@ describe('extractTubeFeaturesFromMeshes (synthetic rectangular tube: 6"x1.5"x1.0
     expect(result.walls.find((w) => w.angleDeg === 270).holes).toEqual([]);
   });
 
-  it('skips a non-round feature (a slot) rather than treating it as a round hole of some averaged diameter, or throwing away every real hole on the same tube over it', () => {
+  it('classifies a non-round feature (a slot) as a profile rather than treating it as a round hole of some averaged diameter, or throwing away every real hole on the same tube over it', () => {
     // Real regression this replaced: refusing the whole tube here used to
     // discard 388 real holes on a real part over 2 shapes (obround witness
     // marks the CAD modeler drew, not holes) that this extractor has no way
-    // to represent.
+    // to represent as a single center+diameter.
     const result = extractTubeFeaturesFromMeshes([buildTestTube({ slotInsteadOfSecondHole: true })]);
     const wall0 = result.walls.find((w) => w.angleDeg === 0);
     // The first (round) hole on this wall still comes through untouched.
     expect(wall0.holes.length).toBe(1);
     expect(wall0.holes[0].position).toBeCloseTo(1.5, 1);
-    // The slot is reported, not silently dropped, so a human can check it.
-    expect(wall0.skippedFeatures.length).toBe(1);
-    expect(wall0.skippedFeatures[0].position).toBeCloseTo(4.5, 1);
-    expect(wall0.skippedFeatures[0].maxDeviation).toBeGreaterThan(0.15);
+    // The slot is described, not silently dropped, so tubestock.js can mill it.
+    expect(wall0.profiles.length).toBe(1);
+    expect(wall0.profiles[0].position).toBeCloseTo(4.5, 1);
+    expect(wall0.profiles[0].lateralOffset).toBeCloseTo(0, 1);
   });
 
-  it('reports an empty skippedFeatures on a wall with nothing skipped, not a missing field', () => {
+  it('gives a profile its full boundary, in the same (position, lateralOffset) coordinates as a hole - not just a centroid', () => {
+    // The synthetic slot is a 1.2" x 0.24" rectangle centered at u=4.5,
+    // v=0.5 on a wall spanning v in [0, 1.0] - see wallAplusCutouts in
+    // buildTestTube. After the same transform holes get (position =
+    // u - lengthMin, lateralOffset = v - wallWidth/2), its boundary should
+    // span roughly x in [3.9, 5.1] and y in [-0.12, 0.12].
+    const result = extractTubeFeaturesFromMeshes([buildTestTube({ slotInsteadOfSecondHole: true })]);
+    const profile = result.walls.find((w) => w.angleDeg === 0).profiles[0];
+    expect(profile.points.length).toBeGreaterThan(3);
+    const xs = profile.points.map((p) => p.x);
+    const ys = profile.points.map((p) => p.y);
+    expect(Math.min(...xs)).toBeGreaterThan(3.5);
+    expect(Math.max(...xs)).toBeLessThan(5.5);
+    expect(Math.min(...ys)).toBeGreaterThan(-0.3);
+    expect(Math.max(...ys)).toBeLessThan(0.3);
+    // A real 2D boundary, not every point collapsed onto the centroid.
+    expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThan(0.5);
+  });
+
+  it('reports an empty profiles on a wall with nothing non-round, not a missing field', () => {
     const result = extractTubeFeaturesFromMeshes([buildTestTube()]);
-    for (const wall of result.walls) expect(wall.skippedFeatures).toEqual([]);
+    for (const wall of result.walls) expect(wall.profiles).toEqual([]);
   });
 
   it('reports lateralOffset as a signed distance from the wall\'s own centerline, not just the position along the tube - real bug found against a real AndyMark 2"x1" tube fixture: this field used to be computed and silently dropped, which would have driven multiple holes on a wide face to the same G-code Y (see tubestock.test.js)', () => {

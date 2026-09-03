@@ -4,7 +4,7 @@ import { PUBLIC_SUPABASE_ANON_KEY, PUBLIC_SUPABASE_URL, PUBLIC_APP_ORIGIN, PUBLI
 import { readStepMeshes, extractTurningProfileFromMeshes, extractRoutingContoursFromMeshes, extractTubeFeaturesFromMeshes } from '$autocam/stepProfile.js';
 import { generateTurningGcode } from '$autocam/turning.js';
 import { generateRoutingGcode } from '$autocam/routing.js';
-import { generateTubestockGcode, tubestockFaceFileName } from '$autocam/tubestock.js';
+import { generateTubestockGcode, tubestockFaceFileName, tubestockFaceGroupFileName } from '$autocam/tubestock.js';
 import { deliverJobToDrive } from '$autocam/drive_watcher.js';
 import stockData from '$lib/stock.json';
 
@@ -265,7 +265,12 @@ export async function POST({ request, url }) {
     const gcodeFileName = job.gcode_file_name || 'output.ngc';
     const facePrograms = (result.gcodeFiles || []).map((file) => ({
       ...file,
-      fileName: tubestockFaceFileName(gcodeFileName, file.angleDeg)
+      // Faces with identical drilling share one file (see
+      // groupIdenticalFaces in tubestock.js) - file.angleDegs carries every
+      // face that file covers, length 1 in the common case.
+      fileName: file.angleDegs?.length > 1
+        ? tubestockFaceGroupFileName(gcodeFileName, file.angleDegs)
+        : tubestockFaceFileName(gcodeFileName, file.angleDeg)
     }));
     const stats = facePrograms.length
       ? { ...result.stats, facePrograms }

@@ -763,9 +763,10 @@ const MIN_TUBE_WALL_AREA_FRACTION = 0.3;
 const TUBE_WALL_ALIGNMENT_THRESHOLD = 0.9;
 // Real drilled holes tessellate as a clean circle - each boundary point sits
 // within this fraction of the mean radius from center. A slot, keyway, or
-// other non-round feature would read well outside this and is skipped
-// rather than silently treated as "a hole of the average radius," which
-// would program the wrong tool/position for indexed drilling.
+// other non-round feature would read well outside this and becomes a
+// profile instead, rather than silently treated as "a hole of the average
+// radius," which would program the wrong tool/position for indexed
+// drilling.
 const MAX_HOLE_RADIUS_VARIATION = 0.15;
 
 /**
@@ -779,23 +780,31 @@ const MAX_HOLE_RADIUS_VARIATION = 0.15;
  * Scope, deliberately: axis-aligned rectangular/square tube only (the STEP
  * file's own X/Y/Z, not an arbitrary rotation - matches how turning's axis
  * detection also tries X/Y/Z directly rather than solving for an arbitrary
- * orientation), round holes only (see MAX_HOLE_RADIUS_VARIATION), drilled
- * straight through a single wall (not through both walls of the tube at
- * once, not angled). Round tube is rejected outright - there is no wall to
- * find a normal for. A non-round hole feature is not rejected outright any
- * more: it is skipped and reported (see skippedFeatures below) rather than
- * failing every real round hole on the same tube over one shape this
- * extractor has no way to represent - guessing at it would program the
- * wrong tool/position, but refusing the whole tube over it is disproportionate
- * when the tube also has real holes nothing here has trouble with.
+ * orientation), drilled/milled straight into a single wall (not through
+ * both walls of the tube at once, not angled). Round tube is rejected
+ * outright - there is no wall to find a normal for. A wall feature that
+ * isn't round (see MAX_HOLE_RADIUS_VARIATION) is not a hole any more, but
+ * it isn't rejected either: it becomes a profile (see profiles below),
+ * described by its full boundary rather than a center+diameter, for
+ * tubestock.js to mill as a contour. This module has no tool diameter to
+ * judge millability with, so it describes every loop and leaves that
+ * decision to the generator - guessing at a profile's own toolpath here
+ * would risk programming the wrong cut, but refusing the whole tube over
+ * one non-round loop is what real generateTubestockGcode data showed to be
+ * disproportionate (a real 24.5" tube with 388 real round holes and 2
+ * non-round witness marks - see tubestock.js).
  *
  * Returns { lengthAxis, tubeLength, crossSection: {a, b} (outer width along
  * the two cross-section axes), walls: [{ angleDeg, holes: [{position,
- * lateralOffset, diameter}, ...], skippedFeatures: [{position, lateralOffset,
- * meanRadius, maxDeviation}, ...] }, ...] } - walls sorted by angleDeg
- * ascending, holes within a wall sorted by position ascending.
- * skippedFeatures is empty on a wall with nothing skipped, present so a
- * caller doesn't have to special-case the field's absence. angleDeg is a
+ * lateralOffset, diameter}, ...], profiles: [{position, lateralOffset,
+ * points: [{x, y}, ...]}, ...] }, ...] } - walls sorted by angleDeg
+ * ascending, holes within a wall sorted by position ascending. profiles is
+ * empty on a wall with nothing non-round, present so a caller doesn't have
+ * to special-case the field's absence; each profile's points are its full
+ * boundary loop in the same (position, lateralOffset) coordinates as a
+ * hole - x runs along the tube, y is lateral offset from the wall's own
+ * centerline, not necessarily closed (first point repeated last) since
+ * routing.js's offsetPolygon closes an open loop itself. angleDeg is a
  * rotary-axis angle around lengthAxis (0/90/180/270 for a square tube's 4
  * faces, measured so the two cross-section axes are 0deg and 90deg
  * respectively - ready to feed straight into tubestock.js's indexed
@@ -884,18 +893,21 @@ export function extractTubeFeaturesFromMeshes(meshes) {
     // First (largest) loop is the wall's own outer rectangle - not a hole.
     const holeLoops = withArea.slice(1);
 
-    // A loop that isn't round is skipped, not fatal. It is real geometry -
-    // a slot, a keyway, or a reference mark the CAD modeler drew for their
-    // own use - that indexed round-hole drilling has no way to represent.
-    // This used to throw and fail the whole tube over it. Found against a
-    // real part while building tube stock's cutoff feature: a 24.5" tube
-    // with 388 real round holes across its 4 walls also had 2 obround
-    // witness marks drawn into one wall, and the throw discarded all 388
-    // holes to refuse 2 shapes nothing here drills. Skipping the 2 and
-    // reporting them is what lets the other 388 actually get drilled - a
-    // human still has to look at what was skipped, which skippedFeatures
-    // is for.
-    const skippedFeatures = [];
+    // A loop that isn't round is a profile, not a rejection. It is real
+    // geometry - a slot, a keyway, a cutout - that indexed round-hole
+    // drilling has no way to represent as a single center+diameter, but
+    // tubestock.js can still mill it as a contour (see buildMillableProfiles
+    // there). This used to throw and fail the whole tube the instant one
+    // loop wasn't round enough. Found against a real part while building
+    // tube stock's cutoff feature: a 24.5" tube with 388 real round holes
+    // across its 4 walls also had 2 obround witness marks drawn into one
+    // wall, and the throw discarded all 388 holes to refuse 2 shapes this
+    // extraction step had no way to describe. Describing every loop instead
+    // of judging it is what let the other 388 holes through then, and is
+    // also what lets a real functional slot actually get milled now -
+    // extraction has no tool diameter to know whether a given profile is
+    // millable, so that decision belongs to the generator, not here.
+    const profiles = [];
     const holes = holeLoops.map(({ points }) => {
       let cu = 0, cv = 0;
       for (const p of points) { cu += p.x; cv += p.y; }
@@ -916,7 +928,14 @@ export function extractTubeFeaturesFromMeshes(meshes) {
       // spot instead of drilling each real hole.
       const lateralOffset = cv - wallWidth / 2;
       if (maxDeviation > MAX_HOLE_RADIUS_VARIATION) {
-        skippedFeatures.push({ position, lateralOffset, meanRadius, maxDeviation });
+        // Same coordinate transform as a hole's own position/lateralOffset,
+        // applied point-by-point instead of to the centroid, so the whole
+        // boundary lands in the same X/Y space generateTubestockGcode
+        // already emits G-code in. Not pre-closed (first point repeated at
+        // the end) - offsetPolygon's own ensureCCW closes an open loop
+        // itself, so doing it twice here would just be dead code.
+        const outline = points.map((p) => ({ x: p.x - lengthMinByAxis[lengthAxis], y: p.y - wallWidth / 2 }));
+        profiles.push({ position, lateralOffset, points: outline });
         return null;
       }
       return { position, lateralOffset, diameter: meanRadius * 2 };
@@ -928,7 +947,7 @@ export function extractTubeFeaturesFromMeshes(meshes) {
       isAWall ? (key[1] === '+' ? 1 : -1) : 0
     );
     const angleDeg = ((angleRad * 180) / Math.PI + 360) % 360;
-    walls.push({ angleDeg, holes, skippedFeatures });
+    walls.push({ angleDeg, holes, profiles });
   }
 
   if (walls.length === 0) {

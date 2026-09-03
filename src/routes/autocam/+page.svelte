@@ -37,7 +37,7 @@
     partHasStepFile,
     CAM_GCODE_FORMAT
   } from '$autocam/camJobs.js';
-  import { tubestockFaceFileName, tubestockFaceLabel } from '$autocam/tubestock.js';
+  import { tubestockFaceFileName, tubestockFaceLabel, tubestockFaceGroupFileName, tubestockFaceGroupLabel } from '$autocam/tubestock.js';
   import { machinesForOperation } from '$autocam/machineOptions.js';
   import stockData from '$lib/stock.json';
   import { normalizeGcodeComments } from '$autocam/gcodeComments.js';
@@ -908,11 +908,15 @@
   // writes these numbers on the tube. The stored value is still the fallback
   // for a record with no angle on it.
   function tubeFaceFileName(job, faceProgram) {
+    // Faces with identical drilling share one file - angleDegs carries
+    // every face that file covers, length 1 in the common case.
+    if (faceProgram?.angleDegs?.length > 1) return tubestockFaceGroupFileName(job.gcode_file_name, faceProgram.angleDegs);
     if (Number.isFinite(faceProgram?.angleDeg)) return tubestockFaceFileName(job.gcode_file_name, faceProgram.angleDeg);
     return faceProgram.fileName || tubestockFaceFileName(job.gcode_file_name, faceProgram.angleDeg);
   }
 
   function tubeFaceLabel(faceProgram) {
+    if (faceProgram?.angleDegs?.length > 1) return tubestockFaceGroupLabel(faceProgram.angleDegs);
     if (Number.isFinite(faceProgram?.angleDeg)) return tubestockFaceLabel(faceProgram.angleDeg);
     return faceProgram.label || tubestockFaceLabel(faceProgram.angleDeg);
   }
@@ -2115,7 +2119,7 @@
           <h3>Install tube stock G-code</h3>
           <p class="face-files-subtitle">
             {faceFilesJob.name || faceFilesJob.parts?.name || 'Tube stock job'} &middot;
-            {faceFilesPrograms.length} face{faceFilesPrograms.length === 1 ? '' : 's'} to cut
+            {faceFilesPrograms.length} file{faceFilesPrograms.length === 1 ? '' : 's'} to run
           </p>
         </div>
         <button type="button" class="modal-close-button" aria-label="Close dialog" on:click={closeFaceFilesModal}>
