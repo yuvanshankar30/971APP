@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateTubestockGcode, tubestockFaceFileName } from './tubestock.js';
+import { generateTubestockGcode, tubestockFaceFileName, tubestockFaceLabel, tubestockFaceClock } from './tubestock.js';
 
 // Synthetic tube features matching extractTubeFeaturesFromMeshes' output
 // shape directly - 2 holes on one wall (0.25"), 1 on another (0.375"), 2
@@ -29,13 +29,14 @@ describe('generateTubestockGcode', () => {
     const result = generateTubestockGcode(twoWallTube(), baseParams);
     expect(result.gcodeFiles).toHaveLength(2);
     expect(result.gcodeFiles.map((file) => file.angleDeg)).toEqual([0, 90]);
-    expect(result.gcodeFiles.map((file) => file.label)).toEqual(['Top', 'Right side']);
+    expect(result.gcodeFiles.map((file) => file.label)).toEqual(['Side 12', 'Side 3']);
     expect(result.stats.facePrograms).toHaveLength(2);
-    expect(result.gcodeFiles[0].gcode).toContain('Top 0.0 deg from Top');
-    expect(result.gcodeFiles[0].gcode).not.toContain('Right side 90.0 deg');
-    expect(result.gcodeFiles[1].gcode).toContain('Right side 90.0 deg from Top');
-    // Not a bare '0.0 deg' - '90.0 deg' contains that as a substring.
-    expect(result.gcodeFiles[1].gcode).not.toContain('Top 0.0 deg');
+    // Each face program names only its own face, so an operator who opens
+    // the wrong file sees the wrong number immediately.
+    expect(result.gcodeFiles[0].gcode).toContain('Side 12 - turn this face up');
+    expect(result.gcodeFiles[0].gcode).not.toContain('Side 3 - turn this face up');
+    expect(result.gcodeFiles[1].gcode).toContain('Side 3 - turn this face up');
+    expect(result.gcodeFiles[1].gcode).not.toContain('Side 12 - turn this face up');
     expect(result.gcodeFiles.every((file) => file.gcode.includes('M30 (program end)'))).toBe(true);
   });
 
@@ -50,7 +51,7 @@ describe('generateTubestockGcode', () => {
     const result = generateTubestockGcode(fourFaceTube, baseParams);
     expect(result.gcodeFiles).toHaveLength(4);
     expect(result.gcodeFiles.map((file) => file.angleDeg)).toEqual([0, 90, 180, 270]);
-    expect(result.gcodeFiles.map((file) => file.label)).toEqual(['Top', 'Right side', 'Bottom', 'Left side']);
+    expect(result.gcodeFiles.map((file) => file.label)).toEqual(['Side 12', 'Side 3', 'Side 6', 'Side 9']);
   });
 
   it('emits one program for equivalent face angles (0 and 360) on the same face', () => {
@@ -63,10 +64,10 @@ describe('generateTubestockGcode', () => {
     };
     const result = generateTubestockGcode(duplicateTop, baseParams);
     expect(result.gcodeFiles).toHaveLength(1);
-    expect(result.gcodeFiles[0].label).toBe('Top');
+    expect(result.gcodeFiles[0].label).toBe('Side 12');
     expect(result.gcodeFiles[0].gcode).toContain('X2.0000');
     expect(result.gcodeFiles[0].gcode).toContain('X8.0000');
-    expect(tubestockFaceFileName('tube.ngc', 360)).toBe('tube-top-a0.ngc');
+    expect(tubestockFaceFileName('tube.ngc', 360)).toBe('tube-side-12.ngc');
   });
 
   it('rejects tube features with no walls', () => {
@@ -218,5 +219,49 @@ describe('generateTubestockGcode', () => {
       const result = generateTubestockGcode(tubeWithCrossSection(5, 5), baseParams);
       expect(result.gcode).toContain('M30');
     });
+  });
+});
+
+describe('tube faces are numbered the way the shop numbers them', () => {
+  // The router manual labels tube sides 3, 6, 9 and 12 clockwise, and the
+  // checklist has the operator write those numbers on the tube. The files
+  // have to match, or they are translating between two schemes at the
+  // machine with a tube already clamped in the fixture.
+  it('maps each wall to its clock position', () => {
+    expect(tubestockFaceClock(0)).toBe(12);
+    expect(tubestockFaceClock(90)).toBe(3);
+    expect(tubestockFaceClock(180)).toBe(6);
+    expect(tubestockFaceClock(270)).toBe(9);
+  });
+
+  it('wraps a full turn back onto 12', () => {
+    expect(tubestockFaceClock(360)).toBe(12);
+    expect(tubestockFaceLabel(360)).toBe('Side 12');
+  });
+
+  it('labels and names files by that number', () => {
+    expect(tubestockFaceLabel(90)).toBe('Side 3');
+    expect(tubestockFaceFileName('p006946.ngc', 90)).toBe('p006946-side-3.ngc');
+    expect(tubestockFaceFileName('p006946.ngc', 270)).toBe('p006946-side-9.ngc');
+  });
+
+  it('keeps the file extension it was given', () => {
+    expect(tubestockFaceFileName('part.nc', 180)).toBe('part-side-6.nc');
+  });
+
+  it('falls back rather than inventing a clock position for a non-cardinal wall', () => {
+    expect(tubestockFaceClock(45)).toBeNull();
+    expect(tubestockFaceLabel(45)).toBe('Face A45');
+    expect(tubestockFaceFileName('tube.ngc', 45)).toBe('tube-face-a45.ngc');
+  });
+
+  it('gives every face of a real tube a distinct file', () => {
+    const fourFace = { tubeLength: 12, walls: [0, 90, 180, 270].map((angleDeg, i) => ({
+      angleDeg, holes: [{ position: 2 + i, lateralOffset: 0, diameter: 0.25 }]
+    })) };
+    const { gcodeFiles } = generateTubestockGcode(fourFace, baseParams);
+    expect(gcodeFiles.map((f) => f.label)).toEqual(['Side 12', 'Side 3', 'Side 6', 'Side 9']);
+    const names = gcodeFiles.map((f) => tubestockFaceFileName('t.ngc', f.angleDeg));
+    expect(new Set(names).size).toBe(4);
   });
 });
