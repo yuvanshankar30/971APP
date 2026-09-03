@@ -424,13 +424,14 @@ describe('generateRoutingGcode - controller dialect (default linuxcnc vs wincnc 
     expect(result.gcode).toContain('[inch]');
   });
 
-  it('wincnc dialect omits G17, uses G22 (not G21) for metric, and drops the LinuxCNC G54 line', () => {
+  it('wincnc dialect omits G17, uses G22 (not G21) for metric, and still selects G54 like linuxcnc', () => {
     const inch = generateRoutingGcode(contour, { toolDiameter: 0.25, targetDepth: 0.25, controller: 'wincnc' });
     expect(inch.gcode).not.toContain('G17');
-    // Explanatory comment text is allowed to mention "G54" descriptively
-    // (it does, to tell the operator why there isn't one) - what actually
-    // matters is that no line emits it as a live command.
-    expect(inch.gcode).not.toMatch(/^G54\b/m);
+    // G54 IS a real stored work offset on this shop's actual WinCNC machine
+    // (confirmed against its own shopsabre.cps post-processor, which
+    // selects G54-G59 by section work offset same as LinuxCNC) - both
+    // dialects select it the same way.
+    expect(inch.gcode).toMatch(/^G54\b/m);
 
     const metric = generateRoutingGcode(contour, { toolDiameter: 0.25, targetDepth: 0.25, controller: 'wincnc', units: 'mm' });
     expect(metric.gcode).toContain('G22');

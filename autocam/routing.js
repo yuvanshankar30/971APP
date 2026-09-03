@@ -11,26 +11,27 @@
  *
  *   'wincnc' - for a real ShopSabre-brand router (e.g. the shop's
  *     ShopSabre Pro 408), which runs WinCNC, not LinuxCNC - a genuinely
- *     different G-code dialect, confirmed against WinCNC's own command
- *     reference manual (wincnc.com), not assumed:
- *       - Comments are "[...]", not "(...)" - WinCNC's manual documents
- *         square brackets as the comment delimiter and its own example
- *         code uses them (e.g. "G4 [Ready To Start Section 2]"); round
- *         parens are not a documented WinCNC comment syntax.
+ *     different G-code dialect. Originally based on WinCNC's own command
+ *     reference manual (wincnc.com); as of 2026-09-03 cross-checked against
+ *     the shop's actual post-processor configs and a real Fusion-cammed
+ *     output file (see autocam/postprocessors/README.md), which is more
+ *     authoritative for this exact machine - one assumption below (G54-G59)
+ *     turned out to be wrong and was corrected against that real source:
+ *       - Comments are "[...]", not "(...)" - confirmed in shopsabre.cps
+ *         (settings.comments.prefix/suffix).
  *       - G21 means CENTIMETERS on WinCNC, not millimeters - G22 is
  *         millimeters. Emitting standard G21 for a metric job here would
  *         be a silent 10x scale error. (units='mm' has no UI path today,
- *         but this generator gets it right either way.)
+ *         but this generator gets it right either way.) Confirmed:
+ *         shopsabre.cps's onOpen never emits G21, only G20 or G22.
  *       - G17 (plane select) is not a documented WinCNC code - omitted
  *         rather than emitting something that might abort parsing.
- *       - G54-G59 do NOT mean "select stored work offset" on WinCNC -
- *         they select between physical heads (Z/W/U/V) on a multi-head
- *         gantry machine. WinCNC's real work-origin mechanism is G92,
- *         set interactively by the operator (jog to the corner, zero) -
- *         not something this program should set for itself, since it has
- *         no way to know the machine is actually jogged to the workpiece
- *         corner at that moment. A loud comment reminds the operator
- *         instead of emitting a G54 that means something else entirely.
+ *       - G54-G59 ARE standard stored work offsets on the real machine,
+ *         selected by section work offset exactly like LinuxCNC/Fanuc
+ *         (shopsabre.cps onSection: workOffset > 1 -> G(53 + workOffset)).
+ *         Emitted the same as 'linuxcnc' below - not head-selection codes,
+ *         and not something requiring an interactive G92 jog-and-zero
+ *         every run, as previously assumed here.
  *       - M00 is not a documented WinCNC code; the real "pause until the
  *         operator presses ENTER" mechanism is a bare G4 (dwell with no
  *         time value), which also supports a bracketed prompt - exactly
@@ -1069,10 +1070,17 @@ export function generateRoutingGcode(contours, params = {}) {
   if (!isWinCNC) lines.push('G17 (XY plane)'); // not a documented WinCNC code - omitted rather than risking an abort on an unrecognized G-code
   lines.push('G94 (feed per minute)');
   if (isWinCNC) {
-    lines.push('(*** VERIFY MACHINE ZERO BEFORE RUNNING ***)');
-    lines.push('(Jog to the workpiece origin and zero the controller (WinCNC local coordinates,)');
-    lines.push('(G92) BEFORE running this file - WinCNC has no G54-style stored work offset)');
-    lines.push('(this program can select for you; it has to be set interactively, right before.)');
+    // G54 IS a standard stored work offset on this shop's actual WinCNC
+    // machine (a ShopSabre) - confirmed against the machine's own real
+    // Autodesk-authored post-processor (shopsabre.cps, see
+    // autocam/postprocessors/), which selects G54-G59 by section work
+    // offset exactly like a LinuxCNC/Fanuc control does. The earlier
+    // "WinCNC has no G54-style stored offset, jog and G92 instead" guidance
+    // here was wrong - it came from WinCNC's generic base manual, not this
+    // specific machine's real setup, and it meant this app's own files used
+    // a different (more manual, error-prone) work-offset workflow than
+    // every Fusion-cammed job on the same router already does.
+    lines.push('G54 (work offset - verify before running)');
   } else {
     lines.push('G54 (work offset - verify before running)');
     // Defensive only - this program never activates a canned cycle, cutter
