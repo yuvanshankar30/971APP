@@ -109,8 +109,29 @@ const OPPOSITE_CLOCK = { 12: 6, 3: 9, 6: 12, 9: 3 };
  * keeps that remnant small; a modest overall length gives the saw blade a
  * real straight edge to follow rather than a single point.
  */
-export const DEFAULT_CUTOFF_WIDTH = 0.25;
-export const DEFAULT_CUTOFF_LENGTH = 0.75;
+// Corrected against 3 real Fusion-cammed tube-side programs
+// (SideTubes_12.ngc, Side Tubes_6.ngc, Side TUbes_3&9.ngc - a real batch of
+// tube blanks run on the actual UNC router, not synthetic) - see the PR that
+// introduced this comment for the raw G-code. The real cutoff is oriented
+// the OPPOSITE way from what this file used to assume: a narrow slot running
+// ACROSS the tube (so a bandsaw blade can track a line spanning the whole
+// face, the way it is actually used), not a long obround running ALONG the
+// tube. The real files cut it in two passes ~0.042" apart with a 0.1575"
+// tool (T1), which combine to a ~0.2" finished kerf - this app cuts the
+// equivalent single clean pass at that same finished width instead of
+// replicating Fusion's specific 2-pass toolpath, since the result - a ~0.2"
+// scribed slot at the right position - is what a bandsaw operator actually
+// needs; how many passes got it there doesn't matter once it's cut.
+export const DEFAULT_CUTOFF_KERF_WIDTH = 0.2; // along the tube - the short dimension
+// How much material the slot stops short of each wall edge - real files
+// stop about 0.16" short of the wall's own boundary on each side rather
+// than running edge-to-edge.
+export const DEFAULT_CUTOFF_EDGE_MARGIN = 0.15;
+// Fallback span (across the wall) only used when tubeFeatures.crossSection
+// isn't available to size it from the wall's own real width - an older
+// caller/test, not the real generateTubestockGcode(tubeFeatures, ...) path,
+// which always has it.
+export const DEFAULT_CUTOFF_SPAN_LENGTH = 0.75;
 
 /**
  * A typical metal-cutting horizontal bandsaw blade's kerf. The cutoff line
@@ -227,13 +248,32 @@ export function tubestockFaceGroupFileName(gcodeFileName, angleDegs) {
  * already written on the tube) and the cutoff goes on the wall directly
  * opposite it.
  *
+ * Which cross-section span a wall's own width is drawn from. Mirrors
+ * stepProfile.js's extractTubeFeaturesFromMeshes exactly (isAWall ?
+ * spans[axisB] : spans[axisA]) - angleDeg 0/180 are the "A" walls (width =
+ * crossSection.b), 90/270 are the "B" walls (width = crossSection.a). Needed
+ * here because a wall object itself carries no width - only its holes and
+ * profiles - so the cutoff (the one feature that needs to know how wide the
+ * wall it's on actually is) has to re-derive it the same way extraction did.
+ */
+function wallWidthForAngle(angleDeg, crossSection) {
+  if (!crossSection) return null;
+  const normalized = normalizeTubestockFaceAngle(angleDeg);
+  return (normalized === 0 || normalized === 180) ? crossSection.b : crossSection.a;
+}
+
+/**
  * @param {Array} walls tubeFeatures.walls
+ * @param {{a: number, b: number}|null} crossSection tubeFeatures.crossSection -
+ *   used to size the cutoff slot to the wall's own width (see
+ *   wallWidthForAngle); a cutoff still builds without it, at the fallback
+ *   width below, since older callers/tests may not pass it.
  * @param {Object} params generateTubestockGcode's own params - reads
  *   finishedLength (required to build a feature at all), fixturePinFace
  *   and toolDiameter (both required once finishedLength is given)
  * @returns {{angleDeg: number, position: number, path: Array<{x,y}>}|null}
  */
-function buildCutoffFeature(walls, params) {
+function buildCutoffFeature(walls, crossSection, params) {
   const finishedLength = Number(params.finishedLength);
   if (!Number.isFinite(finishedLength) || finishedLength <= 0) return null;
 
@@ -264,13 +304,41 @@ function buildCutoffFeature(walls, params) {
   }
 
   const position = tubeCutoffPosition({ partEnd: finishedLength, kerf: DEFAULT_BANDSAW_KERF });
-  const outerPath = tubeCutoffPath({ position, width: DEFAULT_CUTOFF_WIDTH, length: DEFAULT_CUTOFF_LENGTH });
+
+  // How far across the wall the slot spans - the wall's own width minus a
+  // margin at each edge (real files stop ~0.15" short of the edge on each
+  // side rather than running edge-to-edge). Falls back to a fixed span when
+  // crossSection isn't available (older callers/tests) - same fallback
+  // width the old (wrong-orientation) obround used to default to, so a
+  // caller that never passed crossSection still gets a working, if
+  // conservatively narrow, cutoff rather than a thrown error.
+  const wallWidth = wallWidthForAngle(wall.angleDeg, crossSection);
+  const spanLength = wallWidth ? wallWidth - 2 * DEFAULT_CUTOFF_EDGE_MARGIN : DEFAULT_CUTOFF_SPAN_LENGTH;
+  if (spanLength <= 0) {
+    throw new Error(
+      `The cutoff slot would need to span ${spanLength.toFixed(3)}" across a ${wallWidth.toFixed(3)}"-wide wall ` +
+      `after a ${DEFAULT_CUTOFF_EDGE_MARGIN}" margin on each edge - this wall is too narrow for a cutoff line.`
+    );
+  }
+
+  // tubeCutoffPath's own shape is long along X (its "length" param) and
+  // narrow along Y (its "width" param) - the opposite of what a cutoff
+  // actually needs (a bandsaw line runs ACROSS the tube, spanning the wall's
+  // width, not along it - see the real-file comment on the constants above).
+  // Built at position 0 with the roles it already expects (length >= width)
+  // and then rotated 90 degrees - {x: p.y, y: p.x} - so the long axis lands
+  // on Y (across the wall, centred on the wall's own centreline like every
+  // hole's lateralOffset already is) and the short axis on X, finally
+  // shifted to the real along-tube position. Reuses tubeCutoffPath's tested
+  // geometry unchanged rather than duplicating it with the axes swapped.
+  const centered = tubeCutoffPath({ position: 0, width: DEFAULT_CUTOFF_KERF_WIDTH, length: spanLength });
+  const outerPath = centered.map((p) => ({ x: p.y + position, y: p.x }));
   // offsetPolygon itself refuses a tool too large for the shape ("Feature
   // is too small for this tool") - that check is reused here rather than
   // duplicated, so cutter fit is one rule, not two that could disagree.
   const path = offsetPolygon(outerPath, -toolDiameter / 2);
 
-  return { angleDeg: wall.angleDeg, position, toolDiameter, path };
+  return { angleDeg: wall.angleDeg, position, toolDiameter, path, spanLength };
 }
 
 /**
@@ -720,7 +788,7 @@ export function generateTubestockGcode(tubeFeatures, params = {}) {
     throw new Error('Tube stock needs at least one wall with hole data');
   }
   const totalHoles = walls.reduce((sum, w) => sum + w.holes.length, 0);
-  const cutoffFeature = buildCutoffFeature(walls, params);
+  const cutoffFeature = buildCutoffFeature(walls, tubeFeatures?.crossSection ?? null, params);
   if (totalHoles === 0 && !cutoffFeature) {
     throw new Error('No holes found across any wall, and no finished length was given for a cutoff - nothing to machine');
   }
@@ -833,7 +901,7 @@ export function generateTubestockGcode(tubeFeatures, params = {}) {
       // didn't happen," which is a meaningfully different claim.
       unmachinedFeatures: profileFeatures.unmachined,
       cutoff: cutoffFeature
-        ? { angleDeg: cutoffFeature.angleDeg, position: cutoffFeature.position, width: DEFAULT_CUTOFF_WIDTH, length: DEFAULT_CUTOFF_LENGTH }
+        ? { angleDeg: cutoffFeature.angleDeg, position: cutoffFeature.position, width: DEFAULT_CUTOFF_KERF_WIDTH, length: cutoffFeature.spanLength }
         : null,
       facePrograms
     }
