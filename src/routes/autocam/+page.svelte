@@ -2596,10 +2596,20 @@
   }
   .output-action-group {
     display: flex;
-    flex-wrap: nowrap;
+    /* Was nowrap. "Install NGC" grew a "(N)" face-count suffix and this
+       group also grew a third button (the ncviewer icon) since this rule
+       was written - together they no longer reliably fit the Output
+       column's own width, and nowrap let the last button (whichever one
+       that is) render past the row's right edge instead of moving to its
+       own line - same overflow-vs-wrap tradeoff .output-actions above
+       already resolved one level up, just not applied within a group.
+       Measured, not assumed: the icon button was overflowing by 5-26px
+       depending on row content before this change. */
+    flex-wrap: wrap;
     align-items: center;
     min-width: 0;
     gap: 0.4rem;
+    row-gap: 0.3rem;
   }
 
   /* Small hover tooltip for icon-only buttons - the native title attribute
