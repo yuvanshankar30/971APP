@@ -92,7 +92,8 @@ browser confirmation or prompt popups.
   The signed-in home dashboard balances direct links to Manufacturing,
   Purchasing, and Scouting, while keeping each scout's personal assignment
   queue available without filling the page with duplicate scouting tools.
-  The **Strategy** view (`/strategy`) is the decision board: it combines the
+  The **Strategy** view (`/strategy`) replaces Data Scouting in Competition
+  navigation as the decision board: it combines the
   event's data observations, match reports, pit profiles, free-form notes,
   named autonomous routes, and open ACE issues into comparable team rows and
   focused team briefs without duplicating data entry.

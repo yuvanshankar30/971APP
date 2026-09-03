@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { defaultHeaderTabs, ensurePowerRankingsTab, ensureScoutingAdminTab, ensureDataScoutTab, ensureStrategyTab } from './defaultTabs.js';
+import { defaultHeaderTabs, ensurePowerRankingsTab, ensureScoutingAdminTab, ensureStrategyTab } from './defaultTabs.js';
 
 const enabled = { tabs: { powerrankings: true } };
 
@@ -33,19 +33,18 @@ describe('defaultHeaderTabs', () => {
   });
 
   it('orders the scouting surfaces the way the team asked for them', () => {
-    // Deliberate order, not incidental: match -> pit -> strategy -> rankings -> vision
-    // -> data, with the Pick List and the admin surface after them.
+    // Deliberate order, not incidental: match -> pit -> strategy -> rankings
+    // -> vision, with the Pick List and admin surface after them.
     const keys = competitionChildren(defaultHeaderTabs()).map((child) => child.key);
     expect(keys).toEqual([
-      'matchscout', 'pitscout', 'strategy', 'powerrankings', 'vision', 'datascout', 'scouting', 'scouting-admin'
+      'matchscout', 'pitscout', 'strategy', 'powerrankings', 'vision', 'scouting', 'scouting-admin'
     ]);
   });
 
-  it('gives Data Scouting a nav entry at all', () => {
-    // /datascout is a real page that previously had no entry anywhere in
-    // the nav - it was reachable only by typing the URL.
+  it('replaces Data Scouting with Strategy in the default Competition menu', () => {
     const keys = competitionChildren(defaultHeaderTabs()).map((child) => child.key);
-    expect(keys).toContain('datascout');
+    expect(keys).toContain('strategy');
+    expect(keys).not.toContain('datascout');
   });
 
   it('keeps the other active scouting surfaces alongside it', () => {
@@ -66,6 +65,18 @@ describe('ensureStrategyTab', () => {
     const tabs = savedNav();
     tabs[1].children.push({ key: 'strategy', label: 'Game Plan' });
     expect(ensureStrategyTab(tabs)).toBe(tabs);
+  });
+
+  it('replaces a saved Data Scouting entry in the same location', () => {
+    const tabs = [{ type: 'folder', label: 'Competition', children: [
+      { key: 'matchscout', label: 'Match Scouting' },
+      { key: 'datascout', label: 'Data Scouting' },
+      { key: 'vision', label: 'Vision Scouting' }
+    ] }];
+    const result = ensureStrategyTab(tabs);
+    expect(competitionChildren(result).map((item) => item.key)).toEqual(['matchscout', 'strategy', 'vision']);
+    expect(competitionChildren(result)[1].label).toBe('Strategy');
+    expect(competitionChildren(tabs)[1].key).toBe('datascout');
   });
 });
 
@@ -136,34 +147,5 @@ describe('ensurePowerRankingsTab', () => {
     expect(competitionChildren(ensurePowerRankingsTab(oddFolder, enabled))).toEqual([
       { key: 'powerrankings', label: 'Power Rankings' }
     ]);
-  });
-});
-
-describe('ensureDataScoutTab', () => {
-  it('appends Data Scouting to an existing Competition folder', () => {
-    const tabs = [{ type: 'folder', label: 'Competition', children: [{ key: 'pitscout', label: 'Pit Scouting' }] }];
-    const out = ensureDataScoutTab(tabs);
-    expect(out[0].children.map((c) => c.key)).toEqual(['pitscout', 'datascout']);
-  });
-
-  it('leaves a nav that already has it completely alone', () => {
-    const tabs = [{ type: 'folder', label: 'Competition', children: [{ key: 'datascout', label: 'Renamed By User' }] }];
-    expect(ensureDataScoutTab(tabs)).toBe(tabs);
-  });
-
-  it('falls back to a top-level tab when there is no Competition folder', () => {
-    const tabs = [{ type: 'tab', key: 'docs', label: 'Docs' }];
-    const out = ensureDataScoutTab(tabs);
-    expect(out.at(-1)).toEqual({ type: 'tab', key: 'datascout', label: 'Data Scouting' });
-  });
-
-  it('never reorders or removes what is already there', () => {
-    const tabs = [
-      { type: 'tab', key: 'docs', label: 'Docs' },
-      { type: 'folder', label: 'Competition', children: [{ key: 'matchscout', label: 'Match Scouting' }] }
-    ];
-    const out = ensureDataScoutTab(tabs);
-    expect(out[0]).toEqual(tabs[0]);
-    expect(out[1].children[0]).toEqual(tabs[1].children[0]);
   });
 });
