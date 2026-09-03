@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { defaultHeaderTabs, ensurePowerRankingsTab, ensureScoutingAdminTab, ensureStrategyTab } from './defaultTabs.js';
+import { defaultHeaderTabs, ensurePowerRankingsTab, ensureScoutingAdminTab, ensureStrategyTab, ensureTextEngravingTab } from './defaultTabs.js';
 
 const enabled = { tabs: { powerrankings: true } };
 
 function competitionChildren(tabs) {
   return tabs.find((tab) => tab.type === 'folder' && tab.label === 'Competition')?.children || [];
+}
+
+function manufacturingChildren(tabs) {
+  return tabs.find((tab) => tab.type === 'folder' && tab.label === 'Manufacturing')?.children || [];
 }
 
 const savedNav = () => [
@@ -32,6 +36,10 @@ describe('defaultHeaderTabs', () => {
     expect(children.at(-1)).toEqual({ key: 'scouting-admin', label: 'Scouting Admin' });
   });
 
+  it('includes Text Engraving in the Manufacturing folder', () => {
+    expect(manufacturingChildren(defaultHeaderTabs())).toContainEqual({ key: 'text-engraving', label: 'Text Engraving' });
+  });
+
   it('orders the scouting surfaces the way the team asked for them', () => {
     // Deliberate order, not incidental: strategy leads as the board the team
     // opens to decide something, then the collection surfaces that feed it
@@ -54,6 +62,19 @@ describe('defaultHeaderTabs', () => {
     expect(keys).toContain('pitscout');
     expect(keys).toContain('matchscout');
     expect(keys).toContain('vision');
+  });
+});
+
+describe('ensureTextEngravingTab', () => {
+  it('adds Text Engraving to an existing Manufacturing folder', () => {
+    const tabs = [{ type: 'folder', label: 'Manufacturing', children: [{ key: 'manufacture', label: 'Manufacture' }] }];
+    const result = ensureTextEngravingTab(tabs);
+    expect(manufacturingChildren(result).at(-1)).toEqual({ key: 'text-engraving', label: 'Text Engraving' });
+  });
+
+  it('does not duplicate a user-placed text engraving tab', () => {
+    const tabs = [{ type: 'tab', key: 'text-engraving', label: 'Engraving' }];
+    expect(ensureTextEngravingTab(tabs)).toBe(tabs);
   });
 });
 

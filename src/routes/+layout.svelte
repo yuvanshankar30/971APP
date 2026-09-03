@@ -6,8 +6,8 @@
   import { supabase } from '$lib/supabase.js';
   import { fetchActiveScoutingEventKey } from '$lib/scoutingEvent.js';
   import navConfig from '$lib/navigation.json';
-  import { defaultHeaderTabs, ensurePowerRankingsTab, ensureScoutingAdminTab, ensureStrategyTab } from '$lib/defaultTabs.js';
-  import { Move3d, Hammer, Wrench, Receipt, Home, Briefcase, Coins, Package, User, ChevronDown, Menu, X, Camera, CalendarDays, Cpu, FileText, Trophy, Eye, ClipboardCheck, ListChecks, Target } from 'lucide-svelte';
+  import { defaultHeaderTabs, ensurePowerRankingsTab, ensureScoutingAdminTab, ensureStrategyTab, ensureTextEngravingTab } from '$lib/defaultTabs.js';
+  import { Move3d, Hammer, Wrench, Receipt, Home, Briefcase, Coins, Package, User, ChevronDown, Menu, X, Camera, CalendarDays, Cpu, FileText, Trophy, Eye, ClipboardCheck, ListChecks, Target, Type } from 'lucide-svelte';
   import { goto, afterNavigate } from '$app/navigation';
   import { page } from '$app/stores';
   import Toasts from '$lib/Toasts.svelte';
@@ -264,6 +264,7 @@
     if (compact === 'scoutingadmin' || compact === 'scoutadmin') return 'scouting-admin';
     if (compact === 'cotsstocking') return 'cots-stocking';
     if (compact.startsWith('autocam')) return 'autocam';
+    if (compact.startsWith('textengraving')) return 'text-engraving';
     return compact;
   }
 
@@ -287,6 +288,7 @@
     'scouting-admin': '/scouting-admin',
     'cots-stocking': '/cots-stocking',
     autocam: '/autocam',
+    'text-engraving': '/manufacture/text-engraving',
     home: '/',
     profile: '/profile',
     admin: '/admin'
@@ -312,6 +314,7 @@
     'scouting-admin': Briefcase,
     'cots-stocking': Package,
     autocam: Cpu,
+    'text-engraving': Type,
     home: Home,
     profile: User,
     admin: Briefcase
@@ -337,6 +340,7 @@
     'scouting-admin': 'Scouting Admin',
     'cots-stocking': 'COTS Stocking',
     autocam: 'AutoCAM',
+    'text-engraving': 'Text Engraving',
     admin: 'Admin'
   };
 
@@ -459,7 +463,7 @@
   // Power Rankings is appended for anyone whose saved header_tabs predates it,
   // so a customized nav still surfaces the feature. Purely additive - see
   // ensurePowerRankingsTab().
-  $: baseNavTabs = addAdminTabIfAllowed(ensureScoutingAdminTab(ensureStrategyTab(ensurePowerRankingsTab(effectiveTabs, navConfig))), canViewAdmin);
+  $: baseNavTabs = addAdminTabIfAllowed(ensureScoutingAdminTab(ensureStrategyTab(ensureTextEngravingTab(ensurePowerRankingsTab(effectiveTabs, navConfig), navConfig))), canViewAdmin);
   $: navItems = isApproved ? buildNavItems(baseNavTabs) : [];
 
   // Drag-to-reorder for the desktop nav's top-level tabs/folders. Home is
