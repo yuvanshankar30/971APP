@@ -148,6 +148,7 @@
   <a href="/manufacture/router" class:active={$page.url.pathname === '/manufacture/router'}>Router</a>
   <a href="/manufacture/post-processing" class:active={$page.url.pathname === '/manufacture/post-processing'}>Post Processing</a>
   <a href="/manufacture/bins" class:active={$page.url.pathname === '/manufacture/bins'}>Bins</a>
+  <a href="/manufacture/gcode-converter" class:active={$page.url.pathname === '/manufacture/gcode-converter'}>G-code Converter</a>
 </div>
 
 <div class="card">
