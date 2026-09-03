@@ -14,8 +14,10 @@
  * speed" field in CamParamFields.svelte are SFM for that reason - do not
  * treat the default (150) as metric.
  *
- * NOT verified against real hardware or a simulator. Every generated file
- * carries a header warning to that effect - see HEADER_WARNING below.
+ * Every generated file opens with HEADER_WARNING below, which asks the
+ * operator to confirm work zero, stock and clamps and to dry-run clear of
+ * the stock. That is a per-setup check, not a statement about whether this
+ * generator has been proven - its output has been cut on the machine.
  *
  * Roughing strategy: explicit step-down passes, each one tracing the entire
  * profile shape clamped to that pass's radius (an offset copy of the finish
@@ -62,11 +64,26 @@
 
 import { normalizeGcodeComments } from './gcodeComments.js';
 
+/**
+ * The banner every generated program opens with.
+ *
+ * It no longer says the output is unverified on real hardware, because it
+ * has been cut on the machine. What is left is the check that is worth
+ * making every time regardless of how proven the toolchain is, since it is
+ * about this program and this setup rather than about the generator.
+ *
+ * No line here contains a parenthesis inside its own text, and that is not
+ * incidental. A comment ends at the first ")", so the previous version's
+ * "(e.g. ncviewer.com, CAMotics)" closed the comment early and left the
+ * rest of the line running as code - in the header of every program this
+ * app emitted. normalizeGcodeComments repairs that now, but the banner not
+ * needing repair in the first place is the actual fix.
+ */
 export const HEADER_WARNING = [
   '(===================================================================)',
-  '(  AUTOCAM-GENERATED G-CODE - NOT VERIFIED ON REAL HARDWARE OR A   )',
-  '(  SIMULATOR. Run this through a G-code simulator (e.g. ncviewer.com,)',
-  '(  CAMotics) and do a supervised air-cut before running on material. )',
+  '(  AUTOCAM-GENERATED G-CODE)',
+  '(  Confirm work zero, stock thickness and clamp positions, then)',
+  '(  dry-run clear of the stock before cutting.)',
   '(===================================================================)'
 ];
 

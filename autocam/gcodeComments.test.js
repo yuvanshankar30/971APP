@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeGcodeComments } from './gcodeComments.js';
+import { normalizeGcodeComments, MAX_GCODE_LINE_LENGTH } from './gcodeComments.js';
 import { generateRoutingGcode } from './routing.js';
+import { HEADER_WARNING } from './turning.js';
 import { generateTurningGcode } from './turning.js';
 import { generateTubestockGcode } from './tubestock.js';
 
@@ -94,5 +95,108 @@ describe('generated programs have well-formed comments', () => {
     const gcode = generateRoutingGcode(SQUARE, { toolDiameter: 0.25, targetDepth: 0.2, controller: 'wincnc' }).gcode;
     expect(gcode).not.toMatch(/[()]/);
     expect(gcode).toMatch(/\[/);
+  });
+});
+
+describe('normalizeGcodeComments - cleaning an already-generated program', () => {
+  const nestedLines = (gcode) => gcode.split('\n').filter((line) => {
+    const start = line.search(/[([]/);
+    return start !== -1 && /[([]/.test(line.slice(start + 1));
+  });
+
+  it("fixes a stored linuxcnc program without changing its dialect", () => {
+    // Verbatim line 4 of every job generated before the comment fix. A
+    // controller reports "nested comment found" and stops on it.
+    const stored = '(  CAMotics) and do a supervised air-cut before running on material. )\nG01 X1.5 Y2 F20';
+    const out = normalizeGcodeComments(stored, { dialect: 'preserve' });
+    expect(nestedLines(out)).toEqual([]);
+    expect(out).toContain('(  CAMotics and do a supervised air-cut before running on material.)');
+    expect(out).toContain('G01 X1.5 Y2 F20');
+  });
+
+  it('fixes a stored wincnc program and leaves it bracketed', () => {
+    // Looking only for "(" meant a WinCNC program passed through untouched,
+    // which is exactly the one that needed it most.
+    const stored = '[  SIMULATOR. Run this through a simulator [e.g. ncviewer.com,]\nG01 X1 Y2 F20';
+    const out = normalizeGcodeComments(stored, { dialect: 'preserve' });
+    expect(nestedLines(out)).toEqual([]);
+    expect(out).toContain('[');
+    expect(out).not.toContain('(');
+  });
+
+  it('never touches a command line', () => {
+    const program = ['%', 'G20', 'G90', 'G01 X1.5 Y-2.25 Z-0.1 F20', 'G02 X3 Y0 I-1 J0', 'M05', 'M30'].join('\n');
+    expect(normalizeGcodeComments(program, { dialect: 'preserve' })).toBe(program);
+  });
+
+  it('leaves an already-clean comment exactly as it is', () => {
+    const clean = 'G01 X1 Y2 F20 (rapid to hole position)';
+    expect(normalizeGcodeComments(clean, { dialect: 'preserve' })).toBe(clean);
+  });
+});
+
+describe('normalizeGcodeComments line length', () => {
+  it('shortens a comment that would push the line past the interpreter limit', () => {
+    const line = `(GROUPED ROUTER PROGRAM: ${'part-name-'.repeat(30)})`;
+    expect(line.length).toBeGreaterThan(MAX_GCODE_LINE_LENGTH);
+    const out = normalizeGcodeComments(line);
+    expect(out.length).toBeLessThanOrEqual(MAX_GCODE_LINE_LENGTH);
+    expect(out.startsWith('(GROUPED ROUTER PROGRAM: part-name-')).toBe(true);
+    expect(out.endsWith(')')).toBe(true);
+  });
+
+  it('leaves the code before the comment untouched while shortening it', () => {
+    const out = normalizeGcodeComments(`G01 X1.5 Y2.5 F20 (${'reason '.repeat(60)})`);
+    expect(out.startsWith('G01 X1.5 Y2.5 F20 (')).toBe(true);
+    expect(out.length).toBeLessThanOrEqual(MAX_GCODE_LINE_LENGTH);
+  });
+
+  it('does not touch a comment that already fits', () => {
+    const line = 'G01 X1.5 Y2.5 F20 (feed move)';
+    expect(normalizeGcodeComments(line)).toBe(line);
+  });
+
+  it('shortens in the WinCNC dialect too', () => {
+    const out = normalizeGcodeComments(`(${'x'.repeat(400)})`, { dialect: 'wincnc' });
+    expect(out.length).toBeLessThanOrEqual(MAX_GCODE_LINE_LENGTH);
+    expect(out.startsWith('[')).toBe(true);
+    expect(out.endsWith(']')).toBe(true);
+  });
+});
+
+describe('the shared header banner', () => {
+  it('contains no parenthesis inside its own text, so it can never nest', () => {
+    for (const line of HEADER_WARNING) {
+      expect(line.startsWith('(')).toBe(true);
+      expect(line.endsWith(')')).toBe(true);
+      expect(line.slice(1, -1)).not.toMatch(/[()[\]]/);
+    }
+  });
+
+  it('needs no repair from the normalizer', () => {
+    const banner = HEADER_WARNING.join('\n');
+    expect(normalizeGcodeComments(banner)).toBe(banner);
+  });
+
+  it('fits the interpreter line limit', () => {
+    for (const line of HEADER_WARNING) {
+      expect(line.length).toBeLessThanOrEqual(MAX_GCODE_LINE_LENGTH);
+    }
+  });
+
+  // The output has been cut on the machine, so the banner must not keep
+  // telling the operator it is unproven - a warning nobody can act on is a
+  // warning people learn to scroll past.
+  it('no longer claims the output is unverified on real hardware', () => {
+    const banner = HEADER_WARNING.join('\n');
+    expect(banner).not.toMatch(/NOT VERIFIED/i);
+    expect(banner).not.toMatch(/real hardware/i);
+    expect(banner).not.toMatch(/ncviewer|CAMotics/i);
+  });
+
+  it('still asks for the per-setup check before cutting', () => {
+    const banner = HEADER_WARNING.join('\n').toLowerCase();
+    expect(banner).toContain('work zero');
+    expect(banner).toContain('dry-run');
   });
 });

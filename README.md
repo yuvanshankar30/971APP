@@ -96,6 +96,11 @@ browser confirmation or prompt popups.
   The signed-in home dashboard balances direct links to Manufacturing,
   Purchasing, and Scouting, while keeping each scout's personal assignment
   queue available without filling the page with duplicate scouting tools.
+  The **Strategy** view (`/strategy`) replaces Data Scouting in Competition
+  navigation as the decision board: it combines the
+  event's data observations, match reports, pit profiles, free-form notes,
+  named autonomous routes, and open ACE issues into comparable team rows and
+  focused team briefs without duplicating data entry.
 - **Vision Scouting**: a real Competition-folder nav tab, open to every
   approved user like the rest of Competition (no special permission needed),
   running post-match, multi-camera ML processing at `/scouting/vision` for
@@ -308,9 +313,10 @@ own docs are all together in one place instead of scattered across
   tube-wall hole geometry (`extractTubeFeaturesFromMeshes`) directly from a
   STEP file's triangulated mesh (via `occt-import-js`).
 - **`autocam/turning.js`** / **`autocam/routing.js`** / **`autocam/tubestock.js`**
-  - generate the actual G-code from that profile/geometry. Tube stock
-  targets a router with an added rotary 4th axis (indexed drilling, round
-  holes only) - see `autocam/docs/tubestock-feature.md` for the full design
+  - generate the actual G-code from that profile/geometry. Tube stock runs
+  on the router (round holes only), with the operator flipping the tube
+  between faces by hand - there is no rotary 4th axis, and a separate
+  program is emitted per face - see `autocam/docs/tubestock-feature.md` for the full design
   and real-fixture validation, including the one real bug it caught
   (`lateralOffset`) that a synthetic test alone never would have.
   Turning accepts only rotationally symmetric finished geometry; gears,
@@ -322,6 +328,27 @@ own docs are all together in one place instead of scattered across
   toolpath for the 2D preview and 3D simulator, including a cumulative-distance
   interpolation helper for playback (`autocam/components/ToolpathViewer.svelte`,
   `autocam/components/ToolpathSimulator.svelte`).
+- **`autocam/gcodeLint.js`** - checks a program against the conditions that
+  stop LinuxCNC loading it (nested/unclosed comments, characters that are
+  illegal outside a comment, words with no value) and repairs malformed
+  comments. `autocam/routingLinuxcnc.test.js` runs real generated router and
+  tube-stock output through it, so a generator change that emits something
+  LinuxCNC would reject fails the suite. Backs the **G-code Converter**
+  tab (`/manufacture/gcode-converter`), where a pasted program is checked
+  and exported as `.ngc`. The rules are calibrated against the cncjs
+  `gcode-parser` and `pygcode` interpreters, which agree with it
+  line-for-line on real generated programs; LinuxCNC's own `rs274` cannot
+  be built on macOS, so it is not part of the local loop.
+  Generated programs are held to what **LinuxCNC 2.7** supports, checked
+  against the 2.7.15, 2.8.4 and 2.9.0 interpreter sources: `LINELEN` is 255
+  in all three, the comment rules in `close_and_downcase` are unchanged
+  across them, and every G/M code we emit is present in 2.7.
+  `routingLinuxcnc.test.js` pins that set, so adding a newer code (`G64`,
+  `G43`, `G95`/`G96`) has to be a deliberate edit rather than something that
+  silently raises the minimum version a shop needs. Tube stock's `O1002`
+  program number is the one version-sensitive line: 2.7 ignores a bare
+  O-word, 2.8+ reads it as a Fanuc-style program number and keeps
+  executing, and only an INI setting `DISABLE_FANUC_STYLE_SUB` rejects it.
 - **`autocam/nesting.js`** / **`autocam/groupedGcode.js`** - deterministic,
   conservative router-job placement from real G-code bounds and one-program
   composition for grouped sheets; see `autocam/docs/router-job-grouping.md`.
@@ -389,10 +416,10 @@ own docs are all together in one place instead of scattered across
   (`wx-svelte-gantt`), Slack-driven prompts/notifications
   (`src/lib/server/planner_notifications.js`, `971bot.js`), driven by a
   Supabase `pg_cron` job every 15 minutes.
-- **`matchscout/`, `pitscout/`, `datascout/`, `notescout/`, `scouting-admin/`,
+- **`strategy/`, `matchscout/`, `pitscout/`, `datascout/`, `notescout/`, `scouting-admin/`,
   `teamview/`, `discover/`, `powerrankings/`** - FRC competition scouting:
   pit scouting forms, match data scouting, notes, cross-team data
-  discovery/analysis, and the local-scouting power rankings + persisted human
+  discovery/analysis, the cross-source strategy board, and the local-scouting power rankings + persisted human
   consensus + star-plot head-to-head comparison view (own top-level tab, not
   nested under `scouting/`).
 - **`scouting/vision/`, `scouting/vision/dashboard/`** - post-match

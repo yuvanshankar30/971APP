@@ -48,9 +48,9 @@
  *         real air-cut check the first time this runs on the actual
  *         machine, same as everything else this generator produces.
  *
- * NOT verified against real hardware or a simulator either way. Every
- * generated file carries a header warning to that effect - see
- * HEADER_WARNING in turning.js (same text, reused here for consistency).
+ * Every generated file opens with HEADER_WARNING from turning.js (same
+ * text, reused here for consistency), which asks the operator to confirm
+ * work zero, stock and clamps and to dry-run clear of the stock.
  *
  * KNOWN LIMITATION: tool-radius compensation is done with a hand-rolled
  * polygon offset (edge-normal offset + miter join at vertices), not a

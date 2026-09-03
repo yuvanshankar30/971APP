@@ -39,6 +39,13 @@
   } from '$autocam/camJobs.js';
   import { tubestockFaceFileName, tubestockFaceLabel } from '$autocam/tubestock.js';
   import stockData from '$lib/stock.json';
+  import { normalizeGcodeComments } from '$autocam/gcodeComments.js';
+
+  // Anything leaving the app to be read by a controller or a G-code viewer
+  // gets its comments normalised first. Jobs generated before that fix still
+  // hold nested comments, and a viewer stops on them ("nested comment found")
+  // exactly as a control would.
+  const cleanGcodeForExport = (gcode) => normalizeGcodeComments(gcode || '', { dialect: 'preserve' });
   import { buildStockMaterialIndex, materialIdForStockAssignment as resolveMaterialIdForStockAssignment } from '$autocam/stockMaterial.js';
   import { minimumPartClearance } from '$autocam/nesting.js';
   import { Cpu, Upload, Package, Settings, Download, AlertTriangle, X, Link as LinkIcon, Plus, Wrench, Layers, CheckCircle2, Loader2, Search, Filter, Box, Route, ExternalLink, Copy } from 'lucide-svelte';
@@ -743,7 +750,7 @@
     editingJob = job;
     ncviewerCopyOk = null;
     try {
-      await navigator.clipboard.writeText(job.gcode || '');
+      await navigator.clipboard.writeText(cleanGcodeForExport(job.gcode));
       ncviewerCopyOk = true;
     } catch {
       ncviewerCopyOk = false;
@@ -753,7 +760,7 @@
   async function recopyNcviewerGcode() {
     if (!editingJob?.gcode) return;
     try {
-      await navigator.clipboard.writeText(editingJob.gcode);
+      await navigator.clipboard.writeText(cleanGcodeForExport(editingJob.gcode));
       ncviewerCopyOk = true;
       toastActions.show('G-code copied');
     } catch {

@@ -252,8 +252,13 @@ export async function POST({ request, url }) {
       }
       await setProgress(supabase, jobId, 80, 'Generating routing G-code...');
       result = generateRoutingGcode(contours, routingParams);
-      // Recorded so the job row shows the depth that was actually used.
-      params.targetDepth = routingParams.targetDepth;
+      // Deliberately NOT written back into params. The depth actually used
+      // is already in stats.targetDepth, and copying it into params turns an
+      // auto-derived depth into an explicit one - so the next re-run sees a
+      // hand-entered number, skips the break-through allowance, and quietly
+      // cuts to exactly the material thickness. Found by re-running a real
+      // job: it came back with 0.0000" of break-through because a previous
+      // run had stamped its own derived 0.25 into params.
       params.stockThickness = routingParams.stockThickness;
     }
 

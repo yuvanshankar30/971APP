@@ -57,6 +57,7 @@
  */
 
 import { createClient } from '@supabase/supabase-js';
+import { normalizeGcodeComments } from './gcodeComments.js';
 import { env } from '$env/dynamic/private';
 import { gcodeFileNameFor } from './camJobs.js';
 import { PACIFIC_TIME_ZONE } from '$lib/timezone.js';
@@ -447,7 +448,10 @@ export async function deliverJobToDrive(job, machine) {
     const filenames = [];
     for (const output of outputs) {
       const filename = driveDeliveryFileName({ ...job, ...output }, machine);
-      await uploadFileToDriveFolder(accessToken, dateFolderId, filename, output.gcode, 'text/plain');
+      // Same normalisation as the download path - a file delivered to the
+      // machine's Drive folder is run directly, so it must not carry a
+      // nested comment that closes early and leaves live text behind it.
+      await uploadFileToDriveFolder(accessToken, dateFolderId, filename, normalizeGcodeComments(output.gcode, { dialect: 'preserve' }), 'text/plain');
       filenames.push(filename);
     }
     return { delivered: true, dateFolder: dateFolderName, filenames };

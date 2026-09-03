@@ -39,6 +39,23 @@ const DIALECT_DELIMITERS = {
 };
 
 /**
+ * The longest line LinuxCNC will read, in characters, not counting the
+ * newline.
+ *
+ * src/emc/linuxcnc.h sets LINELEN to 255, and the interpreter reads with
+ * fgets(line, LINELEN, fp) then fails with NCE_COMMAND_TOO_LONG when
+ * strlen(raw_line) == LINELEN - 1 (rs274ngc_pre.cc, interp_read.cc). The
+ * stored string includes the newline, so a line of 253 characters already
+ * measures 254 and is rejected. 252 is the last length that loads.
+ *
+ * This matters because comments are what make lines long: a group or part
+ * name goes into a header comment verbatim, and those names are unbounded.
+ * A 227-character group name produced a 253-character line - one over -
+ * which makes LinuxCNC refuse the whole program, not just that line.
+ */
+export const MAX_GCODE_LINE_LENGTH = 252;
+
+/**
  * @param {string} gcode the assembled program
  * @param {object} [options]
  * @param {'linuxcnc'|'wincnc'} [options.dialect='linuxcnc']
@@ -46,21 +63,44 @@ const DIALECT_DELIMITERS = {
  *   dialect's own delimiters
  */
 export function normalizeGcodeComments(gcode, { dialect = 'linuxcnc' } = {}) {
-  const [open, close] = DIALECT_DELIMITERS[dialect] || DIALECT_DELIMITERS.linuxcnc;
+  // 'preserve' re-wraps each comment in whichever delimiter already opened
+  // it, instead of converting the program to one dialect. That is what lets
+  // this clean an ALREADY-GENERATED file - a stored WinCNC program is full
+  // of "[...]" and must stay that way; only its nesting needs fixing.
+  const preserve = dialect === 'preserve';
+  const [openFor, closeFor] = preserve ? [null, null] : (DIALECT_DELIMITERS[dialect] || DIALECT_DELIMITERS.linuxcnc);
 
   return String(gcode ?? '')
     .split('\n')
     .map((line) => {
-      const start = line.indexOf('(');
+      // Either delimiter can open a comment, so both are searched. Looking
+      // only for "(" meant a WinCNC program - which uses "[" throughout -
+      // passed through completely untouched.
+      const paren = line.indexOf('(');
+      const bracket = line.indexOf('[');
+      const start = paren === -1 ? bracket : (bracket === -1 ? paren : Math.min(paren, bracket));
       if (start === -1) return line;
+
+      const opener = line[start];
+      const [open, close] = preserve
+        ? (opener === '[' ? DIALECT_DELIMITERS.wincnc : DIALECT_DELIMITERS.linuxcnc)
+        : [openFor, closeFor];
 
       const code = line.slice(0, start);
       let text = line.slice(start + 1);
-      if (text.endsWith(')')) text = text.slice(0, -1);
+      if (text.endsWith(')') || text.endsWith(']')) text = text.slice(0, -1);
 
       // Nothing inside a comment may look like a delimiter in either
       // dialect - that is exactly what let the comment close early.
       const safe = text.replace(/[()[\]]/g, '').trimEnd();
+
+      // A comment long enough to push the line past the interpreter's limit
+      // is shortened rather than left to make the whole program unloadable.
+      // Only the comment gives way; the code before it is never touched.
+      const room = MAX_GCODE_LINE_LENGTH - code.length - open.length - close.length;
+      if (safe.length > room) {
+        return room > 0 ? `${code}${open}${safe.slice(0, room).trimEnd()}${close}` : code.trimEnd();
+      }
       return `${code}${open}${safe}${close}`;
     })
     .join('\n');

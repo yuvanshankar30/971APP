@@ -6,6 +6,7 @@
  */
 
 import { supabase } from '$lib/supabase.js';
+import { normalizeGcodeComments } from './gcodeComments.js';
 
 export const ACTIVE_CAM_JOB_STATUSES = ['queued', 'claimed', 'processing'];
 export const TERMINAL_CAM_JOB_STATUSES = ['completed', 'failed', 'rejected'];
@@ -444,10 +445,23 @@ export function downloadGcodeBlob(job) {
   downloadGcodeText(job.gcode, job.gcode_file_name || `output.${CAM_GCODE_FORMAT}`);
 }
 
-/** Download a generated G-code artifact, including an individual tube face. */
+/** Download a generated G-code artifact, including an individual tube face.
+ *
+ * Comments are normalised on the way out, not just at generation. A comment
+ * that nests closes at the first inner delimiter, and everything after it on
+ * that line is then live code the operator never intended to send - which is
+ * how a comment ends up affecting the cut. Generation has produced clean
+ * comments since the fix, but every job generated BEFORE it still holds the
+ * old text (measured: 1-17 such lines per stored job), and those files are
+ * what people download and run. Normalising here means the fix reaches them
+ * without anyone having to notice which jobs are old and regenerate them.
+ *
+ * 'preserve' keeps each program in its own dialect - a stored WinCNC file
+ * stays bracketed - since only the nesting is wrong, not the syntax. Motion
+ * lines are untouched; this only ever rewrites the comment span. */
 export function downloadGcodeText(gcode, fileName) {
   if (!gcode) return;
-  const blob = new Blob([gcode], { type: 'text/plain' });
+  const blob = new Blob([normalizeGcodeComments(gcode, { dialect: 'preserve' })], { type: 'text/plain' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
