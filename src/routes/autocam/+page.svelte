@@ -711,12 +711,27 @@
     editingJob = job;
     showJobCadModal = true;
   }
+  // Which face program the simulator is showing. Null means the combined
+  // program - every face in one run, which is what the machine never
+  // actually does but is useful for seeing the whole part at once.
+  let simulatedFace = null;
+
+  $: simulatedFaceOptions = editingJob?.operation_type === 'tubestock'
+    ? (editingJob?.stats?.facePrograms || []).filter((face) => face?.gcode)
+    : [];
+  $: simulatedGcode = simulatedFace?.gcode || editingJob?.gcode;
+
   async function openToolpathPreview(job, previewParams = job.params) {
     editingJob = job;
     toolpathPreviewParams = previewParams;
-    // Tube stock moves in X/Y/Z plus a rotary A axis the 2D preview can't
-    // represent at all - it only ever has a 3D view, so go straight there.
+    // A tube stock program is a set of separate per-face setups rather than
+    // one continuous path - the operator turns the tube by hand between
+    // them - and the 2D preview has no way to show that, so go straight to
+    // 3D where each face can be simulated on its own.
     toolpathView = ['routing', 'turning', 'tubestock'].includes(job.operation_type) ? '3d' : '2d';
+    // Start on the combined program rather than whichever face was picked
+    // for whatever job was open last.
+    simulatedFace = null;
     showJobToolpathModal = true;
     if (toolpathView === '3d') await loadToolpathSimulator();
   }
@@ -738,6 +753,7 @@
   async function open3DToolpathPreview(job, previewParams = job.params) {
     editingJob = job;
     toolpathPreviewParams = previewParams;
+    simulatedFace = null;
     toolpathView = '3d';
     showJobToolpathModal = true;
     await loadToolpathSimulator();
@@ -1864,11 +1880,38 @@
             <button type="button" role="tab" aria-selected={toolpathView === '2d'} class:active={toolpathView === '2d'} on:click={() => (toolpathView = '2d')}>2D Preview</button>
           </div>
         {/if}
+        {#if simulatedFaceOptions.length > 1 && toolpathView === '3d'}
+          <div class="face-sim-picker" role="tablist" aria-label="Tube face to simulate">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={simulatedFace === null}
+              class:active={simulatedFace === null}
+              on:click={() => (simulatedFace = null)}
+            >All faces</button>
+            {#each simulatedFaceOptions as face}
+              <button
+                type="button"
+                role="tab"
+                aria-selected={simulatedFace === face}
+                class:active={simulatedFace === face}
+                on:click={() => (simulatedFace = face)}
+              >{tubeFaceLabel(face)}</button>
+            {/each}
+          </div>
+          <p class="face-sim-hint">
+            {#if simulatedFace}
+              {tubeFaceLabel(simulatedFace)} on its own - one setup, exactly what runs after the tube is turned to this face.
+            {:else}
+              Every face in one run. The machine never does this - the tube is turned by hand between faces - but it shows the whole part at once.
+            {/if}
+          </p>
+        {/if}
         {#if toolpathView === '3d' && (editingJob.operation_type === 'routing' || editingJob.operation_type === 'turning' || editingJob.operation_type === 'tubestock')}
           {#if ToolpathSimulator}
             <svelte:component
               this={ToolpathSimulator}
-              gcode={editingJob.gcode}
+              gcode={simulatedGcode}
               operationType={editingJob.operation_type}
               toolDiameter={Number((toolpathPreviewParams || editingJob.params)?.toolDiameter) || null}
               rapidRate={editingJob.cam_machines?.rapid_rate ?? null}
@@ -2123,6 +2166,34 @@
 {/if}
 
 <style>
+  .face-sim-picker {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-bottom: 0.5rem;
+  }
+  .face-sim-picker button {
+    padding: 0.35rem 0.7rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-1);
+    color: var(--text-muted);
+    font: inherit;
+    font-size: 0.82rem;
+    cursor: pointer;
+  }
+  .face-sim-picker button.active {
+    border-color: var(--accent-strong);
+    color: var(--text);
+    font-weight: 600;
+  }
+  .face-sim-hint {
+    margin: 0 0 0.75rem;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    line-height: 1.45;
+  }
+
   .face-files-modal { max-width: 46rem; }
   .face-files-subtitle { margin: 0.15rem 0 0; color: var(--text-muted); font-size: 0.85rem; }
   .face-files-note {
