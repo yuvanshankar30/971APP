@@ -140,6 +140,11 @@ describe('generateTubestockGcode', () => {
     expect(() => generateTubestockGcode(twoWallTube(), { holeDepth: 0.15, safeZ: 0 })).toThrow(/safeZ must be > 0/);
   });
 
+  it('rejects a non-positive feedRate before emitting any G-code - this is the straight drilling plunge feed, the highest-risk move this generator emits', () => {
+    expect(() => generateTubestockGcode(twoWallTube(), { holeDepth: 0.15, feedRate: 0 })).toThrow(/feedRate must be a positive number/);
+    expect(() => generateTubestockGcode(twoWallTube(), { holeDepth: 0.15, feedRate: -5 })).toThrow(/feedRate must be a positive number/);
+  });
+
   it('drills side-by-side holes on a wide face at their own Y (lateralOffset), not all at Y0 (real bug found against a real AndyMark 2"x1" tube fixture: a wide face can have two holes at the same length-position but different offsets across its width - a real hole pair, not a duplicate)', () => {
     const wideFaceTube = {
       tubeLength: 10,
