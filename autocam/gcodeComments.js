@@ -46,17 +46,32 @@ const DIALECT_DELIMITERS = {
  *   dialect's own delimiters
  */
 export function normalizeGcodeComments(gcode, { dialect = 'linuxcnc' } = {}) {
-  const [open, close] = DIALECT_DELIMITERS[dialect] || DIALECT_DELIMITERS.linuxcnc;
+  // 'preserve' re-wraps each comment in whichever delimiter already opened
+  // it, instead of converting the program to one dialect. That is what lets
+  // this clean an ALREADY-GENERATED file - a stored WinCNC program is full
+  // of "[...]" and must stay that way; only its nesting needs fixing.
+  const preserve = dialect === 'preserve';
+  const [openFor, closeFor] = preserve ? [null, null] : (DIALECT_DELIMITERS[dialect] || DIALECT_DELIMITERS.linuxcnc);
 
   return String(gcode ?? '')
     .split('\n')
     .map((line) => {
-      const start = line.indexOf('(');
+      // Either delimiter can open a comment, so both are searched. Looking
+      // only for "(" meant a WinCNC program - which uses "[" throughout -
+      // passed through completely untouched.
+      const paren = line.indexOf('(');
+      const bracket = line.indexOf('[');
+      const start = paren === -1 ? bracket : (bracket === -1 ? paren : Math.min(paren, bracket));
       if (start === -1) return line;
+
+      const opener = line[start];
+      const [open, close] = preserve
+        ? (opener === '[' ? DIALECT_DELIMITERS.wincnc : DIALECT_DELIMITERS.linuxcnc)
+        : [openFor, closeFor];
 
       const code = line.slice(0, start);
       let text = line.slice(start + 1);
-      if (text.endsWith(')')) text = text.slice(0, -1);
+      if (text.endsWith(')') || text.endsWith(']')) text = text.slice(0, -1);
 
       // Nothing inside a comment may look like a delimiter in either
       // dialect - that is exactly what let the comment close early.
