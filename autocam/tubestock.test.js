@@ -169,12 +169,9 @@ describe('generateTubestockGcode', () => {
       expect(result.gcode).not.toContain('[');
     });
 
-    it('wincnc: bracket comments, no stored work offset, G4 dwell-pause instead of M00, no M30', () => {
+    it('wincnc: bracket comments, still selects G55 (confirmed a real stored offset on this machine), G4 dwell-pause instead of M00, no M30', () => {
       const result = generateTubestockGcode(twoWallTube(), { ...baseParams, controller: 'wincnc' });
-      // Not a blanket substring check - the WinCNC path's own explanatory
-      // comment mentions "G54-style" prose, which would false-positive a
-      // plain .not.toContain('G54') check without actually emitting the code.
-      expect(result.gcode.split('\n').some((l) => /^G5[45]\b/.test(l))).toBe(false);
+      expect(result.gcode.split('\n').some((l) => /^G55\b/.test(l))).toBe(true);
       expect(result.gcode).not.toContain('M00');
       expect(result.gcode).toContain('G4 [TOOL CHANGE');
       expect(result.gcode).not.toContain('M30');

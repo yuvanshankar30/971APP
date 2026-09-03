@@ -475,10 +475,13 @@ function generateProgram(walls, params, { faceAngleDeg = null, faceLabel = null,
   lines.push('G90 (absolute)');
   lines.push('G94 (feed per minute)');
   if (isWinCNC) {
-    lines.push('(*** VERIFY MACHINE ZERO BEFORE RUNNING ***)');
-    lines.push('(Jog to the tube face/rotary-center origin and zero the controller (G92) BEFORE)');
-    lines.push('(running this file - WinCNC has no G54-style stored work offset this program)');
-    lines.push('(can select for you; it has to be set interactively, right before.)');
+    // G54-G59 ARE standard stored work offsets on this shop's real WinCNC
+    // machine (a ShopSabre) - confirmed against shopsabre.cps (see
+    // autocam/postprocessors/), which selects them by section work offset
+    // exactly like LinuxCNC does. Mirrors the LinuxCNC path just below:
+    // G55, not G54, for the same reason documented there - the tube
+    // fixture has its own dedicated offset, not the sheet-setup one.
+    lines.push('G55 (tube stock fixture work offset - the tube fixture lives here, not in G54)');
   } else {
     // G55, not G54. The tube stock fixture has its own work offset on this
     // machine: the router manual has the operator type g55 into the MDI

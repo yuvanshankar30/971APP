@@ -323,6 +323,11 @@ own docs are all together in one place instead of scattered across
   approximated as a round turning envelope.
   Router jobs use material-specific feed, plunge, and spindle presets, with
   conservative dry-routing defaults when stock has not been selected.
+  `routing.js`/`tubestock.js` support two controller dialects
+  (`params.controller`: `'linuxcnc'` default, `'wincnc'`) - see
+  `autocam/postprocessors/README.md` for the shop's real post-processor
+  configs and a real Fusion-cammed example file, used as ground truth for
+  what each dialect actually needs rather than a generic manual.
 - **`autocam/toolpathPreview.js`** - parses generated G-code back into a
   toolpath for the 2D preview and 3D simulator, including a cumulative-distance
   interpolation helper for playback (`autocam/components/ToolpathViewer.svelte`,
