@@ -35,7 +35,7 @@ function teamNumber(teamKey) {
 
 async function collectEventScouting(db, eventKey) {
   const eventMatch = `${eventKey}_%`;
-  const [eventsResult, matchResult, notesResult, problemsResult, pitResult] = await Promise.all([
+  const [eventsResult, matchResult, notesResult, problemsResult, pitResult, autoPathsResult] = await Promise.all([
     db.from('scout_data_events')
       .select('id,match_key,match_number,team_key,phase,event_type,event_value,role,created_at')
       .ilike('match_key', eventMatch)
@@ -55,7 +55,11 @@ async function collectEventScouting(db, eventKey) {
       .select('id,team_key,match_key,summary,detail,severity,resolved,created_at')
       .eq('event_key', eventKey)
       .order('created_at', { ascending: false }),
-    selectPitScoutEntries(db, (query) => query.eq('event_key', eventKey).order('team_key', { ascending: true }))
+    selectPitScoutEntries(db, (query) => query.eq('event_key', eventKey).order('team_key', { ascending: true })),
+    db.from('match_scout_auto_paths')
+      .select('id,event_key,team_key,name,alliance,path,created_at,updated_at')
+      .eq('event_key', eventKey)
+      .order('updated_at', { ascending: false })
   ]);
 
   const failures = [
@@ -63,7 +67,8 @@ async function collectEventScouting(db, eventKey) {
     matchResult.error,
     notesResult.error,
     problemsResult.error,
-    pitResult.error
+    pitResult.error,
+    autoPathsResult.error
   ].filter(Boolean);
   if (failures.length) throw new Error(failures[0].message);
 
@@ -72,7 +77,8 @@ async function collectEventScouting(db, eventKey) {
     match_entries: matchResult.data || [],
     pit_entries: pitResult.data || [],
     notes: notesResult.data || [],
-    pit_problems: problemsResult.data || []
+    pit_problems: problemsResult.data || [],
+    auto_paths: autoPathsResult.data || []
   };
 }
 
@@ -80,7 +86,7 @@ function summaryFor(data) {
   const teams = new Map();
   const add = (key, source) => {
     if (!key) return;
-    const entry = teams.get(key) || { team_key: key, data_events: 0, match_entries: 0, pit_entries: 0, notes: 0, open_problems: 0 };
+    const entry = teams.get(key) || { team_key: key, data_events: 0, match_entries: 0, pit_entries: 0, notes: 0, auto_paths: 0, open_problems: 0 };
     entry[source] += 1;
     teams.set(key, entry);
   };
@@ -88,12 +94,13 @@ function summaryFor(data) {
   for (const row of data.match_entries) add(row.team_key, 'match_entries');
   for (const row of data.pit_entries) add(row.team_key, 'pit_entries');
   for (const row of data.notes) add(row.team_key, 'notes');
+  for (const row of data.auto_paths) add(row.team_key, 'auto_paths');
   for (const row of data.pit_problems) {
     add(row.team_key, 'open_problems');
     if (row.resolved) teams.get(row.team_key).open_problems -= 1;
   }
   const team_rows = [...teams.values()]
-    .map((row) => ({ ...row, total: row.data_events + row.match_entries + row.pit_entries + row.notes }))
+    .map((row) => ({ ...row, total: row.data_events + row.match_entries + row.pit_entries + row.notes + row.auto_paths }))
     .sort((a, b) => b.total - a.total || Number(teamNumber(a.team_key)) - Number(teamNumber(b.team_key)));
   return {
     teams: team_rows,
@@ -103,6 +110,7 @@ function summaryFor(data) {
       match_entries: data.match_entries.length,
       pit_entries: data.pit_entries.length,
       notes: data.notes.length,
+      auto_paths: data.auto_paths.length,
       open_problems: data.pit_problems.filter((row) => !row.resolved).length
     }
   };
@@ -119,12 +127,13 @@ function documentText(eventKey, data, summary) {
     `Match scouting reports: ${summary.totals.match_entries}`,
     `Pit scouting profiles: ${summary.totals.pit_entries}`,
     `Scout notes: ${summary.totals.notes}`,
+    `Saved autonomous paths: ${summary.totals.auto_paths}`,
     `Open ACE Team problems: ${summary.totals.open_problems}`,
     '',
     'Team Coverage'
   ];
   for (const row of summary.teams) {
-    lines.push(`Team ${teamNumber(row.team_key)}: ${row.data_events} data observations, ${row.match_entries} match reports, ${row.pit_entries} pit profiles, ${row.notes} notes${row.open_problems ? `, ${row.open_problems} open ACE problem${row.open_problems === 1 ? '' : 's'}` : ''}`);
+    lines.push(`Team ${teamNumber(row.team_key)}: ${row.data_events} data observations, ${row.match_entries} match reports, ${row.pit_entries} pit profiles, ${row.notes} notes, ${row.auto_paths} saved auto paths${row.open_problems ? `, ${row.open_problems} open ACE problem${row.open_problems === 1 ? '' : 's'}` : ''}`);
   }
   if (data.pit_problems.length) {
     lines.push('', 'ACE Team Problems');

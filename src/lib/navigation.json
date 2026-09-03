@@ -18,6 +18,7 @@
     "cots-stocking": true,
     "autocam": true,
     "datascout": false,
-    "matchscout": true
+    "matchscout": true,
+    "strategy": true
   }
 }

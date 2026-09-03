@@ -54,6 +54,7 @@ export function defaultHeaderTabs(navConfig = navigation) {
     children: [
       { key: 'matchscout', label: 'Match Scouting' },
       { key: 'pitscout', label: 'Pit Scouting' },
+      { key: 'strategy', label: 'Strategy' },
       { key: 'powerrankings', label: 'Power Rankings' },
       { key: 'vision', label: 'Vision Scouting' },
       // /datascout is a real page that had no nav entry at all - it was
@@ -153,6 +154,22 @@ export function ensureDataScoutTab(tabs) {
     ...folder,
     children: [...(Array.isArray(folder.children) ? folder.children : []), entry]
   };
+  return next;
+}
+
+// Strategy is a read-only consolidation of the existing scouting sources,
+// so it belongs alongside the collection tools for users with saved headers.
+export function ensureStrategyTab(tabs) {
+  if (!Array.isArray(tabs)) return tabs;
+  if (containsTabKey(tabs, 'strategy')) return tabs;
+  const entry = { key: 'strategy', label: 'Strategy' };
+  const folderIndex = tabs.findIndex(
+    (item) => item?.type === 'folder' && item?.label === COMPETITION_FOLDER_LABEL
+  );
+  if (folderIndex === -1) return [...tabs, { type: 'tab', ...entry }];
+  const folder = tabs[folderIndex];
+  const next = [...tabs];
+  next[folderIndex] = { ...folder, children: [...(Array.isArray(folder.children) ? folder.children : []), entry] };
   return next;
 }
 

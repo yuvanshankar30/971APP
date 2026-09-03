@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { defaultHeaderTabs, ensurePowerRankingsTab, ensureScoutingAdminTab, ensureDataScoutTab } from './defaultTabs.js';
+import { defaultHeaderTabs, ensurePowerRankingsTab, ensureScoutingAdminTab, ensureDataScoutTab, ensureStrategyTab } from './defaultTabs.js';
 
 const enabled = { tabs: { powerrankings: true } };
 
@@ -33,11 +33,11 @@ describe('defaultHeaderTabs', () => {
   });
 
   it('orders the scouting surfaces the way the team asked for them', () => {
-    // Deliberate order, not incidental: match -> pit -> rankings -> vision
+    // Deliberate order, not incidental: match -> pit -> strategy -> rankings -> vision
     // -> data, with the Pick List and the admin surface after them.
     const keys = competitionChildren(defaultHeaderTabs()).map((child) => child.key);
     expect(keys).toEqual([
-      'matchscout', 'pitscout', 'powerrankings', 'vision', 'datascout', 'scouting', 'scouting-admin'
+      'matchscout', 'pitscout', 'strategy', 'powerrankings', 'vision', 'datascout', 'scouting', 'scouting-admin'
     ]);
   });
 
@@ -53,6 +53,19 @@ describe('defaultHeaderTabs', () => {
     expect(keys).toContain('pitscout');
     expect(keys).toContain('matchscout');
     expect(keys).toContain('vision');
+  });
+});
+
+describe('ensureStrategyTab', () => {
+  it('adds Strategy to an existing Competition folder without disturbing saved tabs', () => {
+    const result = ensureStrategyTab(savedNav());
+    expect(competitionChildren(result).at(-1)).toEqual({ key: 'strategy', label: 'Strategy' });
+  });
+
+  it('does not duplicate Strategy when a user already placed it', () => {
+    const tabs = savedNav();
+    tabs[1].children.push({ key: 'strategy', label: 'Game Plan' });
+    expect(ensureStrategyTab(tabs)).toBe(tabs);
   });
 });
 
