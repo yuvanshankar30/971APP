@@ -2316,6 +2316,7 @@
             role="button"
             tabindex="0"
             class:droppable={assignMode}
+            class:has-sub-row={(part.workflow === 'router' && getRouterProgressSummary(part)) || !!getSeasonBucket(part.created_at)}
           >
             {#if batchSelectMode}
               <td class="select-col">
@@ -3304,6 +3305,35 @@
        tag and stock beside them sat centred. */
     vertical-align: middle;
     position: relative;
+  }
+  /* The sub-line (season tag, router progress) is positioned absolute and
+     out of flow (see .metadata-col .metadata-sub below), so it contributes
+     nothing to this cell's own height - the row's height came entirely from
+     whatever the tallest OTHER cell happened to need (e.g. a two-line
+     wrapped part name or stock description). For a row just barely tall
+     enough for those, the sub-line's fixed offset below the primary line
+     landed right on top of the row's bottom border - "2026 OFFSEASON"
+     crowded against the divider instead of sitting inside the row.
+     Only rows that actually render a sub-line somewhere (.has-sub-row, set
+     on the <tr> from the same conditions as the {#if}s around .metadata-sub)
+     reserve the extra height, so a row with no season tag or router
+     progress stays as compact as before. Scoped to the row rather than the
+     individual cell (unlike a plain .has-sub on just the Created cell) so
+     Status/Due/Created all grow together and their primary lines stay
+     level with each other - the exact bug 1e3941db already fixed once for
+     the vertical offset, restated here for row height.
+     min-height does NOT work here - Chromium ignores min-height on a
+     table-cell for row-height purposes; height on a table-cell is treated
+     as a minimum instead (content/siblings can still make the row taller),
+     which is the behavior actually needed. */
+  .table tbody tr.has-sub-row td.metadata-col {
+    /* Derived from .metadata-sub's own top formula below, so the two stay
+       in sync: primary line centres at H/2, the sub-line starts
+       H/2 + control-height/2 + 0.3rem below that and is itself
+       control-height tall, so its bottom sits at
+       H/2 + 1.5*control-height + 0.3rem. Solving H >= that plus a matching
+       0.3rem margin gives H >= 3*control-height + 1.2rem. */
+    height: calc(var(--control-height) * 3 + 1.2rem);
   }
   /* One shared first line for Status / Due / Created / Requested By. A
      pill badge, a date input and plain text all have different intrinsic
