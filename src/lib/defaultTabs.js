@@ -30,10 +30,9 @@
 // the "Add tab" UI on the profile page - not part of this reorg, unmentioned
 // in the feedback that prompted it.
 //
-// Note: this only changes what a user with NO saved header_tabs sees.
-// Anyone who has already customized their nav keeps their own saved layout
-// - same limitation already hit once before (see the Docs tab's git
-// history) - there's no automatic re-migration of existing customizations.
+// The companion migration `20260903_reset_header_tabs_to_shared_default.sql`
+// clears stale saved layouts once so every existing account receives this
+// shared starting configuration. Subsequent per-user changes remain personal.
 import navigation from '$lib/navigation.json';
 
 export function defaultHeaderTabs(navConfig = navigation) {

@@ -30,6 +30,11 @@ describe('defaultHeaderTabs', () => {
     expect(order).toEqual(['Manufacturing', 'Competition', 'CAD', 'purchasing', 'docs']);
   });
 
+  it('matches the shared header order after the separately rendered Home tab', () => {
+    const order = ['home', ...defaultHeaderTabs().map((tab) => tab.key || tab.label), 'admin'];
+    expect(order).toEqual(['home', 'Manufacturing', 'Competition', 'CAD', 'purchasing', 'docs', 'admin']);
+  });
+
   it('includes Power Rankings and Scouting Admin in the Competition folder', () => {
     const children = competitionChildren(defaultHeaderTabs());
     expect(children).toContainEqual({ key: 'powerrankings', label: 'Power Rankings' });
