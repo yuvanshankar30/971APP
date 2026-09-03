@@ -79,7 +79,11 @@ browser confirmation or prompt popups.
   and an explicit named autonomous-path file library with “Save as new file”
   and “Load file” actions independent of report submission, a 29-by-29-inch
   robot footprint, centerline-conflict marking, and hub collision
-  prevention (trenches render but don't block - a robot drives under one),
+  prevention (trenches render but don't block - a robot drives under one).
+  When `SCOUTING_AUTO_PATHS_DRIVE_FOLDER_ID` is configured, each newly saved
+  autonomous path also uploads as a rendered field-map image to that shared
+  Google Drive folder using the existing service account; see
+  `implementations/scouting-auto-path-drive-export.md` for setup.
   data scouting, free-form notes,
   an Event Analysis view in Data Scouting that consolidates submitted data
   observations (including released vision observations), match reports, pit

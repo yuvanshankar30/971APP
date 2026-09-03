@@ -141,7 +141,7 @@
     });
     const payload = await response.json().catch(() => null);
     if (!response.ok || !payload?.success) throw new Error(payload?.error || `Request failed (${response.status})`);
-    return payload.data;
+    return payload;
   }
 
   async function loadEventTeams(key) {
@@ -216,7 +216,7 @@
     }
     savingPathFile = true;
     try {
-      const saved = await post({
+      const result = await post({
         action: 'save-auto-path',
         event_key: eventKey,
         team_key: robotNumber.trim(),
@@ -224,9 +224,16 @@
         alliance,
         path: autoPath
       });
+      const saved = result.data;
       await loadSavedAutoPaths();
       selectedSavedPathId = String(saved.id);
-      pathFileMessage = `Saved “${saved.name}” as a new path file.`;
+      if (result.drive_export?.ok) {
+        pathFileMessage = `Saved “${saved.name}” and exported its field image to Drive.`;
+      } else if (result.drive_export?.reason === 'drive-export-failed') {
+        pathFileMessage = `Saved “${saved.name}”, but its Drive image could not be exported.`;
+      } else {
+        pathFileMessage = `Saved “${saved.name}” as a new path file.`;
+      }
     } catch (exception) {
       pathFileMessage = exception.message;
     } finally {
