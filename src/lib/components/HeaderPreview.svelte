@@ -1,6 +1,6 @@
 <script>
   import { createEventDispatcher } from 'svelte';
-  import { Home, Hammer, Package, Move3d, Wrench, Receipt, Coins, User, Briefcase, ChevronDown, Camera, Cpu, Target, Type } from 'lucide-svelte';
+  import { Home, Hammer, Package, Move3d, Wrench, Receipt, Coins, User, Briefcase, ChevronDown, Camera, Cpu, Target, FileText } from 'lucide-svelte';
 
   export let header_tabs = [];
   const dispatch = createEventDispatcher();
@@ -19,7 +19,7 @@
     scoutingadmin: Briefcase,
     autocam: Cpu,
     strategy: Target,
-    'text-engraving': Type,
+    'gcode-converter': FileText,
     home: Home,
     profile: User,
     admin: Briefcase
