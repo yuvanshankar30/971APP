@@ -335,6 +335,16 @@ own docs are all together in one place instead of scattered across
   `gcode-parser` and `pygcode` interpreters, which agree with it
   line-for-line on real generated programs; LinuxCNC's own `rs274` cannot
   be built on macOS, so it is not part of the local loop.
+  Generated programs are held to what **LinuxCNC 2.7** supports, checked
+  against the 2.7.15, 2.8.4 and 2.9.0 interpreter sources: `LINELEN` is 255
+  in all three, the comment rules in `close_and_downcase` are unchanged
+  across them, and every G/M code we emit is present in 2.7.
+  `routingLinuxcnc.test.js` pins that set, so adding a newer code (`G64`,
+  `G43`, `G95`/`G96`) has to be a deliberate edit rather than something that
+  silently raises the minimum version a shop needs. Tube stock's `O1002`
+  program number is the one version-sensitive line: 2.7 ignores a bare
+  O-word, 2.8+ reads it as a Fanuc-style program number and keeps
+  executing, and only an INI setting `DISABLE_FANUC_STYLE_SUB` rejects it.
 - **`autocam/nesting.js`** / **`autocam/groupedGcode.js`** - deterministic,
   conservative router-job placement from real G-code bounds and one-program
   composition for grouped sheets; see `autocam/docs/router-job-grouping.md`.
