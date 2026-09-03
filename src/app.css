@@ -111,11 +111,11 @@
   --status-kitted-bg: color-mix(in srgb, var(--text-muted) 14%, transparent);
   --status-kitted-text: var(--text-muted);
 
-  /* Scouting chart categories (datascout, teamview) - qualitative/categorical
-     colors for match-role and climb-level charts, genuinely global (not
-     page-scoped) since both pages independently repeated the same raw hex
-     for the same categories - promoted here instead of duplicating a local
-     :root token block in each page. Names match the Bootstrap palette these
+  /* Scouting chart categories - qualitative/categorical colors for
+     match-role and climb-level charts. Promoted to global tokens when the
+     Data Scouting and Team View pages independently repeated the same raw
+     hex for the same categories; Team View is the remaining consumer now
+     that the Data Scouting page is gone. Names match the Bootstrap palette these
      originated from (each page's chart legend was originally built against
      it directly), not a new naming scheme. */
   --chart-primary: #0d6efd;
