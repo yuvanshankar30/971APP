@@ -5,7 +5,7 @@ import { syncScoutingDataToSheet } from '$lib/server/google_sheets_sync.js';
 
 // Cron-only trigger for the batch Google Sheets sync - same trust
 // boundary/token as the other first-party scheduled sweeps (planner
-// reminders, manufacturing stale-request reminders), not a new secret.
+// reminders), not a new secret.
 // The manual "Sync Now" path in scouting-admin goes through the regular
 // authenticated POST /api/scouting-admin action instead of this route.
 export async function GET({ url, request }) {
