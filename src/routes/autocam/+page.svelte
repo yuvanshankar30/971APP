@@ -158,7 +158,7 @@
     return { toolDiameter: 0.25, stepDown: 0.03, targetDepth: '', tabWidth: 0.25, tabHeight: 0.06, tabSpacing: 6, tabCount: '', feedRate: 25, plungeRate: 8, spindleSpeed: 14000, edgeMargin: 0.5, toolSequence: [] };
   }
   function emptyTubestockParams() {
-    return { holeDepth: '', safeZ: 0.25, feedRate: 8, spindleSpeed: 8000, finishedLength: '' };
+    return { holeDepth: '', safeZ: 0.25, feedRate: 8, spindleSpeed: 8000, finishedLength: '', fixturePinFace: '' };
   }
   function emptyParamsFor(operationType) {
     if (operationType === 'turning') return emptyTurningParams();
@@ -1415,7 +1415,7 @@
                     </button>
                     <button
                       class="btn btn-secondary btn-sm"
-                      title={hasFaceFiles(job) ? `${job.stats.facePrograms.length} face programs - one per face` : (job.gcode_file_name || 'output.ngc')}
+                      title={hasFaceFiles(job) ? `${job.stats.facePrograms.length} face programs` : 'Install NGC'}
                       on:click={() => installJobOutput(job)}
                     >
                       <Download size={14} /> Install NGC{hasFaceFiles(job) ? ` (${job.stats.facePrograms.length})` : ''}

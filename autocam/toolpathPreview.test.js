@@ -1169,7 +1169,7 @@ describe('the tube stock cutoff line reaches the 3D simulator', () => {
     ];
     const { gcode } = generateTubestockGcode(
       { tubeLength: 12, walls },
-      { holeDepth: 0.145, finishedLength: 10, toolDiameter: 0.1575 }
+      { holeDepth: 0.145, finishedLength: 10, fixturePinFace: 12, toolDiameter: 0.1575 }
     );
     const { moves } = parseToolpath3D(gcode);
     const cutoffMoves = moves.filter((m) => Math.abs(m.to.z + 0.145) < 1e-6 && m.kind === 'cut');
