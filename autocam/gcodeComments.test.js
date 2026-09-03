@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { normalizeGcodeComments, MAX_GCODE_LINE_LENGTH } from './gcodeComments.js';
 import { generateRoutingGcode } from './routing.js';
+import { HEADER_WARNING } from './turning.js';
 import { generateTurningGcode } from './turning.js';
 import { generateTubestockGcode } from './tubestock.js';
 
@@ -160,5 +161,42 @@ describe('normalizeGcodeComments line length', () => {
     expect(out.length).toBeLessThanOrEqual(MAX_GCODE_LINE_LENGTH);
     expect(out.startsWith('[')).toBe(true);
     expect(out.endsWith(']')).toBe(true);
+  });
+});
+
+describe('the shared header banner', () => {
+  it('contains no parenthesis inside its own text, so it can never nest', () => {
+    for (const line of HEADER_WARNING) {
+      expect(line.startsWith('(')).toBe(true);
+      expect(line.endsWith(')')).toBe(true);
+      expect(line.slice(1, -1)).not.toMatch(/[()[\]]/);
+    }
+  });
+
+  it('needs no repair from the normalizer', () => {
+    const banner = HEADER_WARNING.join('\n');
+    expect(normalizeGcodeComments(banner)).toBe(banner);
+  });
+
+  it('fits the interpreter line limit', () => {
+    for (const line of HEADER_WARNING) {
+      expect(line.length).toBeLessThanOrEqual(MAX_GCODE_LINE_LENGTH);
+    }
+  });
+
+  // The output has been cut on the machine, so the banner must not keep
+  // telling the operator it is unproven - a warning nobody can act on is a
+  // warning people learn to scroll past.
+  it('no longer claims the output is unverified on real hardware', () => {
+    const banner = HEADER_WARNING.join('\n');
+    expect(banner).not.toMatch(/NOT VERIFIED/i);
+    expect(banner).not.toMatch(/real hardware/i);
+    expect(banner).not.toMatch(/ncviewer|CAMotics/i);
+  });
+
+  it('still asks for the per-setup check before cutting', () => {
+    const banner = HEADER_WARNING.join('\n').toLowerCase();
+    expect(banner).toContain('work zero');
+    expect(banner).toContain('dry-run');
   });
 });
