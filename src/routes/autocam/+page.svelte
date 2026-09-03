@@ -1409,14 +1409,19 @@
             <td data-label="Created By">{job.requester?.full_name || job.requester?.email || '—'}</td>
             <td data-label="Output" on:click|stopPropagation class="output-cell">
               <div class="output-actions">
-                {#if job.step_file_name}
-                  <span class="output-action-group">
+                {#if job.step_file_name || (job.status === 'completed' && job.gcode)}
+                  <span class="output-action-group output-action-group--icons">
+                    {#if job.step_file_name}
                     <button class="btn btn-icon" data-tooltip="View CAD" aria-label="View CAD" on:click={() => openCadPreview(job)}><Box size={15} /></button>
                     <button class="btn btn-icon" data-tooltip="Install STEP" aria-label="Install STEP file" on:click={() => handleInstallCad(job)}><Download size={15} /></button>
+                    {/if}
+                    {#if job.status === 'completed' && job.gcode}
+                      <button class="btn btn-icon" data-tooltip="Open ncviewer.com" aria-label="Open ncviewer.com with the G-code copied to your clipboard" on:click={() => openNcviewer(job)}><ExternalLink size={15} /></button>
+                    {/if}
                   </span>
                 {/if}
                 {#if job.status === 'completed' && job.gcode}
-                  <span class="output-action-group">
+                  <span class="output-action-group output-action-group--commands">
                     <button class="btn btn-secondary btn-sm" on:click={() => openToolpathPreview(job)}>
                       <Route size={14} /> Show Toolpath
                     </button>
@@ -1427,7 +1432,6 @@
                     >
                       <Download size={14} /> Install NGC{hasFaceFiles(job) ? ` (${job.stats.facePrograms.length})` : ''}
                     </button>
-                    <button class="btn btn-icon" data-tooltip="Open ncviewer.com" aria-label="Open ncviewer.com with the G-code copied to your clipboard" on:click={() => openNcviewer(job)}><ExternalLink size={15} /></button>
                   </span>
                 {/if}
               </div>
@@ -2620,6 +2624,16 @@
     min-width: 0;
     gap: 0.4rem;
     row-gap: 0.3rem;
+  }
+  /* Keep the compact yellow icon actions together. They are the quickest
+     visual controls to scan, and nesting the ncviewer icon with the longer
+     text commands previously stranded it on a line by itself. */
+  .output-action-group--icons {
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+  }
+  .output-action-group--commands {
+    flex: 1 1 max-content;
   }
 
   /* Small hover tooltip for icon-only buttons - the native title attribute
