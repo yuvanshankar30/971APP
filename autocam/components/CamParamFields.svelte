@@ -118,7 +118,7 @@
       <div class="form-row">
         <div class="form-group">
           <label class="form-label" for="cf-tube-feed">Feed rate (in/min)</label>
-          <input id="cf-tube-feed" class="form-input" type="number" bind:value={params.feedRate} title="A straight drilling plunge - much slower than a routering contour pass" />
+          <input id="cf-tube-feed" class="form-input" type="number" min="0.1" step="0.1" bind:value={params.feedRate} title="A straight drilling plunge - much slower than a routering contour pass" />
         </div>
         <div class="form-group">
           <label class="form-label" for="cf-tube-spindle">Spindle speed (RPM)</label>
@@ -285,11 +285,11 @@
       <div class="form-row">
         <div class="form-group">
           <label class="form-label" for="cf-feed-rate">Feed rate (in/min)</label>
-          <input id="cf-feed-rate" class="form-input" type="number" bind:value={params.feedRate} />
+          <input id="cf-feed-rate" class="form-input" type="number" min="0.1" step="0.1" bind:value={params.feedRate} />
         </div>
         <div class="form-group">
           <label class="form-label" for="cf-plunge-rate">Plunge rate (in/min)</label>
-          <input id="cf-plunge-rate" class="form-input" type="number" bind:value={params.plungeRate} />
+          <input id="cf-plunge-rate" class="form-input" type="number" min="0.1" max={params.feedRate || undefined} step="0.1" bind:value={params.plungeRate} title="Should never exceed feed rate - a plunge has full axial engagement" />
         </div>
         <div class="form-group">
           <label class="form-label" for="cf-spindle-speed">Spindle speed (RPM)</label>

@@ -740,6 +740,11 @@ export function generateTubestockGcode(tubeFeatures, params = {}) {
   } = params;
   if (!holeDepth || holeDepth <= 0) throw new Error('holeDepth is required and must be > 0');
   if (safeZ <= 0) throw new Error('safeZ must be > 0');
+  // No validation existed here before - a typo'd 0, a negative sign, or a
+  // stray extra digit went straight into the F-word on a straight drilling
+  // plunge (full axial engagement, the highest-risk move this generator
+  // emits) with no error.
+  if (!Number.isFinite(feedRate) || feedRate <= 0) throw new Error('feedRate must be a positive number');
 
   // Real tube/extrusion stock check: the caller resolves stockCatalogId (a
   // pick from this team's real stock catalog, see CamParamFields.svelte's

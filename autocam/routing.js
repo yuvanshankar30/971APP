@@ -889,6 +889,25 @@ function clearPocket(lines, pocket, toolRadius, params, safeZ) {
 // operator has not identified the material yet.
 const TOOL_STEP_DEFAULTS = { stepDown: 0.03, tabWidth: 0.25, tabHeight: 0.06, tabSpacing: 6, feedRate: 25, plungeRate: 8, spindleSpeed: 14000 };
 
+// Neither params.feedRate nor params.plungeRate had any validation before
+// this - a typo'd 0, a negative sign, or a stray extra digit (8 -> 800)
+// went straight into an F-word on a full-engagement axial move with no
+// error. Checked against the shop's real Fusion-cammed output
+// (autocam/postprocessors/__fixtures__/1001-fusion-example.ngc, run
+// through 971_emc.cps): every ramped/helical-entry move there uses a
+// slower feed (13.333-60 in/min) than its own full-speed XY passes (80
+// in/min) - plunge/ramp is never commanded faster than the cutting feed
+// on a real program from this shop, which is the one constraint enforced
+// here rather than picking an arbitrary ceiling.
+function requireSafePlungeAndFeed(feedRate, plungeRate, label = '') {
+  const prefix = label ? `${label}: ` : '';
+  if (!Number.isFinite(feedRate) || feedRate <= 0) throw new Error(`${prefix}feedRate must be a positive number`);
+  if (!Number.isFinite(plungeRate) || plungeRate <= 0) throw new Error(`${prefix}plungeRate must be a positive number`);
+  if (plungeRate > feedRate) {
+    throw new Error(`${prefix}plungeRate (${plungeRate} in/min) cannot exceed feedRate (${feedRate} in/min) - a plunge/ramp move has full axial engagement and should never be commanded faster than the cutting pass`);
+  }
+}
+
 /**
  * For each contour, finds the first (in given order) tool whose radius
  * actually fits - i.e. offsetPolygon doesn't throw the "too small" error.
@@ -1138,6 +1157,7 @@ export function generateRoutingGcode(contours, params = {}) {
     // Single-tool path, unchanged from before multi-tool support existed.
     const { toolDiameter, stepDown = 0.03, tabWidth = 0.25, tabHeight = 0.06, tabSpacing = 6, tabCount = 0, feedRate = 25, plungeRate = 8, spindleSpeed = 14000 } = params;
     if (!toolDiameter || toolDiameter <= 0) throw new Error('toolDiameter is required and must be > 0');
+    requireSafePlungeAndFeed(feedRate, plungeRate);
     // No T-code / M06 here on purpose - these routers have no automatic
     // tool changer (see toolchange-gcode-plan.md: tool changes are
     // operator-driven, an M00 pause with a load prompt, not automatic -
@@ -1189,6 +1209,7 @@ export function generateRoutingGcode(contours, params = {}) {
     const toolSequence = params.toolSequence.map((t) => ({ ...TOOL_STEP_DEFAULTS, tabCount: params.tabCount ?? 0, ...t }));
     for (const t of toolSequence) {
       if (!t.toolDiameter || t.toolDiameter <= 0) throw new Error('Every tool in the sequence needs a toolDiameter > 0');
+      requireSafePlungeAndFeed(t.feedRate, t.plungeRate, t.label || `${fmt(t.toolDiameter, 3)}" tool`);
     }
     const assignments = assignContoursToTools(contours, toolSequence);
 

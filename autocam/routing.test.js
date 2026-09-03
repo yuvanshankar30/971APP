@@ -186,6 +186,26 @@ describe('generateRoutingGcode - single-tool (default)', () => {
     expect(() => generateRoutingGcode(contour, { targetDepth: 0.25 })).toThrow(/toolDiameter is required/);
   });
 
+  it('rejects an unsafe feedRate/plungeRate before emitting any G-code', () => {
+    expect(() => generateRoutingGcode(contour, { toolDiameter: 0.25, targetDepth: 0.25, feedRate: 0 }))
+      .toThrow(/feedRate must be a positive number/);
+    expect(() => generateRoutingGcode(contour, { toolDiameter: 0.25, targetDepth: 0.25, plungeRate: -1 }))
+      .toThrow(/plungeRate must be a positive number/);
+    expect(() => generateRoutingGcode(contour, { toolDiameter: 0.25, targetDepth: 0.25, feedRate: 10, plungeRate: 20 }))
+      .toThrow(/plungeRate \(20 in\/min\) cannot exceed feedRate \(10 in\/min\)/);
+    // A plunge/ramp move has full axial engagement (the whole tool cutting
+    // on every side at once) unlike a normal XY pass, which only engages
+    // the leading edge - commanding it faster than the cutting feed would
+    // be backwards from every real program checked against this app's
+    // actual post-processors (see autocam/postprocessors/README.md).
+  });
+
+  it('rejects an unsafe feedRate/plungeRate per tool in multi-tool mode too', () => {
+    const toolSequence = [{ toolDiameter: 0.25, feedRate: 10, plungeRate: 15 }];
+    expect(() => generateRoutingGcode(partWithHoles(), { targetDepth: 0.25, toolSequence }))
+      .toThrow(/plungeRate \(15 in\/min\) cannot exceed feedRate \(10 in\/min\)/);
+  });
+
   it('generates tab zones when tabSpacing > 0, none when tabSpacing = 0', () => {
     const withTabs = generateRoutingGcode(contour, { toolDiameter: 0.25, targetDepth: 0.25, tabSpacing: 6 });
     const noTabs = generateRoutingGcode(contour, { toolDiameter: 0.25, targetDepth: 0.25, tabSpacing: 0 });
