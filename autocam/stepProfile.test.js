@@ -681,9 +681,25 @@ describe('extractTubeFeaturesFromMeshes (synthetic rectangular tube: 6"x1.5"x1.0
     expect(result.walls.find((w) => w.angleDeg === 270).holes).toEqual([]);
   });
 
-  it('rejects a non-round feature (a slot) instead of treating it as a round hole of some averaged diameter', () => {
-    expect(() => extractTubeFeaturesFromMeshes([buildTestTube({ slotInsteadOfSecondHole: true })]))
-      .toThrow(/isn't round/);
+  it('skips a non-round feature (a slot) rather than treating it as a round hole of some averaged diameter, or throwing away every real hole on the same tube over it', () => {
+    // Real regression this replaced: refusing the whole tube here used to
+    // discard 388 real holes on a real part over 2 shapes (obround witness
+    // marks the CAD modeler drew, not holes) that this extractor has no way
+    // to represent.
+    const result = extractTubeFeaturesFromMeshes([buildTestTube({ slotInsteadOfSecondHole: true })]);
+    const wall0 = result.walls.find((w) => w.angleDeg === 0);
+    // The first (round) hole on this wall still comes through untouched.
+    expect(wall0.holes.length).toBe(1);
+    expect(wall0.holes[0].position).toBeCloseTo(1.5, 1);
+    // The slot is reported, not silently dropped, so a human can check it.
+    expect(wall0.skippedFeatures.length).toBe(1);
+    expect(wall0.skippedFeatures[0].position).toBeCloseTo(4.5, 1);
+    expect(wall0.skippedFeatures[0].maxDeviation).toBeGreaterThan(0.15);
+  });
+
+  it('reports an empty skippedFeatures on a wall with nothing skipped, not a missing field', () => {
+    const result = extractTubeFeaturesFromMeshes([buildTestTube()]);
+    for (const wall of result.walls) expect(wall.skippedFeatures).toEqual([]);
   });
 
   it('reports lateralOffset as a signed distance from the wall\'s own centerline, not just the position along the tube - real bug found against a real AndyMark 2"x1" tube fixture: this field used to be computed and silently dropped, which would have driven multiple holes on a wide face to the same G-code Y (see tubestock.test.js)', () => {

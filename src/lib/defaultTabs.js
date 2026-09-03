@@ -52,9 +52,11 @@ export function defaultHeaderTabs(navConfig = navigation) {
     type: 'folder',
     label: 'Competition',
     children: [
+      // Strategy leads: it is the board the team actually opens to decide
+      // something, and it reads from every other surface below it.
+      { key: 'strategy', label: 'Strategy' },
       { key: 'matchscout', label: 'Match Scouting' },
       { key: 'pitscout', label: 'Pit Scouting' },
-      { key: 'strategy', label: 'Strategy' },
       { key: 'powerrankings', label: 'Power Rankings' },
       { key: 'vision', label: 'Vision Scouting' },
       // Pick List is kept rather than dropped: /scouting is a working page
@@ -122,10 +124,17 @@ export function ensurePowerRankingsTab(tabs, navConfig = navigation) {
   return next;
 }
 
-// Strategy replaces the former Data Scouting navigation destination. The data
-// collection route remains available at /datascout, but it should not compete
-// with the cross-source board in the everyday Competition menu. For saved
-// headers, preserve the user's placement while swapping that old entry once.
+// Strategy replaces the former Data Scouting navigation destination.
+//
+// The Data Scouting page itself is gone. /datascout still exists as the
+// endpoint that reads and writes scout_data_events - Pick List, Power
+// Rankings, Team View and Quick Scout all depend on it - so only the UI was
+// removed, not the data.
+//
+// This still has to run: anyone who customized their header before the
+// change has a saved 'datascout' entry pointing at a page that no longer
+// renders, and swapping it here is what keeps their nav working without
+// rewriting saved rows.
 export function ensureStrategyTab(tabs) {
   if (!Array.isArray(tabs)) return tabs;
   if (containsTabKey(tabs, 'strategy')) return tabs;

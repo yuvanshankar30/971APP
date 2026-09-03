@@ -12,6 +12,7 @@
   // same pattern as the old /manufacture/autocam settings page - since a
   // selected Machine Profile already fills sensible values for all of it.
   import stockData from '$lib/stock.json';
+  import { holeDepthForWall, WALL_BREAKTHROUGH_ALLOWANCE } from '$autocam/tubestock.js';
 
   export let operation = 'routing'; // 'turning' | 'routing' | 'tubestock'
   export let params = {};
@@ -32,6 +33,17 @@
   const routerSheetOptions = (stockData.router || [])
     .filter((s) => !s.isTube && s.thickness > 0)
     .sort((a, b) => a.thickness - b.thickness || a.description.localeCompare(b.description));
+
+  // Hole depth is a property of the tube, not of the job - every hole in a
+  // given tube passes through the same wall - so it is derived from the
+  // selected stock instead of typed. Keeping params.holeDepth in sync here
+  // means the rest of the pipeline (and the generator's own required-value
+  // check) is unchanged.
+  $: selectedTube = tubeStockOptions.find((s) => s.id === params.stockCatalogId) || null;
+  $: if (operation === 'tubestock') {
+    const derived = selectedTube ? holeDepthForWall(selectedTube.wall_thickness) : null;
+    if ((params.holeDepth ?? '') !== (derived ?? '')) params.holeDepth = derived ?? '';
+  }
 </script>
 
 {#if operation === 'tubestock'}
@@ -40,17 +52,25 @@
       <div class="form-group">
         <label class="form-label" for="cf-stock-catalog">Stock (extrusion)</label>
         <select id="cf-stock-catalog" class="form-select" bind:value={params.stockCatalogId}>
-          <option value="">Not specified (skip stock-size check)</option>
+          <option value="">Select the tube being loaded</option>
           {#each tubeStockOptions as stock}
             <option value={stock.id}>{stock.description}</option>
           {/each}
         </select>
-        <p class="text-muted">The real tube that will be loaded on the machine - generation checks it against the STEP file's own measured cross-section and refuses to run if they don't match.</p>
+        <p class="text-muted">The real tube that will be loaded on the machine - generation checks it against the STEP file's own measured cross-section and refuses to run if they don't match. It also sets the hole depth.</p>
       </div>
       <div class="form-group">
-        <label class="form-label" for="cf-hole-depth">Hole depth (in)</label>
-        <input id="cf-hole-depth" class="form-input" type="number" step="0.01" bind:value={params.holeDepth} placeholder="Required" />
-        <p class="text-muted">How deep to plunge past the wall's outer surface - verify against the real tube gauge before running. Too shallow won't clear the wall.</p>
+        <span class="form-label">Hole depth</span>
+        {#if selectedTube}
+          <p class="derived-value">{params.holeDepth}&quot;</p>
+          <p class="text-muted">
+            {selectedTube.wall_thickness}&quot; wall plus {WALL_BREAKTHROUGH_ALLOWANCE}&quot; to break through it.
+            Every hole in this tube goes through the same wall, so there is one depth per stock and nothing to enter.
+          </p>
+        {:else}
+          <p class="derived-value derived-value-empty">&mdash;</p>
+          <p class="text-muted">Set by the tube stock above.</p>
+        {/if}
       </div>
     {/if}
     <div class="form-group">
@@ -58,6 +78,22 @@
       <input id="cf-safe-z" class="form-input" type="number" step="0.05" bind:value={params.safeZ} title="Retract clearance above the wall's outer surface" />
     </div>
   </div>
+
+  {#if mode === 'job'}
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label" for="cf-finished-length">Finished length (in) - optional</label>
+        <input id="cf-finished-length" class="form-input" type="number" step="0.1" bind:value={params.finishedLength} placeholder="Leave blank if this stock needs no cutoff" />
+        <p class="text-muted">
+          The stock loaded is whatever length that piece of extrusion happens to be, which is rarely the length
+          the part needs and isn't something the CAD model can tell you - so this is entered here, not derived.
+          Set it and the program cuts a bandsaw reference line on the wall opposite the zero face (Side 6) once
+          drilling is done: one pass through that wall only, not a full separation - band-saw the tube to length
+          along the line's straight edges afterward.
+        </p>
+      </div>
+    </div>
+  {/if}
 
   <details class="advanced-settings">
     <summary>Advanced settings</summary>
@@ -249,6 +285,19 @@
 {/if}
 
 <style>
+  /* Reads as a stated value rather than a disabled input, because there is
+     nothing here to enable - the tube decides it. */
+  .derived-value {
+    margin: 0 0 0.25rem;
+    padding: 0.4rem 0;
+    font-size: 1rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .derived-value-empty {
+    color: var(--text-muted);
+    font-weight: 400;
+  }
   .cam-param-section {
     margin-bottom: 0.75rem;
   }

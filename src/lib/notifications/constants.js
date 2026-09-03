@@ -11,7 +11,6 @@ export const NOTIFICATION_KEYS = {
   MANUFACTURING_REQUEST: 'manufacturing_request',
   MANUFACTURING_REQUEST_STARTED: 'manufacturing_request_started',
   MANUFACTURING_REQUEST_READY: 'manufacturing_request_ready',
-  MANUFACTURING_REQUEST_STALE: 'manufacturing_request_stale',
   ROUTER_STATUS_UPDATE: 'router_status_update',
   VISION_ALERT: 'vision_alert'
 };
@@ -29,7 +28,6 @@ export const DEFAULT_NOTIFICATION_SETTINGS = {
   [NOTIFICATION_KEYS.MANUFACTURING_REQUEST]: true,
   [NOTIFICATION_KEYS.MANUFACTURING_REQUEST_STARTED]: true,
   [NOTIFICATION_KEYS.MANUFACTURING_REQUEST_READY]: true,
-  [NOTIFICATION_KEYS.MANUFACTURING_REQUEST_STALE]: true,
   [NOTIFICATION_KEYS.ROUTER_STATUS_UPDATE]: true,
   [NOTIFICATION_KEYS.VISION_ALERT]: true
 };
@@ -84,11 +82,6 @@ export const NOTIFICATION_UI_OPTIONS = [
     key: NOTIFICATION_KEYS.MANUFACTURING_REQUEST,
     label: 'Manufacturing requests (lead)',
     description: 'DM when a new manufacturing request is created for a process you lead (e.g. 3D printing).'
-  },
-  {
-    key: NOTIFICATION_KEYS.MANUFACTURING_REQUEST_STALE,
-    label: 'Manufacturing request reminders (lead)',
-    description: 'Follow-up DM if a request you lead has sat untouched for a few days (up to 2 reminders).'
   },
   {
     key: NOTIFICATION_KEYS.MANUFACTURING_REQUEST_STARTED,

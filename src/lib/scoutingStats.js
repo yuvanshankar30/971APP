@@ -1,8 +1,10 @@
 // Summarizes a flat list of scout_data_events rows (as returned by
 // GET /datascout?team_key=...&event_key=...) for one team into simple,
 // robust aggregates. Deliberately not a full analytics engine - just what's
-// directly derivable from the real event vocabulary datascout/+page.svelte
-// actually writes (verified against that file, not guessed):
+// directly derivable from the real event vocabulary written to
+// scout_data_events (the vocabulary was verified against the Data Scouting
+// page that used to write it, not guessed - that page has since been
+// removed, but Quick Scout and the endpoint still write these same types):
 //   rank_driving  - 1-3, subjective driving quality (Bad/Good/Great)
 //   rank_accuracy - 1-5, subjective shooting accuracy
 //   rank_speed    - a numeric rate (balls/sec)
@@ -69,9 +71,9 @@ export function summarizeTeamEvents(events) {
 // Shuttle/Hub fuel counts: a tap ('shuttle_fuel'/'hub_fuel') increments by
 // one; a '..._fuel_override' event sets a new baseline and resets the tap
 // count, so a correction doesn't require deleting/replaying prior taps.
-// Single source of truth for this derivation - datascout/+page.svelte's
-// live counters and the Google Sheets export (deriveMatchTeamRow below)
-// both call this instead of each re-implementing the merge logic.
+// Single source of truth for this derivation - every consumer (the Google
+// Sheets export in deriveMatchTeamRow below, Pick List, Power Rankings)
+// calls this instead of each re-implementing the merge logic.
 export function fuelCountFromEvents(events, location) {
   const tapType = `${location}_fuel`;
   const overrideType = `${location}_fuel_override`;
@@ -81,8 +83,8 @@ export function fuelCountFromEvents(events, location) {
     if (e?.event_type === overrideType) {
       // A non-numeric/negative override is rejected, not coerced to 0 -
       // Math.max(0, NaN || 0) would silently evaluate to 0 and wipe out a
-      // real count on garbage input. The live datascout UI already
-      // validates before ever recording this event type, but this
+      // real count on garbage input. The scouting UI validates before
+      // ever recording this event type, but this
       // aggregation reads whatever's actually in the DB, so it can't just
       // assume that held - same defensive-parsing stance as parseNumeric
       // above.
