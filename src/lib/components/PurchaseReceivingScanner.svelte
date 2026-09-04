@@ -1,12 +1,11 @@
 <script>
-  import { createEventDispatcher, onDestroy, onMount } from 'svelte';
+  import { createEventDispatcher, onDestroy } from 'svelte';
   import { Camera, CheckCircle, LoaderCircle, PackageCheck, RefreshCw, ScanLine, Upload, X } from 'lucide-svelte';
   import { supabase } from '$lib/supabase.js';
   import { toastActions } from '$lib/toast.js';
 
   export let enabled = false;
   const dispatch = createEventDispatcher();
-  let isPhone = false;
   let open = false;
   let stream = null;
   let video;
@@ -18,13 +17,6 @@
   let selected = null;
   let error = '';
 
-  onMount(() => {
-    const query = window.matchMedia('(max-width: 767px) and (pointer: coarse)');
-    const refresh = () => { isPhone = query.matches; };
-    refresh();
-    query.addEventListener?.('change', refresh);
-    return () => query.removeEventListener?.('change', refresh);
-  });
   onDestroy(stopCamera);
 
   function stopCamera() {
@@ -35,13 +27,13 @@
   async function openScanner() {
     if (!enabled) return;
     open = true;
-    stage = isPhone ? 'camera' : 'phone-only';
+    stage = 'camera';
     photo = '';
     candidates = [];
     selected = null;
     extraction = null;
     error = '';
-    if (isPhone) await startCamera();
+    await startCamera();
   }
 
   async function startCamera() {
@@ -132,7 +124,7 @@
   }
 </script>
 
-<button class="btn btn-secondary receiving-scan-button" disabled={!enabled} on:click={openScanner} title={isPhone ? 'Scan a delivered item' : 'Scan is available on phones'}>
+<button class="btn btn-secondary receiving-scan-button" disabled={!enabled} on:click={openScanner} title="Scan a delivered item">
   <ScanLine size={16} /> Scan
 </button>
 
@@ -151,9 +143,6 @@
             <button class="btn btn-primary" disabled={!stream} on:click={capture}><Camera size={16} /> Capture</button>
             <button class="btn btn-secondary" on:click={chooseFile}><Upload size={16} /> Choose photo</button>
           </div>
-        {:else if stage === 'phone-only'}
-          <div class="scan-progress"><ScanLine size={28} /><strong>Use a phone to scan a delivery.</strong><span>The camera opens only on a phone. This computer view cannot take or upload a receiving photo.</span></div>
-          <div class="scanner-actions"><button class="btn btn-primary" on:click={close}>Done</button></div>
         {:else if stage === 'review'}
           <img class="capture-preview" src={photo} alt="Package ready to scan" />
           {#if error}<p class="scan-error">{error}</p>{/if}
