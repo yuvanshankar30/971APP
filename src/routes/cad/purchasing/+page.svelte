@@ -14,6 +14,7 @@
   import { formatPacificDate } from '$lib/timezone.js';
   import { goto } from '$app/navigation';
   import PartNotes from '$lib/components/PartNotes.svelte';
+  import PurchaseReceivingScanner from '$lib/components/PurchaseReceivingScanner.svelte';
   // Base URL for the Slack bot service (971bot). Defaults to the in-app endpoint.
   // Optionally expose via a public env var and import from $env/static/public
   const BOT_BASE_URL = import.meta.env?.VITE_BOT_BASE_URL || '/api/971bot';
@@ -945,6 +946,7 @@
         </div>
       </div>
       <div style="margin-top:1rem; display:flex; gap:0.5rem; flex-wrap: wrap;">
+          <PurchaseReceivingScanner enabled={hasPermission(user, 'PLACE_ORDERS_MISC')} on:complete={loadParts} />
           {#if hasPermission(user, 'PLACE_ORDERS_MISC')}
             <button class="btn btn-secondary" on:click={() => { showAddMiscModal = true; }}>Add Custom Item</button>
           {/if}
