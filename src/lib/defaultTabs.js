@@ -59,9 +59,6 @@ export function defaultHeaderTabs(navConfig = navigation) {
       { key: 'pitscout', label: 'Pit Scouting' },
       { key: 'powerrankings', label: 'Power Rankings' },
       { key: 'vision', label: 'Vision Scouting' },
-      // Pick List is kept rather than dropped: /scouting is a working page
-      // and this remains its sole default navigation entry.
-      { key: 'scouting', label: 'Pick List' },
       { key: 'scouting-admin', label: 'Scouting Admin' }
     ]
   });
