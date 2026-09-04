@@ -122,4 +122,38 @@ describe('planTabPositions - tabs go on flats, not curves', () => {
     const tabs = planTabPositions(rect, { count: 12, width: 0.25 });
     for (let i = 1; i < tabs.length; i += 1) expect(tabs[i] - tabs[i - 1]).toBeGreaterThanOrEqual(0.25);
   });
+
+  it('never puts more than one tab on the same straight side, even when the requested count exceeds the number of sides', () => {
+    // A rectangle only has 4 straight sides - asking for 12 tabs used to
+    // stack several onto whichever side happened to catch multiple of the
+    // 12 evenly-spaced ideal points (which is a function of that side's
+    // length, not whether it needs extra holding). One tab per run is the
+    // whole point of a hold-down tab layout - a real capped count, not the
+    // requested one.
+    const tabs = planTabPositions(rect, { count: 12, width: 0.25 });
+    const runs = findStraightRuns(rect);
+    expect(tabs.length).toBe(runs.length); // 4 sides, 4 tabs, no more
+    for (const centre of tabs) {
+      const hostingRuns = runs.filter((r) => centre >= r.start - 1e-6 && centre <= r.end + 1e-6);
+      expect(hostingRuns).toHaveLength(1);
+    }
+  });
+
+  it('never doubles up on one long side while a short side a few inches away gets none', () => {
+    // A long, thin plate - one side (20") is far longer than the other
+    // three (2" each). Perimeter/spacing would recommend several tabs, and
+    // even spacing around the perimeter puts most of the "ideal" points
+    // inside that one long side just because it is most of the perimeter -
+    // exactly the case the old algorithm got wrong.
+    const longPlate = [{ x: 0, y: 0 }, { x: 20, y: 0 }, { x: 20, y: 2 }, { x: 0, y: 2 }, { x: 0, y: 0 }];
+    const tabs = planTabPositions(longPlate, { count: 6, width: 0.25 });
+    const runs = findStraightRuns(longPlate);
+    // Still capped at one tab per run, even though most of the 6 evenly-
+    // spaced ideal points land inside the 20" run's own span.
+    expect(tabs.length).toBeLessThanOrEqual(runs.length);
+    for (const run of runs) {
+      const onThisRun = tabs.filter((centre) => centre >= run.start - 1e-6 && centre <= run.end + 1e-6);
+      expect(onThisRun.length).toBeLessThanOrEqual(1);
+    }
+  });
 });

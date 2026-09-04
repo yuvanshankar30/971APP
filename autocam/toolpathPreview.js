@@ -45,8 +45,10 @@ const num = (match) => (match ? parseFloat(match[1]) : null);
  *
  * @returns {{moves: Array, toolChangeIndices: number[], totalDistance: number}}
  *   Each move: {from:{x,y,z}, to:{x,y,z}, kind, toolIndex, length, startDistance}
- *   `kind` is 'rapid' | 'cut' | 'ramp', matching how Fusion colours moves by
- *   what they are rather than which tool made them.
+ *   `kind` is 'rapid' | 'cut' | 'ramp' | 'cutoff', matching how Fusion
+ *   colours moves by what they are rather than which tool made them -
+ *   'cutoff' is this app's own addition, for tubestock.js's one feature
+ *   that isn't a round drilled hole (see the "-- cutoff --" marker below).
  */
 export function parseToolpath3D(gcode, { chordTolerance = DEFAULT_CHORD_TOLERANCE } = {}) {
   const moves = [];
@@ -74,6 +76,7 @@ export function parseToolpath3D(gcode, { chordTolerance = DEFAULT_CHORD_TOLERANC
   let dwellSeconds = 0;
   let pauseCount = 0;
   let inTab = false;
+  let inCutoff = false;
 
   // An axis never commanded stays at 0, the way a machine sits at its origin
   // until told otherwise. This matters for turning, which uses X/Z and never
@@ -133,6 +136,13 @@ export function parseToolpath3D(gcode, { chordTolerance = DEFAULT_CHORD_TOLERANC
     // would have to guess the tab height to interpret.
     if (/[([]-- tab:/.test(rawLine)) inTab = true;
     else if (/[([]-- end tab --/.test(rawLine)) inTab = false;
+
+    // The tube cutoff is bracketed the same way (see tubestock.js) - the
+    // one feature on a tube that isn't a round drilled hole, so a consumer
+    // can colour it distinctly instead of it reading as an ordinary cut or
+    // an unexplained rapid crossing the part.
+    if (/[([]-- cutoff --/.test(rawLine)) inCutoff = true;
+    else if (/[([]-- end cutoff --/.test(rawLine)) inCutoff = false;
 
     // Strip comments in BOTH dialects. Stripping only "(...)" meant every
     // bracket comment in a WinCNC program stayed in the line and its text was
@@ -218,6 +228,12 @@ export function parseToolpath3D(gcode, { chordTolerance = DEFAULT_CHORD_TOLERANC
       continue;
     }
 
+    // Overrides classify()'s ordinary rapid/cut/ramp result while inside the
+    // cutoff's own marker comments (never a rapid there - see tubestock.js,
+    // which never emits G00 between them - so this only ever recolours a
+    // 'cut' or 'ramp' move, both real cutting motion).
+    const kindFor = (from, to) => (inCutoff ? 'cutoff' : classify(from, to, motion));
+
     if (motion === 2 || motion === 3) {
       const arcPoints = tessellateArc(at(cur), at(next), {
         clockwise: motion === 2,
@@ -225,11 +241,11 @@ export function parseToolpath3D(gcode, { chordTolerance = DEFAULT_CHORD_TOLERANC
       });
       let previous = at(cur);
       for (const point of arcPoints) {
-        push(previous, point, classify(previous, point, motion), next.a);
+        push(previous, point, kindFor(previous, point), next.a);
         previous = point;
       }
     } else {
-      push({ ...cur }, { ...next }, classify(cur, next, motion), next.a);
+      push({ ...cur }, { ...next }, kindFor(cur, next), next.a);
     }
 
     cur = next;
