@@ -728,10 +728,19 @@ function generateProgram(walls, params, { faceAngleDeg = null, faceLabel = null,
     const [start, ...rest] = cutoffFeature.path;
     lines.push(`G00 X${fmt(start.x)} Y${fmt(start.y)} (rapid to cutoff start)`);
     lines.push(`G00 Z${fmt(safeZ)} (rapid to clearance above wall)`);
+    // Bracketed the same way a tab zone is (see emitContourPass in
+    // routing.js) - a marker comment, not a live G-code word - so a
+    // consumer like the 3D simulator can tell these moves apart from an
+    // ordinary drilled hole or a rapid reposition, instead of everything
+    // reading as one same-colored line. This is the one feature on the
+    // tube that isn't a round drilled hole, so it earns its own visual
+    // identity rather than reusing "cut".
+    lines.push('(-- cutoff --)');
     lines.push(`G01 Z${fmt(-holeDepth)} F${fmt(feedRate, 2)} (plunge)`);
     for (const point of rest) {
       lines.push(`G01 X${fmt(point.x)} Y${fmt(point.y)} F${fmt(feedRate, 2)} (cutoff contour)`);
     }
+    lines.push('(-- end cutoff --)');
     lines.push(`G00 Z${fmt(safeZ)} (retract)`);
   }
 

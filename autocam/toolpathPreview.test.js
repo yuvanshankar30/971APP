@@ -1159,10 +1159,13 @@ describe('estimateMachiningTime - rapid rate comes from the machine', () => {
 });
 
 describe('the tube stock cutoff line reaches the 3D simulator', () => {
-  // ToolpathSimulator.svelte draws every parsed move as a colored line
-  // regardless of operation type - this only has to prove the cutoff's
-  // moves parse and land at the right depth, not the drawing itself.
-  it('parses as real cutting moves at the drilled depth, not rapids or a gap in the path', () => {
+  // ToolpathSimulator.svelte draws each move's own kind in its own colour
+  // (see MOVE_STYLES) - the cutoff gets its own 'cutoff' kind (bracketed by
+  // "-- cutoff --"/"-- end cutoff --" markers in tubestock.js) rather than
+  // reading as an ordinary drilled-hole plunge/cut or an unexplained rapid,
+  // which is what made a real cutoff line look like "a weird curve" in the
+  // simulator - same colour as everything else, nothing to tell it apart.
+  it('parses as its own kind at the drilled depth, not rapids, an ordinary cut/ramp, or a gap in the path', () => {
     const walls = [
       { angleDeg: 0, holes: [{ position: 2, lateralOffset: 0, diameter: 0.25 }] },
       { angleDeg: 180, holes: [{ position: 3, lateralOffset: 0, diameter: 0.25 }] }
@@ -1172,13 +1175,20 @@ describe('the tube stock cutoff line reaches the 3D simulator', () => {
       { holeDepth: 0.145, finishedLength: 10, fixturePinFace: 12, toolDiameter: 0.1575 }
     );
     const { moves } = parseToolpath3D(gcode);
-    const cutoffMoves = moves.filter((m) => Math.abs(m.to.z + 0.145) < 1e-6 && m.kind === 'cut');
+    const cutoffMoves = moves.filter((m) => m.kind === 'cutoff');
     // The offset obround has ~41 straight+arc segments (see tubeCutoff.js) -
     // this only needs "clearly more than one," proving it is a traced
     // contour and not a single point.
     expect(cutoffMoves.length).toBeGreaterThan(10);
-    // Every one of those moves belongs to the wall it was cut on.
-    for (const move of cutoffMoves) expect(move.angleDeg).toBe(180);
+    // Every one of those moves belongs to the wall it was cut on, and lands
+    // at the drilled depth like any other feature through this wall.
+    for (const move of cutoffMoves) {
+      expect(move.angleDeg).toBe(180);
+      expect(Math.abs(move.to.z + 0.145)).toBeLessThan(1e-6);
+    }
+    // No drilled hole or plunge anywhere in the program should ever be
+    // mistaken for the cutoff, or vice versa.
+    expect(moves.some((m) => m.kind === 'cutoff' && m.angleDeg !== 180)).toBe(false);
   });
 
   it('is absent from the parsed moves when no cutoff was requested', () => {
@@ -1186,5 +1196,6 @@ describe('the tube stock cutoff line reaches the 3D simulator', () => {
     const { gcode } = generateTubestockGcode({ tubeLength: 12, walls }, { holeDepth: 0.145 });
     const { moves } = parseToolpath3D(gcode);
     expect(moves.some((m) => Math.abs((m.to.z ?? 0) + 0.145) < 1e-6 && Math.abs(m.to.x - 10) < 1)).toBe(false);
+    expect(moves.some((m) => m.kind === 'cutoff')).toBe(false);
   });
 });

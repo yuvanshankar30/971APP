@@ -148,7 +148,12 @@ export function findStraightRuns(path) {
  * nearest point that sits wholly on a straight run with the tab's full
  * width clear of both ends. A tab with nowhere flat to go is dropped rather
  * than placed on a curve - the caller sees a shorter list and can say so,
- * which is honest about a part that genuinely has few flats.
+ * which is honest about a part that genuinely has few flats. Never more
+ * than one tab per straight run either, for the same reason: a long side
+ * catching several of the evenly-spaced ideal points (because it is long,
+ * not because it needs extra holding) used to stack multiple tabs there
+ * while a short side nearby got none - the actual returned count can come
+ * in under `count` on a part with fewer straight sides than requested.
  *
  * @param {Array<{x:number,y:number}>} path closed contour, path[0] === path[-1]
  * @param {Object} options
@@ -172,13 +177,23 @@ export function planTabPositions(path, { count, width } = {}) {
   // to be held somewhere.
   if (!usable.length) return [];
 
+  // One tab per straight run, never more - a long side getting 2+ of the
+  // evenly-spaced ideal points (because it is long, not because it needs
+  // extra holding) used to stack multiple tabs on that one side while a
+  // shorter side a few inches away got none. A run is retired the moment it
+  // gets a tab, the same "dropped rather than doubled-up" honesty the
+  // MIN_RUN_TO_TAB_WIDTH/onCurves fallbacks already use elsewhere here -
+  // fewer tabs than requested on a part with fewer straight sides than the
+  // count called for, not a second tab jammed onto the same edge.
+  const usedRuns = new Set();
   const placed = [];
   for (let i = 0; i < count; i += 1) {
     const ideal = (perimeter / count) * i;
-    // Nearest usable run, measured to the span where the tab would still
-    // fit entirely inside it.
+    // Nearest usable, not-yet-tabbed run, measured to the span where the
+    // tab would still fit entirely inside it.
     let best = null;
     for (const run of usable) {
+      if (usedRuns.has(run)) continue;
       const lo = run.start + width / 2;
       const hi = run.end - width / 2;
       const centre = Math.min(hi, Math.max(lo, ideal));
@@ -189,6 +204,7 @@ export function planTabPositions(path, { count, width } = {}) {
     // Never stack two tabs on top of each other when several ideal points
     // collapse onto the same short run.
     if (placed.some((p) => Math.abs(p - best.centre) < width)) continue;
+    usedRuns.add(best.run);
     placed.push(best.centre);
   }
   return placed.sort((a, b) => a - b);

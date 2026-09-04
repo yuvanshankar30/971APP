@@ -113,12 +113,19 @@
     rapid: { color: 0xd8b400, label: 'Rapid', opacity: 0.55 },
     cut: { color: 0x2f6fd0, label: 'Cutting', opacity: 1 },
     ramp: { color: 0xd0342c, label: 'Ramp / plunge', opacity: 1 },
-    // Not a Fusion move class - this app's own. Tabs are the only thing
-    // holding the part down on the final pass, so where they are is worth
-    // seeing at a glance rather than inferring from a shallower Z.
-    tab: { color: 0x2f9e44, label: 'Tab', opacity: 1 }
+    // Not a Fusion move class - this app's own. A tab move is still a cut
+    // (same colour as 'cut' - it holds the part, it doesn't change what
+    // kind of motion it is), kept as its own legend entry/toggle only so
+    // where the tabs are can still be shown or hidden at a glance.
+    tab: { color: 0x2f6fd0, label: 'Tab', opacity: 1 },
+    // Also this app's own - tubestock.js's cutoff line, the one feature on
+    // a tube that isn't a round drilled hole. Used to render as an ordinary
+    // 'cut'/'ramp', indistinguishable from a hole and easy to misread as a
+    // stray move - a distinct colour (not gold/blue/red, all already taken
+    // above) makes it identifiable at a glance instead.
+    cutoff: { color: 0xa855f7, label: 'Cutoff line', opacity: 1 }
   };
-  const KINDS = ['rapid', 'cut', 'ramp', 'tab'];
+  const KINDS = ['rapid', 'cut', 'ramp', 'tab', 'cutoff'];
 
   // Real material, not flat plastic: MeshPhongMaterial has no physical
   // basis for metalness/roughness, so no amount of light tuning makes it
@@ -139,7 +146,7 @@
     });
   }
 
-  let visible = { rapid: true, cut: true, ramp: true, tab: true };
+  let visible = { rapid: true, cut: true, ramp: true, tab: true, cutoff: true };
   let toolpathVisible = true;
   let toolVisible = true;
   let stockVisible = true;
