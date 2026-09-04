@@ -129,7 +129,7 @@ browser confirmation or prompt popups.
 - **Purchasing/Budget**: COTS (commercial off-the-shelf) part stock
   tracking, orders, delivery, kitting, budget controls, and a phone-only
   **Scan** receiving workflow. A purchaser photographs packaging or a
-  shipping label; a server-side OpenAI `gpt-4o-mini` vision request extracts
+  shipping label from a phone or computer; a server-side OpenAI `gpt-4o-mini` vision request extracts
   the visible text and ranks still-open purchasing rows. The photo is not
   stored, and an in-app confirmation is required before the selected item is
   atomically marked delivered with a receiving audit event.
