@@ -127,7 +127,13 @@ browser confirmation or prompt popups.
 - **Planning**: Gantt-based build/task scheduling (`wx-svelte-gantt`),
   Slack-driven prompts and reminders on a 15-minute cron sweep.
 - **Purchasing/Budget**: COTS (commercial off-the-shelf) part stock
-  tracking, purchasing tied to CAD parts (`cad/purchasing`), budget
+  tracking, orders, delivery, kitting, budget controls, and a phone-only
+  **Scan** receiving workflow. A purchaser photographs packaging or a
+  shipping label; a server-side OpenAI `gpt-4o-mini` vision request extracts
+  the visible text and ranks still-open purchasing rows. The photo is not
+  stored, and an in-app confirmation is required before the selected item is
+  atomically marked delivered with a receiving audit event.
+  Purchasing is tied to CAD parts (`cad/purchasing`) with budget
   tracking/allocation by project or build (admin Budgets tab).
 - **Tasks**: general task tracking separate from the planner's
   scheduling-focused tasks, including a dedicated P0 (priority-zero issue)
