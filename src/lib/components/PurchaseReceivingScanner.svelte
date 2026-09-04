@@ -33,15 +33,15 @@
   }
 
   async function openScanner() {
-    if (!isPhone || !enabled) return;
+    if (!enabled) return;
     open = true;
-    stage = 'camera';
+    stage = isPhone ? 'camera' : 'phone-only';
     photo = '';
     candidates = [];
     selected = null;
     extraction = null;
     error = '';
-    await startCamera();
+    if (isPhone) await startCamera();
   }
 
   async function startCamera() {
@@ -132,7 +132,7 @@
   }
 </script>
 
-<button class="btn btn-secondary receiving-scan-button" disabled={!isPhone || !enabled} on:click={openScanner} title={isPhone ? 'Scan a delivered item' : 'Receiving scan is available on a phone'}>
+<button class="btn btn-secondary receiving-scan-button" disabled={!enabled} on:click={openScanner} title={isPhone ? 'Scan a delivered item' : 'Scan is available on phones'}>
   <ScanLine size={16} /> Scan
 </button>
 
@@ -151,6 +151,9 @@
             <button class="btn btn-primary" disabled={!stream} on:click={capture}><Camera size={16} /> Capture</button>
             <button class="btn btn-secondary" on:click={chooseFile}><Upload size={16} /> Choose photo</button>
           </div>
+        {:else if stage === 'phone-only'}
+          <div class="scan-progress"><ScanLine size={28} /><strong>Use a phone to scan a delivery.</strong><span>The camera opens only on a phone. This computer view cannot take or upload a receiving photo.</span></div>
+          <div class="scanner-actions"><button class="btn btn-primary" on:click={close}>Done</button></div>
         {:else if stage === 'review'}
           <img class="capture-preview" src={photo} alt="Package ready to scan" />
           {#if error}<p class="scan-error">{error}</p>{/if}
