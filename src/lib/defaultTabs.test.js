@@ -48,11 +48,12 @@ describe('defaultHeaderTabs', () => {
   it('orders the scouting surfaces the way the team asked for them', () => {
     // Deliberate order, not incidental: strategy leads as the board the team
     // opens to decide something, then the collection surfaces that feed it
-    // (match -> pit -> rankings -> vision), with the Pick List and admin
-    // surface after them.
+    // (match -> pit -> rankings -> vision), with the admin surface last.
+    // Exactly these 6 - Pick List (the 'scouting' key) is no longer a
+    // default entry, per direct feedback naming this exact list.
     const keys = competitionChildren(defaultHeaderTabs()).map((child) => child.key);
     expect(keys).toEqual([
-      'strategy', 'matchscout', 'pitscout', 'powerrankings', 'vision', 'scouting', 'scouting-admin'
+      'strategy', 'matchscout', 'pitscout', 'powerrankings', 'vision', 'scouting-admin'
     ]);
   });
 
