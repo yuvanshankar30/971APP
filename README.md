@@ -408,10 +408,9 @@ own docs are all together in one place instead of scattered across
   visibly rather than falling back to Fusion's raw default. No Teams/API-key-per-team
   layer was ported - single shared-secret bearer token for the Runner,
   injected as `FUSION_RUNNER_TOKEN` by Cloud Build; its local `API_KEY` must
-  be obtained from the project administrator. Until the runtime identity has
-  scoped access to a dedicated Fusion secret, Cloud Build maps the authorized
-  Vision token to both runner variables (issue #309); Vision Runner itself
-  uses `VISION_RUNNER_TOKEN`.
+  be obtained from the project administrator. Vision Runner uses its separate
+  `VISION_RUNNER_TOKEN`; both runtime values are injected from their own
+  Secret Manager secrets, never shared or built into the image.
   The Fusion UI includes a Stock Categories tab for CAM managers to define
   the material and true-thickness combinations required before Parts and
   Plates can be nested. Parts can be grouped by stock category with remaining

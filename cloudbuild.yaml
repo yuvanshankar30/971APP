@@ -154,12 +154,8 @@ steps:
       # "Required secure fix" section names a DIFFERENT, wrong project
       # number, 819718873862, corrected in a comment on that issue) already
       # holds roles/secretmanager.secretAccessor on it. The temporary
-      # "map FUSION_RUNNER_TOKEN to the VISION_RUNNER_TOKEN secret" workaround
-      # this line used to carry is gone: it is no longer needed for Fusion,
-      # and it was reading a secret that does not exist (`gcloud secrets
-      # describe VISION_RUNNER_TOKEN` returns NOT_FOUND on this project),
-      # which would have failed this exact deploy step outright regardless
-      # of anything else. What FUSION_RUNNER_TOKEN is for:
+      # Fusion and Vision each use their own Secret Manager credential; do
+      # not map one runner's token to the other. What FUSION_RUNNER_TOKEN is for:
       # src/routes/api/vision-runner/+server.js's authorized()/checkToken()
       # is fail-CLOSED - Boolean(expected && supplied && ...) is always
       # false while it's unset, so that endpoint (and the Fusion runner
@@ -167,14 +163,10 @@ steps:
       # from a legitimate runner. The Fusion add-in's own .env API_KEY must
       # match this same secret's value.
       #
-      # Vision Runner's own credential is a SEPARATE, still-open gap this
-      # change does not touch: no VISION_RUNNER_TOKEN (or equivalent) secret
-      # exists in this project at all right now, under any name, so
-      # vision/runner/vision_runner.py has nothing real to authenticate
-      # with until a GCP admin creates one and grants the same role to the
-      # same service account, the same way FUSION_RUNNER_TOKEN is set up
-      # here - see the comment left on issue #309.
-      - '--set-secrets=SUPABASE_SERVICE_KEY=SUPABASE_SERVICE_KEY:latest,SUPABASE_ANON_KEY=SUPABASE_ANON_KEY:latest,SLACK_BOT_TOKEN=SLACK_BOT_TOKEN:latest,SLACK_SIGNING_SECRET=SLACK_SIGNING_SECRET:latest,TBA_API_KEY=TBA_API_KEY:latest,CRON_NOTIFICATION_TOKEN=CRON_NOTIFICATION_TOKEN:latest,FUSION_RUNNER_TOKEN=FUSION_RUNNER_TOKEN:latest'
+      # Vision Runner has its own dedicated credential. The DGX runner must
+      # receive the same value through its ignored vision/runner/.env; do not
+      # reuse the Fusion token or bake either value into an image.
+      - '--set-secrets=SUPABASE_SERVICE_KEY=SUPABASE_SERVICE_KEY:latest,SUPABASE_ANON_KEY=SUPABASE_ANON_KEY:latest,SLACK_BOT_TOKEN=SLACK_BOT_TOKEN:latest,SLACK_SIGNING_SECRET=SLACK_SIGNING_SECRET:latest,TBA_API_KEY=TBA_API_KEY:latest,CRON_NOTIFICATION_TOKEN=CRON_NOTIFICATION_TOKEN:latest,FUSION_RUNNER_TOKEN=FUSION_RUNNER_TOKEN:latest,VISION_RUNNER_TOKEN=VISION_RUNNER_TOKEN:latest'
       # ORIGIN is adapter-node's own documented fix for a real gap: "HTTP
       # doesn't give SvelteKit a reliable way to know the URL that is
       # currently being requested" behind a reverse proxy that terminates
