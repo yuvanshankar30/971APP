@@ -37,17 +37,23 @@ def SetupGenerator(
     # Z axis/plane + Y axis mode (not the two-in-plane-axes mode) - X is
     # derived automatically via the right-hand rule from Z and Y, rather
     # than picked directly, so its direction can only be controlled via
-    # flipZ/flipY (there's no separate flipX in this mode). This exact
-    # combination - no flips at all, box point 'bottom 1' - was verified
-    # live against the real slapdih document via the Fusion MCP bridge by
-    # directly checking the numbers (not just eyeballing a screenshot):
-    # +Z points up, and BOTH +X and +Y point back into the stock from the
-    # origin's corner, not away from it. (Two earlier attempts flipped Z or
-    # Y to fix +X pointing into the stock, but each broke a different
-    # requirement - Z pointing down, then Y pointing away from the stock -
-    # because this axis pairing derives X from Z and Y, so flipping either
-    # one to fix X's direction always flips something else too. Turns out
-    # the un-flipped baseline already satisfies all three at once.)
+    # flipZ/flipY (there's no separate flipX in this mode).
+    #
+    # Priorities, in order (confirmed directly with the team): origin at
+    # the bottom-left corner, and both +X and +Y pointing back into the
+    # stock from there - +Z's direction (up vs down) does not matter.
+    # Box-point corner labels ('bottom 1', 'bottom 2', ...) do NOT map
+    # consistently to a fixed physical corner across flipZ/flipY choices or
+    # even across documents - Fusion silently relabels which string means
+    # which corner depending on the current flip state and apparently the
+    # document's own history, so a label that was verified correct on one
+    # document was measured wrong on the next. Don't trust the label - if
+    # this is touched again, verify origin position and axis directions
+    # numerically against a live document (e.g. via the Fusion MCP bridge)
+    # rather than reasoning about what the label should mean. flipZ=True,
+    # flipY=False, box point
+    # 'bottom 1' was the combination that measured correctly - bottom-left
+    # corner, both axes into the material - on the real slapdih document.
     setup.parameters.itemByName("wcs_orientation_mode").expression = "'axesZY'"
     setup.parameters.itemByName("wcs_orientation_axisZ").value.value = [
         comp.zConstructionAxis
@@ -55,7 +61,7 @@ def SetupGenerator(
     setup.parameters.itemByName("wcs_orientation_axisY").value.value = [
         comp.xConstructionAxis
     ]
-    setup.parameters.itemByName("wcs_orientation_flipZ").value.value = False
+    setup.parameters.itemByName("wcs_orientation_flipZ").value.value = True
     setup.parameters.itemByName("wcs_orientation_flipY").value.value = False
     setup.parameters.itemByName("wcs_origin_boxPoint").expression = "'bottom 1'"
     baseDir = os.path.dirname(os.path.realpath(__file__))
