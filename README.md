@@ -424,7 +424,10 @@ own docs are all together in one place instead of scattered across
   every postprocessor output as a separate, byte-exact downloadable file with its
   size and SHA-256 checksum; queued and terminal jobs can be deleted from the queue.
   Rollout requires
-  `migrations/20260906_fusion_grouping_integrity.sql` and the updated Runner. See
+  `migrations/20260906_fusion_grouping_integrity.sql` and the updated Runner.
+  Every post-claim Runner call is bound to the `RUNNER_ID` that claimed the job,
+  so another installation cannot advance it. See
+  `autocam/docs/scouting-autocam-audit.md` for the consolidated audit and
   `autocam/docs/fusion-grouping-review.md` for the draft scope and review findings.
   It uses Supabase Auth + `canManageCamProfiles` for
   humans, same as the rest of this

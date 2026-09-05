@@ -4,7 +4,7 @@ from typing import Optional
 import adsk.core
 import sys
 
-from ..config import BASE_URL, OVERRIDE_PATH
+from ..config import BASE_URL, OVERRIDE_PATH, RUNNER_ID
 sys.path.append(OVERRIDE_PATH)
 import requests
 
@@ -36,7 +36,7 @@ def send_job_error(session: requests.Session, job_id: str, error_message: str) -
         session.post(
             f"{BASE_URL}/api/fusion-runner",
             params={"action": "fail"},
-            json={"jobId": job_id, "error": message[:2000]},
+            json={"jobId": job_id, "runnerId": RUNNER_ID, "error": message[:2000]},
             timeout=30,
         )
     except Exception as exc:

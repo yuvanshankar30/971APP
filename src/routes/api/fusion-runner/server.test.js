@@ -23,9 +23,18 @@ describe('Fusion Runner grouping lifecycle',()=>{
  });
  it('does not let a late failure overwrite terminal or non-Fusion jobs',async()=>{
   mocks.from.mockReturnValue(chain({data:[]}));
-  expect((await call('fail',{jobId:'job',error:'late'})).status).toBe(409);
+  expect((await call('fail',{jobId:'job',runnerId:'runner',error:'late'})).status).toBe(409);
   expect(queries[0].eq).toHaveBeenCalledWith('operation_type','milling');
   expect(queries[0].in).toHaveBeenCalledWith('status',['claimed','processing']);
+ });
+ it('requires the runner that claimed a job to advance it',async()=>{
+  mocks.from.mockReturnValue(chain({data:[]}));
+  expect((await call('processing',{jobId:'job',runnerId:'other-runner'})).status).toBe(409);
+  expect(queries[0].eq).toHaveBeenCalledWith('claimed_by','other-runner');
+ });
+ it('requires a runner identifier for every post-claim transition',async()=>{
+  expect((await call('processing',{jobId:'job'})).status).toBe(400);
+  expect(mocks.from).not.toHaveBeenCalled();
  });
  it('rejects a malformed machine ID rather than claiming another machine’s jobs',async()=>{
   expect((await call('claim',{runnerId:'runner',machineId:'invalid'})).status).toBe(400);
@@ -36,7 +45,7 @@ describe('Fusion Runner grouping lifecycle',()=>{
   mocks.from
    .mockReturnValueOnce(chain({data:{id:'job',params:{fusionJobKind:'plate:cam'}}}))
    .mockReturnValueOnce(chain({data:[{id:'job'}]}));
-  const result=await call('complete',{jobId:'job',ncFiles:[{name:'plate.nc',contentBase64}]});
+  const result=await call('complete',{jobId:'job',runnerId:'runner',ncFiles:[{name:'plate.nc',contentBase64}]});
   expect(result.status).toBe(200);
   expect(queries[1].update).toHaveBeenCalledWith(expect.objectContaining({
    gcode:null,
@@ -46,7 +55,7 @@ describe('Fusion Runner grouping lifecycle',()=>{
  });
  it('rejects malformed Fusion output before completing the job',async()=>{
   mocks.from.mockReturnValueOnce(chain({data:{id:'job',params:{fusionJobKind:'plate:cam'}}}));
-  const result=await call('complete',{jobId:'job',ncFiles:[{name:'../plate.nc',contentBase64:'eA=='}]});
+  const result=await call('complete',{jobId:'job',runnerId:'runner',ncFiles:[{name:'../plate.nc',contentBase64:'eA=='}]});
   expect(result.status).toBe(500);
   expect((await result.json()).error).toMatch(/filenames/);
   expect(mocks.from).toHaveBeenCalledTimes(1);

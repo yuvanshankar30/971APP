@@ -216,6 +216,7 @@ def start(data, session):
                 params={"action": "complete"},
                 json={
                     "jobId": job_id,
+                    "runnerId": RUNNER_ID,
                     "gcode": "",
                     "gcodeFileName": f"{plate_id}-arrangement.txt",
                     "stats": {"arranged": True},
@@ -242,6 +243,7 @@ def start(data, session):
                 params={"action": "complete"},
                 json={
                     "jobId": job_id,
+                    "runnerId": RUNNER_ID,
                     "gcode": "",
                     "gcodeFileName": f"{plate_id}-arrangement.txt",
                     "stats": {

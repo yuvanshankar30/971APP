@@ -74,7 +74,7 @@ def _process_job(job: dict, session: requests.Session) -> None:
     response = session.post(
         f"{BASE_URL}/api/fusion-runner",
         params={"action": "processing"},
-        json={"jobId": job.get("id")},
+        json={"jobId": job.get("id"), "runnerId": RUNNER_ID},
         timeout=30,
     )
     response.raise_for_status()

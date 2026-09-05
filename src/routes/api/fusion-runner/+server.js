@@ -118,7 +118,9 @@ export async function POST({ request, url }) {
     }
 
     const jobId = body?.jobId;
+    const runnerId = String(body?.runnerId || '').trim();
     if (!jobId) return json({ error: 'jobId is required' }, { status: 400 });
+    if (!runnerId) return json({ error: 'runnerId is required' }, { status: 400 });
 
     if (action === 'processing') {
       const { data, error } = await supabase
@@ -126,6 +128,7 @@ export async function POST({ request, url }) {
         .update({ status: 'processing', progress: body?.progress ?? 10, progress_message: body?.progressMessage || 'Fusion Runner processing...' })
         .eq('id', jobId)
         .eq('operation_type', 'milling')
+        .eq('claimed_by', runnerId)
         .eq('status', 'claimed') // CAS: only the runner that actually claimed it can move it to processing
         .select('id');
       if (error) throw new Error(error.message);
@@ -135,7 +138,7 @@ export async function POST({ request, url }) {
 
     if (action === 'complete') {
       const { data: currentJob, error: currentError } = await supabase
-        .from('cam_jobs').select('id, params').eq('id', jobId).eq('operation_type', 'milling').eq('status', 'processing').single();
+        .from('cam_jobs').select('id, params').eq('id', jobId).eq('operation_type', 'milling').eq('claimed_by', runnerId).eq('status', 'processing').single();
       if (currentError || !currentJob) return json({ error: 'Job was not in the processing state - not completed' }, { status: 409 });
       const kind = currentJob.params?.fusionJobKind;
       const ncFiles = kind === 'plate:arrange' ? null : validateFusionNcFiles(body?.ncFiles);
@@ -154,6 +157,7 @@ export async function POST({ request, url }) {
         })
         .eq('id', jobId)
         .eq('operation_type', 'milling')
+        .eq('claimed_by', runnerId)
         .eq('status', 'processing') // CAS: same guarantee cam-generate's own completion write has - a cancel landing mid-flight can never get silently clobbered back to "completed"
         .select('id');
       if (error) throw new Error(error.message);
@@ -167,7 +171,7 @@ export async function POST({ request, url }) {
         status: 'failed',
         errors: [message],
         progress_message: message
-      }).eq('id', jobId).eq('operation_type', 'milling').in('status', ['claimed', 'processing']).select('id');
+      }).eq('id', jobId).eq('operation_type', 'milling').eq('claimed_by', runnerId).in('status', ['claimed', 'processing']).select('id');
       if (error) throw error;
       if (!data?.length) return json({ error: 'Job is not an active Fusion job' }, { status: 409 });
       return json({ success: true });

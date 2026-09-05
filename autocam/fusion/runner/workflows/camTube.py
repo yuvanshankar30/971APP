@@ -18,6 +18,7 @@ from ..config import (
     FUSION_DATA_PROJECT_NAME,
     FUSION_DROP_FOLDER_PATH,
     INITIAL_PATH,
+    RUNNER_ID,
     TEMP_PATH,
     TOOLS_PATH,
 )
@@ -281,6 +282,7 @@ def start(data, session):
 
         completion_data = {
             "jobId": job_id,
+            "runnerId": RUNNER_ID,
             "ncFiles": nc_files,
         }
         if total_machining_time is not None:
