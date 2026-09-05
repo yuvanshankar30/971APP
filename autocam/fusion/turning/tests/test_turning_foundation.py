@@ -51,6 +51,18 @@ class TurningFoundationTests(unittest.TestCase):
         cam.ncPrograms.add.assert_not_called()
         self.assertFalse(result['readyForGeneration'])
 
+    def test_targets_the_team_haas_tl1_and_rejects_emc(self):
+        plan = build_turning_plan(EXAMPLE)
+        self.assertEqual(plan['machineModel'], 'Haas TL-1')
+        self.assertEqual(plan['controller'], 'haas')
+        self.assertEqual(plan['postFamily'], 'HAAS Turning')
+        self.assertEqual(plan['toolChangeMode'], 'automatic')
+        for change in [{'controller': 'linuxcnc'}, {'postProcessor': '971_emc.cps'},
+                       {'postProcessor': 'shopsabre.cps'}, {'postFamily': 'HAAS Milling'},
+                       {'machineModel': 'Haas ST-10'}, {'toolChangeMode': 'manual'}]:
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                build_turning_plan({**EXAMPLE, **change})
+
     def test_invalid_input_does_not_touch_fusion(self):
         cam = Mock()
         with self.assertRaises(ValueError):

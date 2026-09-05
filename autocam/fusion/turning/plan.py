@@ -3,6 +3,7 @@ import argparse
 import json
 import math
 from pathlib import Path
+from .machine import validate_machine
 
 SCHEMA_VERSION = 1
 OPERATIONS = ('face', 'od_rough', 'od_finish')
@@ -32,6 +33,7 @@ def build_turning_plan(spec):
     """
     if not isinstance(spec, dict) or type(spec.get('schemaVersion')) is not int or spec.get('schemaVersion') != SCHEMA_VERSION:
         raise ValueError('Unsupported turning specification version')
+    machine = validate_machine(spec)
     if spec.get('units') != 'in' or spec.get('stockShape') != 'round':
         raise ValueError('The prototype supports inch units and round stock only')
     if type(spec.get('quantity')) is not int or spec.get('quantity') != 1:
@@ -60,7 +62,7 @@ def build_turning_plan(spec):
         raise ValueError('Select manual or automatic tool changes explicitly')
     return {
         'schemaVersion': SCHEMA_VERSION, 'camEngine': 'fusion', 'fusionJobKind': 'turning:cam',
-        **refs, **dimensions, 'units': 'in', 'stockShape': 'round', 'quantity': 1,
+        **refs, **dimensions, **machine, 'units': 'in', 'stockShape': 'round', 'quantity': 1,
         'spindleAxis': 'Z', 'origin': 'front_face', 'toolChangeMode': spec['toolChangeMode'],
         'maxRpm': max_rpm, 'operations': list(OPERATIONS),
         'exposedStockLength': usable_length, 'requiredExposedLength': required_length,

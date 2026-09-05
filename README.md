@@ -432,7 +432,9 @@ own docs are all together in one place instead of scattered across
   (repo root) for the full port writeup and the evaluation that led to it.
 - **`autocam/fusion/turning/`** - experimental Fusion turning foundation
   ([issue #331](https://github.com/frc971/spartanshub/issues/331)): validates a
-  single-part round-stock plan and exposes an empty draft turning setup builder.
+  single-part round-stock plan for the Haas TL-1 and exposes an empty draft
+  turning setup builder. It requires the HAAS Turning post family and rejects
+  the LinuxCNC/EMC router post.
   It is not connected to the job queue and does not generate G-code. See its
   `README.md` for design choices, the example CLI, and the staged implementation.
 - **Route files stay in `src/routes/`** regardless (`src/routes/autocam/+page.svelte`,

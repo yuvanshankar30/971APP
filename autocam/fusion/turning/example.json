@@ -16,8 +16,15 @@
   "origin": "front_face",
   "machineId": "REPLACE_WITH_REVIEWED_LATHE_ID",
   "toolLibrary": "REPLACE_WITH_REVIEWED_TURNING_LIBRARY",
-  "postProcessor": "REPLACE_WITH_REVIEWED_LATHE_POST",
-  "toolChangeMode": "manual",
+  "postProcessor": "haas_tl1_turning.cps",
+  "toolChangeMode": "automatic",
   "maxRpm": 1000,
-  "operations": ["face", "od_rough", "od_finish"]
+  "operations": [
+    "face",
+    "od_rough",
+    "od_finish"
+  ],
+  "machineModel": "Haas TL-1",
+  "controller": "haas",
+  "postFamily": "HAAS Turning"
 }

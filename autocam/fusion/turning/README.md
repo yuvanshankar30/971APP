@@ -4,6 +4,27 @@ Tracking issue: [#331](https://github.com/frc971/spartanshub/issues/331).
 This is an experimental, callable foundation. It is not registered with the
 Runner, does not insert jobs, and produces no G-code.
 
+## Haas TL-1 target
+
+The prototype is pinned to the team's **Haas TL-1**, controller `haas`, and
+**HAAS Turning** post family. `machine.py` requires the future reviewed local
+asset name `haas_tl1_turning.cps`; that file is not bundled or validated yet.
+The planner rejects `971_emc.cps`, LinuxCNC, ShopSabre, and Haas milling posts.
+The repository identifies `971_emc.cps` as the UNC router post, not a lathe post.
+
+The example uses automatic turret tool changes because `autocam/turning.js`
+documents the team's TL-1 as equipped with a turret ATC. Verify the real machine
+configuration before enabling output. The older database seed labels 971 Lathe
+`linuxcnc` even though its description says Haas TL-1; do not inherit that legacy
+controller value when wiring this feature into the catalog. No production
+machine record is changed by this prototype.
+
+Haas control generation, actual spindle limit, installed turret configuration,
+post properties and X diameter mode remain machine-specific release checks.
+The spindle limit in the example is synthetic, not a verified machine limit.
+Autodesk's [turning workflow](https://help.autodesk.com/cloudhelp/ENU/Fusion-CAM/files/MFG-OVERVIEW-TURNING-WORKFLOW.htm)
+identifies the HAAS Turning post family for this workflow.
+
 ## First slice and design decisions
 
 Start with one round-stock part, one chuck setup, and facing plus external
@@ -38,8 +59,9 @@ python3 -m autocam.fusion.turning.plan autocam/fusion/turning/example.json
 python3 -m unittest discover -s autocam/fusion/turning/tests -v
 ```
 
-The example is synthetic. Its machine, tool-library, and post names are
-placeholders, and its spindle limit is not a recommendation for any real lathe.
+The example is synthetic. Its machine record ID and tool-library name are
+placeholders; its required Haas post asset has not yet been supplied. Its spindle
+limit is not a recommendation for any real lathe.
 The output contains the exposed stock length, required exposed length, radial
 stock allowance, planned operations, and unresolved setup tasks. It always says
 `readyForGeneration: false` and is deliberately not a `cam_jobs` insert payload.
@@ -68,8 +90,8 @@ already owns turning. Update both claim paths and test isolation before enabling
 
 Follow-ups tracked in #331: real lathe/tool/post selection, fixture and WCS
 mapping, template parameterization, toolpath generation futures and error checks,
-operator review, and Fusion simulation with stock/fixtures/holders. A manual
-lathe needs reviewed tool-change stops and offsets. Radius/diameter X mode,
+operator review, and Fusion simulation with stock/fixtures/holders. The team's
+TL-1 turret configuration needs reviewed tool numbers, offsets, and change moves. Radius/diameter X mode,
 spindle clamp, units, and feeds must be verified in the actual post output.
 
 The draft intentionally does not close #331. Live Fusion execution and a
