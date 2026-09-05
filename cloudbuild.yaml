@@ -138,30 +138,18 @@ steps:
       # yet) — add to both Secret Manager and this line once a real value is
       # available (see docs/deployment/google-cloud-run.md).
       #
-      # !!! REMINDER: ADD VISION_RUNNER_TOKEN TO --set-secrets BELOW !!!
-      # Not added yet because the secret doesn't exist in Secret Manager at
-      # all - adding the reference here before it exists fails every deploy
-      # the same way the CRON_NOTIFICATION_TOKEN gap above did/does ("secret
-      # ... not found" or a permission error, either way a broken build).
-      # Create it, grant the runtime service account access, THEN add it here:
-      #   openssl rand -hex 32 | gcloud secrets create VISION_RUNNER_TOKEN --project=spartanshub --data-file=-
-      #   gcloud secrets add-iam-policy-binding VISION_RUNNER_TOKEN --project=spartanshub \
-      #     --member="serviceAccount:819718873862-compute@developer.gserviceaccount.com" \
-      #     --role="roles/secretmanager.secretAccessor"
-      # then move VISION_RUNNER_TOKEN=VISION_RUNNER_TOKEN:latest into the
-      # --set-secrets line below, and put the SAME secret value into whatever
-      # environment runs vision/runner/vision_runner.py (see
-      # vision/runner/README.md and vision/runner/.env.example).
-      #
-      # What it's actually for: src/routes/api/vision-runner/+server.js's
+      # VISION_RUNNER_TOKEN: the secret now exists in Secret Manager on
+      # spartanshub with the runtime service account granted
+      # roles/secretmanager.secretAccessor, so it's wired into --set-secrets
+      # below. What it's for: src/routes/api/vision-runner/+server.js's
       # authorized()/checkToken() is fail-CLOSED (the opposite of the cron
       # gap above) - Boolean(expected && supplied && ...) is always false
-      # while this env var is unset, so that endpoint currently rejects
-      # every request, including from a legitimate runner. Loud failure over
-      # silent bypass was a deliberate choice (see scoutingvision.md), but it
-      # means the vision pipeline cannot process a single run until this
-      # secret exists - tracked in scoutingvision-remaining-work.md.
-      - '--set-secrets=SUPABASE_SERVICE_KEY=SUPABASE_SERVICE_KEY:latest,SUPABASE_ANON_KEY=SUPABASE_ANON_KEY:latest,SLACK_BOT_TOKEN=SLACK_BOT_TOKEN:latest,SLACK_SIGNING_SECRET=SLACK_SIGNING_SECRET:latest,TBA_API_KEY=TBA_API_KEY:latest,CRON_NOTIFICATION_TOKEN=CRON_NOTIFICATION_TOKEN:latest'
+      # while this env var is unset, so that endpoint rejected every
+      # request, including from a legitimate runner, until now. The SAME
+      # secret value also needs to be in whatever environment runs
+      # vision/runner/vision_runner.py (see vision/runner/README.md and
+      # vision/runner/.env.example) - this only covers the Cloud Run side.
+      - '--set-secrets=SUPABASE_SERVICE_KEY=SUPABASE_SERVICE_KEY:latest,SUPABASE_ANON_KEY=SUPABASE_ANON_KEY:latest,SLACK_BOT_TOKEN=SLACK_BOT_TOKEN:latest,SLACK_SIGNING_SECRET=SLACK_SIGNING_SECRET:latest,TBA_API_KEY=TBA_API_KEY:latest,CRON_NOTIFICATION_TOKEN=CRON_NOTIFICATION_TOKEN:latest,VISION_RUNNER_TOKEN=VISION_RUNNER_TOKEN:latest'
       # ORIGIN is adapter-node's own documented fix for a real gap: "HTTP
       # doesn't give SvelteKit a reliable way to know the URL that is
       # currently being requested" behind a reverse proxy that terminates
