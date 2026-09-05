@@ -32,21 +32,10 @@
 
 <div class="page-header">
   <h1><Layers size={28} /> Fusion CAM</h1>
-  <a
-    class="btn btn-secondary btn-sm"
-    href="https://github.com/frc971/spartanshub/blob/main/valor6800-autocam-runner-setup.md"
-    target="_blank"
-    rel="noopener noreferrer"
-  >
+  <a class="btn btn-secondary btn-sm" href="/autocam/fusion/setup">
     <BookOpen size={14} /> Runner Setup Guide
   </a>
 </div>
-<p class="page-subtitle">
-  Real 3-axis milling via Fusion 360's own CAM engine - a separate pipeline from the code-based
-  <a href="/autocam">AutoCAM</a> turning/routing generator, for parts that need genuine contoured toolpaths a
-  flat 2.5D profile can't represent. Nest parts onto plates or queue box-tube jobs here; a Fusion 360 Runner
-  (see <code>valor6800-autocam-runner-setup.md</code>) claims queued jobs and reports G-code back.
-</p>
 
 <nav class="tab-nav" role="tablist" aria-label="Fusion CAM sections">
   <button type="button" class:active={activeTab === 'plates'} on:click={() => setActiveTab('plates')}>
@@ -90,9 +79,6 @@
      theme override there either). Only page-specific LAYOUT rules remain
      below; all colors now come from the real site tokens in src/app.css. */
 
-  .page-subtitle a {
-    color: var(--accent);
-  }
   .tab-nav {
     display: flex;
     gap: 0.5rem;

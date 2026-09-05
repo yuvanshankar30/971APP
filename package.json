@@ -7,7 +7,9 @@
 		"node": ">=22"
 	},
 	"scripts": {
+		"predev": "node scripts/build-fusion-runner-zip.mjs",
 		"dev": "vite dev",
+		"prebuild": "node scripts/build-fusion-runner-zip.mjs",
 		"build": "vite build",
 		"preview": "vite preview",
 		"start": "node build/index.js",

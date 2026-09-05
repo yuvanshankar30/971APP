@@ -49,3 +49,4 @@ __pycache__/
 # here by default.
 vision/**/*.pt
 vision/**/models/
+static/downloads/

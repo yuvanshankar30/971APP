@@ -4,6 +4,13 @@
 FROM node:22-slim AS build
 WORKDIR /app
 
+# zip: node:22-slim (Debian) doesn't ship it by default. Needed by the
+# prebuild step (scripts/build-fusion-runner-zip.mjs) to package the Fusion
+# Runner add-in into static/downloads/ before the Vite build runs - only
+# static/ survives into the runtime stage below, so this has to happen here,
+# not at request time.
+RUN apt-get update && apt-get install -y --no-install-recommends zip && rm -rf /var/lib/apt/lists/*
+
 COPY package.json package-lock.json ./
 RUN npm ci
 
