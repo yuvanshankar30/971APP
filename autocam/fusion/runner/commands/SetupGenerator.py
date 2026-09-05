@@ -41,8 +41,8 @@ def SetupGenerator(
     setup.parameters.itemByName("wcs_orientation_axisY").value.value = [
         comp.xConstructionAxis
     ]
-    setup.parameters.itemByName("wcs_orientation_flipX").value.value = True
-    setup.parameters.itemByName("wcs_origin_boxPoint").expression = "'top 1'"
+    setup.parameters.itemByName("wcs_orientation_flipX").value.value = False
+    setup.parameters.itemByName("wcs_origin_boxPoint").expression = "'bottom 1'"
     baseDir = os.path.dirname(os.path.realpath(__file__))
     # machine is Swift and IQ, material is Aluminum and Polycarb
     if template_path:
