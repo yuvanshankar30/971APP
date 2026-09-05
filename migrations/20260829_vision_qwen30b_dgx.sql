@@ -1,4 +1,5 @@
--- Full-BF16 Qwen3-VL-30B-A3B inference and mandatory observation review.
+-- Vision-language inference metadata and mandatory observation review. The
+-- migration filename is historical; the active DGX model is Qwen3.8-27B.
 -- Qwen runs on the DGX Spark as an authenticated internal service; the web
 -- app stores only model identity, runtime metrics, and reviewable evidence.
 

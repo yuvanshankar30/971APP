@@ -66,7 +66,7 @@ subsequent deploy, which is exactly how the `CRON_NOTIFICATION_TOKEN` gap
 The Compose stack and systemd units are written and ready; no host is running
 them. Needed: current DGX OS, NVIDIA Container Toolkit, `docker login` against
 NVIDIA NGC (the base image is `nvcr.io/nvidia/pytorch`), the ~60+ GB
-Qwen3-VL-30B checkpoint downloaded into the persistent cache, both example
+Qwen3.8-27B checkpoint downloaded into the persistent cache, both example
 secrets in `vision/runner/.env.example` replaced with real generated values,
 and a decision about who owns uptime and cache maintenance.
 

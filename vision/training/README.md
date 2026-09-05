@@ -42,7 +42,7 @@ and verify that no source leaks across splits:
 ```
 
 Qwen3-VL can bootstrap semantic proposals directly from any number of camera
-recordings. The default is the full BF16 `Qwen3-VL-30B-A3B-Instruct` MoE
+recordings. The default is the full BF16 `Qwen3.8-27B`
 checkpoint and requires the DGX Spark or comparable CUDA memory:
 
 ```bash

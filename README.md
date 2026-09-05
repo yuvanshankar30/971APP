@@ -105,7 +105,7 @@ browser confirmation or prompt popups.
   running post-match, multi-camera ML processing at `/scouting/vision` for
   robot trajectories/mobility, fuel, and climbing, with a calibrated
   red/blue field-occupancy heatmap that fills as trajectory results arrive.
-  A full BF16 Qwen3-VL-30B-A3B service on NVIDIA DGX Spark proposes semantic
+  A full BF16 Qwen3.8-27B service on NVIDIA DGX Spark proposes semantic
   events from bounded multi-camera clips; a
   separate versioned YOLO/ByteTrack runner supplies dense tracking and
   mobility. Both feed a human-reviewed evidence queue rather than silently
@@ -470,7 +470,7 @@ own docs are all together in one place instead of scattered across
   into `scout_data_events` (the release action itself is `VISION_RELEASE`-
   gated; everything else is open to any approved user). The GPU stack lives
   in `vision/runner/` (dense tracking) and `vision/qwen/` (full BF16
-  Qwen3-VL-30B-A3B service on DGX Spark); the fleet/throughput dashboard is
+  Qwen3.8-27B service on DGX Spark); the fleet/throughput dashboard is
   a sub-route, the offline training toolchain lives in `vision/training/`,
   and acceptance metrics live in `vision/evaluation/`.
 - **`cots-stocking/`, `kitting/`** - purchasing/inventory: COTS (commercial

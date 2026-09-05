@@ -1,7 +1,7 @@
 # Qwen3-VL service for DGX Spark
 
 Long-lived, authenticated inference service for the full BF16
-`Qwen/Qwen3-VL-30B-A3B-Instruct` checkpoint. It is separate from
+`Qwen/Qwen3.8-27B` checkpoint. It is separate from
 `vision/runner/`: Qwen handles bounded semantic clip analysis while the
 runner keeps dense YOLO/ByteTrack trajectories and classical game-piece
 tracking deterministic.
