@@ -127,24 +127,83 @@ export async function deletePlate(id) {
   if (error) throw error;
 }
 
-/** Assigns (or updates) how many of a part are nested onto a plate. */
+/**
+ * Assigns (or updates) how many of a part are nested onto a plate.
+ *
+ * fusion_parts.quantity is meant to be "how many are still unassigned to
+ * any plate" (see original_quantity, the fixed total) - PlatesTab.svelte's
+ * own nesting UI already computes its per-plate max as
+ * `part.quantity + (already nested on this plate)`, on the assumption
+ * that quantity excludes this plate's own assignment but nothing else.
+ * That assumption only holds if assigning actually consumes it here -
+ * without this, the same physical part could be over-committed across
+ * several plates at once, since nothing else in this file ever touched
+ * fusion_parts.quantity after createPart set the initial value.
+ *
+ * Read-then-write, not atomic (same pattern already used for quantity
+ * fields elsewhere in this app, e.g. cots-stocking/+page.svelte) - fine
+ * for this team's actual concurrency (one or two people editing a plate
+ * at a time), not fine for a race between simultaneous edits to the same
+ * part, which this app doesn't guard against anywhere else either.
+ */
 export async function assignPartToPlate({ categoryId, plateId, partId, quantity }) {
+  const [{ data: existingAssignment, error: existingError }, { data: part, error: partError }] = await Promise.all([
+    supabase.from('fusion_part_category_assignments').select('quantity').eq('plate_id', plateId).eq('part_id', partId).maybeSingle(),
+    supabase.from('fusion_parts').select('quantity').eq('id', partId).single()
+  ]);
+  if (existingError) throw existingError;
+  if (partError) throw partError;
+
+  const previousQuantity = existingAssignment?.quantity || 0;
+  const delta = quantity - previousQuantity; // positive = consuming more of the part's remaining stock
+  if (delta > part.quantity) {
+    throw new Error(`Only ${part.quantity} of this part remain unassigned - remove it from another plate first or lower the quantity`);
+  }
+
   const { data, error } = await supabase
     .from('fusion_part_category_assignments')
     .upsert({ category_id: categoryId, plate_id: plateId, part_id: partId, quantity }, { onConflict: 'plate_id,part_id' })
     .select()
     .single();
   if (error) throw error;
+
+  if (delta !== 0) {
+    const { error: quantityError } = await supabase
+      .from('fusion_parts')
+      .update({ quantity: Math.max(0, part.quantity - delta) })
+      .eq('id', partId);
+    if (quantityError) throw quantityError;
+  }
+
   return data;
 }
 
+/** Removes a part's assignment from a plate and returns its quantity to fusion_parts.quantity - see assignPartToPlate's own doc comment. */
 export async function removePartFromPlate({ plateId, partId }) {
+  const { data: existingAssignment, error: existingError } = await supabase
+    .from('fusion_part_category_assignments')
+    .select('quantity')
+    .eq('plate_id', plateId)
+    .eq('part_id', partId)
+    .maybeSingle();
+  if (existingError) throw existingError;
+
   const { error } = await supabase
     .from('fusion_part_category_assignments')
     .delete()
     .eq('plate_id', plateId)
     .eq('part_id', partId);
   if (error) throw error;
+
+  if (existingAssignment?.quantity) {
+    const { data: part, error: partError } = await supabase.from('fusion_parts').select('quantity').eq('id', partId).single();
+    if (partError) throw partError;
+    const { error: quantityError } = await supabase
+      .from('fusion_parts')
+      .update({ quantity: (part.quantity || 0) + existingAssignment.quantity })
+      .eq('id', partId);
+    if (quantityError) throw quantityError;
+  }
 }
 
 /* ── Box tubes ─────────────────────────────────────────────────────────── */
