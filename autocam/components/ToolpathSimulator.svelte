@@ -347,10 +347,23 @@
       const material = new THREE.LineBasicMaterial({
         color: style.color,
         transparent: style.opacity < 1,
-        opacity: style.opacity
+        opacity: style.opacity,
+        // A routing contour re-traces the exact same XY path once per
+        // stepDown pass (0.03" apart by default - see routing.js's
+        // cutContour) - a through-cut plate easily has 5-8 of these at
+        // once. Viewed near top-down, those passes sit close enough in Z
+        // that normal depth testing z-fights pass-against-pass (and this
+        // buffer against itself), rendering as a speckled/dashed line
+        // instead of a solid one. This is a display-only overlay, not a
+        // solid the tool/stock need to occlude correctly against, so
+        // depth-testing it at all buys nothing but the flicker - drop it
+        // and always draw on top, ordered by KINDS via renderOrder below.
+        depthTest: false,
+        depthWrite: false
       });
       const object = new THREE.LineSegments(geometry, material);
       object.visible = !!visible[kind];
+      object.renderOrder = 10 + KINDS.indexOf(kind);
       lineObjects[kind] = object;
       scene.add(object);
     }
