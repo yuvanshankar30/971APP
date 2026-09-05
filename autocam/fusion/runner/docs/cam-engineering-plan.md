@@ -45,6 +45,10 @@ Not decided yet — flagging rather than assuming. Two obvious options:
 
 This gets decided once the actual files exist and we know their size/sensitivity — not worth designing storage for data that doesn't exist yet.
 
-## Once these three things exist
+## Local runner assets
 
-Ping me. There's a small, well-scoped remaining piece of Runner code (`_download_tool_library_json`, `_download_machine_post_processor`, and the tool-auto-selection logic in `camPlate.py`/`camTube.py`) that currently still points at endpoints that don't exist — once there's a real tool library JSON and post-processor to point it at instead, that's a contained rewrite, not a redesign.
+The Runner now reads the selected checked-in `.tools` archive via
+`cam_tools.fusion_tool_library_file` and resolves `cam_machines.post_processor`
+to the committed `971_emc.cps` or `shopsabre.cps` file. The remaining work is
+to choose the appropriate real template for each material/tool/machine; that
+decision should be made from validated shop CAM setups rather than filenames.

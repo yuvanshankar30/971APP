@@ -35,7 +35,7 @@ def _format_tool_label(toolpath):
     return label or "0"
 
 
-def export(name, machine):
+def export(name, post_processor_path):
     ui = None
     app = adsk.core.Application.get()
     ui = app.userInterface
@@ -44,7 +44,9 @@ def export(name, machine):
     # Ensure we are in the CAM workspace
     cam = adsk.cam.CAM.cast(design)
     allSetups = cam.setups
-    absolutePath = os.path.join(TOOLS_PATH, f"machine_{machine}.cps")
+    if not post_processor_path or not os.path.isfile(post_processor_path):
+        raise ValueError(f"Fusion post processor is unavailable: {post_processor_path}")
+    absolutePath = post_processor_path
     folder_path = os.path.join(FINAL_PATH, name)
     if not os.path.exists(folder_path):
         os.makedirs(folder_path)

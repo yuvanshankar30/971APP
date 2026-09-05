@@ -25,6 +25,7 @@ from ..config import (
 from .dropFolder import resolve_drop_folder
 from .importPlate import clear_design_nuke
 from .job_status import ensure_completion_response, send_job_error
+from .localCamAssets import load_local_tool_library_json, resolve_local_post_processor
 from .templateTools import patch_cam_template_with_tool_libraries
 
 
@@ -163,85 +164,6 @@ def _get(payload: dict, *keys: str, default=None):
     return default
 
 
-def _download_tool_library_json(
-    session: requests.Session, tool_id: int, dest_dir: str
-) -> tuple[dict, str]:
-    os.makedirs(dest_dir, exist_ok=True)
-    resp = session.get(f"{BASE_URL}/api/tools/{tool_id}", timeout=30)
-    resp.raise_for_status()
-    info = resp.json()
-    if not isinstance(info, dict):
-        raise TypeError(f"Unexpected tool response: {type(info)}")
-
-    url = info.get("file")
-    if not url:
-        raise ValueError("Tool response missing 'file' signed URL")
-
-    out_path = os.path.join(dest_dir, f"{tool_id}.json")
-    if not os.path.exists(out_path):
-        content = requests.get(url, timeout=30).content
-        with open(out_path, "wb") as f:
-            f.write(content)
-
-    return info, out_path
-
-
-def _first_material_name(session: requests.Session, material_ids) -> Optional[str]:
-    if not isinstance(material_ids, list) or not material_ids:
-        return None
-    material_id = material_ids[0]
-    try:
-        material_id_int = int(material_id)
-    except Exception:
-        return None
-
-    resp = session.get(f"{BASE_URL}/api/materials", timeout=30)
-    resp.raise_for_status()
-    data = resp.json()
-    if not isinstance(data, list):
-        return None
-    for material in data:
-        if not isinstance(material, dict):
-            continue
-        try:
-            if int(material.get("id")) != material_id_int:
-                continue
-        except Exception:
-            continue
-        name = material.get("name")
-        return str(name) if name else None
-    return None
-
-
-def _download_machine_post_processor(
-    session: requests.Session, machine_id: int, dest_dir: str
-) -> tuple[dict, str]:
-    """Download machine post processor file from API and return machine info and file path."""
-    os.makedirs(dest_dir, exist_ok=True)
-    resp = session.get(f"{BASE_URL}/api/machines/{machine_id}", timeout=30)
-    resp.raise_for_status()
-    info = resp.json()
-    if not isinstance(info, dict):
-        raise TypeError(f"Unexpected machine response: {type(info)}")
-
-    url = info.get("file")
-    if not url:
-        raise ValueError("Machine response missing 'file' signed URL")
-
-    # Determine file extension from URL or default to .cps
-    file_ext = ".cps"
-    # if "." in url.split("?")[0]:
-    #     file_ext = "." + url.split("?")[0].split(".")[-1]
-
-    out_path = os.path.join(dest_dir, f"machine_{machine_id}{file_ext}")
-    if not os.path.exists(out_path):
-        content = requests.get(url, timeout=30).content
-        with open(out_path, "wb") as f:
-            f.write(content)
-
-    return info, out_path
-
-
 def start(data, session):
     app = adsk.core.Application.get()
     ui = app.userInterface
@@ -301,18 +223,6 @@ def start(data, session):
 
         AutoArrange(length, width)
 
-        # Handle tool_id as a list
-        tool_ids_raw = _get(payload, "tool_id", "toolId", "tool_ids")
-        tool_ids = []
-        if tool_ids_raw is not None:
-            if isinstance(tool_ids_raw, list):
-                tool_ids = [int(tid) for tid in tool_ids_raw if tid is not None]
-            else:
-                try:
-                    tool_ids = [int(tool_ids_raw)]
-                except Exception:
-                    pass
-
         # Extract tool_items (specific tool GUIDs from within libraries)
         tool_items_raw = _get(payload, "tool_items")
         filter_guids = None
@@ -326,217 +236,32 @@ def start(data, session):
             if not filter_guids:
                 filter_guids = None
 
-        machine_id = _get(payload, "machine_id", "machineId")
-
-        try:
-            machine_id_int = int(machine_id) if machine_id is not None else None
-        except Exception:
-            machine_id_int = None
-
-        material_name = None
-        machine_name = None
-        machine_post_processor_path = None
+        # The claim response already joins these records. Keep the Runner
+        # offline after a claim: the old /api/tools, /api/materials, and
+        # /api/machines endpoints were never part of this application.
+        machine = data.get("cam_machines") or {}
+        material = data.get("cam_materials") or {}
+        machine_name = machine.get("name") or _get(payload, "machine")
+        material_name = material.get("name") or _get(payload, "material")
+        machine_post_processor_path = resolve_local_post_processor(data)
         template_path = os.path.join(
             os.path.dirname(__file__), "../templates/Plates.f3dhsm-template"
         )
 
-        tool_library_paths = []
-        tool_info = None
-        tool_list_cache = None
-
-        # Download machine post processor if machine_id is provided
-        if machine_id_int is not None:
-            try:
-                machine_info, machine_post_processor_path = (
-                    _download_machine_post_processor(
-                        session, machine_id_int, dest_dir=TOOLS_PATH
-                    )
-                )
-                machine_name = machine_info.get("name")
-            except Exception:
-                app.log(
-                    "Failed to download machine post processor:\n{}".format(
-                        traceback.format_exc()
-                    )
-                )
-
-        # If no tool_ids provided, pick the first compatible one.
-        if not tool_ids:
-            try:
-                resp = session.get(f"{BASE_URL}/api/tools", timeout=30)
-                resp.raise_for_status()
-                tool_list_cache = resp.json()
-                if isinstance(tool_list_cache, dict) and isinstance(
-                    tool_list_cache.get("data"), list
-                ):
-                    tool_list_cache = tool_list_cache["data"]
-
-                if isinstance(tool_list_cache, list):
-                    for lib in tool_list_cache:
-                        if not isinstance(lib, dict):
-                            continue
-                        lib_id = lib.get("id")
-                        if lib_id is None:
-                            continue
-                        try:
-                            candidate_id = int(lib_id)
-                        except Exception:
-                            continue
-
-                        if machine_id_int is not None:
-                            machine_ids = lib.get("machine_ids") or []
-                            try:
-                                machine_ids = [int(x) for x in machine_ids]
-                            except Exception:
-                                machine_ids = []
-                        if machine_id_int not in machine_ids:
-                            continue
-
-                        tool_ids = [candidate_id]
-                        break
-            except Exception:
-                app.log(
-                    "Failed to list tool libraries:\n{}".format(traceback.format_exc())
-                )
-
-        # Download all tool libraries for the provided tool_ids
-        seen_tool_ids = set()
-        for tool_id_int in tool_ids:
-            if tool_id_int in seen_tool_ids:
-                continue
-            seen_tool_ids.add(tool_id_int)
-            try:
-                tool_info, tool_json_path = _download_tool_library_json(
-                    session, tool_id_int, dest_dir=TOOLS_PATH
-                )
-                tool_library_paths.append(tool_json_path)
-                # Use material from first tool library
-                if material_name is None:
-                    material_name = _first_material_name(
-                        session, tool_info.get("material_ids")
-                    )
-            except Exception:
-                app.log(
-                    "Failed to download tool library:\n{}".format(
-                        traceback.format_exc()
-                    )
-                )
-
-        # If the chosen libraries don't contain every required tool, allow fallbacks.
-        if tool_ids and machine_id_int is not None:
-            try:
-                if tool_list_cache is None:
-                    resp = session.get(f"{BASE_URL}/api/tools", timeout=30)
-                    resp.raise_for_status()
-                    tool_list_cache = resp.json()
-                    if isinstance(tool_list_cache, dict) and isinstance(
-                        tool_list_cache.get("data"), list
-                    ):
-                        tool_list_cache = tool_list_cache["data"]
-
-                material_ids_hint = []
-                # Get material_ids from first tool library
-                if tool_library_paths:
-                    try:
-                        first_tool_info, _ = _download_tool_library_json(
-                            session, tool_ids[0], dest_dir=TOOLS_PATH
-                        )
-                        if isinstance(first_tool_info, dict) and isinstance(
-                            first_tool_info.get("material_ids"), list
-                        ):
-                            material_ids_hint = first_tool_info.get("material_ids")
-                            try:
-                                material_ids_hint = [
-                                    int(x) for x in material_ids_hint if x is not None
-                                ]
-                            except Exception:
-                                material_ids_hint = []
-                        else:
-                            material_ids_hint = []
-                    except Exception:
-                        pass
-
-                seen_ids = set(tool_ids)
-                if isinstance(tool_list_cache, list):
-                    for lib in tool_list_cache:
-                        if not isinstance(lib, dict):
-                            continue
-                        lib_id = lib.get("id")
-                        if lib_id is None:
-                            continue
-                        try:
-                            lib_id_int = int(lib_id)
-                        except Exception:
-                            continue
-                        if lib_id_int in seen_ids:
-                            continue
-
-                        machine_ids = lib.get("machine_ids") or []
-                        try:
-                            machine_ids = [int(x) for x in machine_ids]
-                        except Exception:
-                            machine_ids = []
-                        if machine_id_int not in machine_ids:
-                            continue
-
-                        if material_ids_hint:
-                            lib_material_ids = lib.get("material_ids") or []
-                            try:
-                                lib_material_ids = [int(x) for x in lib_material_ids]
-                            except Exception:
-                                lib_material_ids = []
-                            if not set(material_ids_hint).intersection(
-                                lib_material_ids
-                            ):
-                                continue
-
-                        _, extra_path = _download_tool_library_json(
-                            session, lib_id_int, dest_dir=TOOLS_PATH
-                        )
-                        tool_library_paths.append(extra_path)
-                        seen_ids.add(lib_id_int)
-            except Exception:
-                app.log(
-                    "Failed to add fallback tool libraries:\n{}".format(
-                        traceback.format_exc()
-                    )
-                )
-
-        # Machine name, if not already resolved via the post-processor
-        # download above: already present in the claim response's existing
-        # cam_machines join (see /api/fusion-runner's claimNextJob select) -
-        # no separate lookup needed.
-        if machine_name is None:
-            machine_name = (data.get("cam_machines") or {}).get("name")
-
-        if tool_library_paths:
-            try:
-                # Create a unique template name based on all tool_ids
-                tool_ids_str = (
-                    "_".join(str(tid) for tid in sorted(tool_ids))
-                    if tool_ids
-                    else "none"
-                )
-                patched_template = os.path.join(
-                    TOOLS_PATH,
-                    f"Plates_tool{tool_ids_str}_machine{machine_id_int}.f3dhsm-template",
-                )
-                patch_info = patch_cam_template_with_tool_libraries(
-                    template_path,
-                    patched_template,
-                    tool_library_paths,
-                    material_name=material_name,
-                    filter_guids=filter_guids,
-                )
-                if patch_info.get("missing"):
-                    app.log(
-                        f"Template tool matches missing: {patch_info.get('missing')}"
-                    )
-                template_path = patched_template
-            except Exception:
-                app.log(
-                    "Failed to patch CAM template:\n{}".format(traceback.format_exc())
-                )
+        _tool_info, tool_json_path = load_local_tool_library_json(data, TOOLS_PATH)
+        patched_template = os.path.join(
+            TOOLS_PATH, f"Plates_job{job_id}.f3dhsm-template"
+        )
+        patch_info = patch_cam_template_with_tool_libraries(
+            template_path,
+            patched_template,
+            [tool_json_path],
+            material_name=material_name,
+            filter_guids=filter_guids,
+        )
+        if patch_info.get("missing"):
+            app.log(f"Template tool matches missing: {patch_info.get('missing')}")
+        template_path = patched_template
 
         # Category thickness (nominal part thickness, for the offset
         # calculation true_depth - thickness) - same server-resolved payload
@@ -600,7 +325,7 @@ def start(data, session):
         except FileNotFoundError:
             pass
 
-        export(plate_id, machine_id_int)
+        export(plate_id, machine_post_processor_path)
 
         # cam_jobs.gcode is a single text column (matches turning/routing's
         # one-file-per-job model), not a zip bundle like upstream's

@@ -65,7 +65,7 @@ async function claimNextJob(supabase, runnerId, machineId) {
       .update({ status: 'claimed', claimed_by: runnerId, claimed_at: new Date().toISOString() })
       .eq('id', candidate.id)
       .eq('status', 'queued') // compare-and-swap: only one runner can ever win this specific job
-      .select('*, cam_tools(nose_radius, diameter), cam_machines(name, controller, post_processor), cam_materials(name)')
+      .select('*, cam_tools(nose_radius, diameter, fusion_tool_library_file), cam_machines(name, controller, post_processor), cam_materials(name)')
       .single();
     if (claimError) continue; // lost the race on this one (or a real error) - try the next candidate
     if (claimed) return claimed;
