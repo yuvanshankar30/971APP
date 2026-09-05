@@ -1,0 +1,272 @@
+<script>
+  import { onMount } from 'svelte';
+  import { supabase } from '$lib/supabase.js';
+  import { page } from '$app/stores';
+  import { toastActions } from '$lib/toast.js';
+  import { requestConfirmation } from '$lib/confirmation.js';
+  import { Folder, FolderPlus, Upload, Download, Trash2, File as FileIcon, Home } from 'lucide-svelte';
+
+  const BUCKET = 'manufacturing-drive';
+  // Supabase's own dashboard convention for representing an otherwise-empty
+  // folder in object storage (which has no real concept of a folder, only
+  // "/"-delimited object paths) - a hidden placeholder object inside it, so
+  // list() has something to report at that prefix before any real file
+  // exists there. Filtered out of the UI below, never shown as a "file."
+  const EMPTY_FOLDER_MARKER = '.emptyFolderPlaceholder';
+
+  let currentPath = ''; // '' = root, otherwise "a/b/c" (no leading/trailing slash)
+  let entries = [];
+  let loading = true;
+  let uploading = false;
+  let newFolderName = '';
+  let showNewFolderInput = false;
+  let fileInput;
+
+  $: breadcrumbs = currentPath ? currentPath.split('/') : [];
+
+  function joinPath(prefix, name) {
+    return prefix ? `${prefix}/${name}` : name;
+  }
+
+  async function load() {
+    loading = true;
+    try {
+      const { data, error } = await supabase.storage.from(BUCKET).list(currentPath, {
+        sortBy: { column: 'name', order: 'asc' }
+      });
+      if (error) throw error;
+      entries = (data || []).filter((e) => e.name !== EMPTY_FOLDER_MARKER);
+    } catch (e) {
+      toastActions.show(e.message || 'Failed to load files');
+      entries = [];
+    } finally {
+      loading = false;
+    }
+  }
+
+  onMount(load);
+
+  // Storage's list() has no "type" field - a folder shows up as an entry
+  // with id === null (no metadata, since it isn't a real object itself,
+  // just an implied prefix); a real uploaded file always has an id.
+  function isFolder(entry) {
+    return entry.id === null || entry.id === undefined;
+  }
+
+  function openFolder(entry) {
+    currentPath = joinPath(currentPath, entry.name);
+    load();
+  }
+
+  function goToBreadcrumb(index) {
+    // index === -1 means "Home" (root)
+    currentPath = index < 0 ? '' : breadcrumbs.slice(0, index + 1).join('/');
+    load();
+  }
+
+  async function handleCreateFolder() {
+    const name = newFolderName.trim();
+    if (!name) return;
+    if (/[\\/]/.test(name)) {
+      toastActions.show('Folder name can\'t contain / or \\');
+      return;
+    }
+    try {
+      const { error } = await supabase.storage
+        .from(BUCKET)
+        .upload(joinPath(joinPath(currentPath, name), EMPTY_FOLDER_MARKER), new Blob(['']));
+      if (error) throw error;
+      newFolderName = '';
+      showNewFolderInput = false;
+      await load();
+      toastActions.show('Folder created');
+    } catch (e) {
+      toastActions.show(e.message || 'Failed to create folder');
+    }
+  }
+
+  async function handleUpload(event) {
+    const files = Array.from(event.target.files || []);
+    if (!files.length) return;
+    uploading = true;
+    try {
+      for (const file of files) {
+        const { error } = await supabase.storage
+          .from(BUCKET)
+          .upload(joinPath(currentPath, file.name), file, { upsert: true });
+        if (error) throw error;
+      }
+      toastActions.show(`Uploaded ${files.length} file${files.length === 1 ? '' : 's'}`);
+    } catch (e) {
+      toastActions.show(e.message || 'Upload failed');
+    } finally {
+      uploading = false;
+      if (fileInput) fileInput.value = '';
+      await load();
+    }
+  }
+
+  async function handleDownload(entry) {
+    try {
+      const { data, error } = await supabase.storage
+        .from(BUCKET)
+        .createSignedUrl(joinPath(currentPath, entry.name), 300);
+      if (error || !data?.signedUrl) throw error || new Error('Could not create download link');
+      window.open(data.signedUrl, '_blank');
+    } catch (e) {
+      toastActions.show(e.message || 'Download failed');
+    }
+  }
+
+  async function handleDeleteFile(entry) {
+    if (!await requestConfirmation({ title: 'Delete file', message: `Delete "${entry.name}"?`, confirmLabel: 'Delete', danger: true })) return;
+    try {
+      const { error } = await supabase.storage.from(BUCKET).remove([joinPath(currentPath, entry.name)]);
+      if (error) throw error;
+      await load();
+      toastActions.show('File deleted');
+    } catch (e) {
+      toastActions.show(e.message || 'Failed to delete file');
+    }
+  }
+
+  // Storage's list() only sees one level at a time, so deleting a folder
+  // means walking every level under it first to collect every real object
+  // path (including nested placeholders), then removing them all at once -
+  // remove() doesn't accept a bare prefix.
+  async function listAllPaths(prefix) {
+    const { data, error } = await supabase.storage.from(BUCKET).list(prefix);
+    if (error) throw error;
+    const paths = [];
+    for (const entry of data || []) {
+      const fullPath = joinPath(prefix, entry.name);
+      if (isFolder(entry)) {
+        paths.push(...await listAllPaths(fullPath));
+      } else {
+        paths.push(fullPath);
+      }
+    }
+    return paths;
+  }
+
+  async function handleDeleteFolder(entry) {
+    if (!await requestConfirmation({ title: 'Delete folder', message: `Delete "${entry.name}" and everything inside it? This can't be undone.`, confirmLabel: 'Delete', danger: true })) return;
+    try {
+      const folderPath = joinPath(currentPath, entry.name);
+      const paths = await listAllPaths(folderPath);
+      if (paths.length) {
+        const { error } = await supabase.storage.from(BUCKET).remove(paths);
+        if (error) throw error;
+      }
+      await load();
+      toastActions.show('Folder deleted');
+    } catch (e) {
+      toastActions.show(e.message || 'Failed to delete folder');
+    }
+  }
+
+  function formatSize(bytes) {
+    if (!bytes && bytes !== 0) return '';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+</script>
+
+<svelte:head><title>Files | Manufacturing</title></svelte:head>
+
+<div class="page-header">
+  <h1>Files</h1>
+  <div class="page-actions">
+    <button class="btn btn-secondary" on:click={() => (showNewFolderInput = !showNewFolderInput)}>
+      <FolderPlus size={16} /> New Folder
+    </button>
+    <button class="btn btn-primary" disabled={uploading} on:click={() => fileInput?.click()}>
+      <Upload size={16} /> {uploading ? 'Uploading...' : 'Upload'}
+    </button>
+    <input bind:this={fileInput} type="file" multiple style="display:none" on:change={handleUpload} />
+  </div>
+</div>
+
+<div class="subtabs">
+  <a href="/manufacture" class:active={$page.url.pathname === '/manufacture'}>ToDo</a>
+  <a href="/manufacture/completed" class:active={$page.url.pathname === '/manufacture/completed'}>Completed</a>
+  <a href="/manufacture/router" class:active={$page.url.pathname === '/manufacture/router'}>Router</a>
+  <a href="/manufacture/post-processing" class:active={$page.url.pathname === '/manufacture/post-processing'}>Post Processing</a>
+  <a href="/manufacture/bins" class:active={$page.url.pathname === '/manufacture/bins'}>Bins</a>
+  <a href="/manufacture/gcode-converter" class:active={$page.url.pathname === '/manufacture/gcode-converter'}>G-code Converter</a>
+  <a href="/manufacture/files" class:active={$page.url.pathname === '/manufacture/files'}>Files</a>
+</div>
+
+{#if showNewFolderInput}
+  <div class="card new-folder-card">
+    <input
+      class="form-input"
+      placeholder="Folder name"
+      bind:value={newFolderName}
+      on:keydown={(e) => e.key === 'Enter' && handleCreateFolder()}
+    />
+    <button class="btn btn-primary btn-sm" on:click={handleCreateFolder}>Create</button>
+    <button class="btn btn-ghost btn-sm" on:click={() => { showNewFolderInput = false; newFolderName = ''; }}>Cancel</button>
+  </div>
+{/if}
+
+<div class="breadcrumbs">
+  <button class="crumb" on:click={() => goToBreadcrumb(-1)}><Home size={14} /> Home</button>
+  {#each breadcrumbs as segment, i}
+    <span class="crumb-sep">/</span>
+    <button class="crumb" on:click={() => goToBreadcrumb(i)}>{segment}</button>
+  {/each}
+</div>
+
+{#if loading}
+  <p>Loading...</p>
+{:else if entries.length === 0}
+  <p class="empty-state">This folder is empty. Upload a file or create a folder to get started.</p>
+{:else}
+  <div class="card">
+    <div class="file-list">
+      {#each entries as entry}
+        <div class="file-row">
+          {#if isFolder(entry)}
+            <button class="file-row-main" on:click={() => openFolder(entry)}>
+              <Folder size={18} />
+              <span class="file-name">{entry.name}</span>
+            </button>
+            <div class="file-row-actions">
+              <button class="btn btn-ghost btn-sm" on:click={() => handleDeleteFolder(entry)}><Trash2 size={14} /></button>
+            </div>
+          {:else}
+            <div class="file-row-main file-row-static">
+              <FileIcon size={18} />
+              <span class="file-name">{entry.name}</span>
+              <span class="file-size">{formatSize(entry.metadata?.size)}</span>
+            </div>
+            <div class="file-row-actions">
+              <button class="btn btn-ghost btn-sm" on:click={() => handleDownload(entry)}><Download size={14} /></button>
+              <button class="btn btn-ghost btn-sm" on:click={() => handleDeleteFile(entry)}><Trash2 size={14} /></button>
+            </div>
+          {/if}
+        </div>
+      {/each}
+    </div>
+  </div>
+{/if}
+
+<style>
+  .new-folder-card { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 1rem; padding: 0.75rem 1rem; }
+  .new-folder-card .form-input { flex: 1; max-width: 320px; }
+  .breadcrumbs { display: flex; align-items: center; gap: 0.35rem; margin-bottom: 1rem; flex-wrap: wrap; }
+  .crumb { display: inline-flex; align-items: center; gap: 0.3rem; background: none; border: none; color: var(--text-muted, #888); cursor: pointer; padding: 0.15rem 0.3rem; border-radius: 4px; font-size: 0.9rem; }
+  .crumb:hover { color: var(--text); background: var(--surface-2, rgba(255,255,255,0.06)); }
+  .crumb-sep { color: var(--text-muted, #888); }
+  .file-list { display: flex; flex-direction: column; }
+  .file-row { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.6rem 0.25rem; border-bottom: 1px solid var(--border, #333); }
+  .file-row:last-child { border-bottom: none; }
+  .file-row-main { display: flex; align-items: center; gap: 0.6rem; background: none; border: none; color: var(--text); cursor: pointer; padding: 0.25rem; flex: 1; min-width: 0; text-align: left; font-size: 0.95rem; }
+  .file-row-static { cursor: default; }
+  .file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file-size { color: var(--text-muted, #888); font-size: 0.8rem; flex-shrink: 0; margin-left: auto; }
+  .file-row-actions { display: flex; gap: 0.35rem; flex-shrink: 0; }
+  .empty-state { color: var(--text-muted, #888); padding: 2rem 0; text-align: center; }
+</style>
