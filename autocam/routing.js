@@ -583,7 +583,10 @@ const APPROACH_CLEARANCE = 0.02;
 // How far past the underside of the stock a through-cut is allowed to
 // reach. Enough to guarantee the part actually separates (and to absorb a
 // slightly out-of-flat sheet) without burying the cutter in the spoilboard.
-const THROUGH_CUT_ALLOWANCE = 0.02;
+// Exported (not just used here) so the UI can derive the same "through this
+// stock" depth the generator itself will accept, instead of a duplicated
+// copy of this number drifting out of sync in two other places.
+export const THROUGH_CUT_ALLOWANCE = 0.02;
 
 // How far the CAD model's measured thickness may differ from the selected
 // stock before the header calls it out. Generous on purpose: nominal sheet

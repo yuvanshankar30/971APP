@@ -129,3 +129,31 @@ export function materialIdForStockAssignment(stockMaterialIndex, materials, stoc
   if (!stockCatalog) return '';
   return matchMaterialId(materials, materialNameFromStockText(stockCatalog, materials, stockAssignment));
 }
+
+/**
+ * Finds the specific stock.json catalog row (not just the generic material)
+ * a manufacturing request's stock_assignment names - the actual sheet, with
+ * its real thickness, not just "this part is Aluminum".
+ *
+ * Exact match only, deliberately more conservative than
+ * materialIdForStockAssignment's free-text fallback: a wrong MATERIAL guess
+ * costs a feed/speed default, recoverable by eye before running anything - a
+ * wrong STOCK guess costs the wrong THICKNESS, which is what
+ * generateRoutingGcode's cut depth comes from. Guessing a plausible-looking
+ * but wrong sheet is worse than finding none and leaving stock unspecified
+ * (falls back to the STEP file's own measured thickness instead).
+ *
+ * @param {object} stockCatalog stock.json
+ * @param {string} stockAssignment parts.stock_assignment
+ * @param {'router'|'lathe'} [category] which stockCatalog section to search -
+ *   router sheets/tubes for routing and tube-stock jobs
+ * @returns {string} the matching stock row's id, or '' when nothing matches exactly
+ */
+export function stockCatalogIdForStockAssignment(stockCatalog, stockAssignment, category = 'router') {
+  const needle = String(stockAssignment || '').trim().toLowerCase();
+  if (!needle) return '';
+  const rows = stockCatalog?.[category];
+  if (!Array.isArray(rows)) return '';
+  const exact = rows.find((row) => row?.description?.trim().toLowerCase() === needle);
+  return exact ? exact.id : '';
+}

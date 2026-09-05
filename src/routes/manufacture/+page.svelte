@@ -18,6 +18,7 @@
   import { isManufacturingLead, canCamReview as camReviewAllowed, canDeleteParts } from '$lib/permissions.js';
   import CadViewer from '$lib/components/CadViewer.svelte';
   import stockData from '$lib/stock.json';
+  import { buildStockMaterialIndex, materialIdForStockAssignment, stockCatalogIdForStockAssignment } from '$autocam/stockMaterial.js';
   import { formatPacificDate, formatPacificDateTimeWithZone } from '$lib/timezone.js';
   import PartDueDate from '$lib/components/PartDueDate.svelte';
   import PartNotes from '$lib/components/PartNotes.svelte';
@@ -61,6 +62,7 @@
   let camSetupPart = null;
   let camSetupJob = null;
   let camSetupMachines = [];
+  let camSetupMaterials = [];
   let camSetupTools = [];
   let camSetupMachineTools = [];
   let camSetupMachineId = '';
@@ -512,14 +514,16 @@
     camSetupJob = job;
     showCamSetupModal = true;
     try {
-      const [machinesResponse, toolsResponse, machineToolsResponse] = await Promise.all([
+      const [machinesResponse, materialsResponse, toolsResponse, machineToolsResponse] = await Promise.all([
         supabase.from('cam_machines').select('id, name, default_tool_id, default_params, gcode_extension').eq('operation_type', operationType).eq('enabled', true).order('name'),
+        supabase.from('cam_materials').select('id, name').eq('enabled', true),
         supabase.from('cam_tools').select('id, name, diameter, enabled').eq('enabled', true).order('name'),
         supabase.from('cam_machine_tools').select('machine_id, tool_id')
       ]);
       if (machinesResponse.error) throw machinesResponse.error;
       if (toolsResponse.error) throw toolsResponse.error;
       camSetupMachines = machinesResponse.data || [];
+      camSetupMaterials = materialsResponse.data || [];
       camSetupTools = toolsResponse.data || [];
       camSetupMachineTools = machineToolsResponse.data || [];
       const preferredMachine = camSetupMachines.find((machine) => String(machine.id) === String(job?.machine_id))
@@ -546,16 +550,32 @@
     camSetupToolId = '';
   }
 
+  // Same bridge /autocam's own "New Job" modal uses to carry a linked
+  // part's real recorded stock into the job it creates - built once here
+  // rather than duplicated, since stockData/stock.json never changes at
+  // runtime. See autocam/stockMaterial.js for why this is exact-match-only
+  // for the specific sheet (a wrong guess there costs the wrong cut depth)
+  // but has a free-text fallback for the generic material.
+  const camSetupStockMaterialIndex = buildStockMaterialIndex(stockData);
+
   async function submitCamSetup() {
     if (!camSetupPart || !selectedCamSetupMachine || !camSetupToolId) return;
     const part = camSetupPart;
     queuingCamJobForPartId = part.id;
+    // The request already recorded what this part is actually cut from -
+    // generating straight from the machine's generic defaults (no material,
+    // no specific stock/thickness) used to mean this "quick generate" path
+    // never got the depth/feed benefit of that, even though picking the
+    // part from /autocam's own New Job modal already did.
+    const materialId = materialIdForStockAssignment(camSetupStockMaterialIndex, camSetupMaterials, part.stock_assignment, stockData);
+    const stockCatalogId = stockCatalogIdForStockAssignment(stockData, part.stock_assignment);
     const options = {
       userId: user?.id || null,
       name: camSetupJob?.name || part.name,
       machineId: selectedCamSetupMachine.id,
       toolId: camSetupToolId,
-      params: selectedCamSetupMachine.default_params || {},
+      materialId: materialId || null,
+      params: { ...(selectedCamSetupMachine.default_params || {}), ...(stockCatalogId ? { stockCatalogId } : {}) },
       gcodeExtension: selectedCamSetupMachine.gcode_extension || 'ngc'
     };
     try {
@@ -3051,6 +3071,7 @@
               stockShape={toolpathModalJob.params?.stockShape || 'round'}
               noseRadius={Number(toolpathModalJob.params?.finishTool?.noseRadius ?? toolpathModalJob.params?.noseRadius) || null}
               drillDiameter={Number(toolpathModalJob.params?.drilling?.diameter) || null}
+              stockThickness={Number(toolpathModalJob.params?.stockThickness) || null}
               stepFileName={toolpathModalJob.step_file_name || null}
               edgeShiftX={Number(toolpathModalJob.stats?.edgeShiftX) || 0}
               edgeShiftY={Number(toolpathModalJob.stats?.edgeShiftY) || 0}

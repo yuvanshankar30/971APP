@@ -3,15 +3,10 @@ import { createClient } from '@supabase/supabase-js';
 import { PUBLIC_SUPABASE_ANON_KEY, PUBLIC_SUPABASE_URL, PUBLIC_APP_ORIGIN, PUBLIC_SITE_URL } from '$env/static/public';
 import { readStepMeshes, extractTurningProfileFromMeshes, extractRoutingContoursFromMeshes, extractTubeFeaturesFromMeshes } from '$autocam/stepProfile.js';
 import { generateTurningGcode } from '$autocam/turning.js';
-import { generateRoutingGcode } from '$autocam/routing.js';
+import { generateRoutingGcode, THROUGH_CUT_ALLOWANCE } from '$autocam/routing.js';
 import { generateTubestockGcode, tubestockFaceFileName, tubestockFaceGroupFileName } from '$autocam/tubestock.js';
 import { deliverJobToDrive } from '$autocam/drive_watcher.js';
 import stockData from '$lib/stock.json';
-
-// How far past the underside an auto-derived through cut reaches, so the
-// part actually separates. Matches routing.js's own allowance, which is what
-// its too-deep refusal already permits.
-const THROUGH_CUT_ALLOWANCE = 0.02;
 // Vite-built asset URL for occt-import-js's WASM binary - the same one
 // CadViewer.svelte already fetches successfully client-side. Fetching it
 // over HTTP (below) instead of reading it off disk sidesteps Vercel's

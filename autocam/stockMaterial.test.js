@@ -3,7 +3,8 @@ import {
   buildStockMaterialIndex,
   matchMaterialId,
   materialNameFromStockText,
-  materialIdForStockAssignment
+  materialIdForStockAssignment,
+  stockCatalogIdForStockAssignment
 } from './stockMaterial.js';
 import stockData from '../src/lib/stock.json';
 
@@ -123,5 +124,39 @@ describe('materialIdForStockAssignment (against the real stock catalog)', () => 
     for (const vague of ['Tube', 'lead screw', '0.313 stock', 'BRONZE BUSHING', '', null]) {
       expect(resolve(vague), String(vague)).toBe('');
     }
+  });
+});
+
+describe('stockCatalogIdForStockAssignment (against the real stock catalog)', () => {
+  const routerSheet = (stockData.router || []).find((s) => !s.isTube && s.thickness > 0);
+
+  it('resolves an exact catalog description to that real sheet, thickness and all', () => {
+    expect(routerSheet).toBeTruthy();
+    expect(stockCatalogIdForStockAssignment(stockData, routerSheet.description)).toBe(routerSheet.id);
+  });
+
+  it('is case and whitespace insensitive, same as an operator re-typing a real description', () => {
+    expect(stockCatalogIdForStockAssignment(stockData, `  ${routerSheet.description.toUpperCase()}  `)).toBe(routerSheet.id);
+  });
+
+  it('fails closed on hand-typed free text, unlike the material bridge - a wrong sheet costs the wrong cut depth', () => {
+    // These resolve a MATERIAL fine (see materialIdForStockAssignment above)
+    // but must not resolve to any specific sheet - guessing a thickness is
+    // the one thing this function is deliberately conservative about.
+    for (const handTyped of ['1/4" SRPP', 'Birch 0.75"', '1.25" Polycarb', 'Lexan 1.25"', '3/32 aluminum']) {
+      expect(stockCatalogIdForStockAssignment(stockData, handTyped), handTyped).toBe('');
+    }
+  });
+
+  it('fails closed on empty/vague input', () => {
+    for (const vague of ['', null, undefined, 'Tube', 'lead screw']) {
+      expect(stockCatalogIdForStockAssignment(stockData, vague), String(vague)).toBe('');
+    }
+  });
+
+  it('only searches the requested category', () => {
+    // A router sheet description should not resolve against, say, a lathe
+    // category search - the two catalogs are unrelated stock lists.
+    expect(stockCatalogIdForStockAssignment(stockData, routerSheet.description, 'lathe')).toBe('');
   });
 });
