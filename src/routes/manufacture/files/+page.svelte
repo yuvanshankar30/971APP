@@ -110,14 +110,26 @@
     }
   }
 
+  // Opens the tab synchronously, before the await below - some browsers
+  // (older Firefox/Chromium builds especially) only allow window.open()
+  // within the same tick as the click that triggered it and silently drop
+  // it otherwise, with no error to catch. The tab is filled in once the
+  // signed URL comes back; `download` forces a real attachment response so
+  // it downloads the file instead of just rendering it as text.
   async function handleDownload(entry) {
+    const tab = window.open('', '_blank');
     try {
       const { data, error } = await supabase.storage
         .from(BUCKET)
-        .createSignedUrl(joinPath(currentPath, entry.name), 300);
+        .createSignedUrl(joinPath(currentPath, entry.name), 300, { download: entry.name });
       if (error || !data?.signedUrl) throw error || new Error('Could not create download link');
-      window.open(data.signedUrl, '_blank');
+      if (tab) {
+        tab.location.href = data.signedUrl;
+      } else {
+        window.location.href = data.signedUrl;
+      }
     } catch (e) {
+      if (tab) tab.close();
       toastActions.show(e.message || 'Download failed');
     }
   }
