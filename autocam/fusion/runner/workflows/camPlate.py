@@ -13,7 +13,16 @@ from ..commands.MultiImport import importFiles
 from ..commands.NewNCProgram import export
 from ..commands.DeleteToolpaths import DeleteToolpaths
 from ..commands.AutoArrange import AutoArrange
-from ..config import BASE_URL, FINAL_PATH, INITIAL_PATH, TEMP_PATH, TOOLS_PATH
+from ..config import (
+    BASE_URL,
+    FINAL_PATH,
+    FUSION_DATA_PROJECT_NAME,
+    FUSION_DROP_FOLDER_PATH,
+    INITIAL_PATH,
+    TEMP_PATH,
+    TOOLS_PATH,
+)
+from .dropFolder import resolve_drop_folder
 from .importPlate import clear_design_nuke
 from .job_status import ensure_completion_response, send_job_error
 from .templateTools import patch_cam_template_with_tool_libraries
@@ -560,16 +569,11 @@ def start(data, session):
 
         plate_id = str(_get(payload, "plate_id", "plateId", default="cam_plate"))
 
-        # Save the document to AutoCAM Drop folder
+        # Save the document to the configured AutoCAM drop folder
         try:
-            # Get the AutoCAM Drop folder
-            data_project = app.data.dataProjects.item(1)
-            root_folder = data_project.rootFolder
-            autocam_drop_folder = root_folder.dataFolders.itemByName("AutoCAM Drop")
-
-            if autocam_drop_folder is None:
-                app.log("AutoCAM Drop folder not found, creating it...")
-                autocam_drop_folder = root_folder.dataFolders.add("AutoCAM Drop")
+            data_project, autocam_drop_folder = resolve_drop_folder(
+                app, FUSION_DATA_PROJECT_NAME, FUSION_DROP_FOLDER_PATH
+            )
 
             # Save the document with Plate<plate_id>Job<job_id> format
             doc_name = f"Plate{plate_id}Job{job_id}"
@@ -583,11 +587,11 @@ def start(data, session):
 
             # Save the document
             doc.saveAs(doc_name, autocam_drop_folder, "", "")
-            app.log(f"Saved document '{doc_name}' to AutoCAM Drop folder")
+            app.log(f"Saved document '{doc_name}' to '{data_project.name}/{FUSION_DROP_FOLDER_PATH}'")
 
         except Exception as e:
             app.log(
-                f"Failed to save document to AutoCAM Drop folder:\n{traceback.format_exc()}"
+                f"Failed to save document to '{FUSION_DROP_FOLDER_PATH}' folder:\n{traceback.format_exc()}"
             )
 
         export_dir = os.path.join(FINAL_PATH, plate_id)
