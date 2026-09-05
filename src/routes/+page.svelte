@@ -232,6 +232,9 @@
   // set again - the account preference is unreadable before auth, so this
   // cache is what actually drives the pre-auth render.
   $: if (user?.login_screen_style) setLoginScreenStyle(user.login_screen_style);
+  // The account profile is authoritative, so a sign-in restores the theme
+  // that this email selected even after the browser was signed out.
+  $: if (user?.theme_preference) setTheme(user.theme_preference);
 
   async function handleAuth() {
     authLoading = true;

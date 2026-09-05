@@ -27,6 +27,7 @@
 
   let savingProfile = false;
   let changingPassword = false;
+  let sendingPasswordReset = false;
   let loggingOut = false;
   // Appearance / customization
   let header_tabs = null; // array structure stored in DB
@@ -276,6 +277,25 @@
     }
   }
 
+  async function saveThemePreference(value) {
+    if (!user?.id) return toastActions.show('Not signed in');
+    const previousTheme = $theme;
+    setTheme(value);
+    try {
+      const { error } = await supabase
+        .from('user_profiles')
+        .update({ theme_preference: value })
+        .eq('id', user.id);
+      if (error) throw error;
+      await fetchUserProfile(user.id);
+      toastActions.show('Theme saved to your account');
+    } catch (e) {
+      setTheme(previousTheme);
+      console.error('theme preference update error', e);
+      toastActions.show(e.message || 'Failed to save theme preference');
+    }
+  }
+
   async function savePurchasingLineTotalVisibility(enabled) {
     if (!user?.id) return toastActions.show('Not signed in');
     const previousValue = show_purchasing_line_totals;
@@ -307,6 +327,7 @@
         dashboard_layout: dashboard_layout,
         header_tabs: header_tabs,
         login_screen_style: login_screen_style,
+        theme_preference: $theme,
         show_purchasing_line_totals: show_purchasing_line_totals,
         notification_settings: notificationSettings
       };
@@ -343,15 +364,32 @@
   }
 
   async function changePassword() {
-  if (!user) return toastActions.show('Not signed in');
-  if (!newPassword) return toastActions.show('New password required');
-  if (newPassword !== passwordConfirm) return toastActions.show('Passwords do not match');
+    if (!user) return toastActions.show('Not signed in');
+    if (!currentPassword) return toastActions.show('Enter your current password');
+    if (!newPassword) return toastActions.show('New password required');
+    if (newPassword !== passwordConfirm) return toastActions.show('Passwords do not match');
     changingPassword = true;
     try {
-      // Supabase requires re-auth or uses auth.updateUser with password.
-      const { data, error } = await supabase.auth.updateUser({ password: newPassword });
+      // Re-authenticate before changing a credential. A valid session alone
+      // is not enough: someone with an unattended signed-in browser should
+      // not be able to replace the account password.
+      const { data: authData, error: authUserError } = await supabase.auth.getUser();
+      if (authUserError) throw authUserError;
+      const accountEmail = authData.user?.email;
+      if (!accountEmail) throw new Error('Unable to verify the signed-in account');
+
+      const { error: verificationError } = await supabase.auth.signInWithPassword({
+        email: accountEmail,
+        password: currentPassword
+      });
+      if (verificationError) {
+        toastActions.show('Current password is incorrect');
+        return;
+      }
+
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
       if (error) throw error;
-  toastActions.show('Password changed');
+      toastActions.show('Password changed');
       currentPassword = '';
       newPassword = '';
       passwordConfirm = '';
@@ -360,6 +398,25 @@
   toastActions.show(e.message || 'Failed to change password');
     } finally {
       changingPassword = false;
+    }
+  }
+
+  async function sendPasswordResetEmail() {
+    if (!user) return toastActions.show('Not signed in');
+    sendingPasswordReset = true;
+    try {
+      const { data, error: authUserError } = await supabase.auth.getUser();
+      if (authUserError) throw authUserError;
+      const accountEmail = data.user?.email;
+      if (!accountEmail) throw new Error('Unable to verify the signed-in account');
+      const { error } = await supabase.auth.resetPasswordForEmail(accountEmail);
+      if (error) throw error;
+      toastActions.show('Password reset link sent. Check your email.');
+    } catch (e) {
+      console.error('password reset email error', e);
+      toastActions.show(e.message || 'Failed to send password reset email');
+    } finally {
+      sendingPasswordReset = false;
     }
   }
 
@@ -468,14 +525,19 @@
 
     <section class="card">
       <h3>Change Password</h3>
+      <p class="muted">Confirm your current password before changing it, or request a reset link sent to your account email.</p>
+      <label class="form-label">Current password
+        <input class="form-input" type="password" autocomplete="current-password" bind:value={currentPassword} />
+      </label>
       <label class="form-label">New password
-        <input class="form-input" type="password" bind:value={newPassword} />
+        <input class="form-input" type="password" autocomplete="new-password" bind:value={newPassword} />
       </label>
       <label class="form-label">Confirm password
-        <input class="form-input" type="password" bind:value={passwordConfirm} />
+        <input class="form-input" type="password" autocomplete="new-password" bind:value={passwordConfirm} />
       </label>
       <div class="actions">
         <button class="btn" on:click={changePassword} disabled={changingPassword}>{changingPassword ? 'Changing...' : 'Change Password'}</button>
+        <button class="btn btn-outline" on:click={sendPasswordResetEmail} disabled={sendingPasswordReset} style="margin-left:8px">{sendingPasswordReset ? 'Sending...' : 'Email me a reset link'}</button>
       </div>
     </section>
     {/if}
@@ -489,7 +551,7 @@
             <h4>{group.label}</h4>
             <div class="theme-grid">
               {#each group.themes as t}
-                <button type="button" class="theme-card" class:selected={$theme === t.id} aria-pressed={$theme === t.id} on:click={() => setTheme(t.id)}>
+                <button type="button" class="theme-card" class:selected={$theme === t.id} aria-pressed={$theme === t.id} on:click={() => saveThemePreference(t.id)}>
                   <span class="theme-swatch" style={`--swatch-a:${t.preview[0]};--swatch-b:${t.preview[1]}`}></span>
                   <span>{t.label}</span>
                 </button>
