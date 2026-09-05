@@ -416,7 +416,11 @@ own docs are all together in one place instead of scattered across
   uses `VISION_RUNNER_TOKEN`.
   The Fusion UI includes a Stock Categories tab for CAM managers to define
   the material and true-thickness combinations required before Parts and
-  Plates can be nested. It uses Supabase Auth + `canManageCamProfiles` for
+  Plates can be nested. Parts can be grouped by stock category with remaining
+  quantity totals and a shortcut to matching plates; this is a planning view,
+  with physical arrangement still performed by Fusion. See
+  `autocam/docs/fusion-grouping-review.md` for the draft scope and review findings.
+  It uses Supabase Auth + `canManageCamProfiles` for
   humans, same as the rest of this
   app. See `autocam/fusion/README.md` and `valor6800-autocam-runner-setup.md`
   (repo root) for the full port writeup and the evaluation that led to it.

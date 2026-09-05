@@ -8,6 +8,8 @@
 
   export let user;
   export let canManage;
+  export let categoryFilter = '';
+  $: visiblePlates = categoryFilter ? plates.filter((plate) => String(plate.category_id) === String(categoryFilter)) : plates;
 
   let plates = [];
   let parts = [];
@@ -298,11 +300,17 @@
     </div>
   {/if}
 
-  {#if plates.length === 0}
-    <p class="empty-state">No plates yet. {canManage ? 'Add one above to get started.' : 'Ask a manufacturing lead to add one.'}</p>
+  {#if categoryFilter}
+    <div class="cam-list-actions">
+      <span class="cam-form-hint">Stock group: {categoryLabel(categories.find((category) => String(category.id) === String(categoryFilter)))}</span>
+      <button type="button" class="btn btn-ghost btn-sm" on:click={() => (categoryFilter = '')}>Show all plates</button>
+    </div>
+  {/if}
+  {#if visiblePlates.length === 0}
+    <p class="empty-state">{categoryFilter ? 'No plates match this stock group.' : 'No plates yet.'} {canManage ? 'Add one above to get started.' : 'Ask a manufacturing lead to add one.'}</p>
   {:else}
     <div class="cam-list">
-      {#each plates as plate (plate.id)}
+      {#each visiblePlates as plate (plate.id)}
         <div class="card cam-list-item">
           <div class="cam-list-header">
             {#if renamingPlateId === plate.id}
