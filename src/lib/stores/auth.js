@@ -39,7 +39,7 @@ export async function fetchUserProfile(userId) {
     const [profileResult, rosterResult] = await Promise.all([
       supabase
         .from('user_profiles')
-        .select('id, email, full_name, role, is_dev, permissions, header_tabs, dashboard_layout, login_screen_style, created_at, updated_at, banned, general_role, purchasing_role, team_role, frc_team, notification_settings, slack_user_id, slack_dm_channel, manufacturing_lead_workflows')
+        .select('id, email, full_name, role, is_dev, permissions, header_tabs, dashboard_layout, login_screen_style, show_purchasing_line_totals, created_at, updated_at, banned, general_role, purchasing_role, team_role, frc_team, notification_settings, slack_user_id, slack_dm_channel, manufacturing_lead_workflows')
         .eq('id', userId)
         .single(),
       supabase
@@ -88,6 +88,7 @@ export async function fetchUserProfile(userId) {
       // new customization fields
       header_tabs: headerTabs,
       dashboard_layout: data.dashboard_layout || 'grid',
+      show_purchasing_line_totals: data.show_purchasing_line_totals !== false,
       created_at: data.created_at || '',
   updated_at: data.updated_at || '',
   banned: !!data.banned,

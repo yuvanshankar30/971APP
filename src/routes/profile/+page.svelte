@@ -32,6 +32,7 @@
   let header_tabs = null; // array structure stored in DB
   let dashboard_layout = 'grid';
   let login_screen_style = 'legacy';
+  let show_purchasing_line_totals = true;
   let newFolderName = '';
   let addTabKey = '';
   let targetFolderIdx = '';
@@ -237,6 +238,7 @@
         header_tabs = user.header_tabs || null;
         dashboard_layout = user.dashboard_layout || 'grid';
         login_screen_style = user.login_screen_style || 'legacy';
+        show_purchasing_line_totals = user.show_purchasing_line_totals !== false;
         // Sync this browser's cache so the signed-out screen (which can't
         // read user_profiles before auth) picks up the account's saved
         // preference the next time this user logs out here.
@@ -274,6 +276,25 @@
     }
   }
 
+  async function savePurchasingLineTotalVisibility(enabled) {
+    if (!user?.id) return toastActions.show('Not signed in');
+    const previousValue = show_purchasing_line_totals;
+    show_purchasing_line_totals = enabled;
+    try {
+      const { error } = await supabase
+        .from('user_profiles')
+        .update({ show_purchasing_line_totals: enabled })
+        .eq('id', user.id);
+      if (error) throw error;
+      await fetchUserProfile(user.id);
+      toastActions.show(`Purchasing line totals ${enabled ? 'shown' : 'hidden'}`);
+    } catch (e) {
+      show_purchasing_line_totals = previousValue;
+      console.error('purchasing line totals update error', e);
+      toastActions.show(e.message || 'Failed to update Purchasing display preference');
+    }
+  }
+
   async function saveProfile() {
   if (!user?.id) return toastActions.show('Not signed in');
     savingProfile = true;
@@ -286,6 +307,7 @@
         dashboard_layout: dashboard_layout,
         header_tabs: header_tabs,
         login_screen_style: login_screen_style,
+        show_purchasing_line_totals: show_purchasing_line_totals,
         notification_settings: notificationSettings
       };
       console.log('saveProfile payload', payload);
@@ -307,6 +329,7 @@
           header_tabs = refreshed.header_tabs || null;
           dashboard_layout = refreshed.dashboard_layout || 'grid';
           login_screen_style = refreshed.login_screen_style || 'legacy';
+          show_purchasing_line_totals = refreshed.show_purchasing_line_totals !== false;
         }
       } catch (e) {
         console.warn('Failed to refresh profile after save', e);
@@ -480,6 +503,18 @@
             <option value="modern">Modern Login</option>
           </select>
           <small class="form-help">Applies instantly and is saved to your account.</small>
+        </label>
+        <label class="display-preference" for="purchasing-line-totals">
+          <input
+            id="purchasing-line-totals"
+            type="checkbox"
+            checked={show_purchasing_line_totals}
+            on:change={(event) => savePurchasingLineTotalVisibility(event.currentTarget.checked)}
+          />
+          <span>
+            <strong>Show Purchasing line totals</strong>
+            <small>Displays unit price × quantity in the Purchasing table. This preference applies only to your account.</small>
+          </span>
         </label>
       </section>
     {/if}
@@ -669,6 +704,10 @@
   .theme-card:hover { border-color:var(--text-muted); background:var(--surface-2); }
   .theme-card.selected { border-color:var(--blue-base); box-shadow:0 0 0 1px var(--blue-base); }
   .theme-swatch { width:3.5rem; height:3.5rem; flex:0 0 3.5rem; border-radius:50%; border:1px solid rgba(255,255,255,.18); background:linear-gradient(135deg,var(--swatch-a),var(--swatch-b)); }
+  .display-preference { display:flex; align-items:flex-start; gap:var(--gap-3); margin-top:var(--space-5); padding-top:var(--space-4); border-top:1px solid var(--border); cursor:pointer; }
+  .display-preference input { margin-top:0.2rem; }
+  .display-preference span { display:grid; gap:var(--space-1); }
+  .display-preference small { color:var(--text-muted); }
   .notify-row { display: flex; gap: var(--gap-3); align-items: flex-start; padding: var(--space-2) 0; border-bottom: 1px solid var(--border); }
   .notify-row:last-child { border-bottom: none; }
   .notify-label { font-weight: 600; }
