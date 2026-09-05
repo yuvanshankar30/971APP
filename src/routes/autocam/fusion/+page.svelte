@@ -3,7 +3,7 @@
   import { supabase } from '$lib/supabase.js';
   import { userStore, loadUserFromUUID } from '$lib/stores/user.js';
   import { canManageCamProfiles } from '$lib/permissions.js';
-  import { Layers, Package, Box, ListChecks, SlidersHorizontal } from 'lucide-svelte';
+  import { Layers, Package, Box, ListChecks, SlidersHorizontal, BookOpen } from 'lucide-svelte';
   import PartsTab from './PartsTab.svelte';
   import PlatesTab from './PlatesTab.svelte';
   import BoxTubesTab from './BoxTubesTab.svelte';
@@ -32,6 +32,14 @@
 
 <div class="page-header">
   <h1><Layers size={28} /> Fusion CAM</h1>
+  <a
+    class="btn btn-secondary btn-sm"
+    href="https://github.com/frc971/spartanshub/blob/main/valor6800-autocam-runner-setup.md"
+    target="_blank"
+    rel="noopener noreferrer"
+  >
+    <BookOpen size={14} /> Runner Setup Guide
+  </a>
 </div>
 <p class="page-subtitle">
   Real 3-axis milling via Fusion 360's own CAM engine - a separate pipeline from the code-based
