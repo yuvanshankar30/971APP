@@ -44,6 +44,7 @@ export function defaultHeaderTabs(navConfig = navigation) {
   if (navConfig?.tabs?.['gcode-converter'] !== false) manufacturingChildren.push({ key: 'gcode-converter', label: 'G-code Converter' });
   if (navConfig?.tabs?.kitting !== false) manufacturingChildren.push({ key: 'kitting', label: 'Kitting' });
   if (navConfig?.tabs?.['cots-stocking'] !== false) manufacturingChildren.push({ key: 'cots-stocking', label: 'COTS Stocking' });
+  if (navConfig?.tabs?.files !== false) manufacturingChildren.push({ key: 'files', label: 'Files' });
   if (manufacturingChildren.length) {
     tabs.push({ type: 'folder', label: 'Manufacturing', children: manufacturingChildren });
   }
@@ -163,6 +164,23 @@ export function ensureGcodeConverterTab(tabs, navConfig = navigation) {
     return item.key === 'text-engraving' ? { ...item, ...entry } : item;
   });
   if (containsTabKey(tabs, 'text-engraving')) return replaceTextEngraving(tabs);
+  const folderIndex = tabs.findIndex((item) => item?.type === 'folder' && item?.label === MANUFACTURING_FOLDER_LABEL);
+  if (folderIndex === -1) return [...tabs, { type: 'tab', ...entry }];
+  const folder = tabs[folderIndex];
+  const next = [...tabs];
+  next[folderIndex] = { ...folder, children: [...(Array.isArray(folder.children) ? folder.children : []), entry] };
+  return next;
+}
+
+// Files (the manufacturing-drive shared file browser) is new - anyone with
+// a saved header_tabs from before it existed needs it appended the same way
+// every other post-launch tab does, or "add this for everyone" silently
+// never reaches accounts that already customized their header. See
+// ensureGcodeConverterTab() for the identical Manufacturing-folder pattern.
+export function ensureFilesTab(tabs, navConfig = navigation) {
+  if (navConfig?.tabs?.files === false || !Array.isArray(tabs)) return tabs;
+  if (containsTabKey(tabs, 'files')) return tabs;
+  const entry = { key: 'files', label: 'Files' };
   const folderIndex = tabs.findIndex((item) => item?.type === 'folder' && item?.label === MANUFACTURING_FOLDER_LABEL);
   if (folderIndex === -1) return [...tabs, { type: 'tab', ...entry }];
   const folder = tabs[folderIndex];

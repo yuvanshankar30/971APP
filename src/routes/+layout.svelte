@@ -6,8 +6,8 @@
   import { supabase } from '$lib/supabase.js';
   import { fetchActiveScoutingEventKey } from '$lib/scoutingEvent.js';
   import navConfig from '$lib/navigation.json';
-  import { defaultHeaderTabs, ensurePowerRankingsTab, ensureScoutingAdminTab, ensureStrategyTab, ensureGcodeConverterTab } from '$lib/defaultTabs.js';
-  import { Move3d, Hammer, Wrench, Receipt, Home, Briefcase, Coins, Package, User, ChevronDown, Menu, X, Camera, CalendarDays, Cpu, FileText, Trophy, Eye, ClipboardCheck, ListChecks, Target } from 'lucide-svelte';
+  import { defaultHeaderTabs, ensurePowerRankingsTab, ensureScoutingAdminTab, ensureStrategyTab, ensureGcodeConverterTab, ensureFilesTab } from '$lib/defaultTabs.js';
+  import { Move3d, Hammer, Wrench, Receipt, Home, Briefcase, Coins, Package, User, ChevronDown, Menu, X, Camera, CalendarDays, Cpu, FileText, Trophy, Eye, ClipboardCheck, ListChecks, Target, Folder } from 'lucide-svelte';
   import { goto, afterNavigate } from '$app/navigation';
   import { page } from '$app/stores';
   import Toasts from '$lib/Toasts.svelte';
@@ -289,6 +289,7 @@
     'cots-stocking': '/cots-stocking',
     autocam: '/autocam',
     'gcode-converter': '/manufacture/gcode-converter',
+    files: '/manufacture/files',
     home: '/',
     profile: '/profile',
     admin: '/admin'
@@ -315,6 +316,7 @@
     'cots-stocking': Package,
     autocam: Cpu,
     'gcode-converter': FileText,
+    files: Folder,
     home: Home,
     profile: User,
     admin: Briefcase
@@ -341,6 +343,7 @@
     'cots-stocking': 'COTS Stocking',
     autocam: 'AutoCAM',
     'gcode-converter': 'G-code Converter',
+    files: 'Files',
     admin: 'Admin'
   };
 
@@ -463,7 +466,7 @@
   // Power Rankings is appended for anyone whose saved header_tabs predates it,
   // so a customized nav still surfaces the feature. Purely additive - see
   // ensurePowerRankingsTab().
-  $: baseNavTabs = addAdminTabIfAllowed(ensureScoutingAdminTab(ensureStrategyTab(ensureGcodeConverterTab(ensurePowerRankingsTab(effectiveTabs, navConfig), navConfig))), canViewAdmin);
+  $: baseNavTabs = addAdminTabIfAllowed(ensureScoutingAdminTab(ensureStrategyTab(ensureFilesTab(ensureGcodeConverterTab(ensurePowerRankingsTab(effectiveTabs, navConfig), navConfig), navConfig))), canViewAdmin);
   $: navItems = isApproved ? buildNavItems(baseNavTabs) : [];
 
   // Drag-to-reorder for the desktop nav's top-level tabs/folders. Home is

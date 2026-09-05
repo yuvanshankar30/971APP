@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { defaultHeaderTabs, ensurePowerRankingsTab, ensureScoutingAdminTab, ensureStrategyTab, ensureGcodeConverterTab } from './defaultTabs.js';
+import { defaultHeaderTabs, ensurePowerRankingsTab, ensureScoutingAdminTab, ensureStrategyTab, ensureGcodeConverterTab, ensureFilesTab } from './defaultTabs.js';
 
 const enabled = { tabs: { powerrankings: true } };
 
@@ -45,6 +45,10 @@ describe('defaultHeaderTabs', () => {
     expect(manufacturingChildren(defaultHeaderTabs())).toContainEqual({ key: 'gcode-converter', label: 'G-code Converter' });
   });
 
+  it('includes Files in the Manufacturing folder', () => {
+    expect(manufacturingChildren(defaultHeaderTabs())).toContainEqual({ key: 'files', label: 'Files' });
+  });
+
   it('orders the scouting surfaces the way the team asked for them', () => {
     // Deliberate order, not incidental: strategy leads as the board the team
     // opens to decide something, then the collection surfaces that feed it
@@ -83,6 +87,27 @@ describe('ensureGcodeConverterTab', () => {
     const result = ensureGcodeConverterTab(tabs);
     expect(result).toEqual([{ type: 'tab', key: 'gcode-converter', label: 'G-code Converter' }]);
     expect(tabs[0].key).toBe('text-engraving');
+  });
+});
+
+describe('ensureFilesTab', () => {
+  it('adds Files to an existing Manufacturing folder without disturbing saved tabs', () => {
+    const tabs = [{ type: 'folder', label: 'Manufacturing', children: [{ key: 'manufacture', label: 'Manufacture' }] }];
+    const result = ensureFilesTab(tabs);
+    expect(manufacturingChildren(result)).toContainEqual({ key: 'files', label: 'Files' });
+    expect(manufacturingChildren(result)).toContainEqual({ key: 'manufacture', label: 'Manufacture' });
+  });
+
+  it('does nothing once Files is already present, including if someone moved it', () => {
+    const tabs = [{ type: 'tab', key: 'files', label: 'My Files' }];
+    const result = ensureFilesTab(tabs);
+    expect(result).toEqual(tabs);
+  });
+
+  it('falls back to a top-level tab when there is no Manufacturing folder', () => {
+    const tabs = [{ type: 'tab', key: 'docs', label: 'Docs' }];
+    const result = ensureFilesTab(tabs);
+    expect(result).toContainEqual({ type: 'tab', key: 'files', label: 'Files' });
   });
 });
 
