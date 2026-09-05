@@ -35,15 +35,18 @@ def SetupGenerator(
     )
     setup.parameters.itemByName("job_model").value.value = occurances
     # Z axis/plane + Y axis mode (not the two-in-plane-axes mode) - X is
-    # derived automatically via the right-hand rule from these two, rather
-    # than picked directly. Box point 'bottom 2' looked right numerically
-    # (lands on a real bounding-box corner) but was confirmed via an actual
-    # screenshot of the live Fusion viewport to render at the top-left, not
-    # bottom-left - "min/max" in the box point name is in the WCS's own
-    # local axes, not the screen, so it doesn't visually mean what it
-    # sounds like. 'bottom 1' is the corner at the opposite end of the same
-    # screen-axis (confirmed by direct measurement: same X, the other Y
-    # extreme) - use that one instead.
+    # derived automatically via the right-hand rule from Z and Y, rather
+    # than picked directly, so its direction can only be controlled via
+    # flipZ/flipY (there's no separate flipX in this mode). Verified live,
+    # piece by piece, against the real slapdih document via the Fusion MCP
+    # bridge (earlier box-point-only attempts were confounded by Fusion
+    # caching the previously-imported add-in code across job runs until a
+    # full restart - see camPlate.py's matching note): box point 'bottom 2'
+    # plus flipZ=True puts the origin on the model's (Xmin, Ymin) corner
+    # AND makes +X point back into the material from there (required - the
+    # un-flipped Z had +X pointing away from the stock into open air at
+    # that corner) - matches the zaxis_dir this app's very first validated
+    # reference configuration also used.
     setup.parameters.itemByName("wcs_orientation_mode").expression = "'axesZY'"
     setup.parameters.itemByName("wcs_orientation_axisZ").value.value = [
         comp.zConstructionAxis
@@ -51,9 +54,9 @@ def SetupGenerator(
     setup.parameters.itemByName("wcs_orientation_axisY").value.value = [
         comp.xConstructionAxis
     ]
-    setup.parameters.itemByName("wcs_orientation_flipZ").value.value = False
+    setup.parameters.itemByName("wcs_orientation_flipZ").value.value = True
     setup.parameters.itemByName("wcs_orientation_flipY").value.value = False
-    setup.parameters.itemByName("wcs_origin_boxPoint").expression = "'bottom 1'"
+    setup.parameters.itemByName("wcs_origin_boxPoint").expression = "'bottom 2'"
     baseDir = os.path.dirname(os.path.realpath(__file__))
     # machine is Swift and IQ, material is Aluminum and Polycarb
     if template_path:
