@@ -385,10 +385,23 @@ def start(data, session):
                 fpath = os.path.join(root, fname)
                 try:
                     with open(fpath, "r", encoding="utf-8", errors="replace") as ncf:
-                        gcode_parts.append(f"(=== {fname} ===)\n{ncf.read()}")
+                        content = ncf.read()
+                    # Each post-processed file is a standalone NC program
+                    # with its own leading/trailing '%' delimiter - fine on
+                    # its own, but concatenating more than one (a plate with
+                    # more than one toolpath group) put '%' in the middle of
+                    # the combined file, which LinuxCNC's interpreter rejects
+                    # ("bad character % used"), confirmed against a real
+                    # multi-toolpath plate job. Strip each file's own
+                    # delimiter lines; the combined file gets exactly one
+                    # pair added back below.
+                    content = "\n".join(
+                        line for line in content.splitlines() if line.strip() != "%"
+                    )
+                    gcode_parts.append(f"(=== {fname} ===)\n{content}")
                 except Exception:
                     app.log(f"Could not read exported NC file {fpath}:\n{traceback.format_exc()}")
-        combined_gcode = "\n\n".join(gcode_parts)
+        combined_gcode = "%\n" + "\n\n".join(gcode_parts) + "\n%\n"
         shutil.rmtree(export_dir, ignore_errors=True)
 
         completion_data = {
