@@ -6,6 +6,7 @@
   import { userStore, loadUserFromUUID } from '$lib/stores/user.js';
   import { validateStepFile } from '$lib/step_validation.js';
   import { queueCamJobForPart, WORKFLOW_OPERATION_TYPE } from '$autocam/camJobs.js';
+  import { buildStockMaterialIndex, materialIdForStockAssignment, stockCatalogIdForStockAssignment } from '$autocam/stockMaterial.js';
 
   let partName = '';
   let requesterName = '';
@@ -23,6 +24,7 @@
   let camJobName = ''; // optional AutoCAM job name for router/lathe
   let camFolderPath = '';
   let notes = '';
+  let dontNotify = false;
   let isSubmitting = false;
   let user = null;
 
@@ -73,13 +75,30 @@
   // for router and lathe now) - no separate CAM-specific upload needed.
   // Errors here don't block part creation - the user can retry from the
   // manufacture list.
-  async function triggerAutocamFromStep(newPartId, stepFileName) {
+  // Built once - stock.json never changes at runtime. Bridges this form's
+  // own stock text (whatever the requester picked/typed above) to a
+  // cam_materials row and, for routing, the specific stock.json sheet - see
+  // autocam/stockMaterial.js. Without this, a router/lathe request created
+  // here queued its AutoCAM job with no material and no real stock, even
+  // though the request just recorded exactly what the part is cut from.
+  const createStockMaterialIndex = buildStockMaterialIndex(stockData);
+
+  async function triggerAutocamFromStep(newPartId, stepFileName, effectiveStock) {
     if (!supportsAutocam || !stepFileName) return;
     try {
       const machineDefaults = await resolveAutocamMachineDefaults();
+      const { data: camMaterials } = await supabase.from('cam_materials').select('id, name').eq('enabled', true);
+      const materialId = materialIdForStockAssignment(createStockMaterialIndex, camMaterials || [], effectiveStock, stockData);
+      const stockCatalogId = stockCatalogIdForStockAssignment(stockData, effectiveStock);
       const result = await queueCamJobForPart(
         { id: newPartId, name: partName, workflow, file_name: stepFileName },
-        { userId: user?.id || null, name: camJobName.trim() || null, ...machineDefaults }
+        {
+          userId: user?.id || null,
+          name: camJobName.trim() || null,
+          ...machineDefaults,
+          materialId: materialId || null,
+          params: { ...(machineDefaults.params || {}), ...(stockCatalogId ? { stockCatalogId } : {}) }
+        }
       );
       if (!result.success) console.error('AutoCAM generation failed:', result.error);
     } catch (e) {
@@ -330,7 +349,7 @@
         .select('id')
         .single();
       if (insertError) throw insertError;
-      if (insertedPart?.id) {
+      if (insertedPart?.id && !dontNotify) {
         await sendNotification('manufacturing-request', { part_id: insertedPart.id });
       }
 
@@ -404,8 +423,8 @@
         .single();
       if (insertError) throw insertError;
 
-      await triggerAutocamFromStep(insertedPart.id, stepName);
-      if (insertedPart?.id) {
+      await triggerAutocamFromStep(insertedPart.id, stepName, effectiveStock);
+      if (insertedPart?.id && !dontNotify) {
         await sendNotification('manufacturing-request', { part_id: insertedPart.id });
       }
 
@@ -493,8 +512,8 @@
         .single();
       if (insertError) throw insertError;
 
-      await triggerAutocamFromStep(insertedPart.id, stepName);
-      if (insertedPart?.id) {
+      await triggerAutocamFromStep(insertedPart.id, stepName, effectiveStock);
+      if (insertedPart?.id && !dontNotify) {
         await sendNotification('manufacturing-request', { part_id: insertedPart.id });
       }
 
@@ -826,6 +845,10 @@
           <label for="notes">Notes <span class="optional-label">(optional)</span></label>
           <textarea id="notes" bind:value={notes} rows="4" placeholder="Anything the manufacturing lead should know about this request..."></textarea>
         </div>
+        <label class="dont-notify-check">
+          <input type="checkbox" bind:checked={dontNotify} />
+          Don't notify - skip the Slack message to leads signed up for this process
+        </label>
       </div>
 
       <!-- Submit Button -->
@@ -848,32 +871,75 @@
 
 <style>
   .header { margin-bottom: 2rem; }
-  .header h1 { margin-bottom: 0.5rem; }
+  .header h1 { margin-bottom: 0.5rem; font-size: 1.75rem; }
   .header p { color: var(--neutral-500); margin-bottom: 0; }
-  .form-container { background: var(--primary); border: 1px solid var(--border); border-radius: 4px; padding: 1.5rem; margin-bottom: 1rem; }
-  .form-section { margin-bottom: 2rem; }
-  .form-section h2 { margin-bottom: 1rem; font-size: 1.25rem; font-weight: 600; }
-  .form-group label { display: block; margin-bottom: 0.5rem; font-weight: 500; }
+  .form-container {
+    background: var(--primary);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 2rem;
+    margin-bottom: 1rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.03);
+  }
+  .form-section {
+    padding-bottom: 1.75rem;
+    margin-bottom: 1.75rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .form-section:last-of-type { padding-bottom: 0; margin-bottom: 0; border-bottom: none; }
+  .form-section h2 {
+    margin: 0 0 1.25rem;
+    font-size: 1.05rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+  }
+  .form-group { margin-bottom: 1.1rem; }
+  .form-group:last-child { margin-bottom: 0; }
+  .form-group label { display: block; margin-bottom: 0.4rem; font-weight: 500; font-size: 0.9rem; }
   .optional-label { font-weight: 400; color: var(--text-muted); }
-  .form-group input, .form-group select { width: 100%; border: 1px solid var(--border); }
-  .form-group input:focus, .form-group select:focus { outline: none; border-color: var(--accent); }
+  .dont-notify-check { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.75rem; font-weight: 400; color: var(--text-muted); cursor: pointer; }
+  .dont-notify-check input { width: auto; }
+  .form-group input, .form-group select, .form-group textarea {
+    width: 100%;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.6rem 0.75rem;
+    font-size: 0.95rem;
+    background: var(--background);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    box-sizing: border-box;
+  }
+  .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+  }
   .stock-option-add-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.6rem; align-items: center; }
   .stock-option-add-row input { min-width: 0; }
   .stock-option-add-row button { white-space: nowrap; }
   .form-hint { margin: 0.45rem 0 0; color: var(--text-muted); font-size: 0.85rem; }
   .form-error { margin: 0.45rem 0 0; color: var(--danger, #b42318); font-size: 0.85rem; }
-  .workflow-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem; }
-  .workflow-card { display: block; padding: 1rem; border: 1px solid var(--border); border-radius: 4px; cursor: pointer; position: relative; background: var(--primary); }
+  .workflow-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0.85rem; }
+  .workflow-card {
+    display: block;
+    padding: 1.1rem 1rem;
+    border: 1.5px solid var(--border);
+    border-radius: 10px;
+    cursor: pointer;
+    position: relative;
+    background: var(--primary);
+    transition: border-color 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
+  }
   .workflow-card input { position: absolute; opacity: 0; pointer-events: none; }
-  .workflow-card:hover { border-color: var(--accent); }
-  .workflow-card.selected { border-color: var(--accent); background-color: rgba(241, 195, 49, 0.1); }
+  .workflow-card:hover { border-color: var(--accent); transform: translateY(-1px); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06); }
+  .workflow-card.selected { border-color: var(--accent); background-color: rgba(241, 195, 49, 0.1); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06); }
   .workflow-content { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; }
   .workflow-name { font-weight: 600; }
-  .workflow-file-type { font-size: 0.875rem; color: var(--neutral-500); background: var(--background); padding: 0.25rem 0.5rem; border-radius: 4px; }
+  .workflow-file-type { font-size: 0.8rem; color: var(--neutral-500); background: var(--background); padding: 0.2rem 0.55rem; border-radius: 999px; }
   .upload-container { margin-top: 1rem; }
-  .file-drop-zone { border: 1px dashed var(--border); border-radius: 4px; padding: 2rem; text-align: center; cursor: pointer; background: var(--background); }
-  .file-drop-zone:hover, .file-drop-zone.active { border-color: var(--accent); }
-  .file-drop-zone.has-file { border-color: var(--success); }
+  .file-drop-zone { border: 1.5px dashed var(--border); border-radius: 10px; padding: 2rem; text-align: center; cursor: pointer; background: var(--background); transition: border-color 0.15s ease, background 0.15s ease; }
+  .file-drop-zone:hover, .file-drop-zone.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 5%, var(--background)); }
+  .file-drop-zone.has-file { border-color: var(--success); border-style: solid; }
   .upload-prompt, .uploaded-file { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; }
   .upload-text { font-weight: 500; }
   .upload-subtext { font-size: 0.875rem; color: var(--neutral-500); }
@@ -885,14 +951,15 @@
     background: var(--accent);
     color: var(--secondary);
     border: none;
-    border-radius: 6px;
+    border-radius: 10px;
     font-weight: 600;
     font-size: 1.05rem;
     padding: 1rem 2.75rem;
     cursor: pointer;
-    transition: opacity 0.15s ease, transform 0.05s ease;
+    box-shadow: 0 2px 6px color-mix(in srgb, var(--accent) 35%, transparent);
+    transition: opacity 0.15s ease, transform 0.05s ease, box-shadow 0.15s ease;
   }
-  .submit-btn:hover:not(:disabled) { opacity: 0.9; }
+  .submit-btn:hover:not(:disabled) { opacity: 0.9; box-shadow: 0 3px 10px color-mix(in srgb, var(--accent) 40%, transparent); }
   .submit-btn:active:not(:disabled) { transform: scale(0.99); }
   .submit-btn:disabled { background: var(--neutral-300); cursor: not-allowed; }
   @media (max-width: 640px) {

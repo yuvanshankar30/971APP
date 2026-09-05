@@ -13,12 +13,48 @@
   // selected Machine Profile already fills sensible values for all of it.
   import stockData from '$lib/stock.json';
   import { holeDepthForWall, WALL_BREAKTHROUGH_ALLOWANCE } from '$autocam/tubestock.js';
+  import { THROUGH_CUT_ALLOWANCE } from '$autocam/routing.js';
 
   export let operation = 'routing'; // 'turning' | 'routing' | 'tubestock'
   export let params = {};
   export let mode = 'job';
+  // True when this job is linked to an existing manufacturing request - the
+  // request already recorded the real stock the part gets cut from, so
+  // second-guessing it here (a different sheet than what was actually
+  // ordered/kitted for the part) is the error, not a feature. Only disables
+  // the stock picker itself; every other field (tool diameter, feeds, etc.)
+  // stays editable.
+  export let stockLocked = false;
 
   $: selectedSheet = routerSheetOptions.find((s) => s.id === params.stockCatalogId) || null;
+
+  // Target depth used to just sit wherever it was last typed/derived - real
+  // bug found on real hardware: pick a thin stock (depth auto-fills to just
+  // through it), switch to a thicker one, and the old shallow depth stays in
+  // the field. Nothing forced a re-look, so a job could go out programmed to
+  // cut less than the real stock's thickness - not "too deep into the
+  // spoilboard" (generateRoutingGcode already refuses that), but the
+  // opposite and unguarded failure: doesn't go through at all. Re-deriving
+  // every time the STOCK SELECTION ITSELF changes (not on every keystroke -
+  // a deliberate manual override in Advanced Settings still sticks until the
+  // stock changes again) closes that gap the same way tubestock's holeDepth
+  // already tracks its own stock below.
+  // Starts at whatever stock this form already has (a real ID when opening
+  // an existing job to edit it, undefined for a brand-new one) - not a bare
+  // `undefined` - so opening the editor never immediately overwrites an
+  // already-correct saved depth just because the reactive block runs once
+  // on mount. Only an actual CHANGE after that re-derives.
+  let lastDepthStockId = params.stockCatalogId;
+  $: if (operation === 'routing' && mode === 'job' && params.stockCatalogId !== lastDepthStockId) {
+    lastDepthStockId = params.stockCatalogId;
+    // Switching to a real sheet re-derives depth from it. Switching back to
+    // "not specified" clears the field rather than leaving a stale number
+    // behind - the server falls back to the STEP file's own thickness (plus
+    // the same break-through allowance) when this arrives blank.
+    params.targetDepth = selectedSheet?.thickness > 0
+      ? Number((selectedSheet.thickness + THROUGH_CUT_ALLOWANCE).toFixed(4))
+      : '';
+  }
 
   // Real tube/extrusion stock this team actually stocks (router.json entries
   // flagged isTube) - the STEP file's own measured geometry is still what
@@ -210,31 +246,24 @@
     </div>
   </details>
 {:else}
-  <div class="form-row">
-    <div class="form-group">
-      <label class="form-label" for="cf-tool-dia">Tool diameter (in)</label>
-      <input id="cf-tool-dia" class="form-input" type="number" step="0.0625" bind:value={params.toolDiameter} />
-    </div>
-    {#if mode === 'job'}
-      <div class="form-group">
-        <label class="form-label" for="cf-target-depth">Target depth (in) <span class="text-muted">(auto if blank)</span></label>
-        <input id="cf-target-depth" class="form-input" type="number" step="0.01" bind:value={params.targetDepth} placeholder={selectedSheet ? `Through ${selectedSheet.thickness}" stock` : 'From STEP thickness'} />
-      </div>
-    {/if}
-  </div>
-
   {#if mode === 'job'}
-    <div class="form-group">
+    <!-- The one field the operator actually has to think about every job -
+         everything else (tool diameter, target depth, feeds) either comes
+         from the tool/machine picked in the page above or is derived from
+         this stock pick automatically. -->
+    <div class="form-group cam-primary-field">
       <label class="form-label" for="cf-router-stock">Stock (sheet)</label>
-      <select id="cf-router-stock" class="form-select" bind:value={params.stockCatalogId}>
+      <select id="cf-router-stock" class="form-select" bind:value={params.stockCatalogId} disabled={stockLocked}>
         <option value="">Not specified (use the STEP file's own thickness)</option>
         {#each routerSheetOptions as stock}
           <option value={stock.id}>{stock.description}</option>
         {/each}
       </select>
       <p class="text-muted">
-        {#if selectedSheet}
-          Cuts through {selectedSheet.thickness}" {selectedSheet.material} - depth, and the number of passes, come from this. Generation refuses a depth that would reach past the stock into the spoilboard.
+        {#if stockLocked}
+          Set from the manufacturing request this job is linked to - not changeable here.
+        {:else if selectedSheet}
+          Cuts through {selectedSheet.thickness}" {selectedSheet.material} - depth, feed/plunge/spindle starting values, and the number of passes all come from this. Generation refuses a depth that would reach past the stock into the spoilboard.
         {:else}
           The sheet that will actually be on the table. Its thickness sets the cut depth and pass count, and blocks a program that would cut into the spoilboard.
         {/if}
@@ -244,6 +273,21 @@
 
   <details class="advanced-settings">
     <summary>Advanced settings</summary>
+    <div class="cam-param-section">
+      <h4>Tool &amp; Depth</h4>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label" for="cf-tool-dia">Tool diameter (in)</label>
+          <input id="cf-tool-dia" class="form-input" type="number" step="0.0625" bind:value={params.toolDiameter} title="Normally set by the Tool picked above - override here only for a one-off." />
+        </div>
+        {#if mode === 'job'}
+          <div class="form-group">
+            <label class="form-label" for="cf-target-depth">Target depth (in)</label>
+            <input id="cf-target-depth" class="form-input" type="number" step="0.01" bind:value={params.targetDepth} placeholder={selectedSheet ? `Through ${selectedSheet.thickness}" stock` : 'From STEP thickness'} title="Re-derived from the stock above every time it changes - edit here only to override that for this one job." />
+          </div>
+        {/if}
+      </div>
+    </div>
     <div class="cam-param-section">
       <h4>Cutting</h4>
       <div class="form-row">
@@ -281,7 +325,7 @@
     </div>
     <div class="cam-param-section">
       <h4>Feeds &amp; Speed</h4>
-      <p class="cam-form-hint">Dry router workflow: no coolant commands are emitted. Selecting a stock material applies its feed, plunge, and spindle starting values. Verify the cutter manufacturer's chart and machine setup before running a part.</p>
+      <p class="cam-form-hint">Dry router workflow: no coolant commands are emitted. Picking a stock above applies its material's feed, plunge, and spindle starting values automatically. Verify the cutter manufacturer's chart and machine setup before running a part.</p>
       <div class="form-row">
         <div class="form-group">
           <label class="form-label" for="cf-feed-rate">Feed rate (in/min)</label>
@@ -313,6 +357,19 @@
   .derived-value-empty {
     color: var(--text-muted);
     font-weight: 400;
+  }
+  /* The one field routing actually needs filled in every job - a bit more
+     visual weight than an ordinary form-group so it reads as "start here"
+     rather than blending into the rest of the form. */
+  .cam-primary-field {
+    margin-bottom: 1rem;
+    padding: 0.85rem 1rem;
+    background: var(--surface-2, var(--background));
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md, 8px);
+  }
+  .cam-primary-field .form-label {
+    font-size: 1rem;
   }
   .cam-param-section {
     margin-bottom: 0.75rem;

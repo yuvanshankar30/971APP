@@ -84,6 +84,17 @@
    */
   export let crossSection = null;
   export let walls = [];
+  // The real stock the operator actually picked for this job
+  // (params.stockThickness, set server-side from the routing "Stock"
+  // select - see cam-generate/+server.js), NOT the STEP model's own
+  // measured thickness. The two can legitimately differ (nominal sheet
+  // sizes vs. what a real board actually measures), and the G-code's real
+  // cut depth is derived from THIS value, not the model - so the "does the
+  // endmill actually go through" visual has to check against the same
+  // number the generator did, or it can show a clean cut-through here while
+  // the real stock (thicker than the model) never got fully separated, or
+  // vice versa.
+  export let stockThickness = null;
 
   let container;
   let renderer, scene, camera, controls, frameId, resizeObserver, grid, axes, toolMesh, stockMesh, ghostMesh;
@@ -102,6 +113,11 @@
   let ghostGeometryData = null; // [{position, index}, ...] in scene coordinates, or null
   let turningTargetProfile = null; // {z,x}[] from extractTurningProfileFromMeshes - turning gouge check
   let routingTargetThickness = null; // number from extractRoutingContoursFromMeshes - routing gouge check
+  // The real stock's own thickness wins whenever it's known - see
+  // `stockThickness`'s own doc comment above for why. Falls back to the
+  // STEP model's measured thickness only when no real stock was recorded
+  // (an older job, or one generated with stock left unspecified).
+  $: effectiveRoutingThickness = stockThickness > 0 ? stockThickness : routingTargetThickness;
   let initializedStepFile = null;
 
   // Fusion colours a move by what it is, and CAM users read that scheme
@@ -274,8 +290,8 @@
   $: turningGouge = isTurning && turningTargetProfile && stockOuterProfile
     ? detectTurningGouge(stockOuterProfile, turningTargetProfile)
     : false;
-  $: routingGouge = !isTurning && routingTargetThickness != null && routingHeights
-    ? minOf(routingHeights) < -routingTargetThickness - GOUGE_TOLERANCE
+  $: routingGouge = !isTurning && effectiveRoutingThickness != null && routingHeights
+    ? minOf(routingHeights) < -effectiveRoutingThickness - GOUGE_TOLERANCE
     : false;
   $: gougeDetected = turningGouge || routingGouge;
 
@@ -776,13 +792,16 @@
     const nx = Math.max(10, Math.ceil(width / cellSize) + 1);
     const ny = Math.max(10, Math.ceil(heightSpan / cellSize) + 1);
 
-    // The real measured material thickness once the ghost part has loaded
-    // (Phase 5 - extractRoutingContoursFromMeshes); until/unless that's
-    // available, fall back to "a bit below the deepest programmed cut,
-    // safely into the spoilboard" - not a real measurement, but honest
-    // enough to read as a solid plate rather than a paper-thin sheet.
-    const floorZ = routingTargetThickness != null
-      ? -routingTargetThickness
+    // The real stock's own thickness wins when it's known (see
+    // effectiveRoutingThickness/stockThickness's doc comments - the actual
+    // cut depth was derived from this, not the STEP model, so the "does it
+    // cut all the way through" floor has to match). Falls back to the STEP
+    // model's own measured thickness, and only past that to "a bit below
+    // the deepest programmed cut, safely into the spoilboard" - not a real
+    // measurement, but honest enough to read as a solid plate rather than a
+    // paper-thin sheet.
+    const floorZ = effectiveRoutingThickness != null
+      ? -effectiveRoutingThickness
       : Math.min(bounds.min.z - cellSize, -0.05);
     const moveIndex = toolPosition?.moveIndex ?? 0;
     const progress = toolPosition?.progress ?? 0;
@@ -831,7 +850,7 @@
     // Counted here so the skirt can tell whether the cut actually changed
     // shape, rather than being rebuilt unconditionally every frame.
     let cutThroughCount = 0;
-    if (routingTargetThickness != null) {
+    if (effectiveRoutingThickness != null) {
       const limit = floorZ + CUT_THROUGH_EPSILON;
       for (let i = 0; i < heights.length; i += 1) if (heights[i] <= limit) cutThroughCount += 1;
     }
@@ -862,7 +881,7 @@
     // the measured underside). Without it floorZ sits below the deepest cut
     // by construction, nothing reaches it, and this is inert - which is the
     // honest outcome, since nothing then says the cut went through.
-    if (routingTargetThickness != null) {
+    if (effectiveRoutingThickness != null) {
       // Same rule as before - drop a triangle only when all three of its
       // vertices reached the underside - but written into a preallocated
       // index buffer rather than pushing onto a fresh JS array of up to

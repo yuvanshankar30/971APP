@@ -47,7 +47,7 @@
   // hold nested comments, and a viewer stops on them ("nested comment found")
   // exactly as a control would.
   const cleanGcodeForExport = (gcode) => normalizeGcodeComments(gcode || '', { dialect: 'preserve' });
-  import { buildStockMaterialIndex, materialIdForStockAssignment as resolveMaterialIdForStockAssignment } from '$autocam/stockMaterial.js';
+  import { buildStockMaterialIndex, materialIdForStockAssignment as resolveMaterialIdForStockAssignment, stockCatalogIdForStockAssignment, matchMaterialId } from '$autocam/stockMaterial.js';
   import { minimumPartClearance } from '$autocam/nesting.js';
   import { Cpu, Upload, Package, Settings, Download, AlertTriangle, X, Link as LinkIcon, Plus, Wrench, Layers, CheckCircle2, Loader2, Search, Filter, Box, Route, ExternalLink, Copy } from 'lucide-svelte';
 
@@ -257,6 +257,7 @@
   // without a stock has no depth and would fail in the generator rather than
   // here. Block it at the button instead.
   $: missingTubeStock = newJobOperation === 'tubestock' && !tubestockParams.stockCatalogId;
+  $: selectedMachine = machines.find((m) => String(m.id) === String(selectedMachineId)) || null;
   $: selectedMachineTools = toolsForMachine(selectedMachineId);
   $: editMachineTools = toolsForMachine(editMachineId);
   $: jobStats = {
@@ -523,6 +524,42 @@
     }
   }
 
+  // Same idea, for the actual routing STOCK (a specific sheet, with a real
+  // thickness) rather than just the generic material - a request already
+  // says what the part gets cut from, so a linked job should start on that
+  // exact sheet, not "unspecified" (falls back to the STEP file's own
+  // measured thickness, which may not match what's actually kitted).
+  // Unlike material above, this one is NOT overridable by hand while linked
+  // - CamParamFields' stockLocked disables the picker entirely for a linked
+  // job, so there is no "hand-picked" state to defer to; re-running this
+  // every time the part selection changes is exactly what should happen.
+  $: if (newJobOperation === 'routing' && newJobSource === 'part' && !batchMode && selectedPartId) {
+    const pickedPart = eligibleParts.find((p) => String(p.id) === String(selectedPartId));
+    const carriedStock = pickedPart ? stockCatalogIdForStockAssignment(stockData, pickedPart.stock_assignment) : '';
+    if (String(carriedStock) !== String(routingParams.stockCatalogId)) {
+      routingParams.stockCatalogId = carriedStock;
+    }
+  }
+
+  // Routing no longer has its own material picker - a stock's own material
+  // (stock.json's `material` field, e.g. "1/8" Aluminum Sheet" ->
+  // "Aluminum") drives feed/plunge/spindle starting values instead, the
+  // same cam_materials.default_params any other material pick would. Only
+  // re-runs when the stock actually changes, not on every render, so a
+  // hand-tuned feed rate in Advanced Settings isn't fought on every
+  // reactive pass - same "change tracking, not every dependency tick"
+  // pattern CamParamFields' own target-depth sync uses.
+  let lastStockForMaterialSync;
+  $: if (newJobOperation === 'routing' && routingParams.stockCatalogId !== lastStockForMaterialSync) {
+    lastStockForMaterialSync = routingParams.stockCatalogId;
+    const sheet = (stockData.router || []).find((s) => s.id === routingParams.stockCatalogId);
+    const derivedMaterialId = sheet?.material ? matchMaterialId(materials, sheet.material) : '';
+    if (derivedMaterialId && String(derivedMaterialId) !== String(selectedMaterialId)) {
+      selectedMaterialId = derivedMaterialId;
+      applyMaterialDefaults(derivedMaterialId);
+    }
+  }
+
   // A material with no default_params for the operation being run is not a
   // neutral choice: applyMaterialDefaults is a silent no-op, so the job
   // keeps the generator's own generic fallback (routing.js
@@ -558,6 +595,13 @@
       tubestockParams = { ...tubestockParams, ...(machine.default_params || {}) };
     } else {
       routingParams = { ...routingParams, ...(machine.default_params || {}) };
+      // The multi-tool sequence UI only shows for the New Router profile -
+      // clear any sequence built while a different machine was selected so
+      // switching back to the single-tool UNC Router can't silently submit
+      // a leftover multi-tool plan alongside it.
+      if (machine.name !== 'New Router' && routingParams.toolSequence?.length) {
+        routingParams.toolSequence = [];
+      }
     }
     const availableTools = toolsForMachine(machineId);
     const defaultTool = availableTools.find((tool) => String(tool.id) === String(machine.default_tool_id));
@@ -1652,39 +1696,36 @@
           <p class="cam-form-hint">Uses the STEP file already attached to this part - nothing else to upload.</p>
         {/if}
 
-        {#if newJobOperation === 'turning'}
-          <CamParamFields operation="turning" bind:params={turningParams} mode="job" />
-          <TurningFinishTool {tools} bind:finishTool={turningParams.finishTool} />
-          <TurningDrilling {tools} bind:drilling={turningParams.drilling} disabled={turningParams.setupMode === 'flip'} />
-        {:else if newJobOperation === 'tubestock'}
-          <CamParamFields operation="tubestock" bind:params={tubestockParams} mode="job" />
-        {:else}
-          <CamParamFields operation="routing" bind:params={routingParams} mode="job" />
-          <RoutingToolSequence tools={selectedMachineTools} bind:sequence={routingParams.toolSequence} />
-        {/if}
-
+        <!-- Machine Profile and Tool up front, alongside the operation's own
+             primary field (e.g. routing's Stock below) - these two plus that
+             one field are everything required to queue a job; everything
+             else either follows from them or lives in Advanced Settings. -->
         <div class="form-row">
-          <div class="form-group">
-            <label class="form-label" for="job-material">Material</label>
-            <select id="job-material" class="form-select" bind:value={selectedMaterialId} on:change={() => { materialChosenByHand = true; applyMaterialDefaults(selectedMaterialId); }}>
-              <option value="">Unspecified</option>
-              <!-- Marked, not hidden. A material with no feeds for this
-                   operation is still a legitimate pick for someone entering
-                   numbers by hand; what is not legitimate is picking it
-                   without knowing that nothing will be filled in. -->
-              {#each materials.filter((m) => m.enabled) as m}
-                <option value={m.id}>{m.name}{materialWithoutFeeds(m.id, newJobOperation) ? ' - no feeds on record' : ''}</option>
-              {/each}
-            </select>
-            {#if newJobMaterialWithoutFeeds}
-              <p class="cam-form-warning">
-                <AlertTriangle size={14} />
-                No verified feeds/speeds for {newJobMaterialWithoutFeeds.name} in {operationLabel(newJobOperation).toLowerCase()} - the generic defaults below were kept, and they are tuned for aluminum. Check feed rate, step-down and spindle speed before running this on material.
-              </p>
-            {:else}
-              <p class="text-muted">Fills in conservative starting feeds/speeds for this material below - still yours to tune.</p>
-            {/if}
-          </div>
+          {#if newJobOperation !== 'routing'}
+            <div class="form-group">
+              <label class="form-label" for="job-material">Material</label>
+              <select id="job-material" class="form-select" bind:value={selectedMaterialId} disabled={newJobSource === 'part'} on:change={() => { materialChosenByHand = true; applyMaterialDefaults(selectedMaterialId); }}>
+                <option value="">Unspecified</option>
+                <!-- Marked, not hidden. A material with no feeds for this
+                     operation is still a legitimate pick for someone entering
+                     numbers by hand; what is not legitimate is picking it
+                     without knowing that nothing will be filled in. -->
+                {#each materials.filter((m) => m.enabled) as m}
+                  <option value={m.id}>{m.name}{materialWithoutFeeds(m.id, newJobOperation) ? ' - no feeds on record' : ''}</option>
+                {/each}
+              </select>
+              {#if newJobSource === 'part'}
+                <p class="text-muted">Set from the manufacturing request this job is linked to - not changeable here.</p>
+              {:else if newJobMaterialWithoutFeeds}
+                <p class="cam-form-warning">
+                  <AlertTriangle size={14} />
+                  No verified feeds/speeds for {newJobMaterialWithoutFeeds.name} in {operationLabel(newJobOperation).toLowerCase()} - the generic defaults below were kept, and they are tuned for aluminum. Check feed rate, step-down and spindle speed before running this on material.
+                </p>
+              {:else}
+                <p class="text-muted">Fills in conservative starting feeds/speeds for this material below - still yours to tune.</p>
+              {/if}
+            </div>
+          {/if}
           <div class="form-group">
             <label class="form-label" for="job-machine">Machine Profile</label>
             <select id="job-machine" class="form-select" bind:value={selectedMachineId} on:change={() => applyMachineDefaults(selectedMachineId)}>
@@ -1715,6 +1756,19 @@
             {/if}
           </div>
         </div>
+
+        {#if newJobOperation === 'turning'}
+          <CamParamFields operation="turning" bind:params={turningParams} mode="job" />
+          <TurningFinishTool {tools} bind:finishTool={turningParams.finishTool} />
+          <TurningDrilling {tools} bind:drilling={turningParams.drilling} disabled={turningParams.setupMode === 'flip'} />
+        {:else if newJobOperation === 'tubestock'}
+          <CamParamFields operation="tubestock" bind:params={tubestockParams} mode="job" />
+        {:else}
+          <CamParamFields operation="routing" bind:params={routingParams} mode="job" stockLocked={newJobSource === 'part'} />
+          {#if selectedMachine?.name === 'New Router'}
+            <RoutingToolSequence tools={selectedMachineTools} bind:sequence={routingParams.toolSequence} />
+          {/if}
+        {/if}
 
         <button
           class="btn btn-primary"
@@ -1931,6 +1985,7 @@
               stockShape={(toolpathPreviewParams || editingJob.params)?.stockShape || 'round'}
               noseRadius={Number((toolpathPreviewParams || editingJob.params)?.finishTool?.noseRadius ?? (toolpathPreviewParams || editingJob.params)?.noseRadius) || null}
               drillDiameter={Number((toolpathPreviewParams || editingJob.params)?.drilling?.diameter) || null}
+              stockThickness={Number((toolpathPreviewParams || editingJob.params)?.stockThickness) || null}
               stepFileName={editingJob.step_file_name || null}
               edgeShiftX={Number(editingJob.stats?.edgeShiftX) || 0}
               edgeShiftY={Number(editingJob.stats?.edgeShiftY) || 0}
