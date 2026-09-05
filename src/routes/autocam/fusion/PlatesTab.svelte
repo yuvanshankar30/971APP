@@ -3,13 +3,14 @@
   import { onMount } from 'svelte';
   import { supabase } from '$lib/supabase.js';
   import { toastActions } from '$lib/toast.js';
-  import { fetchPlates, createPlate, deletePlate, fetchPartCategories, queueFusionJob } from '$lib/fusionCam.js';
+  import { fetchPlates, createPlate, deletePlate, fetchPartCategories, fetchParts, assignPartToPlate, removePartFromPlate, queueFusionJob } from '$lib/fusionCam.js';
   import { Plus, Trash2, Layers, Send } from 'lucide-svelte';
 
   export let user;
   export let canManage;
 
   let plates = [];
+  let parts = [];
   let categories = [];
   let machines = [];
   let loading = true;
@@ -22,11 +23,14 @@
   // every job regardless of which one it was actually meant for - a human
   // has to choose explicitly.
   let plateMachineSelections = {};
+  let platePartSelections = {};
+  let platePartQuantities = {};
 
   async function load() {
     loading = true;
     try {
-      [plates, categories] = await Promise.all([fetchPlates(), fetchPartCategories()]);
+      [plates, categories, parts] = await Promise.all([fetchPlates(), fetchPartCategories(), fetchParts()]);
+      platePartQuantities = Object.fromEntries(plates.map((plate) => [plate.id, platePartQuantities[plate.id] || 1]));
       const { data: machineRows } = await supabase.from('cam_machines').select('*').eq('can_run_plates', true).eq('enabled', true).order('name');
       machines = machineRows || [];
     } catch (e) {
@@ -88,6 +92,62 @@
       toastActions.show('Queued for the Fusion Runner');
     } catch (e) {
       toastActions.show(e.message || 'Failed to queue job');
+    }
+  }
+
+  function eligibleParts(plate) {
+    return parts.filter((part) => String(part.category_id) === String(plate.category_id) && Number(part.quantity) > 0);
+  }
+
+  function selectedPart(plate) {
+    return parts.find((part) => String(part.id) === String(platePartSelections[plate.id] || ''));
+  }
+
+  function maximumNestQuantity(plate, part) {
+    const existing = plate.fusion_part_category_assignments?.find((assignment) => String(assignment.fusion_parts?.id) === String(part.id));
+    return Number(part.quantity) + Number(existing?.quantity || 0);
+  }
+
+  async function handleNestPart(plate) {
+    const part = selectedPart(plate);
+    const quantity = Number(platePartQuantities[plate.id]);
+    if (!part) {
+      toastActions.show('Choose a part to nest');
+      return;
+    }
+    if (String(part.category_id) !== String(plate.category_id) || Number(part.quantity) <= 0) {
+      toastActions.show('Choose an available part with the same material and thickness');
+      return;
+    }
+    if (!Number.isInteger(quantity) || quantity <= 0) {
+      toastActions.show('Quantity must be a whole number greater than zero');
+      return;
+    }
+    const maximumQuantity = maximumNestQuantity(plate, part);
+    if (quantity > maximumQuantity) {
+      toastActions.show(`Only ${maximumQuantity} of ${part.name} can be nested on this plate`);
+      return;
+    }
+    try {
+      await assignPartToPlate({ categoryId: part.category_id, plateId: plate.id, partId: part.id, quantity });
+      platePartSelections = { ...platePartSelections, [plate.id]: '' };
+      platePartQuantities = { ...platePartQuantities, [plate.id]: 1 };
+      await load();
+      toastActions.show(`${quantity}x ${part.name} nested on ${plate.name}`);
+    } catch (e) {
+      toastActions.show(e.message || 'Failed to nest part');
+    }
+  }
+
+  async function handleRemoveNestedPart(plate, assignment) {
+    const name = assignment.fusion_parts?.name || 'this part';
+    if (!await requestConfirmation({ title: 'Remove nested part', message: `Remove ${assignment.quantity}x ${name} from "${plate.name}"?`, confirmLabel: 'Remove', danger: true })) return;
+    try {
+      await removePartFromPlate({ plateId: plate.id, partId: assignment.fusion_parts?.id });
+      await load();
+      toastActions.show(`${name} removed from ${plate.name}`);
+    } catch (e) {
+      toastActions.show(e.message || 'Failed to remove nested part');
     }
   }
 
@@ -157,7 +217,38 @@
           </div>
           <p class="cam-form-hint">{plate.width}" x {plate.length}", true depth {plate.true_depth}"</p>
           {#if plate.fusion_part_category_assignments?.length}
-            <p class="cam-form-hint">Nested parts: {plate.fusion_part_category_assignments.map((a) => `${a.quantity}x ${a.fusion_parts?.name || 'part'}`).join(', ')}</p>
+            <div class="cam-list-actions">
+              <span class="cam-form-hint">Nested parts:</span>
+              {#each plate.fusion_part_category_assignments as assignment}
+                <span class="cam-form-hint">{assignment.quantity}x {assignment.fusion_parts?.name || 'part'}</span>
+                {#if canManage}
+                  <button class="btn btn-ghost btn-sm" type="button" title="Remove {assignment.fusion_parts?.name || 'part'}" aria-label="Remove {assignment.fusion_parts?.name || 'part'} from {plate.name}" on:click={() => handleRemoveNestedPart(plate, assignment)}>×</button>
+                {/if}
+              {/each}
+            </div>
+          {/if}
+          {#if canManage}
+            {@const availableParts = eligibleParts(plate)}
+            {@const chosenPart = selectedPart(plate)}
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label" for={`plate-nest-part-${plate.id}`}>Nest a part</label>
+                <select id={`plate-nest-part-${plate.id}`} class="form-select" bind:value={platePartSelections[plate.id]}>
+                  <option value="">{availableParts.length ? 'Select a matching part...' : 'No matching parts available'}</option>
+                  {#each availableParts as part}
+                    <option value={part.id}>{part.name} ({part.quantity} available)</option>
+                  {/each}
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for={`plate-nest-quantity-${plate.id}`}>Quantity</label>
+                <input id={`plate-nest-quantity-${plate.id}`} type="number" min="1" max={chosenPart ? maximumNestQuantity(plate, chosenPart) : undefined} step="1" class="form-input" bind:value={platePartQuantities[plate.id]} disabled={!chosenPart} />
+              </div>
+              <div class="form-group">
+                <span class="form-label" aria-hidden="true">&nbsp;</span>
+                <button class="btn btn-secondary btn-sm" type="button" disabled={!chosenPart} on:click={() => handleNestPart(plate)}><Plus size={14} /> Add</button>
+              </div>
+            </div>
           {/if}
           <div class="cam-list-actions">
             <select class="form-select router-select" bind:value={plateMachineSelections[plate.id]} aria-label="Router for {plate.name}">
