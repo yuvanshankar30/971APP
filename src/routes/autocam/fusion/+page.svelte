@@ -3,11 +3,12 @@
   import { supabase } from '$lib/supabase.js';
   import { userStore, loadUserFromUUID } from '$lib/stores/user.js';
   import { canManageCamProfiles } from '$lib/permissions.js';
-  import { Layers, Package, Box, ListChecks } from 'lucide-svelte';
+  import { Layers, Package, Box, ListChecks, SlidersHorizontal } from 'lucide-svelte';
   import PartsTab from './PartsTab.svelte';
   import PlatesTab from './PlatesTab.svelte';
   import BoxTubesTab from './BoxTubesTab.svelte';
   import JobQueueTab from './JobQueueTab.svelte';
+  import StockCategoriesTab from './StockCategoriesTab.svelte';
 
   let user = null;
   let activeTab = 'plates';
@@ -46,6 +47,9 @@
   <button type="button" class:active={activeTab === 'parts'} on:click={() => setActiveTab('parts')}>
     <Package size={16} /> Parts
   </button>
+  <button type="button" class:active={activeTab === 'stock-categories'} on:click={() => setActiveTab('stock-categories')}>
+    <SlidersHorizontal size={16} /> Stock Categories
+  </button>
   <button type="button" class:active={activeTab === 'box-tubes'} on:click={() => setActiveTab('box-tubes')}>
     <Box size={16} /> Box Tubes
   </button>
@@ -58,6 +62,8 @@
   <PlatesTab {user} {canManage} />
 {:else if activeTab === 'parts'}
   <PartsTab {user} {canManage} />
+{:else if activeTab === 'stock-categories'}
+  <StockCategoriesTab {canManage} />
 {:else if activeTab === 'box-tubes'}
   <BoxTubesTab {user} {canManage} />
 {:else if activeTab === 'queue'}
