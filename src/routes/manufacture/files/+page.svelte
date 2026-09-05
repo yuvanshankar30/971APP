@@ -4,7 +4,7 @@
   import { page } from '$app/stores';
   import { toastActions } from '$lib/toast.js';
   import { requestConfirmation } from '$lib/confirmation.js';
-  import { Folder, FolderPlus, Upload, Download, Trash2, File as FileIcon, Home } from 'lucide-svelte';
+  import { Folder, FolderPlus, Upload, Download, Trash2, File as FileIcon, Home, Pencil, Check, X } from 'lucide-svelte';
 
   const BUCKET = 'manufacturing-drive';
   // Supabase's own dashboard convention for representing an otherwise-empty
@@ -21,6 +21,10 @@
   let newFolderName = '';
   let showNewFolderInput = false;
   let fileInput;
+  // Full path (relative to the bucket root) of the entry currently being
+  // renamed, or '' when nothing is - only one row can be renamed at a time.
+  let renamingPath = '';
+  let renameValue = '';
 
   $: breadcrumbs = currentPath ? currentPath.split('/') : [];
 
@@ -165,6 +169,83 @@
     }
   }
 
+  function startRename(entry) {
+    renamingPath = joinPath(currentPath, entry.name);
+    renameValue = entry.name;
+  }
+
+  function cancelRename() {
+    renamingPath = '';
+    renameValue = '';
+  }
+
+  function validateNewName(name) {
+    if (!name) return 'Name cannot be empty';
+    if (/[\\/]/.test(name)) return 'Name can\'t contain / or \\';
+    return null;
+  }
+
+  async function handleRenameFile(entry) {
+    const name = renameValue.trim();
+    const error = validateNewName(name);
+    if (error) {
+      toastActions.show(error);
+      return;
+    }
+    if (name === entry.name) {
+      cancelRename();
+      return;
+    }
+    try {
+      const { error: moveError } = await supabase.storage
+        .from(BUCKET)
+        .move(joinPath(currentPath, entry.name), joinPath(currentPath, name));
+      if (moveError) throw moveError;
+      cancelRename();
+      await load();
+      toastActions.show('File renamed');
+    } catch (e) {
+      toastActions.show(e.message || 'Failed to rename file');
+    }
+  }
+
+  // Storage has no native folder rename - a "folder" is only ever an implied
+  // path prefix, so renaming one means moving every real object underneath
+  // it (found via the same recursive listAllPaths() delete already uses)
+  // from the old prefix to the new one, one at a time.
+  async function handleRenameFolder(entry) {
+    const name = renameValue.trim();
+    const error = validateNewName(name);
+    if (error) {
+      toastActions.show(error);
+      return;
+    }
+    if (name === entry.name) {
+      cancelRename();
+      return;
+    }
+    try {
+      const oldPrefix = joinPath(currentPath, entry.name);
+      const newPrefix = joinPath(currentPath, name);
+      const paths = await listAllPaths(oldPrefix);
+      for (const path of paths) {
+        const relative = path.slice(oldPrefix.length); // keeps the leading "/..."
+        const { error: moveError } = await supabase.storage.from(BUCKET).move(path, `${newPrefix}${relative}`);
+        if (moveError) throw moveError;
+      }
+      cancelRename();
+      await load();
+      toastActions.show('Folder renamed');
+    } catch (e) {
+      toastActions.show(e.message || 'Failed to rename folder');
+    }
+  }
+
+  function autofocus(node) {
+    node.focus();
+    node.select();
+  }
+
   function formatSize(bytes) {
     if (!bytes && bytes !== 0) return '';
     if (bytes < 1024) return `${bytes} B`;
@@ -227,14 +308,46 @@
   <div class="card">
     <div class="file-list">
       {#each entries as entry}
+        {@const isRenaming = renamingPath === joinPath(currentPath, entry.name)}
         <div class="file-row">
           {#if isFolder(entry)}
-            <button class="file-row-main" on:click={() => openFolder(entry)}>
-              <Folder size={18} />
-              <span class="file-name">{entry.name}</span>
-            </button>
+            {#if isRenaming}
+              <div class="file-row-main file-row-rename">
+                <Folder size={18} />
+                <input
+                  class="form-input"
+                  bind:value={renameValue}
+                  on:keydown={(e) => { if (e.key === 'Enter') handleRenameFolder(entry); if (e.key === 'Escape') cancelRename(); }}
+                  use:autofocus
+                />
+              </div>
+              <div class="file-row-actions">
+                <button class="btn btn-ghost btn-sm" on:click={() => handleRenameFolder(entry)}><Check size={14} /></button>
+                <button class="btn btn-ghost btn-sm" on:click={cancelRename}><X size={14} /></button>
+              </div>
+            {:else}
+              <button class="file-row-main" on:click={() => openFolder(entry)}>
+                <Folder size={18} />
+                <span class="file-name">{entry.name}</span>
+              </button>
+              <div class="file-row-actions">
+                <button class="btn btn-ghost btn-sm" on:click={() => startRename(entry)}><Pencil size={14} /></button>
+                <button class="btn btn-ghost btn-sm" on:click={() => handleDeleteFolder(entry)}><Trash2 size={14} /></button>
+              </div>
+            {/if}
+          {:else if isRenaming}
+            <div class="file-row-main file-row-rename">
+              <FileIcon size={18} />
+              <input
+                class="form-input"
+                bind:value={renameValue}
+                on:keydown={(e) => { if (e.key === 'Enter') handleRenameFile(entry); if (e.key === 'Escape') cancelRename(); }}
+                use:autofocus
+              />
+            </div>
             <div class="file-row-actions">
-              <button class="btn btn-ghost btn-sm" on:click={() => handleDeleteFolder(entry)}><Trash2 size={14} /></button>
+              <button class="btn btn-ghost btn-sm" on:click={() => handleRenameFile(entry)}><Check size={14} /></button>
+              <button class="btn btn-ghost btn-sm" on:click={cancelRename}><X size={14} /></button>
             </div>
           {:else}
             <div class="file-row-main file-row-static">
@@ -243,6 +356,7 @@
               <span class="file-size">{formatSize(entry.metadata?.size)}</span>
             </div>
             <div class="file-row-actions">
+              <button class="btn btn-ghost btn-sm" on:click={() => startRename(entry)}><Pencil size={14} /></button>
               <button class="btn btn-ghost btn-sm" on:click={() => handleDownload(entry)}><Download size={14} /></button>
               <button class="btn btn-ghost btn-sm" on:click={() => handleDeleteFile(entry)}><Trash2 size={14} /></button>
             </div>
@@ -265,6 +379,8 @@
   .file-row:last-child { border-bottom: none; }
   .file-row-main { display: flex; align-items: center; gap: 0.6rem; background: none; border: none; color: var(--text); cursor: pointer; padding: 0.25rem; flex: 1; min-width: 0; text-align: left; font-size: 0.95rem; }
   .file-row-static { cursor: default; }
+  .file-row-rename { cursor: default; }
+  .file-row-rename .form-input { flex: 1; min-width: 0; }
   .file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .file-size { color: var(--text-muted, #888); font-size: 0.8rem; flex-shrink: 0; margin-left: auto; }
   .file-row-actions { display: flex; gap: 0.35rem; flex-shrink: 0; }
