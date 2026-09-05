@@ -156,7 +156,11 @@ browser confirmation or prompt popups.
   also remap semantic success/error/progress/warning and operation badges onto
   palette-coordinated dark surfaces without changing their meanings. The page
   is divided into direct-linkable Account, Appearance, Navigation, and
-  Notifications panels instead of one continuous settings scroll.
+  Notifications panels instead of one continuous settings scroll. Password
+  changes require the current password; an account may instead request a
+  password-reset email from the same page. The selected theme is saved with
+  the signed-in account and restored after that email signs in again, including
+  after signing out.
 - **Default navigation**: Home is always first, followed by Manufacturing,
   Competition, CAD, and Purchasing. Members can still customize this order in
   their Account navigation settings.

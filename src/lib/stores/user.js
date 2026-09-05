@@ -66,6 +66,7 @@ function normalizeProfile(row) {
       return h;
     })(),
     dashboard_layout: row.dashboard_layout || 'grid',
+    theme_preference: row.theme_preference || 'modern',
     show_purchasing_line_totals: row.show_purchasing_line_totals !== false,
     created_at: row.created_at || '',
       updated_at: row.updated_at || '',
@@ -90,7 +91,7 @@ export async function fetchUserProfileByUUID(supabase, uuid) {
   try {
       const { data, error } = await supabase
         .from('user_profiles')
-        .select('id, email, full_name, role, is_dev, permissions, header_tabs, dashboard_layout, show_purchasing_line_totals, created_at, updated_at, banned, general_role, purchasing_role, team_role, frc_team, notification_settings, slack_user_id, slack_dm_channel, manufacturing_lead_workflows')
+        .select('id, email, full_name, role, is_dev, permissions, header_tabs, dashboard_layout, theme_preference, show_purchasing_line_totals, created_at, updated_at, banned, general_role, purchasing_role, team_role, frc_team, notification_settings, slack_user_id, slack_dm_channel, manufacturing_lead_workflows')
       .eq('id', uuid)
       .single();
 

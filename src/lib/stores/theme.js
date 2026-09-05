@@ -80,7 +80,15 @@ if (browser) {
 export function setTheme(value) {
   // An explicit user choice always wins over a deferred startup selection.
   pendingSavedTheme = null;
-  theme.set(THEMES.includes(value) || (specialThemesAuthorized && isSpecialTheme(value)) ? value : DEFAULT_THEME);
+  if (THEMES.includes(value) || (specialThemesAuthorized && isSpecialTheme(value))) {
+    theme.set(value);
+    return;
+  }
+  // An authenticated profile can reference a special theme before its private
+  // catalog arrives. Preserve that ID until registerSpecialThemes can verify
+  // and apply it instead of overwriting the account selection with Modern.
+  pendingSavedTheme = typeof value === 'string' && value ? value : null;
+  theme.set(DEFAULT_THEME);
 }
 
 export function registerSpecialThemes(groups = []) {
