@@ -23,8 +23,14 @@
   // every job regardless of which one it was actually meant for - a human
   // has to choose explicitly.
   let plateMachineSelections = {};
+  let plateToolSelections = {};
   let platePartSelections = {};
   let platePartQuantities = {};
+  // machine_id -> cam_tools rows actually installed on that machine
+  // (cam_machine_tools) - "job creation only offers the tools installed on
+  // its machine" is this app's own existing convention (see the main
+  // /autocam page's tool picker), not a new rule invented here.
+  let machineTools = {};
 
   async function load() {
     loading = true;
@@ -33,10 +39,43 @@
       platePartQuantities = Object.fromEntries(plates.map((plate) => [plate.id, platePartQuantities[plate.id] || 1]));
       const { data: machineRows } = await supabase.from('cam_machines').select('*').eq('can_run_plates', true).eq('enabled', true).order('name');
       machines = machineRows || [];
+      const { data: machineToolRows } = await supabase
+        .from('cam_machine_tools')
+        .select('machine_id, cam_tools(id, name, diameter, tool_type)')
+        .in('machine_id', machines.map((m) => m.id));
+      machineTools = {};
+      for (const row of machineToolRows || []) {
+        if (!row.cam_tools) continue;
+        (machineTools[row.machine_id] ||= []).push(row.cam_tools);
+      }
     } catch (e) {
       toastActions.show(e.message || 'Failed to load plates');
     } finally {
       loading = false;
+    }
+  }
+
+  function toolsForMachine(machineId) {
+    return machineId ? machineTools[machineId] || [] : [];
+  }
+
+  function toolLabel(tool) {
+    return `${tool.name}${tool.diameter ? ` (${tool.diameter}")` : ''}`;
+  }
+
+  // Picking a router pre-selects that machine's default tool (if it's
+  // actually installed on it) rather than leaving the tool blank - same
+  // "profile picks reasonable defaults, human can still override" pattern
+  // applyMachineDefaults() uses on the main /autocam page. Clears the
+  // selection if the previous tool isn't valid for the newly-picked router.
+  function handleMachineChange(plate, machineId) {
+    plateMachineSelections = { ...plateMachineSelections, [plate.id]: machineId };
+    const eligible = toolsForMachine(machineId);
+    const machine = machines.find((m) => String(m.id) === String(machineId));
+    const stillValid = eligible.some((t) => String(t.id) === String(plateToolSelections[plate.id]));
+    if (!stillValid) {
+      const defaultTool = eligible.find((t) => String(t.id) === String(machine?.default_tool_id));
+      plateToolSelections = { ...plateToolSelections, [plate.id]: defaultTool?.id || '' };
     }
   }
 
@@ -80,12 +119,27 @@
       toastActions.show('Choose a router before queueing');
       return;
     }
+    // The Runner's own fallback (auto-picking a tool when none is given)
+    // calls an API endpoint that doesn't exist in this app yet - without
+    // an explicit tool, a queued job has no real way to resolve one, so
+    // this is required here rather than left optional like machineId
+    // originally was before routers were made explicit too.
+    if (!plateToolSelections[plate.id]) {
+      toastActions.show('Choose a tool before queueing');
+      return;
+    }
     try {
       await queueFusionJob({
         fusionJobKind: 'plate:cam',
         plateId: plate.id,
         machineId,
-        materialId: plate.fusion_part_categories?.cam_materials ? plate.category_id : null,
+        // The real cam_materials id, NOT plate.category_id (a
+        // fusion_part_categories id) - cam_jobs.material_id has a foreign
+        // key straight to cam_materials, so passing the category id here
+        // would fail the insert outright with a foreign-key violation any
+        // time the plate actually has a valid category.
+        materialId: plate.fusion_part_categories?.material_id || null,
+        toolId: plateToolSelections[plate.id] || null,
         requestedBy: user?.id,
         name: `Plate CAM: ${plate.name}`
       });
@@ -251,13 +305,19 @@
             </div>
           {/if}
           <div class="cam-list-actions">
-            <select class="form-select router-select" bind:value={plateMachineSelections[plate.id]} aria-label="Router for {plate.name}">
+            <select class="form-select router-select" value={plateMachineSelections[plate.id]} on:change={(e) => handleMachineChange(plate, e.currentTarget.value)} aria-label="Router for {plate.name}">
               <option value={undefined}>Choose a router...</option>
               {#each machines as m}
                 <option value={m.id}>{m.name}</option>
               {/each}
             </select>
-            <button class="btn btn-secondary btn-sm" disabled={!plateMachineSelections[plate.id]} on:click={() => handleQueue(plate)}>
+            <select class="form-select router-select" bind:value={plateToolSelections[plate.id]} aria-label="Tool for {plate.name}" disabled={!plateMachineSelections[plate.id]}>
+              <option value="">{toolsForMachine(plateMachineSelections[plate.id]).length ? 'Choose a tool...' : 'No tools installed on this router'}</option>
+              {#each toolsForMachine(plateMachineSelections[plate.id]) as t}
+                <option value={t.id}>{toolLabel(t)}</option>
+              {/each}
+            </select>
+            <button class="btn btn-secondary btn-sm" disabled={!plateMachineSelections[plate.id] || !plateToolSelections[plate.id]} on:click={() => handleQueue(plate)}>
               <Send size={14} /> Queue CAM Job
             </button>
             {#if canManage}
