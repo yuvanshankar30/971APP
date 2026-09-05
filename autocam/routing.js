@@ -888,9 +888,9 @@ function clearPocket(lines, pocket, toolRadius, params, safeZ) {
 }
 
 // Conservative fallback for unknown stock. A selected cam_material supplies
-// stock-specific values; these avoid treating aluminum like plywood when the
-// operator has not identified the material yet.
-const TOOL_STEP_DEFAULTS = { stepDown: 0.03, tabWidth: 0.25, tabHeight: 0.06, tabSpacing: 6, feedRate: 25, plungeRate: 8, spindleSpeed: 14000 };
+// stock-specific values; these Aluminum-like numbers mirror the shop's real
+// 0.1575" carbide 971 Main Bit Fusion preset, rather than a generic chart.
+const TOOL_STEP_DEFAULTS = { stepDown: 0.03, tabWidth: 0.25, tabHeight: 0.06, tabSpacing: 6, feedRate: 80, plungeRate: 13.333, spindleSpeed: 22000 };
 
 // Neither params.feedRate nor params.plungeRate had any validation before
 // this - a typo'd 0, a negative sign, or a stray extra digit (8 -> 800)
@@ -977,7 +977,7 @@ function dwellLine(isWinCNC, seconds, comment) {
  *   Single-tool mode (unchanged, backward compatible):
  *     toolDiameter (required, inches), stepDown (default 0.03), targetDepth (required)
  *     tabWidth (default 0.25), tabHeight (default 0.06), tabSpacing (default 6, inches; 0 = no tabs)
- *     feedRate (in/min, default 25), plungeRate (in/min, default 8), spindleSpeed (rpm, default 14000)
+ *     feedRate (in/min, default 80), plungeRate (in/min, default 13.333), spindleSpeed (rpm, default 22000)
  *   Multi-tool mode: params.toolSequence = [{ toolDiameter, toolNumber, label,
  *     stepDown, tabWidth, tabHeight, tabSpacing, feedRate, plungeRate, spindleSpeed }, ...],
  *     primary/largest tool first. targetDepth still comes from the top-level
@@ -1158,7 +1158,7 @@ export function generateRoutingGcode(contours, params = {}) {
 
   if (!hasSequence) {
     // Single-tool path, unchanged from before multi-tool support existed.
-    const { toolDiameter, stepDown = 0.03, tabWidth = 0.25, tabHeight = 0.06, tabSpacing = 6, tabCount = 0, feedRate = 25, plungeRate = 8, spindleSpeed = 14000 } = params;
+    const { toolDiameter, stepDown = 0.03, tabWidth = 0.25, tabHeight = 0.06, tabSpacing = 6, tabCount = 0, feedRate = 80, plungeRate = 13.333, spindleSpeed = 22000 } = params;
     if (!toolDiameter || toolDiameter <= 0) throw new Error('toolDiameter is required and must be > 0');
     requireSafePlungeAndFeed(feedRate, plungeRate);
     // No T-code / M06 here on purpose - these routers have no automatic

@@ -153,12 +153,13 @@
   }
   function emptyRoutingParams() {
     // Unspecified stock must not inherit the old wood-friendly 40/15/16k
-    // settings. Material presets replace these with their own published
-    // starting values as soon as a stock is selected.
+    // settings. Material presets replace these with their own defaults as
+    // soon as a stock is selected.
     // 0.1575" (4mm) - the team's actual standard end mill, per the router
     // manual ("Team 971 primarily uses a 4mm, single flute, uncoated carbide
     // end mill") and the real UNC Router tool already stocked in cam_tools.
-    return { toolDiameter: 0.1575, stepDown: 0.03, targetDepth: '', tabWidth: 0.25, tabHeight: 0.06, tabSpacing: 6, tabCount: '', feedRate: 25, plungeRate: 8, spindleSpeed: 14000, edgeMargin: 0.5, toolSequence: [] };
+    // Its feed/plunge/RPM are the matching carbide 971 Main Bit Fusion preset.
+    return { toolDiameter: 0.1575, stepDown: 0.03, targetDepth: '', tabWidth: 0.25, tabHeight: 0.06, tabSpacing: 6, tabCount: '', feedRate: 80, plungeRate: 13.333, spindleSpeed: 22000, edgeMargin: 0.5, toolSequence: [] };
   }
   function emptyTubestockParams() {
     return { holeDepth: '', safeZ: 0.25, feedRate: 8, spindleSpeed: 8000, finishedLength: '', fixturePinFace: '' };
@@ -563,7 +564,7 @@
   // A material with no default_params for the operation being run is not a
   // neutral choice: applyMaterialDefaults is a silent no-op, so the job
   // keeps the generator's own generic fallback (routing.js
-  // TOOL_STEP_DEFAULTS - feed 25 in/min, stepDown 0.03, spindle 14000,
+  // TOOL_STEP_DEFAULTS - feed 80 in/min, stepDown 0.03, spindle 22000,
   // which are aluminum's numbers). Running plywood or soft plastic on those
   // is slow and burns; running a harder material on them is how a bit
   // breaks. Say so rather than letting it pass unnoticed.
