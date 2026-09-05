@@ -107,7 +107,7 @@ Confirmed by real local runs, on branch `yuvan/fusion-arrange-fix`:
   API fixes).
 - `templateTools.py`'s rest-machining fix - the first/largest pocket tool
   pass no longer comes out as an empty toolpath.
-- `NewNCProgram.py`'s post-process retry wrapper and the `_format_tool_label`
+- `NewNCProgram.py`'s post-process retry wrapper
   float-precision fix (no more `S15750000000000004Pocket`-style filenames).
 - The tool-library duplicate-entry cleanup (`971-outside-plate.tools`).
 - The diameter-filter fix in `localCamAssets.py` that let a drill-type tool

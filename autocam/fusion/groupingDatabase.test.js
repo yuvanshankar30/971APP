@@ -9,8 +9,11 @@ const run = (sql, values = []) => db.query(sql, values);
 const assign = (qty, plate = 10, part = 20, cat = 1) => run(`INSERT INTO fusion_part_category_assignments VALUES ($1,$2,$3,$4)
  ON CONFLICT (plate_id,part_id) DO UPDATE SET quantity=excluded.quantity`, [id(cat),id(plate),id(part),qty]);
 const remaining = async () => (await run('SELECT quantity FROM fusion_parts WHERE id=$1', [id(20)])).rows[0]?.quantity;
-const queue = () => run(`INSERT INTO cam_jobs (operation_type,params,machine_id,tool_id,status) VALUES
- ('milling',$1,$2,$3,'queued') RETURNING *`, [{fusionJobKind:'plate:cam',plateId:id(10)}, id(30), id(40)]);
+const queue = (mode = 'grouped', selectedPartId = null, selectedPartIds = mode === 'grouped' ? [id(20), id(21)] : null) => run(`INSERT INTO cam_jobs (operation_type,params,machine_id,tool_id,status) VALUES
+ ('milling',$1,$2,$3,'queued') RETURNING *`, [{
+   fusionJobKind:'plate:cam', plateId:id(10), fusionGroupingMode:mode,
+   ...(selectedPartId ? { selectedPartId } : {}), ...(selectedPartIds ? { selectedPartIds } : {})
+ }, id(30), id(40)]);
 
 beforeAll(async () => {
  db = new PGlite();
@@ -78,6 +81,7 @@ describe('Fusion grouping PostgreSQL migration', () => {
    await expect(run('UPDATE fusion_parts SET category_id=$1',[id(2)])).rejects.toThrow(/immutable/);
  });
  it('rejects empty, missing-file, and invalid-machine queues', async () => {
+   await expect(queue(null)).rejects.toThrow(/explicitly/);
    await expect(queue()).rejects.toThrow(/Nest at least/);
    await assign(2);
    await run('UPDATE fusion_parts SET step_file_name=NULL WHERE id=$1',[id(20)]);
@@ -97,6 +101,26 @@ describe('Fusion grouping PostgreSQL migration', () => {
    expect(saved.fusionPlateSnapshot.assignments[0].quantity).toBe(2);
    await expect(run("UPDATE cam_jobs SET params='{}' WHERE id=$1",[job.id])).rejects.toThrow(/immutable/);
    await run("UPDATE cam_jobs SET status='completed' WHERE id=$1",[job.id]);
+ });
+ it('keeps single-part and grouped plate snapshots unambiguous', async () => {
+   await assign(2); await assign(3,10,21);
+   const single = (await queue('single', id(21))).rows[0];
+   expect(single.params.fusionPlateSnapshot.grouping_mode).toBe('single');
+   expect(single.params.fusionPlateSnapshot.assignments).toEqual([
+     expect.objectContaining({ part_id: id(21), name: 'Part B', quantity: 3 })
+   ]);
+   await expect(queue('single', id(99))).rejects.toThrow(/Nest at least/);
+   const grouped = (await queue()).rows[0];
+   expect(grouped.params.fusionPlateSnapshot.grouping_mode).toBe('grouped');
+   expect(grouped.params.fusionPlateSnapshot.assignments).toHaveLength(2);
+   await run(`INSERT INTO fusion_parts(id,name,quantity,original_quantity,category_id,step_file_name)
+     VALUES ($1,'Part C',2,2,$2,'c.step')`, [id(22), id(1)]);
+   await assign(1,10,22);
+   const subset = (await queue('grouped', null, [id(20), id(22)])).rows[0];
+   expect(subset.params.fusionPlateSnapshot.assignments.map((part) => part.part_id)).toEqual([id(20), id(22)]);
+   await expect(queue('grouped', id(20))).rejects.toThrow(/selected part list/);
+   await expect(queue('grouped', null, [id(20), id(99)])).rejects.toThrow(/must be nested/);
+   await expect(queue('grouped', null, [id(20), id(20)])).rejects.toThrow(/distinct/);
  });
  it('enforces read approval and manager writes in database policies', async () => {
    await db.exec("SET ROLE authenticated");

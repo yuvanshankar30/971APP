@@ -377,9 +377,7 @@ own docs are all together in one place instead of scattered across
   default is a `0.1575 in` flat end mill; operators can add another tool for
   the selected machine directly from the job form.
 - **`autocam/components/`** - `ToolpathViewer.svelte`, `CamParamFields.svelte`,
-  `RoutingToolSequence.svelte`, `TurningFinishTool.svelte`,
-  `AutocamReviewModal.svelte` (the last one currently unused anywhere - a
-  known dead-code candidate, not yet removed).
+  `RoutingToolSequence.svelte`, and `TurningFinishTool.svelte`.
 - **`autocam/scripts/test-cam-extraction.mjs`** - standalone CLI to run a
   real STEP file through the pipeline without the web app - the main tool
   used to stress-test this system against real CAD files.
@@ -417,10 +415,15 @@ own docs are all together in one place instead of scattered across
   The Fusion UI includes a Stock Categories tab for CAM managers to define
   the material and true-thickness combinations required before Parts and
   Plates can be nested. Parts can be grouped by stock category with remaining
-  quantity totals and a shortcut to matching plates; this is a planning view,
-  with physical arrangement still performed by Fusion. Assignment inventory is
-  updated transactionally in PostgreSQL, queued plates preserve immutable input
-  snapshots, and the Runner rejects incomplete groups before CAM. Rollout requires
+  quantity totals and a shortcut to matching plates. Plate CAM makes operators
+  choose either one nested part or a grouped job containing at least two part
+  types; the grouped snapshot records every part, quantity, STEP file, plate,
+  machine, and tool while physical arrangement stays in Fusion. Assignment
+  inventory is updated transactionally in PostgreSQL, queued inputs are immutable,
+  and the Runner rejects incomplete groups before CAM. Completed Fusion jobs keep
+  every postprocessor output as a separate, byte-exact downloadable file with its
+  size and SHA-256 checksum; queued and terminal jobs can be deleted from the queue.
+  Rollout requires
   `migrations/20260906_fusion_grouping_integrity.sql` and the updated Runner. See
   `autocam/docs/fusion-grouping-review.md` for the draft scope and review findings.
   It uses Supabase Auth + `canManageCamProfiles` for

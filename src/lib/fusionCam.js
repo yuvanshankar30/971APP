@@ -226,7 +226,7 @@ export async function deleteBoxTube(id) {
 export async function fetchFusionJobs() {
   const { data, error } = await supabase
     .from('cam_jobs')
-    .select('*, cam_machines(name, controller)')
+    .select('*, cam_machines(name, controller), cam_tools(name, diameter)')
     .eq('operation_type', 'milling')
     .order('created_at', { ascending: false });
   if (error) throw error;
@@ -242,11 +242,20 @@ export async function fetchFusionJobs() {
  * turning/routing's cam-generate, this genuinely needs an external Fusion
  * 360 process).
  */
-export async function queueFusionJob({ fusionJobKind, plateId, boxTubeId, machineId, materialId, toolId, requestedBy, name, partId }) {
+export async function queueFusionJob({ fusionJobKind, plateId, boxTubeId, machineId, materialId, toolId, requestedBy, name, partId, groupingMode, selectedPartId, selectedPartIds }) {
   if (!FUSION_JOB_KINDS.includes(fusionJobKind)) {
     throw new Error(`Invalid fusionJobKind: ${fusionJobKind}`);
   }
-  const params = { fusionJobKind, plateId: plateId || null, boxTubeId: boxTubeId || null };
+  const params = {
+    fusionJobKind,
+    plateId: plateId || null,
+    boxTubeId: boxTubeId || null,
+    ...(fusionJobKind.startsWith('plate:') ? {
+      fusionGroupingMode: groupingMode,
+      selectedPartId: selectedPartId || null,
+      selectedPartIds: Array.isArray(selectedPartIds) ? selectedPartIds : null
+    } : {})
+  };
   const { data, error } = await supabase
     .from('cam_jobs')
     .insert({
@@ -277,4 +286,18 @@ export async function cancelFusionJob(id) {
     .eq('id', id)
     .in('status', ['queued', 'claimed', 'processing']);
   if (error) throw error;
+}
+
+/** Delete a queued or terminal Fusion job. Active Runner work must be cancelled first. */
+export async function deleteFusionJob(id) {
+  if (!id) throw new Error('Job is required');
+  const { data, error } = await supabase
+    .from('cam_jobs')
+    .delete()
+    .eq('id', id)
+    .eq('operation_type', 'milling')
+    .in('status', ['queued', 'completed', 'failed', 'rejected'])
+    .select('id');
+  if (error) throw error;
+  if (!data?.length) throw new Error('Active Fusion jobs must be cancelled before deletion');
 }

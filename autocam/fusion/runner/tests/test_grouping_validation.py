@@ -2,10 +2,17 @@ import importlib.util
 from pathlib import Path
 from types import SimpleNamespace as Obj
 import unittest
+import base64
+import hashlib
+import tempfile
+import os
 
 spec = importlib.util.spec_from_file_location('grouping', Path(__file__).parents[1] / 'commands/GroupingValidation.py')
 grouping = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(grouping)
+artifact_spec = importlib.util.spec_from_file_location('artifacts', Path(__file__).parents[1] / 'commands/NcArtifacts.py')
+artifacts = importlib.util.module_from_spec(artifact_spec)
+artifact_spec.loader.exec_module(artifacts)
 
 def occurrence(path):
     return Obj(fullPathName=path)
@@ -40,6 +47,19 @@ class GroupingValidationTests(unittest.TestCase):
         for value in [0, -1, 1.5, True, None, '3']:
             with self.assertRaises(ValueError):
                 grouping.require_positive_quantity(value)
+
+    def test_nc_artifacts_preserve_exact_bytes_and_file_boundaries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            first = b'%\r\nG21\r\nM30\r\n%\xff\x00'
+            second = b'%\nG55\nM30\n%'
+            os.mkdir(os.path.join(directory, 'setup-2'))
+            Path(directory, 'setup-1.tap').write_bytes(first)
+            Path(directory, 'setup-2', 'output.tap').write_bytes(second)
+            result = artifacts.collect_nc_artifacts(directory)
+        self.assertEqual([item['name'] for item in result], ['setup-1.tap', 'setup-2/output.tap'])
+        self.assertEqual(base64.b64decode(result[0]['contentBase64']), first)
+        self.assertEqual(result[0]['sha256'], hashlib.sha256(first).hexdigest())
+        self.assertEqual(base64.b64decode(result[1]['contentBase64']), second)
 
 if __name__ == '__main__':
     unittest.main()

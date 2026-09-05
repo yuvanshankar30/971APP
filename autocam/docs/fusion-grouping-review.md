@@ -16,6 +16,11 @@ stock grouping, assignment inventory, plate queueing, and Runner arrangement.
 - Plate queue inserts validate machine/tool compatibility and every STEP input,
   capture immutable stock/assignment snapshots, and derive the real material ID.
   Claim-time signing fails the whole job if any file cannot be resolved.
+- Plate CAM requires an explicit single-part or grouped mode. Single-part jobs
+  snapshot only the chosen nested type; grouped jobs require at least two selected
+  nested types and snapshot exactly that selection, including names, quantities,
+  and STEP references. The queue shows
+  the saved plate, parts, machine, tool, and grouped status.
 - Runner CAM requires every requested occurrence to appear in one result
   envelope, uses cutter-aware spacing, and rejects unsupported multi-body or
   assembly imports. It checks the processing response before starting CAM.
@@ -23,6 +28,11 @@ stock grouping, assignment inventory, plate queueing, and Runner arrangement.
   count repeated copies when reporting parts that did not fit.
 - Runner status writes are scoped to milling jobs; late failure reports cannot
   overwrite a completed/cancelled job. Invalid explicit machine IDs are rejected.
+- The Runner posts each complete Fusion Setup once and uploads every resulting
+  NC file as exact bytes with its relative name, size, and SHA-256 checksum.
+  The Hub validates and stores those artifacts separately instead of decoding,
+  annotating, or concatenating complete programs. Queued and terminal Fusion
+  jobs can be deleted from the queue; active jobs must be cancelled first.
 
 ## Rollout and validation limits
 
@@ -59,6 +69,8 @@ machine compatibility, or approval to cut.
 Context: [#295](https://github.com/frc971/spartanshub/pull/295) introduced
 per-plate nesting and quantity bookkeeping;
 [#308](https://github.com/frc971/spartanshub/pull/308) added stock categories;
+[#323](https://github.com/frc971/spartanshub/issues/323) defines the grouped
+plate-job workflow this draft implements;
 [#231](https://github.com/frc971/spartanshub/pull/231) and
 [#235](https://github.com/frc971/spartanshub/pull/235) tightened the separate
 router grouping pipeline. This draft uses Fusion's stock categories rather

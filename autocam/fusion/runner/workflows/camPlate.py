@@ -1,4 +1,5 @@
 from ..commands.GroupingValidation import require_complete_arrangement, plate_spacing, require_positive_quantity
+from ..commands.NcArtifacts import collect_nc_artifacts
 import adsk.core, adsk.fusion, adsk.cam, traceback
 
 import json
@@ -377,33 +378,15 @@ def start(data, session):
 
         export(plate_id, machine_post_processor_path)
 
-        # cam_jobs.gcode is a single text column (matches turning/routing's
-        # one-file-per-job model), not a zip bundle like upstream's
-        # /api/jobs/complete accepted - a real difference in the job model,
-        # not just a URL change. A Fusion CAM template CAN legitimately
-        # export more than one NC file per plate (one per setup/WCS) -
-        # concatenated here with a clear per-file boundary comment (matching
-        # this app's own HEADER_WARNING-style G-code comment conventions -
-        # see autocam/turning.js) as an honest MVP behavior, not a verified
-        # design: whether per-file (not concatenated) storage actually
-        # matters in practice needs a real multi-setup plate job tested
-        # against a real Fusion 360 template, which this environment can't do.
-        gcode_parts = []
-        for root, _dirs, files in os.walk(export_dir) if os.path.isdir(export_dir) else []:
-            for fname in sorted(files):
-                fpath = os.path.join(root, fname)
-                try:
-                    with open(fpath, "r", encoding="utf-8", errors="replace") as ncf:
-                        gcode_parts.append(f"(=== {fname} ===)\n{ncf.read()}")
-                except Exception:
-                    app.log(f"Could not read exported NC file {fpath}:\n{traceback.format_exc()}")
-        combined_gcode = "\n\n".join(gcode_parts)
+        # Preserve each file emitted by Fusion's configured post byte-for-byte.
+        # Each setup is posted as one ordered program; independent setup/WCS
+        # programs remain separate downloads.
+        nc_files = collect_nc_artifacts(export_dir)
         shutil.rmtree(export_dir, ignore_errors=True)
 
         completion_data = {
             "jobId": job_id,
-            "gcode": combined_gcode,
-            "gcodeFileName": f"{plate_id}.ngc",
+            "ncFiles": nc_files,
         }
         if total_machining_time is not None:
             completion_data["stats"] = {"total_machining_time": total_machining_time}

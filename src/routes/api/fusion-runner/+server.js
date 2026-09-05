@@ -20,6 +20,7 @@ import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { createClient } from '@supabase/supabase-js';
 import { isAuthorizedFusionRunnerRequest } from '$lib/server/fusion_runner_auth.js';
+import { validateFusionNcFiles } from '$lib/server/fusion_nc_artifacts.js';
 
 function getServiceSupabase() {
   const url = env.SUPABASE_URL || env.PUBLIC_SUPABASE_URL;
@@ -133,12 +134,20 @@ export async function POST({ request, url }) {
     }
 
     if (action === 'complete') {
+      const { data: currentJob, error: currentError } = await supabase
+        .from('cam_jobs').select('id, params').eq('id', jobId).eq('operation_type', 'milling').eq('status', 'processing').single();
+      if (currentError || !currentJob) return json({ error: 'Job was not in the processing state - not completed' }, { status: 409 });
+      const kind = currentJob.params?.fusionJobKind;
+      const ncFiles = kind === 'plate:arrange' ? null : validateFusionNcFiles(body?.ncFiles);
       const { data, error } = await supabase
         .from('cam_jobs')
         .update({
           status: 'completed',
-          gcode: body?.gcode,
-          gcode_file_name: body?.gcodeFileName || 'output.ngc',
+          // Fusion output is stored as separate base64 artifacts. It is not
+          // decoded, annotated, concatenated, or renamed by this app.
+          gcode: null,
+          gcode_file_name: null,
+          fusion_nc_files: ncFiles,
           stats: body?.stats || null,
           progress: 100,
           progress_message: 'Done'

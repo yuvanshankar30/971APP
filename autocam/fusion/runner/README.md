@@ -33,7 +33,7 @@ Spartans Hub /api/fusion-runner  →  Job Polling  →  Job Queue  →  Router
                                                                   └─→ plate:arrange   →  importPlate
 ```
 
-The add-in runs a background polling thread that claims queued `cam_jobs` rows (`operation_type='milling'`) via a compare-and-swap on `status`, dispatches each job's `params.fusionJobKind` to its workflow, and reports status back to Spartans Hub. STEP files and tooling are downloaded per job, toolpaths are generated in Fusion, and the resulting G-code is posted back as plain text on `cam_jobs.gcode`.
+The add-in runs a background polling thread that claims queued `cam_jobs` rows (`operation_type='milling'`) via a compare-and-swap on `status`, dispatches each job's `params.fusionJobKind` to its workflow, and reports status back to Spartans Hub. STEP files and tooling are downloaded per job, toolpaths are generated in Fusion, and each whole Fusion Setup is posted once. The resulting files are read as bytes and uploaded separately with their original relative names, sizes, and SHA-256 checksums; the Hub does not decode, annotate, concatenate, or rename Fusion's output.
 
 ## Features
 
@@ -43,6 +43,7 @@ The add-in runs a background polling thread that claims queued `cam_jobs` rows (
 - **2D nesting** — auto-arranges parts onto plates with envelope screenshots
 - **Auto-orientation** — orients parts largest-face-up before setup
 - **Template-driven setups** — reusable Fusion CAM templates for plates and box tubes
+- **Exact NC artifacts** — preserves each Fusion-posted file byte for byte instead of joining complete programs together
 - **Status reporting** — completion and errors pushed back to Spartans Hub's `cam_jobs` table
 
 ## Requirements
@@ -122,6 +123,7 @@ It asks which Hub to talk to (deployed, or a local dev server) and for your `FUS
 | `AutoArrange.py` | 2D nesting solver |
 | `SetupGenerator.py` | CAM setup creation |
 | `NewNCProgram.py` | G-code export |
+| `NcArtifacts.py` | Exact-byte NC artifact collection and checksums |
 | `Orientation.py` | Auto-orient parts (largest face up) |
 | `HandleTube.py` | Box-tube handling |
 | `MultiImport.py` | Multi-part import |

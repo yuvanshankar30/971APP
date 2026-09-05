@@ -31,4 +31,24 @@ describe('Fusion Runner grouping lifecycle',()=>{
   expect((await call('claim',{runnerId:'runner',machineId:'invalid'})).status).toBe(400);
   expect(mocks.from).not.toHaveBeenCalled();
  });
+ it('stores exact Fusion output artifacts without synthesizing a combined program',async()=>{
+  const contentBase64=Buffer.from('N10 G90\r\nM30\r\n','utf8').toString('base64');
+  mocks.from
+   .mockReturnValueOnce(chain({data:{id:'job',params:{fusionJobKind:'plate:cam'}}}))
+   .mockReturnValueOnce(chain({data:[{id:'job'}]}));
+  const result=await call('complete',{jobId:'job',ncFiles:[{name:'plate.nc',contentBase64}]});
+  expect(result.status).toBe(200);
+  expect(queries[1].update).toHaveBeenCalledWith(expect.objectContaining({
+   gcode:null,
+   gcode_file_name:null,
+   fusion_nc_files:[expect.objectContaining({name:'plate.nc',contentBase64,size:14})]
+  }));
+ });
+ it('rejects malformed Fusion output before completing the job',async()=>{
+  mocks.from.mockReturnValueOnce(chain({data:{id:'job',params:{fusionJobKind:'plate:cam'}}}));
+  const result=await call('complete',{jobId:'job',ncFiles:[{name:'../plate.nc',contentBase64:'eA=='}]});
+  expect(result.status).toBe(500);
+  expect((await result.json()).error).toMatch(/filenames/);
+  expect(mocks.from).toHaveBeenCalledTimes(1);
+ });
 });
