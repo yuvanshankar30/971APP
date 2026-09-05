@@ -43,9 +43,8 @@ yet and would need to be added to `camPlate.py`.
 
 ## Also still needed (see the runner's own README)
 
-`camPlate.py`'s `_download_tool_library_json` / `_first_material_name` call
-`GET {BASE_URL}/api/tools/{id}` and `GET {BASE_URL}/api/materials` -
-**neither endpoint exists yet in this app.** A real tool library now exists
-too (`autocam/fusion/runner/tools/971-outside-plate.tools` - the "971 Main
-Bit", 0.1575" carbide flat end mill, real presets) but nothing serves it to
-the Runner over HTTP yet.
+The Runner reads the selected tool's checked-in `.tools` archive through
+`cam_tools.fusion_tool_library_file`, extracts `tools.json`, and patches the
+template locally. It likewise resolves `cam_machines.post_processor` to the
+committed `971_emc.cps` or `shopsabre.cps` file; no unsupported web lookup is
+required after a job has been claimed.

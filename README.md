@@ -403,7 +403,11 @@ own docs are all together in one place instead of scattered across
   `src/routes/api/fusion-runner/+server.js`. `autocam/fusion/runner/` is the
   forked Fusion 360 add-in that actually runs CAM; unmodified copies of both
   original repos are vendored at `autocam/fusion/_upstream/` and
-  `autocam/fusion/runner/_upstream/` for reference. No Teams/API-key-per-team
+  `autocam/fusion/runner/_upstream/` for reference. Its active workflows
+  patch Fusion templates from the claimed tool's checked-in `.tools` archive
+  and post with the claimed machine's checked-in `.cps` file; the filename is
+  stored on `cam_tools.fusion_tool_library_file`, so an unknown tool fails
+  visibly rather than falling back to Fusion's raw default. No Teams/API-key-per-team
   layer was ported - single shared-secret bearer token for the Runner,
   Supabase Auth + `canManageCamProfiles` for humans, same as the rest of this
   app. See `autocam/fusion/README.md` and `valor6800-autocam-runner-setup.md`
