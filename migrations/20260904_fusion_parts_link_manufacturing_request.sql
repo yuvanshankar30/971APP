@@ -11,11 +11,15 @@
 -- main /autocam "New Job" flow yet); this is the data-level connection that
 -- makes a later UI merge possible without a schema change at that point.
 
+-- public.parts.id is bigint, not uuid (unlike most other tables in this
+-- app) - this migration originally declared part_id as uuid and failed
+-- outright with a "42804 incompatible types" error the first time it was
+-- actually run. Fixed to match the real column type.
 ALTER TABLE public.fusion_parts
-  ADD COLUMN IF NOT EXISTS part_id uuid REFERENCES public.parts(id) ON DELETE SET NULL;
+  ADD COLUMN IF NOT EXISTS part_id bigint REFERENCES public.parts(id) ON DELETE SET NULL;
 
 ALTER TABLE public.fusion_box_tubes
-  ADD COLUMN IF NOT EXISTS part_id uuid REFERENCES public.parts(id) ON DELETE SET NULL;
+  ADD COLUMN IF NOT EXISTS part_id bigint REFERENCES public.parts(id) ON DELETE SET NULL;
 
 CREATE INDEX IF NOT EXISTS idx_fusion_parts_part_id ON public.fusion_parts(part_id);
 CREATE INDEX IF NOT EXISTS idx_fusion_box_tubes_part_id ON public.fusion_box_tubes(part_id);
