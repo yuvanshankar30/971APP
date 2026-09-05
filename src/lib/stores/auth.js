@@ -39,7 +39,10 @@ export async function fetchUserProfile(userId) {
     const [profileResult, rosterResult] = await Promise.all([
       supabase
         .from('user_profiles')
-        .select('id, email, full_name, role, is_dev, permissions, header_tabs, dashboard_layout, login_screen_style, theme_preference, show_purchasing_line_totals, created_at, updated_at, banned, general_role, purchasing_role, team_role, frc_team, notification_settings, slack_user_id, slack_dm_channel, manufacturing_lead_workflows')
+        // Select the profile row as a whole so a newly deployed client stays
+        // able to sign in while an additive migration is still propagating.
+        // The profile mapper below remains the allow-list for UI data.
+        .select('*')
         .eq('id', userId)
         .single(),
       supabase

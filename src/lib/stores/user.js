@@ -91,7 +91,9 @@ export async function fetchUserProfileByUUID(supabase, uuid) {
   try {
       const { data, error } = await supabase
         .from('user_profiles')
-        .select('id, email, full_name, role, is_dev, permissions, header_tabs, dashboard_layout, theme_preference, show_purchasing_line_totals, created_at, updated_at, banned, general_role, purchasing_role, team_role, frc_team, notification_settings, slack_user_id, slack_dm_channel, manufacturing_lead_workflows')
+        // Keep this legacy loader compatible with an app deployment that
+        // arrives before an additive profile-column migration.
+        .select('*')
       .eq('id', uuid)
       .single();
 
