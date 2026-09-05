@@ -3,7 +3,7 @@
   import { onMount } from 'svelte';
   import { toastActions } from '$lib/toast.js';
   import { supabase } from '$lib/supabase.js';
-  import { fetchParts, createPart, deletePart, renamePart, fetchPartCategories } from '$lib/fusionCam.js';
+  import { fetchParts, createPart, deletePart, renamePart, updatePartQuantity, fetchPartCategories } from '$lib/fusionCam.js';
   import { Plus, Trash2, Package, Pencil, Check, X } from 'lucide-svelte';
 
   export let user;
@@ -23,6 +23,8 @@
   let submitting = false;
   let renamingPartId = null;
   let renameValue = '';
+  let editingQuantityId = null;
+  let quantityValue = '';
 
   async function loadManufacturingParts() {
     const { data, error } = await supabase
@@ -137,6 +139,35 @@
     }
   }
 
+  function startEditQuantity(part) {
+    editingQuantityId = part.id;
+    quantityValue = String(part.original_quantity);
+  }
+
+  function cancelEditQuantity() {
+    editingQuantityId = null;
+    quantityValue = '';
+  }
+
+  async function saveQuantity(part) {
+    const parsed = Number(quantityValue);
+    if (!Number.isInteger(parsed) || parsed < 0) {
+      toastActions.show('Quantity must be a whole number, zero or more');
+      return;
+    }
+    if (parsed === part.original_quantity) {
+      cancelEditQuantity();
+      return;
+    }
+    try {
+      const updated = await updatePartQuantity(part.id, parsed);
+      parts = parts.map((p) => (p.id === part.id ? { ...p, ...updated } : p));
+      cancelEditQuantity();
+    } catch (e) {
+      toastActions.show(e.message || 'Failed to update quantity');
+    }
+  }
+
   function categoryLabel(cat) {
     if (!cat) return 'Unknown';
     const material = cat.cam_materials?.name || 'Material';
@@ -248,7 +279,28 @@
             <span class="tag">{categoryLabel(part.fusion_part_categories)}</span>
           </div>
           <p class="cam-form-hint">
-            Quantity: {part.quantity} of {part.original_quantity}
+            Quantity: {part.quantity} of
+            {#if editingQuantityId === part.id}
+              <span class="rename-control quantity-control">
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  class="form-input rename-input quantity-input"
+                  bind:value={quantityValue}
+                  on:keydown={(e) => { if (e.key === 'Enter') saveQuantity(part); if (e.key === 'Escape') cancelEditQuantity(); }}
+                />
+                <button type="button" class="btn btn-ghost btn-sm" title="Save" on:click={() => saveQuantity(part)}><Check size={14} /></button>
+                <button type="button" class="btn btn-ghost btn-sm" title="Cancel" on:click={cancelEditQuantity}><X size={14} /></button>
+              </span>
+            {:else}
+              <span class="rename-control quantity-control">
+                {part.original_quantity}
+                {#if canManage}
+                  <button type="button" class="btn btn-ghost btn-sm" title="Edit quantity" on:click={() => startEditQuantity(part)}><Pencil size={13} /></button>
+                {/if}
+              </span>
+            {/if}
             {#if part.epic} - {part.epic}{/if}
             {#if part.ticket} - {part.ticket}{/if}
             {#if part.parts} - linked to <strong>{part.parts.name}</strong>{/if}
@@ -276,6 +328,8 @@
   .cam-list-header { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
   .rename-control { display: flex; align-items: center; gap: 0.35rem; min-width: 0; }
   .rename-input { padding: 0.2rem 0.4rem; height: auto; width: auto; min-width: 10rem; }
+  .quantity-control { display: inline-flex; }
+  .quantity-input { min-width: 4rem; width: 4rem; }
   .cam-list-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
   .empty-state { color: var(--text-muted, #888); padding: 2rem 0; text-align: center; }
   .cam-form-hint { color: var(--text-muted, #888); font-size: 0.85rem; margin: 0.25rem 0 0; }

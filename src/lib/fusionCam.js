@@ -113,6 +113,39 @@ export async function renamePart(id, name) {
   return data;
 }
 
+/**
+ * Changes how many of a part actually exist, not just how many are still
+ * unassigned. `quantity` means "still unassigned to any plate" (see
+ * assignPartToPlate's own doc comment) - editing it directly would silently
+ * change how many are considered nested without changing the real total.
+ * Takes the new true total (`original_quantity`) and shifts `quantity` by
+ * the same delta, so however many are already nested elsewhere stays
+ * untouched - increasing the total makes more available to nest, decreasing
+ * it removes from what's available (never from what's already nested).
+ */
+export async function updatePartQuantity(id, newOriginalQuantity) {
+  const { data: part, error: fetchError } = await supabase
+    .from('fusion_parts')
+    .select('quantity, original_quantity')
+    .eq('id', id)
+    .single();
+  if (fetchError) throw fetchError;
+
+  const alreadyNested = part.original_quantity - part.quantity;
+  if (newOriginalQuantity < alreadyNested) {
+    throw new Error(`Can't go below ${alreadyNested} - that many are already nested onto a plate`);
+  }
+
+  const { data, error } = await supabase
+    .from('fusion_parts')
+    .update({ original_quantity: newOriginalQuantity, quantity: newOriginalQuantity - alreadyNested })
+    .eq('id', id)
+    .select('*, fusion_part_categories(thickness, cam_materials(name, category)), parts(id, name, project_id, workflow)')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 export async function deletePart(id) {
   const { error } = await supabase.from('fusion_parts').delete().eq('id', id);
   if (error) throw error;
