@@ -12,6 +12,7 @@
   import { ShoppingCart, Package, DollarSign, Truck, CheckCircle, Clock, AlertTriangle, Edit, MapPin, Download, Settings, X, Link as LinkIcon, Target, Pin } from 'lucide-svelte';
   import { toastActions } from '$lib/toast.js';
   import { formatPacificDate } from '$lib/timezone.js';
+  import { purchasingLineTotal } from '$lib/purchasingLineTotal.js';
   import { goto } from '$app/navigation';
   import PartNotes from '$lib/components/PartNotes.svelte';
   import PurchaseReceivingScanner from '$lib/components/PurchaseReceivingScanner.svelte';
@@ -43,6 +44,7 @@
   let seasonFilter = getCurrentSeasonBucket()?.value || '';
   let show971 = true;
   let show9584 = true;
+  $: showPurchasingLineTotals = user?.show_purchasing_line_totals !== false;
 
   // Derived options and filtered view
   $: vendorOptions = Array.from(new Set(parts.map(p => (p.vendor || '').toString()).filter(v => v && v !== '') ))
@@ -1101,6 +1103,9 @@
               <th>Requester</th>
               <th>Quantity</th>
               <th>Price</th>
+              {#if showPurchasingLineTotals}
+                <th>Total</th>
+              {/if}
               {#if !orderMode}
                 <th>Link</th>
                 <th>Approved</th>
@@ -1108,8 +1113,6 @@
                 <th>Shipping</th>
                 <th>Created</th>
                 <th>Kit</th>
-              {:else}
-                <th>Total</th>
               {/if}
             </tr>
           </thead>
@@ -1191,6 +1194,15 @@
                     />
                   {/if}
                 </td>
+                {#if showPurchasingLineTotals}
+                  <td class="price" data-label="Total">
+                    {#if purchasingLineTotal(part.price, part.quantity) !== null}
+                      <strong>${purchasingLineTotal(part.price, part.quantity).toFixed(2)}</strong>
+                    {:else}
+                      <span aria-label="Price not set">—</span>
+                    {/if}
+                  </td>
+                {/if}
                 {#if !orderMode}
                 <td class="download" data-label="Vendor link">
                   <button class="btn btn-secondary btn-sm" on:click={() => {
@@ -1319,10 +1331,6 @@
                     />
                   </div>
                 </td>
-                {:else}
-                  <td class="price" data-label="Total">
-                    <strong>${((part.price || 0) * (part.quantity || 1)).toFixed(2)}</strong>
-                  </td>
                 {/if}
               </tr>
             {/each}

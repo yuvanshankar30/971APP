@@ -134,7 +134,9 @@ browser confirmation or prompt popups.
   stored, and an in-app confirmation is required before the selected item is
   atomically marked delivered with a receiving audit event.
   Purchasing is tied to CAD parts (`cad/purchasing`) with budget
-  tracking/allocation by project or build (admin Budgets tab).
+  tracking/allocation by project or build (admin Budgets tab). The table can
+  calculate each line as unit price × quantity; members can hide that Total
+  column in Account Settings → Appearance without changing shared purchasing data.
 - **Tasks**: general task tracking separate from the planner's
   scheduling-focused tasks, including a dedicated P0 (priority-zero issue)
   report view.
