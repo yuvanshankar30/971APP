@@ -163,7 +163,9 @@ browser confirmation or prompt popups.
   after signing out.
 - **Default navigation**: Home is always first, followed by Manufacturing,
   Competition, CAD, and Purchasing. Members can still customize this order in
-  their Account navigation settings.
+  their Account navigation settings. Signed-in members can also open global
+  site search from the header (or `⌘/Ctrl+K`) to find relevant user-facing
+  pages, including pages not currently pinned to their personal navigation.
 - **Pick List** (`scouting/`): a team-comparison / pick-list workspace for the
   active event. Named for what it produces: it was previously labelled "Data
   Scouting" in the nav, which collided with the separate `datascout` route and
