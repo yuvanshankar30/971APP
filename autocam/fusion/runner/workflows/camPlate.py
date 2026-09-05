@@ -17,11 +17,12 @@ from ..config import (
     BASE_URL,
     FINAL_PATH,
     FUSION_DATA_PROJECT_NAME,
-    FUSION_DROP_FOLDER_NAME,
+    FUSION_DROP_FOLDER_PATH,
     INITIAL_PATH,
     TEMP_PATH,
     TOOLS_PATH,
 )
+from .dropFolder import resolve_drop_folder
 from .importPlate import clear_design_nuke
 from .job_status import ensure_completion_response, send_job_error
 from .templateTools import patch_cam_template_with_tool_libraries
@@ -570,34 +571,9 @@ def start(data, session):
 
         # Save the document to the configured AutoCAM drop folder
         try:
-            # Resolve the target Data Panel project by name if configured -
-            # NOT by index (dataProjects isn't ordered by relevance; a
-            # hardcoded item(1) previously resolved to a years-stale
-            # project). Falls back to whatever project is currently active
-            # in the Data Panel if FUSION_DATA_PROJECT_NAME is unset or not
-            # found among this account's projects.
-            data_project = None
-            if FUSION_DATA_PROJECT_NAME:
-                for i in range(app.data.dataProjects.count):
-                    candidate = app.data.dataProjects.item(i)
-                    if candidate.name == FUSION_DATA_PROJECT_NAME:
-                        data_project = candidate
-                        break
-                if data_project is None:
-                    app.log(
-                        f"FUSION_DATA_PROJECT_NAME '{FUSION_DATA_PROJECT_NAME}' "
-                        "not found among this account's Fusion projects - "
-                        "falling back to the active project."
-                    )
-            if data_project is None:
-                data_project = app.data.activeProject
-
-            root_folder = data_project.rootFolder
-            autocam_drop_folder = root_folder.dataFolders.itemByName(FUSION_DROP_FOLDER_NAME)
-
-            if autocam_drop_folder is None:
-                app.log(f"'{FUSION_DROP_FOLDER_NAME}' folder not found, creating it...")
-                autocam_drop_folder = root_folder.dataFolders.add(FUSION_DROP_FOLDER_NAME)
+            data_project, autocam_drop_folder = resolve_drop_folder(
+                app, FUSION_DATA_PROJECT_NAME, FUSION_DROP_FOLDER_PATH
+            )
 
             # Save the document with Plate<plate_id>Job<job_id> format
             doc_name = f"Plate{plate_id}Job{job_id}"
@@ -611,11 +587,11 @@ def start(data, session):
 
             # Save the document
             doc.saveAs(doc_name, autocam_drop_folder, "", "")
-            app.log(f"Saved document '{doc_name}' to '{data_project.name}/{FUSION_DROP_FOLDER_NAME}'")
+            app.log(f"Saved document '{doc_name}' to '{data_project.name}/{FUSION_DROP_FOLDER_PATH}'")
 
         except Exception as e:
             app.log(
-                f"Failed to save document to '{FUSION_DROP_FOLDER_NAME}' folder:\n{traceback.format_exc()}"
+                f"Failed to save document to '{FUSION_DROP_FOLDER_PATH}' folder:\n{traceback.format_exc()}"
             )
 
         export_dir = os.path.join(FINAL_PATH, plate_id)
