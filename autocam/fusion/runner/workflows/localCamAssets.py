@@ -5,9 +5,16 @@ import zipfile
 
 _RUNNER_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 _TOOL_LIBRARY_PATH = os.path.join(_RUNNER_PATH, "tools")
-_POST_PROCESSOR_PATH = os.path.abspath(
-    os.path.join(_RUNNER_PATH, "..", "..", "postprocessors")
-)
+# A sibling of this runner folder inside the repo (autocam/postprocessors/),
+# NOT a child of it - reachable via "../../postprocessors" only while this
+# code still lives at its original repo path. The team-setup-guide's own
+# install step copies just this runner folder out to Fusion's AddIns
+# directory (renamed to SpartanRoboticsAutoCAM), at which point that
+# relative climb lands outside Fusion's AddIns folder entirely and finds
+# nothing. Bundled a copy at postprocessors/ (a child, like tools/ already
+# is) so it travels with the runner wherever it's copied, instead of
+# reaching for a repo-relative path that stops existing once installed.
+_POST_PROCESSOR_PATH = os.path.join(_RUNNER_PATH, "postprocessors")
 
 # These values are deliberately filenames, not URLs. Fusion Runner is shipped
 # with the app's known-good assets, so an already-claimed job must not depend
