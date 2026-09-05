@@ -43,8 +43,12 @@
     manufacturingParts = data || [];
   }
 
-  async function load() {
-    loading = true;
+  // showLoading=false for refreshes after an action (add/delete/etc.) -
+  // flipping loading back to true mid-interaction replaced the whole list
+  // with a loading state and back, a jarring flash for what should be a
+  // quiet re-fetch. Only the initial mount needs it.
+  async function load(showLoading = true) {
+    if (showLoading) loading = true;
     try {
       boxTubes = await fetchBoxTubes();
       const { data: machineRows } = await supabase.from('cam_machines').select('*').eq('can_run_box_tubes', true).eq('enabled', true).order('name');
@@ -110,7 +114,7 @@
       newBoxTube = { name: '', epic: '', ticket: '', quantity: 1, manufacturingPartId: '' };
       stepFile = null;
       showAddForm = false;
-      await load();
+      await load(false);
       toastActions.show('Box tube added');
     } catch (e) {
       toastActions.show(e.message || 'Failed to add box tube');
@@ -123,7 +127,7 @@
     if (!await requestConfirmation({ title: 'Delete box tube', message: `Delete box tube "${boxTube.name}"?`, confirmLabel: 'Delete', danger: true })) return;
     try {
       await deleteBoxTube(boxTube.id);
-      await load();
+      await load(false);
     } catch (e) {
       toastActions.show(e.message || 'Failed to delete box tube');
     }

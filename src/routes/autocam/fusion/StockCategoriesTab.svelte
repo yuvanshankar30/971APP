@@ -15,8 +15,12 @@
   let newMaterialName = '';
   let thickness = '';
 
-  async function load() {
-    loading = true;
+  // showLoading=false for refreshes after an action (add/etc.) - flipping
+  // loading back to true mid-interaction replaced the whole list with a
+  // loading state and back, a jarring flash for what should be a quiet
+  // re-fetch. Only the initial mount needs it.
+  async function load(showLoading = true) {
+    if (showLoading) loading = true;
     try {
       const [loadedCategories, materialResult] = await Promise.all([
         fetchPartCategories(),
@@ -63,7 +67,7 @@
       selectedMaterialId = '';
       newMaterialName = '';
       thickness = '';
-      await load();
+      await load(false);
       toastActions.show('Stock category added');
     } catch (error) {
       toastActions.show(error.message || 'Failed to add stock category');

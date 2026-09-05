@@ -18,8 +18,13 @@
     rejected: 'Rejected'
   };
 
-  async function load() {
-    loading = true;
+  // showLoading=false for refreshes after an action, and for the polling
+  // interval below - flipping loading back to true replaced the whole table
+  // with a loading state and back, a jarring flash. With the 10s poll this
+  // was firing on every tick a job was active, not just after an action.
+  // Only the initial mount needs it.
+  async function load(showLoading = true) {
+    if (showLoading) loading = true;
     try {
       jobs = await fetchFusionJobs();
     } catch (e) {
@@ -34,7 +39,7 @@
     // Active jobs (queued/claimed/processing) can change outside this tab -
     // a Runner claims/completes them independently - so poll while any are active.
     const interval = setInterval(() => {
-      if (jobs.some((j) => ['queued', 'claimed', 'processing'].includes(j.status))) load();
+      if (jobs.some((j) => ['queued', 'claimed', 'processing'].includes(j.status))) load(false);
     }, 10000);
     return () => clearInterval(interval);
   });
@@ -43,7 +48,7 @@
     if (!await requestConfirmation({ title: 'Cancel job', message: `Cancel job "${job.name || job.id}"?`, confirmLabel: 'Cancel job', danger: true })) return;
     try {
       await cancelFusionJob(job.id);
-      await load();
+      await load(false);
     } catch (e) {
       toastActions.show(e.message || 'Failed to cancel job');
     }

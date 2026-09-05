@@ -32,8 +32,12 @@
   // /autocam page's tool picker), not a new rule invented here.
   let machineTools = {};
 
-  async function load() {
-    loading = true;
+  // showLoading=false for refreshes after an action (add/delete/nest/etc.) -
+  // flipping loading back to true mid-interaction replaced the whole list
+  // with a loading state and back, a jarring flash/"weird animation" for
+  // what should be a quiet re-fetch. Only the initial mount needs it.
+  async function load(showLoading = true) {
+    if (showLoading) loading = true;
     try {
       [plates, categories, parts] = await Promise.all([fetchPlates(), fetchPartCategories(), fetchParts()]);
       platePartQuantities = Object.fromEntries(plates.map((plate) => [plate.id, platePartQuantities[plate.id] || 1]));
@@ -96,7 +100,7 @@
       });
       newPlate = { name: '', width: '', length: '', trueDepth: '', categoryId: '' };
       showAddForm = false;
-      await load();
+      await load(false);
       toastActions.show('Plate added');
     } catch (e) {
       toastActions.show(e.message || 'Failed to add plate');
@@ -107,7 +111,7 @@
     if (!await requestConfirmation({ title: 'Delete plate', message: `Delete plate "${plate.name}"?`, confirmLabel: 'Delete', danger: true })) return;
     try {
       await deletePlate(plate.id);
-      await load();
+      await load(false);
     } catch (e) {
       toastActions.show(e.message || 'Failed to delete plate');
     }
@@ -186,7 +190,7 @@
       await assignPartToPlate({ categoryId: part.category_id, plateId: plate.id, partId: part.id, quantity });
       platePartSelections = { ...platePartSelections, [plate.id]: '' };
       platePartQuantities = { ...platePartQuantities, [plate.id]: 1 };
-      await load();
+      await load(false);
       toastActions.show(`${quantity}x ${part.name} nested on ${plate.name}`);
     } catch (e) {
       toastActions.show(e.message || 'Failed to nest part');
@@ -198,7 +202,7 @@
     if (!await requestConfirmation({ title: 'Remove nested part', message: `Remove ${assignment.quantity}x ${name} from "${plate.name}"?`, confirmLabel: 'Remove', danger: true })) return;
     try {
       await removePartFromPlate({ plateId: plate.id, partId: assignment.fusion_parts?.id });
-      await load();
+      await load(false);
       toastActions.show(`${name} removed from ${plate.name}`);
     } catch (e) {
       toastActions.show(e.message || 'Failed to remove nested part');
