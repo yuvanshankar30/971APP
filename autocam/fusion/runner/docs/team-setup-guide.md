@@ -53,7 +53,7 @@ RUNNER_MACHINE_ID=""
 
 Leave `RUNNER_MACHINE_ID` blank unless you're connecting this to real shop hardware that already has a machine profile in Spartans Hub (Manage Profiles on the main `/autocam` page) — blank is correct and expected for testing.
 
-**About `API_KEY`:** this must exactly match the deployed `FUSION_RUNNER_TOKEN`. Ask the project administrator for the value; do not generate a second token or put one in source control. After editing `.env`, stop and run the add-in again so it reloads the value.
+**About `API_KEY`:** this must exactly match the deployed `FUSION_RUNNER_TOKEN`. During the temporary compatibility setup, that environment variable is sourced from `VISION_RUNNER_TOKEN`; ask the project administrator for that deployed value and do not generate a second token or put one in source control. Issue #309 tracks returning to a dedicated Fusion credential. After editing `.env`, stop and run the add-in again so it reloads the value.
 
 ### 4. Enable it in Fusion
 

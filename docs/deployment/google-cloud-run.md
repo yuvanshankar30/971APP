@@ -33,9 +33,12 @@ Done and verified live:
   status-checking alone wasn't a reliable signal that it was safe to consider done.
   Worth remembering for any future domain-mapping move.
 - **Runner credentials stay runtime-only**: Cloud Build injects
-  `VISION_RUNNER_TOKEN` for the DGX vision worker and `FUSION_RUNNER_TOKEN`
-  for the physical Fusion CAM add-in. A runner host must be configured with
-  the matching value by a project administrator; neither token belongs in a
+  `VISION_RUNNER_TOKEN` for the DGX vision worker and currently maps that
+  same authorized secret to `FUSION_RUNNER_TOKEN` for the physical Fusion
+  CAM add-in. This is a temporary compatibility path while the runtime
+  service account lacks scoped access to a dedicated Fusion secret; issue
+  #309 tracks splitting them. A runner host must be configured with the
+  matching value by a project administrator; neither token belongs in a
   checked-in `.env.example` file.
 - 8 Secret Manager secrets created and wired to the Cloud Run runtime service account
   (`819718873862-compute@developer.gserviceaccount.com`) via
