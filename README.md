@@ -430,6 +430,11 @@ own docs are all together in one place instead of scattered across
   humans, same as the rest of this
   app. See `autocam/fusion/README.md` and `valor6800-autocam-runner-setup.md`
   (repo root) for the full port writeup and the evaluation that led to it.
+- **`autocam/fusion/turning/`** - experimental Fusion turning foundation
+  ([issue #331](https://github.com/frc971/spartanshub/issues/331)): validates a
+  single-part round-stock plan and exposes an empty draft turning setup builder.
+  It is not connected to the job queue and does not generate G-code. See its
+  `README.md` for design choices, the example CLI, and the staged implementation.
 - **Route files stay in `src/routes/`** regardless (`src/routes/autocam/+page.svelte`,
   `src/routes/api/cam-generate/+server.js`, `src/routes/api/drive-watcher/+server.js`)
   - SvelteKit determines a route's URL from its file location under

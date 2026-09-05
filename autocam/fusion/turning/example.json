@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "name": "Example stepped shaft",
+  "stepFileName": "example-shaft.step",
+  "units": "in",
+  "stockShape": "round",
+  "quantity": 1,
+  "partDiameter": 1,
+  "partLength": 2,
+  "stockDiameter": 1.25,
+  "stockLength": 4,
+  "chuckGripLength": 1,
+  "chuckClearance": 0.25,
+  "frontAllowance": 0.125,
+  "spindleAxis": "Z",
+  "origin": "front_face",
+  "machineId": "REPLACE_WITH_REVIEWED_LATHE_ID",
+  "toolLibrary": "REPLACE_WITH_REVIEWED_TURNING_LIBRARY",
+  "postProcessor": "REPLACE_WITH_REVIEWED_LATHE_POST",
+  "toolChangeMode": "manual",
+  "maxRpm": 1000,
+  "operations": ["face", "od_rough", "od_finish"]
+}
