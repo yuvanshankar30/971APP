@@ -73,20 +73,17 @@ convention on reading a branch's PR before resuming work on it.
      `Plate<uuid>Job<uuid>`), add a Plate sized for your stock, nest the
      part onto it, then queue a `plate:cam` job against a machine/tool from
      the Plates tab.
-   - **Scripted** (faster for repeat testing of the same plate size/material -
-     this is how this session queued its test jobs). A one-off Node script
-     using `@supabase/supabase-js` with the service key can replicate
-     `src/lib/fusionCam.js`'s `createPart`/`createPlate`/
-     `assignPartToPlate`/`queueFusionJob` calls directly: upload a STEP file
-     to the `manufacturing-files` storage bucket, insert `fusion_parts` and
-     `fusion_plates` rows, upsert a `fusion_part_category_assignments` row,
-     then insert a `cam_jobs` row with
-     `params: { fusionJobKind: 'plate:cam', plateId, boxTubeId: null }`.
-     Run it from the repo root (`node script.mjs`, not elsewhere - Node
-     resolves `node_modules` from its own directory) so `.env`'s
-     `SUPABASE_URL`/`SUPABASE_SERVICE_KEY` and the installed
-     `@supabase/supabase-js` are both in scope. Known-good catalog rows from
-     this project (reuse these IDs rather than looking them up each time):
+   - **Scripted** (faster for repeat testing of the same plate size/material):
+     ```
+     node --env-file=.env autocam/scripts/queue-fusion-plate-job.mjs <step-file-path> [part-name]
+     ```
+     Run from the repo root (Node resolves `node_modules` from its own
+     directory) - needs `SUPABASE_URL`/`SUPABASE_SERVICE_KEY` in `.env`.
+     Uploads the STEP file to the `manufacturing-files` bucket, creates
+     `fusion_parts`/`fusion_plates` rows, assigns the part to the plate, and
+     queues the `cam_jobs` row - the same sequence `src/lib/fusionCam.js`'s
+     UI helpers use. Defaults to this project's known-good preset (12x12x0.25in
+     Aluminum 6061, the 0.1575" 971 Main Bit, UNC Router):
 
      | What | Value |
      | --- | --- |
@@ -95,8 +92,9 @@ convention on reading a branch's PR before resuming work on it.
      | 0.1575" 971 Main Bit (`cam_tools.id`) | `60ef32c0-d76d-4549-a4a6-3cf4a7aee115` |
      | UNC Router (`cam_machines.id`) | `517ba89c-7167-4415-b6fd-cfc7be1e59e1` |
 
-     Delete the script when done - it's a throwaway testing tool, not
-     something to commit.
+     Override any of them with `FUSION_TEST_CATEGORY_ID`/`FUSION_TEST_MATERIAL_ID`/
+     `FUSION_TEST_TOOL_ID`/`FUSION_TEST_MACHINE_ID`/`FUSION_TEST_PLATE_WIDTH`/
+     `FUSION_TEST_PLATE_LENGTH`/`FUSION_TEST_PLATE_TRUE_DEPTH` env vars.
 5. **Watch Fusion's Text Commands console.** The Runner logs its own claim,
    setup, toolpath-generation, and post-process steps there - that's the
    primary debugging signal, along with whatever the job's `errors`/
@@ -112,18 +110,34 @@ Confirmed by real local runs, on branch `yuvan/fusion-arrange-fix`:
 - `NewNCProgram.py`'s post-process retry wrapper and the `_format_tool_label`
   float-precision fix (no more `S15750000000000004Pocket`-style filenames).
 - The tool-library duplicate-entry cleanup (`971-outside-plate.tools`).
+- The diameter-filter fix in `localCamAssets.py` that let a drill-type tool
+  survive tool-library loading at all (previously discarded unless it
+  happened to match the selected endmill's own diameter).
+- Small round holes now get milled with the selected end mill via a real
+  Fusion "Bore" operation (`templateTools.py`'s fallback when no dedicated
+  drill tool exists) instead of coming out with no toolpath at all. Backed
+  by `templates/Bore.f3dhsm-template`, a real operation exported directly
+  from Fusion (Setup > 2D > Bore > Save as Template) - **not** a guessed
+  XML strategy. Confirmed: `Bore fallback: [{'status': 'applied', ...}]` in
+  the log, a real `Bore (<tool>)` toolpath with no warning, and a
+  successful postProcess.
 
-**Not yet confirmed against a live Fusion run** - needs a real test before
-trusting it on actual material:
-- `SetupGenerator.py`'s WCS orientation change (Face/Edge picks instead of
-  construction axes, fixture clearances, zeroed X/Y stock padding). Check
-  the resulting Setup's WCS in Fusion, or the toolpath direction, before
-  cutting real stock with it.
+**Reverted, not to be retried without a real exported source**:
+`SetupGenerator.py`'s WCS orientation change (Face/Edge picks instead of
+construction axes) produced a real, wrong toolpath in live testing (a
+zigzag covering almost the entire plate) - reverted back to the
+construction-axis method. A separate, earlier guess at the Bore fallback's
+own Fusion strategy name (`strategy="circular"`) produced the same
+symptom before being replaced with the real exported `bore` strategy
+above. Lesson for both: a Fusion CAM internal strategy/parameter schema
+isn't safely guessable from the public API's docs alone - if a future fix
+needs one, get a real example via Fusion's own "Save as Template" first.
 
-Known gap, not yet addressed: jobs have logged
-`Template tool matches missing: [{'description': '', 'type': 'drill',
-'diameter': 0.256}]` on every run so far. Harmless for parts with no holes
-(nothing has needed that drill yet) but will matter for a part that does.
+Known gap, not yet addressed: `Pocket 1` has logged "One or more pockets
+were not machined because they are too small to be reached with given
+ramping constraints" - a different feature than the round holes (which the
+Bore fallback now handles), doesn't fail the job, just skips some small
+pocket/corner region.
 
 ## Moving off local dev
 
