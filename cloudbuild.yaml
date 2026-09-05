@@ -149,7 +149,13 @@ steps:
       # secret value also needs to be in whatever environment runs
       # vision/runner/vision_runner.py (see vision/runner/README.md and
       # vision/runner/.env.example) - this only covers the Cloud Run side.
-      - '--set-secrets=SUPABASE_SERVICE_KEY=SUPABASE_SERVICE_KEY:latest,SUPABASE_ANON_KEY=SUPABASE_ANON_KEY:latest,SLACK_BOT_TOKEN=SLACK_BOT_TOKEN:latest,SLACK_SIGNING_SECRET=SLACK_SIGNING_SECRET:latest,TBA_API_KEY=TBA_API_KEY:latest,CRON_NOTIFICATION_TOKEN=CRON_NOTIFICATION_TOKEN:latest,VISION_RUNNER_TOKEN=VISION_RUNNER_TOKEN:latest'
+      #
+      # FUSION_RUNNER_TOKEN authenticates the physical Fusion CAM add-in's
+      # claim/processing/complete/fail calls to /api/fusion-runner. The
+      # add-in's local API_KEY must match this Secret Manager value exactly.
+      # Keeping it in --set-secrets makes a missing deployment secret fail a
+      # deploy rather than leaving the Fusion endpoint fail-open.
+      - '--set-secrets=SUPABASE_SERVICE_KEY=SUPABASE_SERVICE_KEY:latest,SUPABASE_ANON_KEY=SUPABASE_ANON_KEY:latest,SLACK_BOT_TOKEN=SLACK_BOT_TOKEN:latest,SLACK_SIGNING_SECRET=SLACK_SIGNING_SECRET:latest,TBA_API_KEY=TBA_API_KEY:latest,CRON_NOTIFICATION_TOKEN=CRON_NOTIFICATION_TOKEN:latest,VISION_RUNNER_TOKEN=VISION_RUNNER_TOKEN:latest,FUSION_RUNNER_TOKEN=FUSION_RUNNER_TOKEN:latest'
       # ORIGIN is adapter-node's own documented fix for a real gap: "HTTP
       # doesn't give SvelteKit a reliable way to know the URL that is
       # currently being requested" behind a reverse proxy that terminates
