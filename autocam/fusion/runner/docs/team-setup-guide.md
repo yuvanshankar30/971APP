@@ -1,12 +1,19 @@
-# Connecting your Fusion 360 to Spartans Hub's Fusion CAM
+# Setting up and using Spartans Hub's Fusion CAM
 
-Practical, step-by-step walkthrough for setting up the Fusion CAM Runner on your own machine. Written from actually doing this, including the real gotchas that aren't obvious from the code or the main README.
+Practical, step-by-step walkthrough for setting up the Fusion CAM Runner on your own machine, using the `/autocam/fusion` web UI to actually queue work, and understanding what happens between "click Queue CAM Job" and "download G-code." Written from actually doing this, including the real gotchas that aren't obvious from the code or the main README.
 
-## What you're setting up
+## The big picture
 
-A Fusion 360 add-in that polls Spartans Hub (`/autocam/fusion`) for queued milling jobs, claims them, and (once real CAM templates exist for your machine — see `cam-engineering-plan.md` if that's not done yet) runs the actual toolpath generation. You can set this up and confirm the connection works even before real templates exist — see "What to expect" at the end.
+Two things have to be running for any of this to work:
 
-## 1. Copy the add-in in — and rename the folder
+1. **Spartans Hub itself** (`/autocam/fusion`) — where you catalog parts/plates/box tubes and queue jobs. This is just the web app, already deployed.
+2. **The Runner** — a Fusion 360 add-in that runs on a machine with Fusion 360 installed, polls Spartans Hub for queued jobs, and does the actual CAM work inside Fusion. This is what you're installing below. Without a Runner running somewhere, jobs sit in the `queued` state forever — nothing else in the system generates G-code.
+
+They talk over plain HTTP (`/api/fusion-runner`), authenticated with a shared-secret bearer token (`FUSION_RUNNER_TOKEN` on the server, `API_KEY` in the Runner's `.env`).
+
+## Part 1: Installing the Runner
+
+### 1. Copy the add-in in — and rename the folder
 
 ```bash
 cp -R autocam/fusion/runner "$HOME/Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns/SpartanRoboticsAutoCAM"
@@ -16,7 +23,9 @@ cp -R autocam/fusion/runner "$HOME/Library/Application Support/Autodesk/Autodesk
 
 (Windows path: `%APPDATA%\Autodesk\Autodesk Fusion 360\API\AddIns\SpartanRoboticsAutoCAM`)
 
-## 2. Install `requests` for Fusion's bundled Python
+**Updating an existing install?** Re-run the same `cp -R`/`rsync` over the existing folder rather than deleting it first — it'll overwrite the code but leave your `.env` and `.overridepath` alone as long as you don't pass a flag that deletes extra files (plain `cp -R` never deletes; if you use `rsync -a`, don't add `--delete`).
+
+### 2. Install `requests` for Fusion's bundled Python
 
 Fusion's own Python has no third-party packages:
 
@@ -27,7 +36,7 @@ echo ~/fusion-runner-deps > "$HOME/Library/Application Support/Autodesk/Autodesk
 
 **Known risk, not yet root-caused:** this installs packages built for whatever Python your system's `pip` defaults to, which may not exactly match Fusion's bundled interpreter's ABI. If the add-in fails to load with an error mentioning `charset_normalizer`, that's the likely cause — ask for help rather than assuming your setup is broken.
 
-## 3. Configure it
+### 3. Configure it
 
 ```bash
 cd "$HOME/Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns/SpartanRoboticsAutoCAM"
@@ -44,24 +53,91 @@ RUNNER_MACHINE_ID=""
 
 Leave `RUNNER_MACHINE_ID` blank unless you're connecting this to real shop hardware that already has a machine profile in Spartans Hub (Manage Profiles on the main `/autocam` page) — blank is correct and expected for testing.
 
-## 4. Enable it in Fusion
+**About `API_KEY`:** as of this writing, Spartans Hub's production deployment does **not** have `FUSION_RUNNER_TOKEN` configured (that's tracked separately — wiring it into the deploy pipeline is its own PR, deliberately not merged until a real secret exists in GCP Secret Manager). `isAuthorizedFusionRunnerRequest` in `src/lib/server/fusion_runner_auth.js` fails open when the server-side secret is unset, meaning **any value works in `API_KEY` for now** — the check isn't actually enforced yet. Put any string in for testing; once the real secret is wired server-side, this file needs to be updated to match it exactly, or the Runner will start getting rejected.
+
+### 4. Enable it in Fusion
 
 1. Open Fusion 360, make sure you're in the **Design** workspace (workspace switcher, top-left).
 2. **Utilities** tab → **Add-Ins** → **Scripts and Add-Ins**. (Fusion renamed "Tools" to "Utilities" in a 2022 update — if you're following an old tutorial that says "Tools tab," this is the same place.)
 3. **Add-Ins** tab inside that dialog (not "My Scripts") → find **SpartanRoboticsAutoCAM** → select it → **Run**.
 4. It'll be listed as **SpartanRoboticsAutoCAM** (one word, no spaces) — matches the internal file names from step 1.
+5. If you edited `.env` while the add-in was already running, **Stop** and **Run** it again — it only reads `.env` on load.
 
-## 5. Confirm it's actually running
+### 5. Confirm it's actually running
 
 Open the **Text Command** window — **Option+Cmd+C** on Mac, or View menu → Show/Hide Text Commands. With logging on by default, you should see it polling every few seconds.
 
-## 6. Prove the connection works
+## Part 2: Using the web UI
 
-- In the browser: `spartanshub.spartanrobotics.org/autocam/fusion` → **Plates** tab → **Add Plate** (needs a material/thickness category first — add one via **Manage Profiles** on the main `/autocam` page if none exist).
-- Click **Queue CAM Job**.
-- Watch the Text Command window — it should claim the job within about 10 seconds.
+Everything below happens at `/autocam/fusion` (not the main `/autocam` page — that's the older pure-JS turning/routing/tubestock pipeline; Fusion CAM is deliberately its own section for now). It has four tabs.
 
-## What to expect
+### Parts tab
+
+A **Part** is a named quantity of stock waiting to be nested onto a plate — e.g. "12x Gearbox Side Plate, 1/8" aluminum." Add one with a name, a Material/Thickness category, a quantity, and optionally a STEP file and a link to a real manufacturing request (so it traces back to what it's actually for). **A Part is never queued directly** — it exists to eventually get nested onto a Plate.
+
+The Material/Thickness dropdown is populated from `fusion_part_categories` (add categories via **Manage Profiles** on the main `/autocam` page) — if it's empty, add a category there first.
+
+### Plates tab
+
+A **Plate** is a real sheet: name, Material/Thickness category, width × length × true depth (inches). This is what actually gets queued and CAM'd.
+
+⚠️ **Known gap:** the data layer supports nesting Parts onto a Plate (`assignPartToPlate` in `src/lib/fusionCam.js`), but **no UI currently calls it** — there's no way to actually assign a Part to a Plate from the web UI today. A Plate you queue right now carries no nested-parts information at all; the Runner will treat it as an empty sheet. Building that assignment UI is a prerequisite for Plates to be genuinely useful — until then, prefer the Box Tubes flow below for anything you actually need CAM'd.
+
+To queue a Plate: pick a router from its row's dropdown, click **Queue CAM Job**.
+
+### Box Tubes tab
+
+A **Box Tube** is a tube with its own STEP file, queued 1:1 (no nesting/assignment step needed) — the most complete, actually-usable path today. Add one with a name, quantity, STEP file, and optionally a link to a manufacturing request. Pick a router, click **Queue CAM Job**.
+
+### Job Queue tab
+
+Shows every Fusion CAM job (`cam_jobs` rows with `operation_type = 'milling'`) and its status: `queued` → `claimed` → `processing` → `completed`/`failed`. Auto-refreshes every 10 seconds while anything is active. A failed job shows its error inline. A completed job gets a **Download G-code** button. You can **Cancel** a job at any point before it completes.
+
+## Part 3: How G-code actually gets generated
+
+Understanding this matters because it explains what "queued" really means and why a completed job's G-code might still not be trustworthy for a real machine yet.
+
+```
+Web UI "Queue CAM Job"
+  → INSERT into cam_jobs (operation_type='milling', status='queued', params.fusionJobKind, plateId/boxTubeId, machine_id, tool_id, material_id)
+
+Runner's polling thread (every few seconds)
+  → GET /api/fusion-runner  — claims a queued row via compare-and-swap on status (two Runners can never grab the same job)
+  → server resolves the full payload: plate/box-tube dimensions, assigned parts (for a plate), STEP file storage paths, machine + tool info
+  → dispatches on params.fusionJobKind:
+        plate:cam     → workflows/camPlate.py
+        box_tube      → workflows/camTube.py
+        plate:arrange → workflows/importPlate.py  (nesting only, no G-code)
+```
+
+Inside `camPlate.py`/`camTube.py` (the actual CAM generation, both follow the same shape):
+
+1. **New Fusion document created**, previous design state cleared.
+2. **STEP files downloaded and imported** (`commands/MultiImport.py`) — one import per assigned part (for a plate) or the tube's own STEP (for a box tube).
+3. **Parts auto-arranged** onto the plate (`commands/AutoArrange.py`) and **oriented largest-face-up** (`commands/Orientation.py`).
+4. **A Fusion CAM template is loaded** — currently hardcoded to `../templates/Plates.f3dhsm-template` (plates) or `../templates/boxtubes.f3dhsm-template` (box tubes). **These are still Team Valor 6800's original placeholder templates**, not this team's real ones — see "What's not real yet" below.
+5. **The template is patched with the job's tool library** (`workflows/templateTools.py`'s `patch_cam_template_with_tool_libraries`) — this rewrites the template's XML in place to swap in the tool(s) resolved for this job (from `payload.tool_id`/`tool_items`, or by asking `GET /api/tools` for the first compatible tool if none was specified — **`/api/tools` doesn't exist in this app yet**, so that fallback currently fails; always pick a tool explicitly on the job for now).
+6. **CAM setups are generated** from the patched template (`commands/SetupGenerator.py`), and Fusion computes real toolpaths.
+7. **G-code is exported** (`commands/NewNCProgram.py`) using the machine's post-processor (`autocam/postprocessors/971_emc.cps` for a LinuxCNC/UNC Router machine, `shopsabre.cps` for a WinCNC/New Router machine — matched by the job's `machine_id` → `cam_machines.controller`).
+8. **The exported `.ngc` file(s) are read back, concatenated** (a plate template can legitimately produce more than one file — one per setup/WCS — joined here with a `(=== filename ===)` comment boundary), and **POSTed back** to `/api/fusion-runner?action=complete` as a single `cam_jobs.gcode` text column.
+9. The web UI's Job Queue tab picks up the `completed` status and lets you download that text as `.ngc`.
+
+Any failure anywhere in this chain calls `/api/fusion-runner?action=fail` with the Python traceback, which is what shows up as the job's error text in the Job Queue tab.
+
+### What's not real yet
+
+- **Templates**: `Plates.f3dhsm-template`/`boxtubes.f3dhsm-template` are still Valor 6800's originals (their tool naming, e.g. "6061Al Onsrud End Mill"). This team's real templates — extracted from the shop's own Fusion `Documents/Template` folder — are staged at `templates/971-real/` but **not wired into `camPlate.py`/`camTube.py`**. Box tubes have one clear real template (`Tubestock(with Cutter Comp).f3dhsm-template`); plates have several candidates for different material/tool/machine combinations (one is explicitly ShopSabre-only per its own filename) — picking the default needs a human CAM call, not a filename guess. See `templates/971-real/README.md` and `cam-engineering-plan.md`.
+- **Tool library**: the real "971 Main Bit" tool library (`tools/971-outside-plate.tools`, two variants — 0.1875" HSS at 13000 RPM, 0.1575" carbide at 22000 RPM, both real Fusion-programmed feeds) is staged but not yet the one templates get patched with by default.
+- **`/api/tools` and `/api/materials`**: `camPlate.py`'s auto-tool-selection and material-name lookup call these; neither endpoint exists in this SvelteKit app yet. Always specify a tool explicitly when queuing a job until these exist.
+- **Plate-part nesting UI**: see the Plates tab section above.
+
+So: claiming jobs, importing geometry, and the full round-trip back to a downloadable `.ngc` file all work today. Whether that G-code is *correct* for a real cut depends on templates/tools that haven't been finished yet — treat any G-code produced today as a pipeline test, not something to run on a real machine.
+
+## Part 4: Proving the connection works end-to-end
+
+- In the browser: `/autocam/fusion` → **Box Tubes** tab → **Add Box Tube** (with a STEP file) → pick a router → **Queue CAM Job**.
+- Watch the Text Command window in Fusion — it should claim the job within about 10 seconds.
+- Watch the **Job Queue** tab in the browser — status should move `queued` → `claimed` → `processing` → `completed` (or `failed` with a real error).
 
 | Stage | Should work today |
 | --- | --- |
@@ -69,7 +145,8 @@ Open the **Text Command** window — **Option+Cmd+C** on Mac, or View menu → S
 | Text Command shows polling activity | Yes |
 | Queued job gets claimed | Yes |
 | Part geometry actually imports into Fusion | Yes |
-| Real, correct toolpaths / G-code | **Not yet** — needs real per-machine CAM templates, see `cam-engineering-plan.md` |
+| Job completes and G-code downloads | Yes (mechanically) |
+| That G-code is correct for a real cut | **Not yet** — needs real per-machine templates/tools, see above and `cam-engineering-plan.md` |
 
 If something fails before the "claimed" stage, that's a real setup problem worth debugging. If it gets that far and then fails or produces garbage during the actual CAM step, that's expected until real templates exist for your machine — not your setup being broken.
 
