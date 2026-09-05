@@ -1,3 +1,5 @@
+from ..commands.GroupingValidation import require_complete_arrangement, plate_spacing, require_positive_quantity
+from ..commands.NcArtifacts import collect_nc_artifacts
 import adsk.core, adsk.fusion, adsk.cam, traceback
 
 import json
@@ -21,6 +23,7 @@ from ..config import (
     FUSION_DATA_PROJECT_NAME,
     FUSION_DROP_FOLDER_PATH,
     INITIAL_PATH,
+    RUNNER_ID,
     TEMP_PATH,
     TOOLS_PATH,
 )
@@ -218,6 +221,11 @@ def start(data, session):
         clear_design_nuke(design)
         time.sleep(1.0)
 
+        raw_assignments = payload.get('assignments')
+        if not isinstance(raw_assignments, list):
+            raise ValueError('Plate job requires an assignment list')
+        for assignment in raw_assignments:
+            require_positive_quantity(assignment.get('quantity'))
         assignments = _normalize_assignments(payload)
         if not assignments:
             raise ValueError("Plate job has no nested parts with STEP files")
@@ -244,7 +252,10 @@ def start(data, session):
         width = float(_get(payload, "width", default=48))
         true_depth = float(_get(payload, "true_depth", "trueDepth", default=0.125))
 
-        AutoArrange(length, width)
+        occurrences = list(design.rootComponent.allOccurrences)
+        spacing = plate_spacing((data.get('cam_tools') or {}).get('diameter'))
+        arrange = AutoArrange(length, width, object_spacing=spacing)
+        require_complete_arrangement(arrange, occurrences)
 
         # Extract tool_items (specific tool GUIDs from within libraries)
         tool_items_raw = _get(payload, "tool_items")
@@ -368,46 +379,16 @@ def start(data, session):
 
         export(plate_id, machine_post_processor_path)
 
-        # cam_jobs.gcode is a single text column (matches turning/routing's
-        # one-file-per-job model), not a zip bundle like upstream's
-        # /api/jobs/complete accepted - a real difference in the job model,
-        # not just a URL change. A Fusion CAM template CAN legitimately
-        # export more than one NC file per plate (one per setup/WCS) -
-        # concatenated here with a clear per-file boundary comment (matching
-        # this app's own HEADER_WARNING-style G-code comment conventions -
-        # see autocam/turning.js) as an honest MVP behavior, not a verified
-        # design: whether per-file (not concatenated) storage actually
-        # matters in practice needs a real multi-setup plate job tested
-        # against a real Fusion 360 template, which this environment can't do.
-        gcode_parts = []
-        for root, _dirs, files in os.walk(export_dir) if os.path.isdir(export_dir) else []:
-            for fname in sorted(files):
-                fpath = os.path.join(root, fname)
-                try:
-                    with open(fpath, "r", encoding="utf-8", errors="replace") as ncf:
-                        content = ncf.read()
-                    # Each post-processed file is a standalone NC program
-                    # with its own leading/trailing '%' delimiter - fine on
-                    # its own, but concatenating more than one (a plate with
-                    # more than one toolpath group) put '%' in the middle of
-                    # the combined file, which LinuxCNC's interpreter rejects
-                    # ("bad character % used"), confirmed against a real
-                    # multi-toolpath plate job. Strip each file's own
-                    # delimiter lines; the combined file gets exactly one
-                    # pair added back below.
-                    content = "\n".join(
-                        line for line in content.splitlines() if line.strip() != "%"
-                    )
-                    gcode_parts.append(f"(=== {fname} ===)\n{content}")
-                except Exception:
-                    app.log(f"Could not read exported NC file {fpath}:\n{traceback.format_exc()}")
-        combined_gcode = "%\n" + "\n\n".join(gcode_parts) + "\n%\n"
+        # Preserve each file emitted by Fusion's configured post byte-for-byte.
+        # Each setup is posted as one ordered program; independent setup/WCS
+        # programs remain separate downloads.
+        nc_files = collect_nc_artifacts(export_dir)
         shutil.rmtree(export_dir, ignore_errors=True)
 
         completion_data = {
             "jobId": job_id,
-            "gcode": combined_gcode,
-            "gcodeFileName": f"{plate_id}.ngc",
+            "runnerId": RUNNER_ID,
+            "ncFiles": nc_files,
         }
         if total_machining_time is not None:
             completion_data["stats"] = {"total_machining_time": total_machining_time}

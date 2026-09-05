@@ -120,21 +120,38 @@ def _material_aliases(material_name: str) -> list[str]:
 def _choose_preset(tool: dict, material_name: Optional[str]) -> Optional[dict]:
     presets = tool.get("start-values", {}).get("presets", [])
     if not isinstance(presets, list) or not presets:
-        return None
+        raise ValueError(f"{_tool_display_name(tool)} has no reviewed feed/speed presets")
 
     aliases = _material_aliases(material_name or "")
-    if aliases:
-        for preset in presets:
-            preset_name = str(preset.get("name") or "").lower()
-            if any(alias in preset_name for alias in aliases):
-                return preset
+    if not aliases:
+        raise ValueError(
+            f"A material is required to choose a reviewed feed/speed preset for {_tool_display_name(tool)}"
+        )
 
+    # Never use a substring as short as "al" here: it matches the "al" in
+    # "Default preset", silently selecting aluminum cutting data for any
+    # material whose aliases happen to include it. A job without an explicit,
+    # reviewed match must stop before Fusion creates a dangerous toolpath.
     for preset in presets:
-        preset_name = str(preset.get("name") or "").strip().lower()
-        if preset_name == "default preset":
+        preset_name = _normalize_desc(str(preset.get("name") or ""))
+        if any(len(alias) >= 3 and alias in preset_name for alias in aliases):
             return preset
 
-    return presets[0]
+    # The checked-in 971 Main Bit's historic "Default preset" is the
+    # reviewed Aluminum 6061 setting. Keep that legacy library usable for
+    # aluminum only, while requiring every other material to have a named
+    # preset. This exception is deliberately narrow; a generic default is
+    # never permission to cut an unreviewed material.
+    normalized_material = _normalize_desc(material_name or "")
+    if normalized_material in {"aluminum", "aluminium", "aluminum 6061", "aluminium 6061", "6061 aluminum", "6061 aluminium"}:
+        for preset in presets:
+            if _normalize_desc(str(preset.get("name") or "")) == "default preset":
+                return preset
+
+    raise ValueError(
+        f"No reviewed feed/speed preset for {material_name!r} on {_tool_display_name(tool)}; "
+        "add a named preset before queueing this material"
+    )
 
 
 def _tool_type_lower(tool: dict) -> str:

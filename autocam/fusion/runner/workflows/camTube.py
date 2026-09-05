@@ -18,12 +18,14 @@ from ..config import (
     FUSION_DATA_PROJECT_NAME,
     FUSION_DROP_FOLDER_PATH,
     INITIAL_PATH,
+    RUNNER_ID,
     TEMP_PATH,
     TOOLS_PATH,
 )
 from .dropFolder import resolve_drop_folder
 from .job_status import ensure_completion_response, send_job_error
 from .localCamAssets import load_local_tool_library_json, resolve_local_post_processor
+from ..commands.NcArtifacts import collect_nc_artifacts
 from .templateTools import patch_cam_template_with_tool_libraries
 
 
@@ -273,28 +275,15 @@ def start(data, session):
 
         export(box_tube_id, machine_post_processor_path)
 
-        # See the matching comment in camPlate.py's start() - cam_jobs.gcode
-        # is a single text column, not a zip bundle, so exported NC files
-        # (one per setup/WCS in general) are concatenated with a per-file
-        # boundary comment rather than uploaded as a zip. Same unverified-MVP
-        # caveat applies: needs a real multi-setup box-tube job tested
-        # against a real Fusion 360 template to confirm this is sufficient.
-        gcode_parts = []
-        for root, _dirs, files in os.walk(export_dir) if os.path.isdir(export_dir) else []:
-            for fname in sorted(files):
-                fpath = os.path.join(root, fname)
-                try:
-                    with open(fpath, "r", encoding="utf-8", errors="replace") as ncf:
-                        gcode_parts.append(f"(=== {fname} ===)\n{ncf.read()}")
-                except Exception:
-                    app.log(f"Could not read exported NC file {fpath}:\n{traceback.format_exc()}")
-        combined_gcode = "\n\n".join(gcode_parts)
+        # Preserve each Fusion-posted setup program byte-for-byte and keep
+        # independent setup/WCS programs as separate downloads.
+        nc_files = collect_nc_artifacts(export_dir)
         shutil.rmtree(export_dir, ignore_errors=True)
 
         completion_data = {
             "jobId": job_id,
-            "gcode": combined_gcode,
-            "gcodeFileName": f"{box_tube_id}.ngc",
+            "runnerId": RUNNER_ID,
+            "ncFiles": nc_files,
         }
         if total_machining_time is not None:
             completion_data["stats"] = {"total_machining_time": total_machining_time}

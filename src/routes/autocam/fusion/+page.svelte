@@ -12,10 +12,17 @@
 
   let user = null;
   let activeTab = 'plates';
+  let plateCategoryFilter = '';
+
+  function viewMatchingPlates(categoryId) {
+    plateCategoryFilter = categoryId;
+    activeTab = 'plates';
+  }
 
   $: canManage = canManageCamProfiles(user);
 
   function setActiveTab(tab) {
+    plateCategoryFilter = '';
     activeTab = tab;
   }
 
@@ -56,9 +63,9 @@
 </nav>
 
 {#if activeTab === 'plates'}
-  <PlatesTab {user} {canManage} />
+  <PlatesTab {user} {canManage} bind:categoryFilter={plateCategoryFilter} />
 {:else if activeTab === 'parts'}
-  <PartsTab {user} {canManage} />
+  <PartsTab {user} {canManage} onViewPlates={viewMatchingPlates} />
 {:else if activeTab === 'stock-categories'}
   <StockCategoriesTab {canManage} />
 {:else if activeTab === 'box-tubes'}

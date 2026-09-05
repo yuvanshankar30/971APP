@@ -2938,6 +2938,16 @@
     border-color: color-mix(in srgb, var(--role-border, var(--border)) 45%, transparent);
     color: color-mix(in srgb, var(--role-border, var(--border)) 60%, #ffffff);
   }
+  /* Gallery themes use a dark custom card. The role metadata is deliberately
+     light-theme pastel data, so applying it directly leaves dark navy/brown
+     text against a dark card (for example, Team 971's #1e3a8a). Build the
+     control from the role's border hue instead: a restrained dark fill and
+     a near-white label remain readable for every role and team. */
+  :global([data-theme^="theme-"]) .role-select {
+    background: color-mix(in srgb, var(--role-border, var(--border)) 14%, transparent);
+    border-color: color-mix(in srgb, var(--role-border, var(--border)) 45%, transparent);
+    color: color-mix(in srgb, var(--role-border, var(--border)) 80%, #ffffff);
+  }
   .role-select:disabled { opacity: 0.7; cursor: progress; }
   .role-select option { color: var(--text); background: var(--primary); font-weight: 500; }
   /* Native <select> width:100% (global .form-select) will happily shrink

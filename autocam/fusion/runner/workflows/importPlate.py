@@ -1,3 +1,5 @@
+from .camPlate import _download_part_file
+from ..commands.GroupingValidation import require_positive_quantity
 from ..commands.MultiImport import importFiles
 from ..commands.AutoArrange import AutoArrange
 from ..commands.ScreenshotEnvelope import screenshotEnvelope
@@ -11,6 +13,7 @@ import time
 sys.path.append(OVERRIDE_PATH)
 
 import os
+from collections import Counter
 
 
 def _delete_all(coll):
@@ -82,11 +85,11 @@ def start(data, session):
         time.sleep(1.0)
         importFiles(
             [
-                os.path.join(INITIAL_PATH, str(child["part_id"]) + ".step")
+                _download_part_file(session, str(child["part_id"]), child.get("step_file_url"))
                 for child in data["payload"]["assignments"]
             ],
             [
-                _normalize_quantity(child.get("quantity", 1))
+                require_positive_quantity(child.get("quantity"))
                 for child in data["payload"]["assignments"]
             ],
         )
@@ -148,18 +151,14 @@ def start(data, session):
 
             # Find parts that weren't arranged at all (not in any envelope)
             # These are oversized parts that couldn't fit
-            all_arranged = set(arranged_on_plate + excess_occurances)
-            oversized_occurances = [
-                name for name in all_part_names
-                if name not in all_arranged
-            ]
+            oversized_occurances = list((Counter(all_part_names) - Counter(arranged_on_plate + excess_occurances)).elements())
 
         # Process excess parts (overflow to other envelopes)
         excess_occurances = [str(x).split(" ")[0] for x in excess_occurances]
         excess_occurances, excess_quantity = unique(excess_occurances)
         for part_name, qty in zip(excess_occurances, excess_quantity):
             try:
-                part_id = int(part_name)
+                part_id = str(part_name)
             except Exception:
                 continue
             excess_parts.append(
@@ -174,7 +173,7 @@ def start(data, session):
         oversized_occurances, oversized_quantity = unique(oversized_occurances)
         for part_name, qty in zip(oversized_occurances, oversized_quantity):
             try:
-                part_id = int(part_name)
+                part_id = str(part_name)
             except Exception:
                 continue
             oversized_parts.append(
@@ -217,6 +216,7 @@ def start(data, session):
                 params={"action": "complete"},
                 json={
                     "jobId": job_id,
+                    "runnerId": RUNNER_ID,
                     "gcode": "",
                     "gcodeFileName": f"{plate_id}-arrangement.txt",
                     "stats": {"arranged": True},
@@ -243,6 +243,7 @@ def start(data, session):
                 params={"action": "complete"},
                 json={
                     "jobId": job_id,
+                    "runnerId": RUNNER_ID,
                     "gcode": "",
                     "gcodeFileName": f"{plate_id}-arrangement.txt",
                     "stats": {

@@ -377,9 +377,7 @@ own docs are all together in one place instead of scattered across
   default is a `0.1575 in` flat end mill; operators can add another tool for
   the selected machine directly from the job form.
 - **`autocam/components/`** - `ToolpathViewer.svelte`, `CamParamFields.svelte`,
-  `RoutingToolSequence.svelte`, `TurningFinishTool.svelte`,
-  `AutocamReviewModal.svelte` (the last one currently unused anywhere - a
-  known dead-code candidate, not yet removed).
+  `RoutingToolSequence.svelte`, and `TurningFinishTool.svelte`.
 - **`autocam/scripts/test-cam-extraction.mjs`** - standalone CLI to run a
   real STEP file through the pipeline without the web app - the main tool
   used to stress-test this system against real CAD files.
@@ -416,10 +414,32 @@ own docs are all together in one place instead of scattered across
   uses `VISION_RUNNER_TOKEN`.
   The Fusion UI includes a Stock Categories tab for CAM managers to define
   the material and true-thickness combinations required before Parts and
-  Plates can be nested. It uses Supabase Auth + `canManageCamProfiles` for
+  Plates can be nested. Parts can be grouped by stock category with remaining
+  quantity totals and a shortcut to matching plates. Plate CAM makes operators
+  choose either one nested part or a grouped job containing at least two part
+  types; the grouped snapshot records every part, quantity, STEP file, plate,
+  machine, and tool while physical arrangement stays in Fusion. Assignment
+  inventory is updated transactionally in PostgreSQL, queued inputs are immutable,
+  and the Runner rejects incomplete groups before CAM. Completed Fusion jobs keep
+  every postprocessor output as a separate, byte-exact downloadable file with its
+  size and SHA-256 checksum; queued and terminal jobs can be deleted from the queue.
+  Rollout requires
+  `migrations/20260906_fusion_grouping_integrity.sql` and the updated Runner.
+  Every post-claim Runner call is bound to the `RUNNER_ID` that claimed the job,
+  so another installation cannot advance it. See
+  `autocam/docs/scouting-autocam-audit.md` for the consolidated audit and
+  `autocam/docs/fusion-grouping-review.md` for the draft scope and review findings.
+  It uses Supabase Auth + `canManageCamProfiles` for
   humans, same as the rest of this
   app. See `autocam/fusion/README.md` and `valor6800-autocam-runner-setup.md`
   (repo root) for the full port writeup and the evaluation that led to it.
+- **`autocam/fusion/turning/`** - experimental Fusion turning foundation
+  ([issue #331](https://github.com/frc971/spartanshub/issues/331)): validates a
+  single-part round-stock plan for the Haas TL-1 and exposes an empty draft
+  turning setup builder. It requires the HAAS Turning post family and rejects
+  the LinuxCNC/EMC router post.
+  It is not connected to the job queue and does not generate G-code. See its
+  `README.md` for design choices, the example CLI, and the staged implementation.
 - **Route files stay in `src/routes/`** regardless (`src/routes/autocam/+page.svelte`,
   `src/routes/api/cam-generate/+server.js`, `src/routes/api/drive-watcher/+server.js`)
   - SvelteKit determines a route's URL from its file location under

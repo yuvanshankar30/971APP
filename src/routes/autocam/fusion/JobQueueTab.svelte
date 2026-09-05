@@ -2,9 +2,9 @@
   import { requestConfirmation } from '$lib/confirmation.js';
   import { onMount } from 'svelte';
   import { toastActions } from '$lib/toast.js';
-  import { fetchFusionJobs, cancelFusionJob } from '$lib/fusionCam.js';
+  import { fetchFusionJobs, cancelFusionJob, deleteFusionJob } from '$lib/fusionCam.js';
   import { formatPacificDateTimeWithZone } from '$lib/timezone.js';
-  import { ListChecks, X, Download } from 'lucide-svelte';
+  import { ListChecks, X, Download, Trash2 } from 'lucide-svelte';
 
   let jobs = [];
   let loading = true;
@@ -54,17 +54,34 @@
     }
   }
 
+  async function handleDelete(job) {
+    if (!await requestConfirmation({
+      title: 'Delete Fusion job',
+      message: `Permanently delete "${job.name || job.id}" and its saved NC output?`,
+      confirmLabel: 'Delete job',
+      danger: true
+    })) return;
+    try {
+      await deleteFusionJob(job.id);
+      jobs = jobs.filter((item) => item.id !== job.id);
+    } catch (e) {
+      toastActions.show(e.message || 'Failed to delete job');
+      await load(false);
+    }
+  }
+
   function jobKind(job) {
     return job.params?.fusionJobKind || 'unknown';
   }
 
-  function downloadGcode(job) {
-    if (!job.gcode) return;
-    const blob = new Blob([job.gcode], { type: 'text/plain' });
+  function downloadNcFile(file) {
+    const binary = atob(file.contentBase64);
+    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+    const blob = new Blob([bytes], { type: 'application/octet-stream' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = job.gcode_file_name || 'output.ngc';
+    a.download = file.name.split('/').at(-1) || 'fusion-output.nc';
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -80,19 +97,37 @@
       <div class="card cam-list-item">
         <div class="cam-list-header">
           <strong><ListChecks size={16} /> {job.name || `Job ${job.id.slice(0, 8)}`}</strong>
-          <span class="tag status-{job.status}">{STATUS_LABELS[job.status] || job.status}</span>
+          <span>
+            {#if job.params?.fusionGroupingMode === 'grouped'}<span class="tag">Grouped</span>{/if}
+            <span class="tag status-{job.status}">{STATUS_LABELS[job.status] || job.status}</span>
+          </span>
         </div>
         <p class="cam-form-hint">
-          {jobKind(job)} - {job.cam_machines?.name || 'no machine assigned'} - queued {formatPacificDateTimeWithZone(job.created_at)}
+          {jobKind(job)} - plate {job.params?.fusionPlateSnapshot?.name || job.params?.plateId || 'n/a'}
+          - {job.cam_machines?.name || 'no machine assigned'}
+          - {job.cam_tools?.name || 'no tool assigned'}
+          - queued {formatPacificDateTimeWithZone(job.created_at)}
           {#if job.claimed_by} - claimed by {job.claimed_by}{/if}
         </p>
+        {#if job.params?.fusionPlateSnapshot?.assignments?.length}
+          <p class="cam-form-hint">
+            Parts: {job.params.fusionPlateSnapshot.assignments.map((part) => `${part.quantity}x ${part.name || part.part_id}`).join(', ')}
+          </p>
+        {/if}
         {#if job.status === 'failed' && job.errors?.length}
           <p class="cam-form-hint error-text">{job.errors.join('; ')}</p>
         {/if}
         <div class="cam-list-actions">
-          {#if job.status === 'completed' && job.gcode}
-            <button class="btn btn-secondary btn-sm" on:click={() => downloadGcode(job)}>
-              <Download size={14} /> Download G-code
+          {#if job.status === 'completed' && job.fusion_nc_files?.length}
+            {#each job.fusion_nc_files as file}
+              <button class="btn btn-secondary btn-sm" title={`${file.name} · SHA-256 ${file.sha256}`} on:click={() => downloadNcFile(file)}>
+                <Download size={14} /> {file.name} ({file.size} bytes)
+              </button>
+            {/each}
+          {/if}
+          {#if ['queued', 'completed', 'failed', 'rejected'].includes(job.status)}
+            <button class="btn btn-ghost btn-sm" on:click={() => handleDelete(job)}>
+              <Trash2 size={14} /> Delete
             </button>
           {/if}
           {#if ['queued', 'claimed', 'processing'].includes(job.status)}

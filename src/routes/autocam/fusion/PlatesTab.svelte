@@ -1,4 +1,5 @@
 <script>
+  import { eligiblePlateParts, platePartQuantity } from '$autocam/fusion/grouping.js';
   import { requestConfirmation } from '$lib/confirmation.js';
   import { onMount } from 'svelte';
   import { supabase } from '$lib/supabase.js';
@@ -8,6 +9,8 @@
 
   export let user;
   export let canManage;
+  export let categoryFilter = '';
+  $: visiblePlates = categoryFilter ? plates.filter((plate) => String(plate.category_id) === String(categoryFilter)) : plates;
 
   let plates = [];
   let parts = [];
@@ -25,7 +28,11 @@
   // every job regardless of which one it was actually meant for - a human
   // has to choose explicitly.
   let plateMachineSelections = {};
+  let queueing = {};
   let plateToolSelections = {};
+  let plateQueueModes = {};
+  let plateSinglePartSelections = {};
+  let plateGroupedPartSelections = {};
   let platePartSelections = {};
   let platePartQuantities = {};
   // machine_id -> cam_tools rows actually installed on that machine
@@ -43,6 +50,15 @@
     try {
       [plates, categories, parts] = await Promise.all([fetchPlates(), fetchPartCategories(), fetchParts()]);
       platePartQuantities = Object.fromEntries(plates.map((plate) => [plate.id, platePartQuantities[plate.id] || 1]));
+      plateGroupedPartSelections = Object.fromEntries(plates.map((plate) => {
+        const nestedIds = new Set((plate.fusion_part_category_assignments || []).map((assignment) => assignment.fusion_parts?.id));
+        return [plate.id, (plateGroupedPartSelections[plate.id] || []).filter((partId) => nestedIds.has(partId))];
+      }));
+      plateSinglePartSelections = Object.fromEntries(plates.map((plate) => {
+        const nestedIds = new Set((plate.fusion_part_category_assignments || []).map((assignment) => assignment.fusion_parts?.id));
+        const selected = plateSinglePartSelections[plate.id];
+        return [plate.id, nestedIds.has(selected) ? selected : ''];
+      }));
       const { data: machineRows } = await supabase.from('cam_machines').select('*').eq('can_run_plates', true).eq('enabled', true).order('name');
       machines = machineRows || [];
       const { data: machineToolRows } = await supabase
@@ -118,6 +134,7 @@
       // real report: even with load()'s loading-flash fix, a full re-fetch
       // still visibly "reloaded" the list on every delete.
       plates = plates.filter((p) => p.id !== plate.id);
+      parts = await fetchParts();
     } catch (e) {
       toastActions.show(e.message || 'Failed to delete plate');
     }
@@ -153,6 +170,7 @@
   }
 
   async function handleQueue(plate) {
+    if (queueing[plate.id]) return;
     const machineId = plateMachineSelections[plate.id];
     if (!machineId) {
       toastActions.show('Choose a router before queueing');
@@ -167,6 +185,23 @@
       toastActions.show('Choose a tool before queueing');
       return;
     }
+    const groupingMode = plateQueueModes[plate.id];
+    if (!['single', 'grouped'].includes(groupingMode)) {
+      toastActions.show('Choose single-part or grouped CAM');
+      return;
+    }
+    const assignments = plate.fusion_part_category_assignments || [];
+    const selectedPartId = groupingMode === 'single' ? plateSinglePartSelections[plate.id] : null;
+    const selectedPartIds = groupingMode === 'grouped' ? (plateGroupedPartSelections[plate.id] || []) : null;
+    if (groupingMode === 'single' && !selectedPartId) {
+      toastActions.show('Choose one nested part for single-part CAM');
+      return;
+    }
+    if (groupingMode === 'grouped' && selectedPartIds.length < 2) {
+      toastActions.show('Select at least two nested part types for this group');
+      return;
+    }
+    queueing = { ...queueing, [plate.id]: true };
     try {
       await queueFusionJob({
         fusionJobKind: 'plate:cam',
@@ -179,17 +214,29 @@
         // time the plate actually has a valid category.
         materialId: plate.fusion_part_categories?.material_id || null,
         toolId: plateToolSelections[plate.id] || null,
+        groupingMode,
+        selectedPartId,
+        selectedPartIds,
         requestedBy: user?.id,
-        name: `Plate CAM: ${plate.name}`
+        name: `${groupingMode === 'grouped' ? 'Grouped Fusion CAM' : 'Fusion CAM'}: ${plate.name}`
       });
       toastActions.show('Queued for the Fusion Runner');
     } catch (e) {
       toastActions.show(e.message || 'Failed to queue job');
+    } finally {
+      queueing = { ...queueing, [plate.id]: false };
     }
   }
 
+  function toggleGroupedPart(plateId, partId) {
+    const selected = new Set(plateGroupedPartSelections[plateId] || []);
+    if (selected.has(partId)) selected.delete(partId);
+    else selected.add(partId);
+    plateGroupedPartSelections = { ...plateGroupedPartSelections, [plateId]: [...selected] };
+  }
+
   function eligibleParts(plate) {
-    return parts.filter((part) => String(part.category_id) === String(plate.category_id) && Number(part.quantity) > 0);
+    return eligiblePlateParts(plate, parts);
   }
 
   function selectedPart(plate) {
@@ -197,8 +244,7 @@
   }
 
   function maximumNestQuantity(plate, part) {
-    const existing = plate.fusion_part_category_assignments?.find((assignment) => String(assignment.fusion_parts?.id) === String(part.id));
-    return Number(part.quantity) + Number(existing?.quantity || 0);
+    return Number(part.quantity) + platePartQuantity(plate, part);
   }
 
   async function handleNestPart(plate) {
@@ -208,7 +254,7 @@
       toastActions.show('Choose a part to nest');
       return;
     }
-    if (String(part.category_id) !== String(plate.category_id) || Number(part.quantity) <= 0) {
+    if (String(part.category_id) !== String(plate.category_id) || maximumNestQuantity(plate, part) <= 0) {
       toastActions.show('Choose an available part with the same material and thickness');
       return;
     }
@@ -298,11 +344,17 @@
     </div>
   {/if}
 
-  {#if plates.length === 0}
-    <p class="empty-state">No plates yet. {canManage ? 'Add one above to get started.' : 'Ask a manufacturing lead to add one.'}</p>
+  {#if categoryFilter}
+    <div class="cam-list-actions">
+      <span class="cam-form-hint">Stock group: {categoryLabel(categories.find((category) => String(category.id) === String(categoryFilter)))}</span>
+      <button type="button" class="btn btn-ghost btn-sm" on:click={() => (categoryFilter = '')}>Show all plates</button>
+    </div>
+  {/if}
+  {#if visiblePlates.length === 0}
+    <p class="empty-state">{categoryFilter ? 'No plates match this stock group.' : 'No plates yet.'} {canManage ? 'Add one above to get started.' : 'Ask a manufacturing lead to add one.'}</p>
   {:else}
     <div class="cam-list">
-      {#each plates as plate (plate.id)}
+      {#each visiblePlates as plate (plate.id)}
         <div class="card cam-list-item">
           <div class="cam-list-header">
             {#if renamingPlateId === plate.id}
@@ -343,11 +395,11 @@
             {@const chosenPart = selectedPart(plate)}
             <div class="form-row">
               <div class="form-group">
-                <label class="form-label" for={`plate-nest-part-${plate.id}`}>Nest a part</label>
+                <label class="form-label" for={`plate-nest-part-${plate.id}`}>Set nested part quantity</label>
                 <select id={`plate-nest-part-${plate.id}`} class="form-select" bind:value={platePartSelections[plate.id]}>
                   <option value="">{availableParts.length ? 'Select a matching part...' : 'No matching parts available'}</option>
                   {#each availableParts as part}
-                    <option value={part.id}>{part.name} ({part.quantity} available)</option>
+                    <option value={part.id}>{part.name} ({part.quantity} available, {platePartQuantity(plate, part)} on this plate)</option>
                   {/each}
                 </select>
               </div>
@@ -357,11 +409,39 @@
               </div>
               <div class="form-group">
                 <span class="form-label" aria-hidden="true">&nbsp;</span>
-                <button class="btn btn-secondary btn-sm" type="button" disabled={!chosenPart} on:click={() => handleNestPart(plate)}><Plus size={14} /> Add</button>
+                <button class="btn btn-secondary btn-sm" type="button" disabled={!chosenPart} on:click={() => handleNestPart(plate)}><Plus size={14} /> Set quantity</button>
               </div>
             </div>
           {/if}
           <div class="cam-list-actions">
+            <select class="form-select router-select" bind:value={plateQueueModes[plate.id]} aria-label="CAM mode for {plate.name}">
+              <option value="">Choose CAM mode...</option>
+              <option value="single">Single nested part</option>
+              <option value="grouped" disabled={(plate.fusion_part_category_assignments?.length || 0) < 2}>Grouped plate ({plate.fusion_part_category_assignments?.length || 0} part types)</option>
+            </select>
+            {#if plateQueueModes[plate.id] === 'single'}
+              <select class="form-select router-select" bind:value={plateSinglePartSelections[plate.id]} aria-label="Part for single-part CAM on {plate.name}">
+                <option value="">Choose one nested part...</option>
+                {#each plate.fusion_part_category_assignments || [] as assignment}
+                  <option value={assignment.fusion_parts?.id}>{assignment.quantity}x {assignment.fusion_parts?.name || 'part'}</option>
+                {/each}
+              </select>
+            {:else if plateQueueModes[plate.id] === 'grouped'}
+              <fieldset class="group-part-picker">
+                <legend>Select parts for grouped CAM</legend>
+                {#each plate.fusion_part_category_assignments || [] as assignment}
+                  {@const groupedPartId = assignment.fusion_parts?.id}
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={(plateGroupedPartSelections[plate.id] || []).includes(groupedPartId)}
+                      on:change={() => toggleGroupedPart(plate.id, groupedPartId)}
+                    />
+                    {assignment.quantity}x {assignment.fusion_parts?.name || 'part'}
+                  </label>
+                {/each}
+              </fieldset>
+            {/if}
             <select class="form-select router-select" value={plateMachineSelections[plate.id]} on:change={(e) => handleMachineChange(plate, e.currentTarget.value)} aria-label="Router for {plate.name}">
               <option value={undefined}>Choose a router...</option>
               {#each machines as m}
@@ -374,8 +454,8 @@
                 <option value={t.id}>{toolLabel(t)}</option>
               {/each}
             </select>
-            <button class="btn btn-secondary btn-sm" disabled={!plateMachineSelections[plate.id] || !plateToolSelections[plate.id]} on:click={() => handleQueue(plate)}>
-              <Send size={14} /> Queue CAM Job
+            <button class="btn btn-secondary btn-sm" disabled={queueing[plate.id] || !plateQueueModes[plate.id] || (plateQueueModes[plate.id] === 'single' && !plateSinglePartSelections[plate.id]) || (plateQueueModes[plate.id] === 'grouped' && (plateGroupedPartSelections[plate.id] || []).length < 2) || !plate.fusion_part_category_assignments?.length || !plateMachineSelections[plate.id] || !plateToolSelections[plate.id]} on:click={() => handleQueue(plate)}>
+              <Send size={14} /> Queue {plateQueueModes[plate.id] === 'grouped' ? 'Grouped ' : ''}CAM Job
             </button>
             {#if canManage}
               <button class="btn btn-ghost btn-sm" on:click={() => handleDelete(plate)}>
@@ -400,6 +480,9 @@
   .rename-input { padding: 0.2rem 0.4rem; height: auto; width: auto; min-width: 10rem; }
   .cam-list-actions { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; flex-wrap: wrap; }
   .router-select { width: auto; min-width: 160px; height: var(--control-height, 2.25rem); }
+  .group-part-picker { display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.4rem 0.6rem; }
+  .group-part-picker legend { color: var(--text-muted); font-size: 0.75rem; padding: 0 0.25rem; }
+  .group-part-picker label { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.85rem; }
   .empty-state { color: var(--text-muted, #888); padding: 2rem 0; text-align: center; }
   .cam-form-hint { color: var(--text-muted, #888); font-size: 0.85rem; margin: 0.25rem 0 0; }
 </style>

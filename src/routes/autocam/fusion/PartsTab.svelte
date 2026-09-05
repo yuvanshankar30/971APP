@@ -4,13 +4,19 @@
   import { toastActions } from '$lib/toast.js';
   import { supabase } from '$lib/supabase.js';
   import { fetchParts, createPart, deletePart, renamePart, updatePartQuantity, fetchPartCategories } from '$lib/fusionCam.js';
+  import { groupFusionParts } from '$autocam/fusion/grouping.js';
   import { Plus, Trash2, Package, Pencil, Check, X } from 'lucide-svelte';
 
   export let user;
   export let canManage;
+  export let onViewPlates = () => {};
 
   let parts = [];
   let categories = [];
+  let groupByStock = true;
+  $: stockGroups = groupByStock
+    ? groupFusionParts(parts, categories)
+    : [{ key: 'all', parts }];
   // Real manufacturing requests this Fusion part can optionally be linked
   // to - see the migration that added fusion_parts.part_id. Kept separate
   // from Fusion's own catalog (fusion_parts) on purpose: /autocam/fusion
@@ -178,13 +184,15 @@
 {#if loading}
   <p>Loading parts...</p>
 {:else}
+  {#if canManage}
   <div class="tab-actions">
     <button class="btn btn-primary" on:click={() => (showAddForm = !showAddForm)}>
       <Plus size={16} /> Add Part
     </button>
   </div>
 
-  {#if showAddForm}
+  {/if}
+  {#if showAddForm && canManage}
     <div class="card">
       <h3>New Part</h3>
       <p class="cam-form-hint">A named quantity of stock waiting to be nested onto a plate - not yet assigned to one.</p>
@@ -253,73 +261,98 @@
   {#if parts.length === 0}
     <p class="empty-state">No parts yet. Add one above.</p>
   {:else}
-    <div class="cam-list">
-      {#each parts as part (part.id)}
-        <div class="card cam-list-item">
-          <div class="cam-list-header">
-            {#if renamingPartId === part.id}
-              <span class="rename-control">
-                <Package size={16} />
-                <input
-                  class="form-input rename-input"
-                  bind:value={renameValue}
-                  on:keydown={(e) => { if (e.key === 'Enter') saveRename(part); if (e.key === 'Escape') cancelRename(); }}
-                />
-                <button type="button" class="btn btn-ghost btn-sm" title="Save" on:click={() => saveRename(part)}><Check size={14} /></button>
-                <button type="button" class="btn btn-ghost btn-sm" title="Cancel" on:click={cancelRename}><X size={14} /></button>
-              </span>
-            {:else}
-              <span class="rename-control">
-                <strong><Package size={16} /> {part.name}</strong>
-                {#if canManage}
-                  <button type="button" class="btn btn-ghost btn-sm" title="Rename" on:click={() => startRename(part)}><Pencil size={13} /></button>
-                {/if}
-              </span>
-            {/if}
-            <span class="tag">{categoryLabel(part.fusion_part_categories)}</span>
-          </div>
-          <p class="cam-form-hint">
-            Quantity: {part.quantity} of
-            {#if editingQuantityId === part.id}
-              <span class="rename-control quantity-control">
-                <input
-                  type="number"
-                  min="0"
-                  step="1"
-                  class="form-input rename-input quantity-input"
-                  bind:value={quantityValue}
-                  on:keydown={(e) => { if (e.key === 'Enter') saveQuantity(part); if (e.key === 'Escape') cancelEditQuantity(); }}
-                />
-                <button type="button" class="btn btn-ghost btn-sm" title="Save" on:click={() => saveQuantity(part)}><Check size={14} /></button>
-                <button type="button" class="btn btn-ghost btn-sm" title="Cancel" on:click={cancelEditQuantity}><X size={14} /></button>
-              </span>
-            {:else}
-              <span class="rename-control quantity-control">
-                {part.original_quantity}
-                {#if canManage}
-                  <button type="button" class="btn btn-ghost btn-sm" title="Edit quantity" on:click={() => startEditQuantity(part)}><Pencil size={13} /></button>
-                {/if}
-              </span>
-            {/if}
-            {#if part.epic} - {part.epic}{/if}
-            {#if part.ticket} - {part.ticket}{/if}
-            {#if part.parts} - linked to <strong>{part.parts.name}</strong>{/if}
-            {#if part.fusion_file_name} - Fusion file name: <strong>{part.fusion_file_name}</strong>{/if}
-          </p>
-          <div class="cam-list-actions">
-            {#if canManage}
-              <button class="btn btn-ghost btn-sm" on:click={() => handleDelete(part)}>
-                <Trash2 size={14} /> Delete
-              </button>
+    <label class="group-toggle">
+      <input type="checkbox" bind:checked={groupByStock} /> Group by material / thickness
+    </label>
+    {#if groupByStock}
+      <p class="cam-form-hint">Stock groups help plan a shared plate. Fit and spacing are checked when Fusion arranges the parts.</p>
+    {/if}
+    {#each stockGroups as group (group.key)}
+      <section class="stock-group">
+        {#if groupByStock}
+          <div class="cam-list-header group-header">
+            <div>
+              <h3>{group.category ? categoryLabel(group.category) : 'Stock category unavailable'}</h3>
+              <p class="cam-form-hint">{group.parts.length} part types · {group.remainingQuantity} remaining to nest</p>
+            </div>
+            {#if group.categoryId}
+              <button type="button" class="btn btn-secondary btn-sm" on:click={() => onViewPlates(group.categoryId)}>View matching plates</button>
             {/if}
           </div>
-        </div>
-      {/each}
-    </div>
+        {/if}
+      <div class="cam-list">
+        {#each group.parts as part (part.id)}
+          <div class="card cam-list-item">
+            <div class="cam-list-header">
+              {#if renamingPartId === part.id}
+                <span class="rename-control">
+                  <Package size={16} />
+                  <input
+                    class="form-input rename-input"
+                    bind:value={renameValue}
+                    on:keydown={(e) => { if (e.key === 'Enter') saveRename(part); if (e.key === 'Escape') cancelRename(); }}
+                  />
+                  <button type="button" class="btn btn-ghost btn-sm" title="Save" on:click={() => saveRename(part)}><Check size={14} /></button>
+                  <button type="button" class="btn btn-ghost btn-sm" title="Cancel" on:click={cancelRename}><X size={14} /></button>
+                </span>
+              {:else}
+                <span class="rename-control">
+                  <strong><Package size={16} /> {part.name}</strong>
+                  {#if canManage}
+                    <button type="button" class="btn btn-ghost btn-sm" title="Rename" on:click={() => startRename(part)}><Pencil size={13} /></button>
+                  {/if}
+                </span>
+              {/if}
+              <span class="tag">{categoryLabel(part.fusion_part_categories)}</span>
+            </div>
+            <p class="cam-form-hint">
+              Quantity: {part.quantity} of
+              {#if editingQuantityId === part.id}
+                <span class="rename-control quantity-control">
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    class="form-input rename-input quantity-input"
+                    bind:value={quantityValue}
+                    on:keydown={(e) => { if (e.key === 'Enter') saveQuantity(part); if (e.key === 'Escape') cancelEditQuantity(); }}
+                  />
+                  <button type="button" class="btn btn-ghost btn-sm" title="Save" on:click={() => saveQuantity(part)}><Check size={14} /></button>
+                  <button type="button" class="btn btn-ghost btn-sm" title="Cancel" on:click={cancelEditQuantity}><X size={14} /></button>
+                </span>
+              {:else}
+                <span class="rename-control quantity-control">
+                  {part.original_quantity}
+                  {#if canManage}
+                    <button type="button" class="btn btn-ghost btn-sm" title="Edit quantity" on:click={() => startEditQuantity(part)}><Pencil size={13} /></button>
+                  {/if}
+                </span>
+              {/if}
+              {#if part.epic} - {part.epic}{/if}
+              {#if part.ticket} - {part.ticket}{/if}
+              {#if part.parts} - linked to <strong>{part.parts.name}</strong>{/if}
+              {#if part.fusion_file_name} - Fusion file name: <strong>{part.fusion_file_name}</strong>{/if}
+            </p>
+            <div class="cam-list-actions">
+              {#if canManage}
+                <button class="btn btn-ghost btn-sm" on:click={() => handleDelete(part)}>
+                  <Trash2 size={14} /> Delete
+                </button>
+              {/if}
+            </div>
+          </div>
+        {/each}
+      </div>
+      </section>
+    {/each}
   {/if}
 {/if}
 
 <style>
+  .group-toggle { display: flex; align-items: center; gap: 0.5rem; }
+  .stock-group { margin-top: 1rem; }
+  .group-header { flex-wrap: wrap; margin-bottom: 0.75rem; }
+  .group-header h3 { margin: 0; }
   .tab-actions { margin-bottom: 1rem; }
   .form-row { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
   .form-row .form-group { flex: 1; min-width: 160px; }
