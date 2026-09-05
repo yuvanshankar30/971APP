@@ -32,16 +32,26 @@ Done and verified live:
   minutes before the certificate actually finished propagating to all edge nodes, so
   status-checking alone wasn't a reliable signal that it was safe to consider done.
   Worth remembering for any future domain-mapping move.
-- **Runner credentials stay runtime-only**: Cloud Build injects
-  `VISION_RUNNER_TOKEN` for the DGX vision worker and currently maps that
-  same authorized secret to `FUSION_RUNNER_TOKEN` for the physical Fusion
-  CAM add-in. This is a temporary compatibility path while the runtime
-  service account lacks scoped access to a dedicated Fusion secret; issue
-  #309 tracks splitting them. A runner host must be configured with the
-  matching value by a project administrator; neither token belongs in a
+- **Runner credentials stay runtime-only.** `FUSION_RUNNER_TOKEN` has its
+  own Secret Manager secret on spartanshub with an enabled version, and
+  the runtime service account (`536793099017-compute@developer
+  .gserviceaccount.com` - this project's real default compute SA,
+  confirmed with `gcloud projects describe spartanshub`) holds
+  `roles/secretmanager.secretAccessor` on it directly - verified against
+  Secret Manager itself, not assumed, while chasing issue #309. The
+  earlier "map FUSION_RUNNER_TOKEN to the VISION_RUNNER_TOKEN secret"
+  workaround is gone from `cloudbuild.yaml`; it was reading a secret that
+  does not exist under that name on this project at all.
+  **`VISION_RUNNER_TOKEN` (or any Vision-specific secret) does not exist
+  in Secret Manager on this project right now**, under any name - that is
+  a separate, still-open gap, not resolved by the Fusion fix. A project
+  administrator needs to create one and grant it the same role on the
+  same service account before the DGX vision worker (and
+  `api/vision-runner`) can authenticate. Neither token belongs in a
   checked-in `.env.example` file.
 - 8 Secret Manager secrets created and wired to the Cloud Run runtime service account
-  (`819718873862-compute@developer.gserviceaccount.com`) via
+  (`536793099017-compute@developer.gserviceaccount.com` - see the note above on
+  where this number comes from) via
   `roles/secretmanager.secretAccessor`, scoped per-secret: `SUPABASE_SERVICE_KEY`,
   `SUPABASE_ANON_KEY`, `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`, `SLACK_USER_TOKEN`,
   `TBA_API_KEY`, `ONSHAPE_ACCESS_KEY`, `ONSHAPE_SECRET_KEY`. The Onshape pair is
@@ -92,7 +102,7 @@ Done and verified live:
   ```bash
   gcloud secrets create CRON_NOTIFICATION_TOKEN --project=spartanshub --data-file=-
   gcloud secrets add-iam-policy-binding CRON_NOTIFICATION_TOKEN --project=spartanshub \
-    --member="serviceAccount:819718873862-compute@developer.gserviceaccount.com" \
+    --member="serviceAccount:536793099017-compute@developer.gserviceaccount.com" \
     --role="roles/secretmanager.secretAccessor"
   ```
 
@@ -188,8 +198,11 @@ gcloud secrets create CRON_NOTIFICATION_TOKEN --data-file=-
 
 Grant the Cloud Run runtime service account access to just these secrets (Compute
 Engine default SA unless you create a dedicated one, which is the better long-term
-choice — for `spartanshub` this is `819718873862-compute@developer.gserviceaccount.com`,
-project-number-specific, so it'll differ in any other project):
+choice — for `spartanshub` this is `536793099017-compute@developer.gserviceaccount.com`
+(confirm with `gcloud projects describe spartanshub --format="value(projectNumber)"`
+rather than trusting a pasted value - an earlier version of this doc, and issue #309,
+both named a different, wrong project number here), project-number-specific, so it'll
+differ in any other project):
 
 ```bash
 for SECRET in SUPABASE_SERVICE_KEY SLACK_BOT_TOKEN SLACK_SIGNING_SECRET \

@@ -94,14 +94,16 @@ Console path (no `gcloud`):
 - **Secret Manager** → **Create Secret** → name it `GOOGLE_DRIVE_SERVICE_ACCOUNT_KEY`
   → upload the downloaded `.json` file as the secret value → **Create Secret**.
 - On that secret's page → **Permissions** → grant the Cloud Run runtime service
-  account (`819718873862-compute@developer.gserviceaccount.com`) the **Secret
+  account (`536793099017-compute@developer.gserviceaccount.com` - confirm with
+  `gcloud projects describe spartanshub --format="value(projectNumber)"` rather
+  than trusting a pasted number) the **Secret
   Manager Secret Accessor** role.
 
 `gcloud` equivalent:
 ```bash
 gcloud secrets create GOOGLE_DRIVE_SERVICE_ACCOUNT_KEY --data-file=/path/to/downloaded-key.json
 gcloud secrets add-iam-policy-binding GOOGLE_DRIVE_SERVICE_ACCOUNT_KEY \
-  --member="serviceAccount:819718873862-compute@developer.gserviceaccount.com" \
+  --member="serviceAccount:536793099017-compute@developer.gserviceaccount.com" \
   --role="roles/secretmanager.secretAccessor"
 ```
 

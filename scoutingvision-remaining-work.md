@@ -56,7 +56,7 @@ heartbeat, complete, all of it.
 ```bash
 openssl rand -hex 32 | gcloud secrets create VISION_RUNNER_TOKEN --project=spartanshub --data-file=-
 gcloud secrets add-iam-policy-binding VISION_RUNNER_TOKEN --project=spartanshub \
-  --member="serviceAccount:819718873862-compute@developer.gserviceaccount.com" \
+  --member="serviceAccount:536793099017-compute@developer.gserviceaccount.com" \
   --role="roles/secretmanager.secretAccessor"
 ```
 
