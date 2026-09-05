@@ -223,11 +223,11 @@ describe('generateRoutingGcode - single-tool (default)', () => {
     expect(result.gcode).not.toMatch(/\bT\d+\s+M06\b/); // no ATC - never claim one
   });
 
-  it('uses conservative dry-routing defaults and never enables coolant', () => {
+  it('uses the carbide 0.1575-inch 971 Main Bit Fusion defaults and never enables coolant', () => {
     const result = generateRoutingGcode(contour, { toolDiameter: 0.25, targetDepth: 0.25 });
-    expect(result.gcode).toContain('S14000 M03');
-    expect(result.gcode).toContain('F8');
-    expect(result.gcode).toContain('F25');
+    expect(result.gcode).toContain('S22000 M03');
+    expect(result.gcode).toContain('F13.333');
+    expect(result.gcode).toContain('F80');
     expect(result.gcode).not.toMatch(/\bM[78]\b/);
   });
 });
