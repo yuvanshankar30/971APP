@@ -56,6 +56,7 @@
   <a href="/manufacture/completed" class:active={$page.url.pathname === '/manufacture/completed'}>Completed</a>
   <a href="/manufacture/router" class:active={$page.url.pathname === '/manufacture/router'}>Router</a>
   <a href="/manufacture/kitting" class:active={$page.url.pathname === '/manufacture/kitting'}>Kitting</a>
+  <a href="/manufacture/files" class:active={$page.url.pathname === '/manufacture/files'}>Files</a>
 </div>
 
 {#if loading}
