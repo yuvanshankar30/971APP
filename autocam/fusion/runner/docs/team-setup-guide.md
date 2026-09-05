@@ -53,7 +53,7 @@ RUNNER_MACHINE_ID=""
 
 Leave `RUNNER_MACHINE_ID` blank unless you're connecting this to real shop hardware that already has a machine profile in Spartans Hub (Manage Profiles on the main `/autocam` page) — blank is correct and expected for testing.
 
-**About `API_KEY`:** as of this writing, Spartans Hub's production deployment does **not** have `FUSION_RUNNER_TOKEN` configured (that's tracked separately — wiring it into the deploy pipeline is its own PR, deliberately not merged until a real secret exists in GCP Secret Manager). `isAuthorizedFusionRunnerRequest` in `src/lib/server/fusion_runner_auth.js` fails open when the server-side secret is unset, meaning **any value works in `API_KEY` for now** — the check isn't actually enforced yet. Put any string in for testing; once the real secret is wired server-side, this file needs to be updated to match it exactly, or the Runner will start getting rejected.
+**About `API_KEY`:** this must exactly match the deployed `FUSION_RUNNER_TOKEN`. Ask the project administrator for the value; do not generate a second token or put one in source control. After editing `.env`, stop and run the add-in again so it reloads the value.
 
 ### 4. Enable it in Fusion
 
@@ -81,7 +81,7 @@ The Material/Thickness dropdown is populated from `fusion_part_categories` (add 
 
 A **Plate** is a real sheet: name, Material/Thickness category, width × length × true depth (inches). This is what actually gets queued and CAM'd.
 
-⚠️ **Known gap:** the data layer supports nesting Parts onto a Plate (`assignPartToPlate` in `src/lib/fusionCam.js`), but **no UI currently calls it** — there's no way to actually assign a Part to a Plate from the web UI today. A Plate you queue right now carries no nested-parts information at all; the Runner will treat it as an empty sheet. Building that assignment UI is a prerequisite for Plates to be genuinely useful — until then, prefer the Box Tubes flow below for anything you actually need CAM'd.
+Nest each Part onto a matching Plate from the Plate card's **Nest a part** control, then choose a router and its installed tool before queuing. A Plate without nested parts is not a useful test job: the Runner now rejects the missing STEP geometry rather than generating an empty CAM document.
 
 To queue a Plate: pick a router from its row's dropdown, click **Queue CAM Job**.
 
@@ -93,6 +93,18 @@ A **Box Tube** is a tube with its own STEP file, queued 1:1 (no nesting/assignme
 
 Shows every Fusion CAM job (`cam_jobs` rows with `operation_type = 'milling'`) and its status: `queued` → `claimed` → `processing` → `completed`/`failed`. Auto-refreshes every 10 seconds while anything is active. A failed job shows its error inline. A completed job gets a **Download G-code** button. You can **Cancel** a job at any point before it completes.
 
+### First plate test
+
+For a safe pipeline test with one flat STEP file, create a Part with quantity
+`1` and attach the file, then create a Plate with the **same** material and
+thickness category. Make the plate larger than the part (for example, a 12 x
+12 in plate with a true depth matching the physical stock), nest `1` copy of
+the Part onto the Plate, and queue it with **UNC Router** and **UNC Router
+0.1575 in Flat End Mill**. Watch Job Queue and Fusion's Text Command window;
+download the resulting G-code for inspection only. The bundled templates are
+still not validated shop templates, so do not run this first output on a
+physical router.
+
 ## Part 3: How G-code actually gets generated
 
 Understanding this matters because it explains what "queued" really means and why a completed job's G-code might still not be trustworthy for a real machine yet.
@@ -102,7 +114,7 @@ Web UI "Queue CAM Job"
   → INSERT into cam_jobs (operation_type='milling', status='queued', params.fusionJobKind, plateId/boxTubeId, machine_id, tool_id, material_id)
 
 Runner's polling thread (every few seconds)
-  → GET /api/fusion-runner  — claims a queued row via compare-and-swap on status (two Runners can never grab the same job)
+  → POST /api/fusion-runner?action=claim — claims a queued row via compare-and-swap on status (two Runners can never grab the same job)
   → server resolves the full payload: plate/box-tube dimensions, assigned parts (for a plate), STEP file storage paths, machine + tool info
   → dispatches on params.fusionJobKind:
         plate:cam     → workflows/camPlate.py
@@ -134,7 +146,7 @@ So: claiming jobs, importing geometry, and the full round-trip back to a downloa
 
 ## Part 4: Proving the connection works end-to-end
 
-- In the browser: `/autocam/fusion` → **Box Tubes** tab → **Add Box Tube** (with a STEP file) → pick a router → **Queue CAM Job**.
+- In the browser: `/autocam/fusion` → **Parts** → add a flat STEP part → **Plates** → add matching stock → nest the part → select router and tool → **Queue CAM Job**.
 - Watch the Text Command window in Fusion — it should claim the job within about 10 seconds.
 - Watch the **Job Queue** tab in the browser — status should move `queued` → `claimed` → `processing` → `completed` (or `failed` with a real error).
 

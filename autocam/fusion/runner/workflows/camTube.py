@@ -102,7 +102,7 @@ def _get(payload: dict, *keys: str, default=None):
 
 
 def _download_box_tube_file(
-    session: requests.Session, tube_id: int, step_file_url: str, dest_dir: str
+    session: requests.Session, tube_id: str, step_file_url: str, dest_dir: str
 ) -> str:
     """Download a box tube's STEP file and save it locally.
 
@@ -115,9 +115,10 @@ def _download_box_tube_file(
     app = adsk.core.Application.get()
     app.log(f"Downloading box tube STEP file from URL: {step_file_url}")
     out_path = os.path.join(dest_dir, f"{tube_id}.step")
-    content = requests.get(step_file_url, timeout=30).content
+    response = requests.get(step_file_url, timeout=30)
+    response.raise_for_status()
     with open(out_path, "wb") as f:
-        f.write(content)
+        f.write(response.content)
 
     return out_path
 
@@ -162,10 +163,7 @@ def start(data, session):
         box_tube_id = _get(payload, "box_tube_id")
         if box_tube_id is None:
             raise ValueError("Payload missing required 'box_tube_id'")
-        try:
-            box_tube_id_int = int(box_tube_id)
-        except Exception:
-            raise ValueError(f"Invalid box_tube_id: {box_tube_id}")
+        box_tube_id = str(box_tube_id)
 
         # Download STEP file - URL already resolved server-side, see
         # _download_box_tube_file's docstring.
@@ -173,14 +171,14 @@ def start(data, session):
         if not step_file_url:
             raise ValueError("Payload missing required 'step_file_url'")
         try:
-            _download_box_tube_file(session, box_tube_id_int, step_file_url, INITIAL_PATH)
+            _download_box_tube_file(session, box_tube_id, step_file_url, INITIAL_PATH)
         except Exception:
             app.log("Failed to download box tube file:\n{}".format(traceback.format_exc()))
             raise
 
         # Import the single tube
         importFiles(
-            [os.path.join(INITIAL_PATH, f"{box_tube_id_int}.step")],
+            [os.path.join(INITIAL_PATH, f"{box_tube_id}.step")],
             [1],
         )
 

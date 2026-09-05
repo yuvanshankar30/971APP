@@ -409,6 +409,9 @@ own docs are all together in one place instead of scattered across
   stored on `cam_tools.fusion_tool_library_file`, so an unknown tool fails
   visibly rather than falling back to Fusion's raw default. No Teams/API-key-per-team
   layer was ported - single shared-secret bearer token for the Runner,
+  injected as `FUSION_RUNNER_TOKEN` by Cloud Build; its local `API_KEY` must
+  be obtained from the project administrator. Vision Runner uses the same
+  deployment pattern through its separate `VISION_RUNNER_TOKEN`.
   Supabase Auth + `canManageCamProfiles` for humans, same as the rest of this
   app. See `autocam/fusion/README.md` and `valor6800-autocam-runner-setup.md`
   (repo root) for the full port writeup and the evaluation that led to it.

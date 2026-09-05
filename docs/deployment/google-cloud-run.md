@@ -32,6 +32,11 @@ Done and verified live:
   minutes before the certificate actually finished propagating to all edge nodes, so
   status-checking alone wasn't a reliable signal that it was safe to consider done.
   Worth remembering for any future domain-mapping move.
+- **Runner credentials stay runtime-only**: Cloud Build injects
+  `VISION_RUNNER_TOKEN` for the DGX vision worker and `FUSION_RUNNER_TOKEN`
+  for the physical Fusion CAM add-in. A runner host must be configured with
+  the matching value by a project administrator; neither token belongs in a
+  checked-in `.env.example` file.
 - 8 Secret Manager secrets created and wired to the Cloud Run runtime service account
   (`819718873862-compute@developer.gserviceaccount.com`) via
   `roles/secretmanager.secretAccessor`, scoped per-secret: `SUPABASE_SERVICE_KEY`,

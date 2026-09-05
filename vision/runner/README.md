@@ -162,8 +162,8 @@ depending on what hardware ends up hosting this:
   Docker. Install steps are in the files' header comments.
 
 Either way, `VISION_RUNNER_TOKEN` must be set to the *same* value as the web
-service's `VISION_RUNNER_TOKEN` secret (not yet created in Secret Manager -
-see the reminder block in `../../cloudbuild.yaml`), and `VISION_MODEL_PATH`
+service's `VISION_RUNNER_TOKEN` secret. Get that value from the project
+administrator; do not generate a replacement on the runner host. `VISION_MODEL_PATH`
 must point at real trained weights (also not built yet - see
 `../training/create_placeholder_model.py` for a non-functional stand-in
 that at least exercises the claim/heartbeat/complete plumbing).

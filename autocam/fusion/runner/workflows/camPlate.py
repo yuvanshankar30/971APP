@@ -133,6 +133,7 @@ def _normalize_assignments(payload: dict) -> list[dict]:
                 {
                     "part_id": part_id,
                     "quantity": normalize_quantity(assignment.get("quantity", 1)),
+                    "step_file_url": assignment.get("step_file_url"),
                 }
             )
         return normalized
@@ -152,6 +153,7 @@ def _normalize_assignments(payload: dict) -> list[dict]:
             {
                 "part_id": part_id,
                 "quantity": normalize_quantity(part.get("quantity", 1)),
+                "step_file_url": part.get("step_file_url"),
             }
         )
     return normalized
@@ -162,6 +164,19 @@ def _get(payload: dict, *keys: str, default=None):
         if key in payload:
             return payload[key]
     return default
+
+
+def _download_part_file(session: requests.Session, part_id: str, step_file_url: str) -> str:
+    """Download the claim response's signed STEP URL to Fusion's import folder."""
+    if not step_file_url:
+        raise ValueError(f"Part {part_id} is missing a STEP file URL")
+    os.makedirs(INITIAL_PATH, exist_ok=True)
+    destination = os.path.join(INITIAL_PATH, f"{part_id}.step")
+    response = session.get(step_file_url, timeout=30)
+    response.raise_for_status()
+    with open(destination, "wb") as output:
+        output.write(response.content)
+    return destination
 
 
 def start(data, session):
@@ -201,12 +216,17 @@ def start(data, session):
         time.sleep(1.0)
 
         assignments = _normalize_assignments(payload)
+        if not assignments:
+            raise ValueError("Plate job has no nested parts with STEP files")
+        step_paths = []
+        for assignment in assignments:
+            part_id = str(assignment["part_id"])
+            step_paths.append(
+                _download_part_file(session, part_id, assignment.get("step_file_url"))
+            )
         importFiles(
-            [
-                os.path.join(INITIAL_PATH, f"{child['part_id']}.step")
-                for child in assignments
-            ],
-            [child.get("quantity", 1) for child in assignments],
+            step_paths,
+            [assignment.get("quantity", 1) for assignment in assignments],
         )
 
         # Plate dimensions: /api/fusion-runner's claim response already
