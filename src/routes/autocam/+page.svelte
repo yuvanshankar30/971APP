@@ -213,6 +213,13 @@
   let toolpathSimulatorLoading = false;
   let showNcviewerModal = false;
   let ncviewerCopyOk = null; // null = not attempted yet, true/false = result
+  let showJobErrorModal = false;
+  let errorModalJob = null;
+
+  function openJobErrorModal(job) {
+    errorModalJob = job;
+    showJobErrorModal = true;
+  }
 
   // Part-picker filters - mirrors the filter bar on /manufacture so parts are
   // easy to find the same way they are there.
@@ -1482,7 +1489,9 @@
               </div>
               {#if job.status === 'failed' && job.errors?.length}
                 <div class="job-output-failed">
-                  <span class="job-error" title={job.errors.join('; ')}><AlertTriangle size={14} /> {job.errors[0]}</span>
+                  <button type="button" class="job-error job-error-button" on:click={() => openJobErrorModal(job)}>
+                    <AlertTriangle size={14} /> View error
+                  </button>
                   {#if job.step_file_name}
                     <button class="btn btn-secondary btn-sm" on:click={() => handleRetryJob(job)} disabled={retryingJobId === job.id}>
                       {retryingJobId === job.id ? 'Retrying…' : 'Retry'}
@@ -2050,6 +2059,29 @@
   </div>
 {/if}
 
+{#if showJobErrorModal && errorModalJob}
+  <div class="modal-backdrop" on:click|self={() => (showJobErrorModal = false)} role="button" tabindex="0" on:keydown={(e) => { if (e.key === 'Escape') (showJobErrorModal = false); }}>
+    <div class="modal job-error-modal" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h3>AutoCAM error - {jobDisplayName(errorModalJob)}</h3>
+        <button type="button" class="modal-close-button" aria-label="Close" on:click={() => (showJobErrorModal = false)}><X size={18} /></button>
+      </div>
+      <div class="modal-body">
+        <pre class="job-error-detail">{errorModalJob.errors.join('\n\n')}</pre>
+        {#if errorModalJob.step_file_name}
+          <button
+            class="btn btn-secondary btn-sm"
+            disabled={retryingJobId === errorModalJob.id}
+            on:click={() => { handleRetryJob(errorModalJob); showJobErrorModal = false; }}
+          >
+            {retryingJobId === errorModalJob.id ? 'Retrying…' : 'Retry'}
+          </button>
+        {/if}
+      </div>
+    </div>
+  </div>
+{/if}
+
 {#if showMachineModal}
   <div class="modal-backdrop" on:click|self={closeMachineModal} role="button" tabindex="0" on:keydown={(e) => { if (e.key === 'Escape') closeMachineModal(); }}>
     <div class="modal" role="dialog" aria-modal="true">
@@ -2476,6 +2508,16 @@
     color: var(--red-strong);
     font-size: var(--font-xs, 0.75rem);
   }
+  .job-error-button {
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .job-error-button:hover {
+    text-decoration: underline;
+  }
 
   .job-row {
     cursor: pointer;
@@ -2536,6 +2578,21 @@
   .toolpath-view-tabs { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; border-bottom: 1px solid var(--border); }
   .toolpath-view-tabs button { padding: 0.5rem 0.75rem; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--text-muted); font: inherit; cursor: pointer; }
   .toolpath-view-tabs button.active { border-bottom-color: var(--accent-strong); color: var(--text); font-weight: 700; }
+  .job-error-modal { width: min(800px, 92vw); }
+  .job-error-detail {
+    background: var(--surface-2, var(--background));
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 6px);
+    padding: 0.75rem;
+    max-height: 60vh;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: var(--font-mono, monospace);
+    font-size: var(--font-xs, 0.8rem);
+    color: var(--red-strong);
+    margin: 0 0 0.75rem;
+  }
   .ncviewer-modal { width: min(1500px, 98vw); max-width: 98vw; height: min(94vh, 1100px); }
   .ncviewer-modal-body {
     display: flex;
