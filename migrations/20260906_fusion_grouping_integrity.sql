@@ -90,11 +90,21 @@ BEGIN
     RAISE EXCEPTION 'A new part must start with all quantities available';
   END IF;
   IF TG_OP = 'UPDATE' THEN
+    IF NEW.category_id IS DISTINCT FROM OLD.category_id THEN
+      RAISE EXCEPTION 'Stock category is immutable; create a new part';
+    END IF;
+    -- Managers may correct the original requested quantity, but must update
+    -- the remaining count by the same delta. That keeps already-nested
+    -- copies reserved; a client cannot relabel reserved stock as available.
+    IF NEW.original_quantity IS DISTINCT FROM OLD.original_quantity THEN
+      IF NEW.quantity IS NOT DISTINCT FROM OLD.quantity
+        OR NEW.original_quantity - NEW.quantity <> OLD.original_quantity - OLD.quantity THEN
+        RAISE EXCEPTION 'Quantity edits must preserve already nested copies';
+      END IF;
+      RETURN NEW;
+    END IF;
     IF NEW.quantity IS DISTINCT FROM OLD.quantity AND pg_trigger_depth() = 1 THEN
       RAISE EXCEPTION 'Remaining quantity is maintained by plate assignments';
-    END IF;
-    IF (NEW.category_id, NEW.original_quantity) IS DISTINCT FROM (OLD.category_id, OLD.original_quantity) THEN
-      RAISE EXCEPTION 'Stock category and requested quantity are immutable; create a new part';
     END IF;
   END IF;
   RETURN NEW;

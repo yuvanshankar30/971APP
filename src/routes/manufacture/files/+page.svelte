@@ -110,13 +110,28 @@
     }
   }
 
+  // Fetches the file itself and saves it via a blob URL instead of
+  // navigating anywhere - no new tab, no visible redirect through
+  // Supabase's storage domain, and it sidesteps the popup-blocking some
+  // browsers apply to a window.open() that isn't in the same tick as the
+  // click (which the previous new-tab-based approach ran into).
   async function handleDownload(entry) {
     try {
       const { data, error } = await supabase.storage
         .from(BUCKET)
         .createSignedUrl(joinPath(currentPath, entry.name), 300);
       if (error || !data?.signedUrl) throw error || new Error('Could not create download link');
-      window.open(data.signedUrl, '_blank');
+      const response = await fetch(data.signedUrl);
+      if (!response.ok) throw new Error('Failed to fetch file');
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = entry.name;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(blobUrl);
     } catch (e) {
       toastActions.show(e.message || 'Download failed');
     }

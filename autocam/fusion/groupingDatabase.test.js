@@ -77,6 +77,9 @@ describe('Fusion grouping PostgreSQL migration', () => {
  it('cannot bypass inventory bookkeeping or change assigned stock', async () => {
    await expect(run('UPDATE fusion_parts SET quantity=4')).rejects.toThrow(/maintained/);
    await assign(2);
+   await run('UPDATE fusion_parts SET original_quantity=8, quantity=6 WHERE id=$1', [id(20)]);
+   expect((await run('SELECT quantity, original_quantity FROM fusion_parts WHERE id=$1', [id(20)])).rows[0]).toMatchObject({ quantity: 6, original_quantity: 8 });
+   await expect(run('UPDATE fusion_parts SET original_quantity=9, quantity=6 WHERE id=$1', [id(20)])).rejects.toThrow(/preserve already nested/);
    await expect(run('UPDATE fusion_plates SET category_id=$1 WHERE id=$2',[id(2),id(10)])).rejects.toThrow(/Remove nested/);
    await expect(run('UPDATE fusion_parts SET category_id=$1',[id(2)])).rejects.toThrow(/immutable/);
  });
