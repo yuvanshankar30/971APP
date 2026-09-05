@@ -33,7 +33,7 @@ The SvelteKit service queues metadata only. A separate GPU-capable runner in
 `vision/runner/` claims jobs with `VISION_RUNNER_TOKEN`, receives one-hour
 signed URLs, runs custom versioned Ultralytics YOLO weights, and submits robot
 tracks and action observations. It also calls the authenticated full-BF16
-Qwen3-VL-30B-A3B service in `vision/qwen/` with bounded frame sequences. The
+Qwen3.8-27B service in `vision/qwen/` with bounded frame sequences. The
 runner must always complete or fail a
 claimed run, following the same terminal-state invariant used by AutoCAM. It
 also heartbeats every poll iteration so a fleet dashboard can show runner
@@ -85,7 +85,7 @@ track's (position alone is ambiguous with multiple same-alliance robots
 nearby).
 
 The authenticated service in `vision/qwen/` loads the full BF16
-Qwen3-VL-30B-A3B-Instruct MoE checkpoint once on DGX Spark. The runner sends
+Qwen3.8-27B checkpoint once on DGX Spark. The runner sends
 bounded, timestamped clips from one or more camera views and receives
 grounded robot, climb, and immobility evidence (fuel proposals, if any, are
 purely a labeling hint - production fuel detection is the classical pipeline
@@ -145,7 +145,7 @@ VISION_RUNNER_ID=vision-runner-gpu-1
 VISION_MODEL_PATH=/models/frc-vision-v1.pt
 VISION_QWEN_URL=http://qwen:8000
 VISION_QWEN_TOKEN=<separate high-entropy internal secret>
-VISION_QWEN_MODEL=Qwen/Qwen3-VL-30B-A3B-Instruct
+VISION_QWEN_MODEL=Qwen/Qwen3.8-27B
 ```
 
 Run all four Vision migrations including

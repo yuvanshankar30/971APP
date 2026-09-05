@@ -24,7 +24,7 @@ Requires a per-view **field mask** (audience/background exclusion) and
 **goal zone** calibration (where a scored piece's trajectory should end) to
 get useful output - see the upload form on `/scouting/vision`.
 
-This worker calls the authenticated full-BF16 Qwen3-VL-30B-A3B service in
+This worker calls the authenticated full-BF16 Qwen3.8-27B service in
 `vision/qwen/` for bounded semantic clip analysis. It still provides
 deterministic per-frame tracks, mobility metrics, and piece attribution.
 Qwen proposals are stored as unreviewed observations and cannot be released
@@ -39,7 +39,7 @@ VISION_RUNNER_ID=vision-runner-gpu-1
 VISION_MODEL_PATH=/models/frc-vision-v1.pt
 VISION_QWEN_URL=http://qwen:8000
 VISION_QWEN_TOKEN=separate-shared-secret
-VISION_QWEN_MODEL=Qwen/Qwen3-VL-30B-A3B-Instruct
+VISION_QWEN_MODEL=Qwen/Qwen3.8-27B
 ```
 
 Manual install and run (quickest way to test on a machine you already have

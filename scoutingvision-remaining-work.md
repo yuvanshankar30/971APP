@@ -47,22 +47,15 @@ in the config as a starting point, not a tuned value.
 
 ## Part A — only a human can do these
 
-### A1. Create `VISION_RUNNER_TOKEN` in Secret Manager **[BLOCKER]**
+### A1. Wire `VISION_RUNNER_TOKEN` into Cloud Run **[READY TO DEPLOY]**
 
-Nothing works at all until this exists. `api/vision-runner` is fail-closed, so
-it rejects **every** runner request while the secret is missing — claim,
-heartbeat, complete, all of it.
-
-```bash
-openssl rand -hex 32 | gcloud secrets create VISION_RUNNER_TOKEN --project=spartanshub --data-file=-
-gcloud secrets add-iam-policy-binding VISION_RUNNER_TOKEN --project=spartanshub \
-  --member="serviceAccount:536793099017-compute@developer.gserviceaccount.com" \
-  --role="roles/secretmanager.secretAccessor"
-```
-
-Then move `VISION_RUNNER_TOKEN=VISION_RUNNER_TOKEN:latest` from the
-`!!! REMINDER !!!` comment block in `cloudbuild.yaml` into the `--set-secrets`
-line, and put the **same value** into the runner host's `.env`.
+The dedicated secret now exists. `cloudbuild.yaml` maps it into the web
+service, and the same value belongs only in the ignored `vision/runner/.env`
+on the DGX host. Before deploying, verify that Cloud Run's runtime service
+account (`536793099017-compute@developer.gserviceaccount.com`) has
+`roles/secretmanager.secretAccessor` on this secret. The runner API is
+fail-closed, so it rejects every claim, heartbeat, and completion until the
+deployed service receives this variable.
 
 The order matters: referencing a secret before it exists breaks every
 subsequent deploy, which is exactly how the `CRON_NOTIFICATION_TOKEN` gap
@@ -73,7 +66,7 @@ subsequent deploy, which is exactly how the `CRON_NOTIFICATION_TOKEN` gap
 The Compose stack and systemd units are written and ready; no host is running
 them. Needed: current DGX OS, NVIDIA Container Toolkit, `docker login` against
 NVIDIA NGC (the base image is `nvcr.io/nvidia/pytorch`), the ~60+ GB
-Qwen3-VL-30B checkpoint downloaded into the persistent cache, both example
+Qwen3.8-27B checkpoint downloaded into the persistent cache, both example
 secrets in `vision/runner/.env.example` replaced with real generated values,
 and a decision about who owns uptime and cache maintenance.
 

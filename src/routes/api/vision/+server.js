@@ -250,8 +250,8 @@ export async function POST({ request }) {
       vision_match_id: body.vision_match_id,
       model_name: body.model_name,
       model_version: body.model_version,
-      qwen_model: body.qwen_model || 'Qwen/Qwen3-VL-30B-A3B-Instruct',
-      qwen_revision: body.qwen_revision || '9c4b90e1e4ba969fd3b5378b57d966d725f1b86c',
+      qwen_model: body.qwen_model || 'Qwen/Qwen3.8-27B',
+      qwen_revision: body.qwen_revision || '1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0',
       qwen_dtype: 'bfloat16',
       config: body.config || {},
       created_by: actor.id
