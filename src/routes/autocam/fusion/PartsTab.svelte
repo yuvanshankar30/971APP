@@ -2,6 +2,7 @@
   import { requestConfirmation } from '$lib/confirmation.js';
   import { onMount } from 'svelte';
   import { toastActions } from '$lib/toast.js';
+  import { supabase } from '$lib/supabase.js';
   import { fetchParts, createPart, deletePart, fetchPartCategories } from '$lib/fusionCam.js';
   import { Plus, Trash2, Package } from 'lucide-svelte';
 
@@ -10,16 +11,35 @@
 
   let parts = [];
   let categories = [];
+  // Real manufacturing requests this Fusion part can optionally be linked
+  // to - see the migration that added fusion_parts.part_id. Kept separate
+  // from Fusion's own catalog (fusion_parts) on purpose: /autocam/fusion
+  // stays its own section for now, this is just the connecting reference.
+  let manufacturingParts = [];
   let loading = true;
   let showAddForm = false;
-  let newPart = { name: '', epic: '', ticket: '', quantity: 1, categoryId: '' };
+  let newPart = { name: '', epic: '', ticket: '', quantity: 1, categoryId: '', manufacturingPartId: '' };
   let stepFile = null;
   let submitting = false;
+
+  async function loadManufacturingParts() {
+    const { data, error } = await supabase
+      .from('parts')
+      .select('id, name, project_id, workflow')
+      .order('created_at', { ascending: false })
+      .limit(200);
+    if (error) {
+      console.warn('Could not load manufacturing requests to link:', error.message);
+      return;
+    }
+    manufacturingParts = data || [];
+  }
 
   async function load() {
     loading = true;
     try {
       [parts, categories] = await Promise.all([fetchParts(), fetchPartCategories()]);
+      await loadManufacturingParts();
     } catch (e) {
       toastActions.show(e.message || 'Failed to load parts');
     } finally {
@@ -47,9 +67,10 @@
         quantity: Number(newPart.quantity),
         categoryId: newPart.categoryId,
         stepFile,
-        createdBy: user?.id
+        createdBy: user?.id,
+        partId: newPart.manufacturingPartId || null
       });
-      newPart = { name: '', epic: '', ticket: '', quantity: 1, categoryId: '' };
+      newPart = { name: '', epic: '', ticket: '', quantity: 1, categoryId: '', manufacturingPartId: '' };
       stepFile = null;
       showAddForm = false;
       await load();
@@ -124,6 +145,18 @@
           <input id="part-step" type="file" accept=".step,.stp" class="form-input" on:change={handleFileChange} />
         </div>
       </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label" for="part-manufacturing-link">Manufacturing request (optional)</label>
+          <select id="part-manufacturing-link" class="form-select" bind:value={newPart.manufacturingPartId}>
+            <option value="">Not linked to a request</option>
+            {#each manufacturingParts as mp}
+              <option value={mp.id}>{mp.name}{mp.project_id ? ` (${mp.project_id})` : ''}</option>
+            {/each}
+          </select>
+          <p class="cam-form-hint">Traces this stock back to the real request it's for - leave unlinked for ad-hoc/prototype stock.</p>
+        </div>
+      </div>
       <button class="btn btn-primary" disabled={submitting} on:click={handleAdd}>{submitting ? 'Adding...' : 'Add Part'}</button>
     </div>
   {/if}
@@ -142,6 +175,7 @@
             Quantity: {part.quantity} of {part.original_quantity}
             {#if part.epic} - {part.epic}{/if}
             {#if part.ticket} - {part.ticket}{/if}
+            {#if part.parts} - linked to <strong>{part.parts.name}</strong>{/if}
           </p>
           <div class="cam-list-actions">
             {#if canManage}

@@ -11,9 +11,12 @@
 
   let boxTubes = [];
   let machines = [];
+  // Real manufacturing requests this box tube can optionally be linked to -
+  // see PartsTab.svelte's matching field for the full reasoning.
+  let manufacturingParts = [];
   let loading = true;
   let showAddForm = false;
-  let newBoxTube = { name: '', epic: '', ticket: '', quantity: 1 };
+  let newBoxTube = { name: '', epic: '', ticket: '', quantity: 1, manufacturingPartId: '' };
   let stepFile = null;
   let submitting = false;
   // Which router each box tube's "Queue CAM Job" currently targets - keyed
@@ -22,12 +25,26 @@
   // more than one real router is eligible.
   let boxTubeMachineSelections = {};
 
+  async function loadManufacturingParts() {
+    const { data, error } = await supabase
+      .from('parts')
+      .select('id, name, project_id, workflow')
+      .order('created_at', { ascending: false })
+      .limit(200);
+    if (error) {
+      console.warn('Could not load manufacturing requests to link:', error.message);
+      return;
+    }
+    manufacturingParts = data || [];
+  }
+
   async function load() {
     loading = true;
     try {
       boxTubes = await fetchBoxTubes();
       const { data: machineRows } = await supabase.from('cam_machines').select('*').eq('can_run_box_tubes', true).eq('enabled', true).order('name');
       machines = machineRows || [];
+      await loadManufacturingParts();
     } catch (e) {
       toastActions.show(e.message || 'Failed to load box tubes');
     } finally {
@@ -54,9 +71,10 @@
         ticket: newBoxTube.ticket,
         quantity: Number(newBoxTube.quantity),
         stepFile,
-        createdBy: user?.id
+        createdBy: user?.id,
+        partId: newBoxTube.manufacturingPartId || null
       });
-      newBoxTube = { name: '', epic: '', ticket: '', quantity: 1 };
+      newBoxTube = { name: '', epic: '', ticket: '', quantity: 1, manufacturingPartId: '' };
       stepFile = null;
       showAddForm = false;
       await load();
@@ -94,7 +112,11 @@
         boxTubeId: boxTube.id,
         machineId,
         requestedBy: user?.id,
-        name: `Box Tube CAM: ${boxTube.name}`
+        name: `Box Tube CAM: ${boxTube.name}`,
+        // Traces the resulting cam_jobs row back to the real manufacturing
+        // request this box tube is for, if it's linked to one - a clean
+        // 1:1 (one box tube per job), unlike a plate's many-parts case.
+        partId: boxTube.part_id || null
       });
       toastActions.show('Queued for the Fusion Runner');
     } catch (e) {
@@ -139,6 +161,18 @@
           <input id="bt-step" type="file" accept=".step,.stp" class="form-input" on:change={handleFileChange} />
         </div>
       </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label" for="bt-manufacturing-link">Manufacturing request (optional)</label>
+          <select id="bt-manufacturing-link" class="form-select" bind:value={newBoxTube.manufacturingPartId}>
+            <option value="">Not linked to a request</option>
+            {#each manufacturingParts as mp}
+              <option value={mp.id}>{mp.name}{mp.project_id ? ` (${mp.project_id})` : ''}</option>
+            {/each}
+          </select>
+          <p class="cam-form-hint">Traces this box tube back to the real request it's for - leave unlinked for ad-hoc stock.</p>
+        </div>
+      </div>
       <button class="btn btn-primary" disabled={submitting} on:click={handleAdd}>{submitting ? 'Adding...' : 'Add Box Tube'}</button>
     </div>
   {/if}
@@ -157,6 +191,7 @@
             {#if boxTube.epic}{boxTube.epic}{/if}
             {#if boxTube.ticket} - {boxTube.ticket}{/if}
             {#if !boxTube.step_file_name} - <em>no STEP file attached</em>{/if}
+            {#if boxTube.parts} - linked to <strong>{boxTube.parts.name}</strong>{/if}
           </p>
           <div class="cam-list-actions">
             <select class="form-select router-select" bind:value={boxTubeMachineSelections[boxTube.id]} aria-label="Router for {boxTube.name}">

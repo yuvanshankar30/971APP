@@ -52,7 +52,7 @@ export async function deletePartCategory(id) {
 export async function fetchParts() {
   const { data, error } = await supabase
     .from('fusion_parts')
-    .select('*, fusion_part_categories(thickness, cam_materials(name, category))')
+    .select('*, fusion_part_categories(thickness, cam_materials(name, category)), parts(id, name, project_id, workflow)')
     .order('created_at', { ascending: false });
   if (error) throw error;
   return data || [];
@@ -62,8 +62,12 @@ export async function fetchParts() {
  * Creates a part row, optionally uploading a STEP file to the shared
  * manufacturing-files bucket first - same bucket/naming pattern
  * manufacture/+page.svelte already uses for turning/routing parts.
+ *
+ * partId (optional) links this Fusion part to a real manufacturing request
+ * (public.parts) - see the migration this shipped with for why it's
+ * nullable. Not every Fusion CAM part is for an existing request.
  */
-export async function createPart({ name, epic, ticket, quantity, categoryId, stepFile, createdBy }) {
+export async function createPart({ name, epic, ticket, quantity, categoryId, stepFile, createdBy, partId }) {
   let stepFileName = null;
   if (stepFile) {
     stepFileName = `${Date.now()}_${(name || 'part').replace(/[^a-zA-Z0-9]/g, '_')}_fusion.${(stepFile.name.split('.').pop() || 'step')}`;
@@ -83,9 +87,10 @@ export async function createPart({ name, epic, ticket, quantity, categoryId, ste
       original_quantity: quantity ?? 0,
       category_id: categoryId,
       step_file_name: stepFileName,
-      created_by: createdBy || null
+      created_by: createdBy || null,
+      part_id: partId || null
     })
-    .select('*, fusion_part_categories(thickness, cam_materials(name, category))')
+    .select('*, fusion_part_categories(thickness, cam_materials(name, category)), parts(id, name, project_id, workflow)')
     .single();
   if (error) throw error;
   return data;
@@ -147,13 +152,15 @@ export async function removePartFromPlate({ plateId, partId }) {
 export async function fetchBoxTubes() {
   const { data, error } = await supabase
     .from('fusion_box_tubes')
-    .select('*')
+    .select('*, parts(id, name, project_id, workflow)')
     .order('created_at', { ascending: false });
   if (error) throw error;
   return data || [];
 }
 
-export async function createBoxTube({ name, epic, ticket, quantity, stepFile, createdBy }) {
+// partId (optional) links this box tube to a real manufacturing request -
+// see createPart's own doc comment, same reasoning.
+export async function createBoxTube({ name, epic, ticket, quantity, stepFile, createdBy, partId }) {
   let stepFileName = null;
   if (stepFile) {
     stepFileName = `${Date.now()}_${(name || 'boxtube').replace(/[^a-zA-Z0-9]/g, '_')}_fusion.${(stepFile.name.split('.').pop() || 'step')}`;
@@ -171,9 +178,10 @@ export async function createBoxTube({ name, epic, ticket, quantity, stepFile, cr
       ticket: ticket || null,
       quantity: quantity ?? 1,
       step_file_name: stepFileName,
-      created_by: createdBy || null
+      created_by: createdBy || null,
+      part_id: partId || null
     })
-    .select()
+    .select('*, parts(id, name, project_id, workflow)')
     .single();
   if (error) throw error;
   return data;
@@ -205,7 +213,7 @@ export async function fetchFusionJobs() {
  * turning/routing's cam-generate, this genuinely needs an external Fusion
  * 360 process).
  */
-export async function queueFusionJob({ fusionJobKind, plateId, boxTubeId, machineId, materialId, toolId, requestedBy, name }) {
+export async function queueFusionJob({ fusionJobKind, plateId, boxTubeId, machineId, materialId, toolId, requestedBy, name, partId }) {
   if (!FUSION_JOB_KINDS.includes(fusionJobKind)) {
     throw new Error(`Invalid fusionJobKind: ${fusionJobKind}`);
   }
@@ -221,7 +229,11 @@ export async function queueFusionJob({ fusionJobKind, plateId, boxTubeId, machin
       tool_id: toolId || null,
       machine_id: machineId || null,
       status: 'queued',
-      requested_by: requestedBy || null
+      requested_by: requestedBy || null,
+      // Only ever set for a box-tube job (a clean 1:1) - a plate job leaves
+      // this null, since a plate nests many parts that may be for several
+      // (or no) requests at once; see the migration this shipped with.
+      part_id: partId || null
     })
     .select()
     .single();
