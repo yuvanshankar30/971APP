@@ -64,7 +64,11 @@ def SetupGenerator(
     ]
     setup.parameters.itemByName("wcs_orientation_flipX").value.value = False
     setup.parameters.itemByName("wcs_orientation_flipY").value.value = False
-    setup.parameters.itemByName("wcs_origin_boxPoint").expression = "'bottom 1'"
+    # 'top 1' - Z=0 at the top face of the stock (the surface an operator
+    # actually touches off), not the bottom - cutting depths come out
+    # negative from there, the normal convention. Same XY corner as before
+    # ('bottom 1'), just the other Z face.
+    setup.parameters.itemByName("wcs_origin_boxPoint").expression = "'top 1'"
     baseDir = os.path.dirname(os.path.realpath(__file__))
     # machine is Swift and IQ, material is Aluminum and Polycarb
     if template_path:
