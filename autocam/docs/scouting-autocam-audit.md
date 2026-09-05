@@ -27,6 +27,9 @@ this PR, so their local worktree directories can be removed after it is open.
 - Post-claim lifecycle actions now require the same `RUNNER_ID` that claimed
   the job. A different installed Runner with the shared service token cannot
   move, complete, or fail somebody else’s active job.
+- Feed/speed selection no longer falls back to the first/default preset for
+  an unreviewed material. The historic default is allowed only for Aluminum
+  6061; every other material needs a clearly named, reviewed preset.
 - The experimental turning foundation explicitly permits the Haas TL-1 and
   rejects unsupported EMC posts rather than emitting misleading output.
 
