@@ -24,6 +24,11 @@
   // PlatesTab.svelte for why silently picking machines[0] is wrong once
   // more than one real router is eligible.
   let boxTubeMachineSelections = {};
+  let boxTubeToolSelections = {};
+  // machine_id -> cam_tools rows actually installed on that machine - see
+  // PlatesTab.svelte's matching comment for why (this app's own existing
+  // "job creation only offers the tools installed on its machine" rule).
+  let machineTools = {};
 
   async function loadManufacturingParts() {
     const { data, error } = await supabase
@@ -44,6 +49,15 @@
       boxTubes = await fetchBoxTubes();
       const { data: machineRows } = await supabase.from('cam_machines').select('*').eq('can_run_box_tubes', true).eq('enabled', true).order('name');
       machines = machineRows || [];
+      const { data: machineToolRows } = await supabase
+        .from('cam_machine_tools')
+        .select('machine_id, cam_tools(id, name, diameter, tool_type)')
+        .in('machine_id', machines.map((m) => m.id));
+      machineTools = {};
+      for (const row of machineToolRows || []) {
+        if (!row.cam_tools) continue;
+        (machineTools[row.machine_id] ||= []).push(row.cam_tools);
+      }
       await loadManufacturingParts();
     } catch (e) {
       toastActions.show(e.message || 'Failed to load box tubes');
@@ -53,6 +67,25 @@
   }
 
   onMount(load);
+
+  function toolsForMachine(machineId) {
+    return machineId ? machineTools[machineId] || [] : [];
+  }
+
+  function toolLabel(tool) {
+    return `${tool.name}${tool.diameter ? ` (${tool.diameter}")` : ''}`;
+  }
+
+  function handleMachineChange(boxTube, machineId) {
+    boxTubeMachineSelections = { ...boxTubeMachineSelections, [boxTube.id]: machineId };
+    const eligible = toolsForMachine(machineId);
+    const machine = machines.find((m) => String(m.id) === String(machineId));
+    const stillValid = eligible.some((t) => String(t.id) === String(boxTubeToolSelections[boxTube.id]));
+    if (!stillValid) {
+      const defaultTool = eligible.find((t) => String(t.id) === String(machine?.default_tool_id));
+      boxTubeToolSelections = { ...boxTubeToolSelections, [boxTube.id]: defaultTool?.id || '' };
+    }
+  }
 
   function handleFileChange(event) {
     stepFile = event.target.files?.[0] || null;
@@ -106,11 +139,19 @@
       toastActions.show('Choose a router before queueing');
       return;
     }
+    // See PlatesTab.svelte's matching comment - the Runner has no working
+    // fallback for an unspecified tool (its auto-select calls an API
+    // endpoint that doesn't exist here), so this is required.
+    if (!boxTubeToolSelections[boxTube.id]) {
+      toastActions.show('Choose a tool before queueing');
+      return;
+    }
     try {
       await queueFusionJob({
         fusionJobKind: 'box_tube',
         boxTubeId: boxTube.id,
         machineId,
+        toolId: boxTubeToolSelections[boxTube.id],
         requestedBy: user?.id,
         name: `Box Tube CAM: ${boxTube.name}`,
         // Traces the resulting cam_jobs row back to the real manufacturing
@@ -194,13 +235,19 @@
             {#if boxTube.parts} - linked to <strong>{boxTube.parts.name}</strong>{/if}
           </p>
           <div class="cam-list-actions">
-            <select class="form-select router-select" bind:value={boxTubeMachineSelections[boxTube.id]} aria-label="Router for {boxTube.name}">
+            <select class="form-select router-select" value={boxTubeMachineSelections[boxTube.id]} on:change={(e) => handleMachineChange(boxTube, e.currentTarget.value)} aria-label="Router for {boxTube.name}">
               <option value={undefined}>Choose a router...</option>
               {#each machines as m}
                 <option value={m.id}>{m.name}</option>
               {/each}
             </select>
-            <button class="btn btn-secondary btn-sm" disabled={!boxTubeMachineSelections[boxTube.id]} on:click={() => handleQueue(boxTube)}>
+            <select class="form-select router-select" bind:value={boxTubeToolSelections[boxTube.id]} aria-label="Tool for {boxTube.name}" disabled={!boxTubeMachineSelections[boxTube.id]}>
+              <option value="">{toolsForMachine(boxTubeMachineSelections[boxTube.id]).length ? 'Choose a tool...' : 'No tools installed on this router'}</option>
+              {#each toolsForMachine(boxTubeMachineSelections[boxTube.id]) as t}
+                <option value={t.id}>{toolLabel(t)}</option>
+              {/each}
+            </select>
+            <button class="btn btn-secondary btn-sm" disabled={!boxTubeMachineSelections[boxTube.id] || !boxTubeToolSelections[boxTube.id]} on:click={() => handleQueue(boxTube)}>
               <Send size={14} /> Queue CAM Job
             </button>
             {#if canManage}

@@ -106,7 +106,7 @@ export async function deletePart(id) {
 export async function fetchPlates() {
   const { data, error } = await supabase
     .from('fusion_plates')
-    .select('*, fusion_part_categories(thickness, cam_materials(name, category)), fusion_part_category_assignments(quantity, fusion_parts(id, name))')
+    .select('*, fusion_part_categories(material_id, thickness, cam_materials(name, category)), fusion_part_category_assignments(quantity, fusion_parts(id, name))')
     .order('created_at', { ascending: false });
   if (error) throw error;
   return data || [];
@@ -116,7 +116,7 @@ export async function createPlate({ name, width, length, trueDepth, categoryId }
   const { data, error } = await supabase
     .from('fusion_plates')
     .insert({ name, width, length, true_depth: trueDepth, category_id: categoryId })
-    .select('*, fusion_part_categories(thickness, cam_materials(name, category))')
+    .select('*, fusion_part_categories(material_id, thickness, cam_materials(name, category))')
     .single();
   if (error) throw error;
   return data;
