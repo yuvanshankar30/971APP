@@ -7,18 +7,20 @@
   import { fetchActiveScoutingEventKey } from '$lib/scoutingEvent.js';
   import navConfig from '$lib/navigation.json';
   import { defaultHeaderTabs, ensurePowerRankingsTab, ensureScoutingAdminTab, ensureStrategyTab, ensureGcodeConverterTab, ensureFilesTab, ensureFusionAutocamTab } from '$lib/defaultTabs.js';
-  import { Move3d, Hammer, Wrench, Receipt, Home, Briefcase, Coins, Package, User, ChevronDown, Menu, X, Camera, CalendarDays, Cpu, FileText, Trophy, Eye, ClipboardCheck, ListChecks, Target, Folder } from 'lucide-svelte';
+  import { Move3d, Hammer, Wrench, Receipt, Home, Briefcase, Coins, Package, User, ChevronDown, Menu, X, Camera, CalendarDays, Cpu, FileText, Trophy, Eye, ClipboardCheck, ListChecks, Target, Folder, Search } from 'lucide-svelte';
   import { goto, afterNavigate } from '$app/navigation';
   import { page } from '$app/stores';
   import Toasts from '$lib/Toasts.svelte';
   import ConfirmationDialog from '$lib/components/ConfirmationDialog.svelte';
   import { trackUserAttendance } from '$lib/attendance.js';
   import { toastActions } from '$lib/toast.js';
+  import GlobalSiteSearch from '$lib/components/GlobalSiteSearch.svelte';
 
   let authUser = null;
   let profile = null;
   let authReady = false;
   let mobileMenuOpen = false;
+  let siteSearchOpen = false;
   let openDesktopFolder = -1;
   let openMobileFolders = {};
   let scoutingEventKey = '';
@@ -167,7 +169,9 @@
       if (event.key === 'Escape') {
         closeDesktopFolders();
         closeMobileMenu();
+        siteSearchOpen = false;
       }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); siteSearchOpen = true; }
     };
     const onVisibility = () => {
       if (document.visibilityState === 'visible') refreshOwnProfile();
@@ -644,6 +648,9 @@
       <!-- Account is a stable destination; using the person's name here made
            it read like identity chrome rather than an actual navigation tab. -->
       <div class="nav-side nav-side-right">
+        <button type="button" class="desktop-profile site-search-trigger" on:click={() => siteSearchOpen = true} aria-label="Search Spartans Hub">
+          <Search size={16} /><span class="profile-name">Search</span>
+        </button>
         <a href="/profile" class="desktop-profile" class:active={isActive('/profile')} aria-label="Account settings" on:click={closeDesktopFolders}>
           <User size={16} />
           <span class="profile-name">Account</span>
@@ -666,6 +673,7 @@
 {#if mobileMenuOpen}
   <div class="mobile-overlay" on:click={closeMobileMenu} on:keydown={(e) => e.key === 'Escape' && closeMobileMenu()} role="button" tabindex="-1" aria-label="Close menu"></div>
   <nav class="mobile-nav" aria-label="Mobile navigation">
+    <button type="button" class="mobile-link" on:click={() => { closeMobileMenu(); siteSearchOpen = true; }}><Search size={18} /><span>Search</span></button>
     <div class="mobile-section-label">Navigation</div>
     <a href="/" class="mobile-link" class:active={isActive('/')} on:click={closeMobileMenu}>
       <Home size={18} />
@@ -714,6 +722,8 @@
     </a>
   </nav>
 {/if}
+
+<GlobalSiteSearch bind:open={siteSearchOpen} canViewAdmin={canViewAdmin} />
 
 {#if canRenderPageContent}
   <main class="container page-container">
@@ -777,6 +787,7 @@
   .nav-side-right {
     justify-content: flex-end;
   }
+  .site-search-trigger { margin-left:0; }
 
   .brand {
     display: flex;
