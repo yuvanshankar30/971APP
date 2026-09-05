@@ -52,7 +52,7 @@ The add-in runs a background polling thread that claims queued `cam_jobs` rows (
 - Network access to a **Spartans Hub** deployment
 - The Fusion CAM runner token (the deployed `FUSION_RUNNER_TOKEN` value; ask whoever manages the deployment)
 
-> **Before you start:** see the repo root's `valor6800-autocam-runner-setup.md` for the full walkthrough, including the `.overridepath`/`requests`-package workaround Fusion's bundled Python needs (Step 4) — that gotcha is unchanged by this fork.
+> **Full walkthrough:** [`docs/team-setup-guide.md`](docs/team-setup-guide.md) covers install + configuration end to end, including a downloadable pre-built zip from the [Fusion AutoCAM Setup page](/autocam/fusion/setup). The sections below are the short version.
 
 ## Installation
 
@@ -70,11 +70,14 @@ Then open Fusion 360 → **Utilities → Scripts and Add-Ins → Add-Ins**, sele
 
 ## Configuration
 
-Copy the example environment file and fill in your deployment values:
+Run the one-command setup instead of hand-editing anything - installs `requests` for Fusion's bundled Python (which has no third-party packages of its own) and writes `.env` for you:
 
 ```bash
-cp .env.example .env
+cd "$HOME/Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns/SpartanRoboticsAutoCAM"
+python3 setup.py
 ```
+
+It asks which Hub to talk to (deployed, or a local dev server) and for your `FUSION_RUNNER_TOKEN` value (ask a project administrator), then writes `.env` itself - see [`setup.py`](setup.py). Prefer to edit `.env` by hand instead? `cp .env.example .env` and fill in the same values manually:
 
 | Variable | Purpose | Default |
 | --- | --- | --- |
@@ -85,9 +88,9 @@ cp .env.example .env
 | `FUSION_DATA_PROJECT_NAME` | Which Fusion Data Panel project generated documents get saved into | `2026 Season CAM` |
 | `FUSION_DROP_FOLDER_PATH` | Nested folder path (within that project, `/`-separated) generated documents get saved into - each segment created if missing | `Offseason Projects/AutoCAM` |
 
-`API_KEY` is stored locally in `.env` (git-ignored). The add-in can also prompt for the key on startup and write it to `.env` for you.
+`.env` is git-ignored either way - never commit a real token.
 
-**Running more than one physical machine at once?** Set `RUNNER_MACHINE_ID` on every install. Without it, a Runner claims *any* queued milling job regardless of which machine it was queued for - fine for a single machine, but a router's Runner could grab a job meant for the mill once two machines are polling at the same time. With `RUNNER_MACHINE_ID` set, a Runner only claims jobs that either target its own machine or don't target a specific machine at all.
+**Running more than one physical machine at once?** Set `RUNNER_MACHINE_ID` on every install (`setup.py` doesn't prompt for this one - add it to `.env` afterward if needed). Without it, a Runner claims *any* queued milling job regardless of which machine it was queued for - fine for a single machine, but a router's Runner could grab a job meant for the mill once two machines are polling at the same time. With `RUNNER_MACHINE_ID` set, a Runner only claims jobs that either target its own machine or don't target a specific machine at all.
 
 ## Project Structure
 

@@ -127,7 +127,9 @@
     if (!await requestConfirmation({ title: 'Delete box tube', message: `Delete box tube "${boxTube.name}"?`, confirmLabel: 'Delete', danger: true })) return;
     try {
       await deleteBoxTube(boxTube.id);
-      await load(false);
+      // Splice locally instead of re-fetching everything just to drop one
+      // row - see PlatesTab.svelte's matching comment.
+      boxTubes = boxTubes.filter((b) => b.id !== boxTube.id);
     } catch (e) {
       toastActions.show(e.message || 'Failed to delete box tube');
     }
@@ -226,7 +228,7 @@
     <p class="empty-state">No box tubes yet. Add one above.</p>
   {:else}
     <div class="cam-list">
-      {#each boxTubes as boxTube}
+      {#each boxTubes as boxTube (boxTube.id)}
         <div class="card cam-list-item">
           <div class="cam-list-header">
             <strong><Box size={16} /> {boxTube.name}</strong>

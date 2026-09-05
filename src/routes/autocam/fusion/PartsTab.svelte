@@ -3,8 +3,8 @@
   import { onMount } from 'svelte';
   import { toastActions } from '$lib/toast.js';
   import { supabase } from '$lib/supabase.js';
-  import { fetchParts, createPart, deletePart, fetchPartCategories } from '$lib/fusionCam.js';
-  import { Plus, Trash2, Package } from 'lucide-svelte';
+  import { fetchParts, createPart, deletePart, renamePart, fetchPartCategories } from '$lib/fusionCam.js';
+  import { Plus, Trash2, Package, Pencil, Check, X } from 'lucide-svelte';
 
   export let user;
   export let canManage;
@@ -21,6 +21,8 @@
   let newPart = { name: '', epic: '', ticket: '', quantity: 1, categoryId: '', manufacturingPartId: '', fusionFileName: '' };
   let stepFile = null;
   let submitting = false;
+  let renamingPartId = null;
+  let renameValue = '';
 
   async function loadManufacturingParts() {
     const { data, error } = await supabase
@@ -98,9 +100,40 @@
     if (!await requestConfirmation({ title: 'Delete part', message: `Delete part "${part.name}"?`, confirmLabel: 'Delete', danger: true })) return;
     try {
       await deletePart(part.id);
-      await load(false);
+      // Splice locally instead of re-fetching everything just to drop one
+      // row - see PlatesTab.svelte's matching comment.
+      parts = parts.filter((p) => p.id !== part.id);
     } catch (e) {
       toastActions.show(e.message || 'Failed to delete part');
+    }
+  }
+
+  function startRename(part) {
+    renamingPartId = part.id;
+    renameValue = part.name;
+  }
+
+  function cancelRename() {
+    renamingPartId = null;
+    renameValue = '';
+  }
+
+  async function saveRename(part) {
+    const trimmed = renameValue.trim();
+    if (!trimmed) {
+      toastActions.show('Name cannot be empty');
+      return;
+    }
+    if (trimmed === part.name) {
+      cancelRename();
+      return;
+    }
+    try {
+      const updated = await renamePart(part.id, trimmed);
+      parts = parts.map((p) => (p.id === part.id ? { ...p, ...updated } : p));
+      cancelRename();
+    } catch (e) {
+      toastActions.show(e.message || 'Failed to rename part');
     }
   }
 
@@ -190,10 +223,28 @@
     <p class="empty-state">No parts yet. Add one above.</p>
   {:else}
     <div class="cam-list">
-      {#each parts as part}
+      {#each parts as part (part.id)}
         <div class="card cam-list-item">
           <div class="cam-list-header">
-            <strong><Package size={16} /> {part.name}</strong>
+            {#if renamingPartId === part.id}
+              <span class="rename-control">
+                <Package size={16} />
+                <input
+                  class="form-input rename-input"
+                  bind:value={renameValue}
+                  on:keydown={(e) => { if (e.key === 'Enter') saveRename(part); if (e.key === 'Escape') cancelRename(); }}
+                />
+                <button type="button" class="btn btn-ghost btn-sm" title="Save" on:click={() => saveRename(part)}><Check size={14} /></button>
+                <button type="button" class="btn btn-ghost btn-sm" title="Cancel" on:click={cancelRename}><X size={14} /></button>
+              </span>
+            {:else}
+              <span class="rename-control">
+                <strong><Package size={16} /> {part.name}</strong>
+                {#if canManage}
+                  <button type="button" class="btn btn-ghost btn-sm" title="Rename" on:click={() => startRename(part)}><Pencil size={13} /></button>
+                {/if}
+              </span>
+            {/if}
             <span class="tag">{categoryLabel(part.fusion_part_categories)}</span>
           </div>
           <p class="cam-form-hint">
@@ -223,6 +274,8 @@
   .cam-list { display: flex; flex-direction: column; gap: 0.75rem; }
   .cam-list-item { padding: 1rem; }
   .cam-list-header { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+  .rename-control { display: flex; align-items: center; gap: 0.35rem; min-width: 0; }
+  .rename-input { padding: 0.2rem 0.4rem; height: auto; width: auto; min-width: 10rem; }
   .cam-list-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
   .empty-state { color: var(--text-muted, #888); padding: 2rem 0; text-align: center; }
   .cam-form-hint { color: var(--text-muted, #888); font-size: 0.85rem; margin: 0.25rem 0 0; }

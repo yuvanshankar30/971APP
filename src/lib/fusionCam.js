@@ -102,6 +102,17 @@ export async function createPart({ name, epic, ticket, quantity, categoryId, ste
   return data;
 }
 
+export async function renamePart(id, name) {
+  const { data, error } = await supabase
+    .from('fusion_parts')
+    .update({ name })
+    .eq('id', id)
+    .select('*, fusion_part_categories(thickness, cam_materials(name, category)), parts(id, name, project_id, workflow)')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 export async function deletePart(id) {
   const { error } = await supabase.from('fusion_parts').delete().eq('id', id);
   if (error) throw error;
@@ -122,6 +133,17 @@ export async function createPlate({ name, width, length, trueDepth, categoryId }
   const { data, error } = await supabase
     .from('fusion_plates')
     .insert({ name, width, length, true_depth: trueDepth, category_id: categoryId })
+    .select('*, fusion_part_categories(material_id, thickness, cam_materials(name, category))')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function renamePlate(id, name) {
+  const { data, error } = await supabase
+    .from('fusion_plates')
+    .update({ name })
+    .eq('id', id)
     .select('*, fusion_part_categories(material_id, thickness, cam_materials(name, category))')
     .single();
   if (error) throw error;

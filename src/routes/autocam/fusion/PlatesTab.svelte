@@ -3,8 +3,8 @@
   import { onMount } from 'svelte';
   import { supabase } from '$lib/supabase.js';
   import { toastActions } from '$lib/toast.js';
-  import { fetchPlates, createPlate, deletePlate, fetchPartCategories, fetchParts, assignPartToPlate, removePartFromPlate, queueFusionJob } from '$lib/fusionCam.js';
-  import { Plus, Trash2, Layers, Send } from 'lucide-svelte';
+  import { fetchPlates, createPlate, deletePlate, renamePlate, fetchPartCategories, fetchParts, assignPartToPlate, removePartFromPlate, queueFusionJob } from '$lib/fusionCam.js';
+  import { Plus, Trash2, Layers, Send, Pencil, Check, X } from 'lucide-svelte';
 
   export let user;
   export let canManage;
@@ -16,6 +16,8 @@
   let loading = true;
   let showAddForm = false;
   let newPlate = { name: '', width: '', length: '', trueDepth: '', categoryId: '' };
+  let renamingPlateId = null;
+  let renameValue = '';
   // Which router each plate's "Queue CAM Job" is currently set to send the
   // job to - keyed by plate id, one router picked per row. No default: with
   // more than one real router now eligible (can_run_plates), silently
@@ -111,9 +113,42 @@
     if (!await requestConfirmation({ title: 'Delete plate', message: `Delete plate "${plate.name}"?`, confirmLabel: 'Delete', danger: true })) return;
     try {
       await deletePlate(plate.id);
-      await load(false);
+      // Splice locally instead of re-fetching everything (categories,
+      // parts, machines, machineTools included) just to drop one row - a
+      // real report: even with load()'s loading-flash fix, a full re-fetch
+      // still visibly "reloaded" the list on every delete.
+      plates = plates.filter((p) => p.id !== plate.id);
     } catch (e) {
       toastActions.show(e.message || 'Failed to delete plate');
+    }
+  }
+
+  function startRename(plate) {
+    renamingPlateId = plate.id;
+    renameValue = plate.name;
+  }
+
+  function cancelRename() {
+    renamingPlateId = null;
+    renameValue = '';
+  }
+
+  async function saveRename(plate) {
+    const trimmed = renameValue.trim();
+    if (!trimmed) {
+      toastActions.show('Name cannot be empty');
+      return;
+    }
+    if (trimmed === plate.name) {
+      cancelRename();
+      return;
+    }
+    try {
+      const updated = await renamePlate(plate.id, trimmed);
+      plates = plates.map((p) => (p.id === plate.id ? { ...p, ...updated } : p));
+      cancelRename();
+    } catch (e) {
+      toastActions.show(e.message || 'Failed to rename plate');
     }
   }
 
@@ -267,10 +302,28 @@
     <p class="empty-state">No plates yet. {canManage ? 'Add one above to get started.' : 'Ask a manufacturing lead to add one.'}</p>
   {:else}
     <div class="cam-list">
-      {#each plates as plate}
+      {#each plates as plate (plate.id)}
         <div class="card cam-list-item">
           <div class="cam-list-header">
-            <strong><Layers size={16} /> {plate.name}</strong>
+            {#if renamingPlateId === plate.id}
+              <span class="rename-control">
+                <Layers size={16} />
+                <input
+                  class="form-input rename-input"
+                  bind:value={renameValue}
+                  on:keydown={(e) => { if (e.key === 'Enter') saveRename(plate); if (e.key === 'Escape') cancelRename(); }}
+                />
+                <button type="button" class="btn btn-ghost btn-sm" title="Save" on:click={() => saveRename(plate)}><Check size={14} /></button>
+                <button type="button" class="btn btn-ghost btn-sm" title="Cancel" on:click={cancelRename}><X size={14} /></button>
+              </span>
+            {:else}
+              <span class="rename-control">
+                <strong><Layers size={16} /> {plate.name}</strong>
+                {#if canManage}
+                  <button type="button" class="btn btn-ghost btn-sm" title="Rename" on:click={() => startRename(plate)}><Pencil size={13} /></button>
+                {/if}
+              </span>
+            {/if}
             <span class="tag">{categoryLabel(plate.fusion_part_categories)}</span>
           </div>
           <p class="cam-form-hint">{plate.width}" x {plate.length}", true depth {plate.true_depth}"</p>
@@ -343,6 +396,8 @@
   .cam-list { display: flex; flex-direction: column; gap: 0.75rem; }
   .cam-list-item { padding: 1rem; }
   .cam-list-header { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+  .rename-control { display: flex; align-items: center; gap: 0.35rem; min-width: 0; }
+  .rename-input { padding: 0.2rem 0.4rem; height: auto; width: auto; min-width: 10rem; }
   .cam-list-actions { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; flex-wrap: wrap; }
   .router-select { width: auto; min-width: 160px; height: var(--control-height, 2.25rem); }
   .empty-state { color: var(--text-muted, #888); padding: 2rem 0; text-align: center; }

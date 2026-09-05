@@ -76,7 +76,7 @@
   <p class="empty-state">No Fusion CAM jobs yet - queue one from the Plates or Box Tubes tab.</p>
 {:else}
   <div class="cam-list">
-    {#each jobs as job}
+    {#each jobs as job (job.id)}
       <div class="card cam-list-item">
         <div class="cam-list-header">
           <strong><ListChecks size={16} /> {job.name || `Job ${job.id.slice(0, 8)}`}</strong>
