@@ -12,7 +12,15 @@ from ..commands.MultiImport import importFiles
 from ..commands.NewNCProgram import export
 from ..commands.DeleteToolpaths import DeleteToolpaths
 from ..commands.HandleTube import handleTube
-from ..config import BASE_URL, FINAL_PATH, INITIAL_PATH, TEMP_PATH, TOOLS_PATH
+from ..config import (
+    BASE_URL,
+    FINAL_PATH,
+    FUSION_DATA_PROJECT_NAME,
+    FUSION_DROP_FOLDER_NAME,
+    INITIAL_PATH,
+    TEMP_PATH,
+    TOOLS_PATH,
+)
 from .job_status import ensure_completion_response, send_job_error
 from .templateTools import patch_cam_template_with_tool_libraries
 
@@ -431,16 +439,36 @@ def start(data, session):
         box_tube_id = str(_get(payload, "box_tube_id", default="cam_tube"))
         doc_name = f"Tube{box_tube_id}Job{job_id}"
 
-        # Save the document to AutoCAM Drop folder
+        # Save the document to the configured AutoCAM drop folder
         try:
-            # Get the AutoCAM Drop folder
-            data_project = app.data.dataProjects.item(1)
+            # Resolve the target Data Panel project by name if configured -
+            # NOT by index (dataProjects isn't ordered by relevance; a
+            # hardcoded item(1) previously resolved to a years-stale
+            # project). Falls back to whatever project is currently active
+            # in the Data Panel if FUSION_DATA_PROJECT_NAME is unset or not
+            # found among this account's projects.
+            data_project = None
+            if FUSION_DATA_PROJECT_NAME:
+                for i in range(app.data.dataProjects.count):
+                    candidate = app.data.dataProjects.item(i)
+                    if candidate.name == FUSION_DATA_PROJECT_NAME:
+                        data_project = candidate
+                        break
+                if data_project is None:
+                    app.log(
+                        f"FUSION_DATA_PROJECT_NAME '{FUSION_DATA_PROJECT_NAME}' "
+                        "not found among this account's Fusion projects - "
+                        "falling back to the active project."
+                    )
+            if data_project is None:
+                data_project = app.data.activeProject
+
             root_folder = data_project.rootFolder
-            autocam_drop_folder = root_folder.dataFolders.itemByName("AutoCAM Drop")
+            autocam_drop_folder = root_folder.dataFolders.itemByName(FUSION_DROP_FOLDER_NAME)
 
             if autocam_drop_folder is None:
-                app.log("AutoCAM Drop folder not found, creating it...")
-                autocam_drop_folder = root_folder.dataFolders.add("AutoCAM Drop")
+                app.log(f"'{FUSION_DROP_FOLDER_NAME}' folder not found, creating it...")
+                autocam_drop_folder = root_folder.dataFolders.add(FUSION_DROP_FOLDER_NAME)
 
             # Save the document with Tube<tube_id>Job<job_id> format
             # Check if file already exists and delete it
@@ -453,11 +481,11 @@ def start(data, session):
 
             # Save the document
             doc.saveAs(doc_name, autocam_drop_folder, "", "")
-            app.log(f"Saved document '{doc_name}' to AutoCAM Drop folder")
+            app.log(f"Saved document '{doc_name}' to '{data_project.name}/{FUSION_DROP_FOLDER_NAME}'")
 
         except Exception as e:
             app.log(
-                f"Failed to save document to AutoCAM Drop folder:\n{traceback.format_exc()}"
+                f"Failed to save document to '{FUSION_DROP_FOLDER_NAME}' folder:\n{traceback.format_exc()}"
             )
 
         export_dir = os.path.join(FINAL_PATH, box_tube_id)

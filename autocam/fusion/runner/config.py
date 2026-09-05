@@ -73,6 +73,26 @@ except FileNotFoundError:
         "root, Step 4, for exact commands."
     )
 
+# Which Fusion "project" (top-level entry in the Data Panel) AutoCAM-
+# generated documents get saved into. Configurable because
+# app.data.dataProjects isn't sorted by relevance or recency - checked
+# against this shop's real Fusion account (9 projects) and the upstream
+# code's hardcoded `dataProjects.item(1)` resolves to "2020 Robot CAM," a
+# years-stale project, never whatever's actually current. Falls back to
+# app.data.activeProject (whatever's selected in the Data Panel when a job
+# runs) if unset - safer than a hardcoded index, but still not fully
+# deterministic for an unattended Runner, since the Data Panel selection can
+# change. Set this explicitly in .env for predictable behavior regardless of
+# what's open in the Data Panel.
+FUSION_DATA_PROJECT_NAME = _read_env_value("FUSION_DATA_PROJECT_NAME") or None
+
+# Name of the Data Panel folder (within the resolved project above) that
+# AutoCAM-generated Fusion documents get saved into - created automatically
+# if it doesn't exist. Was a hardcoded "AutoCAM Drop" string duplicated in
+# camPlate.py and camTube.py; centralized here so both stay in sync and a
+# team can rename it without touching Python logic.
+FUSION_DROP_FOLDER_NAME = _read_env_value("FUSION_DROP_FOLDER_NAME") or "AutoCAM Drop"
+
 TEMP_PATH = os.path.join(os.path.dirname(__file__), "temp")
 INITIAL_PATH = os.path.join(TEMP_PATH, "initial")
 FINAL_PATH = os.path.join(TEMP_PATH, "final")

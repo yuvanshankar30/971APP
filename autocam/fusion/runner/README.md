@@ -82,6 +82,8 @@ cp .env.example .env
 | `BASE_URL` | Spartans Hub deployment base URL | `http://localhost:3000` |
 | `RUNNER_ID` | Stable identifier for this Runner install, sent on every claim | machine hostname |
 | `RUNNER_MACHINE_ID` | The `cam_machines` row (a UUID) this physical machine is - look it up with `select id, name from cam_machines;` in the Supabase SQL editor | _(blank)_ |
+| `FUSION_DATA_PROJECT_NAME` | Which Fusion Data Panel project generated documents get saved into | active project |
+| `FUSION_DROP_FOLDER_NAME` | Folder (within that project) generated documents get saved into - created if missing | `AutoCAM Drop` |
 
 `API_KEY` is stored locally in `.env` (git-ignored). The add-in can also prompt for the key on startup and write it to `.env` for you.
 
