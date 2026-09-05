@@ -34,34 +34,35 @@ def SetupGenerator(
         f"{truedepth-depth} in"
     )
     setup.parameters.itemByName("job_model").value.value = occurances
-    # Z axis/plane + Y axis mode (not the two-in-plane-axes mode) - X is
-    # derived automatically via the right-hand rule from Z and Y, rather
-    # than picked directly, so its direction can only be controlled via
-    # flipZ/flipY (there's no separate flipX in this mode).
+    # Requirements, all of which matter (confirmed the hard way - flipping
+    # Z to satisfy the other two once caused a real "exceeds machine
+    # maximum on Z" fault on the actual router, because it silently
+    # inverted retract moves into plunges): origin at the bottom-left
+    # corner, +X and +Y both pointing back into the stock from there, and
+    # +Z pointing away from the stock (up) so retract moves stay retracts.
     #
-    # Priorities, in order (confirmed directly with the team): origin at
-    # the bottom-left corner, and both +X and +Y pointing back into the
-    # stock from there - +Z's direction (up vs down) does not matter.
-    # Box-point corner labels ('bottom 1', 'bottom 2', ...) do NOT map
-    # consistently to a fixed physical corner across flipZ/flipY choices or
-    # even across documents - Fusion silently relabels which string means
-    # which corner depending on the current flip state and apparently the
-    # document's own history, so a label that was verified correct on one
-    # document was measured wrong on the next. Don't trust the label - if
-    # this is touched again, verify origin position and axis directions
-    # numerically against a live document (e.g. via the Fusion MCP bridge)
-    # rather than reasoning about what the label should mean. flipZ=True,
-    # flipY=False, box point
-    # 'bottom 1' was the combination that measured correctly - bottom-left
-    # corner, both axes into the material - on the real slapdih document.
-    setup.parameters.itemByName("wcs_orientation_mode").expression = "'axesZY'"
-    setup.parameters.itemByName("wcs_orientation_axisZ").value.value = [
-        comp.zConstructionAxis
-    ]
-    setup.parameters.itemByName("wcs_orientation_axisY").value.value = [
+    # An earlier version used 'axesZY' mode (deriving X from Z and Y),
+    # which coupled fixing X's direction to breaking either Z's or Y's -
+    # every combination of flips in that mode traded one requirement for
+    # another. Switching to plain 'axesXY' mode with NO axis swap (X tied
+    # to the model's own X, Y to its own Y) and NO flips at all satisfies
+    # all three simultaneously - verified numerically against the real
+    # slapdih document via the Fusion MCP bridge, box point 'bottom 1'.
+    #
+    # Box-point corner labels ('bottom 1', 'bottom 2', ...) do NOT map to a
+    # fixed physical corner across different flip/axis states or even
+    # across documents - Fusion silently relabels which string means which
+    # corner. If this is touched again, verify origin position and axis
+    # directions numerically against a live document rather than reasoning
+    # about what the label should mean.
+    setup.parameters.itemByName("wcs_orientation_mode").expression = "'axesXY'"
+    setup.parameters.itemByName("wcs_orientation_axisX").value.value = [
         comp.xConstructionAxis
     ]
-    setup.parameters.itemByName("wcs_orientation_flipZ").value.value = True
+    setup.parameters.itemByName("wcs_orientation_axisY").value.value = [
+        comp.yConstructionAxis
+    ]
+    setup.parameters.itemByName("wcs_orientation_flipX").value.value = False
     setup.parameters.itemByName("wcs_orientation_flipY").value.value = False
     setup.parameters.itemByName("wcs_origin_boxPoint").expression = "'bottom 1'"
     baseDir = os.path.dirname(os.path.realpath(__file__))
