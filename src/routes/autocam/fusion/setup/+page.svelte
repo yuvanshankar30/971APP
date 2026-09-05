@@ -29,7 +29,7 @@
       Fusion requires (see Step 1 below) - no manual rename needed.
     </p>
   </div>
-  <a class="btn btn-primary" href="/downloads/SpartanRoboticsAutoCAM-FusionAddIn.zip" download>
+  <a class="btn btn-primary install-download-btn" href="/downloads/SpartanRoboticsAutoCAM-FusionAddIn.zip" download>
     <Download size={16} /> Download Runner (.zip)
   </a>
 </div>
@@ -47,9 +47,17 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
     gap: var(--space-4);
     padding: var(--space-4);
     margin-bottom: var(--space-4);
+  }
+  .install-card-text {
+    min-width: 0;
+  }
+  .install-download-btn {
+    flex-shrink: 0;
+    white-space: nowrap;
   }
   .install-card-text h2 {
     margin: 0 0 var(--space-1);

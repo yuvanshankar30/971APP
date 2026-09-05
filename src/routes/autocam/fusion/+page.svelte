@@ -32,8 +32,8 @@
 
 <div class="page-header">
   <h1><Layers size={28} /> Fusion CAM</h1>
-  <a class="btn btn-secondary btn-sm" href="/autocam/fusion/setup">
-    <BookOpen size={14} /> Runner Setup Guide
+  <a class="btn btn-primary btn-lg" href="/autocam/fusion/setup">
+    <BookOpen size={18} /> Runner Setup Guide
   </a>
 </div>
 
