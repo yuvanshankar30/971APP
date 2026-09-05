@@ -30,7 +30,7 @@ let initialized = false;
 let initCount = 0;
 const INITIAL_SESSION_TIMEOUT_MS = 2500;
 
-export async function fetchUserProfile(userId) {
+export async function fetchUserProfile(userId, attempt = 0) {
   if (!userId) {
     userProfile.set(null);
     return null;
@@ -55,6 +55,7 @@ export async function fetchUserProfile(userId) {
     if (error) {
       console.warn('user_profiles fetch error:', error.message || error);
       userProfile.set(null);
+      if (attempt < 2) setTimeout(() => void fetchUserProfile(userId, attempt + 1), 750 * (attempt + 1));
       return null;
     }
     // Normalize header_tabs: it may come back as JSON text or as an array
@@ -108,6 +109,7 @@ export async function fetchUserProfile(userId) {
   } catch (e) {
     console.warn('user_profiles fetch exception:', e?.message || e);
     userProfile.set(null);
+    if (attempt < 2) setTimeout(() => void fetchUserProfile(userId, attempt + 1), 750 * (attempt + 1));
     return null;
   }
 }

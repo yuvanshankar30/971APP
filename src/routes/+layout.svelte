@@ -6,7 +6,7 @@
   import { supabase } from '$lib/supabase.js';
   import { fetchActiveScoutingEventKey } from '$lib/scoutingEvent.js';
   import navConfig from '$lib/navigation.json';
-  import { defaultHeaderTabs, ensurePowerRankingsTab, ensureScoutingAdminTab, ensureStrategyTab, ensureGcodeConverterTab, ensureFilesTab, ensureFusionAutocamTab } from '$lib/defaultTabs.js';
+  import { defaultHeaderTabs, mergeDefaultHeaderTabs, ensurePowerRankingsTab, ensureScoutingAdminTab, ensureStrategyTab, ensureGcodeConverterTab, ensureFilesTab, ensureFusionAutocamTab } from '$lib/defaultTabs.js';
   import { Move3d, Hammer, Wrench, Receipt, Home, Briefcase, Coins, Package, User, ChevronDown, Menu, X, Camera, CalendarDays, Cpu, FileText, Trophy, Eye, ClipboardCheck, ListChecks, Target, Folder, Search } from 'lucide-svelte';
   import { goto, afterNavigate } from '$app/navigation';
   import { page } from '$app/stores';
@@ -466,11 +466,9 @@
   // happen inside called functions, so the deps must be referenced here.)
   $: canViewAdmin = hasPermission(activeProfile, 'VIEW_ADMIN_PANEL');
   $: customTabs = sanitizeTabs(activeProfile?.header_tabs);
-  // An empty custom-tabs list means "no customization" — fall back to the
-  // default regular nav so nobody (admins included) ends up with an empty bar.
-  $: effectiveTabs = (customTabs && customTabs.length)
-    ? customTabs
-    : fallbackTabs();
+  // Saved layouts retain personal ordering and folders, but no longer freeze
+  // someone on an obsolete subset of the app's navigation.
+  $: effectiveTabs = mergeDefaultHeaderTabs(customTabs, navConfig);
   // Power Rankings is appended for anyone whose saved header_tabs predates it,
   // so a customized nav still surfaces the feature. Purely additive - see
   // ensurePowerRankingsTab().

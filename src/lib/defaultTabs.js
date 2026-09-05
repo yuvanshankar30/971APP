@@ -26,9 +26,8 @@
 //   - Purchasing and Docs: stand alone after the team-workflow folders.
 //
 // Home is rendered separately and always first; Admin is appended for
-// admins by the layout, always last. Planner/Tasks/etc. remain opt-in via
-// the "Add tab" UI on the profile page - not part of this reorg, unmentioned
-// in the feedback that prompted it.
+// admins by the layout, always last. Planning is part of the shared defaults,
+// and saved layouts are reconciled with those defaults at render time.
 //
 // The companion migration `20260903_reset_header_tabs_to_shared_default.sql`
 // clears stale saved layouts once so every existing account receives this
@@ -71,9 +70,50 @@ export function defaultHeaderTabs(navConfig = navigation) {
 
   tabs.push({ type: 'tab', key: 'purchasing', label: 'Purchasing' });
 
+  tabs.push({
+    type: 'folder',
+    label: 'Planning',
+    children: [
+      { key: 'planner', label: 'Planner' },
+      { key: 'tasks', label: 'Tasks' }
+    ]
+  });
+
   tabs.push({ type: 'tab', key: 'docs', label: 'Docs' });
 
   return tabs;
+}
+
+/**
+ * Preserve a member's saved layout but restore every current default tab.
+ * Old layouts otherwise remain permanently frozen at the set of pages that
+ * existed on the day they first customized their navigation.
+ */
+export function mergeDefaultHeaderTabs(savedTabs, navConfig = navigation) {
+  const saved = Array.isArray(savedTabs) ? savedTabs.map((item) => ({
+    ...item,
+    ...(item?.type === 'folder' ? { children: Array.isArray(item.children) ? [...item.children] : [] } : {})
+  })) : [];
+  const hasKey = (items, key) => items.some((item) => item?.key === key || (item?.type === 'folder' && hasKey(item.children || [], key)));
+
+  for (const defaultItem of defaultHeaderTabs(navConfig)) {
+    if (defaultItem.type !== 'folder') {
+      if (!hasKey(saved, defaultItem.key)) saved.push({ ...defaultItem });
+      continue;
+    }
+    const folderIndex = saved.findIndex((item) => item?.type === 'folder' && item.label === defaultItem.label);
+    if (folderIndex === -1) {
+      saved.push({ ...defaultItem, children: [...defaultItem.children] });
+      continue;
+    }
+    const folder = saved[folderIndex];
+    const children = Array.isArray(folder.children) ? [...folder.children] : [];
+    for (const child of defaultItem.children) {
+      if (!hasKey(children, child.key)) children.push({ ...child });
+    }
+    saved[folderIndex] = { ...folder, children };
+  }
+  return saved;
 }
 
 
