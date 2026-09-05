@@ -54,6 +54,13 @@ def _tool_diameter(entry: dict):
         return None
 
 
+def _is_drill_entry(entry: dict) -> bool:
+    """Same "type" field templateTools.py's _is_drill_tool checks - kept
+    independent since this module has no import relationship with that one.
+    """
+    return "drill" in str(entry.get("type") or "").lower()
+
+
 def load_local_tool_library_json(data: dict, dest_dir: str) -> tuple[dict, str]:
     """Extract the selected checked-in Fusion tool library for template patching."""
     tool = _joined_record(data, "cam_tools")
@@ -88,6 +95,21 @@ def load_local_tool_library_json(data: dict, dest_dir: str) -> tuple[dict, str]:
     if isinstance(entries, list):
         for entry in entries:
             if not isinstance(entry, dict):
+                continue
+            # Keep every drill regardless of diameter - a drill isn't "a
+            # variant of the selected endmill" the way a same-named
+            # different-size end mill is, and templateTools.py's own
+            # drill-matching already picks the right diameter per hole
+            # (_set_drill_diameter_range). Diameter-filtering drills out
+            # here meant a plate job could never drill a single hole no
+            # matter what was in the library - confirmed via a real job:
+            # holes rendered in the toolpath preview but nothing cut them,
+            # and every run logged "Template tool matches missing" for a
+            # drill diameter with candidates=0 before this fix, because
+            # this filter had already discarded any drill entry that
+            # didn't happen to match the endmill's own diameter.
+            if _is_drill_entry(entry):
+                matching_entries.append(entry)
                 continue
             entry_diameter = _tool_diameter(entry)
             if entry_diameter is not None and abs(entry_diameter - selected_diameter) < 0.0001:

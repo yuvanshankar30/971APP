@@ -1,6 +1,6 @@
 # Author-
 # Description-
-import adsk.core, adsk.fusion, adsk.cam, traceback
+import adsk.core, adsk.fusion, adsk.cam
 from ..config import *
 import os
 import json
@@ -18,21 +18,73 @@ def get_tool_diameter(toolpath):
 
 
 def _format_tool_label(toolpath):
-    """Create a filename-friendly label from the tool diameter."""
+    """Create a filename-friendly label from the tool diameter.
+
+    Used to regex-strip every non-digit out of str(inches) directly -
+    inches is a cm-to-inch round trip through Fusion's internal value and
+    is almost never an exact float (0.1575in comes back as something like
+    0.15750000000000003), so that pulled in 15+ digits of floating-point
+    noise along with the real diameter, producing names like
+    "S15750000000000004Pocket" instead of "S1575Pocket". Rounding first
+    keeps only the digits that actually describe the tool.
+    """
     try:
         value = toolpath.tool.parameters.itemByName("tool_diameter").value.value
     except Exception:
         return "0"
-    inches = value / 2.54
-    numbers_only = re.sub(r"[^0-9]", "", str(inches))
-    if not numbers_only:
-        numbers_only = "0"
-    try:
-        formatted = f"{float(numbers_only):3.2f}"
-    except Exception:
-        formatted = numbers_only
-    label = formatted.replace(".", "").strip("0")
+    inches = round(value / 2.54, 4)
+    label = f"{inches:.4f}".replace(".", "").strip("0")
     return label or "0"
+
+
+def _post_process_with_retry(app, cam, toolpath, postProcessInput, attempts=3, delay_seconds=1.0):
+    """cam.postProcess() has been observed to fail with "RuntimeError 3:
+    Initialization fails" specifically on the FIRST toolpath posted in a
+    run, while an identical call for the very next toolpath (moments later
+    in wall-clock time) succeeds - see the wait added in DeleteToolpaths.py
+    for one attempt at the underlying cause (toolpath generation still
+    settling), which real local testing showed was not sufficient on its
+    own. Retrying the exact same call after a short pause matches what was
+    actually observed to work (a later call succeeding on its own), rather
+    than a theory about exactly why the first one fails.
+
+    Raises the last error if every attempt fails, instead of a caller
+    silently treating a real failure as success.
+    """
+    last_error = None
+    for attempt in range(1, attempts + 1):
+        if attempt == 1:
+            # Diagnostic context for whatever this attempt is about to try,
+            # logged before the call rather than only on failure - if this
+            # fails again, the next run's log carries these instead of just
+            # the same opaque "Initialization fails" with nothing else to
+            # go on. isToolpathValid/warning reflect the toolpath's own
+            # state; the rest confirms what's actually being asked for.
+            try:
+                app.log(
+                    f"postProcess about to run for '{toolpath.name}': "
+                    f"strategy={getattr(toolpath, 'strategy', '?')}, "
+                    f"isToolpathValid={getattr(toolpath, 'isToolpathValid', '?')}, "
+                    f"isGenerating={getattr(toolpath, 'isGenerating', '?')}, "
+                    f"warning={getattr(toolpath, 'warning', '?')!r}, "
+                    f"programName={getattr(postProcessInput, 'programName', '?')!r}, "
+                    f"outputFolder={getattr(postProcessInput, 'outputFolder', '?')!r}"
+                )
+            except Exception as diag_error:
+                app.log(f"(could not read toolpath diagnostics: {diag_error})")
+        try:
+            cam.postProcess(toolpath, postProcessInput)
+            return
+        except Exception as e:
+            last_error = e
+            app.log(
+                f"postProcess attempt {attempt}/{attempts} failed for "
+                f"'{toolpath.name}': {e}"
+            )
+            if attempt < attempts:
+                adsk.doEvents()
+                time.sleep(delay_seconds)
+    raise last_error
 
 
 def export(name, post_processor_path):
@@ -79,7 +131,7 @@ def export(name, post_processor_path):
                 adsk.cam.PostOutputUnitOptions.MillimetersOutput,
             )
             postProcessInput.isOpenInEditor = False
-            cam.postProcess(toolpath, postProcessInput)
+            _post_process_with_retry(app, cam, toolpath, postProcessInput)
         for toolpath in releventToolpaths["Pocket"]:
             tool = _format_tool_label(toolpath)
             postProcessInput = adsk.cam.PostProcessInput.create(
@@ -89,14 +141,13 @@ def export(name, post_processor_path):
                 adsk.cam.PostOutputUnitOptions.MillimetersOutput,
             )
             postProcessInput.isOpenInEditor = False
-            try:
-                cam.postProcess(toolpath, postProcessInput)
-            except Exception:
-                app.log(
-                    "Failed to post process pocket toolpath:\n{}".format(
-                        traceback.format_exc()
-                    )
-                )
+            # Used to catch-and-log here, which meant a Pocket toolpath that
+            # failed to post was silently missing from the exported G-code
+            # while the job still reported success - real, otherwise-silent
+            # data loss for whoever ran the resulting file. Retries first
+            # (see _post_process_with_retry); if every attempt still fails,
+            # that is a genuine failure and has to surface as one.
+            _post_process_with_retry(app, cam, toolpath, postProcessInput)
 
         for toolpath in releventToolpaths["Profile"]:
             tool = _format_tool_label(toolpath)
@@ -107,7 +158,4 @@ def export(name, post_processor_path):
                 adsk.cam.PostOutputUnitOptions.MillimetersOutput,
             )
             postProcessInput.isOpenInEditor = False
-            cam.postProcess(
-                toolpath,
-                postProcessInput,
-            )
+            _post_process_with_retry(app, cam, toolpath, postProcessInput)

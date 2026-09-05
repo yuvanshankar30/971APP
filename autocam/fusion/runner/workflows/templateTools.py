@@ -9,9 +9,36 @@ from typing import Any, Callable, Iterable, Optional, Tuple
 _TEMPLATE_NS = "http://www.hsmworks.com/namespace/hsmworks/document/template"
 _NUM_RE = re.compile(r"[-+]?(?:\d+\.\d+|\d+|\.\d+)(?:[eE][-+]?\d+)?")
 
+# A real "Bore" operation exported directly from Fusion (Setup > 2D > Bore,
+# right-click > Save as Template) - see templates/Bore.f3dhsm-template's own
+# history for why this exists as a separate file instead of guessed inline
+# XML. strategy="bore" was confirmed this way after an earlier guess
+# (strategy="circular") produced a real, wrong toolpath (a zigzag covering
+# almost an entire plate) in live testing - Fusion's internal strategy
+# names for hole-milling operations aren't derivable from the API's public
+# docs alone, they need a real exported example.
+_BORE_TEMPLATE_PATH = os.path.join(
+    os.path.dirname(__file__), "..", "templates", "Bore.f3dhsm-template"
+)
+
 
 def _q(tag: str) -> str:
     return f"{{{_TEMPLATE_NS}}}{tag}"
+
+
+def _load_bore_template() -> Optional[ET.Element]:
+    """Loads templates/Bore.f3dhsm-template's single <template strategy="bore">
+    element fresh each call (the caller mutates/inserts it, so it can't be
+    cached and reused across jobs).
+    """
+    path = os.path.normpath(_BORE_TEMPLATE_PATH)
+    if not os.path.isfile(path):
+        return None
+    try:
+        tree = ET.parse(path)
+    except ET.ParseError:
+        return None
+    return _find_template(tree.getroot(), strategy="bore")
 
 
 def _as_bool_str(value: Any) -> str:
@@ -70,8 +97,8 @@ def _material_aliases(material_name: str) -> list[str]:
         for token in ("al", "alu", "alum", "6061", "aluminum", "aluminium")
     ):
         aliases.extend(["aluminium", "aluminum", "alum", "alu", "6061"])
-    if "poly" in name or "pc" == name:
-        aliases.extend(["polycarb", "polycarbonate", "poly", "pc"])
+    if "poly" in name or "pc" == name or "lexan" in name:
+        aliases.extend(["polycarb", "polycarbonate", "poly", "pc", "lexan"])
     if "mdf" in name:
         aliases.append("mdf")
     if "acrylic" in name:
@@ -189,10 +216,16 @@ def _replace_template(
         root.insert(index, clone)
 
 
-def _set_rest_machining(template_elem: ET.Element) -> None:
+def _set_rest_machining(template_elem: ET.Element, enabled: bool = True) -> None:
+    # The pocket_new template's own baked-in default for useRestMachining is
+    # "true" (confirmed by reading Plates.f3dhsm-template directly) - so
+    # simply not calling this for the first/largest tool clone is not
+    # enough, it leaves the template's own default of true in place. The
+    # first clone needs useRestMachining explicitly forced to false.
+    value = "true" if enabled else "false"
     for parameter in template_elem.findall(_q("parameter")):
         if parameter.get("name") == "useRestMachining":
-            parameter.set("expression", "true")
+            parameter.set("expression", value)
 
 
 def _unit_suffix_from_tool(tool_elem: Optional[ET.Element]) -> str:
@@ -222,6 +255,34 @@ def _set_drill_diameter_range(template_elem: ET.Element, diameter: float) -> Non
     max_value = diameter + 0.003
     min_expr = _format_diameter_expression(min_value, suffix)
     max_expr = _format_diameter_expression(max_value, suffix)
+    for parameter in template_elem.findall(_q("parameter")):
+        name = parameter.get("name")
+        if name == "holeDiameterMinimum":
+            parameter.set("expression", min_expr)
+        elif name == "holeDiameterMaximum":
+            parameter.set("expression", max_expr)
+
+
+# Generous-but-bounded cap on what counts as a "small hole" for the Bore
+# fallback below - covers real FRC mounting/bolt hole sizes (the real
+# exported Bore.f3dhsm-template used 0.188-0.4999in for one example) without
+# reaching into sizes that should actually be a deliberate pocket.
+_MAX_BORE_HOLE_DIAMETER_IN = 0.75
+
+
+def _set_hole_diameter_range(template_elem: ET.Element, min_diameter: float, max_diameter: float) -> None:
+    """Like _set_drill_diameter_range, but an explicit range independent of
+    the assigned tool's own diameter. A drill bit only cuts the one hole
+    size it's ground for, so the old range (matched diameter +/- .003) was
+    right for that. A bored hole (Bore strategy) isn't limited that way -
+    the tool machines the hole's actual recognized size via helical
+    interpolation - so this widens recognition instead of pinning it to one
+    size.
+    """
+    tool_elem = template_elem.find(_q("tool"))
+    suffix = _unit_suffix_from_tool(tool_elem)
+    min_expr = _format_diameter_expression(min_diameter, suffix)
+    max_expr = _format_diameter_expression(max_diameter, suffix)
     for parameter in template_elem.findall(_q("parameter")):
         name = parameter.get("name")
         if name == "holeDiameterMinimum":
@@ -636,6 +697,12 @@ def patch_cam_template_with_tool_libraries(
     replaced = 0
     missing: list[dict] = []
     handled_templates: set[int] = set()
+    # Diagnostic trail for the Bore fallback below - camPlate.py logs this,
+    # since real testing has twice now shown a toolpath result that didn't
+    # match what the code was expected to do, with nothing in the log to
+    # say whether the fallback even ran. Silent success/failure here isn't
+    # good enough after that.
+    bore_fallback: list[dict] = []
 
     drill_candidates = _select_tools(indexes, _is_drill_tool)
     endmill_candidates = _select_tools(indexes, _is_endmill_tool)
@@ -678,6 +745,51 @@ def patch_cam_template_with_tool_libraries(
         if clones:
             _replace_template(root, drill_template, clones)
             replaced += len(clones)
+    elif drill_template and largest_endmill:
+        # No real drill tool in the library - direct instruction from real-
+        # world testing: mill these small holes out with the same router
+        # bit instead. An earlier attempt at this guessed strategy="circular"
+        # for the fallback operation and produced a real, wrong toolpath in
+        # live testing (a zigzag covering almost the entire plate) - Fusion's
+        # internal strategy name for this isn't "circular", and isn't
+        # derivable from the public API docs alone. templates/Bore.f3dhsm-template
+        # is a real operation exported directly from Fusion (Setup > 2D >
+        # Bore > Save as Template) confirming the actual strategy is "bore",
+        # with its own real, working parameter set - used here wholesale
+        # (only the tool and hole-diameter recognition range get replaced)
+        # instead of guessing at XML structure again.
+        bore_template = _load_bore_template()
+        if bore_template is None:
+            bore_fallback.append({"status": "bore_template_not_found", "path": _BORE_TEMPLATE_PATH})
+        else:
+            tool, idx = largest_endmill
+            clone = _clone_template(bore_template)
+            clone.set("description", f"Bore ({_tool_display_name(tool)})")
+            tool_elem = clone.find(_q("tool"))
+            if tool_elem is None:
+                bore_fallback.append({"status": "clone_has_no_tool_element"})
+            else:
+                _apply_tool_to_elem(
+                    clone,
+                    tool_elem,
+                    tool,
+                    tool_library_version=idx.get("version"),
+                    material_name=material_name,
+                )
+                diameter = _tool_diameter(tool)
+                hole_range = None
+                if diameter is not None:
+                    _set_hole_diameter_range(clone, diameter, _MAX_BORE_HOLE_DIAMETER_IN)
+                    hole_range = [diameter, _MAX_BORE_HOLE_DIAMETER_IN]
+                _replace_template(root, drill_template, [clone])
+                replaced += 1
+                handled_templates.add(id(clone))
+                bore_fallback.append({
+                    "status": "applied",
+                    "tool": _tool_display_name(tool),
+                    "tool_diameter": diameter,
+                    "hole_diameter_range_in": hole_range,
+                })
 
     if pocket_template and endmill_candidates:
         sorted_endmills = sorted(
@@ -696,7 +808,22 @@ def patch_cam_template_with_tool_libraries(
                 tool_library_version=idx.get("version"),
                 material_name=material_name,
             )
-            _set_rest_machining(clone)
+            # Rest machining means "only clear what a previous, LARGER tool
+            # pass left behind" - real for every clone after the first
+            # (smaller tools cleaning up corners the big one couldn't
+            # reach), but wrong for index 0 itself: the largest/first tool
+            # has no earlier pass to rest against, so with this set it
+            # computes there is nothing left to clear and produces a
+            # genuinely empty toolpath (Fusion's own wording: "Toolpath is
+            # empty. Try checking the rest machining, collision avoidance,
+            # or machining boundaries and height settings."). That empty
+            # toolpath is what made cam.postProcess() fail with
+            # "Initialization fails" - confirmed directly, not guessed:
+            # a real local run logged isToolpathValid=True on the failing
+            # Pocket 1 operation, with exactly this "Toolpath is empty"
+            # warning attached. Applied unconditionally here since this
+            # code was forked in; never previously exercised end to end.
+            _set_rest_machining(clone, enabled=index > 0)
             clone.set("description", f"Pocket {index + 1} ({_tool_display_name(tool)})")
             clones.append(clone)
             handled_templates.add(id(clone))
@@ -763,5 +890,6 @@ def patch_cam_template_with_tool_libraries(
     return {
         "replaced": replaced,
         "missing": missing,
+        "bore_fallback": bore_fallback,
         "output_path": output_path,
     }

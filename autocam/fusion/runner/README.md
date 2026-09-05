@@ -20,7 +20,7 @@ This is Team 971's fork of FRC Team Valor 6800's open-source [AutoCAM Runner](ht
 
 The add-in polls Spartans Hub's `/api/fusion-runner` endpoint for queued milling jobs, pulls down plate and box-tube jobs, builds Fusion CAM setups from templates, generates toolpaths, exports G-code, and reports completion back to `cam_jobs` in Spartans Hub's own database.
 
-There is no multi-tenant "team"/API-key-scopes concept here — this Runner authenticates with a single shared-secret bearer token that matches Spartans Hub's `FUSION_RUNNER_TOKEN` environment variable (see `src/lib/server/fusion_runner_auth.js`). Until the runtime service account receives scoped access to a dedicated Fusion secret, Cloud Build maps the already-authorized Vision Runner secret into that environment variable; see issue #309.
+There is no multi-tenant "team"/API-key-scopes concept here — this Runner authenticates with a single shared-secret bearer token that matches Spartans Hub's `FUSION_RUNNER_TOKEN` environment variable (see `src/lib/server/fusion_runner_auth.js`), sourced from its own `FUSION_RUNNER_TOKEN` Secret Manager secret (`cloudbuild.yaml`'s `--set-secrets`) — not shared with Vision Scouting's runner token. See issue #312 for the remaining GCP admin setup this needs before it can run against the deployed Hub instead of a local dev server.
 
 An unmodified copy of the original upstream Runner is kept at [`_upstream/`](_upstream/) for reference/diffing — it is never built or loaded by Fusion.
 
@@ -50,7 +50,7 @@ The add-in runs a background polling thread that claims queued `cam_jobs` rows (
 - **Autodesk Fusion 360** (macOS or Windows)
 - Python runtime provided by Fusion 360 (the `adsk` modules only exist inside Fusion)
 - Network access to a **Spartans Hub** deployment
-- The Fusion CAM runner token (currently the deployed Vision Runner token, mapped into Spartans Hub's `FUSION_RUNNER_TOKEN` env var; ask whoever manages the deployment)
+- The Fusion CAM runner token (the deployed `FUSION_RUNNER_TOKEN` value; ask whoever manages the deployment)
 
 > **Before you start:** see the repo root's `valor6800-autocam-runner-setup.md` for the full walkthrough, including the `.overridepath`/`requests`-package workaround Fusion's bundled Python needs (Step 4) — that gotcha is unchanged by this fork.
 
@@ -78,7 +78,7 @@ cp .env.example .env
 
 | Variable | Purpose | Default |
 | --- | --- | --- |
-| `API_KEY` | Bearer token matching Spartans Hub's `FUSION_RUNNER_TOKEN` (currently sourced from `VISION_RUNNER_TOKEN`; issue #309) | _(required)_ |
+| `API_KEY` | Bearer token matching Spartans Hub's `FUSION_RUNNER_TOKEN` | _(required)_ |
 | `BASE_URL` | Spartans Hub deployment base URL | `https://spartanshub.spartanrobotics.org` |
 | `RUNNER_ID` | Stable identifier for this Runner install, sent on every claim | machine hostname |
 | `RUNNER_MACHINE_ID` | The `cam_machines` row (a UUID) this physical machine is - look it up with `select id, name from cam_machines;` in the Supabase SQL editor | _(blank)_ |
@@ -148,4 +148,4 @@ Please review the **[Security Policy](SECURITY.md)** and report vulnerabilities 
 
 ## License
 
-Distributed under the **MIT License**. See [`LICENSE`](LICENSE) for details. Original work Copyright FRC Team Valor 6800 (AutoCAM-FRC); this fork's changes are adaptations for Spartan Robotics 971's own deployment.
+Distributed under the **MIT License**. See [`_upstream/LICENSE`](_upstream/LICENSE) for the original license text (the untouched reference copy - see "How It Works" above). Original work Copyright FRC Team Valor 6800 (AutoCAM-FRC); this fork's changes are adaptations for Spartan Robotics 971's own deployment.

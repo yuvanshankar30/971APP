@@ -7,6 +7,23 @@ import time
 def waitForGeneration(setup, waitforcontour=False):
     app = adsk.core.Application.get()
     while True:
+        # Settle before checking isGenerating, every iteration including
+        # the first. cam.generateAllToolpaths() (DeleteToolpaths, below)
+        # kicks generation off asynchronously and returns immediately -
+        # its own return value, a GenerateToolpathFuture, isn't even
+        # captured at either call site - so calling this function right
+        # after it, the very first isGenerating check used to run before
+        # Fusion had flipped the flag on ANY operation, see "nothing
+        # generating" on an operation that hadn't started, and exit before
+        # generation had actually begun. That is the exact shape of a real
+        # bug this caused: cam.postProcess() failed with "Initialization
+        # fails" on the FIRST toolpath posted (a Pocket) while an identical
+        # call for the very next toolpath (a Profile) succeeded moments
+        # later, once background generation had caught up on its own in the
+        # meantime.
+        adsk.doEvents()
+        app.activeViewport.refresh()
+        time.sleep(0.1)
         if waitforcontour:
             generating = [
                 (op.name, op.isGenerating) for op in setup.operations if op.isGenerating
@@ -19,9 +36,6 @@ def waitForGeneration(setup, waitforcontour=False):
             ]
         if not generating:
             break
-        adsk.doEvents()
-        app.activeViewport.refresh()
-        time.sleep(0.1)
         # app.log(
         #     "waiting for generation...["
         #     + str([op for op in generating])

@@ -1,7 +1,7 @@
 {
 	"autodeskProduct":	"Fusion",
 	"type":	"addin",
-	"author":	"Spartan Robotics 971 (fork of Zachariah Sharma's AutoCAM Runner, Team Valor 6800)",
+	"author":	"Spartan Robotics 971",
 	"description":	{
 		"":	"Fusion CAM Runner - processes milling CAM jobs queued by Spartans Hub's Fusion CAM section."
 	},

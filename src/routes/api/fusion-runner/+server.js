@@ -107,7 +107,7 @@ async function buildJobPayload(supabase, claimedJob) {
 
     const { data: assignments } = await supabase
       .from('fusion_part_category_assignments')
-      .select('quantity, fusion_parts(id, step_file_name)')
+      .select('quantity, fusion_parts(id, step_file_name, fusion_file_name)')
       .eq('plate_id', plateId);
 
     const resolvedAssignments = [];
@@ -121,7 +121,11 @@ async function buildJobPayload(supabase, claimedJob) {
       resolvedAssignments.push({
         part_id: part.id,
         quantity: assignment.quantity ?? 1,
-        step_file_url: signed.signedUrl
+        step_file_url: signed.signedUrl,
+        // Optional user-typed name (see fusion_parts.fusion_file_name) -
+        // camPlate.py uses it for the saved document instead of the
+        // default Plate<id>Job<id> name when present.
+        fusion_file_name: part.fusion_file_name || null
       });
     }
 

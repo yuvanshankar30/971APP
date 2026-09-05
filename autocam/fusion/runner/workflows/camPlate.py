@@ -2,6 +2,7 @@ import adsk.core, adsk.fusion, adsk.cam, traceback
 
 import json
 import os
+import re
 import shutil
 import time
 
@@ -13,6 +14,7 @@ from ..commands.MultiImport import importFiles
 from ..commands.NewNCProgram import export
 from ..commands.DeleteToolpaths import DeleteToolpaths
 from ..commands.AutoArrange import AutoArrange
+from ..commands.TabPlacement import ConfigureTabs
 from ..config import (
     BASE_URL,
     FINAL_PATH,
@@ -134,6 +136,7 @@ def _normalize_assignments(payload: dict) -> list[dict]:
                     "part_id": part_id,
                     "quantity": normalize_quantity(assignment.get("quantity", 1)),
                     "step_file_url": assignment.get("step_file_url"),
+                    "fusion_file_name": assignment.get("fusion_file_name"),
                 }
             )
         return normalized
@@ -281,6 +284,8 @@ def start(data, session):
         )
         if patch_info.get("missing"):
             app.log(f"Template tool matches missing: {patch_info.get('missing')}")
+        if patch_info.get("bore_fallback"):
+            app.log(f"Bore fallback: {patch_info.get('bore_fallback')}")
         template_path = patched_template
 
         # Category thickness (nominal part thickness, for the offset
@@ -301,6 +306,10 @@ def start(data, session):
             thickness,
             template_path=template_path,
         )
+        try:
+            ConfigureTabs()
+        except Exception:
+            app.log("TabPlacement failed:\n{}".format(traceback.format_exc()))
         DeleteToolpaths()
 
         total_machining_time = None
@@ -320,8 +329,20 @@ def start(data, session):
                 app, FUSION_DATA_PROJECT_NAME, FUSION_DROP_FOLDER_PATH
             )
 
-            # Save the document with Plate<plate_id>Job<job_id> format
-            doc_name = f"Plate{plate_id}Job{job_id}"
+            # Prefer a user-typed name (fusion_parts.fusion_file_name, set on
+            # the Parts tab) over the default Plate<plate_id>Job<job_id> -
+            # the latter is real but unreadable in Fusion's Data Panel (both
+            # plate_id and job_id are UUIDs). Uses the first assigned part's
+            # name since a plate's saved document is one file regardless of
+            # how many parts are nested onto it; falls back to the old
+            # scheme when no assignment set one.
+            custom_name = None
+            for assignment in assignments:
+                candidate = assignment.get("fusion_file_name")
+                if candidate:
+                    custom_name = re.sub(r"\s+", "", str(candidate))
+                    break
+            doc_name = custom_name or f"Plate{plate_id}Job{job_id}"
             # Check if file already exists and delete it
             try:
                 existing_file = autocam_drop_folder.dataFiles.itemByName(doc_name)

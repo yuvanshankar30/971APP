@@ -67,7 +67,7 @@ export async function fetchParts() {
  * (public.parts) - see the migration this shipped with for why it's
  * nullable. Not every Fusion CAM part is for an existing request.
  */
-export async function createPart({ name, epic, ticket, quantity, categoryId, stepFile, createdBy, partId }) {
+export async function createPart({ name, epic, ticket, quantity, categoryId, stepFile, createdBy, partId, fusionFileName }) {
   let stepFileName = null;
   if (stepFile) {
     stepFileName = `${Date.now()}_${(name || 'part').replace(/[^a-zA-Z0-9]/g, '_')}_fusion.${(stepFile.name.split('.').pop() || 'step')}`;
@@ -76,6 +76,11 @@ export async function createPart({ name, epic, ticket, quantity, categoryId, ste
       .upload(stepFileName, stepFile, { cacheControl: '3600', upsert: false });
     if (uploadError) throw new Error(uploadError.message || 'Failed to upload STEP file');
   }
+
+  // No spaces - this becomes the Fusion document name (camPlate.py) and
+  // feeds the exported G-code path, both of which treat it as one token.
+  // Matches the DB check constraint (fusion_parts_fusion_file_name_no_spaces).
+  const cleanedFusionFileName = fusionFileName ? fusionFileName.trim().replace(/\s+/g, '') : null;
 
   const { data, error } = await supabase
     .from('fusion_parts')
@@ -88,7 +93,8 @@ export async function createPart({ name, epic, ticket, quantity, categoryId, ste
       category_id: categoryId,
       step_file_name: stepFileName,
       created_by: createdBy || null,
-      part_id: partId || null
+      part_id: partId || null,
+      fusion_file_name: cleanedFusionFileName || null
     })
     .select('*, fusion_part_categories(thickness, cam_materials(name, category)), parts(id, name, project_id, workflow)')
     .single();

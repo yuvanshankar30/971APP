@@ -18,7 +18,7 @@
   let manufacturingParts = [];
   let loading = true;
   let showAddForm = false;
-  let newPart = { name: '', epic: '', ticket: '', quantity: 1, categoryId: '', manufacturingPartId: '' };
+  let newPart = { name: '', epic: '', ticket: '', quantity: 1, categoryId: '', manufacturingPartId: '', fusionFileName: '' };
   let stepFile = null;
   let submitting = false;
 
@@ -57,6 +57,13 @@
     stepFile = event.target.files?.[0] || null;
   }
 
+  // Strips spaces as you type rather than rejecting on submit - this
+  // becomes the Fusion document name (see camPlate.py), which treats it as
+  // one filename token. Matches the DB check constraint.
+  function handleFusionFileNameInput(event) {
+    newPart.fusionFileName = event.target.value.replace(/\s+/g, '');
+  }
+
   async function handleAdd() {
     if (!newPart.name || !newPart.categoryId || !newPart.quantity) {
       toastActions.show('Name, category, and quantity are required');
@@ -72,9 +79,10 @@
         categoryId: newPart.categoryId,
         stepFile,
         createdBy: user?.id,
-        partId: newPart.manufacturingPartId || null
+        partId: newPart.manufacturingPartId || null,
+        fusionFileName: newPart.fusionFileName || null
       });
-      newPart = { name: '', epic: '', ticket: '', quantity: 1, categoryId: '', manufacturingPartId: '' };
+      newPart = { name: '', epic: '', ticket: '', quantity: 1, categoryId: '', manufacturingPartId: '', fusionFileName: '' };
       stepFile = null;
       showAddForm = false;
       await load(false);
@@ -151,6 +159,19 @@
       </div>
       <div class="form-row">
         <div class="form-group">
+          <label class="form-label" for="part-fusion-file-name">Fusion file name (optional, no spaces)</label>
+          <input
+            id="part-fusion-file-name"
+            class="form-input"
+            value={newPart.fusionFileName}
+            on:input={handleFusionFileNameInput}
+            placeholder="e.g. GearboxSidePlate"
+          />
+          <p class="cam-form-hint">Used as the saved Fusion document name instead of the default Plate/Job ID name.</p>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
           <label class="form-label" for="part-manufacturing-link">Manufacturing request (optional)</label>
           <select id="part-manufacturing-link" class="form-select" bind:value={newPart.manufacturingPartId}>
             <option value="">Not linked to a request</option>
@@ -180,6 +201,7 @@
             {#if part.epic} - {part.epic}{/if}
             {#if part.ticket} - {part.ticket}{/if}
             {#if part.parts} - linked to <strong>{part.parts.name}</strong>{/if}
+            {#if part.fusion_file_name} - Fusion file name: <strong>{part.fusion_file_name}</strong>{/if}
           </p>
           <div class="cam-list-actions">
             {#if canManage}
