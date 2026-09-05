@@ -27,12 +27,12 @@ const savedNav = () => [
 describe('defaultHeaderTabs', () => {
   it('puts Manufacturing and Competition before CAD and Purchasing', () => {
     const order = defaultHeaderTabs().map((tab) => tab.key || tab.label);
-    expect(order).toEqual(['Manufacturing', 'Competition', 'CAD', 'purchasing', 'docs']);
+    expect(order).toEqual(['Manufacturing', 'Competition', 'CAD', 'purchasing', 'Planning', 'docs']);
   });
 
   it('matches the shared header order after the separately rendered Home tab', () => {
     const order = ['home', ...defaultHeaderTabs().map((tab) => tab.key || tab.label), 'admin'];
-    expect(order).toEqual(['home', 'Manufacturing', 'Competition', 'CAD', 'purchasing', 'docs', 'admin']);
+    expect(order).toEqual(['home', 'Manufacturing', 'Competition', 'CAD', 'purchasing', 'Planning', 'docs', 'admin']);
   });
 
   it('includes Power Rankings and Scouting Admin in the Competition folder', () => {
@@ -230,5 +230,16 @@ describe('ensurePowerRankingsTab', () => {
     expect(competitionChildren(ensurePowerRankingsTab(oddFolder, enabled))).toEqual([
       { key: 'powerrankings', label: 'Power Rankings' }
     ]);
+  });
+});
+import { describe, expect, it } from 'vitest';
+import { mergeDefaultHeaderTabs } from './defaultTabs.js';
+
+describe('mergeDefaultHeaderTabs', () => {
+  it('keeps a saved layout while restoring missing default children', () => {
+    const tabs = mergeDefaultHeaderTabs([{ type: 'folder', label: 'Manufacturing', children: [{ key: 'manufacture', label: 'Manufacture' }] }]);
+    const manufacturing = tabs.find((item) => item.label === 'Manufacturing');
+    expect(manufacturing.children.some((item) => item.key === 'autocam')).toBe(true);
+    expect(tabs.some((item) => item.label === 'Planning')).toBe(true);
   });
 });

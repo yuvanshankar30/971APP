@@ -15,8 +15,11 @@
     return hasPermission(user, perm);
   }
   let loading = true;
-  // Keep spinner while auth is ready but profile hasn't loaded yet
-  $: isLoading = loading || (authUser !== null && user === null);
+  // Do not leave a signed-in member behind an infinite spinner when their
+  // profile request fails or is delayed. The auth store keeps retrying the
+  // profile load; this only releases the page shell after a short grace period.
+  let profileWaitExpired = false;
+  $: isLoading = loading || (authUser !== null && user === null && !profileWaitExpired);
   let scoutingLoaded = false;
 
   // --- Home dashboard section customization (drag to reorder, delete, restore) ---
@@ -217,8 +220,23 @@
       loading = !value;
     });
     const uninit = initAuth();
-    return () => { unsub?.(); unsubAuthUser?.(); unsubReady?.(); uninit?.(); };
+    const profileWaitTimer = setTimeout(() => { profileWaitExpired = true; }, 5000);
+    return () => { clearTimeout(profileWaitTimer); unsub?.(); unsubAuthUser?.(); unsubReady?.(); uninit?.(); };
   });
+
+  $: if (user) profileWaitExpired = false;
+  // A profile outage must not turn a valid authenticated session into an
+  // endless loading screen. This minimal shell is replaced as soon as the
+  // background profile retry succeeds; it intentionally carries no elevated
+  // permissions.
+  $: if (profileWaitExpired && authUser && !user) {
+    user = {
+      id: authUser.id,
+      email: authUser.email || '',
+      full_name: authUser.user_metadata?.full_name || authUser.user_metadata?.name || '',
+      permissions: []
+    };
+  }
 
   // The scouting landing page only needs the signed-in scout's own queue.
   $: if (user && !scoutingLoaded) {
