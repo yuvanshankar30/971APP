@@ -17,3 +17,13 @@ export function groupFusionParts(parts, categories) {
   }
   return [...groups.values()];
 }
+
+export function platePartQuantity(plate, part) {
+  return Number(plate.fusion_part_category_assignments?.find((a) => String(a.fusion_parts?.id) === String(part.id))?.quantity || 0);
+}
+
+export function eligiblePlateParts(plate, parts) {
+  return parts.filter((part) => part.category_id != null && plate.category_id != null
+    && String(part.category_id) === String(plate.category_id)
+    && (Number(part.quantity) > 0 || platePartQuantity(plate, part) > 0));
+}

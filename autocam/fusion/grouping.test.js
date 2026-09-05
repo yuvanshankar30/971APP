@@ -46,3 +46,14 @@ describe('Fusion stock planning groups', () => {
     expect(groupFusionParts([], categories)).toEqual([]);
   });
 });
+
+describe('editing existing plate assignments', () => {
+  it('keeps fully assigned parts editable on their plate, but excludes them elsewhere', async () => {
+    const { eligiblePlateParts } = await import('./grouping.js');
+    const part = { id: 'a', category_id: 'stock', quantity: 0 };
+    const plate = { category_id: 'stock', fusion_part_category_assignments: [{ quantity: 5, fusion_parts: { id: 'a' } }] };
+    expect(eligiblePlateParts(plate, [part])).toEqual([part]);
+    expect(eligiblePlateParts({ category_id: 'stock' }, [part])).toEqual([]);
+    expect(eligiblePlateParts({ ...plate, category_id: 'other' }, [part])).toEqual([]);
+  });
+});

@@ -175,13 +175,15 @@
 {#if loading}
   <p>Loading box tubes...</p>
 {:else}
+  {#if canManage}
   <div class="tab-actions">
     <button class="btn btn-primary" on:click={() => (showAddForm = !showAddForm)}>
       <Plus size={16} /> Add Box Tube
     </button>
   </div>
 
-  {#if showAddForm}
+  {/if}
+  {#if showAddForm && canManage}
     <div class="card">
       <h3>New Box Tube</h3>
       <div class="form-row">

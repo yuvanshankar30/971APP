@@ -418,7 +418,10 @@ own docs are all together in one place instead of scattered across
   the material and true-thickness combinations required before Parts and
   Plates can be nested. Parts can be grouped by stock category with remaining
   quantity totals and a shortcut to matching plates; this is a planning view,
-  with physical arrangement still performed by Fusion. See
+  with physical arrangement still performed by Fusion. Assignment inventory is
+  updated transactionally in PostgreSQL, queued plates preserve immutable input
+  snapshots, and the Runner rejects incomplete groups before CAM. Rollout requires
+  `migrations/20260906_fusion_grouping_integrity.sql` and the updated Runner. See
   `autocam/docs/fusion-grouping-review.md` for the draft scope and review findings.
   It uses Supabase Auth + `canManageCamProfiles` for
   humans, same as the rest of this

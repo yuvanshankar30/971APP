@@ -1,4 +1,5 @@
 <script>
+  import { eligiblePlateParts, platePartQuantity } from '$autocam/fusion/grouping.js';
   import { requestConfirmation } from '$lib/confirmation.js';
   import { onMount } from 'svelte';
   import { supabase } from '$lib/supabase.js';
@@ -27,6 +28,7 @@
   // every job regardless of which one it was actually meant for - a human
   // has to choose explicitly.
   let plateMachineSelections = {};
+  let queueing = {};
   let plateToolSelections = {};
   let platePartSelections = {};
   let platePartQuantities = {};
@@ -120,6 +122,7 @@
       // real report: even with load()'s loading-flash fix, a full re-fetch
       // still visibly "reloaded" the list on every delete.
       plates = plates.filter((p) => p.id !== plate.id);
+      parts = await fetchParts();
     } catch (e) {
       toastActions.show(e.message || 'Failed to delete plate');
     }
@@ -155,6 +158,7 @@
   }
 
   async function handleQueue(plate) {
+    if (queueing[plate.id]) return;
     const machineId = plateMachineSelections[plate.id];
     if (!machineId) {
       toastActions.show('Choose a router before queueing');
@@ -169,6 +173,7 @@
       toastActions.show('Choose a tool before queueing');
       return;
     }
+    queueing = { ...queueing, [plate.id]: true };
     try {
       await queueFusionJob({
         fusionJobKind: 'plate:cam',
@@ -187,11 +192,13 @@
       toastActions.show('Queued for the Fusion Runner');
     } catch (e) {
       toastActions.show(e.message || 'Failed to queue job');
+    } finally {
+      queueing = { ...queueing, [plate.id]: false };
     }
   }
 
   function eligibleParts(plate) {
-    return parts.filter((part) => String(part.category_id) === String(plate.category_id) && Number(part.quantity) > 0);
+    return eligiblePlateParts(plate, parts);
   }
 
   function selectedPart(plate) {
@@ -199,8 +206,7 @@
   }
 
   function maximumNestQuantity(plate, part) {
-    const existing = plate.fusion_part_category_assignments?.find((assignment) => String(assignment.fusion_parts?.id) === String(part.id));
-    return Number(part.quantity) + Number(existing?.quantity || 0);
+    return Number(part.quantity) + platePartQuantity(plate, part);
   }
 
   async function handleNestPart(plate) {
@@ -210,7 +216,7 @@
       toastActions.show('Choose a part to nest');
       return;
     }
-    if (String(part.category_id) !== String(plate.category_id) || Number(part.quantity) <= 0) {
+    if (String(part.category_id) !== String(plate.category_id) || maximumNestQuantity(plate, part) <= 0) {
       toastActions.show('Choose an available part with the same material and thickness');
       return;
     }
@@ -351,11 +357,11 @@
             {@const chosenPart = selectedPart(plate)}
             <div class="form-row">
               <div class="form-group">
-                <label class="form-label" for={`plate-nest-part-${plate.id}`}>Nest a part</label>
+                <label class="form-label" for={`plate-nest-part-${plate.id}`}>Set nested part quantity</label>
                 <select id={`plate-nest-part-${plate.id}`} class="form-select" bind:value={platePartSelections[plate.id]}>
                   <option value="">{availableParts.length ? 'Select a matching part...' : 'No matching parts available'}</option>
                   {#each availableParts as part}
-                    <option value={part.id}>{part.name} ({part.quantity} available)</option>
+                    <option value={part.id}>{part.name} ({part.quantity} available, {platePartQuantity(plate, part)} on this plate)</option>
                   {/each}
                 </select>
               </div>
@@ -365,7 +371,7 @@
               </div>
               <div class="form-group">
                 <span class="form-label" aria-hidden="true">&nbsp;</span>
-                <button class="btn btn-secondary btn-sm" type="button" disabled={!chosenPart} on:click={() => handleNestPart(plate)}><Plus size={14} /> Add</button>
+                <button class="btn btn-secondary btn-sm" type="button" disabled={!chosenPart} on:click={() => handleNestPart(plate)}><Plus size={14} /> Set quantity</button>
               </div>
             </div>
           {/if}
@@ -382,7 +388,7 @@
                 <option value={t.id}>{toolLabel(t)}</option>
               {/each}
             </select>
-            <button class="btn btn-secondary btn-sm" disabled={!plateMachineSelections[plate.id] || !plateToolSelections[plate.id]} on:click={() => handleQueue(plate)}>
+            <button class="btn btn-secondary btn-sm" disabled={queueing[plate.id] || !plate.fusion_part_category_assignments?.length || !plateMachineSelections[plate.id] || !plateToolSelections[plate.id]} on:click={() => handleQueue(plate)}>
               <Send size={14} /> Queue CAM Job
             </button>
             {#if canManage}

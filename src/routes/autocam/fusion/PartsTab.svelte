@@ -153,13 +153,15 @@
 {#if loading}
   <p>Loading parts...</p>
 {:else}
+  {#if canManage}
   <div class="tab-actions">
     <button class="btn btn-primary" on:click={() => (showAddForm = !showAddForm)}>
       <Plus size={16} /> Add Part
     </button>
   </div>
 
-  {#if showAddForm}
+  {/if}
+  {#if showAddForm && canManage}
     <div class="card">
       <h3>New Part</h3>
       <p class="cam-form-hint">A named quantity of stock waiting to be nested onto a plate - not yet assigned to one.</p>

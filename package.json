@@ -17,6 +17,7 @@
 		"prepare": "svelte-kit sync || echo ''"
 	},
 	"devDependencies": {
+		"@electric-sql/pglite": "^0.5.8",
 		"@sveltejs/adapter-node": "^5.5.7",
 		"@sveltejs/kit": "^2.16.0",
 		"@sveltejs/vite-plugin-svelte": "^5.0.0",

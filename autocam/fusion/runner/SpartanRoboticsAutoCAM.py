@@ -70,32 +70,14 @@ def _process_job(job: dict, session: requests.Session) -> None:
     kind = params.get("fusionJobKind")
     _app.log(str(job))
 
-    # /api/fusion-runner's action=complete only accepts a CAS from
-    # status='processing' (see that file's comments) - claim() only ever
-    # sets 'claimed', so this transition has to happen somewhere before a
-    # workflow's start() gets to its completion POST, or that POST always
-    # 409s. Best-effort: if this fails, the downstream complete call's 409
-    # naturally cascades into ensure_completion_response() -> send_job_error()
-    # with the real status text, so a failure here still surfaces instead of
-    # hanging silently - no need to abort the job just because this one call
-    # didn't land.
-    try:
-        session.post(
-            f"{BASE_URL}/api/fusion-runner",
-            params={"action": "processing"},
-            json={"jobId": job.get("id")},
-            timeout=30,
-        )
-    except Exception:
-        _queue_log(f"Failed to mark job as processing:\n{traceback.format_exc()}")
-
-    if kind in ("plate:cam", "plate:arrange"):
-        # Both plate workflows import from payload["assignments"] before
-        # doing anything else - downloadFiles() has to run first, or
-        # importFiles() finds nothing at INITIAL_PATH/{part_id}.step.
-        # box_tube doesn't go through this path: camTube.py downloads its
-        # own single STEP file directly from payload["step_file_url"].
-        setupTemp.downloadFiles(TEMP_PATH, job, session)
+    # A cancelled or rejected claim must not proceed to CAM work.
+    response = session.post(
+        f"{BASE_URL}/api/fusion-runner",
+        params={"action": "processing"},
+        json={"jobId": job.get("id")},
+        timeout=30,
+    )
+    response.raise_for_status()
 
     if kind == "plate:cam":
         camPlate.start(job, session)

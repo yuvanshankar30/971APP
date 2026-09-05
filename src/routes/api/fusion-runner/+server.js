@@ -15,6 +15,7 @@
 // Only cam_jobs rows with operation_type='milling' are ever visible here -
 // turning/routing jobs stay exclusively on cam-generate's synchronous path,
 // completely unaffected by this file.
+import { buildJobPayload } from '$autocam/fusion/jobPayload.js';
 import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { createClient } from '@supabase/supabase-js';
@@ -73,102 +74,6 @@ async function claimNextJob(supabase, runnerId, machineId) {
   return null; // every candidate got claimed by someone else between the select and our CAS attempts
 }
 
-// Assembles the flat `payload` shape autocam/fusion/runner/workflows/*.py
-// already parses (data["payload"][...]) - camPlate.py/camTube.py/
-// importPlate.py were written expecting Valor's original API responses
-// nested this way; matching that shape here means the Python side needed
-// only small, targeted edits instead of a full rewrite. Resolves
-// everything server-side (plate/box-tube dimensions, part STEP file signed
-// URLs) so the Runner never needs a second round-trip to a lookup endpoint
-// that doesn't exist on this app - see autocam/fusion/README.md and the
-// plan this was built from for why those endpoints (`/api/plates/{id}`,
-// `/api/boxTubes/{id}`, `/api/parts/{id}`) were never ported.
-//
-// Returns null (not a thrown error) on any resolution failure - a bad or
-// incomplete plate/box-tube shouldn't break claiming for other jobs. The
-// Runner already treats a missing/empty payload as a normal (if
-// unactionable) job and reports a clear error back via send_job_error()
-// rather than crashing silently.
-async function buildJobPayload(supabase, claimedJob) {
-  const params = claimedJob.params || {};
-  const machineId = claimedJob.machine_id || null;
-  const toolId = claimedJob.tool_id || null;
-
-  if (params.fusionJobKind === 'plate:cam' || params.fusionJobKind === 'plate:arrange') {
-    const plateId = params.plateId;
-    if (!plateId) return null;
-
-    const { data: plate, error: plateError } = await supabase
-      .from('fusion_plates')
-      .select('*, fusion_part_categories(thickness, cam_materials(name))')
-      .eq('id', plateId)
-      .single();
-    if (plateError || !plate) return null;
-
-    const { data: assignments } = await supabase
-      .from('fusion_part_category_assignments')
-      .select('quantity, fusion_parts(id, step_file_name, fusion_file_name)')
-      .eq('plate_id', plateId);
-
-    const resolvedAssignments = [];
-    for (const assignment of assignments || []) {
-      const part = assignment.fusion_parts;
-      if (!part?.step_file_name) continue;
-      const { data: signed } = await supabase.storage
-        .from('manufacturing-files')
-        .createSignedUrl(part.step_file_name, 300);
-      if (!signed?.signedUrl) continue;
-      resolvedAssignments.push({
-        part_id: part.id,
-        quantity: assignment.quantity ?? 1,
-        step_file_url: signed.signedUrl,
-        // Optional user-typed name (see fusion_parts.fusion_file_name) -
-        // camPlate.py uses it for the saved document instead of the
-        // default Plate<id>Job<id> name when present.
-        fusion_file_name: part.fusion_file_name || null
-      });
-    }
-
-    return {
-      plate_id: plateId,
-      machine_id: machineId,
-      tool_id: toolId,
-      length: plate.length,
-      width: plate.width,
-      true_depth: plate.true_depth,
-      thickness: plate.fusion_part_categories?.thickness ?? null,
-      material: plate.fusion_part_categories?.cam_materials?.name ?? null,
-      assignments: resolvedAssignments
-    };
-  }
-
-  if (params.fusionJobKind === 'box_tube') {
-    const boxTubeId = params.boxTubeId;
-    if (!boxTubeId) return null;
-
-    const { data: boxTube, error: boxTubeError } = await supabase
-      .from('fusion_box_tubes')
-      .select('*')
-      .eq('id', boxTubeId)
-      .single();
-    if (boxTubeError || !boxTube?.step_file_name) return null;
-
-    const { data: signed } = await supabase.storage
-      .from('manufacturing-files')
-      .createSignedUrl(boxTube.step_file_name, 300);
-    if (!signed?.signedUrl) return null;
-
-    return {
-      box_tube_id: boxTubeId,
-      machine_id: machineId,
-      tool_id: toolId,
-      step_file_url: signed.signedUrl
-    };
-  }
-
-  return null;
-}
-
 export async function POST({ request, url }) {
   if (!isAuthorizedFusionRunnerRequest({ url, headers: request.headers, env })) {
     return json({ error: 'Unauthorized' }, { status: 401 });
@@ -192,11 +97,23 @@ export async function POST({ request, url }) {
       // as a real UUID shape - unlike .eq(), .or() takes a raw string, so an
       // unvalidated value here would be a filter-injection risk.
       const rawMachineId = body?.machineId;
+      if (rawMachineId != null && rawMachineId !== '' && (typeof rawMachineId !== 'string' || !UUID_RE.test(rawMachineId))) {
+        return json({ error: 'machineId must be a UUID' }, { status: 400 });
+      }
       const machineId = typeof rawMachineId === 'string' && UUID_RE.test(rawMachineId) ? rawMachineId : null;
       const job = await claimNextJob(supabase, runnerId, machineId);
       if (!job) return json({ job: null });
-      const payload = await buildJobPayload(supabase, job);
-      return json({ job: { ...job, payload } });
+      try {
+        const payload = await buildJobPayload(supabase, job);
+        return json({ job: { ...job, payload } });
+      } catch (error) {
+        const message = error.message || 'Could not resolve Fusion job inputs';
+        const { error: failError } = await supabase.from('cam_jobs')
+          .update({ status: 'failed', errors: [message], progress_message: message })
+          .eq('id', job.id).eq('status', 'claimed');
+        if (failError) throw failError;
+        return json({ job: null, error: message });
+      }
     }
 
     const jobId = body?.jobId;
@@ -207,6 +124,7 @@ export async function POST({ request, url }) {
         .from('cam_jobs')
         .update({ status: 'processing', progress: body?.progress ?? 10, progress_message: body?.progressMessage || 'Fusion Runner processing...' })
         .eq('id', jobId)
+        .eq('operation_type', 'milling')
         .eq('status', 'claimed') // CAS: only the runner that actually claimed it can move it to processing
         .select('id');
       if (error) throw new Error(error.message);
@@ -226,6 +144,7 @@ export async function POST({ request, url }) {
           progress_message: 'Done'
         })
         .eq('id', jobId)
+        .eq('operation_type', 'milling')
         .eq('status', 'processing') // CAS: same guarantee cam-generate's own completion write has - a cancel landing mid-flight can never get silently clobbered back to "completed"
         .select('id');
       if (error) throw new Error(error.message);
@@ -235,11 +154,13 @@ export async function POST({ request, url }) {
 
     if (action === 'fail') {
       const message = body?.error || 'Fusion Runner reported a failure';
-      await supabase.from('cam_jobs').update({
+      const { data, error } = await supabase.from('cam_jobs').update({
         status: 'failed',
         errors: [message],
         progress_message: message
-      }).eq('id', jobId); // best-effort, unconditional - a job must always be able to reach a terminal state, same guarantee markFailed() has in cam-generate
+      }).eq('id', jobId).eq('operation_type', 'milling').in('status', ['claimed', 'processing']).select('id');
+      if (error) throw error;
+      if (!data?.length) return json({ error: 'Job is not an active Fusion job' }, { status: 409 });
       return json({ success: true });
     }
 

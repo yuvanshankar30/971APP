@@ -1,10 +1,49 @@
 # Fusion grouping draft and AutoCAM review
 
-Reviewed repository baseline: `dc36c55` (2026-09-05). This is a targeted
-review of AutoCAM grouping and the Fusion plate-to-Runner path, not an audit
-of every toolpath strategy. Findings below are in the existing baseline;
-the planning-view draft does not fix them. No production database changes
-or physical machining tests were performed.
+Original review baseline: `dc36c55` (2026-09-05). This targeted review covers
+stock grouping, assignment inventory, plate queueing, and Runner arrangement.
+
+## Implemented corrections
+
+- Database assignment triggers apply the final upsert delta once and restore
+  inventory on removal or cascading plate deletion. A failed inventory write
+  rolls the entire assignment back. Direct remaining-quantity edits are rejected.
+- Assignment stock categories and quantities are validated in PostgreSQL.
+  Fully assigned parts remain editable on their current plate; “Set quantity”
+  explicitly means the total on that plate. Deletion refreshes available parts.
+- Catalog write policies enforce the same manager roles as the UI and require
+  approval. Parts and Box Tubes creation controls now follow that policy too.
+- Plate queue inserts validate machine/tool compatibility and every STEP input,
+  capture immutable stock/assignment snapshots, and derive the real material ID.
+  Claim-time signing fails the whole job if any file cannot be resolved.
+- Runner CAM requires every requested occurrence to appear in one result
+  envelope, uses cutter-aware spacing, and rejects unsupported multi-body or
+  assembly imports. It checks the processing response before starting CAM.
+- Arrangement-only jobs download signed inputs, preserve UUID part IDs, and
+  count repeated copies when reporting parts that did not fit.
+- Runner status writes are scoped to milling jobs; late failure reports cannot
+  overwrite a completed/cancelled job. Invalid explicit machine IDs are rejected.
+
+## Rollout and validation limits
+
+Apply `migrations/20260906_fusion_grouping_integrity.sql` with the updated client
+and Runner. Reload old browser tabs: inventory must no longer be updated by a
+second browser request. The migration intentionally refuses inconsistent
+historical inventory; reconcile affected rows against actual requests first.
+No production data has been rewritten. Old plate jobs without snapshots must
+be cancelled/requeued; claim reports a clear failure instead of using mutable
+inputs. This change has not been deployed or merged.
+
+Tests execute the migration with PostgreSQL via PGlite, test snapshot resolution
+and grouping logic, and exercise Python arrangement checks with API-shaped
+fixtures. PGlite has one connection: independent concurrent PostgreSQL sessions
+and a real Fusion multi-part run remain release checks. Toolpath correctness,
+workholding, postprocessor suitability, and actual cutting are not certified by
+these tests. The grouping guard uses Autodesk's documented
+[result envelopes](https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/files/ArrangeResultEnvelopes.htm)
+and [occurrence results](https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/files/ArrangeOccurrenceResults.htm).
+Inventory runs in AFTER triggers so an upsert cannot apply both preliminary
+INSERT and UPDATE effects; see [PostgreSQL trigger behavior](https://www.postgresql.org/docs/current/trigger-definition.html).
 
 ## Draft behavior
 
@@ -25,7 +64,7 @@ per-plate nesting and quantity bookkeeping;
 router grouping pipeline. This draft uses Fusion's stock categories rather
 than extending the router G-code concatenation path into Fusion.
 
-## Review findings
+## Original review findings (addressed above)
 
 ### P1: Assignment and inventory writes are not atomic
 

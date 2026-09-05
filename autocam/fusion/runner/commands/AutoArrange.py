@@ -3,7 +3,7 @@ import adsk.core
 import adsk.fusion
 
 
-def AutoArrange(length, width) -> adsk.fusion.ArrangeFeature:
+def AutoArrange(length, width, object_spacing=0.26) -> adsk.fusion.ArrangeFeature:
     app = adsk.core.Application.get()
     ui = app.userInterface
     des: adsk.fusion.Design = app.activeProduct
@@ -57,7 +57,7 @@ def AutoArrange(length, width) -> adsk.fusion.ArrangeFeature:
     # real") even though quantity's own docstring calls a string form valid -
     # a real ValueInput is what this Fusion version actually accepts.
     planeEnv.quantity = adsk.core.ValueInput.createByReal(-1.0)
-    planeEnv.objectSpacing = adsk.core.ValueInput.createByString(".26 in")
+    planeEnv.objectSpacing = adsk.core.ValueInput.createByString(f"{object_spacing} in")
     # envelopeSpacing is not set here on purpose, not left out by oversight.
     # Per Arrange2DPlaneEnvelopeInput.envelopeSpacing's own docstring, it
     # "defines the spacing between envelopes when there is more than one" -

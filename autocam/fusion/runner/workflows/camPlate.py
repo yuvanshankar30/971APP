@@ -1,3 +1,4 @@
+from ..commands.GroupingValidation import require_complete_arrangement, plate_spacing, require_positive_quantity
 import adsk.core, adsk.fusion, adsk.cam, traceback
 
 import json
@@ -218,6 +219,11 @@ def start(data, session):
         clear_design_nuke(design)
         time.sleep(1.0)
 
+        raw_assignments = payload.get('assignments')
+        if not isinstance(raw_assignments, list):
+            raise ValueError('Plate job requires an assignment list')
+        for assignment in raw_assignments:
+            require_positive_quantity(assignment.get('quantity'))
         assignments = _normalize_assignments(payload)
         if not assignments:
             raise ValueError("Plate job has no nested parts with STEP files")
@@ -244,7 +250,10 @@ def start(data, session):
         width = float(_get(payload, "width", default=48))
         true_depth = float(_get(payload, "true_depth", "trueDepth", default=0.125))
 
-        AutoArrange(length, width)
+        occurrences = list(design.rootComponent.allOccurrences)
+        spacing = plate_spacing((data.get('cam_tools') or {}).get('diameter'))
+        arrange = AutoArrange(length, width, object_spacing=spacing)
+        require_complete_arrangement(arrange, occurrences)
 
         # Extract tool_items (specific tool GUIDs from within libraries)
         tool_items_raw = _get(payload, "tool_items")
