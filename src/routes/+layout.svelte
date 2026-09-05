@@ -6,7 +6,7 @@
   import { supabase } from '$lib/supabase.js';
   import { fetchActiveScoutingEventKey } from '$lib/scoutingEvent.js';
   import navConfig from '$lib/navigation.json';
-  import { defaultHeaderTabs, ensurePowerRankingsTab, ensureScoutingAdminTab, ensureStrategyTab, ensureGcodeConverterTab, ensureFilesTab } from '$lib/defaultTabs.js';
+  import { defaultHeaderTabs, ensurePowerRankingsTab, ensureScoutingAdminTab, ensureStrategyTab, ensureGcodeConverterTab, ensureFilesTab, ensureFusionAutocamTab } from '$lib/defaultTabs.js';
   import { Move3d, Hammer, Wrench, Receipt, Home, Briefcase, Coins, Package, User, ChevronDown, Menu, X, Camera, CalendarDays, Cpu, FileText, Trophy, Eye, ClipboardCheck, ListChecks, Target, Folder } from 'lucide-svelte';
   import { goto, afterNavigate } from '$app/navigation';
   import { page } from '$app/stores';
@@ -263,6 +263,7 @@
     if (compact.startsWith('task')) return 'tasks';
     if (compact === 'scoutingadmin' || compact === 'scoutadmin') return 'scouting-admin';
     if (compact === 'cotsstocking') return 'cots-stocking';
+    if (compact === 'fusionautocam' || compact === 'fusion') return 'fusion-autocam';
     if (compact.startsWith('autocam')) return 'autocam';
     if (compact.startsWith('gcodeconverter')) return 'gcode-converter';
     return compact;
@@ -288,6 +289,7 @@
     'scouting-admin': '/scouting-admin',
     'cots-stocking': '/cots-stocking',
     autocam: '/autocam',
+    'fusion-autocam': '/autocam/fusion',
     'gcode-converter': '/manufacture/gcode-converter',
     files: '/manufacture/files',
     home: '/',
@@ -315,6 +317,7 @@
     'scouting-admin': Briefcase,
     'cots-stocking': Package,
     autocam: Cpu,
+    'fusion-autocam': Cpu,
     'gcode-converter': FileText,
     files: Folder,
     home: Home,
@@ -342,6 +345,7 @@
     'scouting-admin': 'Scouting Admin',
     'cots-stocking': 'COTS Stocking',
     autocam: 'AutoCAM',
+    'fusion-autocam': 'Fusion AutoCAM',
     'gcode-converter': 'G-code Converter',
     files: 'Files',
     admin: 'Admin'
@@ -466,7 +470,7 @@
   // Power Rankings is appended for anyone whose saved header_tabs predates it,
   // so a customized nav still surfaces the feature. Purely additive - see
   // ensurePowerRankingsTab().
-  $: baseNavTabs = addAdminTabIfAllowed(ensureScoutingAdminTab(ensureStrategyTab(ensureFilesTab(ensureGcodeConverterTab(ensurePowerRankingsTab(effectiveTabs, navConfig), navConfig), navConfig))), canViewAdmin);
+  $: baseNavTabs = addAdminTabIfAllowed(ensureScoutingAdminTab(ensureStrategyTab(ensureFusionAutocamTab(ensureFilesTab(ensureGcodeConverterTab(ensurePowerRankingsTab(effectiveTabs, navConfig), navConfig), navConfig), navConfig))), canViewAdmin);
   $: navItems = isApproved ? buildNavItems(baseNavTabs) : [];
 
   // Drag-to-reorder for the desktop nav's top-level tabs/folders. Home is

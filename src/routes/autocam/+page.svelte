@@ -1583,6 +1583,10 @@
         <button type="button" class="modal-close-button" aria-label="Close" on:click={closeNewJobModal}><X size={18} /></button>
       </div>
       <div class="modal-body">
+        <p class="cam-form-hint fusion-autocam-hint">
+          Milling a real Fusion 360 part through a physical CNC? This flow is for the turning/routing/tube-stock pipeline below - Fusion CAM is its own section.
+          <a href="/autocam/fusion">Go to Fusion AutoCAM <ExternalLink size={12} /></a>
+        </p>
         {#if !(newJobSource === 'part' && batchMode)}
           <div class="form-group">
             <label class="form-label" for="job-name">Job Name <span class="text-muted">(optional)</span></label>
@@ -2846,6 +2850,23 @@
     font-size: var(--font-xs, 0.75rem);
     color: var(--text-muted);
     margin: 0.35rem 0 0;
+  }
+
+  .fusion-autocam-hint {
+    background: var(--surface-2, var(--background));
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 6px);
+    padding: 0.6rem 0.75rem;
+    margin: 0 0 1rem;
+  }
+  .fusion-autocam-hint a {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    margin-left: 0.35rem;
+    font-weight: 600;
+    color: var(--accent-strong, var(--text));
+    white-space: nowrap;
   }
 
   .part-picker-filters {

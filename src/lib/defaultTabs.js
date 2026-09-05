@@ -40,6 +40,7 @@ export function defaultHeaderTabs(navConfig = navigation) {
 
   const manufacturingChildren = [];
   if (navConfig?.tabs?.manufacture !== false) manufacturingChildren.push({ key: 'manufacture', label: 'Manufacture' });
+  if (navConfig?.tabs?.['fusion-autocam'] !== false) manufacturingChildren.push({ key: 'fusion-autocam', label: 'Fusion AutoCAM' });
   if (navConfig?.tabs?.autocam !== false) manufacturingChildren.push({ key: 'autocam', label: 'AutoCAM' });
   if (navConfig?.tabs?.['gcode-converter'] !== false) manufacturingChildren.push({ key: 'gcode-converter', label: 'G-code Converter' });
   if (navConfig?.tabs?.kitting !== false) manufacturingChildren.push({ key: 'kitting', label: 'Kitting' });
@@ -181,6 +182,25 @@ export function ensureFilesTab(tabs, navConfig = navigation) {
   if (navConfig?.tabs?.files === false || !Array.isArray(tabs)) return tabs;
   if (containsTabKey(tabs, 'files')) return tabs;
   const entry = { key: 'files', label: 'Files' };
+  const folderIndex = tabs.findIndex((item) => item?.type === 'folder' && item?.label === MANUFACTURING_FOLDER_LABEL);
+  if (folderIndex === -1) return [...tabs, { type: 'tab', ...entry }];
+  const folder = tabs[folderIndex];
+  const next = [...tabs];
+  next[folderIndex] = { ...folder, children: [...(Array.isArray(folder.children) ? folder.children : []), entry] };
+  return next;
+}
+
+// Fusion AutoCAM (autocam/fusion/ - the Fusion-360-backed milling pipeline)
+// is new and, per its own README, deliberately kept as its own section
+// rather than folded into the main /autocam "New Job" flow yet - same
+// append-only augmentation every other post-launch tab needs, or "add this
+// for everyone" silently never reaches accounts that already customized
+// their header. See ensureGcodeConverterTab() for the identical
+// Manufacturing-folder pattern.
+export function ensureFusionAutocamTab(tabs, navConfig = navigation) {
+  if (navConfig?.tabs?.['fusion-autocam'] === false || !Array.isArray(tabs)) return tabs;
+  if (containsTabKey(tabs, 'fusion-autocam')) return tabs;
+  const entry = { key: 'fusion-autocam', label: 'Fusion AutoCAM' };
   const folderIndex = tabs.findIndex((item) => item?.type === 'folder' && item?.label === MANUFACTURING_FOLDER_LABEL);
   if (folderIndex === -1) return [...tabs, { type: 'tab', ...entry }];
   const folder = tabs[folderIndex];

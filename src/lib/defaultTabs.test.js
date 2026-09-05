@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { defaultHeaderTabs, ensurePowerRankingsTab, ensureScoutingAdminTab, ensureStrategyTab, ensureGcodeConverterTab, ensureFilesTab } from './defaultTabs.js';
+import { defaultHeaderTabs, ensurePowerRankingsTab, ensureScoutingAdminTab, ensureStrategyTab, ensureGcodeConverterTab, ensureFilesTab, ensureFusionAutocamTab } from './defaultTabs.js';
 
 const enabled = { tabs: { powerrankings: true } };
 
@@ -47,6 +47,12 @@ describe('defaultHeaderTabs', () => {
 
   it('includes Files in the Manufacturing folder', () => {
     expect(manufacturingChildren(defaultHeaderTabs())).toContainEqual({ key: 'files', label: 'Files' });
+  });
+
+  it('puts Fusion AutoCAM above the regular AutoCAM in the Manufacturing folder', () => {
+    const keys = manufacturingChildren(defaultHeaderTabs()).map((child) => child.key);
+    expect(keys.indexOf('fusion-autocam')).toBeGreaterThanOrEqual(0);
+    expect(keys.indexOf('fusion-autocam')).toBeLessThan(keys.indexOf('autocam'));
   });
 
   it('orders the scouting surfaces the way the team asked for them', () => {
@@ -108,6 +114,27 @@ describe('ensureFilesTab', () => {
     const tabs = [{ type: 'tab', key: 'docs', label: 'Docs' }];
     const result = ensureFilesTab(tabs);
     expect(result).toContainEqual({ type: 'tab', key: 'files', label: 'Files' });
+  });
+});
+
+describe('ensureFusionAutocamTab', () => {
+  it('adds Fusion AutoCAM to an existing Manufacturing folder without disturbing saved tabs', () => {
+    const tabs = [{ type: 'folder', label: 'Manufacturing', children: [{ key: 'manufacture', label: 'Manufacture' }] }];
+    const result = ensureFusionAutocamTab(tabs);
+    expect(manufacturingChildren(result)).toContainEqual({ key: 'fusion-autocam', label: 'Fusion AutoCAM' });
+    expect(manufacturingChildren(result)).toContainEqual({ key: 'manufacture', label: 'Manufacture' });
+  });
+
+  it('does nothing once Fusion AutoCAM is already present, including if someone moved it', () => {
+    const tabs = [{ type: 'tab', key: 'fusion-autocam', label: 'Fusion CAM' }];
+    const result = ensureFusionAutocamTab(tabs);
+    expect(result).toEqual(tabs);
+  });
+
+  it('falls back to a top-level tab when there is no Manufacturing folder', () => {
+    const tabs = [{ type: 'tab', key: 'docs', label: 'Docs' }];
+    const result = ensureFusionAutocamTab(tabs);
+    expect(result).toContainEqual({ type: 'tab', key: 'fusion-autocam', label: 'Fusion AutoCAM' });
   });
 });
 
