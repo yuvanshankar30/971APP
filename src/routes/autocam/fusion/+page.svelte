@@ -55,14 +55,14 @@
   <button type="button" class:active={activeTab === 'parts'} on:click={() => setActiveTab('parts')}>
     <Package size={16} /> Parts
   </button>
-  <button type="button" class:active={activeTab === 'stock-categories'} on:click={() => setActiveTab('stock-categories')}>
-    <SlidersHorizontal size={16} /> Stock Categories
-  </button>
   <button type="button" class:active={activeTab === 'box-tubes'} on:click={() => setActiveTab('box-tubes')}>
     <Box size={16} /> Box Tubes
   </button>
   <button type="button" class:active={activeTab === 'queue'} on:click={() => setActiveTab('queue')}>
     <ListChecks size={16} /> Job Queue
+  </button>
+  <button type="button" class:active={activeTab === 'stock-categories'} on:click={() => setActiveTab('stock-categories')}>
+    <SlidersHorizontal size={16} /> Stock Categories
   </button>
 </nav>
 
