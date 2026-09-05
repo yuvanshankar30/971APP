@@ -465,6 +465,9 @@
   // loads. (Svelte 5 only invalidates on value change and ignores reads that
   // happen inside called functions, so the deps must be referenced here.)
   $: canViewAdmin = hasPermission(activeProfile, 'VIEW_ADMIN_PANEL');
+  $: canViewScoutingAdmin = activeProfile?.team_role === 'Competition Lead'
+    || canViewAdmin
+    || (activeProfile?.roster_keys || []).some((role) => String(role).toLowerCase() === 'scouting admin');
   $: customTabs = sanitizeTabs(activeProfile?.header_tabs);
   // Saved layouts retain personal ordering and folders, but no longer freeze
   // someone on an obsolete subset of the app's navigation.
@@ -721,7 +724,7 @@
   </nav>
 {/if}
 
-<GlobalSiteSearch bind:open={siteSearchOpen} canViewAdmin={canViewAdmin} />
+<GlobalSiteSearch bind:open={siteSearchOpen} canViewAdmin={canViewAdmin} canViewScoutingAdmin={canViewScoutingAdmin} />
 
 {#if canRenderPageContent}
   <main class="container page-container">
