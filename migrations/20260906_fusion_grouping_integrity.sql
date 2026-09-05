@@ -6,6 +6,11 @@ DO $$ BEGIN
     SELECT 1 FROM public.fusion_parts p LEFT JOIN public.fusion_part_category_assignments a ON a.part_id=p.id
     GROUP BY p.id HAVING p.quantity < 0 OR p.original_quantity < 0 OR p.quantity + coalesce(sum(a.quantity),0) <> p.original_quantity
   ) THEN RAISE EXCEPTION 'Fusion inventory is inconsistent. Reconcile remaining and assigned quantities before applying this migration.'; END IF;
+  IF EXISTS (SELECT 1 FROM public.fusion_part_category_assignments a
+    JOIN public.fusion_parts p ON p.id=a.part_id JOIN public.fusion_plates plate ON plate.id=a.plate_id
+    WHERE a.quantity <= 0 OR a.category_id <> p.category_id OR a.category_id <> plate.category_id) THEN
+    RAISE EXCEPTION 'Reconcile invalid Fusion stock assignments before applying this migration.';
+  END IF;
 END $$;
 
 CREATE OR REPLACE FUNCTION public.can_manage_fusion_stock() RETURNS boolean
@@ -35,7 +40,10 @@ CREATE OR REPLACE FUNCTION public.fusion_validate_assignment() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE plate public.fusion_plates%ROWTYPE; part_category uuid;
 BEGIN
-  IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+  IF TG_OP = 'DELETE' THEN
+    PERFORM 1 FROM public.fusion_plates WHERE id = OLD.plate_id FOR UPDATE;
+    RETURN OLD;
+  END IF;
   IF TG_OP = 'UPDATE' AND (NEW.plate_id, NEW.part_id) IS DISTINCT FROM (OLD.plate_id, OLD.part_id) THEN
     RAISE EXCEPTION 'Remove an assignment before moving it to another plate or part';
   END IF;
@@ -48,7 +56,7 @@ BEGIN
   IF NEW.quantity IS NULL OR NEW.quantity <= 0 THEN RAISE EXCEPTION 'Assignment quantity must be a positive integer'; END IF;
   RETURN NEW;
 END $$;
-CREATE TRIGGER fusion_validate_assignment BEFORE INSERT OR UPDATE
+CREATE TRIGGER fusion_validate_assignment BEFORE INSERT OR UPDATE OR DELETE
 ON public.fusion_part_category_assignments FOR EACH ROW EXECUTE FUNCTION public.fusion_validate_assignment();
 
 -- AFTER is intentional: an upsert must apply only its final INSERT or UPDATE
