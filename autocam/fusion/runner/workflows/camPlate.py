@@ -422,6 +422,20 @@ def start(data, session):
         nc_files = collect_nc_artifacts(export_dir)
         shutil.rmtree(export_dir, ignore_errors=True)
 
+        # A completed job with zero output files is a silent failure, not a
+        # success - real case observed live: export() and postProcess() ran
+        # without raising, but export_dir ended up empty (Fusion state left
+        # over from unrelated concurrent activity in the same session), and
+        # this job would otherwise have reported "completed" with nothing
+        # to download. Same principle as NewNCProgram.py's own posting
+        # retries - a failure has to surface as one, not get reported as
+        # success just because nothing else went wrong along the way.
+        if not nc_files:
+            raise RuntimeError(
+                "Fusion produced no NC files for this job - nothing was posted. "
+                "Check the Runner's log for what postProcess actually did."
+            )
+
         completion_data = {
             "jobId": job_id,
             "runnerId": RUNNER_ID,

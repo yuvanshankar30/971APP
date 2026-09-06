@@ -436,7 +436,7 @@
             {@const chosenPart = selectedPart(plate)}
             <div class="form-row">
               <div class="form-group">
-                <label class="form-label" for={`plate-nest-part-${plate.id}`}>Set nested part quantity</label>
+                <label class="form-label" for={`plate-nest-part-${plate.id}`}>Add a part</label>
                 <select id={`plate-nest-part-${plate.id}`} class="form-select" bind:value={platePartSelections[plate.id]}>
                   <option value="">{availableParts.length ? 'Select a matching part...' : 'No matching parts available'}</option>
                   {#each availableParts as part}
@@ -445,12 +445,12 @@
                 </select>
               </div>
               <div class="form-group">
-                <label class="form-label" for={`plate-nest-quantity-${plate.id}`}>Quantity</label>
+                <label class="form-label" for={`plate-nest-quantity-${plate.id}`}>How many</label>
                 <input id={`plate-nest-quantity-${plate.id}`} type="number" min="1" max={chosenPart ? maximumNestQuantity(plate, chosenPart) : undefined} step="1" class="form-input" bind:value={platePartQuantities[plate.id]} disabled={!chosenPart} />
               </div>
               <div class="form-group">
                 <span class="form-label" aria-hidden="true">&nbsp;</span>
-                <button class="btn btn-secondary btn-sm" type="button" disabled={!chosenPart} on:click={() => handleNestPart(plate)}><Plus size={14} /> Set quantity</button>
+                <button class="btn btn-secondary btn-sm" type="button" disabled={!chosenPart} on:click={() => handleNestPart(plate)}><Plus size={14} /> Nest Part</button>
               </div>
             </div>
           {/if}
