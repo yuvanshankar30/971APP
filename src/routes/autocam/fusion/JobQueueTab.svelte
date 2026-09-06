@@ -5,7 +5,7 @@
   import { toastActions } from '$lib/toast.js';
   import { fetchFusionJobs, cancelFusionJob, deleteFusionJob } from '$lib/fusionCam.js';
   import { formatPacificDateTimeWithZone } from '$lib/timezone.js';
-  import { ListChecks, X, Download, Trash2, Upload } from 'lucide-svelte';
+  import { ListChecks, X, Download, Trash2, Upload, AlertTriangle, ChevronDown } from 'lucide-svelte';
 
   let jobs = [];
   let loading = true;
@@ -20,6 +20,20 @@
   let postModalJob = null;
   let postFileName = '';
   let posting = false;
+  let errorModalJob = null;
+  let openFilesJobId = null;
+
+  // Python tracebacks are many lines of stack frames ending in the one line
+  // that actually says what went wrong (ExceptionType: message) - showing
+  // the whole thing inline, on every job row, buried the useful part in
+  // noise. This pulls out just that last line for the row; the full trace
+  // is still one click away for whoever needs to actually debug it.
+  function errorSummary(job) {
+    const text = (job.errors || []).join('\n').trim();
+    if (!text) return '';
+    const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+    return lines.at(-1) || text;
+  }
 
   const STATUS_LABELS = {
     queued: 'Queued - waiting for a Runner',
@@ -189,15 +203,27 @@
           </p>
         {/if}
         {#if job.status === 'failed' && job.errors?.length}
-          <p class="cam-form-hint error-text">{job.errors.join('; ')}</p>
+          <button type="button" class="job-error-button" on:click={() => (errorModalJob = job)}>
+            <AlertTriangle size={14} /> {errorSummary(job)}
+          </button>
         {/if}
         <div class="cam-list-actions">
           {#if job.status === 'completed' && job.fusion_nc_files?.length}
-            {#each job.fusion_nc_files as file}
-              <button class="btn btn-secondary btn-sm" title={`${file.name} · SHA-256 ${file.sha256}`} on:click={() => downloadNcFile(file)}>
-                <Download size={14} /> {file.name} ({file.size} bytes)
+            <div class="files-dropdown">
+              <button type="button" class="btn btn-secondary btn-sm" on:click={() => (openFilesJobId = openFilesJobId === job.id ? null : job.id)}>
+                <Download size={14} /> {job.fusion_nc_files.length} file{job.fusion_nc_files.length === 1 ? '' : 's'} <ChevronDown size={13} />
               </button>
-            {/each}
+              {#if openFilesJobId === job.id}
+                <div class="files-dropdown-menu">
+                  {#each job.fusion_nc_files as file}
+                    <button type="button" class="files-dropdown-item" title={`SHA-256 ${file.sha256}`} on:click={() => downloadNcFile(file)}>
+                      <span class="file-name">{file.name}</span>
+                      <span class="file-size">{file.size} bytes</span>
+                    </button>
+                  {/each}
+                </div>
+              {/if}
+            </div>
             <button class="btn btn-secondary btn-sm" title="Copy this job's G-code into Files / {FILES_TARGET_FOLDER}" on:click={() => openPostModal(job)}>
               <Upload size={14} /> Post to Files
             </button>
@@ -215,6 +241,20 @@
         </div>
       </div>
     {/each}
+  </div>
+{/if}
+
+{#if errorModalJob}
+  <div class="modal-overlay" role="presentation" on:click={() => (errorModalJob = null)}>
+    <div class="modal error-modal" role="dialog" aria-labelledby="error-modal-title" on:click|stopPropagation>
+      <div class="modal-header">
+        <h3 id="error-modal-title">{errorModalJob.name || `Job ${errorModalJob.id.slice(0, 8)}`}</h3>
+        <button type="button" class="btn btn-ghost btn-sm" title="Close" on:click={() => (errorModalJob = null)}><X size={16} /></button>
+      </div>
+      <div class="modal-body">
+        <pre class="job-error-detail">{(errorModalJob.errors || []).join('\n\n')}</pre>
+      </div>
+    </div>
   </div>
 {/if}
 
@@ -270,4 +310,71 @@
   .status-completed { background: rgba(46, 160, 67, 0.16); color: var(--success, #2ea043); }
   .status-failed,
   .status-rejected { background: rgba(248, 81, 73, 0.14); color: var(--danger, #f85149); }
+
+  .job-error-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    background: none;
+    border: none;
+    padding: 0;
+    margin-top: 0.35rem;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.85rem;
+    color: var(--danger, #e05252);
+    text-align: left;
+    max-width: 100%;
+  }
+  .job-error-button:hover { text-decoration: underline; }
+  .job-error-button :global(svg) { flex-shrink: 0; }
+  .error-modal { width: min(800px, 92vw); }
+  .job-error-detail {
+    background: var(--surface-2, var(--background));
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 6px);
+    padding: 0.75rem;
+    max-height: 60vh;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: var(--font-mono, monospace);
+    font-size: 0.8rem;
+    margin: 0;
+  }
+
+  .files-dropdown { position: relative; }
+  .files-dropdown-menu {
+    position: absolute;
+    top: calc(100% + 0.25rem);
+    left: 0;
+    z-index: 20;
+    min-width: 16rem;
+    max-height: 16rem;
+    overflow-y: auto;
+    background: var(--surface-1, #fff);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 6px);
+    box-shadow: var(--shadow-md, 0 4px 12px rgba(0, 0, 0, 0.12));
+    display: flex;
+    flex-direction: column;
+    padding: 0.25rem;
+  }
+  .files-dropdown-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    background: none;
+    border: none;
+    padding: 0.4rem 0.5rem;
+    border-radius: var(--radius-sm, 4px);
+    cursor: pointer;
+    font-size: 0.85rem;
+    color: var(--text);
+    text-align: left;
+  }
+  .files-dropdown-item:hover { background: var(--surface-2); }
+  .files-dropdown-item .file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .files-dropdown-item .file-size { color: var(--text-muted); font-size: 0.75rem; flex-shrink: 0; }
 </style>

@@ -48,6 +48,22 @@ class GroupingValidationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 grouping.require_positive_quantity(value)
 
+    def test_grouping_mode_must_match_assignment_count(self):
+        single = [{'part_id': 'a'}]
+        grouped = [{'part_id': 'a'}, {'part_id': 'b'}]
+        grouping.require_grouping_mode_matches_assignments(single, 'single')
+        grouping.require_grouping_mode_matches_assignments(grouped, 'grouped')
+        with self.assertRaises(ValueError):
+            grouping.require_grouping_mode_matches_assignments(grouped, 'single')
+        with self.assertRaises(ValueError):
+            grouping.require_grouping_mode_matches_assignments(single, 'grouped')
+        with self.assertRaises(ValueError):
+            grouping.require_grouping_mode_matches_assignments(single, 'bogus')
+        with self.assertRaises(ValueError):
+            grouping.require_grouping_mode_matches_assignments(
+                [{'part_id': 'a'}, {'part_id': 'a'}], 'grouped'
+            )
+
     def test_nc_artifacts_preserve_exact_bytes_and_file_boundaries(self):
         with tempfile.TemporaryDirectory() as directory:
             first = b'%\r\nG21\r\nM30\r\n%\xff\x00'

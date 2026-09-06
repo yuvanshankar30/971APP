@@ -1,4 +1,9 @@
-from ..commands.GroupingValidation import require_complete_arrangement, plate_spacing, require_positive_quantity
+from ..commands.GroupingValidation import (
+    require_complete_arrangement,
+    require_grouping_mode_matches_assignments,
+    plate_spacing,
+    require_positive_quantity,
+)
 from ..commands.NcArtifacts import collect_nc_artifacts
 import adsk.core, adsk.fusion, adsk.cam, traceback
 
@@ -264,6 +269,7 @@ def start(data, session):
         assignments = _normalize_assignments(payload)
         if not assignments:
             raise ValueError("Plate job has no nested parts with STEP files")
+        require_grouping_mode_matches_assignments(assignments, _get(payload, "grouping_mode"))
         step_paths = []
         for assignment in assignments:
             part_id = str(assignment["part_id"])
