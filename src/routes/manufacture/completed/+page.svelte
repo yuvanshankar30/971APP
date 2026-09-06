@@ -1,8 +1,11 @@
 <script>
   import { onMount } from 'svelte';
+  import { goto } from '$app/navigation';
   import { supabase } from '$lib/supabase.js';
   import { page } from '$app/stores';
-  import { Download, Upload, Box, X } from 'lucide-svelte';
+  import { requestConfirmation } from '$lib/confirmation.js';
+  import { buildDuplicatePartPayload } from '$lib/parts_helpers.js';
+  import { Download, Upload, Box, Copy, X } from 'lucide-svelte';
   import { formatPacificDate } from '$lib/timezone.js';
   import { passesTeamFilter } from '$lib/frcTeams.js';
   import TeamFilter from '$lib/components/TeamFilter.svelte';
@@ -18,6 +21,7 @@
   let filterSeason = getCurrentSeasonBucket()?.value || '';
   let show971 = true;
   let show9584 = true;
+  let duplicatingPartIds = new Set();
 
   const workflows = [
     { value: 'laser-cut', label: 'Laser Cut' },
@@ -37,6 +41,39 @@
       .order('updated_at', { ascending: false });
     parts = !error ? (data || []) : [];
     loading = false;
+  }
+
+  function setDuplicating(partId, isDuplicating) {
+    const next = new Set(duplicatingPartIds);
+    if (isDuplicating) next.add(partId);
+    else next.delete(partId);
+    duplicatingPartIds = next;
+  }
+
+  async function duplicateToTodo(part) {
+    if (duplicatingPartIds.has(part.id)) return;
+    const confirmed = await requestConfirmation({
+      title: 'Duplicate to ToDo',
+      message: `Create a new pending request from "${part.name}"? The completed part will stay in history.`,
+      confirmLabel: 'Duplicate to ToDo'
+    });
+    if (!confirmed) return;
+
+    setDuplicating(part.id, true);
+    try {
+      const { data, error } = await supabase
+        .from('parts')
+        .insert(buildDuplicatePartPayload(part))
+        .select('id')
+        .single();
+      if (error) throw error;
+      await goto(`/manufacture?part=${data.id}`);
+    } catch (error) {
+      console.error('Failed to duplicate completed part', error);
+      alert(`Could not duplicate this part: ${error.message || error}`);
+    } finally {
+      setDuplicating(part.id, false);
+    }
   }
 
   function formatDate(dateString) { return formatPacificDate(dateString); }
@@ -155,6 +192,7 @@
           <th>Bin / Delivery</th>
           <th>Completed</th>
           <th>CAD</th>
+          <th>Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -182,6 +220,16 @@
               {:else}
                 <span class="text-muted">—</span>
               {/if}
+            </td>
+            <td>
+              <button
+                type="button"
+                class="btn btn-secondary btn-sm duplicate-button"
+                on:click={() => duplicateToTodo(part)}
+                disabled={duplicatingPartIds.has(part.id)}
+              >
+                <Copy size={14} /> {duplicatingPartIds.has(part.id) ? 'Duplicating...' : 'Duplicate to ToDo'}
+              </button>
             </td>
           </tr>
         {/each}
@@ -211,6 +259,14 @@
             <Box size={13} /> View CAD
           </button>
         {/if}
+        <button
+          type="button"
+          class="btn btn-secondary btn-sm duplicate-button"
+          on:click={() => duplicateToTodo(part)}
+          disabled={duplicatingPartIds.has(part.id)}
+        >
+          <Copy size={14} /> {duplicatingPartIds.has(part.id) ? 'Duplicating...' : 'Duplicate to ToDo'}
+        </button>
       </div>
     {/each}
   </div>
@@ -261,6 +317,13 @@
     white-space: nowrap;
   }
   .view-cad-link:hover { opacity: 0.8; }
+
+  .duplicate-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    white-space: nowrap;
+  }
 
   .cad-modal { width: min(900px, 95vw); max-width: 95vw; }
   .cad-modal-header-actions { display: inline-flex; align-items: center; gap: 0.25rem; }

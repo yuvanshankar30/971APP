@@ -89,6 +89,78 @@ export async function addTraditionalPart(supabase, partData, fileName, fileUrl) 
     }
 }
 
+// These are the request/source fields that remain meaningful on a new run of
+// an already-completed part. Progress, delivery, ownership, and timestamps
+// deliberately stay out so the original remains historical and the duplicate
+// enters the manufacturing queue as a fresh request.
+const DUPLICABLE_PART_FIELDS = [
+    'name',
+    'requester',
+    'project_id',
+    'workflow',
+    'quantity',
+    'material',
+    'stock_assignment',
+    'file_name',
+    'file_url',
+    'notes',
+    'frc_team',
+    'part_number',
+    'onshape_document_id',
+    'onshape_wvm',
+    'onshape_wvmid',
+    'onshape_element_id',
+    'onshape_part_id',
+    'file_format',
+    'is_onshape_part'
+];
+
+/**
+ * Removes status-like router metadata from a duplicated part without losing
+ * its uploaded STEP/PDF references, which also live in file_url JSON.
+ */
+export function resetPartFileMetadata(fileUrl) {
+    if (typeof fileUrl !== 'string') return fileUrl;
+
+    try {
+        const metadata = JSON.parse(fileUrl);
+        if (!metadata || Array.isArray(metadata) || typeof metadata !== 'object') return fileUrl;
+
+        const reset = { ...metadata };
+        delete reset.router_meta;
+        delete reset.travis_progged;
+        delete reset.step;
+        return JSON.stringify(reset);
+    } catch {
+        // Non-router uploads store their Storage path directly in file_url.
+        return fileUrl;
+    }
+}
+
+/**
+ * Builds a new ToDo-row payload from a completed manufacturing part. This
+ * intentionally preserves the CAD/source fields but never reuses completed
+ * workflow state, delivery details, or assignment information.
+ */
+export function buildDuplicatePartPayload(part) {
+    const duplicate = {};
+
+    for (const field of DUPLICABLE_PART_FIELDS) {
+        if (Object.prototype.hasOwnProperty.call(part || {}, field) && part[field] !== undefined) {
+            duplicate[field] = part[field];
+        }
+    }
+
+    duplicate.file_url = resetPartFileMetadata(duplicate.file_url);
+    duplicate.status = 'pending';
+    duplicate.delivered = false;
+    duplicate.kitting_bin = null;
+    duplicate.assigned_to = null;
+    duplicate.due_date = null;
+
+    return duplicate;
+}
+
 /**
  * Helper to determine file format based on workflow
  * @param {string} workflow - The manufacturing workflow
