@@ -866,6 +866,22 @@ def patch_cam_template_with_tool_libraries(
         for template_elem in contour_templates
         if template_elem is not suppress_template
     ]
+    # The bulk-clearing operations that dominate real machining time
+    # (confirmed live: ~93% of total feed time on a real job). Their real
+    # exported template signature calls for the same small "971 Main Bit"
+    # every other operation uses - there's nothing here that would ever
+    # pick a bigger tool on its own, unlike contour2d below, which already
+    # gets whatever the largest available endmill is. Extended the same
+    # existing convention to these strategies: with today's one-tool
+    # library this is a no-op (largest_endmill IS that one tool, same
+    # result as before), but the pipeline is ready the moment a genuinely
+    # larger roughing endmill is added to a machine's tool library,
+    # without needing another code change then.
+    roughing_templates = [
+        template_elem
+        for template_elem in root.findall(f".//{_q('template')}")
+        if template_elem.get("strategy") in ("adaptive2d", "pocket2d")
+    ]
 
     if drill_template and drill_candidates:
         sorted_drills = sorted(
@@ -992,18 +1008,18 @@ def patch_cam_template_with_tool_libraries(
 
     if largest_endmill:
         tool, idx = largest_endmill
-        for contour_template in contour_templates:
-            tool_elem = contour_template.find(_q("tool"))
+        for template_elem in contour_templates + roughing_templates:
+            tool_elem = template_elem.find(_q("tool"))
             if tool_elem is None:
                 continue
             _apply_tool_to_elem(
-                contour_template,
+                template_elem,
                 tool_elem,
                 tool,
                 tool_library_version=idx.get("version"),
                 material_name=material_name,
             )
-            handled_templates.add(id(contour_template))
+            handled_templates.add(id(template_elem))
             replaced += 1
 
     for template_elem in root.findall(f".//{_q('template')}"):
