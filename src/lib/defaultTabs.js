@@ -26,8 +26,7 @@
 //   - Purchasing and Docs: stand alone after the team-workflow folders.
 //
 // Home is rendered separately and always first; Admin is appended for
-// admins by the layout, always last. Planning is part of the shared defaults,
-// and saved layouts are reconciled with those defaults at render time.
+// admins by the layout, always last.
 //
 // The companion migration `20260903_reset_header_tabs_to_shared_default.sql`
 // clears stale saved layouts once so every existing account receives this
@@ -69,15 +68,6 @@ export function defaultHeaderTabs(navConfig = navigation) {
   tabs.push({ type: 'folder', label: 'CAD', children: cadChildren });
 
   tabs.push({ type: 'tab', key: 'purchasing', label: 'Purchasing' });
-
-  tabs.push({
-    type: 'folder',
-    label: 'Planning',
-    children: [
-      { key: 'planner', label: 'Planner' },
-      { key: 'tasks', label: 'Tasks' }
-    ]
-  });
 
   tabs.push({ type: 'tab', key: 'docs', label: 'Docs' });
 
