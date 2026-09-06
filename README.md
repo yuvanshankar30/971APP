@@ -517,7 +517,9 @@ AutoCAM's own code (engine, Drive watcher, `camJobs.js`, its components) is
 - **`components/`** - shared Svelte components: `CadViewer.svelte` (a
   generic STEP/3D viewer used outside AutoCAM too - `/manufacture`,
   `/manufacture/completed` - so it stayed here rather than moving into
-  `autocam/` despite being CAD-adjacent), nav/layout pieces, etc.
+  `autocam/` despite being CAD-adjacent). Its lower-left readout shows the
+  model's smallest bounding-box dimension in inches as a quick thickness/depth
+  cross-check, nav/layout pieces, etc.
 - **`stock.json`** plus **`manufacturing_stock_options`** - bundled baseline
   stock choices and approved-user additions shared by the new manufacturing
   request form, including aluminum, polycarbonate, SRPP, tube, and lathe stock.
