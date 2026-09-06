@@ -60,26 +60,50 @@ def _outer_loop_edges_all_bodies(design):
     return edges
 
 
-# A closed internal loop's own bounding-box long axis divided by its short
-# axis - a real reference CAM program (a manual setup for the same kind of
-# part) treats an elongated slot cutout as a genuinely different operation
-# ("Slot Cut For Features") from a roughly-circular hole or pocket
-# ("Circular Pocket", "Shape Pocket"). No single authoritative ratio
-# distinguishes "slot" from "not a slot"; 2.5 is a middle ground clear of a
-# real square/circular feature's ratio of 1 while still catching a real
-# reference slot's own measured ratio (a 23mm x 4mm rounded slot in
-# practice.ngc, ~6:1).
-_SLOT_ASPECT_RATIO = 2.5
-
-
-def _slot_loop_edges_all_bodies(design):
-    """Every body's own internal (non-outer) loops whose bounding box is
-    elongated rather than roughly circular/square - real slot-shaped
-    cutouts, not a round hole or a compact pocket. See _SLOT_ASPECT_RATIO
-    for why 2.5. Combined across every body, same reasoning as
-    _outer_loop_edges_all_bodies.
+def _is_circular_loop(edges) -> bool:
+    """True if every edge in this loop is part of a circle - a genuine
+    round hole boundary, already handled by the bore/circular-pocket
+    operations' own dedicated hole-recognition machinery. A polygon-ish
+    loop (a slot, kidney, or other pill/rounded-rectangle shape mixing
+    straight and arc segments) is not circular and needs the dedicated
+    ChainSelection-based finishing pass _internal_feature_loop_edges_all_bodies
+    feeds instead.
     """
-    slot_edges = []
+    if not edges:
+        return False
+    for edge in edges:
+        try:
+            if not isinstance(edge.geometry, adsk.core.Circle3D):
+                return False
+        except Exception:
+            return False
+    return True
+
+
+def _internal_feature_loop_edges_all_bodies(design):
+    """Every body's own internal (non-outer), non-circular loop - a real
+    through-cut feature (a slot, kidney, pill, or any other non-round
+    cutout) that needs its own dedicated ChainSelection-based finishing
+    pass, combined across every body (same reasoning as
+    _outer_loop_edges_all_bodies).
+
+    This used to only collect loops whose bounding box was elongated past
+    a 2.5:1 aspect-ratio threshold (treating anything rounder as "not a
+    slot," left to generic PocketRecognitionSelection instead) - dropped
+    after a real part (a router stiffener) surfaced two genuine through-cut
+    kidney/pill features with measured aspect ratios of 2.25 and 1.28, both
+    under that threshold. Confirmed live: both fell through to generic
+    recognition, which found nothing (PocketRecognitionSelection is built
+    for a real recessed pocket with a floor, not a full-depth-through
+    cutout - the same reason the outer profile itself needed a real
+    ChainSelection instead of createNewSilhouetteSelection, see that
+    function's own docstring), leaving both operations empty and deleted
+    by DeleteToolpaths's own cleanup - the part's two real weight-reduction
+    cutouts machined as nothing at all. A round hole is excluded here on
+    purpose (see _is_circular_loop) since it already has its own dedicated
+    operation; nothing else internal needs elongation to qualify.
+    """
+    feature_edges = []
     for occ in design.rootComponent.allOccurrences:
         if occ.bRepBodies.count == 0:
             continue
@@ -90,24 +114,10 @@ def _slot_loop_edges_all_bodies(design):
             if loop.isOuter:
                 continue
             edges = [co_edge.edge for co_edge in loop.coEdges]
-            xs, ys = [], []
-            for edge in edges:
-                try:
-                    start = edge.pointOnEdge
-                except Exception:
-                    continue
-                xs.append(start.x)
-                ys.append(start.y)
-            if len(xs) < 2:
+            if not edges or _is_circular_loop(edges):
                 continue
-            width = max(xs) - min(xs)
-            height = max(ys) - min(ys)
-            long_axis, short_axis = max(width, height), min(width, height)
-            if short_axis <= 1e-6:
-                continue
-            if long_axis / short_axis >= _SLOT_ASPECT_RATIO:
-                slot_edges.append(edges)
-    return slot_edges
+            feature_edges.append(edges)
+    return feature_edges
 
 
 def _repair_missing_selections(setup) -> list[str]:
@@ -147,8 +157,7 @@ def _repair_missing_selections(setup) -> list[str]:
     # per operation. design is shared by both caches below.
     design_cache = []  # single-item list used as a mutable box (no `nonlocal` needed)
     outer_edges_cache = None
-    slot_edges_cache = None
-    feature_slot_assigned = False
+    feature_edges_cache = None
 
     def _design():
         if not design_cache:
@@ -161,16 +170,16 @@ def _repair_missing_selections(setup) -> list[str]:
             )
         return design_cache[0]
 
-    for op in setup.operations:
+    def _needs_repair(op):
         param_name = _SELECTION_PARAM_BY_STRATEGY.get(op.strategy)
         if param_name is None:
-            continue
+            return None
         param = op.parameters.itemByName(param_name)
         if param is None:
-            continue
+            return None
         value = param.value
         if not hasattr(value, "getCurveSelections"):
-            continue
+            return None
         selections = value.getCurveSelections()
         # A template's saved reference can disappear completely when the
         # source body is replaced - Fusion then returns an EMPTY collection
@@ -182,29 +191,66 @@ def _repair_missing_selections(setup) -> list[str]:
         has_missing = selections.count == 0 or any(
             selections.item(i).hasWarning for i in range(selections.count)
         )
-        if not has_missing:
-            continue
-        selections.clear()
+        return (param, value, selections) if has_missing else None
+
+    def _is_outer_profile(op):
         # A contour2d operation is either the ONE real outer-profile cut
         # (group_tabs=true in the template's own default - see
         # TabPlacement.py for the full explanation of this same signal) or
         # a finishing pass for one specific internal feature (a hole,
-        # pocket, or slot a sibling roughing operation already cleared).
-        # The real reference CAM program (a manual setup for the same kind
-        # of part) keeps these as genuinely separate operations - "Shape
-        # Through Finishing Pass", "Shape Pocket Finishing Pass", "Slot
-        # Cut For Features" are three distinct named sections, not one
-        # merged operation - so each contour2d finishing pass here keeps
-        # its own template name and gets its own repaired selection; nothing
-        # here deletes or renames them.
+        # pocket, or slot/kidney/pill a sibling roughing operation already
+        # cleared).
         group_tabs_param = op.parameters.itemByName("group_tabs")
-        is_outer_profile = (
+        return (
             op.strategy == "contour2d"
             and group_tabs_param is not None
             and str(group_tabs_param.expression).strip().lower() == "true"
         )
+
+    # A single snapshot, used for both passes below - setup.operations is
+    # Fusion's own live collection, and separate accesses to it are not
+    # guaranteed to hand back the same Python proxy object for the same
+    # underlying operation (confirmed by this file's own established
+    # pattern elsewhere of snapshotting before any mutation - see
+    # DeleteToolpaths's own toolpaths = list(setup.operations) comment).
+    # A dict keyed by these proxy objects across two separate
+    # `setup.operations` reads would silently never match; keying off one
+    # shared snapshot instead removes the question entirely.
+    ops_snapshot = list(setup.operations)
+
+    # First pass, read-only: which non-outer-profile contour2d finishing
+    # passes actually need repair - known up front so the second pass can
+    # distribute real internal features across ALL of them (one feature
+    # loop per operation) rather than dumping every feature onto whichever
+    # operation happens to be first and leaving the rest to generic
+    # recognition, which doesn't reliably find a through-cut feature (see
+    # _internal_feature_loop_edges_all_bodies's own docstring for the real
+    # part that surfaced this). Sorted so an operation whose template name
+    # already says "feature" (e.g. the New Router metal template's own
+    # "Slot Cut for Features") claims the first, primary slice - the real,
+    # purpose-built operation for this rather than whichever generic
+    # "Shape ... Finishing Pass" happens to iterate first.
+    finishing_pass_ops = sorted(
+        (
+            op
+            for op in ops_snapshot
+            if op.strategy == "contour2d" and not _is_outer_profile(op) and _needs_repair(op) is not None
+        ),
+        key=lambda op: 0 if "feature" in op.name.lower() else 1,
+    )
+    if finishing_pass_ops:
+        design = _design()
+        feature_edges_cache = _internal_feature_loop_edges_all_bodies(design) if design else []
+    feature_op_index = {op.operationId: i for i, op in enumerate(finishing_pass_ops)}
+
+    for op in ops_snapshot:
+        repair_state = _needs_repair(op)
+        if repair_state is None:
+            continue
+        param, value, selections = repair_state
+        selections.clear()
         name_lower = op.name.lower()
-        if is_outer_profile:
+        if _is_outer_profile(op):
             # createNewSilhouetteSelection() is NOT scoped to just the true
             # outer perimeter - confirmed live that it also picks up every
             # internal feature loop that goes all the way through the
@@ -223,35 +269,45 @@ def _repair_missing_selections(setup) -> list[str]:
                 chain.isOpen = False
                 chain.isReverted = False
                 chain.inputGeometry = edges
+        elif op.operationId in feature_op_index and feature_edges_cache:
+            # This operation's own slice of the real internal features -
+            # one loop per finishing-pass operation, in the priority order
+            # finishing_pass_ops was sorted into above, except the LAST
+            # one, which also absorbs any features left over once every
+            # operation has had a turn (more real features than available
+            # finishing-pass operations in the template). Built via
+            # ChainSelection, the same proven technique as the outer
+            # profile above - not the global PocketRecognitionSelection
+            # every other (genuinely pocket-with-a-floor) finishing pass
+            # still uses, which has no way to target one specific feature
+            # and can't reliably find a through-cut one at all.
+            index = feature_op_index[op.operationId]
+            is_last = index == len(finishing_pass_ops) - 1
+            my_edges = feature_edges_cache[index:] if is_last else feature_edges_cache[index : index + 1]
+            if my_edges:
+                for edges in my_edges:
+                    chain = selections.createNewChainSelection()
+                    chain.isOpen = False
+                    chain.isReverted = False
+                    chain.inputGeometry = edges
+                # Only rename a generically-named finishing pass being
+                # repurposed for this (e.g. "Shape Through Finishing
+                # Pass") - a template operation already named for this
+                # purpose (the New Router metal template's own real "Slot
+                # Cut for Features") keeps its own real name as-is.
+                if "feature" not in name_lower:
+                    op.name = "Feature Slot Cut" if index == 0 else f"Feature Cut {index + 1}"
+                value.applyCurveSelections(selections)
+                repaired.append(op.name)
+                continue
+            # More finishing-pass operations than real internal features -
+            # nothing left for this one, fall through to generic
+            # recognition below (harmless: DeleteToolpaths's own cleanup
+            # removes it afterward if that finds nothing either).
+            recognition = selections.createNewPocketRecognitionSelection()
+            recognition.isSetupModelSelected = True
+            recognition.areHolesIncluded = "circular" in name_lower and "hole" in name_lower
         else:
-            # The first non-outer-profile contour2d finishing pass that
-            # needs repair on a part with a real elongated slot cutout
-            # becomes the dedicated slot operation, renamed "Feature Slot
-            # Cut" to match the reference program's own naming - built
-            # from just that slot loop's edges via ChainSelection, the
-            # same proven technique as the outer profile above, not the
-            # global PocketRecognitionSelection every other finishing pass
-            # uses (which has no way to target one specific feature and
-            # would recognize this slot along with everything else too).
-            # Every other finishing pass keeps its own template name and
-            # the existing whole-model recognition - a real part may have
-            # no slot at all, in which case this branch never fires and
-            # nothing changes from before.
-            if op.strategy == "contour2d" and not feature_slot_assigned:
-                if slot_edges_cache is None:
-                    design = _design()
-                    slot_edges_cache = _slot_loop_edges_all_bodies(design) if design else []
-                if slot_edges_cache:
-                    for edges in slot_edges_cache:
-                        chain = selections.createNewChainSelection()
-                        chain.isOpen = False
-                        chain.isReverted = False
-                        chain.inputGeometry = edges
-                    op.name = "Feature Slot Cut"
-                    feature_slot_assigned = True
-                    value.applyCurveSelections(selections)
-                    repaired.append(op.name)
-                    continue
             recognition = selections.createNewPocketRecognitionSelection()
             # Without isSetupModelSelected, a PocketRecognitionSelection
             # has no model to search at all and silently recognizes
