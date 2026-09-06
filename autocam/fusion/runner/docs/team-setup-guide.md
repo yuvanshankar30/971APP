@@ -14,6 +14,13 @@ Two things run this: **Spartans Hub** itself (already deployed - where you queue
 
    **Updating an existing install?** Re-run the same `cp -R` (or re-download+unzip) over the existing folder - your `.env`/`.overridepath` are untouched as long as nothing you run deletes extra files first.
 
+   **Never want to reinstall again?** Instead of copying files, point Fusion's AddIns folder at a live git checkout with a symlink - updates then become `git pull`, no copying or re-downloading, ever:
+   ```bash
+   git clone https://github.com/frc971/spartanshub.git ~/spartanshub
+   ln -s ~/spartanshub/autocam/fusion/runner "$HOME/Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns/SpartanRoboticsAutoCAM"
+   ```
+   (Windows: use `mklink /D` from an admin Command Prompt instead of `ln -s`.) From then on, `cd ~/spartanshub && git pull` picks up every change the moment it lands on `main` - Fusion loads through the symlink, so there's nothing left to copy. Quit and relaunch Fusion afterward (same as any `.env`/code change - see below) to actually pick up the new files. `.env`/`.overridepath` live inside `autocam/fusion/runner/` itself, so they're gitignored and untouched by `git pull` either way.
+
 2. **Run the one-command setup** (installs `requests` for Fusion's Python, then writes `.env` - no manual editing):
    ```bash
    cd "$HOME/Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns/SpartanRoboticsAutoCAM"
