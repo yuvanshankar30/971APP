@@ -5,11 +5,20 @@
   import { supabase } from '$lib/supabase.js';
   import { fetchParts, createPart, deletePart, renamePart, updatePartQuantity, fetchPartCategories } from '$lib/fusionCam.js';
   import { groupFusionParts } from '$autocam/fusion/grouping.js';
-  import { Plus, Trash2, Package, Pencil, Check, X } from 'lucide-svelte';
+  import { fetchStepMeshes } from '$lib/stepMeshLoader.js';
+  import { extractRoutingContoursFromMeshes } from '$autocam/stepProfile.js';
+  import { Plus, Trash2, Package, Pencil, Check, X, Sparkles } from 'lucide-svelte';
 
   export let user;
   export let canManage;
   export let onViewPlates = () => {};
+  // Deep link from Manufacturing's "Open Fusion CAM" button (see
+  // /autocam/fusion/+page.svelte) - the id of a public.parts row to
+  // pre-fill the Add Part form from: name, STEP file (carried over, not
+  // re-uploaded), and a depth estimate read straight off that STEP file's
+  // geometry. Material/thickness is deliberately left for the user to pick
+  // and cross-check against the detected depth - see handlePrefill below.
+  export let initialManufacturingPartId = null;
 
   let parts = [];
   let categories = [];
@@ -32,10 +41,17 @@
   let editingQuantityId = null;
   let quantityValue = '';
 
+  // State for the "Open Fusion CAM" deep-link prefill - see
+  // initialManufacturingPartId and applyManufacturingPrefill below.
+  let prefillApplied = false;
+  let stepCarriedOverFrom = null;
+  let detectingDepth = false;
+  let detectedDepthInches = null;
+
   async function loadManufacturingParts() {
     const { data, error } = await supabase
       .from('parts')
-      .select('id, name, project_id, workflow')
+      .select('id, name, project_id, workflow, file_name, file_url')
       .order('created_at', { ascending: false })
       .limit(200);
     if (error) {
@@ -43,6 +59,91 @@
       return;
     }
     manufacturingParts = data || [];
+  }
+
+  // Same file_url convention manufacture/+page.svelte's own
+  // getStepFileName/getFileMeta use - a JSON blob { step_file, ... } for
+  // router parts, with file_name kept as a plain-string fallback for
+  // backward compat (see manufacture/create/+page.svelte's insert).
+  function manufacturingStepFileName(mp) {
+    if (!mp) return null;
+    try {
+      const meta = JSON.parse(mp.file_url);
+      if (meta?.step_file) return meta.step_file;
+    } catch {}
+    if (mp.file_name && /\.(step|stp)$/i.test(mp.file_name)) return mp.file_name;
+    return null;
+  }
+
+  // Best-effort carry-over of the linked request's STEP file (so the user
+  // doesn't have to re-download-then-re-upload it) and a depth estimate read
+  // straight off its geometry (extractRoutingContoursFromMeshes's own
+  // thickness - the same measure CadViewer.svelte's bounding-box readout and
+  // the routing G-code generator both already trust). Neither is required
+  // for the form to work - a part with no STEP, or geometry this extractor
+  // can't parse (not a flat routed profile), just skips that part quietly.
+  async function applyManufacturingPrefill(linkedPart) {
+    newPart = {
+      ...newPart,
+      name: newPart.name || linkedPart.name || '',
+      manufacturingPartId: initialManufacturingPartId
+    };
+    if (!newPart.fusionFileName) {
+      const derived = (linkedPart.name || '').trim().replace(/\s+/g, '');
+      if (derived) newPart.fusionFileName = derived;
+    }
+    showAddForm = true;
+
+    const stepPath = manufacturingStepFileName(linkedPart);
+    if (!stepPath) return;
+
+    try {
+      const { data: blob, error: downloadError } = await supabase.storage
+        .from('manufacturing-files')
+        .download(stepPath);
+      if (downloadError || !blob) throw downloadError || new Error('Empty download');
+      stepFile = new File([blob], stepPath.split('/').pop(), { type: blob.type || 'application/step' });
+      stepCarriedOverFrom = linkedPart.name;
+    } catch (e) {
+      console.warn('Could not carry over the linked request\'s STEP file:', e.message || e);
+    }
+
+    detectingDepth = true;
+    try {
+      const meshes = await fetchStepMeshes(stepPath);
+      const { thickness } = extractRoutingContoursFromMeshes(meshes);
+      detectedDepthInches = thickness;
+    } catch (e) {
+      console.warn('Could not estimate depth from this STEP file:', e.message || e);
+    } finally {
+      detectingDepth = false;
+    }
+  }
+
+  // Runs once, as soon as both the deep-link target and the manufacturing
+  // parts list it needs to be found in are available. Falls back to a
+  // direct fetch if the request isn't among the most-recent 200 (the
+  // dropdown's own cap) - a deep link can point at an older request.
+  $: if (!prefillApplied && canManage && initialManufacturingPartId && manufacturingParts.length) {
+    prefillApplied = true;
+    const linkedPart = manufacturingParts.find((mp) => mp.id === initialManufacturingPartId);
+    if (linkedPart) {
+      applyManufacturingPrefill(linkedPart);
+    } else {
+      supabase
+        .from('parts')
+        .select('id, name, project_id, workflow, file_name, file_url')
+        .eq('id', initialManufacturingPartId)
+        .maybeSingle()
+        .then(({ data, error }) => {
+          if (error || !data) {
+            console.warn('Could not load the linked manufacturing request:', error?.message);
+            return;
+          }
+          manufacturingParts = [data, ...manufacturingParts];
+          applyManufacturingPrefill(data);
+        });
+    }
   }
 
   // showLoading=false for refreshes after an action (add/delete/etc.) -
@@ -65,6 +166,7 @@
 
   function handleFileChange(event) {
     stepFile = event.target.files?.[0] || null;
+    stepCarriedOverFrom = null; // user picked their own file - the carry-over hint no longer applies
   }
 
   // Strips spaces as you type rather than rejecting on submit - this
@@ -94,6 +196,8 @@
       });
       newPart = { name: '', epic: '', ticket: '', quantity: 1, categoryId: '', manufacturingPartId: '', fusionFileName: '' };
       stepFile = null;
+      stepCarriedOverFrom = null;
+      detectedDepthInches = null;
       showAddForm = false;
       await load(false);
       toastActions.show('Part added');
@@ -196,6 +300,11 @@
     <div class="card">
       <h3>New Part</h3>
       <p class="cam-form-hint">A named quantity of stock waiting to be nested onto a plate - not yet assigned to one.</p>
+      {#if newPart.manufacturingPartId && prefillApplied}
+        <p class="prefill-banner">
+          <Sparkles size={14} /> Pre-filled from the linked manufacturing request - check material/thickness below before saving.
+        </p>
+      {/if}
       <div class="form-row">
         <div class="form-group">
           <label class="form-label" for="part-name">Name</label>
@@ -209,6 +318,13 @@
               <option value={cat.id}>{categoryLabel(cat)}</option>
             {/each}
           </select>
+          {#if detectingDepth}
+            <p class="cam-form-hint">Estimating depth from the CAD file...</p>
+          {:else if detectedDepthInches != null}
+            <p class="cam-form-hint depth-hint">
+              Detected depth from CAD: <strong>{detectedDepthInches.toFixed(detectedDepthInches < 0.1 ? 4 : 3)}"</strong> - pick the material/thickness that matches.
+            </p>
+          {/if}
         </div>
         <div class="form-group">
           <label class="form-label" for="part-quantity">Quantity</label>
@@ -227,6 +343,9 @@
         <div class="form-group">
           <label class="form-label" for="part-step">STEP file (optional)</label>
           <input id="part-step" type="file" accept=".step,.stp" class="form-input" on:change={handleFileChange} />
+          {#if stepCarriedOverFrom}
+            <p class="cam-form-hint">Carried over from "{stepCarriedOverFrom}" - pick a different file above to replace it.</p>
+          {/if}
         </div>
       </div>
       <div class="form-row">
@@ -369,4 +488,13 @@
   .cam-list-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
   .empty-state { color: var(--text-muted, #888); padding: 2rem 0; text-align: center; }
   .cam-form-hint { color: var(--text-muted, #888); font-size: 0.85rem; margin: 0.25rem 0 0; }
+  .depth-hint strong { color: var(--text, #111); }
+  .prefill-banner {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: var(--accent, #2563eb);
+    font-size: 0.85rem;
+    margin: 0 0 0.75rem;
+  }
 </style>

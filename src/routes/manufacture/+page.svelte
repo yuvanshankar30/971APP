@@ -11,7 +11,7 @@
   import SeasonFilter from '$lib/components/SeasonFilter.svelte';
   import { goto } from '$app/navigation';
   import { PUBLIC_ONSHAPE_BASE_URL } from '$env/static/public';
-  import { Search, Filter, Clock, Truck, Package, Download, Zap, Wrench, FileText, Upload, ExternalLink, Pencil, Trash2, X, Users, Box, Route, CircleCheck } from 'lucide-svelte';
+  import { Search, Filter, Clock, Truck, Package, Download, Zap, Wrench, FileText, Upload, ExternalLink, Pencil, Trash2, X, Users, Box, Route, CircleCheck, Layers } from 'lucide-svelte';
   import ROUTER_FLOW from '$lib/router_flow.json';
   import { getDisplayStatus, BUTTONS, getBadgeClass, getWorkflowStatuses } from '$lib/statuses.js';
   import { summarizeRouterStages, isFullyKitted, buildRouterProgressUpdate } from '$lib/router_progress.js';
@@ -1229,6 +1229,13 @@
     return !!getStepFileName(part);
   }
 
+  // Deep link into the Fusion CAM Parts tab, pre-filled from this request -
+  // PartsTab.svelte reads manufacturingPart off the query string, looks the
+  // request up, and pre-fills name/STEP file/depth from it.
+  function fusionCamHref(part) {
+    return `/autocam/fusion?tab=parts&manufacturingPart=${encodeURIComponent(part.id)}`;
+  }
+
   function openCadViewer(part) {
     cadViewerPart = part;
     showCadModal = true;
@@ -2185,6 +2192,11 @@
               <button class="btn btn-secondary btn-sm" on:click={() => openCadViewer(part)} title="View 3D model">
                 <Box size={14} /> View CAD
               </button>
+              {#if part.workflow === 'router'}
+                <a class="btn btn-primary btn-sm" href={fusionCamHref(part)} on:click|stopPropagation title="Open this part in Fusion CAM, pre-filled from this request">
+                  <Layers size={14} /> Open Fusion CAM
+                </a>
+              {/if}
               {#if camCapable}
                 <button class="btn btn-secondary btn-sm" disabled={camJob?.status !== 'completed'} on:click={() => openToolpathModal(camJob)} title={camJob?.status === 'completed' ? 'Preview the generated toolpath' : 'Generate G-code first'}>
                   <Route size={14} /> Show Toolpath
@@ -2413,6 +2425,11 @@
                     <button class="btn btn-secondary btn-sm" on:click={() => openCadViewer(part)} title="View 3D model">
                       <Box size={13} /> View CAD
                     </button>
+                    {#if part.workflow === 'router'}
+                      <a class="btn btn-primary btn-sm" href={fusionCamHref(part)} on:click|stopPropagation title="Open this part in Fusion CAM, pre-filled from this request">
+                        <Layers size={13} /> Open Fusion CAM
+                      </a>
+                    {/if}
                     {#if camCapable}
                       <button class="btn btn-secondary btn-sm" disabled={camJob?.status !== 'completed'} on:click={() => openToolpathModal(camJob)} title={camJob?.status === 'completed' ? 'Preview the generated toolpath' : 'Generate G-code first'}>
                         <Route size={13} /> Show Toolpath

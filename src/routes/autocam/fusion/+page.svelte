@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte';
+  import { page } from '$app/stores';
   import { supabase } from '$lib/supabase.js';
   import { userStore, loadUserFromUUID } from '$lib/stores/user.js';
   import { canManageCamProfiles } from '$lib/permissions.js';
@@ -10,8 +11,15 @@
   import JobQueueTab from './JobQueueTab.svelte';
   import StockCategoriesTab from './StockCategoriesTab.svelte';
 
+  // Deep link from Manufacturing's "Open Fusion CAM" button
+  // (/manufacture's fusionCamHref) - ?tab=parts&manufacturingPart=<id>
+  // jumps straight to the Parts tab with that request pre-filled.
+  const VALID_TABS = ['plates', 'parts', 'box-tubes', 'queue', 'stock-categories'];
+  const requestedTab = $page.url.searchParams.get('tab');
+  const initialManufacturingPartId = $page.url.searchParams.get('manufacturingPart') || null;
+
   let user = null;
-  let activeTab = 'plates';
+  let activeTab = VALID_TABS.includes(requestedTab) ? requestedTab : 'plates';
   let plateCategoryFilter = '';
 
   function viewMatchingPlates(categoryId) {
@@ -70,7 +78,7 @@
 {#if activeTab === 'plates'}
   <PlatesTab {user} {canManage} bind:categoryFilter={plateCategoryFilter} />
 {:else if activeTab === 'parts'}
-  <PartsTab {user} {canManage} onViewPlates={viewMatchingPlates} />
+  <PartsTab {user} {canManage} onViewPlates={viewMatchingPlates} {initialManufacturingPartId} />
 {:else if activeTab === 'stock-categories'}
   <StockCategoriesTab {canManage} />
 {:else if activeTab === 'box-tubes'}
