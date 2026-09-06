@@ -168,6 +168,9 @@ browser confirmation or prompt popups.
   pages, including pages not currently pinned to their personal navigation.
   Saved layouts preserve personal organization while automatically receiving
   every current default tab, so new and restored team tools do not vanish.
+  Scouting Admin is restricted to site administrators and the dedicated
+  Scouting Admin roster entries for Arya Saikia, Caden Nguyen, and Aarush
+  Rajagopalan.
 - **Pick List** (`scouting/`): a team-comparison / pick-list workspace for the
   active event. Named for what it produces: it was previously labelled "Data
   Scouting" in the nav, which collided with the separate `datascout` route and

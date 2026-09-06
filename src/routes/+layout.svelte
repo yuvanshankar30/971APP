@@ -382,10 +382,10 @@
   function canRenderTabKey(key) {
     const k = normalizeKey(key);
     if (k === 'admin') return hasPermission(activeProfile, 'VIEW_ADMIN_PANEL');
-    // Scouting Admin is a scoped competition role, separate from site-wide admin.
+    // Scouting Admin is limited to site-wide admins and the dedicated roster
+    // key assigned only to the named scouting administrators.
     if (k === 'scouting-admin') {
-      return activeProfile?.team_role === 'Competition Lead'
-        || hasPermission(activeProfile, 'VIEW_ADMIN_PANEL')
+      return hasPermission(activeProfile, 'VIEW_ADMIN_PANEL')
         || (activeProfile?.roster_keys || []).some((role) => String(role).toLowerCase() === 'scouting admin');
     }
     return true;
@@ -465,8 +465,7 @@
   // loads. (Svelte 5 only invalidates on value change and ignores reads that
   // happen inside called functions, so the deps must be referenced here.)
   $: canViewAdmin = hasPermission(activeProfile, 'VIEW_ADMIN_PANEL');
-  $: canViewScoutingAdmin = activeProfile?.team_role === 'Competition Lead'
-    || canViewAdmin
+  $: canViewScoutingAdmin = canViewAdmin
     || (activeProfile?.roster_keys || []).some((role) => String(role).toLowerCase() === 'scouting admin');
   $: customTabs = sanitizeTabs(activeProfile?.header_tabs);
   // Saved layouts retain personal ordering and folders, but no longer freeze
