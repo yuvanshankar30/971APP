@@ -84,5 +84,22 @@ def DeleteToolpaths():
             app.log(f"Toolpath: {toolpath.name}, Warning: {toolpath.warning}")
             if "empty" in str(toolpath.warning).lower():
                 toolpath.deleteMe()
+            elif toolpath.name == "Suppress":
+                # Every template ships this as a disabled placeholder
+                # operation - never meant to actually run. Previously only
+                # skipped during export (NewNCProgram.py), which left it
+                # sitting in the setup; a direct instruction to delete any
+                # operation not actually in the job applies to this by
+                # definition. Safe here specifically because this loop runs
+                # after the full waitForGeneration(waitforcontour=True)
+                # above, so non-Drill operations have actually finished
+                # generating by this point.
+                toolpath.deleteMe()
+            elif toolpath.isToolpathValid == False:
+                # Direct instruction: an operation the template included
+                # that doesn't actually apply to this job's geometry (no
+                # valid toolpath came out of it) should be deleted outright,
+                # not just Drill-specific as the loop above already handles.
+                toolpath.deleteMe()
         cam.generateAllToolpaths(True)
         waitForGeneration(setup, waitforcontour=True)
