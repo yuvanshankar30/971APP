@@ -3,10 +3,41 @@
 import adsk.core, adsk.fusion, adsk.cam
 from ..config import *
 import os
+import json
+import re
 import time
 
 
-def _post_process_with_retry(app, cam, post_target, postProcessInput, attempts=3, delay_seconds=1.0):
+def get_tool_diameter(toolpath):
+    """Get tool diameter in inches from a toolpath"""
+    try:
+        value = toolpath.tool.parameters.itemByName("tool_diameter").value
+        return value.value / 2.54  # Convert from cm to inches
+    except Exception:
+        return 0
+
+
+def _format_tool_label(toolpath):
+    """Create a filename-friendly label from the tool diameter.
+
+    Used to regex-strip every non-digit out of str(inches) directly -
+    inches is a cm-to-inch round trip through Fusion's internal value and
+    is almost never an exact float (0.1575in comes back as something like
+    0.15750000000000003), so that pulled in 15+ digits of floating-point
+    noise along with the real diameter, producing names like
+    "S15750000000000004Pocket" instead of "S1575Pocket". Rounding first
+    keeps only the digits that actually describe the tool.
+    """
+    try:
+        value = toolpath.tool.parameters.itemByName("tool_diameter").value.value
+    except Exception:
+        return "0"
+    inches = round(value / 2.54, 4)
+    label = f"{inches:.4f}".replace(".", "").strip("0")
+    return label or "0"
+
+
+def _post_process_with_retry(app, cam, toolpath, postProcessInput, attempts=3, delay_seconds=1.0):
     """cam.postProcess() has been observed to fail with "RuntimeError 3:
     Initialization fails" specifically on the FIRST toolpath posted in a
     run, while an identical call for the very next toolpath (moments later
@@ -31,24 +62,24 @@ def _post_process_with_retry(app, cam, post_target, postProcessInput, attempts=3
             # state; the rest confirms what's actually being asked for.
             try:
                 app.log(
-                    f"postProcess about to run for '{post_target.name}': "
-                    f"strategy={getattr(post_target, 'strategy', '?')}, "
-                    f"isToolpathValid={getattr(post_target, 'isToolpathValid', '?')}, "
-                    f"isGenerating={getattr(post_target, 'isGenerating', '?')}, "
-                    f"warning={getattr(post_target, 'warning', '?')!r}, "
+                    f"postProcess about to run for '{toolpath.name}': "
+                    f"strategy={getattr(toolpath, 'strategy', '?')}, "
+                    f"isToolpathValid={getattr(toolpath, 'isToolpathValid', '?')}, "
+                    f"isGenerating={getattr(toolpath, 'isGenerating', '?')}, "
+                    f"warning={getattr(toolpath, 'warning', '?')!r}, "
                     f"programName={getattr(postProcessInput, 'programName', '?')!r}, "
                     f"outputFolder={getattr(postProcessInput, 'outputFolder', '?')!r}"
                 )
             except Exception as diag_error:
                 app.log(f"(could not read toolpath diagnostics: {diag_error})")
         try:
-            cam.postProcess(post_target, postProcessInput)
+            cam.postProcess(toolpath, postProcessInput)
             return
         except Exception as e:
             last_error = e
             app.log(
                 f"postProcess attempt {attempt}/{attempts} failed for "
-                f"'{post_target.name}': {e}"
+                f"'{toolpath.name}': {e}"
             )
             if attempt < attempts:
                 adsk.doEvents()
@@ -71,23 +102,83 @@ def export(name, post_processor_path):
     folder_path = os.path.join(FINAL_PATH, name)
     if not os.path.exists(folder_path):
         os.makedirs(folder_path)
-    if allSetups.count == 0:
-        raise ValueError('Fusion document has no CAM setups to post')
-    for index, setup in enumerate(allSetups):
-        operations = [operation for operation in setup.operations if not getattr(operation, 'isSuppressed', False)]
-        if not operations:
-            raise ValueError(f'Fusion setup {setup.name} has no enabled operations')
-        # A setup is one ordered Fusion program. Posting each operation and
-        # concatenating the results duplicates headers/trailers and changes
-        # post semantics. Fusion documents that a Setup is a valid postProcess
-        # target and preserves programmed operation order.
-        program_name = f'{name}_setup_{index + 1}'
-        post_input = adsk.cam.PostProcessInput.create(
-            program_name,
-            absolutePath,
-            folder_path,
-            adsk.cam.PostOutputUnitOptions.MillimetersOutput,
+    for setup in allSetups:
+        releventToolpaths = {
+            "Drills": [],
+            "Pocket": [],
+            "Profile": [],
+        }
+        app.log(
+            f"export(): setup '{setup.name}' has "
+            f"{[(op.name, op.strategy) for op in setup.operations]} at categorization time"
         )
-        post_input.isOpenInEditor = False
-        _post_process_with_retry(app, cam, setup, post_input)
-    return folder_path
+        for toolpath in setup.operations:
+            if toolpath.name == "Suppress":
+                continue
+            if toolpath.strategy == "drill":
+                releventToolpaths["Drills"].append(toolpath)
+            elif toolpath.strategy == "pocket_clearing":
+                releventToolpaths["Pocket"].append(toolpath)
+            else:
+                releventToolpaths["Profile"].append(toolpath)
+        app.log(
+            f"export(): categorized -> Drills={[t.name for t in releventToolpaths['Drills']]}, "
+            f"Pocket={[t.name for t in releventToolpaths['Pocket']]}, "
+            f"Profile={[t.name for t in releventToolpaths['Profile']]}"
+        )
+
+        # Sort drills by diameter ascending (smallest first)
+        releventToolpaths["Drills"].sort(key=get_tool_diameter)
+        # Sort pockets by diameter descending (largest first)
+        releventToolpaths["Pocket"].sort(key=get_tool_diameter, reverse=True)
+
+        for toolpath in releventToolpaths["Drills"]:
+            postProcessInput = adsk.cam.PostProcessInput.create(
+                setup.name[0] + str(toolpath.name).split(" ")[0],
+                absolutePath,
+                folder_path,
+                adsk.cam.PostOutputUnitOptions.MillimetersOutput,
+            )
+            postProcessInput.isOpenInEditor = False
+            _post_process_with_retry(app, cam, toolpath, postProcessInput)
+        for toolpath in releventToolpaths["Pocket"]:
+            tool = _format_tool_label(toolpath)
+            postProcessInput = adsk.cam.PostProcessInput.create(
+                setup.name[0] + tool + "Pocket",
+                absolutePath,
+                folder_path,
+                adsk.cam.PostOutputUnitOptions.MillimetersOutput,
+            )
+            postProcessInput.isOpenInEditor = False
+            # Used to catch-and-log here, which meant a Pocket toolpath that
+            # failed to post was silently missing from the exported G-code
+            # while the job still reported success - real, otherwise-silent
+            # data loss for whoever ran the resulting file. Retries first
+            # (see _post_process_with_retry); if every attempt still fails,
+            # that is a genuine failure and has to surface as one.
+            _post_process_with_retry(app, cam, toolpath, postProcessInput)
+
+        # Confirmed on a real job: two operations sharing a tool (e.g. a
+        # "bore" fallback operation and the real "contour2d" perimeter/tab
+        # cut, both landing in this catch-all bucket since neither is
+        # "drill" or "pocket_clearing") produced the IDENTICAL program name
+        # here (setup.name[0] + tool + "Profile" - the tool label is the
+        # only thing that varied, and both used the same tool). The second
+        # post silently overwrote the first's file on disk, and
+        # collect_nc_artifacts only ever saw whichever one wrote last -
+        # real, silent data loss of an entire operation's G-code, not a
+        # posting failure (both posts succeeded; postProcess doesn't know
+        # or care that another operation already used that filename). Fixed
+        # by folding the operation's own index within this bucket into the
+        # name so two operations can never collide just for sharing a tool.
+        for index, toolpath in enumerate(releventToolpaths["Profile"]):
+            tool = _format_tool_label(toolpath)
+            suffix = "Profile" if len(releventToolpaths["Profile"]) == 1 else f"Profile{index + 1}"
+            postProcessInput = adsk.cam.PostProcessInput.create(
+                setup.name[0] + tool + suffix,
+                absolutePath,
+                folder_path,
+                adsk.cam.PostOutputUnitOptions.MillimetersOutput,
+            )
+            postProcessInput.isOpenInEditor = False
+            _post_process_with_retry(app, cam, toolpath, postProcessInput)
