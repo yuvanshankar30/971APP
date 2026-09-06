@@ -94,9 +94,31 @@ def resolve_drop_folder(app, project_name, folder_path):
     folder = data_project.rootFolder
     segments = [s for s in (folder_path or "").split("/") if s.strip()]
     for segment in segments:
-        next_folder = folder.dataFolders.itemByName(segment)
+        # itemByName is documented to return None for a missing item, but
+        # confirmed live against the real shop account: it can instead raise
+        # RuntimeError("... InternalValidationError : status.isOk() &&
+        # folders") for the exact same "not found" case (transient Data
+        # Panel sync lag, most likely - a plain retry-as-not-found recovers
+        # every time this has been seen). An uncaught raise here crashed the
+        # whole folder sync/job save with no fallback, even though "create
+        # it" was already the correct next step one line down.
+        try:
+            next_folder = folder.dataFolders.itemByName(segment)
+        except RuntimeError as exc:
+            app.log(f"itemByName('{segment}') raised instead of returning None ({exc}) - treating as not found.")
+            next_folder = None
         if next_folder is None:
             app.log(f"'{segment}' folder not found under '{folder.name}', creating it...")
-            next_folder = folder.dataFolders.add(segment)
+            try:
+                next_folder = folder.dataFolders.add(segment)
+            except RuntimeError:
+                # Lost a race with another Runner/session creating the same
+                # segment between the lookup above and this add() - the
+                # folder exists now, so look it up for real instead of
+                # failing a job save over something that isn't actually a
+                # problem.
+                next_folder = folder.dataFolders.itemByName(segment)
+                if next_folder is None:
+                    raise
         folder = next_folder
     return data_project, folder
