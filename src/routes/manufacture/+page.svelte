@@ -3324,6 +3324,7 @@
   .table th.quantity-col,
   .table td.quantity-col {
     width: 3%;
+    text-align: center;
   }
   .table th.stock-col,
   .table td.stock-col {
@@ -3425,8 +3426,13 @@
     padding: 0 0.35rem;
     box-sizing: border-box;
   }
-  .metadata-col :global(.due-date) { width: 100%; }
-  .metadata-col :global(.due-input) { box-sizing: border-box; width: 100%; }
+  /* Keep the date field compact and centred within Due. A full-width native
+     date control visually spills into the Created column on wide screens. */
+  .metadata-col :global(.due-date) { width: auto; max-width: 100%; }
+  .metadata-col :global(.due-input) {
+    box-sizing: border-box;
+    width: min(10.75rem, 100%);
+  }
   .table th.requester-col,
   .table td.requester-col {
     width: 7.5%;
