@@ -18,6 +18,8 @@ browser confirmation or prompt popups.
 - **Manufacturing/CAM**: part tracking through the manufacturing pipeline
   (queued → in-progress → completed), STEP file 3D viewing, BOM and build
   tracking, kitting, bins, post-processing, router-specific workflows,
+  and a Completed-page action to duplicate a historical part as a fresh ToDo
+  request while retaining its source/CAD references,
   optional notes on a request (visible/editable both at creation and inline
   on each request in its manufacturing workflow tab), plus an optional router
   CAM-folder path that is saved as part of the request note for the machining
