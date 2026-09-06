@@ -366,6 +366,22 @@
       "workflow": "lathe"
     },
     {
+      "id": "polycarbonate_round_1_25",
+      "material": "Polycarbonate",
+      "description": "1.25\" Polycarbonate Round Stock",
+      "diameter": 1.25,
+      "dimensions": "Round",
+      "workflow": "lathe"
+    },
+    {
+      "id": "polycarbonate_round_2",
+      "material": "Polycarbonate",
+      "description": "2\" Polycarbonate Round Stock",
+      "diameter": 2.0,
+      "dimensions": "Round",
+      "workflow": "lathe"
+    },
+    {
       "id": "thunderhex_3_8",
       "material": "Aluminum",
       "description": "3/8\" ThunderHex Stock",

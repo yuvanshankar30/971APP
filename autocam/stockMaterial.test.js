@@ -92,6 +92,8 @@ describe('materialIdForStockAssignment (against the real stock catalog)', () => 
     expect(resolve('1/8" Aluminum Sheet')).toBe('al');
     expect(resolve('3/16" Aluminum Sheet')).toBe('al');
     expect(resolve('1/8" Polycarbonate Sheet')).toBe('pc');
+    expect(resolve('1.25\" Polycarbonate Round Stock')).toBe('pc');
+    expect(resolve('2\" Polycarbonate Round Stock')).toBe('pc');
     expect(resolve('Steel Block Stock')).toBe('steel');
     expect(resolve('PETG 3D Printing Filament')).toBe('petg');
   });
