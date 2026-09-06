@@ -4,6 +4,50 @@ import adsk.core, adsk.fusion, adsk.cam, traceback
 import time
 
 
+_POCKET_STRATEGIES = ("pocket_new", "pocket_clearing", "pocket2d")
+
+
+def _has_real_pocket_floor(bodies, tolerance=1e-4) -> bool:
+    """A genuine pocket has a flat floor strictly between a body's top and
+    bottom - a through-hole or an outer profile only ever touches the top
+    and bottom faces themselves, nothing in between. Confirmed directly on
+    a real part (holes + outer profile, no pocket): its only flat-face Z
+    heights were the top and bottom faces exactly, nothing between them.
+
+    Why this check exists at all: the "Pocket" template operation this
+    library uses is configured to cut the full stock depth (topHeight
+    'from stock top' to bottomHeight 'from stock bottom') within a boundary
+    that defaults to roughly the model's own footprint - correct for a part
+    that actually has a recessed pocket, but on a part that doesn't, this
+    combination has no real floor to stop at and instead clears across
+    nearly the entire part face at full depth. Confirmed directly:
+    boundaryMode's other choices ('none', 'silhouette', 'selection') don't
+    fix this either - 'none' produced an even LARGER, less-contained
+    toolpath than the default 'bounding-box', not a smaller one. The actual
+    fix is knowing the operation doesn't apply to this part's geometry at
+    all and removing it, the same principle DeleteToolpaths already applies
+    to the template's disabled "Suppress" placeholder and to genuinely
+    empty toolpaths - this is a third case of the same rule.
+    """
+    for body in bodies:
+        bb = body.boundingBox
+        top_z, bottom_z = bb.maxPoint.z, bb.minPoint.z
+        for face in body.faces:
+            try:
+                normal = face.geometry.normal
+            except Exception:
+                continue
+            if abs(normal.z) <= 0.99:
+                continue
+            try:
+                z = face.pointOnFace.z
+            except Exception:
+                continue
+            if z > bottom_z + tolerance and z < top_z - tolerance:
+                return True
+    return False
+
+
 def waitForGeneration(setup, waitforcontour=False, quiet_checks_required=5):
     app = adsk.core.Application.get()
     # Settling before the check (below) closes the *first*-check race
@@ -60,6 +104,25 @@ def DeleteToolpaths():
 
     # Ensure we are in the CAM workspace
     cam = adsk.cam.CAM.cast(design)
+
+    # Real Design product (app.activeProduct is the CAM product by this
+    # point, same "'CAM' object has no attribute 'rootComponent'" reason
+    # TabPlacement.py's own ConfigureTabs() already documents) - needed to
+    # check body geometry for _has_real_pocket_floor below.
+    real_design = adsk.fusion.Design.cast(
+        app.activeDocument.products.itemByProductType("DesignProductType")
+    )
+    bodies = (
+        [occ.bRepBodies.item(0) for occ in real_design.rootComponent.allOccurrences if occ.bRepBodies.count > 0]
+        if real_design
+        else []
+    )
+    # Default to "no pocket floor" (i.e. delete Pocket operations) if the
+    # geometry lookup itself fails - between wrongly dropping a legitimate
+    # Pocket operation and wrongly keeping one that clears across most of
+    # a part at full depth, the former is the safe direction to fail in.
+    has_pocket_floor = _has_real_pocket_floor(bodies) if bodies else False
+
     # Get all setups
     pastCache = 0
     allSetups = cam.setups
@@ -102,6 +165,18 @@ def DeleteToolpaths():
                 # after the full waitForGeneration(waitforcontour=True)
                 # above, so non-Drill operations have actually finished
                 # generating by this point.
+                toolpath.deleteMe()
+            elif toolpath.strategy in _POCKET_STRATEGIES and not has_pocket_floor:
+                # Confirmed on a real job: this template's Pocket operation
+                # is configured to cut the full stock depth within
+                # ~the model's own footprint - correct for a part with a
+                # real recessed pocket, but with no floor to stop at on a
+                # part that doesn't have one, it clears across nearly the
+                # entire part at full depth instead (isToolpathValid is
+                # still True - Fusion considers this "successful", it's
+                # just successfully doing the wrong thing). See
+                # _has_real_pocket_floor's own docstring for how this was
+                # confirmed and why boundaryMode isn't the actual fix.
                 toolpath.deleteMe()
             elif toolpath.isToolpathValid == False:
                 # Direct instruction: an operation the template included
