@@ -28,7 +28,17 @@ def SetupGenerator(
     setup = cam.setups.add(setupInput)
     setup.stockMode = adsk.cam.SetupStockModes.RelativeBoxStock
     setup.parameters.itemByName("job_stockOffsetMode").expression = "'all'"
-    setup.parameters.itemByName("job_stockOffsetXBack").expression = ".5 in"
+    # Margin goes on the two FAR sides only (high-X/"Front", high-Y/"Front"),
+    # not the near-origin sides - "Front"/"Back" aren't a consistent
+    # near/far mapping between X and Y (verified numerically: X's near-origin
+    # side is "Back", Y's near-origin side is "Back" too, but they don't
+    # mirror the same way flip labels don't - don't assume, check the
+    # resulting stock box against the part's bounding box). The previous
+    # margin-on-XBack setting put the 0.5in gap on the near-origin X side
+    # instead, leaving the part flush on the far edge and offset away from
+    # the origin corner instead of sitting on it.
+    setup.parameters.itemByName("job_stockOffsetXFront").expression = ".5 in"
+    setup.parameters.itemByName("job_stockOffsetXBack").expression = "0 in"
     setup.parameters.itemByName("job_stockOffsetYFront").expression = ".5 in"
     setup.parameters.itemByName("job_stockOffsetZFront").expression = (
         f"{truedepth-depth} in"
@@ -44,26 +54,36 @@ def SetupGenerator(
     # An earlier version used 'axesZY' mode (deriving X from Z and Y),
     # which coupled fixing X's direction to breaking either Z's or Y's -
     # every combination of flips in that mode traded one requirement for
-    # another. Switching to plain 'axesXY' mode with NO axis swap (X tied
-    # to the model's own X, Y to its own Y) and NO flips at all satisfies
-    # all three simultaneously - verified numerically against the real
-    # slapdih document via the Fusion MCP bridge, box point 'bottom 1'.
+    # another. 'axesXY' mode with NO axis swap and NO flips satisfied all
+    # three simultaneously - verified numerically against the real slapdih
+    # document via the Fusion MCP bridge.
     #
-    # Box-point corner labels ('bottom 1', 'bottom 2', ...) do NOT map to a
-    # fixed physical corner across different flip/axis states or even
+    # Later switched to 'axesZX' mode (explicit direct request, matching a
+    # manually-configured reference setup shown for this part) - picking Z
+    # from the model's own Z construction axis and X from its X construction
+    # axis, deriving Y via cross product, still with no flips. Re-verified
+    # numerically on a live document: this produces the exact same origin
+    # position and the exact same X/Y/Z direction vectors as the 'axesXY'
+    # config above, so all the same safety requirements still hold - it's a
+    # different UI path to an identical result, not a different orientation.
+    #
+    # Box-point corner labels ('bottom 1', 'top 1', ...) do NOT map to a
+    # fixed physical corner across different flip/axis/mode states or even
     # across documents - Fusion silently relabels which string means which
-    # corner. If this is touched again, verify origin position and axis
-    # directions numerically against a live document rather than reasoning
-    # about what the label should mean.
-    setup.parameters.itemByName("wcs_orientation_mode").expression = "'axesXY'"
+    # corner. Switching modes moved the origin to a different physical
+    # corner under the same 'top 1' label until re-verified below. If this
+    # is touched again, verify origin position and axis directions
+    # numerically against a live document rather than reasoning about what
+    # the label should mean.
+    setup.parameters.itemByName("wcs_orientation_mode").expression = "'axesZX'"
+    setup.parameters.itemByName("wcs_orientation_axisZ").value.value = [
+        comp.zConstructionAxis
+    ]
     setup.parameters.itemByName("wcs_orientation_axisX").value.value = [
         comp.xConstructionAxis
     ]
-    setup.parameters.itemByName("wcs_orientation_axisY").value.value = [
-        comp.yConstructionAxis
-    ]
+    setup.parameters.itemByName("wcs_orientation_flipZ").value.value = False
     setup.parameters.itemByName("wcs_orientation_flipX").value.value = False
-    setup.parameters.itemByName("wcs_orientation_flipY").value.value = False
     # 'top 1' - Z=0 at the top face of the stock (the surface an operator
     # actually touches off), not the bottom - cutting depths come out
     # negative from there, the normal convention. Same XY corner as before
