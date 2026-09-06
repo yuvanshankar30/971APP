@@ -523,23 +523,14 @@ def _apply_tool_to_elem(
     motion_node = _ensure_child(tool_elem, "motion")
     if preset:
         n = _parse_number(preset.get("n")) or _parse_number(preset.get("n_ramp")) or 0
-        # Direct instruction: feed rate and spindle speed should not change
-        # within/between operations - the preset otherwise supplies a
-        # different value per motion type (entry/exit/plunge/ramp/retract/
-        # transition feed, plus a separate ramp spindle speed), which is
-        # exactly what produced the varying F-words seen in real generated
-        # G-code. Collapsing every one of them to the single base cutting
-        # feed/speed here (rather than only in the presets block below)
-        # covers both the <motion> element's own attributes and the preset
-        # parameters.
-        n_ramp = n
+        n_ramp = _parse_number(preset.get("n_ramp")) or n
         v_f = _parse_number(preset.get("v_f")) or 0
-        v_f_lead_in = v_f
-        v_f_lead_out = v_f
-        v_f_plunge = v_f
-        v_f_ramp = v_f
-        v_f_retract = v_f
-        v_f_transition = v_f
+        v_f_lead_in = _parse_number(preset.get("v_f_leadIn")) or v_f
+        v_f_lead_out = _parse_number(preset.get("v_f_leadOut")) or v_f
+        v_f_plunge = _parse_number(preset.get("v_f_plunge")) or 0
+        v_f_ramp = _parse_number(preset.get("v_f_ramp")) or 0
+        v_f_retract = _parse_number(preset.get("v_f_retract")) or 0
+        v_f_transition = _parse_number(preset.get("v_f_transition")) or v_f
 
         ramp_angle_deg = _parse_number(preset.get("ramp-angle"))
         ramp_angle_internal = None
@@ -598,30 +589,52 @@ def _apply_tool_to_elem(
         coolant_expr = preset_exprs.get("tool_coolant") or f"'{coolant_mode}'"
         add_param("tool_coolant", coolant_mode, expression=coolant_expr)
 
-        # Direct instruction: feed rate and spindle speed should not change
-        # within/between operations. Every one of these is forced to the
-        # single base cutting feed/speed instead of the preset's own
-        # per-motion-type value (and its own expression, which could be a
-        # formula resolving to a different number even when the plain
-        # value would otherwise match) - see this function's matching
-        # <motion> element block above for the fuller rationale.
         n = _parse_number(preset.get("n")) or 0
         n_expr = preset_exprs.get("tool_spindleSpeed") or (
             f"{_fmt_num(n)} rpm" if n else None
         )
         add_param("tool_spindleSpeed", _fmt_num(n), expression=n_expr)
-        add_param("tool_rampSpindleSpeed", _fmt_num(n))
+
+        n_ramp = _parse_number(preset.get("n_ramp"))
+        if n_ramp is not None:
+            add_param("tool_rampSpindleSpeed", _fmt_num(n_ramp))
 
         v_f = _parse_number(preset.get("v_f"))
         if v_f is not None:
             v_f_expr = preset_exprs.get("tool_feedCutting")
             add_param("tool_feedCutting", _fmt_num(mm_value(v_f)), expression=v_f_expr)
-            add_param("tool_feedEntry", _fmt_num(mm_value(v_f)))
-            add_param("tool_feedExit", _fmt_num(mm_value(v_f)))
-            add_param("tool_feedTransition", _fmt_num(mm_value(v_f)))
-            add_param("tool_feedPlunge", _fmt_num(mm_value(v_f)))
-            add_param("tool_feedRamp", _fmt_num(mm_value(v_f)))
-            add_param("tool_feedRetract", _fmt_num(mm_value(v_f)))
+            add_param(
+                "tool_feedEntry",
+                _fmt_num(mm_value(_parse_number(preset.get("v_f_leadIn")) or v_f)),
+            )
+            add_param(
+                "tool_feedExit",
+                _fmt_num(mm_value(_parse_number(preset.get("v_f_leadOut")) or v_f)),
+            )
+            add_param(
+                "tool_feedTransition",
+                _fmt_num(mm_value(_parse_number(preset.get("v_f_transition")) or v_f)),
+            )
+
+        v_f_plunge = _parse_number(preset.get("v_f_plunge"))
+        if v_f_plunge is not None:
+            v_f_plunge_expr = preset_exprs.get("tool_feedPlunge")
+            add_param(
+                "tool_feedPlunge",
+                _fmt_num(mm_value(v_f_plunge)),
+                expression=v_f_plunge_expr,
+            )
+
+        v_f_ramp = _parse_number(preset.get("v_f_ramp"))
+        if v_f_ramp is not None:
+            v_f_ramp_expr = preset_exprs.get("tool_feedRamp")
+            add_param(
+                "tool_feedRamp", _fmt_num(mm_value(v_f_ramp)), expression=v_f_ramp_expr
+            )
+
+        v_f_retract = _parse_number(preset.get("v_f_retract"))
+        if v_f_retract is not None:
+            add_param("tool_feedRetract", _fmt_num(mm_value(v_f_retract)))
 
         material_info = preset.get("material", {})
         if isinstance(material_info, dict):
