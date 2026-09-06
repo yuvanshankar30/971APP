@@ -115,19 +115,21 @@ def _edge_length(edge) -> float:
 
 
 def _find_top_face(body):
-    """Largest planar, upward-facing face on a body - same "top face"
-    concept AutoArrange.py/SetupGenerator.py already use, kept independent
-    since this module has no import relationship with either.
+    """Return the highest upward-facing planar face on a body.
+
+    STEP imports can report opposing planar faces as upward-facing. Height
+    avoids the equal-area tie and unstable Fusion face iteration order.
     """
     best_face = None
-    best_area = 0.0
+    best_z = None
     for face in body.faces:
         try:
             normal = face.geometry.normal
+            z = face.pointOnFace.z
         except Exception:
             continue
-        if normal.z > 0.9 and face.area > best_area:
-            best_area = face.area
+        if normal.z > 0.9 and (best_z is None or z > best_z):
+            best_z = z
             best_face = face
     return best_face
 

@@ -16,18 +16,21 @@ _SELECTION_PARAM_BY_STRATEGY = {
 
 
 def _top_face(body):
-    """Largest planar, upward-facing face on a body - same concept
-    TabPlacement.py's _find_top_face uses, kept independent since this
-    module has no import relationship with that one.
+    """Return the highest upward-facing planar face on a body.
+
+    Some STEP imports report both opposing planar faces as upward-facing.
+    Choosing by area can then tie and depend on Fusion's iteration order;
+    Z height identifies the physical top face deterministically.
     """
-    best_face, best_area = None, 0.0
+    best_face, best_z = None, None
     for face in body.faces:
         try:
             normal = face.geometry.normal
+            z = face.pointOnFace.z
         except Exception:
             continue
-        if normal.z > 0.9 and face.area > best_area:
-            best_area = face.area
+        if normal.z > 0.9 and (best_z is None or z > best_z):
+            best_z = z
             best_face = face
     return best_face
 
@@ -170,7 +173,12 @@ def _repair_missing_selections(setup) -> list[str]:
             )
         return design_cache[0]
 
-    def _needs_repair(op):
+    def _curve_selection_state(op):
+        """The (param, value, selections) triple for this op's real
+        geometry-selection parameter, unconditionally - repair the caller
+        decides to do is up to it. Returns None only when this op's own
+        strategy has no such parameter at all.
+        """
         param_name = _SELECTION_PARAM_BY_STRATEGY.get(op.strategy)
         if param_name is None:
             return None
@@ -180,7 +188,13 @@ def _repair_missing_selections(setup) -> list[str]:
         value = param.value
         if not hasattr(value, "getCurveSelections"):
             return None
-        selections = value.getCurveSelections()
+        return (param, value, value.getCurveSelections())
+
+    def _needs_repair(op):
+        state = _curve_selection_state(op)
+        if state is None:
+            return None
+        _param, _value, selections = state
         # A template's saved reference can disappear completely when the
         # source body is replaced - Fusion then returns an EMPTY collection
         # (count == 0) rather than a stale entry carrying hasWarning=True.
@@ -191,7 +205,7 @@ def _repair_missing_selections(setup) -> list[str]:
         has_missing = selections.count == 0 or any(
             selections.item(i).hasWarning for i in range(selections.count)
         )
-        return (param, value, selections) if has_missing else None
+        return state if has_missing else None
 
     def _is_outer_profile(op):
         # A contour2d operation is either the ONE real outer-profile cut
@@ -218,24 +232,24 @@ def _repair_missing_selections(setup) -> list[str]:
     # shared snapshot instead removes the question entirely.
     ops_snapshot = list(setup.operations)
 
-    # First pass, read-only: which non-outer-profile contour2d finishing
-    # passes actually need repair - known up front so the second pass can
-    # distribute real internal features across ALL of them (one feature
-    # loop per operation) rather than dumping every feature onto whichever
-    # operation happens to be first and leaving the rest to generic
-    # recognition, which doesn't reliably find a through-cut feature (see
+    # First pass, read-only: every non-outer-profile contour2d finishing
+    # pass in the setup - known up front so the second pass can distribute
+    # real internal features across ALL of them (one feature loop per
+    # operation) rather than dumping every feature onto whichever operation
+    # happens to be first and leaving the rest to generic recognition,
+    # which doesn't reliably find a through-cut feature (see
     # _internal_feature_loop_edges_all_bodies's own docstring for the real
     # part that surfaced this). Sorted so an operation whose template name
     # already says "feature" (e.g. the New Router metal template's own
     # "Slot Cut for Features") claims the first, primary slice - the real,
     # purpose-built operation for this rather than whichever generic
     # "Shape ... Finishing Pass" happens to iterate first.
+    #
+    # Do not gate contour finishing passes on _needs_repair: Fusion can
+    # report stale template selections as healthy after a fresh STEP import.
+    # These passes are rebuilt from the part's current internal features.
     finishing_pass_ops = sorted(
-        (
-            op
-            for op in ops_snapshot
-            if op.strategy == "contour2d" and not _is_outer_profile(op) and _needs_repair(op) is not None
-        ),
+        (op for op in ops_snapshot if op.strategy == "contour2d" and not _is_outer_profile(op)),
         key=lambda op: 0 if "feature" in op.name.lower() else 1,
     )
     if finishing_pass_ops:
@@ -244,13 +258,21 @@ def _repair_missing_selections(setup) -> list[str]:
     feature_op_index = {op.operationId: i for i, op in enumerate(finishing_pass_ops)}
 
     for op in ops_snapshot:
-        repair_state = _needs_repair(op)
+        is_outer = _is_outer_profile(op)
+        is_feature_op = op.operationId in feature_op_index
+        # Outer profile and feature-finishing-pass operations are always
+        # repaired outright (see finishing_pass_ops's own comment on why
+        # trusting "does this look missing" for them is flaky); everything
+        # else (pocket2d/adaptive2d roughing, and any contour2d finishing
+        # pass this part has no real feature left to give) keeps the
+        # original conditional repair.
+        repair_state = _curve_selection_state(op) if (is_outer or is_feature_op) else _needs_repair(op)
         if repair_state is None:
             continue
         param, value, selections = repair_state
         selections.clear()
         name_lower = op.name.lower()
-        if _is_outer_profile(op):
+        if is_outer:
             # createNewSilhouetteSelection() is NOT scoped to just the true
             # outer perimeter - confirmed live that it also picks up every
             # internal feature loop that goes all the way through the
@@ -269,7 +291,7 @@ def _repair_missing_selections(setup) -> list[str]:
                 chain.isOpen = False
                 chain.isReverted = False
                 chain.inputGeometry = edges
-        elif op.operationId in feature_op_index and feature_edges_cache:
+        elif is_feature_op and feature_edges_cache:
             # This operation's own slice of the real internal features -
             # one loop per finishing-pass operation, in the priority order
             # finishing_pass_ops was sorted into above, except the LAST

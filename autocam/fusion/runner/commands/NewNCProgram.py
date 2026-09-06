@@ -1,5 +1,3 @@
-# Author-
-# Description-
 import adsk.core, adsk.fusion, adsk.cam
 from ..config import *
 import os
