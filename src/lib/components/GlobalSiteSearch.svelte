@@ -6,9 +6,10 @@
 
   export let open = false;
   export let canViewAdmin = false;
+  export let canViewScoutingAdmin = false;
   let query = '';
   let input;
-  $: results = searchSiteRoutes(query, { canViewAdmin });
+  $: results = searchSiteRoutes(query, { canViewAdmin, canViewScoutingAdmin });
   $: if (open) tick().then(() => input?.focus());
 
   function close() { open = false; query = ''; }

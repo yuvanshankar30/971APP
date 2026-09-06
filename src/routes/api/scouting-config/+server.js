@@ -3,10 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/public';
 import { env } from '$env/dynamic/private';
 import notescoutConfig from '$lib/notescout.json';
-import { TEAM_ROLES } from '$lib/permissions.js';
 import { getSupabase } from '$lib/server/971bot.js';
-
-const COMPETITION_LEAD = String(TEAM_ROLES.COMPETITION_LEAD || 'Competition Lead');
 
 const getClientFromRequest = (request) => {
   const auth = request?.headers?.get('authorization') || '';
@@ -19,9 +16,9 @@ function fallbackEventKey() {
   return String(notescoutConfig?.event_key || '').trim() || null;
 }
 
-function isCompetitionLead(profile) {
-  if (profile?.role === 'admin') return true;
-  return String(profile?.team_role || '').trim().toLowerCase() === COMPETITION_LEAD.toLowerCase();
+function canManageScouting(profile, rosterKeys) {
+  return profile?.role === 'admin'
+    || (rosterKeys || []).some((key) => String(key).trim().toLowerCase() === 'scouting admin');
 }
 
 async function fetchActorProfile(authSupa) {
@@ -29,13 +26,16 @@ async function fetchActorProfile(authSupa) {
   const actorId = data?.user?.id || null;
   if (!actorId) return { actorId: null, profile: null };
 
-  const { data: profile } = await authSupa
-    .from('user_profiles')
-    .select('id, role, team_role')
-    .eq('id', actorId)
-    .single();
+  const [profileResult, rosterResult] = await Promise.all([
+    authSupa.from('user_profiles').select('id, role').eq('id', actorId).single(),
+    authSupa.from('roster_entries').select('key:key_id(key_name)').eq('user_id', actorId)
+  ]);
 
-  return { actorId, profile: profile || null };
+  return {
+    actorId,
+    profile: profileResult.data || null,
+    rosterKeys: (rosterResult.data || []).map((entry) => entry?.key?.key_name).filter(Boolean)
+  };
 }
 
 async function getActiveEventKey(db) {
@@ -147,9 +147,9 @@ export async function POST({ request }) {
     if (!nextEventKey) return json({ error: 'event_key is required' }, { status: 400 });
 
     const authSupa = getClientFromRequest(request);
-    const { actorId, profile } = await fetchActorProfile(authSupa);
+    const { actorId, profile, rosterKeys } = await fetchActorProfile(authSupa);
     if (!actorId) return json({ error: 'Unauthorized' }, { status: 401 });
-    if (!isCompetitionLead(profile)) return json({ error: 'Forbidden' }, { status: 403 });
+    if (!canManageScouting(profile, rosterKeys)) return json({ error: 'Forbidden' }, { status: 403 });
 
     const db = getSupabase();
     const { data, error } = await db

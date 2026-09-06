@@ -3,12 +3,11 @@ import { createClient } from '@supabase/supabase-js';
 import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/public';
 import { env } from '$env/dynamic/private';
 import notescoutConfig from '$lib/notescout.json';
-import { FRC_TEAMS, TEAM_ROLES } from '$lib/permissions.js';
+import { FRC_TEAMS } from '$lib/permissions.js';
 import { getSupabase } from '$lib/server/971bot.js';
 import { selectPitScoutEntries } from '$lib/server/pitScoutingSchema.js';
 import { syncScoutingDataToSheet } from '$lib/server/google_sheets_sync.js';
 
-const COMPETITION_LEAD = String(TEAM_ROLES.COMPETITION_LEAD || 'Competition Lead');
 const ALL_FRC_TEAMS = new Set(Object.values(FRC_TEAMS).map(String));
 const PIT_SCOUT_PHOTO_BUCKET = 'pit-scout-photos';
 
@@ -62,18 +61,13 @@ function fallbackEventKey() {
   return String(notescoutConfig?.event_key || '').trim() || null;
 }
 
-function isCompetitionLead(profile) {
-  if (profile?.role === 'admin') return true;
-  return String(profile?.team_role || '').trim().toLowerCase() === COMPETITION_LEAD.toLowerCase();
-}
-
-function isScoutingLead(rosterKeys) {
+function hasScoutingAdminRosterKey(rosterKeys) {
   const keys = new Set((rosterKeys || []).map(normalizeKey).filter(Boolean));
-  return keys.has('scouting admin') || keys.has('scouting lead') || keys.has('data scout lead') || keys.has('note scout lead');
+  return keys.has('scouting admin');
 }
 
 function canManageScouting(profile, rosterKeys) {
-  return isCompetitionLead(profile) || isScoutingLead(rosterKeys);
+  return profile?.role === 'admin' || hasScoutingAdminRosterKey(rosterKeys);
 }
 
 function normalizeKey(value) {

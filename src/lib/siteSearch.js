@@ -27,13 +27,15 @@ const ROUTES = [
   ['Docs', '/docs', 'Resources', 'documentation help guide'],
   ['Discover', '/discover', 'Resources', 'explore tools'],
   ['Admin', '/admin', 'Administration', 'roles teams users settings', 'VIEW_ADMIN_PANEL'],
-  ['Scouting Admin', '/scouting-admin', 'Administration', 'scouting management assignments']
+  ['Scouting Admin', '/scouting-admin', 'Administration', 'scouting management assignments', 'SCOUTING_ADMIN']
 ].map(([label, href, category, keywords, permission]) => ({ label, href, category, keywords, permission }));
 
-export function searchSiteRoutes(query, { canViewAdmin = false } = {}) {
+export function searchSiteRoutes(query, { canViewAdmin = false, canViewScoutingAdmin = false } = {}) {
   const terms = String(query || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
   return ROUTES
-    .filter((route) => !route.permission || (route.permission === 'VIEW_ADMIN_PANEL' && canViewAdmin))
+    .filter((route) => !route.permission
+      || (route.permission === 'VIEW_ADMIN_PANEL' && canViewAdmin)
+      || (route.permission === 'SCOUTING_ADMIN' && canViewScoutingAdmin))
     .map((route) => {
       const haystack = `${route.label} ${route.category} ${route.keywords}`.toLowerCase();
       const score = terms.reduce((total, term) => total + (route.label.toLowerCase().startsWith(term) ? 4 : haystack.includes(term) ? 1 : -10), 0);

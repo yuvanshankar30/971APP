@@ -220,24 +220,21 @@
       loading = !value;
     });
     const uninit = initAuth();
-    const profileWaitTimer = setTimeout(() => { profileWaitExpired = true; }, 5000);
+    const profileWaitTimer = setTimeout(() => {
+      profileWaitExpired = true;
+      if (authUser && !user) {
+        user = {
+          id: authUser.id,
+          email: authUser.email || '',
+          full_name: authUser.user_metadata?.full_name || authUser.user_metadata?.name || '',
+          permissions: []
+        };
+      }
+    }, 5000);
     return () => { clearTimeout(profileWaitTimer); unsub?.(); unsubAuthUser?.(); unsubReady?.(); uninit?.(); };
   });
 
   $: if (user) profileWaitExpired = false;
-  // A profile outage must not turn a valid authenticated session into an
-  // endless loading screen. This minimal shell is replaced as soon as the
-  // background profile retry succeeds; it intentionally carries no elevated
-  // permissions.
-  $: if (profileWaitExpired && authUser && !user) {
-    user = {
-      id: authUser.id,
-      email: authUser.email || '',
-      full_name: authUser.user_metadata?.full_name || authUser.user_metadata?.name || '',
-      permissions: []
-    };
-  }
-
   // The scouting landing page only needs the signed-in scout's own queue.
   $: if (user && !scoutingLoaded) {
     scoutingLoaded = true;

@@ -10,4 +10,9 @@ describe('searchSiteRoutes', () => {
     expect(searchSiteRoutes('admin').some((route) => route.href === '/admin')).toBe(false);
     expect(searchSiteRoutes('admin', { canViewAdmin: true }).some((route) => route.href === '/admin')).toBe(true);
   });
+
+  it('does not expose Scouting Admin without its scoped access', () => {
+    expect(searchSiteRoutes('scouting admin').some((route) => route.href === '/scouting-admin')).toBe(false);
+    expect(searchSiteRoutes('scouting admin', { canViewScoutingAdmin: true }).some((route) => route.href === '/scouting-admin')).toBe(true);
+  });
 });
