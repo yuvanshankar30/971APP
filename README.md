@@ -542,7 +542,9 @@ AutoCAM's own code (engine, Drive watcher, `camJobs.js`, its components) is
   `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` throughout specifically so
   they're safe to re-run (see `migrations/20260817_cam_studio_system.sql`'s
   own header comment for the reasoning) - prefer that pattern for new
-  migrations too.
+  migrations too. Migrations that add, remove, or rename API-visible schema
+  objects must finish with `NOTIFY pgrst, 'reload schema';` so PostgREST does
+  not keep serving stale table metadata after the DDL succeeds.
 - **RLS (Row Level Security)** is the real authorization boundary - not
   app-layer checks. Every table should have RLS enabled with real policies;
   see **Known gaps** for tables that currently don't.
