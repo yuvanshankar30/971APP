@@ -92,17 +92,36 @@ def _material_aliases(material_name: str) -> list[str]:
     if not name:
         return aliases
 
-    if any(
-        token in name
-        for token in ("al", "alu", "alum", "6061", "aluminum", "aluminium")
+    if any(token in name for token in ("aluminum", "aluminium", "6061")) or name in (
+        "al",
+        "alu",
+        "alum",
     ):
+        # Deliberately NOT a bare "al" substring check - that false-matched
+        # "Baltic Birch Plywood" (contains "al" in "baltic") and "Delrin
+        # (Acetal)" (contains "al" in "acetal"), silently routing both to
+        # the aluminum preset. Found by testing _choose_preset against every
+        # real cam_materials name after adding presets for them.
         aliases.extend(["aluminium", "aluminum", "alum", "alu", "6061"])
-    if "poly" in name or "pc" == name or "lexan" in name:
-        aliases.extend(["polycarb", "polycarbonate", "poly", "pc", "lexan"])
+    if (
+        "polycarb" in name
+        or "lexan" in name
+        or "pc" == name
+        or ("poly" in name and "propylene" not in name)
+    ):
+        aliases.extend(["polycarb", "polycarbonate", "pc", "lexan"])
     if "mdf" in name:
         aliases.append("mdf")
     if "acrylic" in name:
         aliases.extend(["acrylic", "pmma"])
+    if "srpp" in name:
+        aliases.append("srpp")
+    if any(token in name for token in ("wood", "plywood", "birch")):
+        aliases.extend(["wood", "plywood", "birch"])
+    if "delrin" in name or "acetal" in name:
+        aliases.extend(["delrin", "acetal"])
+    if "nylon" in name:
+        aliases.append("nylon")
 
     # Also try the raw material name.
     aliases.append(name)
