@@ -60,8 +60,14 @@ import adsk.fusion
 import adsk.cam
 
 
-DEFAULT_MIN_TABS = 3
+DEFAULT_MIN_TABS = 4
 DEFAULT_MAX_TABS = 8
+# How far outward (beyond the candidate edge) to check for real stock -
+# just enough to tell "is there material here at all", not "is there a lot
+# of it". Matches the same order of magnitude as MIN_TAB_EDGE_LENGTH_IN
+# below, not a coincidence - both are about "is this a real, usable
+# anchor point," just measured along different axes of the same tab.
+STOCK_BACKING_CHECK_IN = 0.2
 # Roughly one tab per this many inches of a part's own outer perimeter -
 # FRC-scale sheet parts (a few inches to a couple feet around) land in the
 # 3-8 tab range this way rather than every part getting the same flat count
@@ -171,13 +177,107 @@ def _edges_collinear(edge_a, edge_b, tolerance: float = 1e-3) -> bool:
     return abs(connecting.dotProduct(dir_a)) > 1 - tolerance
 
 
-def select_tab_edges(body, max_tabs: int = DEFAULT_MAX_TABS):
+def _edge_midpoint(edge):
+    geom = edge.geometry
+    start, end = geom.startPoint, geom.endPoint
+    return adsk.core.Point3D.create((start.x + end.x) / 2, (start.y + end.y) / 2, (start.z + end.z) / 2)
+
+
+def _edge_outward_point(edge, body_center, offset_cm):
+    """A point just beyond this edge, on the side AWAY from the part's own
+    body - the side a tab would actually need real stock behind. The edge
+    itself has two perpendicular directions; the one whose offset point
+    ends up FARTHER from the body's own center is outward, since a convex
+    part's outer boundary always faces away from its own centroid.
+    """
+    direction, _ = _edge_direction_and_point(edge)
+    mid = _edge_midpoint(edge)
+    # Either perpendicular to the edge's own direction, in the face plane (z=0 component).
+    perp = adsk.core.Vector3D.create(-direction.y, direction.x, 0)
+    perp.normalize()
+    candidate_a = adsk.core.Point3D.create(mid.x + perp.x * offset_cm, mid.y + perp.y * offset_cm, mid.z)
+    candidate_b = adsk.core.Point3D.create(mid.x - perp.x * offset_cm, mid.y - perp.y * offset_cm, mid.z)
+    dist_a = (candidate_a.x - body_center.x) ** 2 + (candidate_a.y - body_center.y) ** 2
+    dist_b = (candidate_b.x - body_center.x) ** 2 + (candidate_b.y - body_center.y) ** 2
+    return candidate_a if dist_a > dist_b else candidate_b
+
+
+def _has_real_stock_backing(edge, body_center, stock_bounds, offset_cm) -> bool:
+    """A tab on this edge is meaningless if the material just beyond it
+    isn't real stock - direct instruction: a part positioned close to the
+    plate's own edge (AutoArrange's frame margin used up on that side, or
+    a corner placement) can have one or more sides with little to no
+    stock actually behind them; a tab there has nothing real to anchor
+    into. stock_bounds is (xLow, xHigh, yLow, yHigh) from the setup's own
+    real stockXLow/XHigh/YLow/YHigh parameters - the plate's actual
+    machining bounds, not a guess. None (stock bounds unavailable) means
+    "don't filter" rather than "reject everything" - a missing bounds
+    check should never be the reason a part ends up with zero tabs.
+    """
+    if stock_bounds is None:
+        return True
+    x_low, x_high, y_low, y_high = stock_bounds
+    point = _edge_outward_point(edge, body_center, offset_cm)
+    return x_low <= point.x <= x_high and y_low <= point.y <= y_high
+
+
+def _distinct_straight_line_count(body, stock_bounds=None) -> int:
+    """How many genuinely different straight sides body's outer boundary
+    has, after collapsing multi-segment sides (a fillet/tangent
+    transition point splitting what's really one line) and filtering out
+    the same too-short/no-stock-backing edges select_tab_edges itself
+    would reject - used only to decide the target tab count (see
+    _min_tabs_for_body), not to place tabs directly.
+    """
+    top_face = _find_top_face(body)
+    if top_face is None:
+        return 0
+    min_length_cm = MIN_TAB_EDGE_LENGTH_IN * 2.54
+    stock_check_cm = STOCK_BACKING_CHECK_IN * 2.54
+    body_center = adsk.core.Point3D.create(
+        (body.boundingBox.minPoint.x + body.boundingBox.maxPoint.x) / 2,
+        (body.boundingBox.minPoint.y + body.boundingBox.maxPoint.y) / 2,
+        0,
+    )
+    straight_edges = [
+        e
+        for e in _outer_boundary_edges(top_face)
+        if _is_straight_edge(e)
+        and _edge_length(e) >= min_length_cm
+        and _has_real_stock_backing(e, body_center, stock_bounds, stock_check_cm)
+    ]
+    lines: list[list] = []
+    for edge in straight_edges:
+        for line in lines:
+            if _edges_collinear(edge, line[0]):
+                line.append(edge)
+                break
+        else:
+            lines.append([edge])
+    return len(lines)
+
+
+def _min_tabs_for_body(body, min_tabs: int, stock_bounds=None) -> int:
+    """A triangular part only has 3 real sides to begin with - padding a
+    4th tab onto one already-tabbed side doesn't add real holding power,
+    it just doubles up on one side. Direct instruction: 4 or more tabs
+    normally, but exactly 3 for a triangular shape. Anything with 4+
+    distinct sides still uses the normal min_tabs floor (parametric -
+    ConfigureTabs's own min_tabs/max_tabs arguments, not hardcoded here).
+    """
+    if _distinct_straight_line_count(body, stock_bounds) == 3:
+        return 3
+    return min_tabs
+
+
+def select_tab_edges(body, max_tabs: int = DEFAULT_MAX_TABS, stock_bounds=None):
     """Straight edges on the body's own outer boundary, spread across
     distinct straight lines (longest line first) rather than clustered
     onto one, capped at max_tabs. Never returns a curved/filleted edge, an
-    internal-loop (hole/pocket) edge, or one too short to physically hold a
-    tab - direct instruction, not a preference to relax if a part is mostly
-    rounded or small.
+    internal-loop (hole/pocket) edge, one too short to physically hold a
+    tab, or one with no real stock behind it (see _has_real_stock_backing)
+    - direct instruction, not a preference to relax if a part is mostly
+    rounded, small, or sitting close to the plate's own edge.
 
     One tab per distinct line first (so at least 2 different sides get a
     tab whenever the part actually has that many straight sides), then
@@ -189,10 +289,18 @@ def select_tab_edges(body, max_tabs: int = DEFAULT_MAX_TABS):
     if top_face is None:
         return []
     min_length_cm = MIN_TAB_EDGE_LENGTH_IN * 2.54
+    stock_check_cm = STOCK_BACKING_CHECK_IN * 2.54
+    body_center = adsk.core.Point3D.create(
+        (body.boundingBox.minPoint.x + body.boundingBox.maxPoint.x) / 2,
+        (body.boundingBox.minPoint.y + body.boundingBox.maxPoint.y) / 2,
+        0,
+    )
     straight_edges = [
         e
         for e in _outer_boundary_edges(top_face)
-        if _is_straight_edge(e) and _edge_length(e) >= min_length_cm
+        if _is_straight_edge(e)
+        and _edge_length(e) >= min_length_cm
+        and _has_real_stock_backing(e, body_center, stock_bounds, stock_check_cm)
     ]
     straight_edges.sort(key=_edge_length, reverse=True)
 
@@ -281,6 +389,24 @@ def ConfigureTabs(min_tabs: int = DEFAULT_MIN_TABS, max_tabs: int = DEFAULT_MAX_
         return
 
     for setup in cam.setups:
+        # The real machining bounds of this setup's plate, straight from
+        # Fusion's own computed stock parameters - not a guess, and not
+        # the part's own bounding box (a part positioned close to the
+        # plate's own edge - AutoArrange's frame margin used up on that
+        # side, or a corner placement - can have real sides with little
+        # to no stock actually behind them; see _has_real_stock_backing).
+        # None (any parameter missing) means "skip this filter, don't
+        # place zero tabs from a name lookup failing."
+        stock_bounds = None
+        try:
+            x_low = float(setup.parameters.itemByName("stockXLow").expression)
+            x_high = float(setup.parameters.itemByName("stockXHigh").expression)
+            y_low = float(setup.parameters.itemByName("stockYLow").expression)
+            y_high = float(setup.parameters.itemByName("stockYHigh").expression)
+            stock_bounds = (x_low, x_high, y_low, y_high)
+        except Exception as e:
+            app.log(f"TabPlacement: could not read stock bounds, skipping the real-stock-backing check: {e}")
+
         # Only the ONE contour2d operation the template itself designates
         # for tabs (group_tabs already true in the template's own default,
         # read here before this function ever touches it) - confirmed
@@ -333,13 +459,14 @@ def ConfigureTabs(min_tabs: int = DEFAULT_MIN_TABS, max_tabs: int = DEFAULT_MAX_
             total_perimeter_in = 0.0
             for body in bodies:
                 perimeter_in = _outer_perimeter_in(body)
-                target_tabs = _tab_count_for_perimeter(perimeter_in, min_tabs, max_tabs)
-                body_candidates = select_tab_edges(body, max_tabs=target_tabs)
-                if len(body_candidates) < min_tabs:
+                body_min_tabs = _min_tabs_for_body(body, min_tabs, stock_bounds)
+                target_tabs = _tab_count_for_perimeter(perimeter_in, body_min_tabs, max_tabs)
+                body_candidates = select_tab_edges(body, max_tabs=target_tabs, stock_bounds=stock_bounds)
+                if len(body_candidates) < body_min_tabs:
                     app.log(
                         f"TabPlacement: '{op.name}' - a nested body only had "
                         f"{len(body_candidates)} straight edge(s) long enough "
-                        f"to hold a tab (wanted at least {min_tabs} of "
+                        f"to hold a tab (wanted at least {body_min_tabs} of "
                         f"{target_tabs} target, perimeter {perimeter_in:.1f}in) "
                         "- using what's available rather than placing a tab "
                         "on a rounded or too-short edge."
