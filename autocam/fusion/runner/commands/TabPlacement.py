@@ -330,7 +330,34 @@ def ConfigureTabs(min_tabs: int = DEFAULT_MIN_TABS, max_tabs: int = DEFAULT_MAX_
     single_body = bodies[0] if len(bodies) == 1 else None
 
     for setup in cam.setups:
-        contour_ops = [op for op in setup.operations if op.strategy == "contour2d"]
+        # Only the ONE contour2d operation the template itself designates
+        # for tabs (group_tabs already true in the template's own default,
+        # read here before this function ever touches it) - confirmed
+        # directly against the real exported template
+        # ((DEPRECATED)971 Metal Sheet.f3dhsm-template): of its three
+        # contour2d operations ("Shape Through Finishing Pass", "Shape
+        # Pocket Finishing Pass", "2D Slot Cut"), only "2D Slot Cut"
+        # defaults group_tabs to true - the other two are finishing passes
+        # for individual internal features, not the outer profile that
+        # actually holds the part to stock. This function used to enable
+        # group_tabs and apply the BODY's outer-boundary tab edges to every
+        # contour2d operation indiscriminately, including those finishing
+        # passes - confirmed live as a real bug (small, wrong-looking tabs
+        # applied to operations that cut internal features, nothing to do
+        # with holding the part to stock).
+        contour_ops = []
+        for op in setup.operations:
+            if op.strategy != "contour2d":
+                continue
+            group_tabs_param = op.parameters.itemByName("group_tabs")
+            if group_tabs_param is None:
+                continue
+            try:
+                already_tabbed = str(group_tabs_param.expression).strip().lower() == "true"
+            except Exception:
+                already_tabbed = False
+            if already_tabbed:
+                contour_ops.append(op)
         if not contour_ops:
             continue
 

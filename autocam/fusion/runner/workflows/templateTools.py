@@ -771,6 +771,54 @@ def _find_largest_endmill(indexes: list[dict]) -> Optional[tuple[dict, dict]]:
     return None
 
 
+_NESTED_SHEET_LEAD_STRATEGIES = {"contour2d", "pocket2d"}
+
+
+def _set_parameter_expression(template_elem: ET.Element, name: str, expression: str) -> bool:
+    parameter = template_elem.find(f"{_q('parameter')}[@name='{name}']")
+    if parameter is None:
+        return False
+    parameter.set("expression", expression)
+    return True
+
+
+def disable_geometry_dependent_leads(template_path: str) -> list[str]:
+    """Make imported/nested sheet contours valid without stale lead geometry.
+
+    A real material-sheet template stores lead-in and lead-out choices from
+    the CAD used when that template was exported. On a grouped or otherwise
+    tightly-packed plate those leads can collide with a neighboring contour
+    or a tight circular pocket, so Fusion skips the contour entirely with a
+    "given lead parameters would cause a collision" warning - confirmed live
+    on a real grouped job (Shape Through/Shape Pocket finishing passes both
+    warned and were left unmachined). The cutting path itself remains valid
+    without a lead-in/out; disabling them is safe for closed internal
+    features and thin sheet, which is what these strategies are used for
+    here. The tabbed outer profile (the one operation tabs actually depend
+    on) already has leads disabled in the real exported templates, so this
+    is a no-op for it, not a behavior change.
+    """
+    ET.register_namespace("", _TEMPLATE_NS)
+    tree = ET.parse(template_path)
+    changed: list[str] = []
+    for template_elem in tree.getroot().findall(f".//{_q('template')}"):
+        if template_elem.get("strategy") not in _NESTED_SHEET_LEAD_STRATEGIES:
+            continue
+        altered = False
+        for name, expression in (
+            ("doLeadIn", "false"),
+            ("doLeadOut", "false"),
+            ("leadsForAllFinishingPasses", "false"),
+            ("entryPositions", "false"),
+            ("exitPositions", "false"),
+        ):
+            altered = _set_parameter_expression(template_elem, name, expression) or altered
+        if altered:
+            changed.append(template_elem.get("description") or template_elem.get("strategy") or "operation")
+    tree.write(template_path, encoding="utf-8", xml_declaration=True)
+    return changed
+
+
 def patch_cam_template_with_tool_libraries(
     template_path: str,
     output_path: str,

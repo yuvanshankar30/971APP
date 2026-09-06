@@ -35,7 +35,7 @@ from ..config import (
 from .dropFolder import resolve_drop_folder
 from .job_status import ensure_completion_response, send_job_error
 from .localCamAssets import load_local_tool_library_json, resolve_local_post_processor
-from .templateTools import patch_cam_template_with_tool_libraries
+from .templateTools import patch_cam_template_with_tool_libraries, disable_geometry_dependent_leads
 
 
 def _select_plate_template_path(machine_name: Optional[str], material_name: Optional[str]) -> str:
@@ -337,6 +337,10 @@ def start(data, session):
         if patch_info.get("bore_fallback"):
             app.log(f"Bore fallback: {patch_info.get('bore_fallback')}")
         template_path = patched_template
+
+        leads_disabled = disable_geometry_dependent_leads(template_path)
+        if leads_disabled:
+            app.log(f"Disabled geometry-dependent leads for: {leads_disabled}")
 
         # Category thickness (nominal part thickness, for the offset
         # calculation true_depth - thickness) - same server-resolved payload

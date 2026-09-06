@@ -60,7 +60,14 @@ def _repair_missing_selections(setup) -> list[str]:
         if not hasattr(value, "getCurveSelections"):
             continue
         selections = value.getCurveSelections()
-        has_missing = any(
+        # A template's saved reference can disappear completely when the
+        # source body is replaced - Fusion then returns an EMPTY collection
+        # (count == 0) rather than a stale entry carrying hasWarning=True.
+        # any() over an empty range is False, so this used to read as "not
+        # missing" and skip repair entirely - confirmed live as the cause of
+        # circular pockets silently generating no toolpath at all (the
+        # operation kept its original, now-empty selection).
+        has_missing = selections.count == 0 or any(
             selections.item(i).hasWarning for i in range(selections.count)
         )
         if not has_missing:
@@ -69,7 +76,16 @@ def _repair_missing_selections(setup) -> list[str]:
         if op.strategy == "contour2d":
             selections.createNewSilhouetteSelection()
         else:
-            selections.createNewPocketRecognitionSelection()
+            recognition = selections.createNewPocketRecognitionSelection()
+            # Without isSetupModelSelected, a PocketRecognitionSelection has
+            # no model to search at all and silently recognizes nothing -
+            # confirmed live as the other half of the same "circular pockets
+            # not generating" failure. areHolesIncluded is off by default
+            # (every pocket/adaptive operation would otherwise also try to
+            # cut circular holes meant for their own dedicated operation);
+            # only turn it on for the operation actually named for that.
+            recognition.isSetupModelSelected = True
+            recognition.areHolesIncluded = "circular" in op.name.lower() and "hole" in op.name.lower()
         value.applyCurveSelections(selections)
         repaired.append(op.name)
     return repaired
