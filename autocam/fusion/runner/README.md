@@ -115,6 +115,7 @@ It asks which Hub to talk to (deployed, or a local dev server) and for your `FUS
 | `job_status.py` | Reports job status back to Spartans Hub |
 | `setupTemp.py` | Setup + temp-file handling |
 | `templateTools.py` | Applies tool libraries from templates |
+| `machiningTime.py` | Uses Fusion's real CAM API to report plate and box-tube machining time consistently |
 
 ### Commands (`commands/`)
 
