@@ -3,7 +3,7 @@
   import { supabase } from '$lib/supabase.js';
   import { userStore, loadUserFromUUID } from '$lib/stores/user.js';
   import { canManageCamProfiles } from '$lib/permissions.js';
-  import { Layers, Package, Box, ListChecks, SlidersHorizontal, BookOpen } from 'lucide-svelte';
+  import { Layers, Package, Box, ListChecks, SlidersHorizontal, BookOpen, HelpCircle } from 'lucide-svelte';
   import PartsTab from './PartsTab.svelte';
   import PlatesTab from './PlatesTab.svelte';
   import BoxTubesTab from './BoxTubesTab.svelte';
@@ -39,9 +39,14 @@
 
 <div class="page-header">
   <h1><Layers size={28} /> Fusion CAM</h1>
-  <a class="btn btn-primary btn-lg" href="/autocam/fusion/setup">
-    <BookOpen size={18} /> Runner Setup Guide
-  </a>
+  <div class="header-guide-links">
+    <a class="btn btn-secondary btn-sm" href="/autocam/fusion/usage">
+      <HelpCircle size={14} /> Usage Guide
+    </a>
+    <a class="btn btn-secondary btn-sm" href="/autocam/fusion/setup">
+      <BookOpen size={14} /> Runner Setup
+    </a>
+  </div>
 </div>
 
 <nav class="tab-nav" role="tablist" aria-label="Fusion CAM sections">
@@ -55,7 +60,7 @@
     <Box size={16} /> Box Tubes
   </button>
   <button type="button" class:active={activeTab === 'queue'} on:click={() => setActiveTab('queue')}>
-    <ListChecks size={16} /> Job Queue
+    <ListChecks size={16} /> Jobs
   </button>
   <button type="button" class:active={activeTab === 'stock-categories'} on:click={() => setActiveTab('stock-categories')}>
     <SlidersHorizontal size={16} /> Stock Categories
@@ -86,6 +91,10 @@
      theme override there either). Only page-specific LAYOUT rules remain
      below; all colors now come from the real site tokens in src/app.css. */
 
+  .header-guide-links {
+    display: flex;
+    gap: 0.5rem;
+  }
   .tab-nav {
     display: flex;
     gap: 0.5rem;

@@ -38,6 +38,47 @@ def resolve_data_project(app, project_name):
     return app.data.activeProject
 
 
+def list_data_folder_tree(app, project_name, base_folder_path, max_depth=3):
+    """Walks the Data Panel folder tree starting at base_folder_path (e.g.
+    "Offseason Projects/AutoCAM", the configured drop folder) and returns
+    it as nested plain dicts - {"name", "path", "children": [...]}, path
+    being the "/"-joined segments from the PROJECT ROOT, not base_folder_path
+    (what resolve_drop_folder's folder_path argument expects back).
+
+    This is read-only enumeration for the web UI's folder picker (see
+    "sync-folders" in the fusion-runner API route) - not involved in
+    resolving where a document actually gets saved, that's still
+    resolve_drop_folder above.
+
+    Deliberately scoped to base_folder_path rather than the whole project:
+    confirmed live against the real shop account that even a shallow
+    (depth-3) walk from the project ROOT blocked Fusion's main thread long
+    enough to time out the MCP bridge twice in a row - "2026 Season CAM"
+    has enough unrelated top-level folders that enumerating them all is
+    genuinely too slow for a periodic sync, each dataFolders access being
+    a real synchronous Autodesk cloud round-trip. Jumping straight to the
+    AutoCAM folder via resolve_drop_folder's existing (already fast, used
+    on every job) walk and only recursing from there keeps this to the
+    part of the tree someone queueing a job actually needs to browse.
+    Folders outside this subtree still work fine as a save destination via
+    resolve_drop_folder; they just don't appear in the picker.
+    """
+    data_project, base_folder = resolve_drop_folder(app, project_name, base_folder_path)
+
+    def walk(folder, path, depth):
+        node = {"name": folder.name, "path": path, "children": []}
+        if depth >= max_depth:
+            return node
+        for i in range(folder.dataFolders.count):
+            child = folder.dataFolders.item(i)
+            child_path = f"{path}/{child.name}" if path else child.name
+            node["children"].append(walk(child, child_path, depth + 1))
+        node["children"].sort(key=lambda n: n["name"].lower())
+        return node
+
+    return {"project": data_project.name, "root": walk(base_folder, base_folder_path, 0)}
+
+
 def resolve_drop_folder(app, project_name, folder_path):
     """Finds (or creates) the nested Data Panel folder documents get saved
     into, e.g. folder_path="Offseason Projects/AutoCAM".

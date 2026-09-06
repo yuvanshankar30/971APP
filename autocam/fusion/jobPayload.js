@@ -35,7 +35,14 @@ export async function buildJobPayload(supabase, job) {
     }
     return { plate_id: snapshot.plate_id, grouping_mode: snapshot.grouping_mode || null, machine_id, tool_id, length: Number(snapshot.length),
       width: Number(snapshot.width), true_depth: Number(snapshot.true_depth), thickness: Number(snapshot.thickness),
-      material: snapshot.material, assignments };
+      material: snapshot.material, assignments,
+      // Set at queue time on the Plates tab (folder-tree picker + filename
+      // field) - takes priority over any per-part fusion_file_name above.
+      // Both optional: camPlate.py falls back to its existing defaults
+      // (per-part name, then Plate<id>Job<id>; the configured drop folder)
+      // when a job was queued before this existed.
+      fusion_file_name: typeof params.fusionFileName === 'string' && params.fusionFileName.trim() ? params.fusionFileName.trim() : null,
+      fusion_folder_path: typeof params.fusionFolderPath === 'string' && params.fusionFolderPath.trim() ? params.fusionFolderPath.trim() : null };
   }
   if (params.fusionJobKind === 'box_tube') {
     const { data, error } = await supabase.from('fusion_box_tubes').select('*').eq('id', params.boxTubeId).single();

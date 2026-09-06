@@ -1,13 +1,25 @@
 <script>
   import { requestConfirmation } from '$lib/confirmation.js';
   import { onMount } from 'svelte';
+  import { supabase } from '$lib/supabase.js';
   import { toastActions } from '$lib/toast.js';
   import { fetchFusionJobs, cancelFusionJob, deleteFusionJob } from '$lib/fusionCam.js';
   import { formatPacificDateTimeWithZone } from '$lib/timezone.js';
-  import { ListChecks, X, Download, Trash2 } from 'lucide-svelte';
+  import { ListChecks, X, Download, Trash2, Upload } from 'lucide-svelte';
 
   let jobs = [];
   let loading = true;
+
+  // Where a job's G-code lands when someone presses "Post to Files" below -
+  // the same "manufacturing-drive" bucket /manufacture/files browses,
+  // under one fixed folder so completed CAM output always ends up
+  // somewhere predictable instead of scattered across the drive.
+  const FILES_BUCKET = 'manufacturing-drive';
+  const FILES_TARGET_FOLDER = 'AutoCAM';
+
+  let postModalJob = null;
+  let postFileName = '';
+  let posting = false;
 
   const STATUS_LABELS = {
     queued: 'Queued - waiting for a Runner',
@@ -74,6 +86,63 @@
     return job.params?.fusionJobKind || 'unknown';
   }
 
+  function machiningTimeLabel(job) {
+    const seconds = Number(job?.stats?.total_machining_time);
+    if (!Number.isFinite(seconds) || seconds <= 0) return null;
+    const minutes = Math.round(seconds / 60);
+    if (minutes < 1) return 'under a minute';
+    if (minutes < 60) return `about ${minutes} min`;
+    const hours = Math.floor(minutes / 60);
+    const rem = minutes % 60;
+    return rem ? `about ${hours}h ${rem}m` : `about ${hours}h`;
+  }
+
+  function openPostModal(job) {
+    postModalJob = job;
+    postFileName = (job.name || `Job${job.id.slice(0, 8)}`).replace(/\s+/g, '');
+  }
+
+  function closePostModal() {
+    postModalJob = null;
+  }
+
+  // Uploads every NC file this job produced into one shared folder in the
+  // Files tab, named from the text the user typed - one file gets that
+  // name exactly; more than one gets it with -1, -2, etc. so multiple
+  // operations don't collide.
+  async function confirmPost() {
+    const job = postModalJob;
+    const baseName = postFileName.trim().replace(/\s+/g, '');
+    if (!baseName) {
+      toastActions.show('Enter a file name');
+      return;
+    }
+    const files = job.fusion_nc_files || [];
+    if (!files.length) {
+      toastActions.show('This job has no G-code to post');
+      return;
+    }
+    posting = true;
+    try {
+      for (const [index, file] of files.entries()) {
+        const suffix = files.length === 1 ? '' : `-${index + 1}`;
+        const path = `${FILES_TARGET_FOLDER}/${baseName}${suffix}.ngc`;
+        const binary = atob(file.contentBase64);
+        const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+        const { error } = await supabase.storage
+          .from(FILES_BUCKET)
+          .upload(path, new Blob([bytes]), { upsert: true, contentType: 'text/plain' });
+        if (error) throw error;
+      }
+      toastActions.show(`Posted to Files / ${FILES_TARGET_FOLDER}`);
+      closePostModal();
+    } catch (e) {
+      toastActions.show(e.message || 'Failed to post to Files');
+    } finally {
+      posting = false;
+    }
+  }
+
   function downloadNcFile(file) {
     const binary = atob(file.contentBase64);
     const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
@@ -114,6 +183,11 @@
             Parts: {job.params.fusionPlateSnapshot.assignments.map((part) => `${part.quantity}x ${part.name || part.part_id}`).join(', ')}
           </p>
         {/if}
+        {#if job.status === 'completed' && machiningTimeLabel(job)}
+          <p class="cam-form-hint" title="Estimated time to cut this on the machine, not counting load/unload">
+            Machining time: {machiningTimeLabel(job)}
+          </p>
+        {/if}
         {#if job.status === 'failed' && job.errors?.length}
           <p class="cam-form-hint error-text">{job.errors.join('; ')}</p>
         {/if}
@@ -124,6 +198,9 @@
                 <Download size={14} /> {file.name} ({file.size} bytes)
               </button>
             {/each}
+            <button class="btn btn-secondary btn-sm" title="Copy this job's G-code into Files / {FILES_TARGET_FOLDER}" on:click={() => openPostModal(job)}>
+              <Upload size={14} /> Post to Files
+            </button>
           {/if}
           {#if ['queued', 'completed', 'failed', 'rejected'].includes(job.status)}
             <button class="btn btn-ghost btn-sm" on:click={() => handleDelete(job)}>
@@ -138,6 +215,39 @@
         </div>
       </div>
     {/each}
+  </div>
+{/if}
+
+{#if postModalJob}
+  <div class="modal-overlay" role="presentation" on:click={closePostModal}>
+    <div class="modal post-modal" role="dialog" aria-labelledby="post-modal-title" on:click|stopPropagation>
+      <div class="modal-header">
+        <h3 id="post-modal-title">Post to Files</h3>
+        <button type="button" class="btn btn-ghost btn-sm" title="Close" on:click={closePostModal}><X size={16} /></button>
+      </div>
+      <div class="modal-body">
+        <p class="cam-form-hint">
+          Copies this job's G-code into Files / {FILES_TARGET_FOLDER}, where anyone can grab it.
+          {#if postModalJob.fusion_nc_files?.length > 1}This job has {postModalJob.fusion_nc_files.length} files - each gets this name with -1, -2, etc.{/if}
+        </p>
+        <div class="form-group">
+          <label class="form-label" for="post-file-name">File name</label>
+          <input
+            id="post-file-name"
+            class="form-input"
+            value={postFileName}
+            on:input={(e) => (postFileName = e.currentTarget.value.replace(/\s+/g, ''))}
+            on:keydown={(e) => { if (e.key === 'Enter') confirmPost(); }}
+          />
+        </div>
+      </div>
+      <div class="modal-footer-actions">
+        <button class="btn btn-ghost" type="button" on:click={closePostModal}>Cancel</button>
+        <button class="btn btn-primary" type="button" disabled={posting} on:click={confirmPost}>
+          <Upload size={14} /> {posting ? 'Posting…' : 'Post'}
+        </button>
+      </div>
+    </div>
   </div>
 {/if}
 

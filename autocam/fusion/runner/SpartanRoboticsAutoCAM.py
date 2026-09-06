@@ -10,6 +10,7 @@ from .workflows import importPlate as importPlate
 from .workflows import camPlate as camPlate
 from .workflows import camTube as camTube
 from .workflows import setupTemp as setupTemp
+from .workflows.dropFolder import list_data_folder_tree
 from .config import *
 import requests
 
@@ -28,6 +29,13 @@ _handlers = []  # type: List[adsk.core.EventHandler]
 _job_queue = queue.Queue()  # type: queue.Queue
 _log_queue = queue.Queue()  # type: queue.Queue
 _job_processing = threading.Event()
+# Set from the background poll thread (handleServer), consumed on the main
+# thread (_JobQueueEventHandler.notify) - the actual Fusion Data Panel walk
+# has to run there, same as every other Fusion API call in this add-in.
+# Fusion's API is documented as unsafe to call off the main UI thread; the
+# background thread only ever signals "please sync" and fires the existing
+# custom event, it never touches app.data itself.
+_folder_sync_requested = threading.Event()
 
 _JOB_QUEUE_EVENT_ID = f"{ADDIN_NAME}_job_queue_event"
 
@@ -127,6 +135,10 @@ class _JobQueueEventHandler(adsk.core.CustomEventHandler):
                 finally:
                     _job_processing.clear()
                     _job_queue.task_done()
+
+            if _folder_sync_requested.is_set():
+                _folder_sync_requested.clear()
+                _sync_data_folders()
         except Exception:
             if _app:
                 _app.log(
@@ -272,7 +284,31 @@ def _startup_key_gate(
     return api_key
 
 
+_FOLDER_SYNC_INTERVAL_SEC = 300.0
+_last_folder_sync = 0.0
+
+
+def _sync_data_folders():
+    """Pushes a snapshot of the real Fusion Data Panel folder tree up to
+    Supabase so the web UI's folder picker (queueing a plate job) has
+    something to show - the web app itself has no live connection to
+    Fusion's Data Panel, only a Runner does. Best-effort: failures are
+    logged, not raised, so a sync hiccup never interrupts job claiming.
+    """
+    try:
+        tree = list_data_folder_tree(_app, FUSION_DATA_PROJECT_NAME, FUSION_DROP_FOLDER_PATH)
+        session.post(
+            f"{BASE_URL}/api/fusion-runner",
+            params={"action": "sync-folders"},
+            json={"runnerId": RUNNER_ID, "projectName": tree["project"], "tree": tree["root"]},
+            timeout=30,
+        )
+    except Exception:
+        _queue_log(f"Folder sync failed:\n{traceback.format_exc()}")
+
+
 def handleServer(temp_dir: str, stop_event: threading.Event):
+    global _last_folder_sync
     while not stop_event.is_set():
         try:
             time.sleep(5)
@@ -281,6 +317,11 @@ def handleServer(temp_dir: str, stop_event: threading.Event):
                 continue
             if session is None:
                 raise RuntimeError("HTTP session not initialized.")
+            now = time.monotonic()
+            if now - _last_folder_sync >= _FOLDER_SYNC_INTERVAL_SEC:
+                _last_folder_sync = now
+                _folder_sync_requested.set()
+                _fire_job_queue_event()
             # Claim endpoint (src/routes/api/fusion-runner/+server.js,
             # action=claim) - a compare-and-swap on cam_jobs.status, not the
             # original /api/jobs/request. Returns HTTP 200 with

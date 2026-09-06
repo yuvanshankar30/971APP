@@ -306,9 +306,9 @@
               <span class="tag">{categoryLabel(part.fusion_part_categories)}</span>
             </div>
             <p class="cam-form-hint">
-              Quantity: {part.quantity} of
               {#if editingQuantityId === part.id}
                 <span class="rename-control quantity-control">
+                  Total needed:
                   <input
                     type="number"
                     min="0"
@@ -322,9 +322,12 @@
                 </span>
               {:else}
                 <span class="rename-control quantity-control">
-                  {part.original_quantity}
+                  {part.original_quantity} needed total - {part.quantity} still need a plate
+                  {#if part.original_quantity - part.quantity > 0}
+                    ({part.original_quantity - part.quantity} already on a plate)
+                  {/if}
                   {#if canManage}
-                    <button type="button" class="btn btn-ghost btn-sm" title="Edit quantity" on:click={() => startEditQuantity(part)}><Pencil size={13} /></button>
+                    <button type="button" class="btn btn-ghost btn-sm" title="Edit total quantity needed" on:click={() => startEditQuantity(part)}><Pencil size={13} /></button>
                   {/if}
                 </span>
               {/if}

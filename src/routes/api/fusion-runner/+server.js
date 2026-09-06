@@ -91,6 +91,21 @@ export async function POST({ request, url }) {
   const supabase = getServiceSupabase();
 
   try {
+    if (action === 'sync-folders') {
+      const projectName = String(body?.projectName || '').trim();
+      const tree = body?.tree;
+      if (!projectName) return json({ error: 'projectName is required' }, { status: 400 });
+      if (!tree || typeof tree !== 'object') return json({ error: 'tree is required' }, { status: 400 });
+      const { error } = await supabase.from('fusion_data_folders').upsert({
+        project_name: projectName,
+        tree,
+        synced_by: String(body?.runnerId || '').trim() || null,
+        synced_at: new Date().toISOString()
+      });
+      if (error) throw new Error(error.message);
+      return json({ success: true });
+    }
+
     if (action === 'claim') {
       const runnerId = String(body?.runnerId || '').trim();
       if (!runnerId) return json({ error: 'runnerId is required' }, { status: 400 });
@@ -177,7 +192,7 @@ export async function POST({ request, url }) {
       return json({ success: true });
     }
 
-    return json({ error: `Unknown action: ${action}. Expected one of: claim, processing, complete, fail` }, { status: 400 });
+    return json({ error: `Unknown action: ${action}. Expected one of: claim, processing, complete, fail, sync-folders` }, { status: 400 });
   } catch (error) {
     return json({ error: error?.message || 'Internal server error' }, { status: 500 });
   }

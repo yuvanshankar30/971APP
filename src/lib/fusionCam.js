@@ -267,6 +267,25 @@ export async function fetchFusionJobs() {
 }
 
 /**
+ * Reads the cached Fusion Data Panel folder tree for the given project
+ * (default FUSION_DATA_PROJECT_NAME's real value, "2026 Season CAM") -
+ * pushed up by a live Runner (see SpartanRoboticsAutoCAM.py's
+ * _sync_data_folders and the "sync-folders" action on /api/fusion-runner).
+ * The web app has no direct connection to Fusion's Data Panel, so this can
+ * be stale (as of the last sync) or missing (no Runner has synced yet) -
+ * callers should handle a null return.
+ */
+export async function fetchFusionFolderTree(projectName = '2026 Season CAM') {
+  const { data, error } = await supabase
+    .from('fusion_data_folders')
+    .select('*')
+    .eq('project_name', projectName)
+    .maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+
+/**
  * Queues a Fusion milling job against a plate or a box tube - a cam_jobs
  * row with operation_type='milling', status='queued', and the
  * plate/box-tube reference in params.fusionJobKind/params.plateId or
@@ -275,7 +294,7 @@ export async function fetchFusionJobs() {
  * turning/routing's cam-generate, this genuinely needs an external Fusion
  * 360 process).
  */
-export async function queueFusionJob({ fusionJobKind, plateId, boxTubeId, machineId, materialId, toolId, requestedBy, name, partId, groupingMode, selectedPartId, selectedPartIds }) {
+export async function queueFusionJob({ fusionJobKind, plateId, boxTubeId, machineId, materialId, toolId, requestedBy, name, partId, groupingMode, selectedPartId, selectedPartIds, fusionFileName, fusionFolderPath }) {
   if (!FUSION_JOB_KINDS.includes(fusionJobKind)) {
     throw new Error(`Invalid fusionJobKind: ${fusionJobKind}`);
   }
@@ -287,7 +306,12 @@ export async function queueFusionJob({ fusionJobKind, plateId, boxTubeId, machin
       fusionGroupingMode: groupingMode,
       selectedPartId: selectedPartId || null,
       selectedPartIds: Array.isArray(selectedPartIds) ? selectedPartIds : null
-    } : {})
+    } : {}),
+    // Where the saved Fusion document goes and what it's named - chosen at
+    // queue time (Plates tab). Optional; camPlate.py falls back to its
+    // existing defaults when these aren't set.
+    fusionFileName: fusionFileName || null,
+    fusionFolderPath: fusionFolderPath || null
   };
   const { data, error } = await supabase
     .from('cam_jobs')

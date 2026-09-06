@@ -2,8 +2,9 @@
   import { onMount } from 'svelte';
   import { toastActions } from '$lib/toast.js';
   import { supabase } from '$lib/supabase.js';
-  import { createPartCategory, fetchPartCategories } from '$lib/fusionCam.js';
-  import { Plus, SlidersHorizontal } from 'lucide-svelte';
+  import { requestConfirmation } from '$lib/confirmation.js';
+  import { createPartCategory, deletePartCategory, fetchPartCategories } from '$lib/fusionCam.js';
+  import { Plus, SlidersHorizontal, Trash2, AlertTriangle } from 'lucide-svelte';
 
   export let canManage;
 
@@ -11,9 +12,37 @@
   let materials = [];
   let loading = true;
   let submitting = false;
+  let deletingId = null;
   let selectedMaterialId = '';
   let newMaterialName = '';
   let thickness = '';
+
+  // Mirrors templateTools.py's _material_aliases() keyword groups exactly -
+  // that function is what a real Fusion job uses to pick cutting feeds and
+  // speeds for a material, matching on substrings of the material's name
+  // (not a separate field). A name that matches none of these has no way
+  // to resolve a preset: _choose_preset() raises and the job fails outright
+  // the moment it tries to cut, not when this material was added - so this
+  // tab needs to warn about that gap right here, before anyone nests a
+  // part against it and only finds out days later in Fusion.
+  const KNOWN_MATERIAL_KEYWORDS = [
+    'aluminum', 'aluminium', '6061', 'al', 'alu', 'alum',
+    'polycarb', 'lexan', 'pc',
+    'mdf', 'acrylic', 'srpp', 'wood', 'plywood', 'birch',
+    'delrin', 'acetal', 'nylon'
+  ];
+
+  function isReviewedMaterialName(name) {
+    const lower = (name || '').trim().toLowerCase();
+    if (!lower) return true; // nothing typed yet - not a warning-worthy state
+    if (KNOWN_MATERIAL_KEYWORDS.some((keyword) => lower.includes(keyword) || lower === keyword)) return true;
+    // "poly" counts too, except "propylene" - same carve-out as the Python
+    // side (Polypropylene isn't actually a reviewed material there either).
+    if (lower.includes('poly') && !lower.includes('propylene')) return true;
+    return false;
+  }
+
+  $: newMaterialUnreviewed = newMaterialName.trim() && !isReviewedMaterialName(newMaterialName);
 
   // showLoading=false for refreshes after an action (add/etc.) - flipping
   // loading back to true mid-interaction replaced the whole list with a
@@ -79,6 +108,29 @@
   function categoryLabel(category) {
     return `${category.cam_materials?.name || 'Material'} - ${category.thickness}\"`;
   }
+
+  function categoryUnreviewed(category) {
+    return !isReviewedMaterialName(category.cam_materials?.name);
+  }
+
+  async function handleDelete(category) {
+    if (!await requestConfirmation({
+      title: 'Delete stock category',
+      message: `Delete "${categoryLabel(category)}"? Any part or plate still using it will fail to save.`,
+      confirmLabel: 'Delete',
+      danger: true
+    })) return;
+    deletingId = category.id;
+    try {
+      await deletePartCategory(category.id);
+      categories = categories.filter((c) => c.id !== category.id);
+      toastActions.show('Stock category deleted');
+    } catch (error) {
+      toastActions.show(error.message || 'Failed to delete stock category - it may still be in use by a part or plate');
+    } finally {
+      deletingId = null;
+    }
+  }
 </script>
 
 {#if loading}
@@ -114,6 +166,14 @@
             <input id="stock-thickness" class="form-input" type="number" min="0.001" step="0.001" bind:value={thickness} placeholder="0.125" />
           </div>
         </div>
+        {#if newMaterialUnreviewed}
+          <p class="unreviewed-warning">
+            <AlertTriangle size={14} />
+            "{newMaterialName}" doesn't match a material Fusion has real cutting data for yet (aluminum, polycarbonate/Lexan,
+            acrylic, MDF, SRPP, wood/plywood, Delrin/acetal, nylon). You can still add it, but any job that tries to cut this
+            stock will fail until someone adds feed/speed presets for it in the CAM templates.
+          </p>
+        {/if}
         <button class="btn btn-primary" type="button" disabled={submitting} on:click={handleAdd}>
           <Plus size={16} /> {submitting ? 'Adding...' : 'Add Stock Category'}
         </button>
@@ -125,9 +185,29 @@
     <section class="card category-list-card">
       <h2>Available Categories</h2>
       {#if categories.length}
-        <div class="category-list">
-          {#each categories as category}
-            <span class="tag">{categoryLabel(category)}</span>
+        <div class="cam-list">
+          {#each categories as category (category.id)}
+            <div class="cam-list-item">
+              <div class="cam-list-item-main">
+                <span class="tag">{categoryLabel(category)}</span>
+                {#if categoryUnreviewed(category)}
+                  <span class="tag tag-warning" title="No reviewed feed/speed presets for this material yet - jobs against it will fail in Fusion">
+                    <AlertTriangle size={12} /> No cutting data yet
+                  </span>
+                {/if}
+              </div>
+              {#if canManage}
+                <button
+                  type="button"
+                  class="btn btn-ghost btn-sm"
+                  disabled={deletingId === category.id}
+                  title="Delete this stock category"
+                  on:click={() => handleDelete(category)}
+                >
+                  <Trash2 size={14} />
+                </button>
+              {/if}
+            </div>
           {/each}
         </div>
       {:else}
@@ -146,7 +226,37 @@
   .form-row { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
   .form-group { flex: 1 1 12rem; min-width: 0; }
   .thickness-group { flex-basis: 9rem; }
-  .category-list { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; }
+  .unreviewed-warning {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.4rem;
+    background: var(--yellow-subtle, rgba(234, 179, 8, 0.12));
+    color: var(--yellow-strong, #854d0e);
+    border-radius: var(--radius-sm);
+    padding: 0.6rem 0.75rem;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    margin: 0 0 0.75rem;
+  }
+  .unreviewed-warning :global(svg) { flex-shrink: 0; margin-top: 0.15rem; }
+  .cam-list { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.75rem; }
+  .cam-list-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+  }
+  .cam-list-item-main { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+  .tag-warning {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    background: var(--yellow-subtle, rgba(234, 179, 8, 0.12));
+    color: var(--yellow-strong, #854d0e);
+  }
   @media (max-width: 640px) {
     .form-group, .thickness-group { flex-basis: 100%; }
   }

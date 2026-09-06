@@ -90,71 +90,37 @@ def _select_plate_template_path(machine_name: Optional[str], material_name: Opti
     return candidate if os.path.isfile(candidate) else fallback
 
 
-def _read_time_value(value) -> Optional[float]:
-    if value is None:
-        return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    for attr in ("value", "valueInSeconds", "seconds"):
-        try:
-            v = getattr(value, attr)
-        except Exception:
-            continue
-        try:
-            return float(v)
-        except Exception:
-            continue
-    return None
-
-
-def _operation_machining_time(operation) -> Optional[float]:
-    if getattr(operation, "isSuppressed", False):
-        return None
-    if hasattr(operation, "isToolpathValid") and not operation.isToolpathValid:
-        return None
-    for attr in ("machiningTime", "cycleTime", "toolpathTime"):
-        if not hasattr(operation, attr):
-            continue
-        try:
-            val = getattr(operation, attr)
-            if callable(val):
-                val = val()
-        except Exception:
-            continue
-        t = _read_time_value(val)
-        if t is not None:
-            return t
-    for attr in ("toolpathStatistics", "toolpathStatistic", "toolpathStats"):
-        if not hasattr(operation, attr):
-            continue
-        try:
-            stats = getattr(operation, attr)
-            if callable(stats):
-                stats = stats()
-        except Exception:
-            continue
-        if stats is None:
-            continue
-        for stat_attr in ("machiningTime", "cycleTime", "totalTime"):
-            if not hasattr(stats, stat_attr):
-                continue
-            t = _read_time_value(getattr(stats, stat_attr))
-            if t is not None:
-                return t
-    return None
+# None of adsk.cam.Operation's actual attributes expose a per-operation
+# time (no machiningTime/cycleTime/toolpathTime/toolpathStatistics on the
+# real API - a prior version of this function probed for those names
+# speculatively and always fell through to None, so total_machining_time
+# was silently never populated). adsk.cam.CAM.getMachiningTime() is the
+# real, confirmed-live API behind Fusion's own "Machining Time" dialog.
+# Rapid feed matches the shop's actual router rapid (30000 mm/min ==
+# 50 cm/s, the unit getMachiningTime expects); toolChangeTime is a rough
+# shop estimate, not measured.
+_MACHINING_TIME_RAPID_CM_PER_SEC = 50.0
+_MACHINING_TIME_TOOL_CHANGE_SEC = 15.0
 
 
 def _total_machining_time(cam: adsk.cam.CAM) -> Optional[float]:
-    total = 0.0
-    found = False
+    ops = adsk.core.ObjectCollection.create()
     for setup in cam.setups:
         for operation in setup.operations:
-            t = _operation_machining_time(operation)
-            if t is None:
+            if getattr(operation, "isSuppressed", False):
                 continue
-            total += t
-            found = True
-    return total if found else None
+            if hasattr(operation, "isToolpathValid") and not operation.isToolpathValid:
+                continue
+            ops.add(operation)
+    if ops.count == 0:
+        return None
+    try:
+        mt = cam.getMachiningTime(
+            ops, 100, _MACHINING_TIME_RAPID_CM_PER_SEC, _MACHINING_TIME_TOOL_CHANGE_SEC
+        )
+    except Exception:
+        return None
+    return mt.machiningTime
 
 
 def _normalize_assignments(payload: dict) -> list[dict]:
@@ -401,26 +367,30 @@ def start(data, session):
 
         plate_id = str(_get(payload, "plate_id", "plateId", default="cam_plate"))
 
-        # Save the document to the configured AutoCAM drop folder
+        # Save the document to the configured AutoCAM drop folder, or the
+        # folder chosen at queue time (Plates tab folder-tree picker).
         try:
+            folder_path = _get(payload, "fusion_folder_path") or FUSION_DROP_FOLDER_PATH
             data_project, autocam_drop_folder = resolve_drop_folder(
-                app, FUSION_DATA_PROJECT_NAME, FUSION_DROP_FOLDER_PATH
+                app, FUSION_DATA_PROJECT_NAME, folder_path
             )
 
-            # Prefer a user-typed name (fusion_parts.fusion_file_name, set on
-            # the Parts tab) over the default Plate<plate_id>Job<job_id> -
-            # the latter is real but unreadable in Fusion's Data Panel (both
-            # plate_id and job_id are UUIDs). Uses the first assigned part's
-            # name since a plate's saved document is one file regardless of
-            # how many parts are nested onto it; falls back to the old
-            # scheme when no assignment set one.
-            custom_name = None
-            for assignment in assignments:
-                candidate = assignment.get("fusion_file_name")
-                if candidate:
-                    custom_name = re.sub(r"\s+", "", str(candidate))
-                    break
-            doc_name = custom_name or f"Plate{plate_id}Job{job_id}"
+            # Prefer a name typed at queue time (payload.fusion_file_name -
+            # the Plates tab filename field) over a per-part name
+            # (fusion_parts.fusion_file_name, set on the Parts tab) over the
+            # default Plate<plate_id>Job<job_id> - the last is real but
+            # unreadable in Fusion's Data Panel (both plate_id and job_id
+            # are UUIDs). The per-part fallback uses the first assigned
+            # part's name since a plate's saved document is one file
+            # regardless of how many parts are nested onto it.
+            custom_name = _get(payload, "fusion_file_name")
+            if not custom_name:
+                for assignment in assignments:
+                    candidate = assignment.get("fusion_file_name")
+                    if candidate:
+                        custom_name = candidate
+                        break
+            doc_name = re.sub(r"\s+", "", str(custom_name)) if custom_name else f"Plate{plate_id}Job{job_id}"
             # Check if file already exists and delete it
             try:
                 existing_file = autocam_drop_folder.dataFiles.itemByName(doc_name)

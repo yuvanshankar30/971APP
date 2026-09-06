@@ -49,7 +49,7 @@
   const cleanGcodeForExport = (gcode) => normalizeGcodeComments(gcode || '', { dialect: 'preserve' });
   import { buildStockMaterialIndex, materialIdForStockAssignment as resolveMaterialIdForStockAssignment, stockCatalogIdForStockAssignment, matchMaterialId } from '$autocam/stockMaterial.js';
   import { minimumPartClearance } from '$autocam/nesting.js';
-  import { Cpu, Upload, Package, Settings, Download, AlertTriangle, X, Link as LinkIcon, Plus, Wrench, Layers, CheckCircle2, Loader2, Search, Filter, Box, Route, ExternalLink, Copy } from 'lucide-svelte';
+  import { Cpu, Upload, Package, Settings, Download, AlertTriangle, X, Link as LinkIcon, Plus, Wrench, Layers, CheckCircle2, Loader2, Search, Filter, Box, Route, ExternalLink, Copy, Clock } from 'lucide-svelte';
 
   let user = null;
   let loading = true;
@@ -942,6 +942,17 @@
     return 'status-running';
   }
 
+  function machiningTimeLabel(job) {
+    const seconds = Number(job?.stats?.total_machining_time);
+    if (!Number.isFinite(seconds) || seconds <= 0) return null;
+    const minutes = Math.round(seconds / 60);
+    if (minutes < 1) return '<1 min';
+    if (minutes < 60) return `${minutes} min`;
+    const hours = Math.floor(minutes / 60);
+    const rem = minutes % 60;
+    return rem ? `${hours}h ${rem}m` : `${hours}h`;
+  }
+
   const MACHINE_TYPE_LABEL = { turning: 'Lathe', routing: 'Router', milling: 'Mill', tubestock: 'Router' };
   function machineTypeLabel(operationType) {
     return MACHINE_TYPE_LABEL[operationType] || operationType || '—';
@@ -1449,6 +1460,11 @@
                 <div class="job-row-progress">
                   <div class="job-row-progress-bar"><div class="job-row-progress-fill" style="width: {job.progress || 0}%"></div></div>
                   {#if job.progress_message}<span class="job-row-progress-label">{job.progress_message}</span>{/if}
+                </div>
+              {/if}
+              {#if job.status === 'completed' && machiningTimeLabel(job)}
+                <div class="job-machining-time" title="Estimated time to cut this job on the machine">
+                  <Clock size={12} /> {machiningTimeLabel(job)}
                 </div>
               {/if}
             </td>
@@ -2708,6 +2724,15 @@
   }
   .job-created-date {
     display: inline-block;
+    white-space: nowrap;
+  }
+  .job-machining-time {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    margin-top: 0.25rem;
+    font-size: 0.75rem;
+    color: var(--text-muted);
     white-space: nowrap;
   }
   .output-cell { min-width: 0; white-space: normal; }

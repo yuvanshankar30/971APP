@@ -4,8 +4,9 @@
   import { onMount } from 'svelte';
   import { supabase } from '$lib/supabase.js';
   import { toastActions } from '$lib/toast.js';
-  import { fetchPlates, createPlate, deletePlate, renamePlate, fetchPartCategories, fetchParts, assignPartToPlate, removePartFromPlate, queueFusionJob } from '$lib/fusionCam.js';
+  import { fetchPlates, createPlate, deletePlate, renamePlate, fetchPartCategories, fetchParts, assignPartToPlate, removePartFromPlate, queueFusionJob, fetchFusionFolderTree } from '$lib/fusionCam.js';
   import { Plus, Trash2, Layers, Send, Pencil, Check, X } from 'lucide-svelte';
+  import FolderTreeNode from './FolderTreeNode.svelte';
 
   export let user;
   export let canManage;
@@ -40,6 +41,26 @@
   // its machine" is this app's own existing convention (see the main
   // /autocam page's tool picker), not a new rule invented here.
   let machineTools = {};
+
+  // Fusion filename + folder picker, shown as a confirmation step right
+  // before a job actually queues. folderTreeRow is the cached Data Panel
+  // tree (see fetchFusionFolderTree) - null until a Runner has synced at
+  // least once, in which case the modal just falls back to the server's
+  // own default folder with a note explaining why there's no tree to pick
+  // from yet.
+  let folderTreeRow = null;
+  let queueModalPlate = null;
+  let queueFileName = '';
+  let queueFolderPath = '';
+  let queueSubmitting = false;
+
+  async function loadFolderTree() {
+    try {
+      folderTreeRow = await fetchFusionFolderTree();
+    } catch (e) {
+      console.warn('Could not load Fusion folder tree:', e.message);
+    }
+  }
 
   // showLoading=false for refreshes after an action (add/delete/nest/etc.) -
   // flipping loading back to true mid-interaction replaced the whole list
@@ -101,7 +122,10 @@
     }
   }
 
-  onMount(load);
+  onMount(() => {
+    load();
+    loadFolderTree();
+  });
 
   async function handleAdd() {
     if (!newPlate.name || !newPlate.width || !newPlate.length || !newPlate.trueDepth || !newPlate.categoryId) {
@@ -169,44 +193,57 @@
     }
   }
 
-  async function handleQueue(plate) {
-    if (queueing[plate.id]) return;
-    const machineId = plateMachineSelections[plate.id];
-    if (!machineId) {
-      toastActions.show('Choose a router before queueing');
-      return;
-    }
+  // Everything queueing a job actually needs, checked before the filename/
+  // folder confirmation modal even opens - failing fast here (as a toast)
+  // reads better than opening the modal only to reject it on confirm.
+  function queueValidationError(plate) {
+    if (!plateMachineSelections[plate.id]) return 'Choose a router before queueing';
     // The Runner's own fallback (auto-picking a tool when none is given)
     // calls an API endpoint that doesn't exist in this app yet - without
     // an explicit tool, a queued job has no real way to resolve one, so
     // this is required here rather than left optional like machineId
     // originally was before routers were made explicit too.
-    if (!plateToolSelections[plate.id]) {
-      toastActions.show('Choose a tool before queueing');
+    if (!plateToolSelections[plate.id]) return 'Choose a tool before queueing';
+    const groupingMode = plateQueueModes[plate.id];
+    if (!['single', 'grouped'].includes(groupingMode)) return 'Choose single-part or grouped CAM';
+    if (groupingMode === 'single' && !plateSinglePartSelections[plate.id]) return 'Choose one nested part for single-part CAM';
+    if (groupingMode === 'grouped' && (plateGroupedPartSelections[plate.id] || []).length < 2) return 'Select at least two nested part types for this group';
+    return null;
+  }
+
+  function openQueueModal(plate) {
+    const error = queueValidationError(plate);
+    if (error) {
+      toastActions.show(error);
+      return;
+    }
+    queueModalPlate = plate;
+    queueFileName = (plate.name || '').replace(/\s+/g, '');
+    queueFolderPath = '';
+  }
+
+  function closeQueueModal() {
+    queueModalPlate = null;
+  }
+
+  async function confirmQueue() {
+    const plate = queueModalPlate;
+    if (!plate || queueing[plate.id]) return;
+    const error = queueValidationError(plate);
+    if (error) {
+      toastActions.show(error);
       return;
     }
     const groupingMode = plateQueueModes[plate.id];
-    if (!['single', 'grouped'].includes(groupingMode)) {
-      toastActions.show('Choose single-part or grouped CAM');
-      return;
-    }
-    const assignments = plate.fusion_part_category_assignments || [];
     const selectedPartId = groupingMode === 'single' ? plateSinglePartSelections[plate.id] : null;
     const selectedPartIds = groupingMode === 'grouped' ? (plateGroupedPartSelections[plate.id] || []) : null;
-    if (groupingMode === 'single' && !selectedPartId) {
-      toastActions.show('Choose one nested part for single-part CAM');
-      return;
-    }
-    if (groupingMode === 'grouped' && selectedPartIds.length < 2) {
-      toastActions.show('Select at least two nested part types for this group');
-      return;
-    }
+    queueSubmitting = true;
     queueing = { ...queueing, [plate.id]: true };
     try {
       await queueFusionJob({
         fusionJobKind: 'plate:cam',
         plateId: plate.id,
-        machineId,
+        machineId: plateMachineSelections[plate.id],
         // The real cam_materials id, NOT plate.category_id (a
         // fusion_part_categories id) - cam_jobs.material_id has a foreign
         // key straight to cam_materials, so passing the category id here
@@ -218,12 +255,16 @@
         selectedPartId,
         selectedPartIds,
         requestedBy: user?.id,
-        name: `${groupingMode === 'grouped' ? 'Grouped Fusion CAM' : 'Fusion CAM'}: ${plate.name}`
+        name: `${groupingMode === 'grouped' ? 'Grouped Fusion CAM' : 'Fusion CAM'}: ${plate.name}`,
+        fusionFileName: queueFileName.trim() || null,
+        fusionFolderPath: queueFolderPath || null
       });
       toastActions.show('Queued for the Fusion Runner');
+      closeQueueModal();
     } catch (e) {
       toastActions.show(e.message || 'Failed to queue job');
     } finally {
+      queueSubmitting = false;
       queueing = { ...queueing, [plate.id]: false };
     }
   }
@@ -454,7 +495,7 @@
                 <option value={t.id}>{toolLabel(t)}</option>
               {/each}
             </select>
-            <button class="btn btn-secondary btn-sm" disabled={queueing[plate.id] || !plateQueueModes[plate.id] || (plateQueueModes[plate.id] === 'single' && !plateSinglePartSelections[plate.id]) || (plateQueueModes[plate.id] === 'grouped' && (plateGroupedPartSelections[plate.id] || []).length < 2) || !plate.fusion_part_category_assignments?.length || !plateMachineSelections[plate.id] || !plateToolSelections[plate.id]} on:click={() => handleQueue(plate)}>
+            <button class="btn btn-secondary btn-sm" disabled={queueing[plate.id] || !plateQueueModes[plate.id] || (plateQueueModes[plate.id] === 'single' && !plateSinglePartSelections[plate.id]) || (plateQueueModes[plate.id] === 'grouped' && (plateGroupedPartSelections[plate.id] || []).length < 2) || !plate.fusion_part_category_assignments?.length || !plateMachineSelections[plate.id] || !plateToolSelections[plate.id]} on:click={() => openQueueModal(plate)}>
               <Send size={14} /> Queue {plateQueueModes[plate.id] === 'grouped' ? 'Grouped ' : ''}CAM Job
             </button>
             {#if canManage}
@@ -467,6 +508,51 @@
       {/each}
     </div>
   {/if}
+{/if}
+
+{#if queueModalPlate}
+  <div class="modal-overlay" role="presentation" on:click={closeQueueModal}>
+    <div class="modal queue-modal" role="dialog" aria-labelledby="queue-modal-title" on:click|stopPropagation>
+      <div class="modal-header">
+        <h3 id="queue-modal-title">Queue "{queueModalPlate.name}"</h3>
+        <button type="button" class="btn btn-ghost btn-sm" title="Close" on:click={closeQueueModal}><X size={16} /></button>
+      </div>
+      <div class="modal-body">
+        <p class="cam-form-hint">This saves a new Fusion document for the job. Name it and pick where it goes - both default to something reasonable if you skip them.</p>
+        <div class="form-group">
+          <label class="form-label" for="queue-file-name">Fusion file name</label>
+          <input
+            id="queue-file-name"
+            class="form-input"
+            value={queueFileName}
+            on:input={(e) => (queueFileName = e.currentTarget.value.replace(/\s+/g, ''))}
+            placeholder="e.g. GearboxSidePlate"
+          />
+          <p class="cam-form-hint">No spaces - this becomes the saved document's name in Fusion's Data Panel.</p>
+        </div>
+        <div class="form-group">
+          <span class="form-label">Save to folder</span>
+          {#if folderTreeRow?.tree}
+            <div class="folder-tree-box">
+              <FolderTreeNode node={folderTreeRow.tree} selectedPath={queueFolderPath} onSelect={(path) => (queueFolderPath = path)} />
+            </div>
+            <p class="cam-form-hint">
+              {queueFolderPath ? `Selected: ${queueFolderPath}` : "Using the default AutoCAM folder - click a folder above to save somewhere else."}
+              Folder list as of {new Date(folderTreeRow.synced_at).toLocaleString()}.
+            </p>
+          {:else}
+            <p class="cam-form-hint">No folder list yet - a Fusion Runner needs to have run at least once to share it. This will save to the default AutoCAM folder.</p>
+          {/if}
+        </div>
+      </div>
+      <div class="modal-footer-actions">
+        <button class="btn btn-ghost" type="button" on:click={closeQueueModal}>Cancel</button>
+        <button class="btn btn-primary" type="button" disabled={queueSubmitting} on:click={confirmQueue}>
+          <Send size={14} /> {queueSubmitting ? 'Queueing…' : 'Queue Job'}
+        </button>
+      </div>
+    </div>
+  </div>
 {/if}
 
 <style>
@@ -485,4 +571,12 @@
   .group-part-picker label { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.85rem; }
   .empty-state { color: var(--text-muted, #888); padding: 2rem 0; text-align: center; }
   .cam-form-hint { color: var(--text-muted, #888); font-size: 0.85rem; margin: 0.25rem 0 0; }
+  .queue-modal { max-width: 32rem; }
+  .folder-tree-box {
+    max-height: 16rem;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 6px);
+    padding: 0.35rem;
+  }
 </style>
