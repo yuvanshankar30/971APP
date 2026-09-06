@@ -691,6 +691,67 @@ def _apply_tool_to_elem(
         if diameter is not None:
             _set_drill_diameter_range(template_elem, diameter)
 
+    if preset:
+        _set_template_level_feed_params(template_elem, preset)
+
+
+# A real Fusion-exported template (any of templates/971-real/*.f3dhsm-template,
+# unlike the minimal generic Plates.f3dhsm-template) carries its OWN
+# top-level <template><parameter name="tool_spindleSpeed" expression="22000.">
+# entries - a snapshot of whatever tool/preset was bound when it was
+# originally exported - as siblings of the <tool> element, not inside it.
+# Confirmed by direct inspection: patching one of these richer templates
+# with a Lexan preset left every one of these top-level parameters at their
+# original hardcoded values (22000 rpm, 40-60 in/min) - _apply_tool_to_elem
+# only ever wrote into the nested <tool> element's own expressions/motion/
+# presets data, never these template-level siblings. Confirmed this wasn't
+# just a template-inspection artifact: a REAL Lexan job's actual posted
+# G-code showed S13000/S18000 (Plates.f3dhsm-template's and Bore.f3dhsm-
+# template's own hardcoded values), never the researched Lexan preset's
+# 12000 rpm - every material-specific preset built this session had never
+# actually been reaching real G-code output. Fixed by overwriting these
+# top-level parameters directly from the same chosen preset, immediately
+# after _apply_tool_to_elem finishes updating the tool's own data.
+_TEMPLATE_LEVEL_FEED_PARAMS = {
+    "tool_spindleSpeed": "n",
+    "tool_rampSpindleSpeed": "n_ramp",
+    "tool_feedCutting": "v_f",
+    "tool_feedEntry": "v_f_leadIn",
+    "tool_feedExit": "v_f_leadOut",
+    "tool_feedTransition": "v_f_transition",
+    "tool_feedPlunge": "v_f_plunge",
+    "tool_feedRamp": "v_f_ramp",
+    "tool_feedRetract": "v_f_retract",
+}
+# Parameters with no unit suffix in real exported templates (rpm is bare;
+# every feed rate is "<number>in/min" - confirmed by direct inspection of
+# templates/971-real/*.f3dhsm-template and templates/Plates.f3dhsm-template).
+_TEMPLATE_LEVEL_FEED_PARAMS_NO_UNIT = {"tool_spindleSpeed", "tool_rampSpindleSpeed"}
+
+
+def _set_template_level_feed_params(template_elem: ET.Element, preset: dict) -> None:
+    fallback_v_f = _parse_number(preset.get("v_f"))
+    fallback_n = _parse_number(preset.get("n"))
+    values: dict[str, Optional[float]] = {}
+    for param_name, preset_key in _TEMPLATE_LEVEL_FEED_PARAMS.items():
+        value = _parse_number(preset.get(preset_key))
+        if value is None:
+            if preset_key in ("v_f_leadIn", "v_f_leadOut", "v_f_transition"):
+                value = fallback_v_f
+            elif preset_key == "n_ramp":
+                value = fallback_n
+        values[param_name] = value
+
+    for parameter in template_elem.findall(_q("parameter")):
+        name = parameter.get("name")
+        if name not in values or values[name] is None:
+            continue
+        value = values[name]
+        if name in _TEMPLATE_LEVEL_FEED_PARAMS_NO_UNIT:
+            parameter.set("expression", _fmt_num(value))
+        else:
+            parameter.set("expression", f"{_fmt_num(value)}in/min")
+
 
 def _find_largest_endmill(indexes: list[dict]) -> Optional[tuple[dict, dict]]:
     """Find the largest endmill (by diameter) from all tool indexes."""
