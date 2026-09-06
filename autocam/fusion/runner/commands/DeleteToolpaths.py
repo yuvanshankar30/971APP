@@ -4,23 +4,29 @@ import adsk.core, adsk.fusion, adsk.cam, traceback
 import time
 
 
-def waitForGeneration(setup, waitforcontour=False):
+def waitForGeneration(setup, waitforcontour=False, quiet_checks_required=5):
     app = adsk.core.Application.get()
-    while True:
-        # Settle before checking isGenerating, every iteration including
-        # the first. cam.generateAllToolpaths() (DeleteToolpaths, below)
-        # kicks generation off asynchronously and returns immediately -
-        # its own return value, a GenerateToolpathFuture, isn't even
-        # captured at either call site - so calling this function right
-        # after it, the very first isGenerating check used to run before
-        # Fusion had flipped the flag on ANY operation, see "nothing
-        # generating" on an operation that hadn't started, and exit before
-        # generation had actually begun. That is the exact shape of a real
-        # bug this caused: cam.postProcess() failed with "Initialization
-        # fails" on the FIRST toolpath posted (a Pocket) while an identical
-        # call for the very next toolpath (a Profile) succeeded moments
-        # later, once background generation had caught up on its own in the
-        # meantime.
+    # Settling before the check (below) closes the *first*-check race
+    # (calling this immediately after cam.generateAllToolpaths() used to see
+    # "nothing generating" before Fusion had flipped the flag on ANY
+    # operation, and exit before generation had actually begun - the exact
+    # shape of a real bug: cam.postProcess() failed with "Initialization
+    # fails" on the FIRST toolpath posted while an identical call for the
+    # very next toolpath succeeded moments later). It does NOT close a
+    # second, later race: operations don't all start generating at once,
+    # so there can be a real gap where op A has finished and op B hasn't
+    # started yet - a single clean "nothing generating" read during that
+    # gap looks identical to "everything is actually done". Confirmed this
+    # second race is real, not theoretical: it deleted a fully valid,
+    # untouched "2D Contour2" operation from a real job's Setup (the
+    # perimeter/tab cut that frees the part from stock) - the operation
+    # generated cleanly with no warning when re-created and waited on with
+    # extra margin, so DeleteToolpaths's `isToolpathValid == False` check
+    # below caught it mid-gap, not actually broken. Fixed by requiring
+    # several consecutive clean reads before trusting the loop is done,
+    # not just one.
+    quiet_streak = 0
+    while quiet_streak < quiet_checks_required:
         adsk.doEvents()
         app.activeViewport.refresh()
         time.sleep(0.1)
@@ -34,8 +40,10 @@ def waitForGeneration(setup, waitforcontour=False):
                 for op in setup.operations
                 if op.isGenerating and "Drill" in op.name
             ]
-        if not generating:
-            break
+        if generating:
+            quiet_streak = 0
+        else:
+            quiet_streak += 1
         # app.log(
         #     "waiting for generation...["
         #     + str([op for op in generating])
