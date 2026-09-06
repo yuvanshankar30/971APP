@@ -18,7 +18,7 @@ def tool_with(*preset_names):
 
 
 class TemplateToolPresetTests(unittest.TestCase):
-    def test_conservative_router_preset_halves_every_motion_feed(self):
+    def test_conservative_router_preset_quarters_every_motion_feed(self):
         preset = {
             "n": 22000,
             "v_f": 80,
@@ -33,13 +33,13 @@ class TemplateToolPresetTests(unittest.TestCase):
         scaled = template_tools._conservative_router_preset(preset)
 
         self.assertEqual(scaled["n"], 22000)
-        self.assertEqual(scaled["v_f"], 40)
-        self.assertEqual(scaled["v_f_leadIn"], 40)
-        self.assertEqual(scaled["v_f_leadOut"], 40)
-        self.assertEqual(scaled["v_f_transition"], 40)
-        self.assertEqual(scaled["v_f_plunge"], 6.6665)
-        self.assertEqual(scaled["v_f_ramp"], 10)
-        self.assertEqual(scaled["v_f_retract"], 20)
+        self.assertEqual(scaled["v_f"], 20)
+        self.assertEqual(scaled["v_f_leadIn"], 20)
+        self.assertEqual(scaled["v_f_leadOut"], 20)
+        self.assertEqual(scaled["v_f_transition"], 20)
+        self.assertEqual(scaled["v_f_plunge"], 3.33325)
+        self.assertEqual(scaled["v_f_ramp"], 5)
+        self.assertEqual(scaled["v_f_retract"], 10)
         self.assertEqual(preset["v_f"], 80)
 
     def test_default_preset_is_allowed_only_for_known_aluminum(self):

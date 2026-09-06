@@ -13,7 +13,14 @@ _NUM_RE = re.compile(r"[-+]?(?:\d+\.\d+|\d+|\.\d+)(?:[eE][-+]?\d+)?")
 # validates the templates on the physical machine. This applies to every
 # cutting motion, including the through-slot operation, without changing
 # spindle speed or the reviewed source values in the tool library.
-_ROUTER_FEED_RATE_SCALE = 0.5
+#
+# Started at 0.5 (half of the tool library's own programmed feeds). Direct
+# feedback after watching a real generated job run: still visibly too fast
+# on the slot/contour cutting motion even at that reduction. Dropped to
+# 0.25 (quarter of the original) - still a real, working feed (the tool
+# library's own baseline, e.g. 80 in/min main cutting feed -> 20 in/min),
+# not a token gesture.
+_ROUTER_FEED_RATE_SCALE = 0.25
 _FEED_PRESET_KEYS = (
     "v_f",
     "v_f_leadIn",

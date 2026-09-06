@@ -346,6 +346,50 @@ def _repair_missing_selections(setup) -> list[str]:
     return repaired
 
 
+def _cap_other_way_feedrate(setup) -> list[str]:
+    """adaptive2d (roughing) operations carry their own otherWayFeedrate
+    parameter - Fusion's own built-in strategy default for the return pass
+    of a bothWays clearing move, set independently of the tool's own
+    programmed cutting feed (tool_feedCutting) and NOT part of this
+    template's own XML (confirmed: not present anywhere in the raw
+    .f3dhsm-template file) or the tool preset dict _conservative_router_preset
+    scales - it's applied by Fusion itself at operation-creation time.
+
+    Confirmed live as a real, direct consequence of lowering
+    _ROUTER_FEED_RATE_SCALE in templateTools.py: with tool_feedCutting
+    scaled down (80 -> 20 in/min) but otherWayFeedrate untouched at its
+    original default (60in/min, now internally reported as 1524 vs 508 in
+    Fusion's own units), every adaptive2d operation failed outright with
+    "Other Way Feedrate: The other way feedrate exceeds the primary
+    cutting feedrate" and produced zero toolpath - a real regression, not
+    hypothetical (three real operations on a real part hit this: "Shape
+    Through Hole", "Small Shape Through Hole", "Shape Pocket"). Clamping
+    otherWayFeedrate down to tool_feedCutting whenever it exceeds it
+    removes the warning outright, confirmed live; whatever real "Generated
+    toolpath is empty" state remains after that (a real thin sheet part
+    generally has nothing for a bulk-roughing pass to clear at all) is
+    already handled by this file's own existing empty-toolpath cleanup
+    below, unrelated to this fix.
+    """
+    capped = []
+    for op in setup.operations:
+        if op.strategy != "adaptive2d":
+            continue
+        other_param = op.parameters.itemByName("otherWayFeedrate")
+        cutting_param = op.parameters.itemByName("tool_feedCutting")
+        if other_param is None or cutting_param is None:
+            continue
+        try:
+            other_value = other_param.value
+            cutting_value = cutting_param.value.value
+            if other_value.value > cutting_value:
+                other_value.value = cutting_value
+                capped.append(op.name)
+        except Exception:
+            continue
+    return capped
+
+
 def _has_real_pocket_floor(bodies, tolerance=1e-4) -> bool:
     """A genuine pocket has a flat floor strictly between a body's top and
     bottom - a through-hole or an outer profile only ever touches the top
@@ -475,6 +519,26 @@ def DeleteToolpaths():
     allSetups = cam.setups
     # Iterate through setups
     for setup in allSetups:
+        # Fix a real regression before anything below reads a warning or
+        # decides what to delete - see _cap_other_way_feedrate's own
+        # docstring. Must run first: the empty-toolpath cleanup loop right
+        # below reads each operation's CURRENT warning, and an
+        # otherWayFeedrate violation reports a different warning entirely
+        # ("Other Way Feedrate...", not "empty"), so an uncapped roughing
+        # operation would sail through this cleanup with zero toolpath and
+        # never get caught.
+        capped = _cap_other_way_feedrate(setup)
+        if capped:
+            app.log(f"Capped otherWayFeedrate (exceeded the scaled cutting feed) on: {capped}")
+            # A parameter mutation invalidates the operation's toolpath but
+            # does not itself queue regeneration (same real gap
+            # ConfigureTabs's own mutations hit elsewhere in this file) -
+            # without this, the empty-toolpath cleanup loop right below
+            # would read each capped operation's STALE pre-fix warning
+            # instead of its real post-fix state.
+            cam.generateAllToolpaths(True)
+            waitForGeneration(setup, waitforcontour=True)
+
         # Get toolpaths in the setup
         pastCache = 0
         while True:
