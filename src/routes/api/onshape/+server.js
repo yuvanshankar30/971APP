@@ -436,7 +436,11 @@ async function handlePartTranslation(documentId, wvm, wvmId, elementId, partId, 
                     formatName: format,
                     partIds: partId,         // single-part string
                     onePartPerDoc: true,     // important for STEP files
-                    storeInDocument: false   // external file
+                    storeInDocument: false,  // external file
+                    // STL has no unit declaration. The client-side CAD
+                    // viewer reports geometry in inches, matching uploaded
+                    // STEP parsing and the manufacturing convention.
+                    ...(format === 'STL' ? { units: 'inch' } : {})
                 })
             }
         );
@@ -462,7 +466,8 @@ async function handlePartTranslation(documentId, wvm, wvmId, elementId, partId, 
                             formatName: format,
                             partIds: partId,
                             onePartPerDoc: true,
-                            storeInDocument: false
+                            storeInDocument: false,
+                            ...(format === 'STL' ? { units: 'inch' } : {})
                         })
                     }
                 );
