@@ -49,10 +49,10 @@ describe('defaultHeaderTabs', () => {
     expect(manufacturingChildren(defaultHeaderTabs())).toContainEqual({ key: 'files', label: 'Files' });
   });
 
-  it('puts Fusion AutoCAM above the regular AutoCAM in the Manufacturing folder', () => {
+  it('includes Fusion AutoCAM but not the removed legacy AutoCAM tab in the Manufacturing folder', () => {
     const keys = manufacturingChildren(defaultHeaderTabs()).map((child) => child.key);
-    expect(keys.indexOf('fusion-autocam')).toBeGreaterThanOrEqual(0);
-    expect(keys.indexOf('fusion-autocam')).toBeLessThan(keys.indexOf('autocam'));
+    expect(keys).toContain('fusion-autocam');
+    expect(keys).not.toContain('autocam');
   });
 
   it('orders the scouting surfaces the way the team asked for them', () => {
@@ -239,7 +239,7 @@ describe('mergeDefaultHeaderTabs', () => {
   it('keeps a saved layout while restoring missing default children', () => {
     const tabs = mergeDefaultHeaderTabs([{ type: 'folder', label: 'Manufacturing', children: [{ key: 'manufacture', label: 'Manufacture' }] }]);
     const manufacturing = tabs.find((item) => item.label === 'Manufacturing');
-    expect(manufacturing.children.some((item) => item.key === 'autocam')).toBe(true);
+    expect(manufacturing.children.some((item) => item.key === 'fusion-autocam')).toBe(true);
     expect(tabs.some((item) => item.label === 'CAD')).toBe(true);
   });
 });

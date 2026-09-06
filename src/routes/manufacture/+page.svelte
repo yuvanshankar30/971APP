@@ -18,26 +18,19 @@
   import { isManufacturingLead, canCamReview as camReviewAllowed, canDeleteParts } from '$lib/permissions.js';
   import CadViewer from '$lib/components/CadViewer.svelte';
   import stockData from '$lib/stock.json';
-  import { buildStockMaterialIndex, materialIdForStockAssignment, stockCatalogIdForStockAssignment } from '$autocam/stockMaterial.js';
   import { formatPacificDate, formatPacificDateTimeWithZone } from '$lib/timezone.js';
   import PartDueDate from '$lib/components/PartDueDate.svelte';
   import PartNotes from '$lib/components/PartNotes.svelte';
-  import ToolpathViewer from '$autocam/components/ToolpathViewer.svelte';
-  import {
-    queueCamJobForPart,
-    updateCamJobAndRegenerate,
-    getPartStepFileName,
-    loadLatestCamJobsForParts,
-    loadCamGroupsForJobs,
-    downloadGcodeBlob,
-    downloadGcodeText,
-    camJobStatusLabel,
-    isCamJobActive,
-    WORKFLOW_OPERATION_TYPE
-  } from '$autocam/camJobs.js';
-  import { tubestockFaceFileName, tubestockFaceLabel, tubestockFaceGroupFileName, tubestockFaceGroupLabel } from '$autocam/tubestock.js';
+  import { fetchFusionJobsByManufacturingPartIds } from '$lib/fusionCam.js';
 
   const LAST_SUBSYSTEM_STORAGE_KEY = '971hub:lastSubsystem';
+  // Same labels JobQueueTab.svelte's own STATUS_LABELS uses, for the
+  // in-progress states this page's own status badge shows.
+  const FUSION_JOB_STATUS_LABELS = {
+    queued: 'Queued - waiting for a Runner',
+    claimed: 'Claimed by a Runner',
+    processing: 'Processing in Fusion 360'
+  };
   const QUICK_PRINT_STOCK_OPTIONS = stockData['3d-print'] || [];
   const DEFAULT_PETG_STOCK = QUICK_PRINT_STOCK_OPTIONS.find((stock) => stock.material === 'PETG')?.description || 'PETG 3D Printing Filament';
   
@@ -55,20 +48,13 @@
   let toastMessage = '';
   let toastTone = 'neutral';
   let showToast = false;
-  let camJobsByPart = {};
-  let camGroupsByJob = {};
+  // Fusion CAM job status per manufacturing request, keyed by part id -
+  // traced through fusion_parts/fusion_box_tubes to whichever plate/tube
+  // they're nested on (see fetchFusionJobsByManufacturingPartIds). Replaces
+  // the old direct-per-part legacy AutoCAM job lookup - Fusion CAM only
+  // covers router-workflow parts today.
+  let fusionJobsByPart = {};
   let queuingCamJobForPartId = null;
-  let showCamSetupModal = false;
-  let camSetupPart = null;
-  let camSetupJob = null;
-  let camSetupMachines = [];
-  let camSetupMaterials = [];
-  let camSetupTools = [];
-  let camSetupMachineTools = [];
-  let camSetupMachineId = '';
-  let camSetupToolId = '';
-  let availableCamSetupTools = [];
-  let loadingCamSetup = false;
   let subsystemOptions = [];
   let showQuickPrintModal = false;
   let quickPrintPartName = '';
@@ -469,7 +455,7 @@
       for (const p of parts) {
         if (p.kitting_bin) selectedBinMap[p.id] = p.kitting_bin;
       }
-      loadCamJobsForParts();
+      loadFusionJobsForParts();
     } catch (error) {
       console.error('Error loading parts:', error);
       alert('Error loading parts. Please try again.');
@@ -478,136 +464,26 @@
     }
   }
 
-  // AutoCAM: latest job status per part, keyed by part id. Loaded separately
-  // (not blocking) so a slow cam_jobs query never delays the parts list.
-  async function loadCamJobsForParts() {
-    const jobsMap = await loadLatestCamJobsForParts(parts.map((p) => p.id));
-    const byPart = {};
-    for (const [partId, job] of jobsMap.entries()) byPart[partId] = job;
-    camJobsByPart = byPart;
-    const groupsMap = await loadCamGroupsForJobs([...jobsMap.values()].map((job) => job.id));
-    camGroupsByJob = Object.fromEntries(groupsMap);
-  }
-
-  $: selectedCamSetupMachine = camSetupMachines.find((machine) => String(machine.id) === String(camSetupMachineId));
-  $: {
-    const assignedToolIds = new Set(camSetupMachineTools
-      .filter((link) => String(link.machine_id) === String(camSetupMachineId))
-      .map((link) => String(link.tool_id)));
-    availableCamSetupTools = camSetupTools.filter((tool) => tool.enabled && (
-      assignedToolIds.size ? assignedToolIds.has(String(tool.id)) : !selectedCamSetupMachine?.default_tool_id || String(tool.id) === String(selectedCamSetupMachine.default_tool_id)
-    ));
-  }
-
-  function selectCamSetupMachine(machineId) {
-    camSetupMachineId = machineId;
-    const machine = camSetupMachines.find((candidate) => String(candidate.id) === String(machineId));
-    const defaultTool = camSetupTools.find((tool) => String(tool.id) === String(machine?.default_tool_id));
-    camSetupToolId = defaultTool?.id || camSetupTools.find((tool) => tool.enabled)?.id || '';
-  }
-
-  async function openCamSetupModal(part, job = null) {
-    const operationType = WORKFLOW_OPERATION_TYPE[part.workflow];
-    if (!operationType) return;
-    loadingCamSetup = true;
-    camSetupPart = part;
-    camSetupJob = job;
-    showCamSetupModal = true;
+  // Fusion CAM job status per manufacturing request. Loaded separately (not
+  // blocking) so this never delays the parts list itself.
+  async function loadFusionJobsForParts() {
     try {
-      const [machinesResponse, materialsResponse, toolsResponse, machineToolsResponse] = await Promise.all([
-        supabase.from('cam_machines').select('id, name, default_tool_id, default_params, gcode_extension').eq('operation_type', operationType).eq('enabled', true).order('name'),
-        supabase.from('cam_materials').select('id, name').eq('enabled', true),
-        supabase.from('cam_tools').select('id, name, diameter, enabled').eq('enabled', true).order('name'),
-        supabase.from('cam_machine_tools').select('machine_id, tool_id')
-      ]);
-      if (machinesResponse.error) throw machinesResponse.error;
-      if (toolsResponse.error) throw toolsResponse.error;
-      camSetupMachines = machinesResponse.data || [];
-      camSetupMaterials = materialsResponse.data || [];
-      camSetupTools = toolsResponse.data || [];
-      camSetupMachineTools = machineToolsResponse.data || [];
-      const preferredMachine = camSetupMachines.find((machine) => String(machine.id) === String(job?.machine_id))
-        || (part.workflow === 'router' ? camSetupMachines.find((machine) => machine.name === 'UNC Router') : null)
-        || camSetupMachines[0];
-      selectCamSetupMachine(preferredMachine?.id || '');
-      if (job?.tool_id && camSetupTools.some((tool) => String(tool.id) === String(job.tool_id))) camSetupToolId = job.tool_id;
+      fusionJobsByPart = await fetchFusionJobsByManufacturingPartIds(parts.map((p) => p.id));
     } catch (error) {
-      showToastMessage(error.message || 'Could not load AutoCAM machine profiles', 'error');
-      closeCamSetupModal();
-    } finally {
-      loadingCamSetup = false;
+      console.error('Error loading Fusion CAM job status:', error);
     }
   }
 
-  function closeCamSetupModal() {
-    showCamSetupModal = false;
-    camSetupPart = null;
-    camSetupJob = null;
-    camSetupMachines = [];
-    camSetupTools = [];
-    camSetupMachineTools = [];
-    camSetupMachineId = '';
-    camSetupToolId = '';
-  }
-
-  // Same bridge /autocam's own "New Job" modal uses to carry a linked
-  // part's real recorded stock into the job it creates - built once here
-  // rather than duplicated, since stockData/stock.json never changes at
-  // runtime. See autocam/stockMaterial.js for why this is exact-match-only
-  // for the specific sheet (a wrong guess there costs the wrong cut depth)
-  // but has a free-text fallback for the generic material.
-  const camSetupStockMaterialIndex = buildStockMaterialIndex(stockData);
-
-  async function submitCamSetup() {
-    if (!camSetupPart || !selectedCamSetupMachine || !camSetupToolId) return;
-    const part = camSetupPart;
-    queuingCamJobForPartId = part.id;
-    // The request already recorded what this part is actually cut from -
-    // generating straight from the machine's generic defaults (no material,
-    // no specific stock/thickness) used to mean this "quick generate" path
-    // never got the depth/feed benefit of that, even though picking the
-    // part from /autocam's own New Job modal already did.
-    const materialId = materialIdForStockAssignment(camSetupStockMaterialIndex, camSetupMaterials, part.stock_assignment, stockData);
-    const stockCatalogId = stockCatalogIdForStockAssignment(stockData, part.stock_assignment);
-    const options = {
-      userId: user?.id || null,
-      name: camSetupJob?.name || part.name,
-      machineId: selectedCamSetupMachine.id,
-      toolId: camSetupToolId,
-      materialId: materialId || null,
-      params: { ...(selectedCamSetupMachine.default_params || {}), ...(stockCatalogId ? { stockCatalogId } : {}) },
-      gcodeExtension: selectedCamSetupMachine.gcode_extension || 'ngc'
-    };
-    try {
-      const result = camSetupJob
-        ? await updateCamJobAndRegenerate(camSetupJob, options)
-        : await queueCamJobForPart(part, options);
-      camJobsByPart = { ...camJobsByPart, [part.id]: result.job };
-      showToastMessage(result.success ? 'CAM generated successfully' : (result.error || 'AutoCAM generation failed'), result.success ? 'success' : 'error');
-      if (result.success) closeCamSetupModal();
-    } catch (error) {
-      showToastMessage(error.message || 'AutoCAM generation failed', 'error');
-    } finally {
-      queuingCamJobForPartId = null;
-    }
-  }
-
-  function generateAutocam(part) {
-    openCamSetupModal(part);
-  }
-
-  // "Attach STEP" modal - only needed for the retrofit case: a lathe part
-  // created before STEP was required for that workflow, so it has no STEP
-  // file yet for AutoCAM (or the 3D viewer) to use.
+  // "Attach STEP" modal - only needed for the retrofit case: a router/lathe
+  // part created before STEP was required for that workflow, so it has no
+  // STEP file yet for the 3D viewer (or, for router, Fusion CAM).
   let showCamProfileModal = false;
   let camProfileModalPart = null;
   let camProfileFile = null;
-  let camProfileJobName = '';
 
   function openCamProfileModal(part) {
     camProfileModalPart = part;
     camProfileFile = null;
-    camProfileJobName = part.name || '';
     showCamProfileModal = true;
   }
 
@@ -615,7 +491,6 @@
     showCamProfileModal = false;
     camProfileModalPart = null;
     camProfileFile = null;
-    camProfileJobName = '';
   }
 
   async function submitCamProfile() {
@@ -623,9 +498,9 @@
     const part = camProfileModalPart;
     queuingCamJobForPartId = part.id;
     try {
-      // Upload the STEP and attach it to the PART itself (not just the CAM
-      // job) so canViewCad()/getStepFileName() pick it up too - same JSON
-      // meta convention router already uses, merged with whatever's there.
+      // Upload the STEP and attach it to the PART itself so
+      // canViewCad()/getStepFileName() pick it up - same JSON meta
+      // convention router already uses, merged with whatever's there.
       const stepName = `${Date.now()}_${(part.name || 'part').replace(/[^a-zA-Z0-9]/g, '_')}_cad.${(camProfileFile.name.split('.').pop() || 'step')}`;
       const { error: uploadError } = await supabase.storage
         .from('manufacturing-files')
@@ -642,21 +517,12 @@
         showToastMessage(partUpdateError.message || 'Failed to attach STEP to part');
         return;
       }
-
-      const result = await queueCamJobForPart({ ...part, file_url: newFileUrl }, { userId: user?.id || null, name: camProfileJobName.trim() || null });
-      camJobsByPart = { ...camJobsByPart, [part.id]: result.job };
-      showToastMessage(result.success ? 'CAM generated' : (result.error || 'AutoCAM generation failed'));
+      showToastMessage('STEP file attached', 'success');
       closeCamProfileModal();
       await loadParts(); // refresh so canViewCad() picks up the newly-attached STEP
     } finally {
       queuingCamJobForPartId = null;
     }
-  }
-
-  async function retryAutocam(part) {
-    const job = camJobsByPart[part.id];
-    if (!job) return;
-    openCamSetupModal(part, job);
   }
 
   // Single dispatcher for "Install CAD" (STEP download) regardless of where
@@ -670,81 +536,21 @@
     return downloadFromStorage(part.file_name, part.id);
   }
 
-  let showToolpathModal = false;
-  let toolpathModalJob = null;
-  let toolpathView3D = false;
-  let ToolpathSimulator = null;
-  let toolpathSimulator3DLoading = false;
-
-  function openToolpathModal(job) {
-    if (!job?.gcode) return;
-    toolpathModalJob = job;
-    toolpathView3D = true;
-    showToolpathModal = true;
-    loadToolpathSimulator3D();
-  }
-
-  async function loadToolpathSimulator3D() {
-    if (ToolpathSimulator || toolpathSimulator3DLoading) return;
-    toolpathSimulator3DLoading = true;
-    try {
-      // Kept out of this page's normal load path (same reasoning as
-      // /autocam's own dynamic import) - Three.js is only needed once a
-      // completed job's 3D view is actually opened.
-      ToolpathSimulator = (await import('$autocam/components/ToolpathSimulator.svelte')).default;
-    } catch (error) {
-      console.error('Could not load the 3D toolpath simulator:', error);
-      showToastMessage('Could not load the 3D toolpath simulator.', 'error');
-      toolpathView3D = false;
-    } finally {
-      toolpathSimulator3DLoading = false;
+  // Downloads every G-code file a completed Fusion CAM job produced - same
+  // base64-decode technique JobQueueTab.svelte's downloadNcFile uses, just
+  // triggered from the Manufacturing page instead of the Fusion CAM Jobs tab.
+  function downloadFusionNcFiles(job) {
+    for (const file of job.fusion_nc_files || []) {
+      const binary = atob(file.contentBase64);
+      const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+      const blob = new Blob([bytes], { type: 'application/octet-stream' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = file.name.split('/').at(-1) || 'fusion-output.nc';
+      a.click();
+      URL.revokeObjectURL(url);
     }
-  }
-
-  async function showToolpath3D() {
-    toolpathView3D = true;
-    await loadToolpathSimulator3D();
-  }
-
-  function closeToolpathModal() {
-    showToolpathModal = false;
-    toolpathModalJob = null;
-    toolpathView3D = false;
-  }
-
-  let showTubeFaceFilesModal = false;
-  let tubeFaceFilesJob = null;
-  let selectedTubeFaceProgram = null;
-
-  // Derived from the angle rather than trusting the stored label/name.
-  // Jobs generated before tube faces were numbered by clock position carry
-  // the old "Top"/"Right side" text, and showing two schemes side by side is
-  // exactly the confusion the numbering is meant to remove - the operator
-  // writes these numbers on the tube. The stored value is still the fallback
-  // for a record with no angle on it.
-  function tubeFaceProgramLabel(faceProgram) {
-    if (faceProgram?.angleDegs?.length > 1) return tubestockFaceGroupLabel(faceProgram.angleDegs);
-    if (Number.isFinite(faceProgram?.angleDeg)) return tubestockFaceLabel(faceProgram.angleDeg);
-    return faceProgram?.label || tubestockFaceLabel(faceProgram?.angleDeg);
-  }
-
-  function tubeFaceProgramFileName(job, faceProgram) {
-    if (faceProgram?.angleDegs?.length > 1) return tubestockFaceGroupFileName(job?.gcode_file_name, faceProgram.angleDegs);
-    if (Number.isFinite(faceProgram?.angleDeg)) return tubestockFaceFileName(job?.gcode_file_name, faceProgram.angleDeg);
-    return faceProgram?.fileName || tubestockFaceFileName(job?.gcode_file_name, faceProgram?.angleDeg);
-  }
-
-  function openTubeFaceFilesModal(job) {
-    if (job?.operation_type !== 'tubestock' || !job.stats?.facePrograms?.length) return;
-    tubeFaceFilesJob = job;
-    selectedTubeFaceProgram = job.stats.facePrograms[0];
-    showTubeFaceFilesModal = true;
-  }
-
-  function closeTubeFaceFilesModal() {
-    showTubeFaceFilesModal = false;
-    tubeFaceFilesJob = null;
-    selectedTubeFaceProgram = null;
   }
 
   async function sendNotification(type, payload = {}) {
@@ -2184,10 +1990,9 @@
             </button>
           {/if}
 
-          <!-- CAD / AutoCAM action grid -->
+          <!-- CAD / Fusion CAM action grid -->
           {#if canViewCad(part)}
-            {@const camJob = camJobsByPart[part.id]}
-            {@const camCapable = !!WORKFLOW_OPERATION_TYPE[part.workflow]}
+            {@const fusionJob = part.workflow === 'router' ? fusionJobsByPart[part.id] : null}
             <div class="cad-action-grid" on:click|stopPropagation on:keydown|stopPropagation role="presentation">
               <button class="btn btn-secondary btn-sm" on:click={() => openCadViewer(part)} title="View 3D model">
                 <Box size={14} /> View CAD
@@ -2197,61 +2002,31 @@
                   <Layers size={14} /> Open Fusion CAM
                 </a>
               {/if}
-              {#if camCapable}
-                <button class="btn btn-secondary btn-sm" disabled={camJob?.status !== 'completed'} on:click={() => openToolpathModal(camJob)} title={camJob?.status === 'completed' ? 'Preview the generated toolpath' : 'Generate G-code first'}>
-                  <Route size={14} /> Show Toolpath
-                </button>
-              {/if}
               <button class="btn btn-secondary btn-sm" on:click={() => installCadStepFile(part)} title="Download STEP file">
                 <Download size={14} /> Install CAD
               </button>
-              {#if camCapable}
-                {#if isCamJobActive(camJob)}
-                  <span class="btn btn-secondary btn-sm autocam-running" title="AutoCAM is processing this part">
-                    <span class="autocam-spinner"></span> {camJobStatusLabel(camJob.status)}
-                  </span>
-                {:else if camJob?.status === 'completed'}
-                  {#if camJob.operation_type === 'tubestock' && camJob.stats?.facePrograms?.length}
-                    <button class="btn btn-secondary btn-sm" on:click={() => openTubeFaceFilesModal(camJob)} title="View and install the generated program for each tube face">
-                      <FileText size={14} /> View all G-code
-                    </button>
-                  {:else}
-                    <button class="btn btn-secondary btn-sm" on:click={() => downloadGcodeBlob(camJob)} title="Download G-code">
-                      <Download size={14} /> Install NGC
-                    </button>
-                  {/if}
-                {:else if camJob?.status === 'failed'}
-                  <button
-                    class="btn btn-secondary btn-sm"
-                    disabled={queuingCamJobForPartId === part.id}
-                    title={`AutoCAM failed: ${camJob.errors?.[0] || 'unknown error'} - click to retry`}
-                    on:click={() => retryAutocam(part)}
-                  >
-                    <Zap size={14} /> Retry AutoCAM
-                  </button>
-                {:else}
-                  <button
-                    class="btn btn-secondary btn-sm"
-                    disabled={queuingCamJobForPartId === part.id}
-                    title="Generate G-code from this part's STEP file"
-                    on:click={() => generateAutocam(part)}
-                  >
-                    <Zap size={14} /> Generate G-code
-                  </button>
-                {/if}
+              {#if fusionJob?.status === 'completed' && fusionJob.fusion_nc_files?.length}
+                <button class="btn btn-secondary btn-sm" on:click={() => downloadFusionNcFiles(fusionJob)} title="Download G-code">
+                  <Download size={14} /> Install G-code
+                </button>
               {/if}
             </div>
-            {#if camJob?.status === 'completed'}
-              <span class="autocam-completed part-card-autocam-status"><CircleCheck size={14} /> AutoCAM completed</span>
-              {#if camGroupsByJob[camJob.id]}
-                <a class="autocam-completed part-card-autocam-status grouped-status" href={`/autocam?group=${camGroupsByJob[camJob.id].id}`}><CircleCheck size={14} /> Grouped</a>
+            {#if fusionJob}
+              {#if ['queued', 'claimed', 'processing'].includes(fusionJob.status)}
+                <span class="btn btn-secondary btn-sm autocam-running part-card-autocam-status" title="Fusion CAM is processing this part">
+                  <span class="autocam-spinner"></span> {FUSION_JOB_STATUS_LABELS[fusionJob.status] || fusionJob.status}
+                </span>
+              {:else if fusionJob.status === 'completed'}
+                <span class="autocam-completed part-card-autocam-status"><CircleCheck size={14} /> Fusion CAM completed</span>
+              {:else if fusionJob.status === 'failed'}
+                <a class="autocam-failed part-card-autocam-status" href={fusionCamHref(part)} title={fusionJob.errors?.[0] || 'Unknown error'}>Fusion CAM failed - open Fusion CAM to retry</a>
               {/if}
             {/if}
-          {:else if WORKFLOW_OPERATION_TYPE[part.workflow]}
+          {:else if part.workflow === 'router' || part.workflow === 'lathe'}
             <button
               class="btn btn-secondary btn-sm"
               on:click|stopPropagation={() => openCamProfileModal(part)}
-              title="This part was created before STEP was required for its workflow - attach one to unlock the 3D viewer and AutoCAM"
+              title="This part was created before STEP was required for its workflow - attach one to unlock the 3D viewer{part.workflow === 'router' ? ' and Fusion CAM' : ''}"
             >
               <Upload size={14} /> Attach STEP
             </button>
@@ -2273,11 +2048,6 @@
               >
                 <Clock size={14} /> Start
               </button>
-            {/if}
-            {#if camJobsByPart[part.id]}
-              <a class="btn btn-secondary btn-sm" href={`/autocam?job=${camJobsByPart[part.id].id}`} on:click|stopPropagation>
-                <ExternalLink size={14} /> AutoCAM
-              </a>
             {/if}
           {:else if part.status === 'in-progress'}
             {#if part.workflow === 'router'}
@@ -2419,8 +2189,7 @@
             <td class="actions-table-col" class:hidden={assignMode}>
               <div class="row-actions">
                 {#if canViewCad(part)}
-                  {@const camJob = camJobsByPart[part.id]}
-                  {@const camCapable = !!WORKFLOW_OPERATION_TYPE[part.workflow]}
+                  {@const fusionJob = part.workflow === 'router' ? fusionJobsByPart[part.id] : null}
                   <div class="cad-action-grid" on:click|stopPropagation on:keydown|stopPropagation role="presentation">
                     <button class="btn btn-secondary btn-sm" on:click={() => openCadViewer(part)} title="View 3D model">
                       <Box size={13} /> View CAD
@@ -2430,61 +2199,31 @@
                         <Layers size={13} /> Open Fusion CAM
                       </a>
                     {/if}
-                    {#if camCapable}
-                      <button class="btn btn-secondary btn-sm" disabled={camJob?.status !== 'completed'} on:click={() => openToolpathModal(camJob)} title={camJob?.status === 'completed' ? 'Preview the generated toolpath' : 'Generate G-code first'}>
-                        <Route size={13} /> Show Toolpath
-                      </button>
-                    {/if}
                     <button class="btn btn-secondary btn-sm" on:click={() => installCadStepFile(part)} title="Download STEP file">
                       <Download size={13} /> Install CAD
                     </button>
-                    {#if camCapable}
-                      {#if isCamJobActive(camJob)}
-                        <span class="btn btn-secondary btn-sm autocam-running" title="AutoCAM is processing this part">
-                          <span class="autocam-spinner"></span> {camJobStatusLabel(camJob.status)}
-                        </span>
-                      {:else if camJob?.status === 'completed'}
-                        {#if camJob.operation_type === 'tubestock' && camJob.stats?.facePrograms?.length}
-                          <button class="btn btn-secondary btn-sm" on:click={() => openTubeFaceFilesModal(camJob)} title="View and install the generated program for each tube face">
-                            <FileText size={13} /> View all G-code
-                          </button>
-                        {:else}
-                          <button class="btn btn-secondary btn-sm" on:click={() => downloadGcodeBlob(camJob)} title="Download G-code">
-                            <Download size={13} /> Install NGC
-                          </button>
-                        {/if}
-                      {:else if camJob?.status === 'failed'}
-                        <button
-                          class="btn btn-secondary btn-sm"
-                          disabled={queuingCamJobForPartId === part.id}
-                          title={`AutoCAM failed: ${camJob.errors?.[0] || 'unknown error'} - click to retry`}
-                          on:click={() => retryAutocam(part)}
-                        >
-                          <Zap size={13} /> Retry AutoCAM
-                        </button>
-                      {:else}
-                        <button
-                          class="btn btn-secondary btn-sm"
-                          disabled={queuingCamJobForPartId === part.id}
-                          title="Generate G-code from this part's STEP file"
-                          on:click={() => generateAutocam(part)}
-                        >
-                          <Zap size={13} /> Generate G-code
-                        </button>
-                      {/if}
+                    {#if fusionJob?.status === 'completed' && fusionJob.fusion_nc_files?.length}
+                      <button class="btn btn-secondary btn-sm" on:click={() => downloadFusionNcFiles(fusionJob)} title="Download G-code">
+                        <Download size={13} /> Install G-code
+                      </button>
                     {/if}
                   </div>
-                  {#if camJob?.status === 'completed'}
-                    <span class="autocam-completed"><CircleCheck size={14} /> AutoCAM completed</span>
-                    {#if camGroupsByJob[camJob.id]}
-                      <a class="autocam-completed grouped-status" href={`/autocam?group=${camGroupsByJob[camJob.id].id}`}><CircleCheck size={14} /> Grouped</a>
+                  {#if fusionJob}
+                    {#if ['queued', 'claimed', 'processing'].includes(fusionJob.status)}
+                      <span class="autocam-running" title="Fusion CAM is processing this part">
+                        <span class="autocam-spinner"></span> {FUSION_JOB_STATUS_LABELS[fusionJob.status] || fusionJob.status}
+                      </span>
+                    {:else if fusionJob.status === 'completed'}
+                      <span class="autocam-completed"><CircleCheck size={14} /> Fusion CAM completed</span>
+                    {:else if fusionJob.status === 'failed'}
+                      <a class="autocam-failed" href={fusionCamHref(part)} title={fusionJob.errors?.[0] || 'Unknown error'}>Fusion CAM failed - open Fusion CAM to retry</a>
                     {/if}
                   {/if}
-                {:else if WORKFLOW_OPERATION_TYPE[part.workflow]}
+                {:else if part.workflow === 'router' || part.workflow === 'lathe'}
                   <button
                     class="btn btn-secondary btn-sm"
                     on:click={() => openCamProfileModal(part)}
-                    title="This part was created before STEP was required for its workflow - attach one to unlock the 3D viewer and AutoCAM"
+                    title="This part was created before STEP was required for its workflow - attach one to unlock the 3D viewer{part.workflow === 'router' ? ' and Fusion CAM' : ''}"
                   >
                     <Upload size={13} /> Attach STEP
                   </button>
@@ -2507,11 +2246,6 @@
                 >
                   <Clock size={13} /> Start
                 </button>
-                {/if}
-                {#if camJobsByPart[part.id]}
-                  <a class="btn btn-secondary btn-sm" href={`/autocam?job=${camJobsByPart[part.id].id}`} on:click|stopPropagation title="Open this AutoCAM job">
-                    <ExternalLink size={14} /> AutoCAM
-                  </a>
                 {/if}
 
               {:else if part.status === 'in-progress'}
@@ -2876,8 +2610,8 @@
               <Download size={18} />
             </button>
           {/if}
-          {#if camJobsByPart[cadViewerPart.id]?.status === 'completed'}
-            <button type="button" class="cad-download-btn" aria-label="Install CAM (download G-code)" title="Install CAM (download G-code)" on:click={() => downloadGcodeBlob(camJobsByPart[cadViewerPart.id])}>
+          {#if cadViewerPart.workflow === 'router' && fusionJobsByPart[cadViewerPart.id]?.status === 'completed' && fusionJobsByPart[cadViewerPart.id]?.fusion_nc_files?.length}
+            <button type="button" class="cad-download-btn" aria-label="Download G-code" title="Download G-code" on:click={() => downloadFusionNcFiles(fusionJobsByPart[cadViewerPart.id])}>
               <Zap size={18} />
             </button>
           {/if}
@@ -2889,62 +2623,6 @@
       <div class="modal-body">
         <CadViewer part={cadViewerPart} stepFileName={getStepFileName(cadViewerPart)} />
         <p class="cad-modal-hint">Drag to rotate · scroll to zoom · right-drag to pan</p>
-      </div>
-    </div>
-  </div>
-{/if}
-
-{#if showCamSetupModal && camSetupPart}
-  <div
-    class="modal-backdrop"
-    on:click|self={closeCamSetupModal}
-    role="button"
-    tabindex="0"
-    on:keydown={(e) => { if (e.key === 'Escape') { e.preventDefault(); closeCamSetupModal(); } }}
-  >
-    <div class="modal cam-setup-modal" role="dialog" aria-modal="true" aria-label="AutoCAM setup">
-      <div class="modal-header">
-        <h3>{camSetupJob ? 'Retry AutoCAM' : 'Generate G-code'} - {camSetupPart.name}</h3>
-        <button type="button" class="modal-close-button" aria-label="Close dialog" on:click={closeCamSetupModal}>
-          <X size={18} />
-        </button>
-      </div>
-      <div class="modal-body">
-        {#if loadingCamSetup}
-          <p class="text-muted">Loading machine profiles...</p>
-        {:else}
-          <div class="cam-setup-grid">
-            <div class="form-group">
-              <label class="form-label" for="cam-setup-machine">Machine profile</label>
-              <select id="cam-setup-machine" class="form-select" value={camSetupMachineId} on:change={(event) => selectCamSetupMachine(event.currentTarget.value)}>
-                {#each camSetupMachines as machine}
-                  <option value={machine.id}>{machine.name}</option>
-                {/each}
-              </select>
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="cam-setup-tool">Tool / end mill</label>
-              <select id="cam-setup-tool" class="form-select" bind:value={camSetupToolId}>
-                {#each availableCamSetupTools as tool}
-                  <option value={tool.id}>{tool.name}{tool.diameter ? ` (${tool.diameter}\" dia)` : ''}</option>
-                {/each}
-              </select>
-            </div>
-          </div>
-          {#if !camSetupMachines.length || !availableCamSetupTools.length}
-            <p class="cam-setup-error">Add an enabled machine profile and tool before generating this job.</p>
-          {/if}
-        {/if}
-      </div>
-      <div class="modal-footer">
-        <button class="btn" on:click={closeCamSetupModal}>Cancel</button>
-        <button
-          class="btn btn-primary"
-          disabled={loadingCamSetup || !selectedCamSetupMachine || !camSetupToolId || queuingCamJobForPartId === camSetupPart.id}
-          on:click={submitCamSetup}
-        >
-          <Zap size={16} /> {queuingCamJobForPartId === camSetupPart.id ? 'Generating...' : 'Generate G-code'}
-        </button>
       </div>
     </div>
   </div>
@@ -2967,17 +2645,11 @@
       </div>
       <div class="modal-body">
         <p class="cad-modal-hint">
-          This part was created before a STEP file was required for its workflow. Attach one now to unlock the 3D
-          viewer and let AutoCAM generate {camProfileModalPart.workflow === 'lathe' ? 'turning' : 'routering'} G-code
-          immediately.
+          This part was created before a STEP file was required for its workflow. Attach one now to unlock the 3D viewer{camProfileModalPart.workflow === 'router' ? ' and Fusion CAM' : ''}.
           {#if camProfileModalPart.workflow === 'lathe'}
             Model it with the spindle axis along the STEP file's Z axis, centered at X=0, Y=0.
           {/if}
         </p>
-        <div class="form-group">
-          <label class="form-label" for="cam-job-name">Job Name</label>
-          <input id="cam-job-name" class="form-input" bind:value={camProfileJobName} />
-        </div>
         <input
           type="file"
           class="form-input"
@@ -2990,118 +2662,8 @@
           disabled={!camProfileFile || queuingCamJobForPartId === camProfileModalPart.id}
           on:click={submitCamProfile}
         >
-          {queuingCamJobForPartId === camProfileModalPart.id ? 'Generating…' : 'Generate G-code'}
+          {queuingCamJobForPartId === camProfileModalPart.id ? 'Attaching…' : 'Attach STEP'}
         </button>
-      </div>
-    </div>
-  </div>
-{/if}
-
-{#if showTubeFaceFilesModal && tubeFaceFilesJob}
-  <div
-    class="modal-backdrop"
-    on:click|self={closeTubeFaceFilesModal}
-    role="button"
-    tabindex="0"
-    on:keydown={(e) => { if (e.key === 'Escape') { e.preventDefault(); closeTubeFaceFilesModal(); } }}
-  >
-    <div class="modal tube-face-files-modal" role="dialog" aria-modal="true" aria-label="Tube stock G-code files">
-      <div class="modal-header">
-        <div>
-          <h3>Tube Stock G-code</h3>
-          <p class="tube-face-files-subtitle">{tubeFaceFilesJob.name || tubeFaceFilesJob.parts?.name || 'Tube stock job'}: one program for each drilled face.</p>
-        </div>
-        <button type="button" class="modal-close-button" aria-label="Close dialog" on:click={closeTubeFaceFilesModal}>
-          <X size={18} />
-        </button>
-      </div>
-      <div class="modal-body tube-face-files-body">
-        <div class="tube-face-program-list" aria-label="Generated face programs">
-          {#each tubeFaceFilesJob.stats.facePrograms as faceProgram}
-            <button
-              type="button"
-              class:active={selectedTubeFaceProgram === faceProgram}
-              class="tube-face-program"
-              on:click={() => (selectedTubeFaceProgram = faceProgram)}
-            >
-              <span>
-                <strong>{tubeFaceProgramLabel(faceProgram)}</strong>
-                <small>{faceProgram.holeCount} hole{faceProgram.holeCount === 1 ? '' : 's'}</small>
-              </span>
-              <span class="tube-face-program-file">{tubeFaceProgramFileName(tubeFaceFilesJob, faceProgram)}</span>
-            </button>
-          {/each}
-        </div>
-        {#if selectedTubeFaceProgram}
-          <section class="tube-face-program-preview" aria-label={`${tubeFaceProgramLabel(selectedTubeFaceProgram)} G-code`}>
-            <div class="tube-face-program-preview-header">
-              <div>
-                <h4>{tubeFaceProgramLabel(selectedTubeFaceProgram)}</h4>
-                <p>{tubeFaceProgramFileName(tubeFaceFilesJob, selectedTubeFaceProgram)}</p>
-              </div>
-              <button
-                class="btn btn-primary btn-sm"
-                on:click={() => downloadGcodeText(selectedTubeFaceProgram.gcode, tubeFaceProgramFileName(tubeFaceFilesJob, selectedTubeFaceProgram))}
-              >
-                <Download size={14} /> Install this file
-              </button>
-            </div>
-            <pre>{selectedTubeFaceProgram.gcode || 'This saved job does not contain the face program text. Regenerate it to create individual files.'}</pre>
-          </section>
-        {/if}
-      </div>
-    </div>
-  </div>
-{/if}
-
-{#if showToolpathModal && toolpathModalJob}
-  <div
-    class="modal-backdrop"
-    on:click|self={closeToolpathModal}
-    role="button"
-    tabindex="0"
-    on:keydown={(e) => { if (e.key === 'Escape') { e.preventDefault(); closeToolpathModal(); } }}
-  >
-    <div class="modal toolpath-modal" class:toolpath-modal-3d={toolpathView3D} role="dialog" aria-modal="true">
-      <div class="modal-header">
-        <h3>Toolpath Preview</h3>
-        <button type="button" class="modal-close-button" aria-label="Close dialog" on:click={closeToolpathModal}>
-          <X size={18} />
-        </button>
-      </div>
-      <div class="modal-body">
-        {#if toolpathModalJob.operation_type === 'routing' || toolpathModalJob.operation_type === 'turning'}
-          <div class="toolpath-view-tabs" role="tablist" aria-label="Toolpath view">
-            <button type="button" role="tab" aria-selected={toolpathView3D} class:active={toolpathView3D} on:click={showToolpath3D}>3D Toolpath</button>
-            <button type="button" role="tab" aria-selected={!toolpathView3D} class:active={!toolpathView3D} on:click={() => (toolpathView3D = false)}>2D Preview</button>
-          </div>
-        {/if}
-        {#if toolpathView3D}
-          {#if ToolpathSimulator}
-            <svelte:component
-              this={ToolpathSimulator}
-              gcode={toolpathModalJob.gcode}
-              operationType={toolpathModalJob.operation_type}
-              toolDiameter={Number(toolpathModalJob.params?.toolDiameter) || null}
-              rapidRate={toolpathModalJob.cam_machines?.rapid_rate ?? null}
-              toolSequence={toolpathModalJob.params?.toolSequence || []}
-              stockDiameter={Number(toolpathModalJob.params?.stockDiameter) || null}
-              stockShape={toolpathModalJob.params?.stockShape || 'round'}
-              noseRadius={Number(toolpathModalJob.params?.finishTool?.noseRadius ?? toolpathModalJob.params?.noseRadius) || null}
-              drillDiameter={Number(toolpathModalJob.params?.drilling?.diameter) || null}
-              stockThickness={Number(toolpathModalJob.params?.stockThickness) || null}
-              stepFileName={toolpathModalJob.step_file_name || null}
-              edgeShiftX={Number(toolpathModalJob.stats?.edgeShiftX) || 0}
-              edgeShiftY={Number(toolpathModalJob.stats?.edgeShiftY) || 0}
-              crossSection={toolpathModalJob.stats?.crossSection || null}
-              walls={toolpathModalJob.stats?.walls || []}
-            />
-          {:else}
-            <div class="toolpath-simulator-loading" aria-busy="true"><span class="loading-spinner"></span> Loading 3D toolpath...</div>
-          {/if}
-        {:else}
-          <ToolpathViewer gcode={toolpathModalJob.gcode} operationType={toolpathModalJob.operation_type} />
-        {/if}
       </div>
     </div>
   </div>
@@ -3142,6 +2704,15 @@
     flex-basis: 100%;
   }
 
+  .autocam-failed {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    color: var(--danger, #e05252);
+    font-size: var(--font-xs, 0.75rem);
+    font-weight: 600;
+  }
+
   .autocam-spinner {
     display: inline-block;
     width: 12px;
@@ -3166,91 +2737,6 @@
     line-height: 1.2;
     font-size: var(--font-xs, 0.75rem);
     padding: 0.3rem 0.4rem;
-  }
-
-  .toolpath-modal { width: min(700px, 95vw); max-width: 95vw; }
-  .toolpath-modal-3d { width: min(1100px, 95vw); }
-  .toolpath-simulator-loading { min-height: 320px; display: flex; align-items: center; justify-content: center; gap: 0.65rem; color: var(--text-muted); }
-  .toolpath-simulator-loading .loading-spinner { width: 1.25rem; height: 1.25rem; border-width: 2px; }
-  .toolpath-view-tabs { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; border-bottom: 1px solid var(--border); }
-  .toolpath-view-tabs button { padding: 0.5rem 0.75rem; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--text-muted); font: inherit; cursor: pointer; }
-  .toolpath-view-tabs button.active { border-bottom-color: var(--accent-strong); color: var(--text); font-weight: 700; }
-
-  .tube-face-files-modal { width: min(1100px, 96vw); max-width: 96vw; }
-  .tube-face-files-modal .modal-header { align-items: flex-start; }
-  .tube-face-files-modal h3 { margin: 0; }
-  .tube-face-files-subtitle { margin: 0.25rem 0 0; color: var(--text-muted); font-size: var(--font-sm, 0.9rem); }
-  .tube-face-files-body {
-    display: grid;
-    grid-template-columns: minmax(14rem, 0.75fr) minmax(0, 1.6fr);
-    gap: 1rem;
-    min-height: 28rem;
-  }
-  .tube-face-program-list {
-    display: grid;
-    align-content: start;
-    gap: 0.5rem;
-  }
-  .tube-face-program {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 0.75rem;
-    width: 100%;
-    padding: 0.7rem;
-    color: var(--text);
-    text-align: left;
-    background: var(--surface-1);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm, 4px);
-    cursor: pointer;
-  }
-  .tube-face-program:hover,
-  .tube-face-program.active { border-color: var(--accent-strong); background: var(--surface-2); }
-  .tube-face-program strong,
-  .tube-face-program small { display: block; }
-  .tube-face-program small { margin-top: 0.2rem; color: var(--text-muted); }
-  .tube-face-program-file {
-    max-width: 10rem;
-    overflow: hidden;
-    color: var(--text-muted);
-    font-family: var(--font-mono-stack);
-    font-size: var(--font-xs, 0.75rem);
-    text-align: right;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .tube-face-program-preview {
-    display: grid;
-    grid-template-rows: auto minmax(0, 1fr);
-    min-width: 0;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm, 4px);
-    overflow: hidden;
-  }
-  .tube-face-program-preview-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-    padding: 0.75rem;
-    border-bottom: 1px solid var(--border);
-  }
-  .tube-face-program-preview h4,
-  .tube-face-program-preview p { margin: 0; }
-  .tube-face-program-preview p { margin-top: 0.2rem; color: var(--text-muted); font-family: var(--font-mono-stack); font-size: var(--font-xs, 0.75rem); }
-  .tube-face-program-preview pre {
-    min-width: 0;
-    max-height: 31rem;
-    margin: 0;
-    padding: 0.85rem;
-    overflow: auto;
-    background: var(--surface-2);
-    color: var(--text);
-    font-family: var(--font-mono-stack);
-    font-size: var(--font-xs, 0.75rem);
-    line-height: 1.5;
-    white-space: pre;
   }
 
   .deep-link-highlight {
@@ -3679,16 +3165,6 @@
   @keyframes toast-fade {
     0%, 78% { opacity: 1; }
     100% { opacity: 0; }
-  }
-
-  .cam-setup-modal { width: min(34rem, 94vw); }
-  .cam-setup-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
-  .cam-setup-error { color: var(--red-strong, #b4232e); margin: 1rem 0 0; }
-
-  @media (max-width: 700px) {
-    .tube-face-files-body { grid-template-columns: 1fr; min-height: 0; }
-    .tube-face-program-preview { min-height: 20rem; }
-    .tube-face-program-preview-header { align-items: flex-start; flex-direction: column; }
   }
 
   /* Mobile Responsive Styles */

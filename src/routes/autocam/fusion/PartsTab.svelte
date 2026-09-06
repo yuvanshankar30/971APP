@@ -182,8 +182,14 @@
       return;
     }
     submitting = true;
+    // Came from the "Open Fusion CAM" deep link (see initialManufacturingPartId)?
+    // Adding the part is only step one of that flow - jump straight to the
+    // Plates tab, pre-filtered to this part's own stock category, so nesting
+    // it onto a plate is the very next thing the user does, not a separate
+    // hunt through the Plates tab afterward.
+    const cameFromDeepLink = prefillApplied && newPart.manufacturingPartId === initialManufacturingPartId;
     try {
-      await createPart({
+      const created = await createPart({
         name: newPart.name,
         epic: newPart.epic,
         ticket: newPart.ticket,
@@ -200,7 +206,12 @@
       detectedDepthInches = null;
       showAddForm = false;
       await load(false);
-      toastActions.show('Part added');
+      if (cameFromDeepLink) {
+        toastActions.show('Part added - now nest it onto a plate below');
+        onViewPlates(created.category_id);
+      } else {
+        toastActions.show('Part added');
+      }
     } catch (e) {
       toastActions.show(e.message || 'Failed to add part');
     } finally {

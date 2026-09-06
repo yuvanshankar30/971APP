@@ -267,6 +267,77 @@ export async function fetchFusionJobs() {
 }
 
 /**
+ * Maps manufacturing request ids (public.parts.id) to the most recent Fusion
+ * milling job that actually covers them - traced through
+ * fusion_parts/fusion_box_tubes (linked via their own part_id) to whichever
+ * plate or box tube they were nested/queued onto, then to that plate/tube's
+ * most recent milling cam_jobs row. Used by /manufacture to show real Fusion
+ * CAM status next to a request instead of the old per-part legacy AutoCAM
+ * job (which queued directly against the part - Fusion CAM's nest-many-
+ * parts-onto-one-plate model means the job a request cares about is one
+ * step removed, so this does that lookup once for a whole list of requests
+ * rather than each caller re-deriving it).
+ *
+ * A request with no linked Fusion part, or a Fusion part never nested onto
+ * anything queued yet, simply has no entry in the returned map.
+ */
+export async function fetchFusionJobsByManufacturingPartIds(partIds) {
+  const ids = [...new Set((partIds || []).filter(Boolean))];
+  if (!ids.length) return {};
+
+  const [{ data: fParts, error: fPartsError }, { data: fTubes, error: fTubesError }] = await Promise.all([
+    supabase.from('fusion_parts').select('id, part_id').in('part_id', ids),
+    supabase.from('fusion_box_tubes').select('id, part_id').in('part_id', ids)
+  ]);
+  if (fPartsError) throw fPartsError;
+  if (fTubesError) throw fTubesError;
+
+  const fusionPartIds = (fParts || []).map((fp) => fp.id);
+  let assignments = [];
+  if (fusionPartIds.length) {
+    const { data, error } = await supabase
+      .from('fusion_part_category_assignments')
+      .select('part_id, plate_id')
+      .in('part_id', fusionPartIds);
+    if (error) throw error;
+    assignments = data || [];
+  }
+
+  // plateId -> Set of manufacturing part ids nested onto it
+  const plateToManufacturingParts = new Map();
+  const fusionPartToManufacturingPart = new Map((fParts || []).map((fp) => [fp.id, fp.part_id]));
+  for (const a of assignments) {
+    const mpId = fusionPartToManufacturingPart.get(a.part_id);
+    if (!mpId) continue;
+    if (!plateToManufacturingParts.has(a.plate_id)) plateToManufacturingParts.set(a.plate_id, new Set());
+    plateToManufacturingParts.get(a.plate_id).add(mpId);
+  }
+
+  // boxTubeId -> manufacturing part id (1:1 - see createBoxTube's own doc comment)
+  const boxTubeToManufacturingPart = new Map((fTubes || []).filter((t) => t.part_id).map((t) => [t.id, t.part_id]));
+
+  if (!plateToManufacturingParts.size && !boxTubeToManufacturingPart.size) return {};
+
+  const jobs = await fetchFusionJobs(); // already ordered created_at desc
+  const result = {};
+  for (const job of jobs) {
+    const plateId = job.params?.plateId;
+    const boxTubeId = job.params?.boxTubeId;
+    const mpIds = new Set();
+    if (plateId && plateToManufacturingParts.has(plateId)) {
+      for (const id of plateToManufacturingParts.get(plateId)) mpIds.add(id);
+    }
+    if (boxTubeId && boxTubeToManufacturingPart.has(boxTubeId)) {
+      mpIds.add(boxTubeToManufacturingPart.get(boxTubeId));
+    }
+    for (const mpId of mpIds) {
+      if (!result[mpId]) result[mpId] = job; // first match wins - jobs is already newest-first
+    }
+  }
+  return result;
+}
+
+/**
  * Reads the cached Fusion Data Panel folder tree for the given project
  * (default FUSION_DATA_PROJECT_NAME's real value, "2026 Season CAM") -
  * pushed up by a live Runner (see SpartanRoboticsAutoCAM.py's

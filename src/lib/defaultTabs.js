@@ -10,9 +10,14 @@
 // anyone not touching most of them day to day. Order (Home, Manufacturing,
 // Competition, CAD, Purchasing, Docs, Admin) keeps the team's primary daily
 // workflows at the front of the header.
-//   - Manufacturing: the shop-floor tools (manufacture tracking, AutoCAM,
-//     Kitting, COTS Stocking) - "whatever else we add" here later just needs
-//     a new entry in manufacturingChildren below.
+//   - Manufacturing: the shop-floor tools (manufacture tracking, Fusion
+//     AutoCAM, Kitting, COTS Stocking) - "whatever else we add" here later
+//     just needs a new entry in manufacturingChildren below. The legacy
+//     per-part AutoCAM tab was removed once Fusion CAM took over G-code
+//     generation for router parts (still reachable by URL like the other
+//     deliberately-hidden-but-not-deleted routes below) - lathe (turning)
+//     parts currently have no CAM generation surface at all as a result;
+//     see the tracking issue for restoring that.
 //   - CAD: CAD and Build combined into one group, since Build is really a
 //     CAD sub-concern (already lives at /cad/build).
 //   - Competition: the active scouting surfaces only. The legacy routes
@@ -39,7 +44,6 @@ export function defaultHeaderTabs(navConfig = navigation) {
   const manufacturingChildren = [];
   if (navConfig?.tabs?.manufacture !== false) manufacturingChildren.push({ key: 'manufacture', label: 'Manufacture' });
   if (navConfig?.tabs?.['fusion-autocam'] !== false) manufacturingChildren.push({ key: 'fusion-autocam', label: 'Fusion AutoCAM' });
-  if (navConfig?.tabs?.autocam !== false) manufacturingChildren.push({ key: 'autocam', label: 'AutoCAM' });
   if (navConfig?.tabs?.['gcode-converter'] !== false) manufacturingChildren.push({ key: 'gcode-converter', label: 'G-code Converter' });
   if (navConfig?.tabs?.kitting !== false) manufacturingChildren.push({ key: 'kitting', label: 'Kitting' });
   if (navConfig?.tabs?.['cots-stocking'] !== false) manufacturingChildren.push({ key: 'cots-stocking', label: 'COTS Stocking' });
