@@ -467,31 +467,11 @@ def start(data, session):
             job_id,
             f"Plate {plate_id} job {job_id} completion upload",
         )
-        doc.close(False)
-        app.log(f"Closed document '{doc_name}'")
-
-        # Land back on Fusion's own Start/home screen between jobs instead
-        # of leaving whatever the previous job's now-closed document
-        # happened to be replaced by - direct instruction, and confirmed
-        # live as a real problem: this Runner's own test documents were
-        # accumulating open (3 at once observed live) rather than each job
-        # cleanly returning to a blank state. Fusion shows its Start screen
-        # automatically once no document is open, so this only needs to
-        # close what's safe to close - anything this Runner itself created
-        # (its own "Plate<id>Job<id>" naming) or Fusion's own blank
-        # "Untitled" canvas, never a document with unsaved changes, which
-        # could be someone's real unfinished work this Runner has no
-        # business discarding.
-        try:
-            for other_doc in list(app.documents):
-                if other_doc is doc:
-                    continue
-                is_runner_doc = other_doc.name.startswith("Plate") and "Job" in other_doc.name
-                is_blank_canvas = other_doc.name == "Untitled" and not other_doc.isSaved
-                if is_runner_doc or is_blank_canvas:
-                    other_doc.close(False)
-        except Exception:
-            app.log("Failed to close stray documents:\n{}".format(traceback.format_exc()))
+        # Left open on purpose - direct instruction to remove the earlier
+        # "close it and return to Fusion's Start screen between jobs"
+        # behavior. Whoever's watching a job run can now inspect the real
+        # finished document (setups, operations, generated toolpaths)
+        # immediately, without Fusion clearing it out from under them.
 
     except Exception:
         if app:
