@@ -55,7 +55,7 @@ RUNNER_MACHINE_ID = _read_env_value("RUNNER_MACHINE_ID") or None
 
 # .overridepath is how this add-in finds a `pip install --target=...`'d
 # copy of `requests` (Fusion's bundled Python has no third-party packages) -
-# see valor6800-autocam-runner-setup.md (repo root), Step 4, for the real
+# see docs/team-setup-guide.md, Step 4, for the real
 # gotcha this works around. Genuinely missing on first install (git-ignored,
 # never checked in) - fail with a clear, actionable message instead of a
 # bare FileNotFoundError with no context, same "loud and specific beats
@@ -69,8 +69,8 @@ except FileNotFoundError:
         f"Missing {_OVERRIDEPATH_FILE} - this add-in needs a `pip install "
         "--target=<some-folder> requests` (Fusion's bundled Python has no "
         "third-party packages) and a .overridepath file containing that "
-        "folder's path. See valor6800-autocam-runner-setup.md at the repo "
-        "root, Step 4, for exact commands."
+        "folder's path. See docs/team-setup-guide.md, Step 4, for exact "
+        "commands."
     )
 
 # Which Fusion "project" (top-level entry in the Data Panel) AutoCAM-

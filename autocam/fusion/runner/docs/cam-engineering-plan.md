@@ -4,7 +4,7 @@ This doc is for whoever actually knows the machine — not a software question, 
 
 ## Why this can't be figured out from the software side
 
-The Runner (`autocam/fusion/runner/`) works by taking a saved Fusion CAM "template" — basically a recording of a real setup someone built once by hand (stock, work coordinate system, which tools cut which features, feeds and speeds) — and re-applying it to new part geometry automatically. It doesn't invent a machining strategy from scratch. Right now, the template files in `autocam/fusion/runner/templates/` are the ones that shipped with the open-source project this was forked from (Team Valor 6800's AutoCAM) — built around *their* machines, not ours. Applying them to our parts would produce wrong or nonsensical toolpaths.
+The Runner (`autocam/fusion/runner/`) works by taking a saved Fusion CAM "template" — basically a recording of a real setup someone built once by hand (stock, work coordinate system, which tools cut which features, feeds and speeds) — and re-applying it to new part geometry automatically. It doesn't invent a machining strategy from scratch. The legacy template files in `autocam/fusion/runner/templates/` are not validated for our machines. Applying them to our parts could produce wrong or nonsensical toolpaths.
 
 Three real things are needed, none of which are a config file or a code change:
 
@@ -40,7 +40,7 @@ Questions to answer:
 ## Where these files actually go
 
 Not decided yet — flagging rather than assuming. Two obvious options:
-- Committed into the repo under `autocam/fusion/runner/templates/` and a new `tools/` folder, the same way Valor's originals shipped (simple, works with the current file-path-based code, but puts real tool/machine data in git history).
+- Committed into the repo under `autocam/fusion/runner/templates/` and a new `tools/` folder (simple, works with the current file-path-based code, but puts real tool/machine data in git history).
 - Some kind of real upload path through the web app instead (more work, keeps this stuff out of git, matches how STEP files already work).
 
 This gets decided once the actual files exist and we know their size/sensitivity — not worth designing storage for data that doesn't exist yet.

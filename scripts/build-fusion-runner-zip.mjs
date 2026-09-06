@@ -35,12 +35,10 @@ const stagingRoot = mkdtempSync(join(tmpdir(), 'fusion-runner-zip-'));
 const stagingDir = join(stagingRoot, 'SpartanRoboticsAutoCAM');
 
 try {
-  // _upstream/ is a large vendored reference copy (never loaded by Fusion -
-  // see autocam/fusion/runner/README.md), and __pycache__ is local build
-  // noise - neither belongs in a real install.
+  // __pycache__ is local build noise and does not belong in a real install.
   cpSync(runnerSrc, stagingDir, {
     recursive: true,
-    filter: (src) => !/(^|\/)(_upstream|__pycache__)(\/|$)/.test(src.slice(runnerSrc.length))
+    filter: (src) => !/(^|\/)__pycache__(\/|$)/.test(src.slice(runnerSrc.length))
   });
 
   // The add-in itself (SpartanRoboticsAutoCAM.py's _ENV_PATH) only ever

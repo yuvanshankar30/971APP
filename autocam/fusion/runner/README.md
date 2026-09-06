@@ -16,13 +16,12 @@ Pairs with Spartans Hub's `/autocam/fusion` section and its `/api/fusion-runner`
 
 ## Overview
 
-This is Team 971's fork of FRC Team Valor 6800's open-source [AutoCAM Runner](https://github.com/AutoCAM-FRC/Runner), adapted to run against **Spartans Hub** (this repo) instead of the original AutoCAM WebUI. It's the Fusion 360 side of Spartans Hub's **Fusion CAM** section (`/autocam/fusion`) — the real-milling counterpart to the existing pure-JS turning/routing pipeline documented in the repo root's `README.md`.
+This is Team 971's Fusion CAM Runner, built to run against **Spartans Hub** (this repo). It is the Fusion 360 side of Spartans Hub's **Fusion CAM** section (`/autocam/fusion`) — the real-milling counterpart to the existing pure-JS turning/routing pipeline documented in the repo root's `README.md`.
 
 The add-in polls Spartans Hub's `/api/fusion-runner` endpoint for queued milling jobs, pulls down plate and box-tube jobs, builds Fusion CAM setups from templates, generates toolpaths, exports G-code, and reports completion back to `cam_jobs` in Spartans Hub's own database.
 
 There is no multi-tenant "team"/API-key-scopes concept here — this Runner authenticates with a single shared-secret bearer token that matches Spartans Hub's `FUSION_RUNNER_TOKEN` environment variable (see `src/lib/server/fusion_runner_auth.js`), sourced from its own `FUSION_RUNNER_TOKEN` Secret Manager secret (`cloudbuild.yaml`'s `--set-secrets`) — not shared with Vision Scouting's runner token. See issue #312 for the remaining GCP admin setup this needs before it can run against the deployed Hub instead of a local dev server.
 
-An unmodified copy of the original upstream Runner is kept at [`_upstream/`](_upstream/) for reference/diffing — it is never built or loaded by Fusion.
 
 ## How It Works
 
@@ -103,7 +102,6 @@ It asks which Hub to talk to (deployed, or a local dev server) and for your `FUS
 | `workflows/` | CAM job-processing pipelines |
 | `templates/` | Fusion CAM template files (`Plates`, `boxtubes`) |
 | `lib/` | Shared Fusion add-in utilities |
-| `_upstream/` | Unmodified copy of the original AutoCAM Runner, kept for reference |
 
 ### Workflows (`workflows/`)
 
@@ -140,17 +138,11 @@ python3 -m compileall -q .
 
 Toggle verbose logging to the Fusion **Text Command** window via `DEBUG = True` in `config.py`.
 
-See **[CONTRIBUTING.md](CONTRIBUTING.md)** for the original upstream pull-request checklist (still broadly applicable to this fork).
-
 ## Related
 
-- **[`autocam/fusion/README.md`](../README.md)** — the vendoring/porting writeup for this whole Fusion CAM section
-- **[AutoCAM Runner (upstream)](https://github.com/AutoCAM-FRC/Runner)** — the original project this was forked from, by FRC Team Valor 6800
+- **[`autocam/fusion/README.md`](../README.md)** — the Fusion CAM architecture writeup
+- **[`docs/team-setup-guide.md`](docs/team-setup-guide.md)** — install and configuration instructions
 
 ## Security
 
-Please review the **[Security Policy](SECURITY.md)** and report vulnerabilities responsibly rather than opening a public issue.
-
-## License
-
-Distributed under the **MIT License**. See [`_upstream/LICENSE`](_upstream/LICENSE) for the original license text (the untouched reference copy - see "How It Works" above). Original work Copyright FRC Team Valor 6800 (AutoCAM-FRC); this fork's changes are adaptations for Spartan Robotics 971's own deployment.
+Report security concerns privately to the project maintainers rather than opening a public issue.

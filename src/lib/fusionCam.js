@@ -1,6 +1,6 @@
 /**
  * Data layer for Fusion CAM - the Fusion-360-backed milling pipeline
- * (autocam/fusion/, ported from Team Valor 6800's open-source AutoCAM).
+ * (autocam/fusion/).
  * Mirrors camJobs.js's role for the existing turning/routing pipeline:
  * shared Supabase helpers used by the /autocam/fusion UI, kept in one
  * place so job/part/plate creation stays consistent.

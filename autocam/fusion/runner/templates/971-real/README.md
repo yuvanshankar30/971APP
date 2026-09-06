@@ -4,7 +4,7 @@ These are the team's actual Fusion CAM templates (from the team's own
 `Documents/Template` folder), copied here for safekeeping. They are **not
 yet referenced by any Runner code** - `camPlate.py`/`camTube.py` still point
 at `../Plates.f3dhsm-template` and `../boxtubes.f3dhsm-template` one level
-up, which are still Valor 6800's own originals (their tool naming, e.g.
+up, which are legacy template files (their tool naming, e.g.
 "6061Al Onsrud End Mill" - not ours).
 
 Confirmed real (not Valor's) by reading the XML directly - `<description>`

@@ -17,8 +17,7 @@
 # mode and got it wrong (see git history) - a real Fusion export of a 2D
 # Contour operation with manually-placed tabs
 # (templates/reference-tab-positions.f3dhsm-template, description="2D Slot
-# Cut" - reference only, never loaded at runtime, same role
-# _upstream/ plays elsewhere in this repo) showed the real mechanism is
+# Cut" - reference only, never loaded at runtime) showed the real mechanism is
 # different from what was guessed: tabPositioning stays 'distance' even
 # with manual points -
 # it's tabPositions itself that's the actual toggle/data (shown as the

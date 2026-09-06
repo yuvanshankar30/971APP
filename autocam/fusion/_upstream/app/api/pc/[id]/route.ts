@@ -1,1 +1,0 @@
-export { PATCH, DELETE } from "@/lib/api/pc";

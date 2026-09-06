@@ -1,5 +1,4 @@
-// Job-claim API for the Fusion CAM Runner (autocam/fusion/runner/ - a fork
-// of Team Valor 6800's open-source AutoCAM Runner add-in). Polled by an
+// Job-claim API for the Fusion CAM Runner (autocam/fusion/runner/). Polled by an
 // external Fusion 360 machine, not called from the browser - authenticated
 // via a shared-secret bearer token (fusion_runner_auth.js), not a Supabase
 // Auth session, so this uses the service-role client throughout (same

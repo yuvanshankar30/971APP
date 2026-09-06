@@ -1,1 +1,0 @@
-export { Accept as GET } from "@/lib/api/user/invites";

@@ -270,7 +270,7 @@ browser confirmation or prompt popups.
   string import), not read from disk per-request - the production Docker
   image never gets the raw source tree, only compiled `build/` output, so
   a request-time `fs.readdir` would find nothing there. Excludes
-  `node_modules` and the vendored `autocam/fusion/**/_upstream` trees.
+  `node_modules`.
 - **Integrations**: Onshape (CAD source of truth for parts), Slack (bot
   notifications/DMs, `971bot`), The Blue Alliance (competition data),
   Google Drive (AutoCAM input/output watcher), Sentry (error monitoring),
@@ -406,17 +406,14 @@ own docs are all together in one place instead of scattered across
   are synchronous in-process math; milling needs an actual external Fusion
   360 Runner) - now built as **Fusion CAM**, see the next bullet.
 - **`autocam/fusion/`** (reachable from `/autocam/fusion`) - **Fusion CAM**:
-  a native SvelteKit/Supabase port of Team Valor 6800's open-source AutoCAM
-  (`AutoCAM-FRC/Website` + `AutoCAM-FRC/Runner`, MIT licensed), fills the
-  milling gap the rest of AutoCAM deliberately doesn't solve (real 3-axis
+  a native SvelteKit/Supabase milling pipeline that fills the gap the rest
+  of AutoCAM deliberately doesn't solve (real 3-axis
   contoured toolpaths via Fusion 360's own CAM engine, not flat 2.5D
   profiles). Backed by new `fusion_parts`/`fusion_plates`/`fusion_box_tubes`/
   `fusion_part_categories` tables plus the reused `cam_jobs`/`cam_machines`/
   `cam_tools`/`cam_materials` tables and a claim/complete/fail endpoint at
   `src/routes/api/fusion-runner/+server.js`. `autocam/fusion/runner/` is the
-  forked Fusion 360 add-in that actually runs CAM; unmodified copies of both
-  original repos are vendored at `autocam/fusion/_upstream/` and
-  `autocam/fusion/runner/_upstream/` for reference. Its active workflows
+  Fusion 360 add-in that actually runs CAM. Its active workflows
   patch Fusion templates from the claimed tool's checked-in `.tools` archive
   and post with the claimed machine's checked-in `.cps` file; the filename is
   stored on `cam_tools.fusion_tool_library_file`, so an unknown tool fails
@@ -445,8 +442,9 @@ own docs are all together in one place instead of scattered across
   `autocam/docs/fusion-grouping-review.md` for the draft scope and review findings.
   It uses Supabase Auth + `canManageCamProfiles` for
   humans, same as the rest of this
-  app. See `autocam/fusion/README.md` and `valor6800-autocam-runner-setup.md`
-  (repo root) for the full port writeup and the evaluation that led to it.
+  app. See `autocam/fusion/README.md` and
+  `autocam/fusion/runner/docs/team-setup-guide.md` for the architecture and
+  setup instructions.
 - **`autocam/fusion/turning/`** - experimental Fusion turning foundation
   ([issue #331](https://github.com/frc971/spartanshub/issues/331)): validates a
   single-part round-stock plan for the Haas TL-1 and exposes an empty draft
