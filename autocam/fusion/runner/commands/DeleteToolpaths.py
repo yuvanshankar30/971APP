@@ -49,7 +49,33 @@ def _repair_missing_selections(setup) -> list[str]:
     way they always have.
     """
     repaired = []
-    for op in setup.operations:
+    # A real material-sheet template provides SEVERAL contour2d "finishing
+    # pass" operations (one per internal feature its author had at export
+    # time - "Shape Through Finishing Pass", "Shape Pocket Finishing
+    # Pass"), all doing the same job once repaired with a model-driven
+    # recognition selection: trace whatever internal features exist on
+    # THIS part, not the one specific feature the template author's part
+    # happened to have. Keeping all of them running the identical
+    # recognition doesn't cover anything extra - it just re-cuts the same
+    # geometry once per leftover template operation, wasted machining
+    # time. Direct instruction: exactly one "Feature Slot Cut" per setup,
+    # covering every internal feature; the rest are deleted, not repaired.
+    # snapshot first - this loop deletes operations, so it can't iterate
+    # setup.operations live (same mutate-while-iterating hazard fixed
+    # elsewhere in this file).
+    feature_slot_op = None
+    for op in list(setup.operations):
+        group_tabs_param = op.parameters.itemByName("group_tabs")
+        is_outer_profile = (
+            op.strategy == "contour2d"
+            and group_tabs_param is not None
+            and str(group_tabs_param.expression).strip().lower() == "true"
+        )
+        is_feature_finishing_pass = op.strategy == "contour2d" and not is_outer_profile
+        if is_feature_finishing_pass and feature_slot_op is not None:
+            op.deleteMe()
+            continue
+
         param_name = _SELECTION_PARAM_BY_STRATEGY.get(op.strategy)
         if param_name is None:
             continue
@@ -71,21 +97,38 @@ def _repair_missing_selections(setup) -> list[str]:
             selections.item(i).hasWarning for i in range(selections.count)
         )
         if not has_missing:
+            if is_feature_finishing_pass:
+                feature_slot_op = op
             continue
         selections.clear()
-        if op.strategy == "contour2d":
+        name_lower = op.name.lower()
+        if is_outer_profile:
+            # The one real outer-profile cut - a whole-body silhouette is
+            # correct here and only here; using it for every contour2d
+            # operation (the original bug) made a feature finishing pass
+            # indistinguishable from this one.
             selections.createNewSilhouetteSelection()
         else:
             recognition = selections.createNewPocketRecognitionSelection()
-            # Without isSetupModelSelected, a PocketRecognitionSelection has
-            # no model to search at all and silently recognizes nothing -
-            # confirmed live as the other half of the same "circular pockets
-            # not generating" failure. areHolesIncluded is off by default
-            # (every pocket/adaptive operation would otherwise also try to
-            # cut circular holes meant for their own dedicated operation);
-            # only turn it on for the operation actually named for that.
+            # Without isSetupModelSelected, a PocketRecognitionSelection
+            # has no model to search at all and silently recognizes
+            # nothing - confirmed live as the cause of circular pockets
+            # not generating any toolpath at all.
             recognition.isSetupModelSelected = True
-            recognition.areHolesIncluded = "circular" in op.name.lower() and "hole" in op.name.lower()
+            # areHolesIncluded is off by default (every pocket/adaptive
+            # operation would otherwise also try to cut circular holes
+            # meant for their own dedicated operation); only turn it on for
+            # the operation actually named for that.
+            recognition.areHolesIncluded = "circular" in name_lower and "hole" in name_lower
+            if is_feature_finishing_pass:
+                # Renamed so the setup tree itself shows this as a
+                # distinct operation from "2D Slot Cut" - direct
+                # instruction. A pocket2d/adaptive2d ROUGHING operation
+                # keeps its own real name ("Shape Pocket", ">.3 Circular
+                # Through Hole", etc.); only the one kept finishing pass
+                # gets renamed.
+                op.name = "Feature Slot Cut"
+                feature_slot_op = op
         value.applyCurveSelections(selections)
         repaired.append(op.name)
     return repaired
@@ -173,7 +216,16 @@ def waitForGeneration(setup, waitforcontour=False, quiet_checks_required=30):
     quiet_streak = 0
     while quiet_streak < quiet_checks_required:
         adsk.doEvents()
-        app.activeViewport.refresh()
+        # activeViewport is None whenever Fusion's window isn't the active
+        # one on screen (minimized, unfocused, or - as observed live during
+        # unattended Runner testing - simply not the foreground app at that
+        # instant) - confirmed live as a real crash (AttributeError: 'NoneType'
+        # object has no attribute 'refresh'), not a theoretical case. The
+        # refresh here is a best-effort nudge to help Fusion notice toolpath
+        # generation progress, not something the wait loop actually depends
+        # on to function correctly.
+        if app.activeViewport is not None:
+            app.activeViewport.refresh()
         time.sleep(0.1)
         if waitforcontour:
             generating = [

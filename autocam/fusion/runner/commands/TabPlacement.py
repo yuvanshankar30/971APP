@@ -26,28 +26,35 @@
 # a live geometry/point reference tied to one specific part - contours=true
 # shows the same flattening for the operation's own geometry selection).
 # The reference also had group_tabs=true (default is false) alongside it.
-# So: leave tabPositioning alone, set group_tabs=true, and set tabPositions
-# to the real computed points directly - no enum guessing needed here.
+# So: leave tabPositioning alone, and set tabPositions to the real computed
+# points directly - no enum guessing needed here.
 #
-# GROUPED (multi-part) jobs: confirmed as a real, live bug, not theoretical.
-# This file used to gather candidate tab edges from EVERY body in the
-# document and apply that same mixed-body list to EVERY contour2d operation
-# in the setup - correct only by coincidence for a single-part job (the only
-# case this was ever tested against). On a real grouped job (multiple
-# different parts nested on one plate, confirmed live via the Fusion MCP
-# bridge against an actual 9-part plate), that meant a given part's cut
-# operation could receive tab edges belonging to a DIFFERENT part entirely -
-# a tab reference with no real stock behind it, which is exactly what
-# produced a real "Failed to post data" error on an actual job. Fixed by
-# matching each contour2d operation to the ONE body it actually cuts before
-# picking tab edges for it, instead of assuming there's only one body.
+# WHICH operation actually gets tabs: only the one the template itself
+# already designates via group_tabs=true in its own default state - a real
+# material-sheet template has SEVERAL contour2d operations (finishing
+# passes on individual pocket/hole features, plus one outer-profile
+# release cut), and only the outer-profile one is meant to hold the part(s)
+# to stock. Confirmed directly against a real exported template
+# ((DEPRECATED)971 Metal Sheet.f3dhsm-template): of its three contour2d
+# operations, only "2D Slot Cut" defaults group_tabs to true. This file
+# used to force group_tabs=true and apply tab edges to EVERY contour2d
+# operation indiscriminately - confirmed live as a real bug, tabs applied
+# to finishing passes that cut a small internal feature and have nothing
+# to do with holding the part to stock. Fixed by only touching operations
+# where group_tabs was already true, read before this function ever
+# modifies anything.
 #
-# There is no direct API from an Operation back to "which body does this
-# cut" - adsk.cam.Operation exposes no body/model accessor. The matching
-# here works by reading the operation's own RESOLVED geometry selection
-# (real curve data Fusion has already computed for it, not a guess) and
-# testing which body's bounding box contains it - bodies on a nested plate
-# don't overlap by construction, so this is unambiguous.
+# GROUPED (multi-part) jobs: group_tabs is exactly Fusion's own "distribute
+# tabs across every body in the setup" flag - so the one operation that has
+# it true is, BY DEFINITION, the shared cut that releases every nested part
+# from stock at once, not any single part's own operation. An earlier
+# version of this file tried to match that operation to exactly one body
+# (the right approach for a per-part finishing pass, the wrong one for
+# this) - confirmed live on a real 2-part grouped job that the match always
+# failed, silently leaving the one real tabbed operation with no tabs at
+# all. Fixed by computing candidate tab edges from EVERY body on the plate
+# and combining them - for a single-body plate this reduces to exactly the
+# old single-body behavior.
 import adsk.core
 import adsk.fusion
 import adsk.cam
@@ -211,60 +218,6 @@ def select_tab_edges(body, max_tabs: int = DEFAULT_MAX_TABS):
     return selected
 
 
-def _operation_sample_point(operation):
-    """A real XYZ point Fusion has already resolved for this operation's own
-    geometry selection - used only to figure out which body the operation
-    belongs to (see module header), not for the tab positions themselves.
-    Tries the contour2d "contours" parameter first, then the pocket-strategy
-    "pockets" parameter, since which one exists depends on strategy. Returns
-    None if the operation has no resolved selection yet (nothing to match
-    against - caller falls back to the single-body case).
-    """
-    for param_name in ("contours", "pockets"):
-        param = operation.parameters.itemByName(param_name)
-        if param is None:
-            continue
-        value = param.value
-        if not hasattr(value, "getCurveSelections"):
-            continue
-        try:
-            selections = value.getCurveSelections()
-            for i in range(selections.count):
-                output = selections.item(i).outputGeometry
-                for path in output:
-                    if path.count == 0:
-                        continue
-                    curve = path.item(0)
-                    point = getattr(curve, "startPoint", None)
-                    if point is not None:
-                        return point
-        except Exception:
-            continue
-    return None
-
-
-def _match_body_for_point(bodies, point, margin_cm: float = 0.5):
-    """Which body's own footprint contains this point, if any. Nested parts
-    on a plate don't overlap by construction, so a small margin (to absorb
-    the point sitting exactly on a boundary) is enough to disambiguate
-    safely - this is not a fuzzy/best-guess match, it's the one body whose
-    real bounding box actually contains the point.
-    """
-    if point is None:
-        return None
-    matches = []
-    for body in bodies:
-        bb = body.boundingBox
-        if (
-            bb.minPoint.x - margin_cm <= point.x <= bb.maxPoint.x + margin_cm
-            and bb.minPoint.y - margin_cm <= point.y <= bb.maxPoint.y + margin_cm
-        ):
-            matches.append(body)
-    if len(matches) == 1:
-        return matches[0]
-    return None
-
-
 def _apply_tab_positions(app, operation, points) -> bool:
     """Sets tabPositions to the real computed points and group_tabs=true,
     per a real Fusion export showing this is the actual mechanism (see this
@@ -327,8 +280,6 @@ def ConfigureTabs(min_tabs: int = DEFAULT_MIN_TABS, max_tabs: int = DEFAULT_MAX_
     if cam is None:
         return
 
-    single_body = bodies[0] if len(bodies) == 1 else None
-
     for setup in cam.setups:
         # Only the ONE contour2d operation the template itself designates
         # for tabs (group_tabs already true in the template's own default,
@@ -362,43 +313,44 @@ def ConfigureTabs(min_tabs: int = DEFAULT_MIN_TABS, max_tabs: int = DEFAULT_MAX_
             continue
 
         for op in contour_ops:
-            # Single-part jobs (still the common case) have no ambiguity -
-            # skip the geometry-matching machinery entirely and use the one
-            # body directly. Grouped jobs match each operation to its own
-            # body via its already-resolved selection geometry (see
-            # _operation_sample_point/_match_body_for_point above) - if that
-            # match fails for some reason (operation not yet generated,
-            # unexpected geometry shape), skip tabs for THIS operation only
-            # rather than guessing with another part's edges, which is the
-            # exact bug this rework fixes.
-            if single_body is not None:
-                body = single_body
-            else:
-                point = _operation_sample_point(op)
-                body = _match_body_for_point(bodies, point)
-                if body is None:
+            # An operation reaching here already has group_tabs=true in the
+            # template's own default - group_tabs is exactly Fusion's own
+            # "distribute tabs across every body in the setup" flag, so this
+            # operation is BY DEFINITION the one shared outer-profile cut
+            # that releases every nested part from stock at once, not one
+            # specific part's own operation. Confirmed live: on a real
+            # 2-part grouped job, this is a single "2D Slot Cut" operation
+            # whose own resolved geometry selection spans both bodies - an
+            # earlier version of this function tried to match it to exactly
+            # ONE body (the right approach for a part-specific finishing
+            # pass, the wrong one for this), which always failed to match
+            # and silently left this operation with NO tabs at all on every
+            # grouped job. Fixed by computing candidate edges from EVERY
+            # body on the plate and combining them, single-part or grouped -
+            # for a single-body plate this is exactly the old single_body
+            # behavior (the loop below runs once).
+            all_candidates = []
+            total_perimeter_in = 0.0
+            for body in bodies:
+                perimeter_in = _outer_perimeter_in(body)
+                target_tabs = _tab_count_for_perimeter(perimeter_in, min_tabs, max_tabs)
+                body_candidates = select_tab_edges(body, max_tabs=target_tabs)
+                if len(body_candidates) < min_tabs:
                     app.log(
-                        f"TabPlacement: could not match '{op.name}' to a single "
-                        "body on this grouped plate - skipping tabs for this "
-                        "operation rather than risking edges from a different "
-                        "part."
+                        f"TabPlacement: '{op.name}' - a nested body only had "
+                        f"{len(body_candidates)} straight edge(s) long enough "
+                        f"to hold a tab (wanted at least {min_tabs} of "
+                        f"{target_tabs} target, perimeter {perimeter_in:.1f}in) "
+                        "- using what's available rather than placing a tab "
+                        "on a rounded or too-short edge."
                     )
-                    continue
+                all_candidates.extend(body_candidates)
+                total_perimeter_in += perimeter_in
+            candidate_edges = all_candidates
+            perimeter_in = total_perimeter_in
 
-            perimeter_in = _outer_perimeter_in(body)
-            target_tabs = _tab_count_for_perimeter(perimeter_in, min_tabs, max_tabs)
-            candidate_edges = select_tab_edges(body, max_tabs=target_tabs)
-
-            if len(candidate_edges) < min_tabs:
-                app.log(
-                    f"TabPlacement: '{op.name}' - only found "
-                    f"{len(candidate_edges)} straight edge(s) long enough to "
-                    f"hold a tab (wanted at least {min_tabs} of {target_tabs} "
-                    f"target, perimeter {perimeter_in:.1f}in) - using what's "
-                    "available rather than placing a tab on a rounded or "
-                    "too-short edge."
-                )
             if not candidate_edges:
+                app.log(f"TabPlacement: '{op.name}' - no usable tab edges found on any body, skipping.")
                 continue
 
             # A real run showed setting tabPositions to bare adsk.core.Point3D
@@ -425,8 +377,8 @@ def ConfigureTabs(min_tabs: int = DEFAULT_MIN_TABS, max_tabs: int = DEFAULT_MAX_
                 # so the target tab count is at least roughly achieved
                 # instead of leaving the template's default (tool_diameter
                 # * 8, usually far more than a few tabs' worth of spacing on
-                # a real plate-sized contour). Perimeter/edge count are this
-                # operation's OWN matched body's, not a different part's.
+                # a real plate-sized contour). Perimeter/edge count are the
+                # combined total across every body this operation cuts.
                 tab_distance = op.parameters.itemByName("tabDistance")
                 if tab_distance is not None and perimeter_in and len(candidate_edges) > 0:
                     try:
