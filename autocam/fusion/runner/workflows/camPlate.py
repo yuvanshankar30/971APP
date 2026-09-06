@@ -470,10 +470,28 @@ def start(data, session):
         doc.close(False)
         app.log(f"Closed document '{doc_name}'")
 
+        # Land back on Fusion's own Start/home screen between jobs instead
+        # of leaving whatever the previous job's now-closed document
+        # happened to be replaced by - direct instruction, and confirmed
+        # live as a real problem: this Runner's own test documents were
+        # accumulating open (3 at once observed live) rather than each job
+        # cleanly returning to a blank state. Fusion shows its Start screen
+        # automatically once no document is open, so this only needs to
+        # close what's safe to close - anything this Runner itself created
+        # (its own "Plate<id>Job<id>" naming) or Fusion's own blank
+        # "Untitled" canvas, never a document with unsaved changes, which
+        # could be someone's real unfinished work this Runner has no
+        # business discarding.
         try:
-            ui.workspaces.itemById("FusionSolidEnvironment").activate()
+            for other_doc in list(app.documents):
+                if other_doc is doc:
+                    continue
+                is_runner_doc = other_doc.name.startswith("Plate") and "Job" in other_doc.name
+                is_blank_canvas = other_doc.name == "Untitled" and not other_doc.isSaved
+                if is_runner_doc or is_blank_canvas:
+                    other_doc.close(False)
         except Exception:
-            pass
+            app.log("Failed to close stray documents:\n{}".format(traceback.format_exc()))
 
     except Exception:
         if app:
