@@ -28,10 +28,66 @@ from ..config import (
     TOOLS_PATH,
 )
 from .dropFolder import resolve_drop_folder
-from .importPlate import clear_design_nuke
 from .job_status import ensure_completion_response, send_job_error
 from .localCamAssets import load_local_tool_library_json, resolve_local_post_processor
 from .templateTools import patch_cam_template_with_tool_libraries
+
+
+def _select_plate_template_path(machine_name: Optional[str], material_name: Optional[str]) -> str:
+    """Picks the richer, real-machine-exported template for metal/polycarbonate
+    jobs on a machine that has one, falling back to the generic
+    Plates.f3dhsm-template otherwise.
+
+    Direct instruction, verified against cam_machines before wiring this up
+    (two real machines, not one "the router"): "UNC Router" (controller
+    linuxcnc, 971_emc.cps) is the old router - metal/Lexan jobs there use
+    templates/971-real/(DEPRECATED)971 Metal Sheet.f3dhsm-template.
+    "New Router" (controller wincnc per its current DB row, though its own
+    filename says "shopsabre only!!" - see the separate GitHub issue
+    flagging that controller value as likely wrong) is the new router -
+    metal/Lexan jobs there use templates/971-real/new router metal sheet
+    (shopsabre only!!).f3dhsm-template. Some richer templates (e.g.
+    countersink) are flagged by the user as new-router-only; this function
+    only handles the one mapping actually requested (metal/Lexan by
+    machine), not a general per-template machine-compatibility system.
+
+    Materials outside metal/polycarbonate (SRPP, MDF, acrylic, wood,
+    Delrin, nylon) keep using the generic Plates.f3dhsm-template - nobody
+    has asked for a richer template for those yet, and guessing one would
+    risk the exact "guessed wrong Fusion internals" failure mode this
+    project has hit before.
+    """
+    base_dir = os.path.dirname(__file__)
+    fallback = os.path.join(base_dir, "../templates/Plates.f3dhsm-template")
+
+    material = (material_name or "").strip().lower()
+    is_metal_or_lexan = (
+        "aluminum" in material
+        or "aluminium" in material
+        or "6061" in material
+        or "lexan" in material
+        or "polycarb" in material
+        or ("poly" in material and "propylene" not in material)
+    )
+    if not is_metal_or_lexan:
+        return fallback
+
+    machine = (machine_name or "").strip().lower()
+    if machine == "unc router":
+        candidate = os.path.join(
+            base_dir, "../templates/971-real/(DEPRECATED)971 Metal Sheet.f3dhsm-template"
+        )
+    elif machine == "new router":
+        candidate = os.path.join(
+            base_dir,
+            "../templates/971-real/new router metal sheet (shopsabre only!!).f3dhsm-template",
+        )
+    else:
+        # An unrecognized machine name - don't guess, use the generic
+        # template rather than silently picking one of the two above.
+        return fallback
+
+    return candidate if os.path.isfile(candidate) else fallback
 
 
 def _read_time_value(value) -> Optional[float]:
@@ -217,7 +273,20 @@ def start(data, session):
         if not design:
             raise RuntimeError("No active Design product.")
 
-        # Clear design but don't nuke CAM (we're creating a new file)
+        # Clear design but don't nuke CAM (we're creating a new file).
+        # Deferred (not module-level) import: importPlate.py imports
+        # _download_part_file from this module at ITS OWN module level, so
+        # a module-level import here forms a genuine circular import -
+        # SpartanRoboticsAutoCAM.py's own top-level import of importPlate
+        # would fail immediately on a fresh add-in load ("cannot import
+        # name 'clear_design_nuke' from partially initialized module"),
+        # since importPlate.py is still mid-load (hasn't defined
+        # clear_design_nuke yet) at the exact moment this module tries to
+        # import it back. Confirmed directly: a real fresh Fusion restart
+        # hit exactly this error. Deferring to call time works because by
+        # then both modules have finished loading.
+        from .importPlate import clear_design_nuke
+
         clear_design_nuke(design)
         time.sleep(1.0)
 
@@ -278,9 +347,7 @@ def start(data, session):
         machine_name = machine.get("name") or _get(payload, "machine")
         material_name = material.get("name") or _get(payload, "material")
         machine_post_processor_path = resolve_local_post_processor(data)
-        template_path = os.path.join(
-            os.path.dirname(__file__), "../templates/Plates.f3dhsm-template"
-        )
+        template_path = _select_plate_template_path(machine_name, material_name)
 
         _tool_info, tool_json_path = load_local_tool_library_json(data, TOOLS_PATH)
         patched_template = os.path.join(

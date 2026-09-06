@@ -6,6 +6,74 @@ import time
 
 _POCKET_STRATEGIES = ("pocket_new", "pocket_clearing", "pocket2d")
 
+# Maps each strategy to the name of its geometry-selection parameter - the
+# thing that actually holds WHAT to cut, separate from all the how-to-cut
+# parameters (feeds, stepdown, etc.) already handled elsewhere. Confirmed
+# by direct inspection of a real operation's parameters, not guessed.
+_SELECTION_PARAM_BY_STRATEGY = {
+    "contour2d": "contours",
+    "pocket2d": "pockets",
+    "adaptive2d": "pockets",
+}
+
+
+def _repair_missing_selections(setup) -> list[str]:
+    """A template applied to a DIFFERENT part than the one it was originally
+    exported from can carry geometry selections that don't resolve - "1 of 3
+    files a real Fusion-exported template stores are edge/face IDs from the
+    ORIGINAL part, and createFromCAMTemplate2 has no way to re-pick
+    equivalent geometry on a new one. Confirmed directly on a real job
+    (autocamtraining.step, a "many different operations" test part): 8 of 9
+    operations from templates/971-real/(DEPRECATED)971 Metal Sheet.f3dhsm-
+    template came back with a "missing selections to machine" warning
+    despite all having Fusion's own auto-detection already enabled
+    (contours=true / pockets=true in the raw template) - inspecting the
+    actual selection objects showed real ChainSelection entries, each with
+    its own `hasWarning=True, warning="Missing selection"` - the stale
+    reference from whichever part the template was originally captured
+    against, not something these auto-detect flags override on their own.
+
+    Fix: replace the geometry selection with a fresh, model-based one -
+    SilhouetteSelection for a contour2d perimeter/profile cut,
+    PocketRecognitionSelection for a pocket2d/adaptive2d pocket-clearing
+    operation - both auto-compute from the actual bound geometry instead of
+    referencing specific edges/faces from another part. Verified directly:
+    every one of the 8 broken operations came back isToolpathValid=True
+    with no warning after this, and posted real, substantial G-code (2.5KB-
+    149KB depending on the operation) with zero postProcess errors.
+
+    An operation that still finds nothing after this (no warning cleared,
+    or a genuinely empty toolpath) has no matching feature on this specific
+    part - not this function's job to fix that; the isToolpathValid/empty-
+    warning checks already in DeleteToolpaths() below handle it the same
+    way they always have.
+    """
+    repaired = []
+    for op in setup.operations:
+        param_name = _SELECTION_PARAM_BY_STRATEGY.get(op.strategy)
+        if param_name is None:
+            continue
+        param = op.parameters.itemByName(param_name)
+        if param is None:
+            continue
+        value = param.value
+        if not hasattr(value, "getCurveSelections"):
+            continue
+        selections = value.getCurveSelections()
+        has_missing = any(
+            selections.item(i).hasWarning for i in range(selections.count)
+        )
+        if not has_missing:
+            continue
+        selections.clear()
+        if op.strategy == "contour2d":
+            selections.createNewSilhouetteSelection()
+        else:
+            selections.createNewPocketRecognitionSelection()
+        value.applyCurveSelections(selections)
+        repaired.append(op.name)
+    return repaired
+
 
 def _has_real_pocket_floor(bodies, tolerance=1e-4) -> bool:
     """A genuine pocket has a flat floor strictly between a body's top and
@@ -176,6 +244,19 @@ def DeleteToolpaths():
         # already been made against stale data - too late to matter.
         cam.generateAllToolpaths(True)
         waitForGeneration(setup, waitforcontour=True)
+
+        # Repair geometry selections that didn't survive being applied to a
+        # different part than the template was captured against (see
+        # _repair_missing_selections's own docstring), then regenerate and
+        # wait again so the operations below reflect their POST-repair
+        # state - without this second wait, a just-repaired operation reads
+        # the same way an invalidated-but-not-yet-regenerated one did in the
+        # bug this file already fixed above.
+        repaired = _repair_missing_selections(setup)
+        if repaired:
+            app.log(f"Repaired missing geometry selections on: {repaired}")
+            cam.generateAllToolpaths(True)
+            waitForGeneration(setup, waitforcontour=True)
 
         # Real Design product (app.activeProduct is the CAM product by this
         # point, same "'CAM' object has no attribute 'rootComponent'" reason
