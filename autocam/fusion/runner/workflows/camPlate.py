@@ -278,8 +278,19 @@ def start(data, session):
         machine_name = machine.get("name") or _get(payload, "machine")
         material_name = material.get("name") or _get(payload, "material")
         machine_post_processor_path = resolve_local_post_processor(data)
+        # Direct instruction: Lexan/polycarbonate plate jobs should use the
+        # team's real, hand-tuned "new router metal sheet" template (feeds,
+        # speeds, and other cut settings someone with machine knowledge
+        # already vetted for sheet stock) instead of the generic plate
+        # template every other material uses.
+        is_lexan = "lexan" in (material_name or "").lower() or "polycarb" in (material_name or "").lower()
+        template_filename = (
+            "971-real/new router metal sheet (shopsabre only!!).f3dhsm-template"
+            if is_lexan
+            else "Plates.f3dhsm-template"
+        )
         template_path = os.path.join(
-            os.path.dirname(__file__), "../templates/Plates.f3dhsm-template"
+            os.path.dirname(__file__), f"../templates/{template_filename}"
         )
 
         _tool_info, tool_json_path = load_local_tool_library_json(data, TOOLS_PATH)
