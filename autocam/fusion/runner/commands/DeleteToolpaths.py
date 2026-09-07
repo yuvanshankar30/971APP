@@ -909,8 +909,8 @@ def DeleteToolpaths():
 
         # Force regeneration before trusting isToolpathValid below - not
         # just settling. Root cause of a real bug: ConfigureTabs() mutates
-        # tabPositions/group_tabs/tabsPerContour on the contour/tab
-        # operation, which invalidates its toolpath, but nothing had
+        # group_tabs/tabsPerContour/noTabZones on the contour/tab operation,
+        # which invalidates its toolpath, but nothing had
         # explicitly asked Fusion to regenerate it since. Raising
         # waitForGeneration's quiet-check threshold didn't help, because
         # there was nothing actually generating to wait out - the operation
@@ -918,9 +918,9 @@ def DeleteToolpaths():
         # eventual isToolpathValid==False check below deleted a real,
         # untouched operation. Confirmed directly: a real job's log showed
         # `2D Contour2 (9), strategy=contour2d, isToolpathValid=False` at
-        # the exact deletion check, immediately after ConfigureTabs's own
-        # "tabPositions set to 4 point(s)" log line for that same operation
-        # - invalidated by the tab mutation, never regenerated afterward.
+        # the exact deletion check, immediately after ConfigureTabs changed
+        # that operation's tab configuration - invalidated by the mutation,
+        # never regenerated afterward.
         # This file already had a "regenerate everything, then wait" call,
         # but only at the very end, after the deletion decisions below had
         # already been made against stale data - too late to matter.

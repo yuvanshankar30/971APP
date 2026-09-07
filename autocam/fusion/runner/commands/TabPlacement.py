@@ -13,62 +13,12 @@
 # they're generic, string-keyed CAM parameters Fusion defines internally per
 # strategy, with no public documentation of valid enum values.
 #
-# CORRECTED (confirmed live against a real running Fusion instance, after a
-# real toolpath - not just a template export - showed tabs landing on
-# rounded corners despite this file forcing tabPositions to computed
-# straight-edge points): an earlier version of this file believed
-# tabPositioning "stays 'distance' even with manual points" and that
-# tabPositions itself was the real toggle, based on a static
-# .f3dhsm-template export showing tabPositions=true. That's wrong.
-# tabPositioning.getChoices() on a real operation returns exactly two
-# choices - 'distance' (By distance) and 'tabCount' (Number of tabs) -
-# there is no manual/points mode in this Fusion version's real API at all.
-# Assigning geometry to tabPositions is accepted with no error and the
-# parameter happily reports it (expression flips to "true", the value
-# collection really does hold the assigned edges) - but it has NO effect on
-# where tabs actually land whenever tabPositioning is 'distance' or
-# 'tabCount', which is always, since no third mode exists to select. The
-# tabPositions mechanism this file used to rely on was never functional;
-# the "confirmed working against real jobs" note in git history was based
-# on the parameter accepting the assignment without erroring, not on
-# checking where the resulting tabs actually appeared.
-#
-# Re-confirmed a second time after the real Fusion UI turned out to have
-# a distinct "Manual Tabs" field (visible under Tabs > Tab Positioning,
-# regardless of which Tab Positioning mode is selected) - tabPositions is
-# that same field, so it seemed plausible it might actually work when
-# combined with tabCount mode rather than left alone. Tested live: set
-# tabPositions to the real good straight edges, kept tabPositioning at
-# 'tabCount' with tabsPerContour LEFT NON-ZERO (matching the candidate
-# count) - the resulting G-code still had a tab plateau crossing a corner
-# arc, identical to before. That test never actually isolated Manual Tabs:
-# with tabsPerContour still nonzero, Fusion's own automatic count-based
-# placement was still active and free to add its own tabs anywhere on the
-# contour on top of (or instead of) the manual ones - a positive result
-# either way wouldn't have told us which mechanism actually placed the
-# tabs, and the negative one doesn't prove Manual Tabs itself doesn't work.
-#
-# Direct instruction: tabsPerContour should be 0 (disables Fusion's own
-# automatic placement entirely) with Manual Tabs (tabPositions) supplying
-# the real locations. CONFIRMED LIVE this time, with the isolating variable
-# actually controlled for: regenerated a real "2D Slot Cut" operation with
-# tabsPerContour=0 and tabPositions set to the real computed candidate
-# edges, then posted it and inspected the resulting G-code directly. Every
-# shallow tab-height Z segment landed on a G1 (straight) run; not one of
-# the file's G2 (arc/corner) segments carried tab-height Z at any point -
-# 5 tabs, all on real straight edges, zero on curves. The earlier "Manual
-# Tabs doesn't work" conclusion was a real false negative from not
-# isolating the variable (tabsPerContour was left nonzero in that test, so
-# automatic placement was still free to run and could have been what
-# placed - or interfered with - the tabs actually observed). noTabZones is
-# still set as well as a second safety net, but tabsPerContour=0 + Manual
-# Tabs alone is what this run's result actually demonstrates working.
-#
-# noTabZones is a second, independently-confirmed-working mechanism:
-# Fusion's automatic tabCount/distance placement genuinely avoids whatever
-# edges are listed there. Both are the same kind of parameter as
-# tabPositions (a CadObjectParameterValue - arbitrary geometry, no typed
-# API).
+# Fusion exposes only `distance` and `tabCount` placement modes. Manual
+# tab geometry is not used here: on a real Dih job it did not preserve the
+# requested physical tab count. tabCount gives Fusion the count contract;
+# noTabZones gives it the geometry contract. Every rounded, short, or
+# stock-unbacked outer edge is a no-tab zone, so count-based placement can
+# only choose from the same straight, usable edges this module calculates.
 #
 # WHICH operation actually gets tabs: only the one the template itself
 # already designates via group_tabs=true in its own default state - a real
@@ -126,11 +76,8 @@ MIN_TAB_EDGE_LENGTH_IN = 0.5
 # could bridge a short straight run into an adjacent corner fillet). Direct
 # instruction: 0.6in - the template's own original default. Bridging a
 # short run into a corner is no longer the same risk it was under
-# tabCount/noTabZones placement: tabs are now Manual Tabs positioned
-# directly on this file's own selected candidate edges with
-# tabsPerContour=0 (Fusion's automatic placement disabled outright - see
-# this module's header comment), not spaced automatically within whatever
-# straight run remains after excluding bad edges.
+# tabCount/noTabZones placement. Fusion distributes the computed count only
+# across the usable straight runs left after bad edges are excluded.
 TAB_WIDTH_IN = 0.6
 
 
@@ -312,13 +259,9 @@ def _good_straight_edges(body, stock_bounds=None):
 def _no_tab_zone_edges(body, stock_bounds=None):
     """Every outer-boundary edge that ISN'T a good tab candidate - curved/
     filleted, too short, or with no real stock behind it - for Fusion's own
-    noTabZones parameter, the mechanism that actually works (see this
-    module's header comment for why tabPositions/tabPositioning alone
-    don't). Feeding these to noTabZones makes it physically impossible for
-    Fusion's automatic tabCount-mode placement to land a tab on a curve,
-    a too-short stub, or a side with nothing real behind it - the same
-    guarantee this file always intended, achieved through the parameter
-    that's actually honored instead of the one that silently isn't.
+    noTabZones parameter. Feeding these to noTabZones makes it physically
+    impossible for Fusion's automatic tabCount-mode placement to land a tab
+    on a curve, a too-short stub, or a side with nothing real behind it.
     """
     top_face = _find_top_face(body)
     if top_face is None:
@@ -368,12 +311,10 @@ def select_tab_edges(body, max_tabs: int = DEFAULT_MAX_TABS, stock_bounds=None):
     - direct instruction, not a preference to relax if a part is mostly
     rounded, small, or sitting close to the plate's own edge.
 
-    Used by ConfigureTabs only to COUNT how many good, well-distributed
-    tab slots this body really has (its length becomes tabsPerContour) -
-    not to place tabs at these exact edges directly, since Fusion's real
-    API has no working mechanism for that (see this module's header
-    comment). The complementary _no_tab_zone_edges is what actually keeps
-    tabs off the bad edges.
+    Used by ConfigureTabs to confirm there is at least one usable straight
+    run and to build the complementary _no_tab_zone_edges list. Fusion's
+    `tabCount` mode does the final placement; no-tab zones are what keep it
+    off the bad edges.
 
     One tab per distinct line first (so at least 2 different sides get a
     tab whenever the part actually has that many straight sides), then
@@ -405,20 +346,13 @@ def select_tab_edges(body, max_tabs: int = DEFAULT_MAX_TABS, stock_bounds=None):
     return selected
 
 
-def _apply_no_tab_zones(app, operation, zone_edges, tab_edges) -> bool:
-    """Sets tabsPerContour to 0 (direct instruction - disables Fusion's own
-    automatic tabCount/distance placement outright, rather than leaving it
-    running alongside manual ones) and populates tabPositions (the real
-    "Manual Tabs" UI field) with tab_edges, the actual good straight-edge
-    candidates this file already computed. noTabZones is still set as well
-    (a second, independently-confirmed-working exclusion mechanism - see
-    this module's header comment) in case tabsPerContour=0 alone doesn't
-    fully suppress automatic placement.
+def _apply_automatic_tabs(app, operation, zone_edges, tab_count) -> bool:
+    """Configure count-based tabs while excluding every unsafe edge.
 
-    Returns True only if tabPositions was actually accepted - the caller
-    falls back to plain tabCount placement (no exclusion) otherwise, and
-    this always logs which outcome happened so it's visible in Fusion's
-    Text Commands console instead of failing silently.
+    `tabCount` is the only source of tab count. `noTabZones` prevents its
+    automatic placement from choosing rounded corners, short stubs, or an
+    edge with no stock backing. This intentionally never writes Fusion's
+    Manual Tabs (`tabPositions`) parameter.
     """
     positioning_param = operation.parameters.itemByName("tabPositioning")
     if positioning_param is not None:
@@ -437,17 +371,15 @@ def _apply_no_tab_zones(app, operation, zone_edges, tab_edges) -> bool:
         except Exception as e:
             app.log(f"TabPlacement: failed to set tabWidth: {e}")
 
-    # Direct instruction: tabsPerContour=0, Manual Tabs supplies the real
-    # locations instead - 0 rather than the candidate count, since a
-    # nonzero count here is exactly what let Fusion's own automatic
-    # placement run alongside (and mask whether) Manual Tabs was doing
-    # anything, per this module's header comment.
     tabs_per_contour = operation.parameters.itemByName("tabsPerContour")
-    if tabs_per_contour is not None:
-        try:
-            tabs_per_contour.expression = "0"
-        except Exception as e:
-            app.log(f"TabPlacement: failed to set tabsPerContour to 0: {e}")
+    if tabs_per_contour is None:
+        app.log("TabPlacement: this operation has no tabsPerContour parameter.")
+        return False
+    try:
+        tabs_per_contour.expression = str(tab_count)
+    except Exception as e:
+        app.log(f"TabPlacement: failed to set tabsPerContour to {tab_count}: {e}")
+        return False
 
     zones_param = operation.parameters.itemByName("noTabZones")
     if zones_param is not None and zone_edges:
@@ -456,21 +388,10 @@ def _apply_no_tab_zones(app, operation, zone_edges, tab_edges) -> bool:
         except Exception as e:
             app.log(f"TabPlacement: setting noTabZones to {len(zone_edges)} edge(s) failed: {e}")
 
-    positions_param = operation.parameters.itemByName("tabPositions")
-    if positions_param is None:
-        app.log("TabPlacement: this operation has no tabPositions (Manual Tabs) parameter.")
-        return False
-    if not tab_edges:
-        app.log("TabPlacement: no candidate tab edges to assign to Manual Tabs.")
-        return False
-
-    try:
-        positions_param.value.value = list(tab_edges)
-    except Exception as e:
-        app.log(f"TabPlacement: setting tabPositions (Manual Tabs) to {len(tab_edges)} edge(s) failed: {e}")
-        return False
-
-    app.log(f"TabPlacement: tabsPerContour=0, Manual Tabs set to {len(tab_edges)} edge(s)")
+    app.log(
+        f"TabPlacement: tabCount={tab_count}, width={TAB_WIDTH_IN}in, "
+        f"no-tab zones set on {len(zone_edges)} edge(s)"
+    )
     return True
 
 
@@ -575,6 +496,7 @@ def ConfigureTabs(min_tabs: int = DEFAULT_MIN_TABS, max_tabs: int = DEFAULT_MAX_
             all_candidates = []
             all_zone_edges = []
             total_perimeter_in = 0.0
+            total_target_tabs = 0
             for body in bodies:
                 perimeter_in = _outer_perimeter_in(body)
                 body_min_tabs = _min_tabs_for_body(body, min_tabs, stock_bounds)
@@ -592,6 +514,7 @@ def ConfigureTabs(min_tabs: int = DEFAULT_MIN_TABS, max_tabs: int = DEFAULT_MAX_
                 all_candidates.extend(body_candidates)
                 all_zone_edges.extend(_no_tab_zone_edges(body, stock_bounds))
                 total_perimeter_in += perimeter_in
+                total_target_tabs += target_tabs
             candidate_edges = all_candidates
             perimeter_in = total_perimeter_in
 
@@ -599,15 +522,6 @@ def ConfigureTabs(min_tabs: int = DEFAULT_MIN_TABS, max_tabs: int = DEFAULT_MAX_
                 app.log(f"TabPlacement: '{op.name}' - no usable tab edges found on any body, skipping.")
                 continue
 
-            applied = _apply_no_tab_zones(app, op, all_zone_edges, candidate_edges)
+            applied = _apply_automatic_tabs(app, op, all_zone_edges, total_target_tabs)
             if not applied:
-                # Safe fallback: still automatic/count-based, but at least
-                # sized to the target tab count instead of leaving the
-                # template's default - just without the curve-exclusion
-                # guarantee if noTabZones itself couldn't be set.
-                tabs_per_contour = op.parameters.itemByName("tabsPerContour")
-                if tabs_per_contour is not None:
-                    try:
-                        tabs_per_contour.expression = str(len(candidate_edges))
-                    except Exception as e:
-                        app.log(f"TabPlacement: failed to set fallback tabsPerContour: {e}")
+                app.log(f"TabPlacement: '{op.name}' could not configure automatic tabs.")
