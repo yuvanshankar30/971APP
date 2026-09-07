@@ -24,15 +24,23 @@ export async function buildJobPayload(supabase, job) {
       if (snapshot.grouping_mode === 'grouped' && snapshot.assignments.length < 2) throw new Error('Grouped CAM must contain at least two part types');
     }
     const seen = new Set();
-    const assignments = [];
+    const validatedAssignments = [];
     for (const part of snapshot.assignments) {
       if (!part.part_id || seen.has(part.part_id) || !Number.isSafeInteger(part.quantity) || part.quantity <= 0) {
         throw new Error('Plate job contains an invalid or duplicate assignment');
       }
       seen.add(part.part_id);
-      assignments.push({ part_id: part.part_id, quantity: part.quantity,
-        step_file_url: await signedUrl(part.step_file_name, part.part_id), fusion_file_name: part.fusion_file_name || null });
+      validatedAssignments.push(part);
     }
+    // Signed URL requests are independent. Resolve them concurrently so a
+    // plate with many part types does not add one full storage round trip
+    // per assignment to claim latency.
+    const assignments = await Promise.all(validatedAssignments.map(async (part) => ({
+      part_id: part.part_id,
+      quantity: part.quantity,
+      step_file_url: await signedUrl(part.step_file_name, part.part_id),
+      fusion_file_name: part.fusion_file_name || null
+    })));
     return { plate_id: snapshot.plate_id, grouping_mode: snapshot.grouping_mode || null, machine_id, tool_id, length: Number(snapshot.length),
       width: Number(snapshot.width), true_depth: Number(snapshot.true_depth), thickness: Number(snapshot.thickness),
       material: snapshot.material, assignments,

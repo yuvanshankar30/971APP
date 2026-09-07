@@ -20,6 +20,13 @@
 import { supabase } from '$lib/supabase.js';
 
 export const FUSION_JOB_KINDS = ['plate:arrange', 'plate:cam', 'box_tube'];
+export const FUSION_JOB_LIST_LIMIT = 200;
+
+// Deliberately excludes step_file_name, gcode, and fusion_nc_files. The NC
+// artifacts are base64 and can dwarf every other field; fetch them only
+// when someone actually asks to download/post a completed job.
+const FUSION_JOB_SELECT = 'id, name, source_type, part_id, operation_type, params, material_id, tool_id, machine_id, status, claimed_by, claimed_at, errors, warnings, stats, progress, progress_message, requested_by, created_at, updated_at, cam_machines(name, controller), cam_tools(name, diameter)';
+const FUSION_JOB_UPDATE_SELECT = 'id, status, claimed_by, claimed_at, errors, warnings, stats, progress, progress_message, updated_at';
 
 async function uploadFusionStep({ name, fallback, stepFile }) {
   if (!stepFile) return null;
@@ -268,11 +275,37 @@ export async function deleteBoxTube(id) {
 export async function fetchFusionJobs() {
   const { data, error } = await supabase
     .from('cam_jobs')
-    .select('*, cam_machines(name, controller), cam_tools(name, diameter)')
+    .select(FUSION_JOB_SELECT)
     .eq('operation_type', 'milling')
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: false })
+    .limit(FUSION_JOB_LIST_LIMIT);
   if (error) throw error;
   return data || [];
+}
+
+/** Refresh only mutable fields for the handful of jobs a Runner can change. */
+export async function fetchFusionJobUpdates(jobIds) {
+  const ids = [...new Set((jobIds || []).filter(Boolean))];
+  if (!ids.length) return [];
+  const { data, error } = await supabase.from('cam_jobs')
+    .select(FUSION_JOB_UPDATE_SELECT)
+    .eq('operation_type', 'milling')
+    .in('id', ids);
+  if (error) throw error;
+  return data || [];
+}
+
+/** Load the heavy base64 output for one completed job on demand. */
+export async function fetchFusionJobNcFiles(jobId) {
+  if (!jobId) throw new Error('Job is required');
+  const { data, error } = await supabase.from('cam_jobs')
+    .select('fusion_nc_files')
+    .eq('id', jobId)
+    .eq('operation_type', 'milling')
+    .eq('status', 'completed')
+    .single();
+  if (error) throw error;
+  return data?.fusion_nc_files || [];
 }
 
 /**
@@ -327,7 +360,24 @@ export async function fetchFusionJobsByManufacturingPartIds(partIds) {
 
   if (!plateToManufacturingParts.size && !boxTubeToManufacturingPart.size) return {};
 
-  const jobs = await fetchFusionJobs(); // already ordered created_at desc
+  const targetQueries = [];
+  const plateIds = [...plateToManufacturingParts.keys()];
+  const boxTubeIds = [...boxTubeToManufacturingPart.keys()];
+  if (plateIds.length) {
+    targetQueries.push(supabase.from('cam_jobs').select(FUSION_JOB_SELECT)
+      .eq('operation_type', 'milling').in('params->>plateId', plateIds));
+  }
+  if (boxTubeIds.length) {
+    targetQueries.push(supabase.from('cam_jobs').select(FUSION_JOB_SELECT)
+      .eq('operation_type', 'milling').in('params->>boxTubeId', boxTubeIds));
+  }
+  const queryResults = await Promise.all(targetQueries);
+  const jobs = [];
+  for (const { data, error } of queryResults) {
+    if (error) throw error;
+    jobs.push(...(data || []));
+  }
+  jobs.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
   const result = {};
   for (const job of jobs) {
     const plateId = job.params?.plateId;
@@ -417,12 +467,15 @@ export async function queueFusionJob({ fusionJobKind, plateId, boxTubeId, machin
 }
 
 export async function cancelFusionJob(id) {
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('cam_jobs')
     .update({ status: 'failed', errors: ['Cancelled by user'] })
     .eq('id', id)
-    .in('status', ['queued', 'claimed', 'processing']);
+    .eq('operation_type', 'milling')
+    .in('status', ['queued', 'claimed', 'processing'])
+    .select('id');
   if (error) throw error;
+  if (!data?.length) throw new Error('Fusion job is no longer active');
 }
 
 /** Delete a queued or terminal Fusion job. Active Runner work must be cancelled first. */

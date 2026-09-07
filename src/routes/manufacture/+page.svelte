@@ -21,7 +21,7 @@
   import { formatPacificDate, formatPacificDateTimeWithZone } from '$lib/timezone.js';
   import PartDueDate from '$lib/components/PartDueDate.svelte';
   import PartNotes from '$lib/components/PartNotes.svelte';
-  import { fetchFusionJobsByManufacturingPartIds } from '$lib/fusionCam.js';
+  import { fetchFusionJobsByManufacturingPartIds, fetchFusionJobNcFiles } from '$lib/fusionCam.js';
 
   const LAST_SUBSYSTEM_STORAGE_KEY = '971hub:lastSubsystem';
   // Same labels JobQueueTab.svelte's own STATUS_LABELS uses, for the
@@ -539,17 +539,26 @@
   // Downloads every G-code file a completed Fusion CAM job produced - same
   // base64-decode technique JobQueueTab.svelte's downloadNcFile uses, just
   // triggered from the Manufacturing page instead of the Fusion CAM Jobs tab.
-  function downloadFusionNcFiles(job) {
-    for (const file of job.fusion_nc_files || []) {
-      const binary = atob(file.contentBase64);
-      const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-      const blob = new Blob([bytes], { type: 'application/octet-stream' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = file.name.split('/').at(-1) || 'fusion-output.nc';
-      a.click();
-      URL.revokeObjectURL(url);
+  async function downloadFusionNcFiles(job) {
+    try {
+      const files = Array.isArray(job.fusion_nc_files) ? job.fusion_nc_files : await fetchFusionJobNcFiles(job.id);
+      for (const key of Object.keys(fusionJobsByPart)) {
+        if (fusionJobsByPart[key]?.id === job.id) fusionJobsByPart[key] = { ...fusionJobsByPart[key], fusion_nc_files: files };
+      }
+      fusionJobsByPart = { ...fusionJobsByPart };
+      for (const file of files) {
+        const binary = atob(file.contentBase64);
+        const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+        const blob = new Blob([bytes], { type: 'application/octet-stream' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = file.name.split('/').at(-1) || 'fusion-output.nc';
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+    } catch (error) {
+      showToastMessage(error.message || 'Failed to download Fusion G-code', 'error');
     }
   }
 
@@ -2005,7 +2014,7 @@
               <button class="btn btn-secondary btn-sm" on:click={() => installCadStepFile(part)} title="Download STEP file">
                 <Download size={14} /> Install CAD
               </button>
-              {#if fusionJob?.status === 'completed' && fusionJob.fusion_nc_files?.length}
+              {#if fusionJob?.status === 'completed' && fusionJob.params?.fusionJobKind !== 'plate:arrange'}
                 <button class="btn btn-secondary btn-sm" on:click={() => downloadFusionNcFiles(fusionJob)} title="Download G-code">
                   <Download size={14} /> Install G-code
                 </button>
@@ -2202,7 +2211,7 @@
                     <button class="btn btn-secondary btn-sm" on:click={() => installCadStepFile(part)} title="Download STEP file">
                       <Download size={13} /> Install CAD
                     </button>
-                    {#if fusionJob?.status === 'completed' && fusionJob.fusion_nc_files?.length}
+                    {#if fusionJob?.status === 'completed' && fusionJob.params?.fusionJobKind !== 'plate:arrange'}
                       <button class="btn btn-secondary btn-sm" on:click={() => downloadFusionNcFiles(fusionJob)} title="Download G-code">
                         <Download size={13} /> Install G-code
                       </button>
@@ -2610,7 +2619,7 @@
               <Download size={18} />
             </button>
           {/if}
-          {#if cadViewerPart.workflow === 'router' && fusionJobsByPart[cadViewerPart.id]?.status === 'completed' && fusionJobsByPart[cadViewerPart.id]?.fusion_nc_files?.length}
+          {#if cadViewerPart.workflow === 'router' && fusionJobsByPart[cadViewerPart.id]?.status === 'completed' && fusionJobsByPart[cadViewerPart.id]?.params?.fusionJobKind !== 'plate:arrange'}
             <button type="button" class="cad-download-btn" aria-label="Download G-code" title="Download G-code" on:click={() => downloadFusionNcFiles(fusionJobsByPart[cadViewerPart.id])}>
               <Zap size={18} />
             </button>

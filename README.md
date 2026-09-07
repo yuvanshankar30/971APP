@@ -447,8 +447,15 @@ own docs are all together in one place instead of scattered across
   and the Runner rejects incomplete groups before CAM. Completed Fusion jobs keep
   every postprocessor output as a separate, byte-exact downloadable file with its
   size and SHA-256 checksum; queued and terminal jobs can be deleted from the queue.
-  Rollout requires
-  `migrations/20260906_fusion_grouping_integrity.sql` and the updated Runner.
+  The Jobs tab loads the newest 200 lightweight rows once, then polls only mutable
+  fields for active job IDs; base64 NC artifacts load on demand only when someone
+  downloads or posts them. Manufacturing status lookups query only the relevant plate/tube
+  IDs; plate STEP signed URLs resolve concurrently; and the Runner skips folder-tree
+  sync writes when the snapshot has not changed. Matching partial/expression indexes
+  live in `migrations/20260906_fusion_queue_efficiency.sql`.
+  Rollout requires `migrations/20260906_fusion_grouping_integrity.sql`,
+  `migrations/20260906_add_tubestock_operation_type.sql`,
+  `migrations/20260906_fusion_queue_efficiency.sql`, and the updated Runner.
   Every post-claim Runner call is bound to the `RUNNER_ID` that claimed the job,
   so another installation cannot advance it. `RUNNER_MACHINE_ID` is required,
   active jobs heartbeat through `claimed_at`, and unstarted claims older than
