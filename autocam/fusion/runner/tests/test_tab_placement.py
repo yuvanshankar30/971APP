@@ -162,15 +162,43 @@ class TabDistributionTests(unittest.TestCase):
         self.assertEqual(len(selected), 4)
         self.assertIn(edges["right"], selected)
 
-    def test_the_per_side_guarantee_is_not_capped_by_max_tabs(self):
-        body, edges = self._rectangle_body_and_edges()
-        stock_bounds = (-1, 9, -1, 6)
+    def test_a_many_sided_part_is_capped_and_keeps_its_longest_sides(self):
+        """A real teardrop bracket a few inches across picked up a tab on
+        every one of its short bottom facets - far more than a part that
+        size needs, and clustered where a tab has least room to hold. The
+        cap plus longest-first ordering is what puts the tabs on the long
+        structural sides instead.
+        """
+        long_a = _edge(0, 0, 0, 10)      # two long sides
+        long_b = _edge(12, 0, 12, 10)
+        mid_a = _edge(0, 10, 5, 14)      # two medium sides
+        mid_b = _edge(12, 10, 7, 14)
+        facets = [                        # a fan of short bottom facets
+            _edge(0, 0, 2, -1),
+            _edge(2, -1, 5, -1.5),
+            _edge(5, -1.5, 8, -1.5),
+            _edge(8, -1.5, 12, 0),
+        ]
+        edges = [long_a, long_b, mid_a, mid_b, *facets]
+        loop = _loop(True, edges)
+        body = _body([_face(1.0, 1.0, [loop])], (0, -1.5), (12, 14))
 
-        # Only 2 requested, but a real rectangular part has 4 real sides -
-        # every one of them still gets its guaranteed tab.
-        selected = TabPlacement.select_tab_edges(body, max_tabs=2, stock_bounds=stock_bounds)
+        selected = TabPlacement.select_tab_edges(body, max_tabs=4, stock_bounds=None)
 
         self.assertEqual(len(selected), 4)
+        selected_ids = {id(e) for e in selected}
+        # The four longest distinct sides win; no short facet gets a tab.
+        for expected in (long_a, long_b, mid_a, mid_b):
+            self.assertIn(id(expected), selected_ids)
+        for facet in facets:
+            self.assertNotIn(id(facet), selected_ids)
+
+    def test_a_side_without_stock_still_wins_a_tab_when_it_is_long_enough(self):
+        # The no-stock-backing improvement must survive the cap: backing
+        # decides WHICH segment of a side, never whether a long side is
+        # eligible at all.
+        body, edges = self._rectangle_body_and_edges()
+        selected = TabPlacement.select_tab_edges(body, max_tabs=4, stock_bounds=(-1, 9, -1, 6))
         self.assertIn(edges["right"], selected)
 
     def test_stock_backed_edges_are_preferred_when_backing_is_missing_is_not_forced(self):

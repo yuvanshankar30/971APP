@@ -310,15 +310,14 @@ def select_tab_edges(body, max_tabs: int = DEFAULT_MAX_TABS, stock_bounds=None):
     edge is an explicit, safe release-tab location; Fusion's automatic
     placement is disabled rather than allowed to place more tabs elsewhere.
 
-    Every distinct side gets exactly one guaranteed tab first, regardless
-    of max_tabs and regardless of whether that side has real stock behind
-    it (direct instruction: at least one tab per side, always) - preferring
-    a stock-backed segment of that side when one exists, falling back to
-    its longest segment otherwise so the side is never left with zero tabs
-    just because it happens to sit close to the plate's own edge. Only
-    once every side has its guaranteed tab does any remaining budget (up
-    to max_tabs) get filled from additional segments, stock-backed ones
-    preferred first.
+    One tab per distinct side, longest side first, capped at max_tabs
+    (which _tab_count_for_perimeter has already scaled to the part's own
+    size). A side is never skipped just because it has no real stock
+    behind it - within a side a stock-backed segment is preferred, falling
+    back to its longest segment otherwise, so a part sitting close to the
+    plate's edge still gets held. Only if the part has fewer distinct
+    sides than tabs asked for do additional segments of those sides get
+    used, stock-backed ones first.
     """
     stock_check_cm = STOCK_BACKING_CHECK_IN * 2.54
     body_center = _body_center(body)
@@ -335,8 +334,27 @@ def select_tab_edges(body, max_tabs: int = DEFAULT_MAX_TABS, stock_bounds=None):
         pool = backed if backed else line
         return max(pool, key=_edge_length)
 
-    selected = [best_edge_for_line(line) for line in lines]
+    # One tab per distinct side, longest side first, capped at max_tabs.
+    #
+    # The cap is the point. An earlier version guaranteed a tab on EVERY
+    # distinct straight side regardless of max_tabs, which is right for a
+    # rectangle (4 sides, 4 tabs) but wrong for the shape this pipeline
+    # actually cuts most often: a small bracket whose outline is a long
+    # profile plus a fan of short facets. Confirmed live on a real part -
+    # a teardrop bracket a few inches across picked up a tab on every one
+    # of its little bottom facets, far more than a part that size needs to
+    # stay put, and clustered where they were least useful.
+    #
+    # Longest-first is what makes the cap land well: the long structural
+    # sides get the tabs and the short facets lose out, which is also where
+    # a tab actually has room to hold. _tab_count_for_perimeter has already
+    # scaled max_tabs to the part's own size before this is called, so a
+    # small part asks for ~4 and a large one asks for more.
+    selected = [best_edge_for_line(line) for line in lines[:max_tabs]]
 
+    # Only if the part genuinely has fewer distinct sides than tabs asked
+    # for (a triangle, say) do additional segments of the sides it does
+    # have get used, stock-backed ones first.
     if len(selected) < max_tabs:
         selected_ids = {id(e) for e in selected}
         remaining = [e for e in all_edges if id(e) not in selected_ids]
