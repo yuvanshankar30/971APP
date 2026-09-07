@@ -29,6 +29,13 @@ export const ROUTER_STAGE_LABELS = {
 export const ROUTER_PRE_CUT_STAGES = ['pending', 'cam_ing', 'cam_review', 'cammed', 'queued', 'cut'];
 export const ROUTER_POST_PROCESSING_STAGES = ['cut', 'jigsawed', 'countersinking', 'deburred', 'inspecting', 'kitted'];
 
+export function canAdvanceRouterToCamReview(part, fusionJob) {
+  return part?.workflow === 'router'
+    && fusionJob?.status === 'completed'
+    && Array.isArray(fusionJob.fusion_nc_files)
+    && fusionJob.fusion_nc_files.length > 0;
+}
+
 export function normalizePositiveInt(value, fallback = 1) {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;

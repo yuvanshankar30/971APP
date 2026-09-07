@@ -12,8 +12,27 @@ import {
   getLegacyStatusForStageCounts,
   getLegacyStepForStageCounts,
   advanceRouterStageCounts,
-  buildRouterProgressUpdate
+  buildRouterProgressUpdate,
+  canAdvanceRouterToCamReview
 } from './router_progress.js';
+
+describe('canAdvanceRouterToCamReview', () => {
+  it('requires a completed Fusion job for a router request', () => {
+    const part = { workflow: 'router' };
+    const output = [{ name: 'part.nc', contentBase64: 'RzIw' }];
+    expect(canAdvanceRouterToCamReview(part, { status: 'completed', fusion_nc_files: output })).toBe(true);
+    expect(canAdvanceRouterToCamReview(part, { status: 'completed', fusion_nc_files: [] })).toBe(false);
+    expect(canAdvanceRouterToCamReview(part, { status: 'processing', fusion_nc_files: output })).toBe(false);
+    expect(canAdvanceRouterToCamReview(part, null)).toBe(false);
+  });
+
+  it('does not treat a completed Fusion job as CAM for another workflow', () => {
+    expect(canAdvanceRouterToCamReview(
+      { workflow: 'lathe' },
+      { status: 'completed', fusion_nc_files: [{ name: 'part.nc' }] }
+    )).toBe(false);
+  });
+});
 
 describe('normalizePositiveInt', () => {
   it('parses a valid positive integer', () => {

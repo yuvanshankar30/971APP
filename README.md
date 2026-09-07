@@ -30,6 +30,10 @@ browser confirmation or prompt popups.
   (CAM review, CAM reviewed, postprocessed, jprogged, machined, kitted -
   Router's the only workflow with this many distinct steps). See the
   **AutoCAM** section below for automatic G-code generation specifically.
+  Router request cards link only to the Fusion CAM workflow and derive their
+  job status/G-code downloads from actual Fusion generation jobs (not
+  arrangement-only runs); a request cannot advance to CAM review until its
+  linked Fusion job has completed with NC output.
 - **AutoCAM**: automatic STEP → G-code generation for lathe turning, router
   routering, and indexed tube-stock drilling jobs run on the router with the
   operator flipping the tube between faces by hand - either manually queued
