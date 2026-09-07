@@ -63,6 +63,7 @@
  */
 
 import { normalizeGcodeComments } from './gcodeComments.js';
+import { formatGcodeNumber as fmt } from './gcodeFormatting.js';
 
 /**
  * The banner every generated program opens with.
@@ -86,10 +87,6 @@ export const HEADER_WARNING = [
   '(  dry-run clear of the stock before cutting.)',
   '(===================================================================)'
 ];
-
-function fmt(n, decimals = 4) {
-  return Number(n).toFixed(decimals);
-}
 
 function requireFiniteNumber(value, name, { positive = false, nonNegative = false, integer = false } = {}) {
   if (!Number.isFinite(value) || (positive && value <= 0) || (nonNegative && value < 0) || (integer && !Number.isInteger(value))) {

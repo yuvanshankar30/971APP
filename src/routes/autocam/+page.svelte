@@ -35,7 +35,8 @@
     downloadGcodeText,
     downloadStepFile,
     partHasStepFile,
-    CAM_GCODE_FORMAT
+    CAM_GCODE_FORMAT,
+    IN_PROCESS_OPERATION_TYPES
   } from '$autocam/camJobs.js';
   import { tubestockFaceFileName, tubestockFaceLabel, tubestockFaceGroupFileName, tubestockFaceGroupLabel } from '$autocam/tubestock.js';
   import { machinesForOperation } from '$autocam/machineOptions.js';
@@ -300,6 +301,7 @@
     const { data, error } = await supabase
       .from('cam_jobs')
       .select('*, parts(name, project_id), cam_materials(name), cam_tools(name), cam_machines(name, rapid_rate)')
+      .in('operation_type', IN_PROCESS_OPERATION_TYPES)
       .order('created_at', { ascending: false })
       .limit(200);
     if (error) return;
@@ -953,17 +955,14 @@
     return rem ? `${hours}h ${rem}m` : `${hours}h`;
   }
 
-  const MACHINE_TYPE_LABEL = { turning: 'Lathe', routing: 'Router', milling: 'Mill', tubestock: 'Router' };
+  const MACHINE_TYPE_LABEL = { turning: 'Lathe', routing: 'Router', tubestock: 'Router' };
   function machineTypeLabel(operationType) {
     return MACHINE_TYPE_LABEL[operationType] || operationType || '—';
   }
 
-  // Milling jobs are Fusion CAM jobs (autocam/fusion/) - they land in this
-  // same cam_jobs table/list (loadJobs() has no operation_type filter) but
-  // get their own label/color here rather than the raw "milling" string, so
-  // it's clear at a glance which ones went through the external Fusion 360
-  // Runner instead of this app's own in-process turning/routing math.
-  const OPERATION_LABEL = { turning: 'Turning', routing: 'Routering', milling: 'Fusion', tubestock: 'Tube Stock' };
+  // Fusion milling jobs have their own queue and editor at /autocam/fusion;
+  // this page intentionally exposes only the in-process generators.
+  const OPERATION_LABEL = { turning: 'Turning', routing: 'Routering', tubestock: 'Indexed Tube Drilling' };
   function operationLabel(operationType) {
     return OPERATION_LABEL[operationType] || operationType || '—';
   }
@@ -1028,7 +1027,7 @@
     return `${holes} hole${holes === 1 ? '' : 's'}`;
   }
 
-  const OPERATION_TAG_CLASS = { turning: 'tag-season', milling: 'tag-mentor', tubestock: 'tag-9584' };
+  const OPERATION_TAG_CLASS = { turning: 'tag-season', tubestock: 'tag-9584' };
   function operationTagClass(operationType) {
     return OPERATION_TAG_CLASS[operationType] || 'tag-971';
   }
@@ -1325,7 +1324,7 @@
           <option value="">All Operations</option>
           <option value="turning">Turning</option>
           <option value="routing">Routering</option>
-          <option value="milling">Fusion</option>
+          <option value="tubestock">Indexed Tube Drilling</option>
         </select>
       </div>
       <div class="form-group">

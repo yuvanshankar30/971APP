@@ -21,6 +21,29 @@ import { supabase } from '$lib/supabase.js';
 
 export const FUSION_JOB_KINDS = ['plate:arrange', 'plate:cam', 'box_tube'];
 
+async function uploadFusionStep({ name, fallback, stepFile }) {
+  if (!stepFile) return null;
+  const extension = stepFile.name.split('.').pop() || 'step';
+  const safeName = (name || fallback).replace(/[^a-zA-Z0-9]/g, '_');
+  const path = `${crypto.randomUUID()}_${safeName}_fusion.${extension}`;
+  const { error } = await supabase.storage.from('manufacturing-files')
+    .upload(path, stepFile, { cacheControl: '3600', upsert: false });
+  if (error) throw new Error(error.message || 'Failed to upload STEP file');
+  return path;
+}
+
+async function removeFailedFusionUpload(path, insertError) {
+  if (path) {
+    try {
+      const { error } = await supabase.storage.from('manufacturing-files').remove([path]);
+      if (error) console.error(`Could not remove orphaned Fusion upload ${path}`, error);
+    } catch (error) {
+      console.error(`Could not remove orphaned Fusion upload ${path}`, error);
+    }
+  }
+  throw insertError;
+}
+
 /* ── Part categories (material + thickness groupings) ───────────────── */
 
 export async function fetchPartCategories() {
@@ -68,14 +91,7 @@ export async function fetchParts() {
  * nullable. Not every Fusion CAM part is for an existing request.
  */
 export async function createPart({ name, epic, ticket, quantity, categoryId, stepFile, createdBy, partId, fusionFileName }) {
-  let stepFileName = null;
-  if (stepFile) {
-    stepFileName = `${Date.now()}_${(name || 'part').replace(/[^a-zA-Z0-9]/g, '_')}_fusion.${(stepFile.name.split('.').pop() || 'step')}`;
-    const { error: uploadError } = await supabase.storage
-      .from('manufacturing-files')
-      .upload(stepFileName, stepFile, { cacheControl: '3600', upsert: false });
-    if (uploadError) throw new Error(uploadError.message || 'Failed to upload STEP file');
-  }
+  const stepFileName = await uploadFusionStep({ name, fallback: 'part', stepFile });
 
   // No spaces - this becomes the Fusion document name (camPlate.py) and
   // feeds the exported G-code path, both of which treat it as one token.
@@ -98,7 +114,7 @@ export async function createPart({ name, epic, ticket, quantity, categoryId, ste
     })
     .select('*, fusion_part_categories(thickness, cam_materials(name, category)), parts(id, name, project_id, workflow)')
     .single();
-  if (error) throw error;
+  if (error) await removeFailedFusionUpload(stepFileName, error);
   return data;
 }
 
@@ -223,14 +239,7 @@ export async function fetchBoxTubes() {
 // partId (optional) links this box tube to a real manufacturing request -
 // see createPart's own doc comment, same reasoning.
 export async function createBoxTube({ name, epic, ticket, quantity, stepFile, createdBy, partId }) {
-  let stepFileName = null;
-  if (stepFile) {
-    stepFileName = `${Date.now()}_${(name || 'boxtube').replace(/[^a-zA-Z0-9]/g, '_')}_fusion.${(stepFile.name.split('.').pop() || 'step')}`;
-    const { error: uploadError } = await supabase.storage
-      .from('manufacturing-files')
-      .upload(stepFileName, stepFile, { cacheControl: '3600', upsert: false });
-    if (uploadError) throw new Error(uploadError.message || 'Failed to upload STEP file');
-  }
+  const stepFileName = await uploadFusionStep({ name, fallback: 'boxtube', stepFile });
 
   const { data, error } = await supabase
     .from('fusion_box_tubes')
@@ -245,7 +254,7 @@ export async function createBoxTube({ name, epic, ticket, quantity, stepFile, cr
     })
     .select('*, parts(id, name, project_id, workflow)')
     .single();
-  if (error) throw error;
+  if (error) await removeFailedFusionUpload(stepFileName, error);
   return data;
 }
 

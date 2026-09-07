@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { todayDriveDateFolderName, driveDeliveryFileName } from './drive_watcher.js';
+import { todayDriveDateFolderName, driveDeliveryFileName, listChangesSince } from './drive_watcher.js';
 
 describe('todayDriveDateFolderName', () => {
   afterEach(() => {
@@ -37,15 +37,15 @@ describe('driveDeliveryFileName', () => {
   it('prefixes with the machine name and keeps the original extension - the real reason this exists: multiple machines can share one drive_output_folder_id (both routers deliver into the same dated Cammed folder), so nothing else in this system tells two machines\' files apart once they land there', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-08-20T21:05:09Z')); // 14:05:09 PDT
-    const job = { gcode_file_name: 'gearbox-plate.ngc' };
+    const job = { id: '12345678-abcd', gcode_file_name: 'gearbox-plate.ngc' };
     const machine = { name: 'Old Router (ShopSabre)' };
-    expect(driveDeliveryFileName(job, machine)).toBe('old-router-shopsabre_gearbox-plate_140509.ngc');
+    expect(driveDeliveryFileName(job, machine)).toBe('old-router-shopsabre_gearbox-plate_140509_12345678-abcd.ngc');
   });
 
   it('two different machines cutting the same-named part at the same moment still produce different filenames', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-08-20T21:05:09Z'));
-    const job = { gcode_file_name: 'bracket.ngc' };
+    const job = { id: '12345678-abcd', gcode_file_name: 'bracket.ngc' };
     const oldRouter = driveDeliveryFileName(job, { name: 'Old Router' });
     const newRouter = driveDeliveryFileName(job, { name: 'New Router' });
     expect(oldRouter).not.toBe(newRouter);
@@ -56,7 +56,7 @@ describe('driveDeliveryFileName', () => {
   it('preserves a non-.ngc extension (e.g. .tap for a Mach3/Mach4-style profile)', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-08-20T21:05:09Z'));
-    const job = { gcode_file_name: 'bracket.tap' };
+    const job = { id: '12345678-abcd', gcode_file_name: 'bracket.tap' };
     expect(driveDeliveryFileName(job, { name: 'New Router' })).toMatch(/\.tap$/);
   });
 
@@ -64,6 +64,33 @@ describe('driveDeliveryFileName', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-08-20T21:05:09Z'));
     // Matches the pre-existing 'output.ngc' fallback this replaced.
-    expect(driveDeliveryFileName({}, {})).toBe('machine_output_140509.ngc');
+    expect(driveDeliveryFileName({}, {})).toBe('machine_output_140509_no-id.ngc');
+  });
+
+  it('does not collide for two same-name jobs delivered in the same second', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-20T21:05:09Z'));
+    const first = driveDeliveryFileName({ id: 'aaaaaaaa-1111', gcode_file_name: 'bracket.ngc' }, { name: 'Router' });
+    const second = driveDeliveryFileName({ id: 'bbbbbbbb-2222', gcode_file_name: 'bracket.ngc' }, { name: 'Router' });
+    expect(first).not.toBe(second);
+  });
+});
+
+describe('listChangesSince', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('reads one bounded page and returns its immediate cursor without skipping later work', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ changes: [{ fileId: 'first' }], nextPageToken: 'page-2' })
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(listChangesSince('token', 'page-1', 'drive-id')).resolves.toEqual({
+      changes: [{ fileId: 'first' }],
+      nextPageToken: 'page-2'
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toContain('pageSize=10');
   });
 });

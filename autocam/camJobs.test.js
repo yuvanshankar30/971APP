@@ -4,7 +4,9 @@ const mocks = vi.hoisted(() => ({
   from: vi.fn(),
   getSession: vi.fn(),
   single: vi.fn(),
-  updateEq: vi.fn(),
+  updateMaybeSingle: vi.fn(),
+  readMaybeSingle: vi.fn(),
+  updateQueries: [],
   updates: []
 }));
 
@@ -58,14 +60,20 @@ describe('camJobs display helpers', () => {
 describe('triggerGenerationAndRefetch terminal status guarantee', () => {
   beforeEach(() => {
     mocks.updates.length = 0;
+    mocks.updateQueries.length = 0;
     mocks.getSession.mockReset().mockResolvedValue({ data: { session: { access_token: 'test-token' } } });
     mocks.single.mockReset();
-    mocks.updateEq.mockReset().mockResolvedValue({ error: null });
+    mocks.updateMaybeSingle.mockReset().mockImplementation(async (payload) => ({ data: { id: 'failed-job', ...payload }, error: null }));
+    mocks.readMaybeSingle.mockReset().mockResolvedValue({ data: null, error: null });
     mocks.from.mockReset().mockImplementation(() => ({
-      select: () => ({ eq: () => ({ single: mocks.single }) }),
+      select: () => ({ eq: () => ({ single: mocks.single, maybeSingle: mocks.readMaybeSingle }) }),
       update: (payload) => {
         mocks.updates.push(payload);
-        return { eq: mocks.updateEq };
+        const query = {};
+        for (const method of ['eq', 'in', 'select']) query[method] = vi.fn(() => query);
+        query.maybeSingle = () => mocks.updateMaybeSingle(payload);
+        mocks.updateQueries.push(query);
+        return query;
       }
     }));
     vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ ok: true })));
@@ -94,8 +102,9 @@ describe('triggerGenerationAndRefetch terminal status guarantee', () => {
     mocks.single.mockResolvedValue({ data: null, error: null });
     const result = await triggerGenerationAndRefetch('missing', null, { pollMs: 0, timeoutMs: 20 });
     expectTerminal(result);
-    expect(result.errors[0]).toContain('could not be found');
+    expect(mocks.updates.at(-1).errors[0]).toContain('could not be found');
     expect(mocks.updates.at(-1)).toMatchObject({ status: 'failed' });
+    expect(mocks.updateQueries.at(-1).in).toHaveBeenCalledWith('status', ['queued', 'claimed', 'processing']);
   });
 
   it('turns a session lookup failure into a terminal result before fetching', async () => {
@@ -135,9 +144,17 @@ describe('triggerGenerationAndRefetch terminal status guarantee', () => {
 
   it('returns failed even when the terminal database write also fails', async () => {
     mocks.single.mockResolvedValue({ data: null, error: { message: 'row missing' } });
-    mocks.updateEq.mockRejectedValue(new Error('write unavailable'));
+    mocks.updateMaybeSingle.mockRejectedValue(new Error('write unavailable'));
     const result = await triggerGenerationAndRefetch('write-error', null, { pollMs: 0, timeoutMs: 20 });
     expectTerminal(result);
     expect(result.status).toBe('failed');
+  });
+
+  it('returns a terminal row that wins the timeout race instead of overwriting it', async () => {
+    mocks.single.mockResolvedValue({ data: null, error: { message: 'poll raced' } });
+    mocks.updateMaybeSingle.mockResolvedValue({ data: null, error: null });
+    mocks.readMaybeSingle.mockResolvedValue({ data: { id: 'race', status: 'completed', gcode: 'M30' }, error: null });
+    const result = await triggerGenerationAndRefetch('race', null, { pollMs: 0, timeoutMs: 20 });
+    expect(result).toMatchObject({ id: 'race', status: 'completed', gcode: 'M30' });
   });
 });

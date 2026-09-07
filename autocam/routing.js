@@ -130,18 +130,8 @@
 import { normalizeGcodeComments } from './gcodeComments.js';
 import { HEADER_WARNING } from './turning.js';
 import { recommendTabCount, planTabPositions, planEvenTabPositions } from './tabPlanner.js';
-
-function fmt(n, decimals = 4) {
-  return Number(n).toFixed(decimals);
-}
-
-function signedArea(points) {
-  let sum = 0;
-  for (let i = 0; i < points.length - 1; i += 1) {
-    sum += points[i].x * points[i + 1].y - points[i + 1].x * points[i].y;
-  }
-  return sum / 2;
-}
+import { formatGcodeNumber as fmt, gcodePauseLine as pauseLine, gcodeDwellLine as dwellLine } from './gcodeFormatting.js';
+import { signedArea2d as signedArea } from './geometry2d.js';
 
 // Ensures a closed polygon (last point == first) winds counter-clockwise.
 // Epsilon, not exact equality, for "is this already closed" - a contour
@@ -947,10 +937,6 @@ function assignContoursToTools(contours, toolSequence) {
 // standard M00; WinCNC gets a bare G4 (dwell-until-ENTER), which is the
 // documented WinCNC mechanism and supports the same bracketed prompt - see
 // file header comment for why M00 isn't used for 'wincnc'.
-function pauseLine(isWinCNC, promptText) {
-  return isWinCNC ? `G4 (${promptText})` : `M00 (${promptText})`;
-}
-
 // SPINDLE SPIN-UP DWELL - real bug this fixes: every M03 (spindle on) was
 // immediately followed by cutting/positioning moves with no wait at all,
 // trusting the spindle to already be at speed. A real spindle/VFD takes a
@@ -966,11 +952,6 @@ function pauseLine(isWinCNC, promptText) {
 // "Dwell - G4 X# ... stops movement for the time specified by the X value
 // in seconds"). Getting this backwards on a WinCNC machine wouldn't dwell
 // at all - it would likely be parsed as an unrecognized/no-op argument.
-function dwellLine(isWinCNC, seconds, comment) {
-  const word = isWinCNC ? 'X' : 'P';
-  return `G04 ${word}${fmt(seconds, 1)} (${comment})`;
-}
-
 /**
  * @param {Array<{points: Array<{x,y}>, isHole: boolean}>} contours
  * @param {Object} params

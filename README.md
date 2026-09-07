@@ -349,6 +349,10 @@ own docs are all together in one place instead of scattered across
   `autocam/postprocessors/README.md` for the shop's real post-processor
   configs and a real Fusion-cammed example file, used as ground truth for
   what each dialect actually needs rather than a generic manual.
+- **`autocam/gcodeFormatting.js`** / **`autocam/geometry2d.js`** - shared
+  numeric G-code formatting, pause/dwell dialect handling, and polygon-area
+  primitives used across generators so safety-critical output rules do not
+  drift between copied implementations.
 - **`autocam/toolpathPreview.js`** - parses generated G-code back into a
   toolpath for the 2D preview and 3D simulator, including a cumulative-distance
   interpolation helper for playback (`autocam/components/ToolpathViewer.svelte`,
@@ -382,7 +386,10 @@ own docs are all together in one place instead of scattered across
 - **`autocam/drive_watcher.js`** - Google Drive input-sweep (`cad` →
   auto-queue) and output-delivery (finished G-code → dated `cammed`
   subfolder) - see `autocam/docs/drive-watcher-folder-layout.md` for the real folder
-  layout this was built for.
+  layout this was built for. Sweeps persist a cursor after each bounded
+  Changes API page, and delivery names include the job ID so two jobs
+  completed in the same second cannot overwrite or ambiguously duplicate
+  one another.
 - **`autocam/camJobs.js`** - shared job-queue helpers used by both
   `/autocam` and `/manufacture`.
 - **Machine-scoped tooling** - `cam_machine_tools` records which cutters are
@@ -417,7 +424,10 @@ own docs are all together in one place instead of scattered across
   forked Fusion 360 add-in that actually runs CAM; unmodified copies of both
   original repos are vendored at `autocam/fusion/_upstream/` and
   `autocam/fusion/runner/_upstream/` for reference. Its active workflows
-  patch Fusion templates from the claimed tool's checked-in `.tools` archive
+  compare completed plate G-code against the part's internal CAD loops and
+  stock depth before reporting completion, surfacing missing-feature,
+  incomplete-through-cut, and unsafe thin-wall findings as job warnings.
+  They patch Fusion templates from the claimed tool's checked-in `.tools` archive
   and post with the claimed machine's checked-in `.cps` file; the filename is
   stored on `cam_tools.fusion_tool_library_file`, so an unknown tool fails
   visibly rather than falling back to Fusion's raw default. No Teams/API-key-per-team
@@ -440,13 +450,19 @@ own docs are all together in one place instead of scattered across
   Rollout requires
   `migrations/20260906_fusion_grouping_integrity.sql` and the updated Runner.
   Every post-claim Runner call is bound to the `RUNNER_ID` that claimed the job,
-  so another installation cannot advance it. See
+  so another installation cannot advance it. `RUNNER_MACHINE_ID` is required,
+  active jobs heartbeat through `claimed_at`, and unstarted claims older than
+  15 minutes are safely requeued after a Runner crash. Processing Fusion jobs
+  require operator review rather than an automatic retry. The general `/autocam` job
+  list excludes these milling rows; their retry/edit controls live only in
+  `/autocam/fusion`, preventing the synchronous JS generator from mutating a
+  Fusion-owned job. See
   `autocam/docs/scouting-autocam-audit.md` for the consolidated audit and
   `autocam/docs/fusion-grouping-review.md` for the draft scope and review findings.
   It uses Supabase Auth + `canManageCamProfiles` for
   humans, same as the rest of this
-  app. See `autocam/fusion/README.md` and `valor6800-autocam-runner-setup.md`
-  (repo root) for the full port writeup and the evaluation that led to it.
+  app. See `autocam/fusion/README.md` and the Fusion Runner's own
+  `autocam/fusion/runner/README.md` for the current setup and operation guide.
 - **`autocam/fusion/turning/`** - experimental Fusion turning foundation
   ([issue #331](https://github.com/frc971/spartanshub/issues/331)): validates a
   single-part round-stock plan for the Haas TL-1 and exposes an empty draft

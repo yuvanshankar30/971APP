@@ -7,6 +7,8 @@ import { generateRoutingGcode, THROUGH_CUT_ALLOWANCE } from '$autocam/routing.js
 import { generateTubestockGcode, tubestockFaceFileName, tubestockFaceGroupFileName } from '$autocam/tubestock.js';
 import { deliverJobToDrive } from '$autocam/drive_watcher.js';
 import stockData from '$lib/stock.json';
+
+const IN_PROCESS_OPERATION_TYPES = ['turning', 'routing', 'tubestock'];
 // Vite-built asset URL for occt-import-js's WASM binary - the same one
 // CadViewer.svelte already fetches successfully client-side. Fetching it
 // over HTTP (below) instead of reading it off disk sidesteps Vercel's
@@ -97,7 +99,7 @@ async function markFailed(supabase, jobId, message) {
       status: 'failed',
       errors: [message],
       progress_message: message
-    }).eq('id', jobId);
+    }).eq('id', jobId).in('status', ['queued', 'claimed', 'processing']);
   } catch (e) {
     console.error('CAM job failed AND the failure write itself failed - job may be stuck', jobId, e);
   }
@@ -137,7 +139,7 @@ export async function POST({ request, url }) {
     if (job.status !== 'queued') {
       return json({ success: false, error: `Job is already ${job.status}, not generating again` }, { status: 409 });
     }
-    if (job.operation_type === 'milling') {
+    if (!IN_PROCESS_OPERATION_TYPES.includes(job.operation_type)) {
       // Real milling now exists, just not through this synchronous
       // turning/routing endpoint - see autocam/fusion/ (the Fusion-360-
       // backed pipeline, /autocam/fusion in the UI). A milling job created
@@ -145,11 +147,12 @@ export async function POST({ request, url }) {
       // never routed to a Runner and never will be from here; reject
       // loudly rather than leaving it stuck at "queued" forever - same
       // reasoning as every other terminal-status write in this file.
-      await supabase.from('cam_jobs').update({
+      const { error: rejectError } = await supabase.from('cam_jobs').update({
         status: 'rejected',
-        errors: ['Milling does not run through this endpoint - use Fusion CAM (/autocam/fusion) instead']
-      }).eq('id', jobId);
-      return json({ success: false, error: 'Milling does not run through this endpoint - use Fusion CAM instead' }, { status: 400 });
+        errors: [`Operation "${job.operation_type}" does not run through this endpoint${job.operation_type === 'milling' ? ' - use Fusion CAM (/autocam/fusion) instead' : ''}`]
+      }).eq('id', jobId).eq('status', 'queued');
+      if (rejectError) throw new Error(`Could not reject unsupported CAM job: ${rejectError.message}`);
+      return json({ success: false, error: `Unsupported in-process CAM operation: ${job.operation_type}` }, { status: 400 });
     }
     if (!job.step_file_name) {
       await markFailed(supabase, jobId, 'No STEP file attached to this job');
@@ -216,7 +219,7 @@ export async function POST({ request, url }) {
         : params;
       await setProgress(supabase, jobId, 80, 'Generating tube stock G-code...');
       result = generateTubestockGcode(features, tubestockParams);
-    } else {
+    } else if (job.operation_type === 'routing') {
       const { contours, thickness } = extractRoutingContoursFromMeshes(meshes);
       // The operator's pick from this team's real sheet stock (the routing
       // "Stock" select in CamParamFields). Its thickness is what is actually
@@ -255,6 +258,8 @@ export async function POST({ request, url }) {
       // job: it came back with 0.0000" of break-through because a previous
       // run had stamped its own derived 0.25 into params.
       params.stockThickness = routingParams.stockThickness;
+    } else {
+      throw new Error(`Unsupported in-process CAM operation: ${job.operation_type}`);
     }
 
     const gcodeFileName = job.gcode_file_name || 'output.ngc';

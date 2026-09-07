@@ -44,10 +44,9 @@ The add-in runs a background polling thread that claims queued `cam_jobs` rows (
 - **Grouping validation** — refuses partial/multi-envelope arrangements and
   quantity mismatches before CAM generation
 - **Auto-orientation** — orients parts largest-face-up before setup
-- **Template-driven setups** — reviewed machine/material mappings with locally
-  resolved tool libraries and postprocessors
-- **Holding tabs and selection repair** — places tabs on usable outer edges and
-  repairs template geometry selections against the imported job bodies
+- **Template-driven setups** — reusable Fusion CAM templates for plates and box tubes
+- **Topology-aware contour repair** — rebuilds stale template selections from the imported model while preserving each internal loop's real direction
+- **Safe automatic tabs** — uses a geometry-scaled count with `0.6 in` tabs while excluding curved, short, and unsupported outer edges
 - **Exact NC artifacts** — preserves each Fusion-posted file byte for byte instead of joining complete programs together
 - **Plate machining-time reporting** — stores Fusion's measured job time for the web queue (box-tube parity is tracked separately)
 - **Status reporting** — completion and errors pushed back to Spartans Hub's `cam_jobs` table
@@ -84,20 +83,27 @@ cd "$HOME/Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns/Sp
 python3 setup.py
 ```
 
-It asks which Hub to talk to (deployed, or a local dev server) and for your `FUSION_RUNNER_TOKEN` value (ask a project administrator), then writes `.env` itself - see [`setup.py`](setup.py). Prefer to edit `.env` by hand instead? `cp .env.example .env` and fill in the same values manually:
+It asks which Hub to talk to (deployed, or a local dev server), for your
+`FUSION_RUNNER_TOKEN` value, and for this physical machine's `cam_machines`
+UUID, then writes `.env` itself - see [`setup.py`](setup.py). Prefer to edit
+`.env` by hand instead? `cp .env.example .env` and fill in the same values manually:
 
 | Variable | Purpose | Default |
 | --- | --- | --- |
 | `API_KEY` | Bearer token matching Spartans Hub's `FUSION_RUNNER_TOKEN` | _(required)_ |
 | `BASE_URL` | Spartans Hub deployment base URL | `https://spartanshub.spartanrobotics.org` |
 | `RUNNER_ID` | Stable identifier for this Runner install, sent on every claim | machine hostname |
-| `RUNNER_MACHINE_ID` | The `cam_machines` row (a UUID) this physical machine is - look it up with `select id, name from cam_machines;` in the Supabase SQL editor | _(blank)_ |
+| `RUNNER_MACHINE_ID` | The `cam_machines` row UUID for this physical machine; `setup.py` validates its UUID format | _(required)_ |
 | `FUSION_DATA_PROJECT_NAME` | Which Fusion Data Panel project generated documents get saved into | `2026 Season CAM` |
 | `FUSION_DROP_FOLDER_PATH` | Nested folder path (within that project, `/`-separated) generated documents get saved into - each segment created if missing | `Offseason Projects/AutoCAM` |
 
 `.env` is git-ignored either way - never commit a real token.
 
-**Running more than one physical machine at once?** Set `RUNNER_MACHINE_ID` on every install (`setup.py` doesn't prompt for this one - add it to `.env` afterward if needed). Without it, a Runner claims *any* queued milling job regardless of which machine it was queued for - fine for a single machine, but a router's Runner could grab a job meant for the mill once two machines are polling at the same time. With `RUNNER_MACHINE_ID` set, a Runner only claims jobs that either target its own machine or don't target a specific machine at all.
+`RUNNER_MACHINE_ID` is mandatory even with one Runner. The server refuses a
+claim without it, eliminating the old claim-any-machine fallback. While Fusion
+works, the add-in sends a heartbeat every 30 seconds. A claim that expires
+before Fusion starts is retried after 15 minutes; an expired processing job is
+left for an operator to review so its CAM work cannot be duplicated.
 
 ## Project Structure
 
@@ -136,8 +142,8 @@ It asks which Hub to talk to (deployed, or a local dev server) and for your `FUS
 | `Orientation.py` | Auto-orient parts (largest face up) |
 | `HandleTube.py` | Box-tube handling |
 | `MultiImport.py` | Multi-part import |
-| `DeleteToolpaths.py` | Repairs selections, regenerates, and removes inapplicable/invalid operations |
-| `TabPlacement.py` | Places holding tabs on valid straight outer-profile edges |
+| `DeleteToolpaths.py` | Clear existing toolpaths |
+| `ContourChains.py` | Preserve face-loop direction when rebuilding contour selections |
 | `ScreenshotEnvelope.py` | Capture envelope screenshots |
 
 ## Development
@@ -149,6 +155,9 @@ python3 -m compileall -q .
 ```
 
 Toggle verbose logging to the Fusion **Text Command** window via `DEBUG = True` in `config.py`.
+
+For the contour-chain direction rule and its live-Fusion validation steps, see
+[`docs/contour-chain-direction.md`](docs/contour-chain-direction.md).
 
 See **[CONTRIBUTING.md](CONTRIBUTING.md)** for the original upstream pull-request checklist (still broadly applicable to this fork).
 
