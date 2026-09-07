@@ -71,16 +71,10 @@ describe('Fusion Runner grouping lifecycle',()=>{
    gcode_file_name:null,
    fusion_nc_files:[expect.objectContaining({name:'plate.nc',contentBase64,size:14})]
   }));
-  // Direct instruction: a completed job's G-code should land in Files
-  // automatically, named from the plate/part it was run against, spaces
-  // stripped - same convention the manual "Post to Files" button already
-  // used, just no longer requiring someone to click through to it.
-  expect(mocks.storageUpload).toHaveBeenCalledTimes(1);
-  expect(mocks.storageUpload).toHaveBeenCalledWith(
-   'AutoCAM/x44stiffner.ngc',
-   expect.any(Buffer),
-   expect.objectContaining({upsert:true,contentType:'text/plain'})
-  );
+  // Completing a job must NOT copy G-code into Files - that is the
+  // "Post to Files" button's job, kept a deliberate human action so test
+  // and retry jobs don't fill the shared folders.
+  expect(mocks.storageUpload).not.toHaveBeenCalled();
  });
  it('records how far the posted program travels so a machine-limit report can be triaged',async()=>{
   // Issue #359: "program exceeds machine maximum" kept being reported when
@@ -105,15 +99,5 @@ describe('Fusion Runner grouping lifecycle',()=>{
   expect((await result.json()).error).toMatch(/filenames/);
   expect(mocks.from).toHaveBeenCalledTimes(1);
   expect(mocks.storageUpload).not.toHaveBeenCalled();
- });
- it('still reports the job completed even if posting to Files fails',async()=>{
-  const contentBase64=Buffer.from('N10 G90\r\nM30\r\n','utf8').toString('base64');
-  mocks.from
-   .mockReturnValueOnce(chain({data:{id:'job',params:{fusionJobKind:'plate:cam'}}}))
-   .mockReturnValueOnce(chain({data:[{id:'job'}]}));
-  mocks.storageUpload.mockResolvedValue({error:{message:'bucket unreachable'}});
-  const result=await call('complete',{jobId:'job',runnerId:'runner',ncFiles:[{name:'plate.nc',contentBase64}]});
-  expect(result.status).toBe(200);
-  expect(await result.json()).toEqual({success:true});
  });
 });
