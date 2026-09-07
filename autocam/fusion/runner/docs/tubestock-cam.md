@@ -20,8 +20,9 @@ The setups are fixture-labelled in this order:
 3. `Tube Side 6`
 4. `Tube Side 9`
 
-The template selections are replaced on each wall. Small round holes use its
-Bore operation, larger round holes use the circular pocket operation, broad
+The template selections are replaced on each wall. Small round holes use the
+Bore operation selected from each hole's actual cylindrical wall face (not the
+tube's planar exterior face), larger round holes use the circular pocket operation, broad
 profiles use one Shape Through roughing pass plus its finishing contour, and
 narrow profiles use the 2D Slot Cut. An operation with no matching geometry
 is deleted before generation, so a stale selection stored in the template can

@@ -38,6 +38,11 @@ class TubeFaceProgramTests(unittest.TestCase):
         self.assertIn("face_program_names", workflow)
         self.assertNotIn("DeleteToolpaths()", workflow)
 
+    def test_bore_selection_uses_the_hole_wall_not_the_planar_tube_wall(self):
+        handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
+        self.assertIn("adsk.core.Cylinder.classType()", handler)
+        self.assertIn('loop["circular_faces"]', handler)
+
 
 if __name__ == "__main__":
     unittest.main()

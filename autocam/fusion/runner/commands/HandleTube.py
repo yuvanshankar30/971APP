@@ -140,10 +140,25 @@ def _loop_specs(face):
         ]
         planar_spans = sorted((span for span in spans if span > 1e-6), reverse=True)
         aspect = planar_spans[0] / planar_spans[1] if len(planar_spans) >= 2 else 0.0
+        circular_faces = []
+        if circular:
+            # Bore's ``circularFaces`` parameter does not mean the planar
+            # wall face that *contains* a hole. It means the cylindrical
+            # BRep face forming the hole wall. Selecting the planar face was
+            # a subtle but real API mismatch: it can remain accepted as a
+            # generic BRepFace while producing no bore, or selecting a
+            # different cylindrical feature from stale template geometry.
+            for edge in edges:
+                for adjacent_face in edge.faces:
+                    if adjacent_face.geometry.objectType != adsk.core.Cylinder.classType():
+                        continue
+                    if adjacent_face not in circular_faces:
+                        circular_faces.append(adjacent_face)
         specs.append({
             "edges": edges,
             "is_reverted": is_reverted_for_loop_seed(coedges[0].isOpposedToEdge),
             "circular": circular,
+            "circular_faces": circular_faces,
             "diameter": diameter,
             "slot": not circular and aspect >= _SLOT_ASPECT_RATIO,
         })
@@ -165,12 +180,12 @@ def _apply_chains(operation, parameter_name, specs):
     return bool(specs)
 
 
-def _apply_circular_faces(operation, face):
+def _apply_circular_faces(operation, faces):
     parameter = operation.parameters.itemByName("circularFaces")
-    if parameter is None:
+    if parameter is None or not faces:
         return False
     try:
-        parameter.value.value = [face]
+        parameter.value.value = faces
         return True
     except Exception:
         return False
@@ -184,6 +199,7 @@ def _configure_face_operations(setup, face):
     slots = [loop for loop in loops if loop["slot"]]
     shapes = [loop for loop in loops if not loop["circular"] and not loop["slot"]]
     have_shape_roughing = False
+    small_circular_faces = [face for loop in small_circles for face in loop["circular_faces"]]
 
     for operation in list(setup.operations):
         name = str(operation.name or "").lower()
@@ -195,7 +211,7 @@ def _configure_face_operations(setup, face):
             # future payload; it is not replaced with a plate contour.
             keep = False
         elif operation.strategy == "bore" or "drill" in name:
-            keep = bool(small_circles) and _apply_circular_faces(operation, face)
+            keep = bool(small_circles) and _apply_circular_faces(operation, small_circular_faces)
         elif "circular" in name and "hole" in name:
             keep = _apply_chains(operation, "pockets", large_circles)
         elif "shape" in name and "through" in name and operation.strategy in ("adaptive2d", "pocket2d"):
