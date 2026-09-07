@@ -109,6 +109,12 @@
     const stepPath = manufacturingStepFileName(linkedPart);
     if (!stepPath) return;
 
+    // Never leave an older manually picked file attached while this link is
+    // loading. If the linked file cannot be downloaded, handleAdd below
+    // blocks creation rather than silently associating the request with
+    // unrelated geometry.
+    stepFile = null;
+    stepCarriedOverFrom = null;
     try {
       const { data: blob, error: downloadError } = await supabase.storage
         .from('manufacturing-files')
@@ -118,6 +124,7 @@
       stepCarriedOverFrom = linkedPart.name;
     } catch (e) {
       console.warn('Could not carry over the linked request\'s STEP file:', e.message || e);
+      toastActions.show('Could not load the linked request STEP file');
     }
 
     detectingDepth = true;
@@ -236,6 +243,10 @@
   async function handleAdd() {
     if (!newPart.name || !newPart.categoryId || !newPart.quantity) {
       toastActions.show('Name, category, and quantity are required');
+      return;
+    }
+    if (manufacturingHasStepFile && !stepFile) {
+      toastActions.show('The linked request STEP file is still unavailable');
       return;
     }
     submitting = true;
