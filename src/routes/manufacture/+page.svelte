@@ -1042,6 +1042,22 @@
     return `/autocam/fusion?tab=parts&manufacturingPart=${encodeURIComponent(part.id)}`;
   }
 
+  // Lathe/turning parts have no Fusion CAM path at all - Fusion CAM only
+  // runs plate and box-tube routing jobs. When the legacy per-part AutoCAM
+  // buttons were removed from this page, router gained "Open Fusion CAM"
+  // and turning was left with no CAM entry point anywhere on this page
+  // (issue #396), even though /autocam itself still works and can still
+  // generate turning G-code through its own New Job flow.
+  //
+  // This is deliberately just a link, not a pre-filled deep link like
+  // router's: /autocam has no part-prefill parameter to target (it only
+  // reads `job` and `group`), and #396 explicitly asks that the bigger
+  // question - extend Fusion CAM to turning, or build a real lathe entry
+  // point - be settled with the team rather than assumed. Sending an
+  // operator to the page that actually works today is the part that needs
+  // no decision.
+  const TURNING_CAM_HREF = '/autocam';
+
   // A router request may enter human CAM review only after the real Fusion
   // pipeline has completed its job. This replaces the old manual Start ->
   // CAM Done ladder, which could claim CAM was ready without any generated
@@ -2015,6 +2031,10 @@
                 <a class="btn btn-primary btn-sm" href={fusionCamHref(part)} on:click|stopPropagation title="Open this part in Fusion CAM, pre-filled from this request">
                   <Layers size={14} /> Open Fusion CAM
                 </a>
+              {:else if part.workflow === 'lathe'}
+                <a class="btn btn-secondary btn-sm" href={TURNING_CAM_HREF} on:click|stopPropagation title="Turning G-code is generated in AutoCAM - open it and start a new job with this part's STEP file">
+                  <Layers size={14} /> Open AutoCAM
+                </a>
               {/if}
               <button class="btn btn-secondary btn-sm" on:click={() => installCadStepFile(part)} title="Download STEP file">
                 <Download size={14} /> Install CAD
@@ -2209,6 +2229,10 @@
                     {#if part.workflow === 'router'}
                       <a class="btn btn-primary btn-sm" href={fusionCamHref(part)} on:click|stopPropagation title="Open this part in Fusion CAM, pre-filled from this request">
                         <Layers size={13} /> Open Fusion CAM
+                      </a>
+                    {:else if part.workflow === 'lathe'}
+                      <a class="btn btn-secondary btn-sm" href={TURNING_CAM_HREF} on:click|stopPropagation title="Turning G-code is generated in AutoCAM - open it and start a new job with this part's STEP file">
+                        <Layers size={13} /> Open AutoCAM
                       </a>
                     {/if}
                     <button class="btn btn-secondary btn-sm" on:click={() => installCadStepFile(part)} title="Download STEP file">
