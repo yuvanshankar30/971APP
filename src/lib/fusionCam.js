@@ -25,7 +25,10 @@ export const FUSION_OUTPUT_JOB_KINDS = ['plate:cam', 'box_tube'];
 export function isFusionOutputJob(job) {
   return FUSION_OUTPUT_JOB_KINDS.includes(job?.params?.fusionJobKind);
 }
-export const FUSION_JOB_LIST_LIMIT = 200;
+// How many jobs the Job Queue tab loads before someone asks for more.
+// Sized to fill the visible list on a normal screen without paying for the
+// rest of the history up front.
+export const FUSION_JOB_PAGE_SIZE = 25;
 
 // Deliberately excludes step_file_name, gcode, and fusion_nc_files. The NC
 // artifacts are base64 and can dwarf every other field; fetch them only
@@ -277,15 +280,28 @@ export async function deleteBoxTube(id) {
 
 /* ── Job queue (reuses cam_jobs - see file header) ───────────────────── */
 
-export async function fetchFusionJobs() {
+/**
+ * One page of milling jobs, newest first.
+ *
+ * Paged rather than "the most recent 200 in one request": a real queue of
+ * 175 jobs was 290KB and ~340ms before a single row rendered, and almost
+ * none of it is what someone opening this tab is looking at - they want the
+ * few most recent jobs. Older ones load on request instead.
+ *
+ * Returns { jobs, hasMore } - hasMore is resolved by asking for one row
+ * past the page and reporting whether it existed, which avoids a second
+ * count() round-trip just to decide whether to show a "Load more" button.
+ */
+export async function fetchFusionJobs({ offset = 0, limit = FUSION_JOB_PAGE_SIZE } = {}) {
   const { data, error } = await supabase
     .from('cam_jobs')
     .select(FUSION_JOB_SELECT)
     .eq('operation_type', 'milling')
     .order('created_at', { ascending: false })
-    .limit(FUSION_JOB_LIST_LIMIT);
+    .range(offset, offset + limit); // one extra row: presence of it means there is another page
   if (error) throw error;
-  return data || [];
+  const rows = data || [];
+  return { jobs: rows.slice(0, limit), hasMore: rows.length > limit };
 }
 
 /** Refresh only mutable fields for the handful of jobs a Runner can change. */

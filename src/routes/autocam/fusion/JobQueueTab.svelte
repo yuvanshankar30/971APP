@@ -9,6 +9,8 @@
 
   let jobs = [];
   let loading = true;
+  let hasMore = false;
+  let loadingMore = false;
 
   // Where a job's G-code lands when someone presses "Post to Files" below -
   // the same "manufacturing-drive" bucket /manufacture/files browses. A copy
@@ -52,14 +54,37 @@
   // with a loading state and back, a jarring flash. With the 10s poll this
   // was firing on every tick a job was active, not just after an action.
   // Only the initial mount needs it.
+  // Reloads the first page only. Any extra pages the user had loaded are
+  // deliberately dropped: after an action (delete/cancel) the older pages'
+  // offsets have shifted, so keeping them would risk showing a duplicated
+  // or skipped row. They are one click away again.
   async function load(showLoading = true) {
     if (showLoading) loading = true;
     try {
-      jobs = await fetchFusionJobs();
+      const page = await fetchFusionJobs();
+      jobs = page.jobs;
+      hasMore = page.hasMore;
     } catch (e) {
       toastActions.show(e.message || 'Failed to load jobs');
     } finally {
       loading = false;
+    }
+  }
+
+  async function loadMore() {
+    if (loadingMore) return;
+    loadingMore = true;
+    try {
+      const page = await fetchFusionJobs({ offset: jobs.length });
+      // Guard against a job arriving/being removed between pages shifting
+      // an offset - a row already on screen must not appear twice.
+      const seen = new Set(jobs.map((job) => job.id));
+      jobs = [...jobs, ...page.jobs.filter((job) => !seen.has(job.id))];
+      hasMore = page.hasMore;
+    } catch (e) {
+      toastActions.show(e.message || 'Failed to load more jobs');
+    } finally {
+      loadingMore = false;
     }
   }
 
@@ -289,6 +314,14 @@
       </div>
     {/each}
   </div>
+  {#if hasMore}
+    <div class="load-more-row">
+      <button class="btn btn-secondary" disabled={loadingMore} on:click={loadMore}>
+        {loadingMore ? 'Loading...' : 'Load older jobs'}
+      </button>
+      <span class="cam-form-hint">Showing the {jobs.length} most recent jobs.</span>
+    </div>
+  {/if}
 {/if}
 
 {#if errorModalJob}
@@ -339,6 +372,13 @@
 {/if}
 
 <style>
+  .load-more-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    justify-content: center;
+    margin-top: var(--space-3);
+  }
   .cam-list { display: flex; flex-direction: column; gap: 0.75rem; }
   .cam-list-item { padding: 1rem; }
   .cam-list-header { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
