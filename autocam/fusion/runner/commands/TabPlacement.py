@@ -256,6 +256,22 @@ def _good_straight_edges(body, stock_bounds=None):
     ]
 
 
+def _edge_identity(edge):
+    """A stable identity for one Fusion BRepEdge.
+
+    Fusion can return a new Python proxy every time an edge collection is
+    read. Python's ``id(edge)`` then describes the temporary wrapper, not
+    the physical edge, and made good edges appear in noTabZones on a later
+    read. entityToken identifies the actual BRep entity for this document.
+    """
+    try:
+        return edge.entityToken
+    except Exception:
+        # A temporary edge should not normally reach this path, but preserve
+        # the former behavior as a last-resort key instead of failing CAM.
+        return id(edge)
+
+
 def _no_tab_zone_edges(body, stock_bounds=None):
     """Every outer-boundary edge that ISN'T a good tab candidate - curved/
     filleted, too short, or with no real stock behind it - for Fusion's own
@@ -266,8 +282,8 @@ def _no_tab_zone_edges(body, stock_bounds=None):
     top_face = _find_top_face(body)
     if top_face is None:
         return []
-    good_ids = {id(e) for e in _good_straight_edges(body, stock_bounds)}
-    return [e for e in _outer_boundary_edges(top_face) if id(e) not in good_ids]
+    good_edges = {_edge_identity(e) for e in _good_straight_edges(body, stock_bounds)}
+    return [e for e in _outer_boundary_edges(top_face) if _edge_identity(e) not in good_edges]
 
 
 def _distinct_straight_line_count(body, stock_bounds=None) -> int:
