@@ -327,6 +327,32 @@ export async function fetchFusionPartStepFiles(partIds) {
   return Object.fromEntries((data || []).map((part) => [part.id, part.step_file_name]));
 }
 
+/**
+ * "Install CAD" for a Fusion part/job - downloads its real STEP file from
+ * storage. Same signed-URL-then-open-in-a-new-tab technique
+ * manufacture/+page.svelte's installCadStepFile/downloadFromStorage
+ * already use for turning/routing parts, generalized here since every
+ * Fusion CAM STEP file lives in the same 'manufacturing-files' bucket
+ * (see uploadFusionStep above) regardless of whether it's reached through
+ * fusion_parts directly or through a job's params.selectedPartId (see
+ * fetchFusionPartStepFiles).
+ */
+export async function installFusionPartCad(stepFileName) {
+  if (!stepFileName) throw new Error('This part has no STEP file to install');
+  let { data, error } = await supabase.storage
+    .from('manufacturing-files')
+    .createSignedUrl(stepFileName, 60);
+  // The stored name can be URL-encoded in some older rows - matches the
+  // same decode-and-retry manufacture/+page.svelte's downloadFromStorage
+  // already does for the identical bucket/naming scheme.
+  if (error && error.message?.includes('Object not found')) {
+    const decoded = decodeURIComponent(stepFileName);
+    ({ data, error } = await supabase.storage.from('manufacturing-files').createSignedUrl(decoded, 60));
+  }
+  if (error) throw new Error(error.message || 'Could not create a download link for this STEP file');
+  return data.signedUrl;
+}
+
 /** Refresh only mutable fields for the handful of jobs a Runner can change. */
 export async function fetchFusionJobUpdates(jobIds) {
   const ids = [...new Set((jobIds || []).filter(Boolean))];

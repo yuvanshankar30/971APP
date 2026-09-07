@@ -3,7 +3,7 @@
   import { onMount } from 'svelte';
   import { supabase } from '$lib/supabase.js';
   import { toastActions } from '$lib/toast.js';
-  import { fetchFusionJobs, fetchFusionJobUpdates, fetchFusionJobNcFiles, fetchFusionPartStepFiles, cancelFusionJob, deleteFusionJob } from '$lib/fusionCam.js';
+  import { fetchFusionJobs, fetchFusionJobUpdates, fetchFusionJobNcFiles, fetchFusionPartStepFiles, installFusionPartCad, cancelFusionJob, deleteFusionJob } from '$lib/fusionCam.js';
   import CadViewer from '$lib/components/CadViewer.svelte';
   import { formatPacificDateTimeWithZone } from '$lib/timezone.js';
   import { ListChecks, X, Download, Trash2, Upload, AlertTriangle, ChevronDown, Box } from 'lucide-svelte';
@@ -38,6 +38,15 @@
     } catch (e) {
       // A missing CAD link only hides a button - never block the job list.
       console.error('Failed to resolve Fusion job STEP files', e);
+    }
+  }
+
+  async function handleInstallCad(job) {
+    try {
+      const url = await installFusionPartCad(jobStepFile(job));
+      window.open(url, '_blank');
+    } catch (e) {
+      toastActions.show(e.message || 'Failed to download STEP file');
     }
   }
 
@@ -314,6 +323,9 @@
           {#if jobStepFile(job)}
             <button class="btn btn-secondary btn-sm" title="Preview this job's part in 3D" on:click={() => (cadModalJob = job)}>
               <Box size={14} /> View CAD
+            </button>
+            <button class="btn btn-secondary btn-sm" title="Download this job's real STEP file" on:click={() => handleInstallCad(job)}>
+              <Download size={14} /> Install CAD
             </button>
           {/if}
           {#if job.status === 'completed' && jobKind(job) !== 'plate:arrange'}

@@ -1,8 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ from: vi.fn(), queries: [] }));
+const mocks = vi.hoisted(() => ({ from: vi.fn(), queries: [], createSignedUrl: vi.fn() }));
 vi.mock('$lib/supabase.js', () => ({
-  supabase: { from: mocks.from }
+  supabase: {
+    from: mocks.from,
+    storage: { from: vi.fn(() => ({ createSignedUrl: mocks.createSignedUrl })) }
+  }
 }));
 
 import {
@@ -12,6 +15,7 @@ import {
   fetchFusionJobNcFiles,
   fetchFusionPartStepFiles,
   fetchFusionJobsByManufacturingPartIds,
+  installFusionPartCad,
   isFusionOutputJob
 } from './fusionCam.js';
 
@@ -27,6 +31,7 @@ function chain(result) {
 beforeEach(() => {
   mocks.from.mockReset();
   mocks.queries.length = 0;
+  mocks.createSignedUrl.mockReset();
 });
 
 describe('Fusion CAM queue query efficiency', () => {
@@ -119,5 +124,24 @@ describe('Fusion CAM queue query efficiency', () => {
     const camQuery = mocks.queries.at(-1);
     expect(camQuery.in).toHaveBeenCalledWith('params->>plateId', ['plate-1']);
     expect(camQuery.limit).not.toHaveBeenCalled();
+  });
+
+  it('installs CAD by creating a signed download URL for the real STEP file', async () => {
+    mocks.createSignedUrl.mockResolvedValue({ data: { signedUrl: 'https://example.test/a.step' }, error: null });
+    await expect(installFusionPartCad('a.step')).resolves.toBe('https://example.test/a.step');
+    expect(mocks.createSignedUrl).toHaveBeenCalledWith('a.step', 60);
+  });
+
+  it('refuses to install CAD for a part with no STEP file rather than call storage', async () => {
+    await expect(installFusionPartCad(null)).rejects.toThrow(/no STEP file/);
+    expect(mocks.createSignedUrl).not.toHaveBeenCalled();
+  });
+
+  it('retries a URL-decoded filename when the stored name was encoded', async () => {
+    mocks.createSignedUrl
+      .mockResolvedValueOnce({ data: null, error: { message: 'Object not found' } })
+      .mockResolvedValueOnce({ data: { signedUrl: 'https://example.test/decoded.step' }, error: null });
+    await expect(installFusionPartCad('a%20b.step')).resolves.toBe('https://example.test/decoded.step');
+    expect(mocks.createSignedUrl).toHaveBeenNthCalledWith(2, 'a b.step', 60);
   });
 });

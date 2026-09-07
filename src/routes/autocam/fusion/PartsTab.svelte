@@ -3,11 +3,12 @@
   import { onMount } from 'svelte';
   import { toastActions } from '$lib/toast.js';
   import { supabase } from '$lib/supabase.js';
-  import { fetchParts, createPart, deletePart, renamePart, updatePartQuantity, fetchPartCategories } from '$lib/fusionCam.js';
+  import { fetchParts, createPart, deletePart, renamePart, updatePartQuantity, fetchPartCategories, installFusionPartCad } from '$lib/fusionCam.js';
   import { groupFusionParts } from '$autocam/fusion/grouping.js';
   import { fetchStepMeshes } from '$lib/stepMeshLoader.js';
   import { extractRoutingContoursFromMeshes } from '$autocam/stepProfile.js';
-  import { Plus, Trash2, Package, Pencil, Check, X, Sparkles } from 'lucide-svelte';
+  import CadViewer from '$lib/components/CadViewer.svelte';
+  import { Plus, Trash2, Package, Pencil, Check, X, Sparkles, Box, Download } from 'lucide-svelte';
 
   export let user;
   export let canManage;
@@ -323,6 +324,21 @@
     const material = cat.cam_materials?.name || 'Material';
     return `${material} - ${cat.thickness}"`;
   }
+
+  // View CAD / Install CAD - fetchParts already selects fusion_parts.*, so
+  // step_file_name is on the row directly here, unlike JobQueueTab.svelte
+  // (a Fusion job's own step_file_name is always null; it has to resolve
+  // this through its linked part instead - see fetchFusionPartStepFiles).
+  let cadModalPart = null;
+
+  async function handleInstallCad(part) {
+    try {
+      const url = await installFusionPartCad(part.step_file_name);
+      window.open(url, '_blank');
+    } catch (e) {
+      toastActions.show(e.message || 'Failed to download STEP file');
+    }
+  }
 </script>
 
 {#if loading}
@@ -496,6 +512,14 @@
               {#if part.fusion_file_name} - Fusion file name: <strong>{part.fusion_file_name}</strong>{/if}
             </p>
             <div class="cam-list-actions">
+              {#if part.step_file_name}
+                <button class="btn btn-secondary btn-sm" on:click={() => (cadModalPart = part)}>
+                  <Box size={14} /> View CAD
+                </button>
+                <button class="btn btn-secondary btn-sm" on:click={() => handleInstallCad(part)}>
+                  <Download size={14} /> Install CAD
+                </button>
+              {/if}
               {#if canManage}
                 <button class="btn btn-ghost btn-sm" on:click={() => handleDelete(part)}>
                   <Trash2 size={14} /> Delete
@@ -510,7 +534,25 @@
   {/if}
 {/if}
 
+{#if cadModalPart}
+  <div class="modal-backdrop" on:click|self={() => (cadModalPart = null)} role="button" tabindex="0"
+       on:keydown={(e) => { if (e.key === 'Escape') (cadModalPart = null); }}>
+    <div class="modal cad-modal" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h3>CAD Preview - {cadModalPart.name}</h3>
+        <button type="button" class="modal-close-button" aria-label="Close" on:click={() => (cadModalPart = null)}><X size={18} /></button>
+      </div>
+      <div class="modal-body">
+        <CadViewer part={null} stepFileName={cadModalPart.step_file_name} />
+        <p class="cam-form-hint">Drag to rotate &middot; scroll to zoom &middot; right-drag to pan</p>
+      </div>
+    </div>
+  </div>
+{/if}
+
 <style>
+  .cad-modal { width: min(900px, 94vw); }
+  .cad-modal .modal-body { min-height: 60vh; }
   .group-toggle { display: flex; align-items: center; gap: 0.5rem; }
   .stock-group { margin-top: 1rem; }
   .group-header { flex-wrap: wrap; margin-bottom: 0.75rem; }
