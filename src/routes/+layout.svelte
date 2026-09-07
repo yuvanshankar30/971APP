@@ -6,7 +6,7 @@
   import { supabase } from '$lib/supabase.js';
   import { fetchActiveScoutingEventKey } from '$lib/scoutingEvent.js';
   import navConfig from '$lib/navigation.json';
-  import { defaultHeaderTabs, mergeDefaultHeaderTabs, ensurePowerRankingsTab, ensureScoutingAdminTab, ensureStrategyTab, ensureGcodeConverterTab, ensureFilesTab, ensureFusionAutocamTab } from '$lib/defaultTabs.js';
+  import { defaultHeaderTabs, mergeDefaultHeaderTabs, ensurePowerRankingsTab, ensureScoutingAdminTab, ensureStrategyTab, ensureGcodeConverterTab, ensureFilesTab, ensureFusionAutocamTab, promoteChildrenOfDisabledFolders } from '$lib/defaultTabs.js';
   import { Move3d, Hammer, Wrench, Receipt, Home, Briefcase, Coins, Package, User, ChevronDown, Menu, X, Camera, CalendarDays, Cpu, FileText, Trophy, Eye, ClipboardCheck, ListChecks, Target, Folder, Search } from 'lucide-svelte';
   import { goto, afterNavigate } from '$app/navigation';
   import { page } from '$app/stores';
@@ -478,7 +478,11 @@
   // so a customized nav still surfaces the feature. Purely additive - see
   // ensurePowerRankingsTab().
   $: baseNavTabs = addAdminTabIfAllowed(ensureScoutingAdminTab(ensureStrategyTab(ensureFusionAutocamTab(ensureFilesTab(ensureGcodeConverterTab(ensurePowerRankingsTab(effectiveTabs, navConfig), navConfig), navConfig), navConfig))), canViewAdmin);
-  $: navItems = isApproved ? buildNavItems(baseNavTabs) : [];
+  // Old accounts may still store a CAD folder containing CAD + Build. Once
+  // CAD is disabled, promote Build out of that retired folder so the top bar
+  // does not keep a misleading CAD shell around it.
+  $: visibleNavTabs = promoteChildrenOfDisabledFolders(baseNavTabs, navConfig);
+  $: navItems = isApproved ? buildNavItems(visibleNavTabs) : [];
 
   // Drag-to-reorder for the desktop nav's top-level tabs/folders. Home is
   // rendered outside this list entirely, and Admin is appended by
