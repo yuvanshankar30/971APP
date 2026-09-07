@@ -44,15 +44,32 @@ const STALE_CLAIM_MS = 15 * 60 * 1000;
 // intentionally never retried automatically: Fusion may already have changed
 // a document or exported an artifact, so retrying them could duplicate CAM
 // work. Those require an operator's explicit review.
+const TRANSIENT_FETCH_ERROR_RE = /fetch failed/i;
+const STALE_REQUEUE_RETRY_ATTEMPTS = 3;
+const STALE_REQUEUE_RETRY_DELAY_MS = 200;
+
 async function requeueStaleFusionJobs(supabase) {
   const cutoff = new Date(Date.now() - STALE_CLAIM_MS).toISOString();
-  const { error } = await supabase.from('cam_jobs').update({
-    status: 'queued',
-    claimed_by: null,
-    claimed_at: null,
-    progress: 0,
-    progress_message: 'Runner claim expired before processing; queued for retry'
-  }).eq('operation_type', 'milling').eq('status', 'claimed').lt('claimed_at', cutoff);
+  let error;
+  // Seen in production as every claim request failing 500 with
+  // "Could not recover stale Fusion jobs: TypeError: fetch failed" - a
+  // transient network blip between this server and Supabase, not a real
+  // Postgres error. If it persists across polls, the runner (which already
+  // retries claim failures on its own, see SpartanRoboticsAutoCAM.py) never
+  // gets past this step to claim anything. Retrying the same update here
+  // absorbs a one-off blip instead of failing the whole claim cycle on it.
+  for (let attempt = 0; attempt < STALE_REQUEUE_RETRY_ATTEMPTS; attempt++) {
+    ({ error } = await supabase.from('cam_jobs').update({
+      status: 'queued',
+      claimed_by: null,
+      claimed_at: null,
+      progress: 0,
+      progress_message: 'Runner claim expired before processing; queued for retry'
+    }).eq('operation_type', 'milling').eq('status', 'claimed').lt('claimed_at', cutoff));
+    const isLastAttempt = attempt === STALE_REQUEUE_RETRY_ATTEMPTS - 1;
+    if (!error || !TRANSIENT_FETCH_ERROR_RE.test(error.message || '') || isLastAttempt) break;
+    await new Promise((resolve) => setTimeout(resolve, STALE_REQUEUE_RETRY_DELAY_MS * (attempt + 1)));
+  }
   if (error) throw new Error(`Could not recover stale Fusion jobs: ${error.message}`);
 }
 
