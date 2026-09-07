@@ -390,39 +390,54 @@ def _repair_missing_selections(setup) -> list[str]:
     ops_snapshot = list(setup.operations)
 
     # First pass, read-only: every non-outer-profile contour2d finishing
-    # pass in the setup - known up front so the second pass can pick the
-    # single primary one to hold ALL of this part's real internal features
-    # together, rather than spreading them across every available
-    # finishing-pass operation. Direct instruction: every real internal
-    # feature belongs in ONE "Feature Slot Cut" operation, not split
-    # across "Feature Slot Cut" + "Feature Cut 2" - matches the real
-    # reference program's own structure (a single "FEATURE SLOT CUT"
-    # section covering every internal cutout). Sorted so an operation
-    # whose template name already says "feature" (e.g. the New Router
-    # metal template's own "Slot Cut for Features") is picked as that one
-    # operation - the real, purpose-built operation for this - rather than
-    # whichever generic "Shape ... Finishing Pass" happens to iterate
-    # first.
+    # pass in the setup. Direct instruction, after a real part (Anton
+    # plate, 8 distinct internal loops - 4 border frame slots plus 4
+    # center shapes) needed more than a single operation could reliably
+    # hold: distribute internal feature loops across every available
+    # finishing-pass operation the template provides (round-robin, capped
+    # per operation at MAX_LOOPS_PER_FEATURE_OP), not just the first one.
+    # A simple part (x44_stiffner, 2 kidney loops) still lands entirely in
+    # one operation this way - the split only engages once a part
+    # genuinely has more loops than one operation should reasonably carry
+    # - so this generalizes to "any STEP file" instead of hard-coding a
+    # single-operation assumption that only held for the simpler part it
+    # was first written against. Sorted so an operation whose template
+    # name already says "feature" (e.g. the New Router metal template's
+    # own "Slot Cut for Features") is used first - the real, purpose-built
+    # operation for this - rather than whichever generic "Shape ...
+    # Finishing Pass" happens to iterate first.
     #
     # Do not gate contour finishing passes on _needs_repair: Fusion can
     # report stale template selections as healthy after a fresh STEP import.
     # This pass is rebuilt from the part's current internal features.
+    MAX_LOOPS_PER_FEATURE_OP = 4
     finishing_pass_ops = sorted(
         (op for op in ops_snapshot if op.strategy == "contour2d" and not _is_outer_profile(op)),
         key=lambda op: 0 if "feature" in op.name.lower() else 1,
     )
-    primary_feature_op = finishing_pass_ops[0] if finishing_pass_ops else None
-    if primary_feature_op is not None:
+    if finishing_pass_ops:
         design = _design()
         feature_edges_cache = _internal_feature_loop_edges_all_bodies(design) if design else []
-    # Only the ONE primary operation is treated as "the" feature-cut
-    # operation - every OTHER contour2d finishing pass in the template
-    # (a real part rarely needs more than one) falls through to the
-    # ordinary conditional repair path below and, having no real feature
-    # left to give it, ends up empty and is removed by this file's own
-    # existing empty-toolpath cleanup, same as any other operation the
-    # template shipped that doesn't apply to this specific part.
-    feature_op_index = {primary_feature_op.operationId: 0} if primary_feature_op is not None else {}
+    # Only as many finishing-pass operations as the loop count actually
+    # needs are used - any operation beyond that (a real part rarely needs
+    # more than one or two) falls through to the ordinary conditional
+    # repair path below and, having no real feature left to give it, ends
+    # up empty and is removed by this file's own existing empty-toolpath
+    # cleanup, same as any other operation the template shipped that
+    # doesn't apply to this specific part.
+    active_feature_ops = []
+    feature_op_assignments = {}  # operationId -> list of edge-lists, this op's own share
+    if finishing_pass_ops and feature_edges_cache:
+        ops_needed = min(
+            len(finishing_pass_ops),
+            max(1, -(-len(feature_edges_cache) // MAX_LOOPS_PER_FEATURE_OP)),
+        )
+        active_feature_ops = finishing_pass_ops[:ops_needed]
+        for i, edges in enumerate(feature_edges_cache):
+            target_op = active_feature_ops[i % len(active_feature_ops)]
+            feature_op_assignments.setdefault(target_op.operationId, []).append(edges)
+    feature_op_order = {op.operationId: idx for idx, op in enumerate(active_feature_ops)}
+    feature_op_index = {op_id: True for op_id in feature_op_assignments}
 
     for op in ops_snapshot:
         is_outer = _is_outer_profile(op)
@@ -484,32 +499,28 @@ def _repair_missing_selections(setup) -> list[str]:
                 # away from those interior features, not into them.
                 chain.isReverted = True
                 chain.inputGeometry = edges
-        elif is_feature_op and feature_edges_cache:
-            # The ONE primary feature-cut operation gets EVERY real
-            # internal feature loop on the part, each as its own
-            # ChainSelection within the same operation - direct
-            # instruction: every internal feature belongs in one "Feature
-            # Slot Cut" operation, not split across several. feature_op_index
-            # only ever maps the single primary_feature_op, so reaching
-            # this branch at all already means "this is the one" - no
-            # per-operation slicing needed. Built via ChainSelection, the
-            # same proven technique as the outer profile above - not the
-            # global PocketRecognitionSelection every other (genuinely
+        elif is_feature_op:
+            # This operation's own share of the part's real internal
+            # feature loops (see feature_op_assignments above for how that
+            # share is decided) - each as its own ChainSelection within
+            # this operation. Built via ChainSelection, the same proven
+            # technique as the outer profile above - not the global
+            # PocketRecognitionSelection every other (genuinely
             # pocket-with-a-floor) finishing pass still uses, which has no
             # way to target these specific features and can't reliably
             # find a through-cut one at all.
             #
-            # Direct instruction to build this chain differently, after
-            # the outer profile's own full-edge-list technique (assigning
-            # every edge in the loop to inputGeometry at once) was
-            # confirmed live to produce visibly wrong geometry here even
-            # though it works for the outer profile. Seeded from a single
-            # edge instead - Fusion's own ChainSelection auto-completes
-            # the rest of a closed, tangent-connected loop from just one
-            # of its edges, so this doesn't depend on loop.coEdges already
-            # being in the exact order/winding Fusion's chain builder
-            # expects, the way passing every edge explicitly does.
-            for edges in feature_edges_cache:
+            # Seeded from a single edge, not the outer profile's own
+            # full-edge-list technique (assigning every edge in the loop to
+            # inputGeometry at once) - confirmed live that technique
+            # produces visibly wrong geometry here even though it works
+            # for the outer profile. Fusion's own ChainSelection
+            # auto-completes the rest of a closed, tangent-connected loop
+            # from just one of its edges, so this doesn't depend on
+            # loop.coEdges already being in the exact order/winding
+            # Fusion's chain builder expects, the way passing every edge
+            # explicitly does.
+            for edges in feature_op_assignments.get(op.operationId, []):
                 chain = selections.createNewChainSelection()
                 chain.isOpen = False
                 chain.isReverted = False
@@ -518,9 +529,12 @@ def _repair_missing_selections(setup) -> list[str]:
             # repurposed for this (e.g. "Shape Through Finishing Pass") -
             # a template operation already named for this purpose (the New
             # Router metal template's own real "Slot Cut for Features")
-            # keeps its own real name as-is.
+            # keeps its own real name as-is. A second (or later) operation
+            # gets a numbered name so it's clearly part of the same split
+            # feature-cut work, not confused for an unrelated operation.
             if "feature" not in name_lower:
-                op.name = "Feature Slot Cut"
+                op_order = feature_op_order.get(op.operationId, 0)
+                op.name = "Feature Slot Cut" if op_order == 0 else f"Feature Slot Cut {op_order + 1}"
             # Direct instruction: no tabs on the feature slot cut at all -
             # confirmed live as a real bug, not hypothetical: the
             # template's own default (tabsPerContour=1, untouched here
@@ -536,6 +550,46 @@ def _repair_missing_selections(setup) -> list[str]:
             if tabs_per_contour is not None:
                 try:
                     tabs_per_contour.expression = "0"
+                except Exception:
+                    pass
+            # Direct instruction, after a real part (Anton plate) needed a
+            # second feature-cut operation and its actual G-code came out
+            # cutting to Z0.025 - barely below the surface, not through the
+            # material at all - while the first operation correctly cut to
+            # Z-2.095. Root cause: the template's own raw operations don't
+            # all share the same depth convention. Whichever one became the
+            # first feature op already had bottomHeight_mode='from surface
+            # bottom' (a real through-cut, 0.02in past the true bottom
+            # face for clean breakthrough); the one repurposed as a second
+            # operation had bottomHeight_mode='from contour' instead - tied
+            # to the selected geometry's OWN Z (the top face, ~0), so it
+            # never cut deeper than the surface it started from. Forced
+            # explicitly on every feature-cut operation, not just trusted
+            # from whatever the raw template op defaulted to, so a part
+            # needing 2, 3, or more feature-cut operations always gets a
+            # real through-cut on every one of them.
+            top_height_mode = op.parameters.itemByName("topHeight_mode")
+            if top_height_mode is not None:
+                try:
+                    top_height_mode.expression = "'from stock top'"
+                except Exception:
+                    pass
+            top_height_offset = op.parameters.itemByName("topHeight_offset")
+            if top_height_offset is not None:
+                try:
+                    top_height_offset.expression = "0in"
+                except Exception:
+                    pass
+            bottom_height_mode = op.parameters.itemByName("bottomHeight_mode")
+            if bottom_height_mode is not None:
+                try:
+                    bottom_height_mode.expression = "'from surface bottom'"
+                except Exception:
+                    pass
+            bottom_height_offset = op.parameters.itemByName("bottomHeight_offset")
+            if bottom_height_offset is not None:
+                try:
+                    bottom_height_offset.expression = "(-.02) * 1in"
                 except Exception:
                     pass
         elif is_big_hole_op:
