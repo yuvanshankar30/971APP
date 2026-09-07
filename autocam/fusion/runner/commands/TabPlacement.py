@@ -76,6 +76,10 @@ TARGET_TAB_SPACING_IN = 6.0
 # corner between them.
 TAB_WIDTH_IN = 0.6
 TAB_HEIGHT_IN = 0.15
+# A smaller nested part may not have a 1.2in straight run available for the
+# default tab plus lead-in/lead-out. Do not make a tab narrower than this
+# unless the geometry genuinely demands it.
+MIN_TAB_WIDTH_IN = 0.2
 # Tab height is remaining material, so it can never exceed the sheet itself.
 # Keep one geometry for every tab in a job, using the thinnest nested body
 # for grouped plates. 70% preserves the existing 0.15in height on 0.25in
@@ -195,6 +199,29 @@ def _body_thickness_in(body) -> float:
         return abs(float(bounds.maxPoint.z) - float(bounds.minPoint.z)) / 2.54
     except Exception:
         return 0.0
+
+
+def _body_minimum_planar_span_in(body) -> float:
+    """Smallest X/Y extent of a body's arranged geometry in inches."""
+    try:
+        bounds = body.boundingBox
+        x_span = abs(float(bounds.maxPoint.x) - float(bounds.minPoint.x)) / 2.54
+        y_span = abs(float(bounds.maxPoint.y) - float(bounds.minPoint.y)) / 2.54
+        return min(x_span, y_span)
+    except Exception:
+        return 0.0
+
+
+def _tab_width_for_bodies(bodies) -> float:
+    """Return one safe, uniform tab width for all bodies in this setup."""
+    spans = [span for span in (_body_minimum_planar_span_in(body) for body in bodies) if span > 0]
+    if not spans:
+        return TAB_WIDTH_IN
+
+    # The side-selection rule reserves two tab widths: the tab itself plus
+    # useful lead-in/lead-out. Leave a small lower floor for cutter stability;
+    # exceptionally tiny parts still use the existing longest-side fallback.
+    return min(TAB_WIDTH_IN, max(MIN_TAB_WIDTH_IN, min(spans) * 0.45))
 
 
 def _tab_height_for_bodies(bodies) -> float:
@@ -400,7 +427,12 @@ def _min_tabs_for_body(body, min_tabs: int) -> int:
     return min_tabs
 
 
-def select_tab_edges(body, max_tabs: int = DEFAULT_MAX_TABS, stock_bounds=None):
+def select_tab_edges(
+    body,
+    max_tabs: int = DEFAULT_MAX_TABS,
+    stock_bounds=None,
+    tab_width_in: float = TAB_WIDTH_IN,
+):
     """Straight edges on the body's own outer boundary, spread across
     every distinct straight side. Never returns a curved/filleted edge, an
     internal-loop (hole/pocket) edge, or one too short to physically hold
@@ -452,10 +484,10 @@ def select_tab_edges(body, max_tabs: int = DEFAULT_MAX_TABS, stock_bounds=None):
     # scaled max_tabs to the part's own size before this is called, so a
     # small part asks for ~4 and a large one asks for more.
     # Drop sides too short to actually hold a tab (see
-    # MIN_TAB_SIDE_LENGTH_IN). Measured on the segment that would carry the
+    # tab_width_in * 2). Measured on the segment that would carry the
     # tab, not the side's summed length: a side split into several short
     # collinear pieces still has to fit the tab within ONE of them.
-    min_side_cm = MIN_TAB_SIDE_LENGTH_IN * 2.54
+    min_side_cm = tab_width_in * 2 * 2.54
     usable = [line for line in lines if _edge_length(best_edge_for_line(line)) >= min_side_cm]
 
     # Never return nothing. On a part so small that no side clears the
@@ -486,7 +518,13 @@ def select_tab_edges(body, max_tabs: int = DEFAULT_MAX_TABS, stock_bounds=None):
     return selected
 
 
-def _apply_manual_tabs(app, operation, tab_points, tab_height_in: float = TAB_HEIGHT_IN) -> bool:
+def _apply_manual_tabs(
+    app,
+    operation,
+    tab_points,
+    tab_width_in: float = TAB_WIDTH_IN,
+    tab_height_in: float = TAB_HEIGHT_IN,
+) -> bool:
     """Configure uniform explicit positions in Fusion's Manual Tabs field.
 
     ``tabPositions`` receives explicit SketchPoints on the release contour.
@@ -496,7 +534,7 @@ def _apply_manual_tabs(app, operation, tab_points, tab_height_in: float = TAB_HE
     width_param = operation.parameters.itemByName("tabWidth")
     if width_param is not None:
         try:
-            width_param.expression = f"{TAB_WIDTH_IN}in"
+            width_param.expression = f"{tab_width_in}in"
         except Exception as e:
             app.log(f"TabPlacement: failed to set tabWidth: {e}")
 
@@ -576,7 +614,7 @@ def _apply_manual_tabs(app, operation, tab_points, tab_height_in: float = TAB_HE
 
     app.log(
         f"TabPlacement: Manual Tabs set to {len(tab_points)} point(s) "
-        f"(operation kept {accepted}), {TAB_WIDTH_IN}in wide x "
+        f"(operation kept {accepted}), {tab_width_in:.4f}in wide x "
         f"{tab_height_in:.4f}in tall"
     )
     return True
@@ -607,7 +645,13 @@ def ConfigureTabs(min_tabs: int = DEFAULT_MIN_TABS, max_tabs: int = DEFAULT_MAX_
         app.log("TabPlacement: no bodies found, skipping tab configuration")
         return
 
+    tab_width_in = _tab_width_for_bodies(bodies)
     tab_height_in = _tab_height_for_bodies(bodies)
+    if tab_width_in < TAB_WIDTH_IN:
+        app.log(
+            f"TabPlacement: reduced tab width from {TAB_WIDTH_IN}in to "
+            f"{tab_width_in:.4f}in for the narrowest nested body."
+        )
     if tab_height_in < TAB_HEIGHT_IN:
         app.log(
             f"TabPlacement: reduced tab height from {TAB_HEIGHT_IN}in to "
@@ -692,7 +736,12 @@ def ConfigureTabs(min_tabs: int = DEFAULT_MIN_TABS, max_tabs: int = DEFAULT_MAX_
                 perimeter_in = _outer_perimeter_in(body)
                 body_min_tabs = _min_tabs_for_body(body, min_tabs)
                 target_tabs = _tab_count_for_perimeter(perimeter_in, body_min_tabs, max_tabs)
-                body_candidates = select_tab_edges(body, max_tabs=target_tabs, stock_bounds=stock_bounds)
+                body_candidates = select_tab_edges(
+                    body,
+                    max_tabs=target_tabs,
+                    stock_bounds=stock_bounds,
+                    tab_width_in=tab_width_in,
+                )
                 if len(body_candidates) < body_min_tabs:
                     app.log(
                         f"TabPlacement: '{op.name}' - a nested body only had "
@@ -717,6 +766,6 @@ def ConfigureTabs(min_tabs: int = DEFAULT_MIN_TABS, max_tabs: int = DEFAULT_MAX_
                 app.log(f"TabPlacement: '{op.name}' - no usable explicit tab points found on any body, skipping.")
                 continue
 
-            applied = _apply_manual_tabs(app, op, all_tab_points, tab_height_in)
+            applied = _apply_manual_tabs(app, op, all_tab_points, tab_width_in, tab_height_in)
             if not applied:
                 app.log(f"TabPlacement: '{op.name}' could not configure Manual Tabs.")
