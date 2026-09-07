@@ -21,6 +21,7 @@ from ..commands.MultiImport import importFiles
 from ..commands.NewNCProgram import export
 from ..commands.DeleteToolpaths import DeleteToolpaths
 from ..commands.AutoArrange import AutoArrange
+from ..commands.Orientation import orient_plate_pocket_side_up
 from ..commands.TabPlacement import ConfigureTabs
 from ..config import (
     BASE_URL,
@@ -414,6 +415,14 @@ def start(data, session):
             step_paths,
             [assignment.get("quantity", 1) for assignment in assignments],
         )
+
+        # Select the broad side that contains blind-pocket openings before
+        # nesting.  The old area-only choice favored the larger plain back,
+        # then Arrange could preserve that wrong side all the way into CAM.
+        # Do this before AutoArrange so its face-up constraint keeps pockets
+        # accessible to the setup and PocketRecognitionSelection.
+        for occurrence in design.rootComponent.allOccurrences:
+            orient_plate_pocket_side_up(occurrence)
 
         # Plate dimensions: /api/fusion-runner's claim response already
         # resolves these server-side from fusion_plates (see

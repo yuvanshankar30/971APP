@@ -33,6 +33,12 @@ def _is_dedicated_circular_hole_op(name_lower: str) -> bool:
 # by direct inspection of a real operation's parameters, not guessed.
 _SELECTION_PARAM_BY_STRATEGY = {
     "contour2d": "contours",
+    # The current plate template's real recessed-pocket operation uses
+    # pocket_new.  It has the same ``pockets`` selection parameter as the
+    # older pocket2d/adaptive variants; omitting it meant the operation could
+    # never have its stale template geometry replaced after a STEP import.
+    "pocket_new": "pockets",
+    "pocket_clearing": "pockets",
     "pocket2d": "pockets",
     "adaptive2d": "pockets",
 }
@@ -78,11 +84,12 @@ def _set_min_hole_diameter_from_name(recognition, name_lower: str) -> None:
 
 
 def _top_face(body):
-    """Return the highest upward-facing planar face on a body.
+    """Return the physically highest planar face on a body.
 
-    Some STEP imports report both opposing planar faces as upward-facing.
-    Choosing by area can then tie and depend on Fusion's iteration order;
-    Z height identifies the physical top face deterministically.
+    Some STEP imports report both opposing planar faces as upward-facing,
+    while ordinary imports correctly report the bottom face as downward.
+    In both cases, physical height identifies the machining top
+    deterministically; the sign of a STEP-exported BRep normal does not.
     """
     best_face, best_z = None, None
     for face in body.faces:
@@ -91,17 +98,14 @@ def _top_face(body):
             z = face.pointOnFace.z
         except Exception:
             continue
-        if normal.z > 0.9 and (best_z is None or z > best_z):
+        if abs(normal.z) > 0.9 and (best_z is None or z > best_z):
             best_z = z
             best_face = face
     return best_face
 
 
 def _bottom_face(body):
-    """Return the lowest upward-facing planar face on a body - see
-    _top_face's own docstring for why "upward-facing" alone doesn't
-    already mean "the top" on a real part (a STEP-export orientation
-    quirk can report the bottom face's normal as upward too).
+    """Return the physically lowest planar face on a body.
 
     Direct instruction: the outer-profile/slot-cut contour selection
     should reference the BOTTOM edge of the part around its whole
@@ -116,7 +120,7 @@ def _bottom_face(body):
             z = face.pointOnFace.z
         except Exception:
             continue
-        if normal.z > 0.9 and (best_z is None or z < best_z):
+        if abs(normal.z) > 0.9 and (best_z is None or z < best_z):
             best_z = z
             best_face = face
     return best_face
@@ -397,48 +401,40 @@ def _repair_missing_selections(setup) -> list[str]:
     # shared snapshot instead removes the question entirely.
     ops_snapshot = list(setup.operations)
 
-    # First pass, read-only: every non-outer-profile contour2d finishing
-    # pass in the setup - known up front so the second pass can pick the
-    # single primary one to hold ALL of this part's real internal features
-    # together. Direct instruction, reinforced twice: every real internal
-    # feature belongs in ONE "Feature Slot Cut" operation, not split across
-    # several - an earlier attempt at splitting across multiple operations
-    # (round-robin, capped per operation) was reverted; it was never
-    # actually the fix for the real bug (see the chain-construction
-    # comments below), just an unrelated change made at the same time.
-    # Sorted so an operation whose template name already says "feature"
-    # (e.g. the New Router metal template's own "Slot Cut for Features")
-    # is used - the real, purpose-built operation for this - rather than
-    # whichever generic "Shape ... Finishing Pass" happens to iterate
-    # first.
-    #
-    # Do not gate contour finishing passes on _needs_repair: Fusion can
-    # report stale template selections as healthy after a fresh STEP import.
-    # This pass is rebuilt from the part's current internal features.
-    finishing_pass_ops = sorted(
-        (op for op in ops_snapshot if op.strategy == "contour2d" and not _is_outer_profile(op)),
-        key=lambda op: 0 if "feature" in op.name.lower() else 1,
-    )
-    if finishing_pass_ops:
+    # A non-circular loop on the physical bottom face is a through-cut, not
+    # a blind pocket. Keep it in the template's own named Shape Through
+    # operations. The old code relabeled the first arbitrary contour pass as
+    # "Feature Slot Cut" and fed it every loop from a normal-filtered face;
+    # on ordinary STEP files that face could be the pocket-bearing top, so a
+    # simple pocketed plate acquired a fake feature-slot operation and wrong
+    # geometry. A real Shape Through Hole / Shape Through Finishing Pass is
+    # both clearer in CAM review and correctly scoped to through features.
+    through_shape_ops = [
+        op
+        for op in ops_snapshot
+        if op.name.lower() == "shape through hole"
+        or "shape through finishing" in op.name.lower()
+    ]
+    through_chain_assignments = {}
+    if through_shape_ops:
         design = _design()
         feature_chains_cache = _internal_feature_loop_chains_all_bodies(design) if design else []
-    # Only the ONE primary operation is treated as "the" feature-cut
-    # operation. Do not leave the other template contour passes to their
-    # stale selections: a stale selection can look healthy to Fusion even
-    # when it resolves to unrelated geometry on the newly imported part.
-    # They are removed after this pass so the browser always presents one
-    # feature operation, rather than ambiguous duplicate finishing passes.
-    active_feature_ops = []
-    feature_op_assignments = {}  # operationId -> list of (seed edge, reversal), this op's own share
-    if finishing_pass_ops and feature_chains_cache:
-        ops_needed = 1
-        active_feature_ops = finishing_pass_ops[:ops_needed]
-        for i, chain_input in enumerate(feature_chains_cache):
-            target_op = active_feature_ops[i % len(active_feature_ops)]
-            feature_op_assignments.setdefault(target_op.operationId, []).append(chain_input)
-    feature_op_index = {op_id: True for op_id in feature_op_assignments}
+        if feature_chains_cache:
+            for op in through_shape_ops:
+                through_chain_assignments[op.operationId] = feature_chains_cache
+
+    # Pocket finishing passes are not a substitute for a real Shape Pocket:
+    # their stale template references are removed. The adaptive Shape Pocket
+    # operation below is rebuilt from PocketRecognitionSelection and owns
+    # actual recessed floors; Shape Through Finishing Pass owns through-cut
+    # chains. No generic "Feature Slot Cut" remains for a part that has no
+    # slot feature.
+    finishing_pass_ops = [
+        op for op in ops_snapshot if op.strategy == "contour2d" and not _is_outer_profile(op)
+    ]
+    active_through_ids = set(through_chain_assignments)
     inactive_finishing_ops = [
-        op for op in finishing_pass_ops if op.operationId not in feature_op_index
+        op for op in finishing_pass_ops if op.operationId not in active_through_ids
     ]
     inactive_finishing_ids = {op.operationId for op in inactive_finishing_ops}
 
@@ -446,7 +442,7 @@ def _repair_missing_selections(setup) -> list[str]:
         if op.operationId in inactive_finishing_ids:
             continue
         is_outer = _is_outer_profile(op)
-        is_feature_op = op.operationId in feature_op_index
+        is_through_shape_op = op.operationId in active_through_ids
         # The template's own dedicated big-hole operation (pocket2d,
         # named for exactly this - see _set_min_hole_diameter_from_name's
         # own comment) suffers the identical stale-selection flakiness
@@ -465,8 +461,19 @@ def _repair_missing_selections(setup) -> list[str]:
         # else (pocket2d/adaptive2d roughing, and any contour2d finishing
         # pass this part has no real feature left to give) keeps the
         # original conditional repair.
+        # A template's saved PocketRecognitionSelection can look healthy
+        # while still referring to the template's original model. Rebuild
+        # every generic pocket operation from the imported part, not only
+        # the ones Fusion happens to flag as missing. This is especially
+        # important for blind pockets: their recognition is only valid after
+        # the importer has deliberately put the pocket-bearing side on top.
+        is_generic_pocket_op = (
+            op.strategy in _POCKET_STRATEGIES and not is_big_hole_op
+        )
         repair_state = (
-            _curve_selection_state(op) if (is_outer or is_feature_op or is_big_hole_op) else _needs_repair(op)
+            _curve_selection_state(op)
+            if (is_outer or is_through_shape_op or is_big_hole_op or is_generic_pocket_op)
+            else _needs_repair(op)
         )
         if repair_state is None:
             continue
@@ -504,16 +511,11 @@ def _repair_missing_selections(setup) -> list[str]:
                 # away from those interior features, not into them.
                 chain.isReverted = True
                 chain.inputGeometry = edges
-        elif is_feature_op:
-            # This operation's own share of the part's real internal
-            # feature loops (see feature_op_assignments above for how that
-            # share is decided) - each as its own ChainSelection within
-            # this operation. Built via ChainSelection, the same proven
-            # technique as the outer profile above - not the global
-            # PocketRecognitionSelection every other (genuinely
-            # pocket-with-a-floor) finishing pass still uses, which has no
-            # way to target these specific features and can't reliably
-            # find a through-cut one at all.
+        elif is_through_shape_op:
+            # Every real non-circular through feature belongs to the
+            # template's existing Shape Through operation(s). ChainSelection
+            # is necessary here: PocketRecognitionSelection recognizes a
+            # recessed pocket floor, not arbitrary full-depth cutouts.
             #
             # Seeded from a single edge, not the outer profile's own
             # full-edge-list technique (assigning every edge in the loop to
@@ -525,7 +527,7 @@ def _repair_missing_selections(setup) -> list[str]:
             # loop.coEdges already being in the exact order/winding
             # Fusion's chain builder expects, the way passing every edge
             # explicitly does.
-            for seed_edge, is_reverted in feature_op_assignments.get(op.operationId, []):
+            for seed_edge, is_reverted in through_chain_assignments.get(op.operationId, []):
                 chain = selections.createNewChainSelection()
                 chain.isOpen = False
                 # Follow this loop's co-edge orientation. A shared BRepEdge
@@ -533,21 +535,10 @@ def _repair_missing_selections(setup) -> list[str]:
                 # some imported feature chains point the wrong way.
                 chain.isReverted = is_reverted
                 chain.inputGeometry = [seed_edge]
-            # The generated setup deliberately has one consolidated feature
-            # operation. Naming it consistently makes CAM review unambiguous
-            # and prevents it being confused with the final outer slot cut.
-            op.name = "Feature Slot Cut"
-            # Direct instruction: no tabs on the feature slot cut at all -
-            # confirmed live as a real bug, not hypothetical: the
-            # template's own default (tabsPerContour=1, untouched here
-            # since ConfigureTabs only ever touches the one operation with
-            # group_tabs=true - this one has group_tabs=false) was placing
-            # a real tab where the two internal loops' own ChainSelections
-            # meet, which reads as the two separate kidney cutouts being
-            # joined into one connected shape instead of two independently
-            # closed loops. Tabs exist to hold a part to surrounding stock
-            # during an outer release cut - an internal feature loop that
-            # falls IN to scrap, not free-floating stock, has no such need.
+            # Tabs only belong to the final outer release contour. The
+            # internal Shape Through Finishing Pass must never bridge a
+            # cutout to the part, even if a template happens to carry a tab
+            # default.
             tabs_per_contour = op.parameters.itemByName("tabsPerContour")
             if tabs_per_contour is not None:
                 try:
@@ -874,24 +865,17 @@ def DeleteToolpaths():
             # when iterating a stable snapshot avoids the skip in the first
             # place.
             for toolpath in list(live_toolpaths):
-                # A contour2d operation (the outer profile, or a candidate
-                # feature-cut finishing pass) and a hole-named pocket2d
-                # operation (the template's own dedicated big-hole cut)
-                # both get their geometry selection unconditionally
-                # rebuilt by _repair_missing_selections below, specifically
-                # BECAUSE their stale template-carried selection can read
-                # as broken/empty before that repair ever runs. Deleting
-                # them here, on that same stale pre-repair warning, skips
-                # the repair entirely - confirmed live as the exact reason
-                # the big-hole operation kept disappearing even after its
-                # own repair logic was fixed: this loop removed it first,
-                # every time, before _repair_missing_selections ever got a
-                # chance to run. Deferred to the later isToolpathValid
-                # cleanup (after generateAllToolpaths + repair have both
-                # run), which reflects their real, post-repair state.
-                name_lower = toolpath.name.lower()
-                is_deferred = toolpath.strategy == "contour2d" or (
-                    toolpath.strategy == "pocket2d" and "hole" in name_lower
+                # Contours and every pocket-style operation get their
+                # current model geometry rebuilt by _repair_missing_selections
+                # below. A template's stale selection can look empty before
+                # that repair, so deleting it here would remove a legitimate
+                # Shape Through Hole or Shape Pocket before it gets a chance
+                # to recognize the newly imported STEP. The later cleanup is
+                # intentionally after regeneration and is the trustworthy
+                # place to remove genuinely inapplicable operations.
+                is_deferred = (
+                    toolpath.strategy == "contour2d"
+                    or toolpath.strategy in _POCKET_STRATEGIES
                 )
                 if is_deferred:
                     continue
