@@ -1,6 +1,26 @@
 """Fusion-independent ranking for choosing a plate's machining side."""
 
 
+def loop_is_blind_pocket(wall_reaches_back_face):
+    """Whether one feature opening (a hole/pocket/slot loop) is a blind
+    pocket, given whether each of its own cavity wall faces is directly
+    adjacent to the material's opposite broad face.
+
+    True only when there's at least one wall AND none of them reach the
+    back face directly - a through-cut's wall(s) run straight from the
+    opening to the far side, while a blind pocket's wall(s) instead
+    terminate at their own separate floor before ever getting there. This
+    is deliberately NOT based on comparing any face's own reported normal
+    direction: a STEP import can report a plate's two truly-opposite
+    broad faces with the identical raw normal (confirmed live), which
+    makes a normal-sign comparison unable to tell a pocket's real opening
+    side from its own plain back - both can be fooled by the same shared,
+    unreliable sign. Adjacency to the actual far-side face has no such
+    ambiguity.
+    """
+    return bool(wall_reaches_back_face) and not any(wall_reaches_back_face)
+
+
 def pocket_side_sort_key(side):
     """Rank a planar plate side, preferring real blind-pocket openings.
 
