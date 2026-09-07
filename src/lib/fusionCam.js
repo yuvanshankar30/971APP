@@ -20,6 +20,11 @@
 import { supabase } from '$lib/supabase.js';
 
 export const FUSION_JOB_KINDS = ['plate:arrange', 'plate:cam', 'box_tube'];
+export const FUSION_OUTPUT_JOB_KINDS = ['plate:cam', 'box_tube'];
+
+export function isFusionOutputJob(job) {
+  return FUSION_OUTPUT_JOB_KINDS.includes(job?.params?.fusionJobKind);
+}
 
 async function uploadFusionStep({ name, fallback, stepFile }) {
   if (!stepFile) return null;
@@ -330,6 +335,11 @@ export async function fetchFusionJobsByManufacturingPartIds(partIds) {
   const jobs = await fetchFusionJobs(); // already ordered created_at desc
   const result = {};
   for (const job of jobs) {
+    // Arrangement is a Fusion operation, but it does not generate machine
+    // output. Manufacturing cards must reflect only a real CAM run; otherwise
+    // a newer completed arrange job masks the plate:cam job and falsely
+    // advertises downloadable/reviewable G-code.
+    if (!isFusionOutputJob(job)) continue;
     const plateId = job.params?.plateId;
     const boxTubeId = job.params?.boxTubeId;
     const mpIds = new Set();

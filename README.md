@@ -30,6 +30,10 @@ browser confirmation or prompt popups.
   (CAM review, CAM reviewed, postprocessed, jprogged, machined, kitted -
   Router's the only workflow with this many distinct steps). See the
   **AutoCAM** section below for automatic G-code generation specifically.
+  Router request cards link only to the Fusion CAM workflow and derive their
+  job status/G-code downloads from actual Fusion generation jobs (not
+  arrangement-only runs); a request cannot advance to CAM review until its
+  linked Fusion job has completed with NC output.
   Build tracking remains in the main navigation, but the Onshape-backed CAD
   tab is hidden while the Onshape integration credentials are disconnected;
   legacy saved CAD folders are collapsed so Build appears directly instead;
