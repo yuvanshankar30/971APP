@@ -269,12 +269,8 @@ use `_face_id`, not `id()` or bare equality.
 ## Tabs
 
 Tab edges are selected on the outer profile the same way as any other
-selection, but tab *placement* has its own rules, in `TabPlacement.py`.
-The final `tabPositions` value is a `CadPoints` collection: the runner turns
-each vetted edge into a midpoint `SketchPoint` on the release face before
-assigning it. Do not assign `BRepEdge` objects to `tabPositions`; Fusion can
-display those references but cannot consistently resolve a location along
-their chain. Three placement rules apply, in order:
+selection - real edges, not synthesized points - but tab *placement* has its
+own rules, in `TabPlacement.py`. Three, in order:
 
 1. **How many.** `_tab_count_for_perimeter` scales the count to the part's
    own perimeter (roughly one per `TARGET_TAB_SPACING_IN`), floored at
@@ -294,18 +290,15 @@ their chain. Three placement rules apply, in order:
    0.6in tab it was supposed to fit, so an edge could qualify for a tab it
    could not physically contain.
 
-### Tab points must lie on the contour being cut
+### Tab edges must lie on the contour being cut
 
 **This is the one that silently breaks everything else above.** A manual tab
-is not a free-floating position: Fusion places it on the selected contour,
-so a tab point that is not part of that contour cannot be placed and is
-dropped without a warning.
+is not a free-floating position: Fusion places it on an edge *of the
+selected contour*, so a tab edge that is not part of that contour cannot be
+placed and is dropped without a warning.
 
 Tab edges therefore come from the same face the release contour does - the
-bottom face (`_find_tab_face`, matching `DeleteToolpaths._bottom_face`) -
-and `_manual_tab_points` creates hidden midpoint SketchPoints in that face's
-component. For occurrence proxies, it converts each point back to the same
-assembly context before assigning it to the operation.
+bottom face (`_find_tab_face`, matching `DeleteToolpaths._bottom_face`).
 
 An earlier version deliberately took them from the **top** face, on the
 theory that tabs and their contour were independent edge loops. They are
@@ -340,8 +333,8 @@ the first:
   expression may still read `'points' == 'points' ? ...`.
 
 So automatic placement is always on and a manual tab is an *addition* to
-it. Manual tabs winning is a consequence of their explicit SketchPoints
-being on the contour - not of having switched Fusion into some manual mode.
+it. Manual tabs winning is a consequence of their edges being on the
+contour - not of having switched Fusion into some manual mode.
 
 Two invariants worth preserving if this is touched:
 
