@@ -16,24 +16,14 @@
 # Fusion's UI has a separate Manual Tabs field (`tabPositions`) alongside
 # its automatic placement mode. This module supplies that manual list.
 #
-# TWO THINGS ABOUT IT ARE NOT WHAT THEY LOOK LIKE, both confirmed live
-# against a real job's operation:
-#
-# 1. `tabsPerContour = 0` does NOT disable automatic tabs. This file used to
-#    say it did. Read back from a real operation, the parameter reports a
-#    value of 1 no matter what is assigned to it (0, 1, 2 and 4 all read
-#    back as 1) because it is simply inactive in the active mode.
-# 2. There is no manual-only mode to switch to. `tabPositioning` offers
-#    exactly two choices - 'distance' and 'tabCount' (enumerated directly
-#    from the live parameter); 'points' is rejected as an invalid
-#    enumeration value even though the template's own stale tabDistance
-#    expression still reads "'points' == 'points' ? ...".
-#
-# So automatic placement is always on, and a manual tab is an ADDITION to
-# it rather than a replacement. The Manual Tabs parameter does not accept a
-# bare edge as a location, though: it is a CadPoints collection. Each tab is
-# therefore represented by a SketchPoint placed at the midpoint of a vetted
-# edge on the release contour - see _manual_tab_points.
+# Tab placement controls are discrete CAM values. Use
+# ``parameter.value.value``, not ``parameter.expression``: assigning the
+# latter can appear accepted while leaving the strategy in its old
+# distance-placement mode. Manual-only tabs require the exact combination
+# ``tabPositioning.value.value = 'tabCount'`` and
+# ``tabsPerContour.value.value = 0``. The Manual Tabs parameter itself is a
+# CadPoints collection, not a list of bare edges, so every selected release
+# edge becomes a midpoint SketchPoint - see _manual_tab_points.
 #
 # WHICH operation actually gets tabs: only the one the template itself
 # already designates via group_tabs=true in its own default state - a real
@@ -148,12 +138,6 @@ def _find_tab_face(body):
     references at z=0.0in, while the contour it was attached to was built
     from edges at z=-0.0625in - an intersection of exactly ZERO. Fusion's
     dialog listed four selections and used none of them.
-
-    What actually cut were Fusion's own automatic tabs: tabPositioning is
-    'distance' with tabDistance 0.0, which on a rectangular part happens to
-    space four tabs evenly - close enough to look correct on simple parts
-    (which is why this went unnoticed) and completely outside this module's
-    control on anything else.
 
     Note the top face is still the RIGHT choice for anything that only has
     to describe the part's own silhouette - but nothing here does; every
@@ -518,22 +502,35 @@ def _apply_manual_tabs(app, operation, tab_points) -> bool:
         except Exception as e:
             app.log(f"TabPlacement: failed to set tabHeight: {e}")
 
+    # Fusion exposes these as discrete CAM values, not unit expressions.
+    # Assigning an expression can look accepted in the parameter dialog yet
+    # leave the strategy in its previous distance-placement mode. That is
+    # exactly how a four-point selection degraded to the template's two
+    # automatic tabs on autocamtraining. The documented working API pattern
+    # is to set the nested value directly before assigning SketchPoints.
+    group_tabs = operation.parameters.itemByName("group_tabs")
+    if group_tabs is not None:
+        try:
+            group_tabs.value.value = True
+        except Exception as e:
+            app.log(f"TabPlacement: failed to enable grouped tabs: {e}")
+
+    positioning_param = operation.parameters.itemByName("tabPositioning")
+    if positioning_param is not None:
+        try:
+            positioning_param.value.value = "tabCount"
+        except Exception as e:
+            app.log(f"TabPlacement: failed to set tabPositioning: {e}")
+
     tabs_per_contour = operation.parameters.itemByName("tabsPerContour")
     if tabs_per_contour is None:
         app.log("TabPlacement: this operation has no tabsPerContour parameter.")
         return False
     try:
-        tabs_per_contour.expression = "0"
+        tabs_per_contour.value.value = 0
     except Exception as e:
         app.log(f"TabPlacement: failed to disable automatic tabs: {e}")
         return False
-
-    positioning_param = operation.parameters.itemByName("tabPositioning")
-    if positioning_param is not None:
-        try:
-            positioning_param.expression = "'tabCount'"
-        except Exception as e:
-            app.log(f"TabPlacement: failed to set tabPositioning: {e}")
 
     positions_param = operation.parameters.itemByName("tabPositions")
     if positions_param is None:
@@ -552,13 +549,10 @@ def _apply_manual_tabs(app, operation, tab_points) -> bool:
     # assignment above stuck.
     #
     # Nothing here used to verify anything, and that is exactly how this
-    # module's two real bugs stayed invisible. Tab positions were being
-    # taken from the wrong face for a long time - every one of them off the
-    # contour, so not a single manual tab could be placed - and the job
-    # still reported success every time, because Fusion's own automatic
-    # placement quietly produced tabs that looked plausible on simple
-    # rectangular parts. Separately, `tabsPerContour` accepts any value and
-    # silently reports 1 back.
+    # module's real tab-placement bug stayed invisible. Tab positions were
+    # being taken from the wrong face for a long time - every one of them
+    # off the contour, so not a single manual tab could be placed - and the
+    # job still reported success every time.
     #
     # The pattern in both: a Fusion CAM parameter accepts what it is given,
     # reports success, and does something else. So assignments here are
