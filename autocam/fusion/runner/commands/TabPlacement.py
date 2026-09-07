@@ -485,9 +485,37 @@ def _apply_manual_tabs(app, operation, tab_edges) -> bool:
         app.log(f"TabPlacement: setting Manual Tabs to {len(tab_edges)} edge(s) failed: {e}")
         return False
 
+    # Read back what Fusion actually kept, rather than assuming the
+    # assignment above stuck.
+    #
+    # Nothing here used to verify anything, and that is exactly how this
+    # module's two real bugs stayed invisible. Tab edges were being taken
+    # from the wrong face for a long time - every one of them off the
+    # contour, so not a single manual tab could be placed - and the job
+    # still reported success every time, because Fusion's own automatic
+    # placement quietly produced tabs that looked plausible on simple
+    # rectangular parts. Separately, `tabsPerContour` accepts any value and
+    # silently reports 1 back.
+    #
+    # The pattern in both: a Fusion CAM parameter accepts what it is given,
+    # reports success, and does something else. So assignments here are
+    # checked, not trusted.
+    accepted = None
+    try:
+        accepted = len(positions_param.value.value)
+    except Exception:
+        pass
+    if accepted is not None and accepted != len(tab_edges):
+        app.log(
+            f"TabPlacement: WARNING - selected {len(tab_edges)} tab edge(s) but the "
+            f"operation kept {accepted}. The dropped edges are not on the contour "
+            f"being cut, so Fusion cannot place a tab on them; any tabs that do "
+            f"appear are its own automatic placement, not this module's choice."
+        )
+
     app.log(
-        f"TabPlacement: automatic tabs disabled; Manual Tabs set to "
-        f"{len(tab_edges)} edge(s), {TAB_WIDTH_IN}in wide x "
+        f"TabPlacement: Manual Tabs set to {len(tab_edges)} edge(s) "
+        f"(operation kept {accepted}), {TAB_WIDTH_IN}in wide x "
         f"{TAB_HEIGHT_IN}in tall"
     )
     return True
