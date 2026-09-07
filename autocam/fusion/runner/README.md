@@ -41,7 +41,10 @@ but an unchanged snapshot is not posted or written to the database again.
 
 - **Automatic job polling** — background thread claims queued jobs and dispatches by kind
 - **Plate CAM** — downloads STEP files, applies tool libraries, generates toolpaths and G-code
-- **Box-tube CAM** — the same flow adapted for tubular stock
+- **Box-tube CAM** — a geometry-derived rectangular-tube workflow: four
+  face-scoped Fusion setups are posted as `-side-12`, `-side-3`, `-side-6`,
+  and `-side-9` programs for manual indexing, never as one unsafe all-face
+  program
 - **2D nesting** — auto-arranges parts onto plates with envelope screenshots
 - **Grouping validation** — refuses partial/multi-envelope arrangements and
   quantity mismatches before CAM generation

@@ -81,7 +81,7 @@ def _post_process_with_retry(app, cam, toolpath, postProcessInput, attempts=6, i
     raise last_error
 
 
-def export(name, post_processor_path):
+def export(name, post_processor_path, setup_program_names=None):
     ui = None
     app = adsk.core.Application.get()
     ui = app.userInterface
@@ -116,6 +116,13 @@ def export(name, post_processor_path):
     # silently overwrite each other's file on disk, losing an entire
     # operation's G-code while the job still reported success. With one
     # program per setup there is no name to collide.
+    if setup_program_names is not None and len(setup_program_names) != allSetups.count:
+        raise ValueError(
+            "Expected one program name per Fusion setup; got {} names for {} setups".format(
+                len(setup_program_names), allSetups.count
+            )
+        )
+
     for index, setup in enumerate(allSetups):
         operations = [op for op in setup.operations if op.name != "Suppress"]
         app.log(
@@ -129,8 +136,10 @@ def export(name, post_processor_path):
         # Nearly always exactly one setup, so the common case is a single
         # file named after the job. A second setup would otherwise post
         # under the same name and overwrite the first.
-        program_name = _safe_program_name(name)
-        if allSetups.count > 1:
+        program_name = _safe_program_name(
+            setup_program_names[index] if setup_program_names is not None else name
+        )
+        if setup_program_names is None and allSetups.count > 1:
             program_name = f"{program_name}-{index + 1}"
 
         postProcessInput = adsk.cam.PostProcessInput.create(
