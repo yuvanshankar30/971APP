@@ -247,6 +247,7 @@ describe('mergeDefaultHeaderTabs', () => {
     const tabs = mergeDefaultHeaderTabs([{ type: 'folder', label: 'Manufacturing', children: [{ key: 'manufacture', label: 'Manufacture' }] }]);
     const manufacturing = tabs.find((item) => item.label === 'Manufacturing');
     expect(manufacturing.children.some((item) => item.key === 'fusion-autocam')).toBe(true);
-    expect(tabs.some((item) => item.label === 'CAD')).toBe(true);
+    expect(tabs).toContainEqual({ type: 'tab', key: 'build', label: 'Build' });
+    expect(tabs.some((item) => item.label === 'CAD' || item.key === 'cad')).toBe(false);
   });
 });
