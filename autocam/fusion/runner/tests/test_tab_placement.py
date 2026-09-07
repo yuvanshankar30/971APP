@@ -335,7 +335,8 @@ class ManualTabTests(unittest.TestCase):
         operation = types.SimpleNamespace(parameters=_Parameters(parameters))
         app = types.SimpleNamespace(log=lambda _message: None)
 
-        self.assertTrue(TabPlacement._apply_manual_tabs(app, operation, [object()], 0.04375))
+        self.assertTrue(TabPlacement._apply_manual_tabs(
+            app, operation, [object()], tab_height_in=0.04375))
 
         self.assertEqual(parameters["tabHeight"].expression, "0.04375in")
 
@@ -350,6 +351,23 @@ class TabHeightTests(unittest.TestCase):
         body = _body([], (0, 0, 0), (1, 1, 0.0625 * 2.54))
 
         self.assertAlmostEqual(TabPlacement._tab_height_for_bodies([body]), 0.04375)
+
+
+class TabWidthTests(unittest.TestCase):
+    def test_preserves_the_requested_width_on_normal_part_geometry(self):
+        body = _body([], (0, 0, 0), (4 * 2.54, 3 * 2.54, 0.25 * 2.54))
+
+        self.assertEqual(TabPlacement._tab_width_for_bodies([body]), 0.6)
+
+    def test_caps_width_for_the_narrowest_nested_part(self):
+        body = _body([], (0, 0, 0), (4 * 2.54, 1 * 2.54, 0.25 * 2.54))
+
+        self.assertAlmostEqual(TabPlacement._tab_width_for_bodies([body]), 0.45)
+
+    def test_keeps_a_small_cutter_stable_width_floor(self):
+        body = _body([], (0, 0, 0), (4 * 2.54, 0.25 * 2.54, 0.25 * 2.54))
+
+        self.assertEqual(TabPlacement._tab_width_for_bodies([body]), 0.2)
 
 
 class ManualTabPointTests(unittest.TestCase):

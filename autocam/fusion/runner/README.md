@@ -48,7 +48,7 @@ but an unchanged snapshot is not posted or written to the database again.
 - **Auto-orientation** — orients parts largest-face-up before setup
 - **Template-driven setups** — reusable Fusion CAM templates for plates and box tubes
 - **Topology-aware contour repair** — rebuilds stale template selections from the imported model while preserving each internal loop's real direction
-- **Safe manual tabs** — places uniform `0.6in` wide tabs at explicit midpoint SketchPoints on straight, stock-backed outer release edges; height is capped at `0.15in` or 70% of the thinnest nested stock
+- **Safe manual tabs** — places uniform explicit midpoint tabs on straight, stock-backed outer release edges; defaults are `0.6 x 0.15in`, with width capped for the narrowest nested part and height capped at 70% of the thinnest nested stock
 - **Exact NC artifacts** — preserves each Fusion-posted file byte for byte instead of joining complete programs together
 - **Plate machining-time reporting** — stores Fusion's measured job time for the web queue (box-tube parity is tracked separately)
 - **Status reporting** — completion and errors pushed back to Spartans Hub's `cam_jobs` table

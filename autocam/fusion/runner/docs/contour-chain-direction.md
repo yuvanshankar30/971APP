@@ -345,9 +345,14 @@ are what the release contour machines.
 `tabHeight` is the material deliberately left at each tab. A fixed `0.15in`
 height is valid on common quarter-inch plate but impossible on `0.063in`
 sheet. The runner therefore uses one height for every tab in a job: the
-requested `0.15in` maximum, capped at 70% of the thinnest nested body. This
-keeps all tabs geometrically consistent while preventing Fusion from silently
-dropping thin-stock tab locations.
+requested `0.15in` maximum, capped at 70% of the thinnest nested body.
+
+The same job-wide sizing rule applies to width. The default is `0.6in`, but
+the runner caps it to 45% of the narrowest nested part's planar span (with a
+`0.2in` cutter-stability floor). Selection then uses that calculated width to
+require a real tab plus lead-in/lead-out before choosing a straight side.
+Every tab on the setup therefore has the same valid geometry instead of
+forcing the default dimensions onto a part that cannot contain them.
 
 Two invariants worth preserving if this is touched:
 
