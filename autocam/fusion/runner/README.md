@@ -34,6 +34,9 @@ Spartans Hub /api/fusion-runner  →  Job Polling  →  Job Queue  →  Router
 
 The add-in runs a background polling thread that claims queued `cam_jobs` rows (`operation_type='milling'`) via a compare-and-swap on `status`, dispatches each job's `params.fusionJobKind` to its workflow, and reports status back to Spartans Hub. STEP files and tooling are downloaded per job, toolpaths are generated in Fusion, and each whole Fusion Setup is posted once. The resulting files are read as bytes and uploaded separately with their original relative names, sizes, and SHA-256 checksums; the Hub does not decode, annotate, concatenate, or rename Fusion's output.
 
+The Data Panel folder tree is inspected periodically for the web folder picker,
+but an unchanged snapshot is not posted or written to the database again.
+
 ## Features
 
 - **Automatic job polling** — background thread claims queued jobs and dispatches by kind

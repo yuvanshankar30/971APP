@@ -1,4 +1,5 @@
 import adsk.core, adsk.fusion, adsk.cam, traceback
+import json
 import os
 import queue
 import re
@@ -294,6 +295,7 @@ _FOLDER_SYNC_INTERVAL_SEC = 300.0
 _HEARTBEAT_INTERVAL_SEC = 30.0
 _last_folder_sync = 0.0
 _last_heartbeat = 0.0
+_last_folder_tree_json = None  # type: Optional[str]
 
 
 def _sync_data_folders():
@@ -303,8 +305,12 @@ def _sync_data_folders():
     Fusion's Data Panel, only a Runner does. Best-effort: failures are
     logged, not raised, so a sync hiccup never interrupts job claiming.
     """
+    global _last_folder_tree_json
     try:
         tree = list_data_folder_tree(_app, FUSION_DATA_PROJECT_NAME, FUSION_DROP_FOLDER_PATH)
+        serialized = json.dumps(tree, sort_keys=True, separators=(",", ":"))
+        if serialized == _last_folder_tree_json:
+            return
         response = session.post(
             f"{BASE_URL}/api/fusion-runner",
             params={"action": "sync-folders"},
@@ -312,6 +318,7 @@ def _sync_data_folders():
             timeout=30,
         )
         response.raise_for_status()
+        _last_folder_tree_json = serialized
     except Exception as exc:  # noqa: BLE001 - best-effort by design, see docstring
         # Fusion's cloud connection not being up yet is the normal state for
         # the first several seconds after launch, and this sync runs again
