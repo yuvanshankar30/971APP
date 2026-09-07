@@ -156,8 +156,8 @@ def _body(faces, bb_min, bb_max):
     return types.SimpleNamespace(
         faces=faces,
         boundingBox=types.SimpleNamespace(
-            minPoint=types.SimpleNamespace(x=bb_min[0], y=bb_min[1]),
-            maxPoint=types.SimpleNamespace(x=bb_max[0], y=bb_max[1]),
+            minPoint=types.SimpleNamespace(x=bb_min[0], y=bb_min[1], z=bb_min[2] if len(bb_min) > 2 else 0),
+            maxPoint=types.SimpleNamespace(x=bb_max[0], y=bb_max[1], z=bb_max[2] if len(bb_max) > 2 else 0),
         ),
     )
 
@@ -329,6 +329,27 @@ class ManualTabTests(unittest.TestCase):
         self.assertEqual(parameters["tabWidth"].expression, "0.6in")
         self.assertEqual(parameters["tabHeight"].expression, "0.15in")
         self.assertEqual(parameters["tabPositions"].value.value, points)
+
+    def test_uses_the_job_safe_height_for_thin_stock(self):
+        parameters = {name: _Parameter() for name in ("tabHeight", "tabsPerContour", "tabPositions")}
+        operation = types.SimpleNamespace(parameters=_Parameters(parameters))
+        app = types.SimpleNamespace(log=lambda _message: None)
+
+        self.assertTrue(TabPlacement._apply_manual_tabs(app, operation, [object()], 0.04375))
+
+        self.assertEqual(parameters["tabHeight"].expression, "0.04375in")
+
+
+class TabHeightTests(unittest.TestCase):
+    def test_preserves_the_requested_height_on_thick_stock(self):
+        body = _body([], (0, 0, 0), (1, 1, 0.25 * 2.54))
+
+        self.assertEqual(TabPlacement._tab_height_for_bodies([body]), 0.15)
+
+    def test_caps_height_to_a_safe_fraction_of_thin_stock(self):
+        body = _body([], (0, 0, 0), (1, 1, 0.0625 * 2.54))
+
+        self.assertAlmostEqual(TabPlacement._tab_height_for_bodies([body]), 0.04375)
 
 
 class ManualTabPointTests(unittest.TestCase):
