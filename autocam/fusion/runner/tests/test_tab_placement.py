@@ -37,18 +37,35 @@ def _load_tab_placement():
 TabPlacement = _load_tab_placement()
 
 
-class EdgeIdentityTests(unittest.TestCase):
-    def test_uses_fusions_entity_token_not_the_python_proxy_identity(self):
-        # The API can hand back separate Python objects for the same BRepEdge
-        # across two collection reads. The no-tab-zone calculation must keep
-        # that physical edge eligible both times.
-        first_proxy = types.SimpleNamespace(entityToken="physical-edge-1")
-        second_proxy = types.SimpleNamespace(entityToken="physical-edge-1")
-        self.assertIsNot(first_proxy, second_proxy)
-        self.assertEqual(
-            TabPlacement._edge_identity(first_proxy),
-            TabPlacement._edge_identity(second_proxy),
-        )
+class _Parameter:
+    def __init__(self):
+        self.expression = None
+        self.value = types.SimpleNamespace(value=None)
+
+
+class _Parameters:
+    def __init__(self, values):
+        self.values = values
+
+    def itemByName(self, name):
+        return self.values.get(name)
+
+
+class ManualTabTests(unittest.TestCase):
+    def test_disables_automatic_tabs_and_sets_uniform_manual_dimensions(self):
+        parameters = {
+            name: _Parameter()
+            for name in ("tabWidth", "tabHeight", "tabsPerContour", "tabPositions")
+        }
+        operation = types.SimpleNamespace(parameters=_Parameters(parameters))
+        app = types.SimpleNamespace(log=lambda _message: None)
+        edges = [object(), object(), object(), object()]
+
+        self.assertTrue(TabPlacement._apply_manual_tabs(app, operation, edges))
+        self.assertEqual(parameters["tabsPerContour"].expression, "0")
+        self.assertEqual(parameters["tabWidth"].expression, "0.6in")
+        self.assertEqual(parameters["tabHeight"].expression, "0.15in")
+        self.assertEqual(parameters["tabPositions"].value.value, edges)
 
 
 if __name__ == "__main__":

@@ -13,12 +13,13 @@
 # they're generic, string-keyed CAM parameters Fusion defines internally per
 # strategy, with no public documentation of valid enum values.
 #
-# Fusion exposes only `distance` and `tabCount` placement modes. Manual
-# tab geometry is not used here: on a real Dih job it did not preserve the
-# requested physical tab count. tabCount gives Fusion the count contract;
-# noTabZones gives it the geometry contract. Every rounded, short, or
-# stock-unbacked outer edge is a no-tab zone, so count-based placement can
-# only choose from the same straight, usable edges this module calculates.
+# Fusion's UI has a separate Manual Tabs field (`tabPositions`) alongside
+# its automatic distance/count modes. Automatic count placement can place a
+# tab on an unsuitable portion of an otherwise valid contour, so release
+# cuts use Manual Tabs only: `tabsPerContour=0` disables automatic tabs and
+# this module supplies the selected outer edges directly. A live Fusion
+# validation with that isolating configuration placed every tab on a straight
+# G1 run, never on a corner arc.
 #
 # WHICH operation actually gets tabs: only the one the template itself
 # already designates via group_tabs=true in its own default state - a real
@@ -70,15 +71,11 @@ TARGET_TAB_SPACING_IN = 6.0
 # plus clearance on each side - an edge shorter than this can't take one
 # safely regardless of how the count/spacing math comes out.
 MIN_TAB_EDGE_LENGTH_IN = 0.5
-# Went through 0.15in (too small, per direct feedback: "a tab that thin
-# doesn't hold real material") and 0.25in (an intermediate compromise, back
-# when tabs were still placed via tabCount/noTabZones and a too-wide tab
-# could bridge a short straight run into an adjacent corner fillet). Direct
-# instruction: 0.6in - the template's own original default. Bridging a
-# short run into a corner is no longer the same risk it was under
-# tabCount/noTabZones placement. Fusion distributes the computed count only
-# across the usable straight runs left after bad edges are excluded.
+# Every release tab has the same operator-specified dimensions. Candidate
+# edges are selected directly, so Fusion cannot distribute a tab into a
+# corner between them.
 TAB_WIDTH_IN = 0.6
+TAB_HEIGHT_IN = 0.15
 
 
 def _is_straight_edge(edge) -> bool:
@@ -232,10 +229,8 @@ def _has_real_stock_backing(edge, body_center, stock_bounds, offset_cm) -> bool:
 def _good_straight_edges(body, stock_bounds=None):
     """Every straight, long-enough, stock-backed edge on body's own outer
     boundary - the full set of genuinely usable tab locations (not capped
-    to any count). Shares its filter predicate with select_tab_edges
-    below; kept separate because this one is also used to compute the
-    complementary noTabZones set (see _no_tab_zone_edges) via a plain "not
-    in this set" check on the same face's full outer boundary.
+    to any count). ``select_tab_edges`` below applies the same filter before
+    choosing a geometry-scaled, well-distributed manual-tab set.
     """
     top_face = _find_top_face(body)
     if top_face is None:
@@ -254,36 +249,6 @@ def _good_straight_edges(body, stock_bounds=None):
         and _edge_length(e) >= min_length_cm
         and _has_real_stock_backing(e, body_center, stock_bounds, stock_check_cm)
     ]
-
-
-def _edge_identity(edge):
-    """A stable identity for one Fusion BRepEdge.
-
-    Fusion can return a new Python proxy every time an edge collection is
-    read. Python's ``id(edge)`` then describes the temporary wrapper, not
-    the physical edge, and made good edges appear in noTabZones on a later
-    read. entityToken identifies the actual BRep entity for this document.
-    """
-    try:
-        return edge.entityToken
-    except Exception:
-        # A temporary edge should not normally reach this path, but preserve
-        # the former behavior as a last-resort key instead of failing CAM.
-        return id(edge)
-
-
-def _no_tab_zone_edges(body, stock_bounds=None):
-    """Every outer-boundary edge that ISN'T a good tab candidate - curved/
-    filleted, too short, or with no real stock behind it - for Fusion's own
-    noTabZones parameter. Feeding these to noTabZones makes it physically
-    impossible for Fusion's automatic tabCount-mode placement to land a tab
-    on a curve, a too-short stub, or a side with nothing real behind it.
-    """
-    top_face = _find_top_face(body)
-    if top_face is None:
-        return []
-    good_edges = {_edge_identity(e) for e in _good_straight_edges(body, stock_bounds)}
-    return [e for e in _outer_boundary_edges(top_face) if _edge_identity(e) not in good_edges]
 
 
 def _distinct_straight_line_count(body, stock_bounds=None) -> int:
@@ -327,10 +292,9 @@ def select_tab_edges(body, max_tabs: int = DEFAULT_MAX_TABS, stock_bounds=None):
     - direct instruction, not a preference to relax if a part is mostly
     rounded, small, or sitting close to the plate's own edge.
 
-    Used by ConfigureTabs to confirm there is at least one usable straight
-    run and to build the complementary _no_tab_zone_edges list. Fusion's
-    `tabCount` mode does the final placement; no-tab zones are what keep it
-    off the bad edges.
+    Used by ConfigureTabs as the actual Manual Tabs geometry. Each selected
+    edge is an explicit, safe release-tab location; Fusion's automatic
+    placement is disabled rather than allowed to place more tabs elsewhere.
 
     One tab per distinct line first (so at least 2 different sides get a
     tab whenever the part actually has that many straight sides), then
@@ -362,24 +326,13 @@ def select_tab_edges(body, max_tabs: int = DEFAULT_MAX_TABS, stock_bounds=None):
     return selected
 
 
-def _apply_automatic_tabs(app, operation, zone_edges, tab_count) -> bool:
-    """Configure count-based tabs while excluding every unsafe edge.
+def _apply_manual_tabs(app, operation, tab_edges) -> bool:
+    """Disable automatic tabs and populate Fusion's Manual Tabs field.
 
-    `tabCount` is the only source of tab count. `noTabZones` prevents its
-    automatic placement from choosing rounded corners, short stubs, or an
-    edge with no stock backing. This intentionally never writes Fusion's
-    Manual Tabs (`tabPositions`) parameter.
+    ``tabPositions`` receives vetted release edges, not synthesized points.
+    This deliberately does not configure automatic positioning or no-tab
+    zones: tabs are exclusively the explicit manual selections.
     """
-    positioning_param = operation.parameters.itemByName("tabPositioning")
-    if positioning_param is not None:
-        try:
-            positioning_param.expression = "'tabCount'"
-        except Exception as e:
-            app.log(f"TabPlacement: failed to set tabPositioning to tabCount: {e}")
-
-    # See TAB_WIDTH_IN's own comment - the template's own default (0.6in)
-    # is too wide for this part's own straight runs, confirmed live to
-    # bridge past a short edge into an adjacent corner fillet.
     width_param = operation.parameters.itemByName("tabWidth")
     if width_param is not None:
         try:
@@ -387,26 +340,40 @@ def _apply_automatic_tabs(app, operation, zone_edges, tab_count) -> bool:
         except Exception as e:
             app.log(f"TabPlacement: failed to set tabWidth: {e}")
 
+    height_param = operation.parameters.itemByName("tabHeight")
+    if height_param is not None:
+        try:
+            height_param.expression = f"{TAB_HEIGHT_IN}in"
+        except Exception as e:
+            app.log(f"TabPlacement: failed to set tabHeight: {e}")
+
     tabs_per_contour = operation.parameters.itemByName("tabsPerContour")
     if tabs_per_contour is None:
         app.log("TabPlacement: this operation has no tabsPerContour parameter.")
         return False
     try:
-        tabs_per_contour.expression = str(tab_count)
+        tabs_per_contour.expression = "0"
     except Exception as e:
-        app.log(f"TabPlacement: failed to set tabsPerContour to {tab_count}: {e}")
+        app.log(f"TabPlacement: failed to disable automatic tabs: {e}")
         return False
 
-    zones_param = operation.parameters.itemByName("noTabZones")
-    if zones_param is not None and zone_edges:
-        try:
-            zones_param.value.value = list(zone_edges)
-        except Exception as e:
-            app.log(f"TabPlacement: setting noTabZones to {len(zone_edges)} edge(s) failed: {e}")
+    positions_param = operation.parameters.itemByName("tabPositions")
+    if positions_param is None:
+        app.log("TabPlacement: this operation has no tabPositions (Manual Tabs) parameter.")
+        return False
+    if not tab_edges:
+        app.log("TabPlacement: no candidate edges to assign to Manual Tabs.")
+        return False
+    try:
+        positions_param.value.value = list(tab_edges)
+    except Exception as e:
+        app.log(f"TabPlacement: setting Manual Tabs to {len(tab_edges)} edge(s) failed: {e}")
+        return False
 
     app.log(
-        f"TabPlacement: tabCount={tab_count}, width={TAB_WIDTH_IN}in, "
-        f"no-tab zones set on {len(zone_edges)} edge(s)"
+        f"TabPlacement: automatic tabs disabled; Manual Tabs set to "
+        f"{len(tab_edges)} edge(s), {TAB_WIDTH_IN}in wide x "
+        f"{TAB_HEIGHT_IN}in tall"
     )
     return True
 
@@ -510,9 +477,6 @@ def ConfigureTabs(min_tabs: int = DEFAULT_MIN_TABS, max_tabs: int = DEFAULT_MAX_
             # grouped - for a single-body plate this is exactly the old
             # single_body behavior (the loop below runs once).
             all_candidates = []
-            all_zone_edges = []
-            total_perimeter_in = 0.0
-            total_target_tabs = 0
             for body in bodies:
                 perimeter_in = _outer_perimeter_in(body)
                 body_min_tabs = _min_tabs_for_body(body, min_tabs, stock_bounds)
@@ -526,18 +490,14 @@ def ConfigureTabs(min_tabs: int = DEFAULT_MIN_TABS, max_tabs: int = DEFAULT_MAX_
                         f"{target_tabs} target, perimeter {perimeter_in:.1f}in) "
                         "- using what's available rather than placing a tab "
                         "on a rounded or too-short edge."
-                    )
+                )
                 all_candidates.extend(body_candidates)
-                all_zone_edges.extend(_no_tab_zone_edges(body, stock_bounds))
-                total_perimeter_in += perimeter_in
-                total_target_tabs += target_tabs
             candidate_edges = all_candidates
-            perimeter_in = total_perimeter_in
 
             if not candidate_edges:
                 app.log(f"TabPlacement: '{op.name}' - no usable tab edges found on any body, skipping.")
                 continue
 
-            applied = _apply_automatic_tabs(app, op, all_zone_edges, total_target_tabs)
+            applied = _apply_manual_tabs(app, op, candidate_edges)
             if not applied:
-                app.log(f"TabPlacement: '{op.name}' could not configure automatic tabs.")
+                app.log(f"TabPlacement: '{op.name}' could not configure Manual Tabs.")
