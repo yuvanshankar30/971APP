@@ -36,6 +36,7 @@ from ..config import (
 from .dropFolder import resolve_drop_folder
 from .job_status import ensure_completion_response, send_job_error
 from .localCamAssets import load_local_tool_library_json, resolve_local_post_processor
+from .machiningTime import total_machining_time
 from .templateTools import patch_cam_template_with_tool_libraries, disable_geometry_dependent_leads
 
 
@@ -96,37 +97,8 @@ def _select_plate_template_path(machine_name: Optional[str], material_name: Opti
     return candidate if os.path.isfile(candidate) else fallback
 
 
-# None of adsk.cam.Operation's actual attributes expose a per-operation
-# time (no machiningTime/cycleTime/toolpathTime/toolpathStatistics on the
-# real API - a prior version of this function probed for those names
-# speculatively and always fell through to None, so total_machining_time
-# was silently never populated). adsk.cam.CAM.getMachiningTime() is the
-# real, confirmed-live API behind Fusion's own "Machining Time" dialog.
-# Rapid feed matches the shop's actual router rapid (30000 mm/min ==
-# 50 cm/s, the unit getMachiningTime expects); toolChangeTime is a rough
-# shop estimate, not measured.
-_MACHINING_TIME_RAPID_CM_PER_SEC = 50.0
-_MACHINING_TIME_TOOL_CHANGE_SEC = 15.0
-
-
 def _total_machining_time(cam: adsk.cam.CAM) -> Optional[float]:
-    ops = adsk.core.ObjectCollection.create()
-    for setup in cam.setups:
-        for operation in setup.operations:
-            if getattr(operation, "isSuppressed", False):
-                continue
-            if hasattr(operation, "isToolpathValid") and not operation.isToolpathValid:
-                continue
-            ops.add(operation)
-    if ops.count == 0:
-        return None
-    try:
-        mt = cam.getMachiningTime(
-            ops, 100, _MACHINING_TIME_RAPID_CM_PER_SEC, _MACHINING_TIME_TOOL_CHANGE_SEC
-        )
-    except Exception:
-        return None
-    return mt.machiningTime
+    return total_machining_time(cam, adsk.core.ObjectCollection.create)
 
 
 def _normalize_assignments(payload: dict) -> list[dict]:
