@@ -111,7 +111,17 @@ async function main() {
       name: `Plate CAM: ${partName}`,
       source_type: 'upload',
       operation_type: 'milling',
-      params: { fusionJobKind: 'plate:cam', plateId: plate.id, boxTubeId: null },
+      // Match PlatesTab's explicit single-part queue contract. The database
+      // trigger snapshots this selected assignment, plate dimensions, and
+      // stock material atomically when it accepts the queued job.
+      params: {
+        fusionJobKind: 'plate:cam',
+        plateId: plate.id,
+        boxTubeId: null,
+        fusionGroupingMode: 'single',
+        selectedPartId: part.id,
+        selectedPartIds: null
+      },
       material_id: MATERIAL_ID,
       tool_id: TOOL_ID,
       machine_id: MACHINE_ID,
