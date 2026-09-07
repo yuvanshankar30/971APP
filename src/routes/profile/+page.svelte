@@ -607,7 +607,7 @@
           <div class="input-group">
             <select class="form-select" id="add-tab-select" bind:value={addTabKey}>
               <option value="">-- Select tab --</option>
-              {#each Object.keys(navigation.tabs) as key}
+              {#each Object.keys(navigation.tabs).filter((key) => navigation.tabs[key] !== false) as key}
                 <option value={key}>{key}</option>
               {/each}
             </select>
