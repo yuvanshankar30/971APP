@@ -67,15 +67,39 @@ STOCK_BACKING_CHECK_IN = 0.2
 # as the middle of commonly cited CNC sheet-tabbing guidance (roughly every
 # 4-8in of perimeter for thin plate) rather than picked arbitrarily.
 TARGET_TAB_SPACING_IN = 6.0
-# A tab needs enough straight run to actually hold a realistic tab width
-# plus clearance on each side - an edge shorter than this can't take one
-# safely regardless of how the count/spacing math comes out.
-MIN_TAB_EDGE_LENGTH_IN = 0.5
 # Every release tab has the same operator-specified dimensions. Candidate
 # edges are selected directly, so Fusion cannot distribute a tab into a
 # corner between them.
 TAB_WIDTH_IN = 0.6
 TAB_HEIGHT_IN = 0.15
+
+# The shortest side that may carry a tab, derived from the tab itself
+# rather than picked as a round number.
+#
+# A tab occupies TAB_WIDTH_IN of the edge, and the cutter has to ramp up
+# onto it and back down off it - so the flat run has to be meaningfully
+# longer than the tab, not merely longer. Published sheet-routing guidance
+# puts tabs at roughly 0.25-0.5in on thin stock and asks for a straight run
+# comfortably longer than the tab; twice the tab width is the common rule
+# of thumb and is what this uses, giving half a tab width of lead-on and
+# lead-off at 0.6in tabs.
+#
+# This also corrects a real inconsistency: the previous 0.5in floor was
+# SHORTER than TAB_WIDTH_IN (0.6in), so an edge could qualify for a tab it
+# physically could not contain. Deriving it from TAB_WIDTH_IN means that
+# can't drift apart again if the tab size is ever retuned.
+#
+# A side shorter than this gets no tab - confirmed against a real teardrop
+# bracket whose short bottom facets were being tabbed, which is both
+# unnecessary on a part that size and the worst place to put one. If a part
+# is so small that NO side qualifies, select_tab_edges falls back to its
+# longest sides anyway: an unheld part is worse than a tight tab.
+MIN_TAB_SIDE_LENGTH_IN = TAB_WIDTH_IN * 2
+
+# Kept as the coarse "is this edge even worth considering" filter. The real
+# gate is MIN_TAB_SIDE_LENGTH_IN above, applied per side after collinear
+# segments are grouped.
+MIN_TAB_EDGE_LENGTH_IN = 0.5
 
 
 def _is_straight_edge(edge) -> bool:
@@ -350,14 +374,33 @@ def select_tab_edges(body, max_tabs: int = DEFAULT_MAX_TABS, stock_bounds=None):
     # a tab actually has room to hold. _tab_count_for_perimeter has already
     # scaled max_tabs to the part's own size before this is called, so a
     # small part asks for ~4 and a large one asks for more.
-    selected = [best_edge_for_line(line) for line in lines[:max_tabs]]
+    # Drop sides too short to actually hold a tab (see
+    # MIN_TAB_SIDE_LENGTH_IN). Measured on the segment that would carry the
+    # tab, not the side's summed length: a side split into several short
+    # collinear pieces still has to fit the tab within ONE of them.
+    min_side_cm = MIN_TAB_SIDE_LENGTH_IN * 2.54
+    usable = [line for line in lines if _edge_length(best_edge_for_line(line)) >= min_side_cm]
+
+    # Never return nothing. On a part so small that no side clears the
+    # threshold, a tab that is tight is still better than a part that comes
+    # loose mid-cut, so fall back to its longest sides.
+    if not usable:
+        usable = lines
+
+    selected = [best_edge_for_line(line) for line in usable[:max_tabs]]
 
     # Only if the part genuinely has fewer distinct sides than tabs asked
     # for (a triangle, say) do additional segments of the sides it does
-    # have get used, stock-backed ones first.
+    # have get used, stock-backed ones first. These are held to the same
+    # length threshold as the first pass - otherwise filling the budget
+    # would quietly put tabs back on exactly the short facets the
+    # threshold just excluded.
     if len(selected) < max_tabs:
         selected_ids = {id(e) for e in selected}
-        remaining = [e for e in all_edges if id(e) not in selected_ids]
+        remaining = [
+            e for e in all_edges
+            if id(e) not in selected_ids and _edge_length(e) >= min_side_cm
+        ]
         remaining.sort(key=lambda e: (not is_backed(e), -_edge_length(e)))
         for edge in remaining:
             if len(selected) >= max_tabs:

@@ -208,13 +208,36 @@ use `_face_id`, not `id()` or bare equality.
 
 Tab edges are selected on the outer profile the same way as any other
 selection - real edges, not synthesized points - but tab *placement* has its
-own rule, in `TabPlacement.py`: every distinct straight side of a part gets
-at least one guaranteed tab, even a side with no real stock behind it (a
-part positioned close to the plate's own edge can leave a whole side without
-real backing). Stock backing only decides *which* edge to prefer within a
-side (and fills any budget remaining beyond the one-per-side guarantee) - it
-never drops a whole side to zero tabs. See `TabPlacement.py`'s own module
-docstring and `select_tab_edges` for the full reasoning.
+own rules, in `TabPlacement.py`. Three, in order:
+
+1. **How many.** `_tab_count_for_perimeter` scales the count to the part's
+   own perimeter (roughly one per `TARGET_TAB_SPACING_IN`), floored at
+   `min_tabs` and capped at `max_tabs`. A small bracket asks for ~4, a
+   large plate for more.
+2. **Which sides.** One tab per distinct straight side, **longest side
+   first**, capped at that count. This is not "one per side unconditionally"
+   - an earlier version was, and on a real teardrop bracket it put a tab on
+   every one of its short bottom facets. Longest-first is what makes the cap
+   land on the long structural sides instead.
+3. **Minimum side length.** A side shorter than `MIN_TAB_SIDE_LENGTH_IN`
+   gets no tab at all. That threshold is *derived* from `TAB_WIDTH_IN`
+   (twice it), not picked as a round number: the tab occupies its own width
+   of the edge and the cutter still has to ramp on and off it, so the flat
+   has to be meaningfully longer than the tab. Deriving it also fixed a real
+   inconsistency - the previous fixed 0.5in floor was *shorter* than the
+   0.6in tab it was supposed to fit, so an edge could qualify for a tab it
+   could not physically contain.
+
+Two invariants worth preserving if this is touched:
+
+- **Stock backing never disqualifies a side.** It decides *which segment*
+  of a side carries the tab (preferring one with real stock behind it), but
+  a part positioned close to the plate's edge still gets held.
+- **A part is never left with zero tabs.** If no side clears the length
+  threshold, `select_tab_edges` falls back to the part's longest sides
+  anyway - a tight tab beats a part coming loose mid-cut. The
+  budget-filling pass applies the same threshold, so it cannot quietly put
+  tabs back on the short facets rule 3 just excluded.
 
 ## Validation
 
