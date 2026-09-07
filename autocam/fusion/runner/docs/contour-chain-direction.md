@@ -123,10 +123,68 @@ branch, and generic-pocket leftover-circular handling), which was confirmed
 live as the same class of bug: the chain direction arrow pointed the wrong
 way on a real `>.3 Circular Through Hole` operation.
 
-The outer release operation remains separately tuned and currently uses its
-known-good full outer-loop selection and reversal. Do not combine it with an
-internal-feature operation or copy its direction setting into feature
-chains: its tool-side and tab behavior are different.
+The outer release operation follows the **same rule** - it is not a special
+case, and no longer hard-codes a direction. It was the last selection in
+the file still asserting `isReverted = True` for every part, and that was
+confirmed live as wrong: on a job where every other operation's arrow was
+correct, the outer `2D Slot Cut` was the only one reversed.
+
+One formula covers outer and inner loops because the difference is already
+in the geometry: Fusion winds an **outer loop counter-clockwise and an
+inner loop clockwise**, so the opposite handedness an outer release cut
+needs - tool outside the part, not inside the cutout - falls out of the
+loop's own co-edge ordering. Reading it makes the result correct per part
+rather than correct for whichever part it was last tuned against.
+
+Direction still matters here for a specific, confirmed reason: wound the
+wrong way against this operation's `left` compensation, the tool offsets
+INWARD toward the part's interior features instead of outward into the
+scrap. On a real part the edge-to-hole clearance was as little as 0.1495in
+against a 0.1575in tool, so the offset direction is the only thing keeping
+it from gouging. That requirement is unchanged - it is now satisfied by
+reading the geometry instead of asserting one answer.
+
+**There is no hard-coded chain direction anywhere in `DeleteToolpaths.py`.**
+If a new selection is added, derive its direction the same way; do not
+copy a literal `True`/`False` from a working operation, because the value
+that happens to be right for one part's winding is wrong for another's.
+
+The outer operation is still separate in the ways that genuinely differ:
+it is the only one that carries tabs, and it selects the full outer-loop
+edge list rather than a single seed edge.
+
+## Posting: one program per setup, not one per operation
+
+`NewNCProgram.py`'s `export()` posts the **whole setup** in a single
+`cam.postProcess(setup, ...)` call, producing one `.ngc` per job.
+
+It used to post each operation separately, bucketed into
+Drills/Pocket/Profile and sorted by tool diameter. A single-part plate came
+back as **7 files** the operator had to load and run in the right order by
+hand.
+
+Posting the setup as a unit is both simpler and safer:
+
+- **Ordering is preserved by construction.** Fusion emits operations in
+  CAM-browser order, which is already the correct machining order - and
+  that ordering is not incidental: the template puts the outer
+  `2D Slot Cut` **last** precisely so the part isn't released from the
+  stock until every internal feature has been cut. The old code had to
+  re-derive that ordering by bucketing and sorting.
+- **Tool changes are Fusion's job.** One program with proper tool-change
+  codes between operations, rather than one file per tool.
+- **It removes a real data-loss bug.** Two operations sharing a tool could
+  generate the identical program name and silently overwrite each other's
+  file on disk - an entire operation's G-code lost while the job still
+  reported success. With one program per setup there is no name to collide.
+
+The program is named from the job, sanitized by `_safe_program_name` to
+letters/digits/dash/underscore and capped at 60 characters, since job names
+are free text that can carry spaces, slashes and colons. A second setup
+(rare) gets a `-N` suffix so it cannot overwrite the first.
+
+Verified on a real job: 1 file, 708 lines, one `M30`, one tool change, all
+7 operations present in template order with `2D SLOT CUT` last.
 
 ## Face identity: use `tempId`, never Python's `id()` or bare `==`
 
@@ -175,16 +233,34 @@ circular and non-circular) and confirm live in Fusion:
 - Each internal operation's own selected geometry sits at the Z height it
   should (a through-loop at the material's true bottom, a pocket loop at its
   own real floor depth - not the same Z for both).
-- The chain direction arrow is correct in Fusion's own UI - `isReverted`
-  alone doesn't prove this; it just proves the code isn't hardcoding one
-  value.
+- The chain direction arrow is correct in Fusion's own UI **on every
+  operation, including `2D Slot Cut`** - `isReverted` alone doesn't prove
+  this; it just proves the code isn't hardcoding one value. The outer cut
+  was historically the one that got missed here.
+- **The job produced exactly one `.ngc`.** More than one means the setup is
+  being posted per-operation again.
 - Simulate before posting and verify the tool stays in the intended cutout,
   not the retained material, and that a blind pocket actually stops at its
   floor rather than cutting through.
 
+### A known trap when testing
+
+Editing a file under `autocam/fusion/runner/` and copying it into the live
+add-in folder does **not** affect the running Fusion process - Python does
+not re-read a module once imported. A job queued after such a copy still
+runs the old code, and the result looks like the fix failed.
+
+This has cost real debugging time more than once. **Fully quit and relaunch
+Fusion** before trusting a test run. A quick way to tell which code
+actually ran: the old per-operation posting names files `S1575Profile1.ngc`
+and so on, while the current code names the single program after the job.
+
+### Unit tests
+
 `tests/test_contour_chains.py` protects the pure direction mapping,
-`tests/test_pocket_orientation.py` protects the pure blind-vs-through
-decision, and `tests/test_tab_placement.py` protects the tab-per-side
-guarantee - all without requiring Fusion. A live Fusion simulation remains
-required for actual CAM behavior; none of these unit tests can catch a
-Fusion-side identity or recognition failure like the ones documented above.
+`tests/test_pocket_orientation.py` the blind-vs-through decision,
+`tests/test_tab_placement.py` the tab-per-side guarantee, and
+`tests/test_nc_program_naming.py` the program-name sanitizing - all without
+requiring Fusion. A live Fusion run remains required for actual CAM
+behavior; none of these can catch a Fusion-side identity, recognition, or
+posting failure like the ones documented above.
