@@ -82,6 +82,22 @@ describe('Fusion Runner grouping lifecycle',()=>{
    expect.objectContaining({upsert:true,contentType:'text/plain'})
   );
  });
+ it('records how far the posted program travels so a machine-limit report can be triaged',async()=>{
+  // Issue #359: "program exceeds machine maximum" kept being reported when
+  // the program's own span was modest and the machine's G54 offset was the
+  // real cause. Measuring it on completion means nobody has to parse the
+  // .ngc by hand to rule the program out.
+  const contentBase64=Buffer.from('G20\nG0 X1 Y2\nG1 X9 Y2 Z-0.25\n','utf8').toString('base64');
+  mocks.from
+   .mockReturnValueOnce(chain({data:{id:'job',params:{fusionJobKind:'plate:cam'}}}))
+   .mockReturnValueOnce(chain({data:[{id:'job'}]}));
+  expect((await call('complete',{jobId:'job',runnerId:'runner',ncFiles:[{name:'plate.nc',contentBase64}],stats:{total_machining_time:12}})).status).toBe(200);
+  const update=queries[1].update.mock.calls[0][0];
+  // Existing stats are preserved, not replaced by the measurement.
+  expect(update.stats.total_machining_time).toBe(12);
+  expect(update.stats.program_extents.units).toBe('in');
+  expect(update.stats.program_extents.combined.X).toEqual({min:1,max:9,span:8});
+ });
  it('rejects malformed Fusion output before completing the job',async()=>{
   mocks.from.mockReturnValueOnce(chain({data:{id:'job',params:{fusionJobKind:'plate:cam'}}}));
   const result=await call('complete',{jobId:'job',runnerId:'runner',ncFiles:[{name:'../plate.nc',contentBase64:'eA=='}]});
