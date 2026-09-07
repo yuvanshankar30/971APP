@@ -18,10 +18,6 @@ function getDbClient(fallbackClient) {
   }
 }
 
-function isLocalHost(url) {
-  return url?.hostname === 'localhost' || url?.hostname === '127.0.0.1';
-}
-
 function isPublicReadRequest(url) {
   const teamKey = String(url.searchParams.get('team_key') || '').trim();
   return url.searchParams.has('list_teams') || url.searchParams.has('all_teams') || Boolean(teamKey);
@@ -46,7 +42,7 @@ async function getActor(authSupa) {
     - ?list_teams=1 => list of distinct team keys
 */
 
-export async function POST({ request, url }) {
+export async function POST({ request }) {
   try {
     const body = await request.json();
 
@@ -57,28 +53,24 @@ export async function POST({ request, url }) {
       const authSupa = getClientFromRequest(request);
       const db = getDbClient(authSupa);
       const actor = await getActor(authSupa);
-      const isLocal = isLocalHost(url);
+      if (!actor?.id) return json({ error: 'Unauthorized' }, { status: 401 });
 
-      if (!isLocal && !actor?.id) return json({ error: 'Unauthorized' }, { status: 401 });
+      const { data: profile } = await authSupa
+        .from('user_profiles')
+        .select('role')
+        .eq('id', actor.id)
+        .single();
 
-      if (!isLocal) {
-        const { data: profile } = await authSupa
-          .from('user_profiles')
-          .select('role')
-          .eq('id', actor.id)
-          .single();
+      const { data: row, error: rowErr } = await db
+        .from('scout_data_events')
+        .select('created_by')
+        .eq('id', id)
+        .single();
 
-        const { data: row, error: rowErr } = await db
-          .from('scout_data_events')
-          .select('created_by')
-          .eq('id', id)
-          .single();
+      if (rowErr) return json({ error: rowErr.message }, { status: 500 });
 
-        if (rowErr) return json({ error: rowErr.message }, { status: 500 });
-
-        const canEdit = profile?.role === 'admin' || row?.created_by === actor.id;
-        if (!canEdit) return json({ error: 'Forbidden' }, { status: 403 });
-      }
+      const canEdit = profile?.role === 'admin' || row?.created_by === actor.id;
+      if (!canEdit) return json({ error: 'Forbidden' }, { status: 403 });
 
       const { data, error } = await db
         .from('scout_data_events')
@@ -96,9 +88,7 @@ export async function POST({ request, url }) {
     const authSupa = getClientFromRequest(request);
     const db = getDbClient(authSupa);
     const actor = await getActor(authSupa);
-    const isLocal = isLocalHost(url);
-
-    if (!isLocal && !actor?.id) return json({ error: 'Unauthorized' }, { status: 401 });
+    if (!actor?.id) return json({ error: 'Unauthorized' }, { status: 401 });
 
     const { match_key, match_number, team_key, phase, event_type, event_value, role, on_shift } = body;
     if (!match_key || !team_key || !event_type) return json({ error: 'Missing required fields' }, { status: 400 });
@@ -112,7 +102,9 @@ export async function POST({ request, url }) {
       event_value: event_value ?? null,
       role: role ?? null,
       on_shift: typeof on_shift === 'boolean' ? on_shift : null,
-      created_by: actor?.id || body?.user_id || null,
+      // Authenticated identity is authoritative; never accept attribution
+      // supplied by a caller in the JSON body.
+      created_by: actor.id,
       created_at: new Date().toISOString()
     };
 
@@ -124,7 +116,7 @@ export async function POST({ request, url }) {
   }
 }
 
-export async function DELETE({ request, url }) {
+export async function DELETE({ request }) {
   try {
     const { id } = await request.json();
     if (!id) return json({ error: 'Missing ID' }, { status: 400 });
@@ -132,28 +124,24 @@ export async function DELETE({ request, url }) {
     const authSupa = getClientFromRequest(request);
     const db = getDbClient(authSupa);
     const actor = await getActor(authSupa);
-    const isLocal = isLocalHost(url);
+    if (!actor?.id) return json({ error: 'Unauthorized' }, { status: 401 });
 
-    if (!isLocal && !actor?.id) return json({ error: 'Unauthorized' }, { status: 401 });
+    const { data: profile } = await authSupa
+      .from('user_profiles')
+      .select('role')
+      .eq('id', actor.id)
+      .single();
 
-    if (!isLocal) {
-      const { data: profile } = await authSupa
-        .from('user_profiles')
-        .select('role')
-        .eq('id', actor.id)
-        .single();
+    const { data: row, error: rowErr } = await db
+      .from('scout_data_events')
+      .select('created_by')
+      .eq('id', id)
+      .single();
 
-      const { data: row, error: rowErr } = await db
-        .from('scout_data_events')
-        .select('created_by')
-        .eq('id', id)
-        .single();
+    if (rowErr) return json({ error: rowErr.message }, { status: 500 });
 
-      if (rowErr) return json({ error: rowErr.message }, { status: 500 });
-
-      const canDelete = profile?.role === 'admin' || row?.created_by === actor.id;
-      if (!canDelete) return json({ error: 'Forbidden' }, { status: 403 });
-    }
+    const canDelete = profile?.role === 'admin' || row?.created_by === actor.id;
+    if (!canDelete) return json({ error: 'Forbidden' }, { status: 403 });
 
     const { error } = await db.from('scout_data_events').delete().eq('id', id);
     if (error) return json({ error: error.message }, { status: 500 });
@@ -169,10 +157,9 @@ export async function GET({ url, request }) {
     const authSupa = getClientFromRequest(request);
     const db = getDbClient(authSupa);
     const actor = await getActor(authSupa);
-    const isLocal = isLocalHost(url);
     const canReadPublic = isPublicReadRequest(url);
 
-    if (!isLocal && !actor?.id && !canReadPublic) return json({ error: 'Unauthorized' }, { status: 401 });
+    if (!actor?.id && !canReadPublic) return json({ error: 'Unauthorized' }, { status: 401 });
 
     const team_key = url.searchParams.get('team_key');
     const match_key = url.searchParams.get('match_key');
@@ -249,7 +236,10 @@ export async function GET({ url, request }) {
       return json({ success: true, data: rows, truncated: rows.length >= maxRows });
     }
 
-    const recent = Number(url.searchParams.get('recent') || '100');
+    const requestedRecent = Number(url.searchParams.get('recent') || '100');
+    const recent = Number.isFinite(requestedRecent)
+      ? Math.min(Math.max(Math.trunc(requestedRecent), 1), 1000)
+      : 100;
     const { data, error } = await db
       .from('scout_data_events')
       .select('*')

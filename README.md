@@ -218,7 +218,10 @@ browser confirmation or prompt popups.
   large enough for real scout observations. Timed robot actions, per-fuel
   taps and the objective endgame result are recorded through Quick Scout
   (`quickscout/`), which writes the same `scout_data_events` the removed
-  Data Scouting page did.
+  Data Scouting page did. All scouting mutations require a real signed-in
+  user, including in local development; write attribution always comes from
+  the verified session rather than a caller-provided user ID. Public,
+  event-scoped read views remain available where documented.
 - **Power Rankings** (`powerrankings/`): the last item in the Competition nav
   folder - its own page rather than a mode of the Pick List workspace, so it
   never gets confused with that page's comparison table. An event-relative
@@ -511,7 +514,9 @@ own docs are all together in one place instead of scattered across
 - **`admin/`, `profile/`** - user/permission administration and the Account
   settings destination.
 - **`docs/`** - repo-wide markdown file browser (see **Features** above).
-- **`scouting/`** - new unified scouting app, currently blank (see **Features** above).
+- **`scouting/`** - the active-event Pick List workspace described under
+  **Features** above; it combines TBA and local scouting data and persists the
+  strategy group's shared ordering and notes.
 - **`api/`** - server endpoints backing the above, plus integration
   webhooks/crons: `api/cam-generate` (synchronous G-code generation),
   `api/drive-watcher` (Drive input-sweep, cron-gated), `api/planner`

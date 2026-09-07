@@ -18,10 +18,6 @@ function getDbClient(fallbackClient) {
   }
 }
 
-function isLocalHost(url) {
-  return url?.hostname === 'localhost' || url?.hostname === '127.0.0.1';
-}
-
 function isPublicReadRequest(url) {
   const teamKey = String(url.searchParams.get('team_key') || '').trim();
   return url.searchParams.has('list_teams') || Boolean(teamKey);
@@ -53,7 +49,7 @@ async function insertScoutNote(db, payload) {
 
 // POST to save notes: expects { action: 'save-note', match_key, match_number,
 // team_key, notes, ranking_impact }
-export async function POST({ request, url }) {
+export async function POST({ request }) {
   try {
     const body = await request.json();
     const action = body?.action;
@@ -62,9 +58,7 @@ export async function POST({ request, url }) {
     const authSupa = getClientFromRequest(request);
     const db = getDbClient(authSupa);
     const actor = await getActor(authSupa);
-    const isLocal = isLocalHost(url);
-
-    if (!isLocal && !actor?.id) return json({ error: 'Unauthorized' }, { status: 401 });
+    if (!actor?.id) return json({ error: 'Unauthorized' }, { status: 401 });
 
     const match_key = body.match_key || null;
     const match_number = body.match_number || null;
@@ -79,7 +73,7 @@ export async function POST({ request, url }) {
       team_key,
       notes: String(notes),
       ranking_impact: sanitizeRankingImpact(body.ranking_impact),
-      created_by: actor?.id || body?.user_id || null,
+      created_by: actor.id,
       created_at: new Date().toISOString()
     };
 
@@ -100,10 +94,9 @@ export async function GET({ url, request }) {
     const authSupa = getClientFromRequest(request);
     const db = getDbClient(authSupa);
     const actor = await getActor(authSupa);
-    const isLocal = isLocalHost(url);
     const canReadPublic = isPublicReadRequest(url);
 
-    if (!isLocal && !actor?.id && !canReadPublic) return json({ error: 'Unauthorized' }, { status: 401 });
+    if (!actor?.id && !canReadPublic) return json({ error: 'Unauthorized' }, { status: 401 });
 
     const team_key = url.searchParams.get('team_key');
     const event_key = String(url.searchParams.get('event_key') || '').trim();
@@ -121,7 +114,10 @@ export async function GET({ url, request }) {
     }
 
     if (url.searchParams.get('list_teams')) {
-      const recent = Number(url.searchParams.get('recent') || '1000');
+      const requestedRecent = Number(url.searchParams.get('recent') || '1000');
+      const recent = Number.isFinite(requestedRecent)
+        ? Math.min(Math.max(Math.trunc(requestedRecent), 1), 5000)
+        : 1000;
       let query = db
         .from('scout_notes')
         .select('team_key');

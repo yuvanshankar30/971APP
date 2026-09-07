@@ -142,9 +142,7 @@ export async function GET({ url, request }) {
     const authSupa = getClientFromRequest(request);
     const db = getDbClient(authSupa);
     const { actorId, profile } = await fetchActorProfile(authSupa);
-    const isLocal = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
-
-    if (!isLocal && !actorId) {
+    if (!actorId) {
       return json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -211,7 +209,7 @@ export async function GET({ url, request }) {
   }
 }
 
-export async function POST({ request, url }) {
+export async function POST({ request }) {
   try {
     const body = await request.json();
     const action = body?.action;
@@ -221,16 +219,14 @@ export async function POST({ request, url }) {
     const authSupa = getClientFromRequest(request);
     const db = getDbClient(authSupa);
     const { actorId, profile } = await fetchActorProfile(authSupa);
-    const isLocal = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
-
-    if (!isLocal && !actorId) {
+    if (!actorId) {
       return json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const rosterKeys = actorId ? await fetchRosterKeysForUser(db, actorId) : [];
     const access = computePitAccess(profile, rosterKeys);
 
-    if (!isLocal && !access.canEdit) {
+    if (!access.canEdit) {
       return json({ error: 'Forbidden' }, { status: 403 });
     }
 
