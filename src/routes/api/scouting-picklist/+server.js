@@ -4,8 +4,8 @@ import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/publi
 import { getSupabase } from '$lib/server/971bot.js';
 
 // Same request-handling shape as src/routes/datascout|notescout/+server.js -
-// authenticated writes via RLS through the caller's own JWT, service-role
-// fallback for local dev, GET reads treated as public whenever an event_key
+// authenticated writes, service-role fallback when configured, and GET reads
+// treated as public whenever an event_key
 // is present (the picklist is meant to be glanceable without friction, same
 // spirit as team_key-scoped reads elsewhere in scouting).
 const getClientFromRequest = (request) => {
@@ -21,10 +21,6 @@ function getDbClient(fallbackClient) {
   } catch {
     return fallbackClient;
   }
-}
-
-function isLocalHost(url) {
-  return url?.hostname === 'localhost' || url?.hostname === '127.0.0.1';
 }
 
 async function getActor(authSupa) {
@@ -61,7 +57,7 @@ export async function GET({ url, request }) {
   }
 }
 
-export async function POST({ request, url }) {
+export async function POST({ request }) {
   try {
     const body = await request.json();
     const action = body?.action;
@@ -69,9 +65,7 @@ export async function POST({ request, url }) {
     const authSupa = getClientFromRequest(request);
     const db = getDbClient(authSupa);
     const actor = await getActor(authSupa);
-    const isLocal = isLocalHost(url);
-
-    if (!isLocal && !actor?.id) return json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    if (!actor?.id) return json({ success: false, error: 'Unauthorized' }, { status: 401 });
 
     if (action === 'add') {
       const { event_key, team_key, team_number, nickname } = body;

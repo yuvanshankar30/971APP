@@ -189,9 +189,7 @@ export async function GET({ url, request }) {
     const authSupa = getClientFromRequest(request);
     const db = getDbClient(authSupa);
     const { actorId, profile } = await fetchActorProfile(authSupa);
-    const isLocal = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
-
-    if (!isLocal && !actorId) {
+    if (!actorId) {
       return json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -227,7 +225,7 @@ export async function GET({ url, request }) {
 
     if (mine) {
       if (!reqUserId) return json({ error: 'user_id required' }, { status: 400 });
-      if (!isLocal && reqUserId !== actorId) return json({ error: 'Forbidden' }, { status: 403 });
+      if (reqUserId !== actorId) return json({ error: 'Forbidden' }, { status: 403 });
       base
         .eq('assigned_user', reqUserId)
         .order('completed_at', { ascending: true })
@@ -271,7 +269,7 @@ export async function GET({ url, request }) {
   }
 }
 
-export async function POST({ request, url }) {
+export async function POST({ request }) {
   try {
     const body = await request.json();
     const action = body?.action;
@@ -283,16 +281,14 @@ export async function POST({ request, url }) {
     const authSupa = getClientFromRequest(request);
     const db = getDbClient(authSupa);
     const { actorId, profile } = await fetchActorProfile(authSupa);
-    const isLocal = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
-
-    if (!isLocal && !actorId) {
+    if (!actorId) {
       return json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const rosterKeys = actorId ? await fetchRosterKeysForUser(db, actorId) : [];
     const access = computeScoutingAccess(profile, rosterKeys);
 
-    if (action !== 'complete' && !isLocal && !canEditForType(access, scouting_type)) {
+    if (action !== 'complete' && !canEditForType(access, scouting_type)) {
       return json({ error: 'Forbidden' }, { status: 403 });
     }
 
@@ -334,38 +330,39 @@ export async function POST({ request, url }) {
       const { team_key, user_id } = body;
       if (!team_key || !user_id) return json({ error: 'team_key, user_id required' }, { status: 400 });
 
-      const { data: existingRows } = await db
+      const { data: existingRows, error: existingError } = await db
         .from('scout_match_assignments')
         .select('id, match_key, team_key, assigned_user')
         .eq('scouting_type', scouting_type)
         .eq('team_key', team_key);
 
+      if (existingError) return json({ error: existingError.message }, { status: 500 });
+
       const prevMap = new Map((existingRows || []).map((row) => [`${row.match_key}:${row.team_key}`, row]));
 
-      const { data: existing, error: selErr } = await db
+      const assignments = (existingRows || []).map((row) => ({
+        scouting_type,
+        match_key: row.match_key,
+        team_key,
+        assigned_user: user_id
+      }));
+      if (assignments.length === 0) return json({ success: true });
+
+      const { data: upsertedRows, error } = await db
         .from('scout_match_assignments')
-        .select('match_key')
-        .eq('scouting_type', scouting_type)
-        .eq('team_key', team_key);
+        .upsert(assignments, { onConflict: 'scouting_type,match_key,team_key' })
+        .select('id, match_key, team_key, assigned_user');
 
-      if (selErr) return json({ error: selErr.message }, { status: 500 });
+      if (error) return json({ error: error.message }, { status: 500 });
 
-      for (const row of existing || []) {
-        const { data: upserted, error } = await db
-          .from('scout_match_assignments')
-          .upsert({ scouting_type, match_key: row.match_key, team_key, assigned_user: user_id }, { onConflict: 'scouting_type,match_key,team_key' })
-          .select('id, assigned_user')
-          .single();
-
-        if (error) return json({ error: error.message }, { status: 500 });
-
-        const prev = prevMap.get(`${row.match_key}:${team_key}`)?.assigned_user;
-        if (upserted?.assigned_user && upserted.assigned_user !== prev) {
+      for (const upserted of upsertedRows || []) {
+        const prev = prevMap.get(`${upserted.match_key}:${upserted.team_key}`)?.assigned_user;
+        if (upserted.assigned_user && upserted.assigned_user !== prev) {
           await notifyPublishedScoutAssignment({
             assignmentId: upserted.id,
             userId: upserted.assigned_user,
-            matchKey: row.match_key,
-            teamKey: team_key,
+            matchKey: upserted.match_key,
+            teamKey: upserted.team_key,
             scoutingType: scouting_type
           });
         }
@@ -427,7 +424,7 @@ export async function POST({ request, url }) {
         return json({ error: 'match_key, team_key, user_id required' }, { status: 400 });
       }
 
-      if (!isLocal && (!actorId || user_id !== actorId)) {
+      if (user_id !== actorId) {
         return json({ error: 'Forbidden' }, { status: 403 });
       }
 

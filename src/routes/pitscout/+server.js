@@ -97,10 +97,6 @@ function getDbClient(fallbackClient) {
   }
 }
 
-function isLocalHost(url) {
-  return url?.hostname === 'localhost' || url?.hostname === '127.0.0.1';
-}
-
 function isPublicReadRequest(url) {
   const eventKey = String(url.searchParams.get('event_key') || '').trim();
   return Boolean(eventKey);
@@ -218,7 +214,7 @@ function sanitizeTechnicalDetails(input) {
   return clean;
 }
 
-export async function POST({ request, url }) {
+export async function POST({ request }) {
   try {
     const body = await request.json();
     if (body?.action !== 'save-entry') return json({ error: 'Invalid action' }, { status: 400 });
@@ -226,9 +222,7 @@ export async function POST({ request, url }) {
     const authSupa = getClientFromRequest(request);
     const db = getDbClient(authSupa);
     const actor = await getActor(authSupa);
-    const isLocal = isLocalHost(url);
-
-    if (!isLocal && !actor?.id) return json({ error: 'Unauthorized' }, { status: 401 });
+    if (!actor?.id) return json({ error: 'Unauthorized' }, { status: 401 });
 
     const event_key = String(body?.event_key || '').trim();
     const team_key = normalizeTeamKey(body?.team_key);
@@ -266,7 +260,7 @@ export async function POST({ request, url }) {
       auto_options,
       technical_details,
       photo_paths,
-      created_by: actor?.id || body?.user_id || null,
+      created_by: actor.id,
       updated_at: new Date().toISOString()
     };
 
@@ -290,13 +284,12 @@ export async function GET({ url, request }) {
     const authSupa = getClientFromRequest(request);
     const db = getDbClient(authSupa);
     const actor = await getActor(authSupa);
-    const isLocal = isLocalHost(url);
     const canReadPublic = isPublicReadRequest(url);
 
-    if (!isLocal && !actor?.id && !canReadPublic) return json({ error: 'Unauthorized' }, { status: 401 });
+    if (!actor?.id && !canReadPublic) return json({ error: 'Unauthorized' }, { status: 401 });
 
     if (url.searchParams.get('resource') === 'pit-contacts') {
-      if (!isLocal && !actor?.id) return json({ error: 'Unauthorized' }, { status: 401 });
+      if (!actor?.id) return json({ error: 'Unauthorized' }, { status: 401 });
       const { data, error } = await db
         .from('pit_scout_entries')
         .select('scout_name')

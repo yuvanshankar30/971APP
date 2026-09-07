@@ -232,7 +232,6 @@
       team_key: selectedTeam,
       event_type,
       event_value,
-      user_id: user?.id || null,
     };
 
     const tempEvent = { ...payload, created_at: new Date().toISOString() };
