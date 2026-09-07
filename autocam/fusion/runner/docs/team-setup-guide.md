@@ -4,35 +4,48 @@ Two things run this: **Spartans Hub** itself (already deployed - where you queue
 
 ## Install
 
-1. **Install and run setup in one step.** This copies the add-in into Fusion's AddIns folder (named exactly `SpartanRoboticsAutoCAM` - required, no spaces, or Fusion won't list it) and immediately runs its setup, which installs `requests` for Fusion's Python and writes `.env` (no manual editing):
+1. **Run one command.** From a clone of this repo, in a normal terminal (not Fusion):
    ```bash
-   cp -R autocam/fusion/runner "$HOME/Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns/SpartanRoboticsAutoCAM" && cd "$HOME/Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns/SpartanRoboticsAutoCAM" && python3 setup.py
+   python3 autocam/fusion/runner/setup.py
    ```
-   (Windows: `%APPDATA%\Autodesk\Autodesk Fusion 360\API\AddIns\SpartanRoboticsAutoCAM` in place of the `cp -R`/`cd` target, `copy` instead of `cp -R`.)
+   That's the whole install. It finds Fusion's AddIns folder for your OS (creating it if Fusion hasn't yet - a fresh Fusion install doesn't make it until you open Scripts and Add-Ins once), copies the add-in in under the exact name Fusion requires, installs `requests` for Fusion's bundled Python, and writes `.env` from a few prompts. Same command on macOS and Windows; you never type or substitute a path.
 
-   It'll ask which Hub to talk to (deployed, or local dev) and for your `FUSION_RUNNER_TOKEN` value (ask a project administrator - don't generate your own or commit one anywhere) - then writes everything itself.
+   It asks for three things:
+   - **Which Hub** - the deployed one (normal) or a local dev server.
+   - **`FUSION_RUNNER_TOKEN`** - one shared secret for the whole team. Ask a project administrator; don't generate your own or commit it anywhere.
+   - **This machine's `RUNNER_MACHINE_ID`** - see step 2.
 
    **Known risk, not yet root-caused:** the `pip install` step builds packages for whatever Python your system defaults to, which may not exactly match Fusion's bundled interpreter's ABI. If the add-in fails to load with an error mentioning `charset_normalizer`, that's the likely cause - ask for help rather than assuming your setup is broken.
 
-   Or download the ready-made zip from the [Fusion AutoCAM Setup page](/autocam/fusion/setup), unzip it into the AddIns folder above (already named correctly), then run `python3 setup.py` from inside it.
+   No repo clone? Download the ready-made zip from the [Fusion AutoCAM Setup page](/autocam/fusion/setup), unzip it anywhere, and run `python3 setup.py` from inside it - it installs itself to the right place from there too.
 
-   **Updating an existing install?** Re-run the same command (or re-download+unzip, then `setup.py` again) over the existing folder - your `.env`/`.overridepath` are untouched as long as nothing you run deletes extra files first.
+   **Updating an existing install?** Re-run the exact same command. It copies over the existing folder and deliberately never overwrites `.env` or `.overridepath`, so your token and machine id survive.
 
-   **Never want to reinstall again?** Point Fusion's AddIns folder at a live git checkout with a symlink instead of copying files - updates then become `git pull`, no copying or re-downloading, ever:
+   **Never want to reinstall again?** Point Fusion's AddIns folder at a live git checkout with a symlink, so updates become `git pull` and nothing ever needs copying again:
    ```bash
-   git clone https://github.com/frc971/spartanshub.git ~/spartanshub && ln -s ~/spartanshub/autocam/fusion/runner "$HOME/Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns/SpartanRoboticsAutoCAM" && cd ~/spartanshub/autocam/fusion/runner && python3 setup.py
+   git clone https://github.com/frc971/spartanshub.git ~/spartanshub
+   ln -s ~/spartanshub/autocam/fusion/runner "$HOME/Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns/SpartanRoboticsAutoCAM"
+   python3 ~/spartanshub/autocam/fusion/runner/setup.py
    ```
-   (Windows: use `mklink /D` from an admin Command Prompt instead of `ln -s`.) From then on, `cd ~/spartanshub && git pull` picks up every change the moment it lands on `main` - Fusion loads through the symlink, so there's nothing left to copy. Quit and relaunch Fusion afterward (same as any `.env`/code change - see below) to actually pick up the new files. `.env`/`.overridepath` live inside `autocam/fusion/runner/` itself, so they're gitignored and untouched by `git pull` either way.
+   (Windows: `mklink /D` from an admin Command Prompt instead of `ln -s`.) `setup.py` detects the symlink and leaves it in place rather than copying over it. From then on `cd ~/spartanshub && git pull` picks up every change the moment it lands on `main`. Quit and relaunch Fusion afterward to actually load the new files. `.env`/`.overridepath` live inside `autocam/fusion/runner/` and are gitignored, so `git pull` never touches them.
 
-2. **Enable it in Fusion:** Utilities tab -> Scripts and Add-Ins -> **Add-Ins** tab -> **SpartanRoboticsAutoCAM** -> Run. ("Utilities" was called "Tools" before a 2022 Fusion update, in case an old tutorial says that instead.)
+2. **Know the difference between the two values it asks for.** They are not interchangeable, and this is the step people get wrong:
 
-3. **Confirm it's running:** open the Text Command window (Option+Cmd+C on Mac, or View -> Show/Hide Text Commands) - you should see it polling every few seconds.
+   | | What it is | Same on every computer? |
+   |---|---|---|
+   | `FUSION_RUNNER_TOKEN` | The shared secret that lets any Runner talk to the Hub at all | **Yes** - one value for the whole team |
+   | `RUNNER_MACHINE_ID` | Which *physical machine* this computer drives | **No** - per device |
+
+   `RUNNER_MACHINE_ID` is the `cam_machines` id of the machine this computer is actually wired to. Find it at **`/autocam/fusion` -> Machines** and copy the id of that machine. It's a UUID, like `517ba89c-7167-4415-b6fd-cfc7be1e59e1`; `setup.py` checks the format before writing it.
+
+   It matters because a Runner only claims jobs meant for its own machine (or jobs left unassigned). Give two workstations the same machine id and the router's Runner can pick up a job queued for the mill - which is why it's required rather than optional.
+
+3. **Enable it in Fusion:** Utilities tab -> Scripts and Add-Ins -> **Add-Ins** tab -> **SpartanRoboticsAutoCAM** -> Run. ("Utilities" was called "Tools" before a 2022 Fusion update, in case an old tutorial says that instead.)
+
+4. **Confirm it's running:** open the Text Command window (Option+Cmd+C on Mac, or View -> Show/Hide Text Commands) - you should see it polling every few seconds.
 
 Running more than one machine at once is safe: claiming is a compare-and-swap,
-so two Runners cannot grab the same job. Every install needs its own `RUNNER_ID`
-and a required `RUNNER_MACHINE_ID`; `setup.py` prompts for both and validates
-the machine UUID's format. A Runner only claims jobs for that physical machine (or jobs
-the operator left unassigned).
+so two Runners cannot grab the same job.
 
 **Changed `.env` again later?** Fully quit and relaunch Fusion - Stop/Run alone doesn't reliably reload it.
 

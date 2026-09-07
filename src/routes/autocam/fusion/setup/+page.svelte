@@ -24,9 +24,10 @@
   <div class="install-card-text">
     <h2>Install the Runner add-in</h2>
     <p>
-      A zip of <code>autocam/fusion/runner/</code> - the actual Fusion 360 add-in files - ready to unzip straight
-      into Fusion's AddIns folder. Already named <code>SpartanRoboticsAutoCAM</code> inside the zip, matching what
-      Fusion requires (see Step 1 below) - no manual rename needed.
+      A zip of <code>autocam/fusion/runner/</code> - the actual Fusion 360 add-in files. Only needed if you don't
+      have a clone of the repo. Unzip it anywhere, then run <code>python3 setup.py</code> from inside it: that
+      installs it into Fusion's AddIns folder for you and writes your config, so there's no path to find and
+      nothing to rename (see Step 1 below).
     </p>
   </div>
   <a class="btn btn-primary install-download-btn" href="/downloads/SpartanRoboticsAutoCAM-FusionAddIn.zip" download>
