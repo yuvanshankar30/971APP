@@ -1,5 +1,3 @@
-# Author-
-# Description-
 import adsk.core, adsk.fusion, adsk.cam
 from ..config import *
 import os
@@ -37,7 +35,7 @@ def _format_tool_label(toolpath):
     return label or "0"
 
 
-def _post_process_with_retry(app, cam, toolpath, postProcessInput, attempts=3, delay_seconds=1.0):
+def _post_process_with_retry(app, cam, toolpath, postProcessInput, attempts=6, initial_delay_seconds=1.0):
     """cam.postProcess() has been observed to fail with "RuntimeError 3:
     Initialization fails" specifically on the FIRST toolpath posted in a
     run, while an identical call for the very next toolpath (moments later
@@ -48,10 +46,21 @@ def _post_process_with_retry(app, cam, toolpath, postProcessInput, attempts=3, d
     actually observed to work (a later call succeeding on its own), rather
     than a theory about exactly why the first one fails.
 
+    Confirmed a real 3-attempt/1s-flat-delay budget (~2s total between
+    calls) is not always enough on its own: a real job still failed all 3
+    attempts. Raised to 6 attempts with exponential backoff (1, 2, 4, 8,
+    16s between calls - about 31s of total runway instead of 2s) rather
+    than guessing at a different root cause (confirmed live against the
+    real Fusion API docstring: postProcess's `operations` parameter
+    explicitly accepts a single Operation, Setup, Folder, or Pattern
+    object directly - "wrap it in an ObjectCollection" is not the fix,
+    since a single object was never the problem).
+
     Raises the last error if every attempt fails, instead of a caller
     silently treating a real failure as success.
     """
     last_error = None
+    delay_seconds = initial_delay_seconds
     for attempt in range(1, attempts + 1):
         if attempt == 1:
             # Diagnostic context for whatever this attempt is about to try,
@@ -84,6 +93,7 @@ def _post_process_with_retry(app, cam, toolpath, postProcessInput, attempts=3, d
             if attempt < attempts:
                 adsk.doEvents()
                 time.sleep(delay_seconds)
+                delay_seconds *= 2
     raise last_error
 
 

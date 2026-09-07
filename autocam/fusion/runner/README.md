@@ -46,7 +46,7 @@ The add-in runs a background polling thread that claims queued `cam_jobs` rows (
 - **Auto-orientation** — orients parts largest-face-up before setup
 - **Template-driven setups** — reusable Fusion CAM templates for plates and box tubes
 - **Topology-aware contour repair** — rebuilds stale template selections from the imported model while preserving each internal loop's real direction
-- **Safe automatic tabs** — uses a geometry-scaled count with `0.6 in` tabs while excluding curved, short, and unsupported outer edges
+- **Safe manual tabs** — disables automatic tabs and places geometry-scaled `0.6 x 0.15 in` tabs only on straight, stock-backed outer edges
 - **Exact NC artifacts** — preserves each Fusion-posted file byte for byte instead of joining complete programs together
 - **Plate machining-time reporting** — stores Fusion's measured job time for the web queue (box-tube parity is tracked separately)
 - **Status reporting** — completion and errors pushed back to Spartans Hub's `cam_jobs` table

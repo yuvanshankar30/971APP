@@ -1,8 +1,31 @@
 import adsk.core, adsk.fusion, adsk.cam, traceback
 import time
 
+from .ContourChains import is_reverted_for_loop_seed
 
-_POCKET_STRATEGIES = ("pocket_new", "pocket_clearing", "pocket2d")
+
+_POCKET_STRATEGIES = ("pocket_new", "pocket_clearing", "pocket2d", "adaptive2d")
+
+
+def _is_dedicated_circular_hole_op(name_lower: str) -> bool:
+    """True only for the template's own dedicated big-hole operation
+    (">.3 Circular Through Hole" et al) - requires BOTH "circular" and
+    "hole", not just "hole" alone. A plain substring check on "hole" was
+    confirmed live to be a real bug, not just imprecise: this template
+    also ships "Shape Through Hole" and "Small Shape Through Hole" -
+    ordinary adaptive2d roughing passes that have nothing to do with the
+    dedicated circular-hole operation but do contain the word "hole" in
+    their own name - which the broader check was wrongly exempting from
+    both the early-cleanup and has_pocket_floor deletion checks below,
+    right alongside the real big-hole operation. Left with a genuinely
+    empty toolpath (confirmed: "Generated toolpath is empty" on a real
+    thin sheet part with nothing for a bulk-roughing pass to clear),
+    every one of these wrongly-kept operations then made
+    cam.postProcess() fail outright with "Initialization fails" - not a
+    warning, a hard failure that aborted the entire job's export, so this
+    was a real, job-killing bug, not just a name collision.
+    """
+    return "circular" in name_lower and "hole" in name_lower
 
 # Maps each strategy to the name of its geometry-selection parameter - the
 # thing that actually holds WHAT to cut, separate from all the how-to-cut
@@ -14,20 +37,87 @@ _SELECTION_PARAM_BY_STRATEGY = {
     "adaptive2d": "pockets",
 }
 
+# The real reference template ships two separate circular-hole operations
+# named for exactly this split - "<.3 Circular Through Hole" (bore, small
+# holes) and ">.3 Circular Through Hole" (pocket2d, everything bigger,
+# since a large hole needs a real helical/pocket toolpath rather than a
+# single bore plunge). Direct instruction: the big hole and the small
+# holes should be cut by these two different operations, not lumped
+# together - so the pocket2d one's own hole recognition needs a minimum
+# diameter matching the template's own ">.3" naming, or it would also
+# pick up the same small holes the bore operation already handles.
+_MIN_HOLE_DIAMETER_NAME_THRESHOLDS_IN = (
+    (">.3", 0.3),
+    ("&gt;.3", 0.3),  # XML-escaped '>' - op.name can come through either way
+)
+
+
+def _min_hole_diameter_cm_from_name(name_lower: str):
+    """The real diameter threshold (in cm) this operation's own name
+    implies, or None if its name carries no such marker at all - shared by
+    both the legacy PocketRecognitionSelection path and the real
+    ChainSelection-based big-hole fix below, so the two can never disagree
+    about what threshold a given operation name means.
+    """
+    for marker, threshold_in in _MIN_HOLE_DIAMETER_NAME_THRESHOLDS_IN:
+        if marker in name_lower:
+            return threshold_in * 2.54
+    return None
+
+
+def _set_min_hole_diameter_from_name(recognition, name_lower: str) -> None:
+    if not recognition.areHolesIncluded:
+        return
+    threshold_cm = _min_hole_diameter_cm_from_name(name_lower)
+    if threshold_cm is None:
+        return
+    try:
+        recognition.minimumHoleDiameter = threshold_cm
+    except Exception:
+        pass
+
 
 def _top_face(body):
-    """Largest planar, upward-facing face on a body - same concept
-    TabPlacement.py's _find_top_face uses, kept independent since this
-    module has no import relationship with that one.
+    """Return the highest upward-facing planar face on a body.
+
+    Some STEP imports report both opposing planar faces as upward-facing.
+    Choosing by area can then tie and depend on Fusion's iteration order;
+    Z height identifies the physical top face deterministically.
     """
-    best_face, best_area = None, 0.0
+    best_face, best_z = None, None
     for face in body.faces:
         try:
             normal = face.geometry.normal
+            z = face.pointOnFace.z
         except Exception:
             continue
-        if normal.z > 0.9 and face.area > best_area:
-            best_area = face.area
+        if normal.z > 0.9 and (best_z is None or z > best_z):
+            best_z = z
+            best_face = face
+    return best_face
+
+
+def _bottom_face(body):
+    """Return the lowest upward-facing planar face on a body - see
+    _top_face's own docstring for why "upward-facing" alone doesn't
+    already mean "the top" on a real part (a STEP-export orientation
+    quirk can report the bottom face's normal as upward too).
+
+    Direct instruction: the outer-profile/slot-cut contour selection
+    should reference the BOTTOM edge of the part around its whole
+    perimeter, not the top - used only by _outer_loop_edges_all_bodies
+    below, not by internal-feature or tab-candidate edge selection
+    elsewhere, which stay on the true top face.
+    """
+    best_face, best_z = None, None
+    for face in body.faces:
+        try:
+            normal = face.geometry.normal
+            z = face.pointOnFace.z
+        except Exception:
+            continue
+        if normal.z > 0.9 and (best_z is None or z < best_z):
+            best_z = z
             best_face = face
     return best_face
 
@@ -41,73 +131,160 @@ def _outer_loop_edges_all_bodies(design):
     through) included, not just the true outer perimeter - so "2D Slot
     Cut" ended up also cutting internal features it should have left
     alone. A ChainSelection built from just each body's real isOuter loop
-    (the same distinction TabPlacement.py already relies on for tab
-    edges) has no such ambiguity. Combined across every body so a grouped
+    has no such ambiguity. Combined across every body so a grouped
     multi-part job's shared outer-profile operation gets every part's own
     real outer boundary, not just one.
+
+    Taken from the BOTTOM face (_bottom_face) - briefly swapped to the top
+    face alongside the feature-loop fix below (same session, same
+    hypothesis that both needed the same face), then confirmed live via
+    direct screenshot comparison that the SWAP broke this one specifically
+    - the bottom-face version was already correct (the "Closed Chain 1" /
+    tabs dialog the user confirmed as the real target was captured before
+    this swap, on the bottom face) - while the top face was what the
+    feature loops actually needed. The two selections don't share a
+    single correct face on this part; each was tuned independently
+    against its own live-confirmed result.
     """
     edges = []
     for occ in design.rootComponent.allOccurrences:
         if occ.bRepBodies.count == 0:
             continue
-        top_face = _top_face(occ.bRepBodies.item(0))
-        if top_face is None:
+        bottom_face = _bottom_face(occ.bRepBodies.item(0))
+        if bottom_face is None:
             continue
-        for loop in top_face.loops:
+        for loop in bottom_face.loops:
             if loop.isOuter:
                 edges.append([co_edge.edge for co_edge in loop.coEdges])
                 break
     return edges
 
 
-# A closed internal loop's own bounding-box long axis divided by its short
-# axis - a real reference CAM program (a manual setup for the same kind of
-# part) treats an elongated slot cutout as a genuinely different operation
-# ("Slot Cut For Features") from a roughly-circular hole or pocket
-# ("Circular Pocket", "Shape Pocket"). No single authoritative ratio
-# distinguishes "slot" from "not a slot"; 2.5 is a middle ground clear of a
-# real square/circular feature's ratio of 1 while still catching a real
-# reference slot's own measured ratio (a 23mm x 4mm rounded slot in
-# practice.ngc, ~6:1).
-_SLOT_ASPECT_RATIO = 2.5
-
-
-def _slot_loop_edges_all_bodies(design):
-    """Every body's own internal (non-outer) loops whose bounding box is
-    elongated rather than roughly circular/square - real slot-shaped
-    cutouts, not a round hole or a compact pocket. See _SLOT_ASPECT_RATIO
-    for why 2.5. Combined across every body, same reasoning as
-    _outer_loop_edges_all_bodies.
+def _is_circular_loop(edges) -> bool:
+    """True if every edge in this loop is part of a circle - a genuine
+    round hole boundary, already handled by the bore/circular-pocket
+    operations' own dedicated hole-recognition machinery. A polygon-ish
+    loop (a slot, kidney, or other pill/rounded-rectangle shape mixing
+    straight and arc segments) is not circular and needs the dedicated
+    ChainSelection-based finishing pass _internal_feature_loop_chains_all_bodies
+    feeds instead.
     """
-    slot_edges = []
+    if not edges:
+        return False
+    for edge in edges:
+        try:
+            if not isinstance(edge.geometry, adsk.core.Circle3D):
+                return False
+        except Exception:
+            return False
+    return True
+
+
+def _circle_loop_diameter_cm(edges) -> float:
+    """The real diameter of a circular loop, in cm - only defined for the
+    common case of a single full-circle edge (every circular hole this
+    project has actually seen). Returns 0.0 for anything else rather than
+    guessing, so a malformed/multi-segment "circular" loop is simply
+    treated as too small to qualify rather than silently mismeasured.
+    """
+    if len(edges) != 1:
+        return 0.0
+    try:
+        return edges[0].geometry.radius * 2
+    except Exception:
+        return 0.0
+
+
+def _big_circular_loop_edges_all_bodies(design, min_diameter_cm: float):
+    """Every body's own internal circular loop whose diameter is at least
+    min_diameter_cm, combined across every body (same reasoning as
+    _outer_loop_edges_all_bodies) - the template's own dedicated big-hole
+    operation needs a real ChainSelection built from these, for the exact
+    same reason _internal_feature_loop_chains_all_bodies needed one instead
+    of generic PocketRecognitionSelection: confirmed live that
+    PocketRecognitionSelection's areHolesIncluded hole-search finds
+    nothing for this part's real big circular through-hole even with
+    minimumHoleDiameter set correctly (isSetupModelSelected=True,
+    isToolpathValid=True, but "Generated toolpath is empty" - a genuinely
+    empty result, not a timing artifact) - it's built for a real recessed
+    pocket with a floor or a small bore-style hole, not reliably for an
+    arbitrary large full-depth-through circular cutout either. A round
+    loop under the threshold is left to the bore operation's own working
+    hole-recognition, unaffected by this function returning it or not,
+    since the bore operation doesn't call this at all - see
+    _repair_missing_selections's own is_big_hole_op branch, the only
+    caller.
+    """
+    loops = []
     for occ in design.rootComponent.allOccurrences:
         if occ.bRepBodies.count == 0:
             continue
-        top_face = _top_face(occ.bRepBodies.item(0))
-        if top_face is None:
+        bottom_face = _bottom_face(occ.bRepBodies.item(0))
+        if bottom_face is None:
             continue
-        for loop in top_face.loops:
+        for loop in bottom_face.loops:
             if loop.isOuter:
                 continue
             edges = [co_edge.edge for co_edge in loop.coEdges]
-            xs, ys = [], []
-            for edge in edges:
-                try:
-                    start = edge.pointOnEdge
-                except Exception:
-                    continue
-                xs.append(start.x)
-                ys.append(start.y)
-            if len(xs) < 2:
+            if not edges or not _is_circular_loop(edges):
                 continue
-            width = max(xs) - min(xs)
-            height = max(ys) - min(ys)
-            long_axis, short_axis = max(width, height), min(width, height)
-            if short_axis <= 1e-6:
+            if _circle_loop_diameter_cm(edges) >= min_diameter_cm:
+                loops.append(edges)
+    return loops
+
+
+def _internal_feature_loop_chains_all_bodies(design):
+    """Every body's own internal (non-outer), non-circular loop - a real
+    through-cut feature (a slot, kidney, pill, or any other non-round
+    cutout) that needs its own dedicated ChainSelection-based finishing
+    pass, combined across every body (same reasoning as
+    _outer_loop_edges_all_bodies).
+
+    This used to only collect loops whose bounding box was elongated past
+    a 2.5:1 aspect-ratio threshold (treating anything rounder as "not a
+    slot," left to generic PocketRecognitionSelection instead) - dropped
+    after a real part (a router stiffener) surfaced two genuine through-cut
+    kidney/pill features with measured aspect ratios of 2.25 and 1.28, both
+    under that threshold. Confirmed live: both fell through to generic
+    recognition, which found nothing (PocketRecognitionSelection is built
+    for a real recessed pocket with a floor, not a full-depth-through
+    cutout - the same reason the outer profile itself needed a real
+    ChainSelection instead of createNewSilhouetteSelection, see that
+    function's own docstring), leaving both operations empty and deleted
+    by DeleteToolpaths's own cleanup - the part's two real weight-reduction
+    cutouts machined as nothing at all. A round hole is excluded here on
+    purpose (see _is_circular_loop) since it already has its own dedicated
+    operation; nothing else internal needs elongation to qualify.
+
+    On the BOTTOM face (_bottom_face) - direct instruction, after the top
+    face was confirmed live to still leave real internal features
+    uncut on a real, more complex part (Anton plate - 8 internal loops,
+    not x44_stiffner's simpler 2). Matches _outer_loop_edges_all_bodies's
+    own bottom face now too, so the feature-cut and outer-profile
+    selections share one consistent face reference on this part instead
+    of two independently-tuned ones.
+    """
+    feature_chains = []
+    for occ in design.rootComponent.allOccurrences:
+        if occ.bRepBodies.count == 0:
+            continue
+        bottom_face = _bottom_face(occ.bRepBodies.item(0))
+        if bottom_face is None:
+            continue
+        for loop in bottom_face.loops:
+            if loop.isOuter:
                 continue
-            if long_axis / short_axis >= _SLOT_ASPECT_RATIO:
-                slot_edges.append(edges)
-    return slot_edges
+            co_edges = list(loop.coEdges)
+            edges = [co_edge.edge for co_edge in co_edges]
+            if not edges or _is_circular_loop(edges):
+                continue
+            # A BRepEdge's direction is global, but this selected face's
+            # BRepCoEdge records the loop direction.  Preserve that relation
+            # in ChainSelection rather than imposing one direction on every
+            # imported feature.  See docs/contour-chain-direction.md.
+            seed = co_edges[0]
+            feature_chains.append((seed.edge, is_reverted_for_loop_seed(seed.isOpposedToEdge)))
+    return feature_chains
 
 
 def _repair_missing_selections(setup) -> list[str]:
@@ -147,8 +324,8 @@ def _repair_missing_selections(setup) -> list[str]:
     # per operation. design is shared by both caches below.
     design_cache = []  # single-item list used as a mutable box (no `nonlocal` needed)
     outer_edges_cache = None
-    slot_edges_cache = None
-    feature_slot_assigned = False
+    feature_chains_cache = None
+    big_hole_edges_cache = None
 
     def _design():
         if not design_cache:
@@ -161,17 +338,28 @@ def _repair_missing_selections(setup) -> list[str]:
             )
         return design_cache[0]
 
-    for op in setup.operations:
+    def _curve_selection_state(op):
+        """The (param, value, selections) triple for this op's real
+        geometry-selection parameter, unconditionally - repair the caller
+        decides to do is up to it. Returns None only when this op's own
+        strategy has no such parameter at all.
+        """
         param_name = _SELECTION_PARAM_BY_STRATEGY.get(op.strategy)
         if param_name is None:
-            continue
+            return None
         param = op.parameters.itemByName(param_name)
         if param is None:
-            continue
+            return None
         value = param.value
         if not hasattr(value, "getCurveSelections"):
-            continue
-        selections = value.getCurveSelections()
+            return None
+        return (param, value, value.getCurveSelections())
+
+    def _needs_repair(op):
+        state = _curve_selection_state(op)
+        if state is None:
+            return None
+        _param, _value, selections = state
         # A template's saved reference can disappear completely when the
         # source body is replaced - Fusion then returns an EMPTY collection
         # (count == 0) rather than a stale entry carrying hasWarning=True.
@@ -182,29 +370,110 @@ def _repair_missing_selections(setup) -> list[str]:
         has_missing = selections.count == 0 or any(
             selections.item(i).hasWarning for i in range(selections.count)
         )
-        if not has_missing:
-            continue
-        selections.clear()
+        return state if has_missing else None
+
+    def _is_outer_profile(op):
         # A contour2d operation is either the ONE real outer-profile cut
         # (group_tabs=true in the template's own default - see
         # TabPlacement.py for the full explanation of this same signal) or
         # a finishing pass for one specific internal feature (a hole,
-        # pocket, or slot a sibling roughing operation already cleared).
-        # The real reference CAM program (a manual setup for the same kind
-        # of part) keeps these as genuinely separate operations - "Shape
-        # Through Finishing Pass", "Shape Pocket Finishing Pass", "Slot
-        # Cut For Features" are three distinct named sections, not one
-        # merged operation - so each contour2d finishing pass here keeps
-        # its own template name and gets its own repaired selection; nothing
-        # here deletes or renames them.
+        # pocket, or slot/kidney/pill a sibling roughing operation already
+        # cleared).
         group_tabs_param = op.parameters.itemByName("group_tabs")
-        is_outer_profile = (
+        return (
             op.strategy == "contour2d"
             and group_tabs_param is not None
             and str(group_tabs_param.expression).strip().lower() == "true"
         )
+
+    # A single snapshot, used for both passes below - setup.operations is
+    # Fusion's own live collection, and separate accesses to it are not
+    # guaranteed to hand back the same Python proxy object for the same
+    # underlying operation (confirmed by this file's own established
+    # pattern elsewhere of snapshotting before any mutation - see
+    # DeleteToolpaths's own toolpaths = list(setup.operations) comment).
+    # A dict keyed by these proxy objects across two separate
+    # `setup.operations` reads would silently never match; keying off one
+    # shared snapshot instead removes the question entirely.
+    ops_snapshot = list(setup.operations)
+
+    # First pass, read-only: every non-outer-profile contour2d finishing
+    # pass in the setup - known up front so the second pass can pick the
+    # single primary one to hold ALL of this part's real internal features
+    # together. Direct instruction, reinforced twice: every real internal
+    # feature belongs in ONE "Feature Slot Cut" operation, not split across
+    # several - an earlier attempt at splitting across multiple operations
+    # (round-robin, capped per operation) was reverted; it was never
+    # actually the fix for the real bug (see the chain-construction
+    # comments below), just an unrelated change made at the same time.
+    # Sorted so an operation whose template name already says "feature"
+    # (e.g. the New Router metal template's own "Slot Cut for Features")
+    # is used - the real, purpose-built operation for this - rather than
+    # whichever generic "Shape ... Finishing Pass" happens to iterate
+    # first.
+    #
+    # Do not gate contour finishing passes on _needs_repair: Fusion can
+    # report stale template selections as healthy after a fresh STEP import.
+    # This pass is rebuilt from the part's current internal features.
+    finishing_pass_ops = sorted(
+        (op for op in ops_snapshot if op.strategy == "contour2d" and not _is_outer_profile(op)),
+        key=lambda op: 0 if "feature" in op.name.lower() else 1,
+    )
+    if finishing_pass_ops:
+        design = _design()
+        feature_chains_cache = _internal_feature_loop_chains_all_bodies(design) if design else []
+    # Only the ONE primary operation is treated as "the" feature-cut
+    # operation. Do not leave the other template contour passes to their
+    # stale selections: a stale selection can look healthy to Fusion even
+    # when it resolves to unrelated geometry on the newly imported part.
+    # They are removed after this pass so the browser always presents one
+    # feature operation, rather than ambiguous duplicate finishing passes.
+    active_feature_ops = []
+    feature_op_assignments = {}  # operationId -> list of (seed edge, reversal), this op's own share
+    if finishing_pass_ops and feature_chains_cache:
+        ops_needed = 1
+        active_feature_ops = finishing_pass_ops[:ops_needed]
+        for i, chain_input in enumerate(feature_chains_cache):
+            target_op = active_feature_ops[i % len(active_feature_ops)]
+            feature_op_assignments.setdefault(target_op.operationId, []).append(chain_input)
+    feature_op_index = {op_id: True for op_id in feature_op_assignments}
+    inactive_finishing_ops = [
+        op for op in finishing_pass_ops if op.operationId not in feature_op_index
+    ]
+    inactive_finishing_ids = {op.operationId for op in inactive_finishing_ops}
+
+    for op in ops_snapshot:
+        if op.operationId in inactive_finishing_ids:
+            continue
+        is_outer = _is_outer_profile(op)
+        is_feature_op = op.operationId in feature_op_index
+        # The template's own dedicated big-hole operation (pocket2d,
+        # named for exactly this - see _set_min_hole_diameter_from_name's
+        # own comment) suffers the identical stale-selection flakiness
+        # confirmed on the contour2d finishing passes above: Fusion can
+        # report it as "not missing" after a fresh STEP import even
+        # though the reference doesn't actually apply to this part, so
+        # gating its repair on _needs_repair below would silently skip it
+        # on some runs and leave it to be deleted by the generic
+        # isToolpathValid==False cleanup - exactly what made this
+        # operation look "never used" before this fix. Always repaired
+        # outright, same treatment as the outer/feature operations.
+        is_big_hole_op = op.strategy == "pocket2d" and _is_dedicated_circular_hole_op(op.name.lower())
+        # Outer profile and feature-finishing-pass operations are always
+        # repaired outright (see finishing_pass_ops's own comment on why
+        # trusting "does this look missing" for them is flaky); everything
+        # else (pocket2d/adaptive2d roughing, and any contour2d finishing
+        # pass this part has no real feature left to give) keeps the
+        # original conditional repair.
+        repair_state = (
+            _curve_selection_state(op) if (is_outer or is_feature_op or is_big_hole_op) else _needs_repair(op)
+        )
+        if repair_state is None:
+            continue
+        param, value, selections = repair_state
+        selections.clear()
         name_lower = op.name.lower()
-        if is_outer_profile:
+        if is_outer:
             # createNewSilhouetteSelection() is NOT scoped to just the true
             # outer perimeter - confirmed live that it also picks up every
             # internal feature loop that goes all the way through the
@@ -221,37 +490,152 @@ def _repair_missing_selections(setup) -> list[str]:
             for edges in outer_edges_cache:
                 chain = selections.createNewChainSelection()
                 chain.isOpen = False
-                chain.isReverted = False
+                # Direct instruction: the chain's own direction arrow
+                # (visible in Fusion's own UI) pointed the wrong way -
+                # confirmed live as the real cause of the tool merging
+                # into small holes near the boundary: with the chain
+                # wound the wrong way relative to this operation's own
+                # 'left' compensation, the tool offsets INWARD (into the
+                # part, toward its interior features) instead of OUTWARD
+                # (away from the part, into the scrap/stock side) for an
+                # outer release cut - the raw edge-to-hole clearance
+                # (confirmed live: as little as 0.1495in against a
+                # 0.1575in tool) only stays ungouged if the tool offsets
+                # away from those interior features, not into them.
+                chain.isReverted = True
                 chain.inputGeometry = edges
+        elif is_feature_op:
+            # This operation's own share of the part's real internal
+            # feature loops (see feature_op_assignments above for how that
+            # share is decided) - each as its own ChainSelection within
+            # this operation. Built via ChainSelection, the same proven
+            # technique as the outer profile above - not the global
+            # PocketRecognitionSelection every other (genuinely
+            # pocket-with-a-floor) finishing pass still uses, which has no
+            # way to target these specific features and can't reliably
+            # find a through-cut one at all.
+            #
+            # Seeded from a single edge, not the outer profile's own
+            # full-edge-list technique (assigning every edge in the loop to
+            # inputGeometry at once) - confirmed live that technique
+            # produces visibly wrong geometry here even though it works
+            # for the outer profile. Fusion's own ChainSelection
+            # auto-completes the rest of a closed, tangent-connected loop
+            # from just one of its edges, so this doesn't depend on
+            # loop.coEdges already being in the exact order/winding
+            # Fusion's chain builder expects, the way passing every edge
+            # explicitly does.
+            for seed_edge, is_reverted in feature_op_assignments.get(op.operationId, []):
+                chain = selections.createNewChainSelection()
+                chain.isOpen = False
+                # Follow this loop's co-edge orientation. A shared BRepEdge
+                # can run either way on a face, so a hard-coded False made
+                # some imported feature chains point the wrong way.
+                chain.isReverted = is_reverted
+                chain.inputGeometry = [seed_edge]
+            # The generated setup deliberately has one consolidated feature
+            # operation. Naming it consistently makes CAM review unambiguous
+            # and prevents it being confused with the final outer slot cut.
+            op.name = "Feature Slot Cut"
+            # Direct instruction: no tabs on the feature slot cut at all -
+            # confirmed live as a real bug, not hypothetical: the
+            # template's own default (tabsPerContour=1, untouched here
+            # since ConfigureTabs only ever touches the one operation with
+            # group_tabs=true - this one has group_tabs=false) was placing
+            # a real tab where the two internal loops' own ChainSelections
+            # meet, which reads as the two separate kidney cutouts being
+            # joined into one connected shape instead of two independently
+            # closed loops. Tabs exist to hold a part to surrounding stock
+            # during an outer release cut - an internal feature loop that
+            # falls IN to scrap, not free-floating stock, has no such need.
+            tabs_per_contour = op.parameters.itemByName("tabsPerContour")
+            if tabs_per_contour is not None:
+                try:
+                    tabs_per_contour.expression = "0"
+                except Exception:
+                    pass
+            # Direct instruction, after a real part (Anton plate) needed a
+            # second feature-cut operation and its actual G-code came out
+            # cutting to Z0.025 - barely below the surface, not through the
+            # material at all - while the first operation correctly cut to
+            # Z-2.095. Root cause: the template's own raw operations don't
+            # all share the same depth convention. Whichever one became the
+            # first feature op already had bottomHeight_mode='from surface
+            # bottom' (a real through-cut, 0.02in past the true bottom
+            # face for clean breakthrough); the one repurposed as a second
+            # operation had bottomHeight_mode='from contour' instead - tied
+            # to the selected geometry's OWN Z (the top face, ~0), so it
+            # never cut deeper than the surface it started from. Forced
+            # explicitly on every feature-cut operation, not just trusted
+            # from whatever the raw template op defaulted to, so a part
+            # needing 2, 3, or more feature-cut operations always gets a
+            # real through-cut on every one of them.
+            top_height_mode = op.parameters.itemByName("topHeight_mode")
+            if top_height_mode is not None:
+                try:
+                    top_height_mode.expression = "'from stock top'"
+                except Exception:
+                    pass
+            top_height_offset = op.parameters.itemByName("topHeight_offset")
+            if top_height_offset is not None:
+                try:
+                    top_height_offset.expression = "0in"
+                except Exception:
+                    pass
+            bottom_height_mode = op.parameters.itemByName("bottomHeight_mode")
+            if bottom_height_mode is not None:
+                try:
+                    bottom_height_mode.expression = "'from surface bottom'"
+                except Exception:
+                    pass
+            bottom_height_offset = op.parameters.itemByName("bottomHeight_offset")
+            if bottom_height_offset is not None:
+                try:
+                    bottom_height_offset.expression = "(-.02) * 1in"
+                except Exception:
+                    pass
+        elif is_big_hole_op:
+            # PocketRecognitionSelection's areHolesIncluded hole-search
+            # cannot reliably find this part's real big circular
+            # through-hole - confirmed live: isSetupModelSelected=True,
+            # minimumHoleDiameter set correctly from the operation's own
+            # ">.3" name, isToolpathValid=True, but "Generated toolpath is
+            # empty" - a genuinely empty result on a truly fresh
+            # SetupGenerator run, not a timing artifact (a prior "it
+            # works" result turned out to be testing against a document
+            # that already had this operation's selection correctly set
+            # from an earlier, unrelated manual run - not a real repair by
+            # this code path at all). Same root cause already fixed for
+            # the internal kidney/pill features above:
+            # PocketRecognitionSelection is built for a real recessed
+            # pocket with a floor, not reliably for an arbitrary large
+            # full-depth-through circular cutout either. Built via
+            # ChainSelection instead, from the real circular loop edges
+            # whose diameter meets this operation's own name threshold.
+            if big_hole_edges_cache is None:
+                design = _design()
+                threshold_cm = _min_hole_diameter_cm_from_name(name_lower) or 0.0
+                big_hole_edges_cache = (
+                    _big_circular_loop_edges_all_bodies(design, threshold_cm) if design else []
+                )
+            if big_hole_edges_cache:
+                for edges in big_hole_edges_cache:
+                    chain = selections.createNewChainSelection()
+                    chain.isOpen = False
+                    chain.isReverted = False
+                    chain.inputGeometry = edges
+            else:
+                # No real loop on this part actually meets this
+                # operation's own name threshold - fall back to generic
+                # recognition (harmless: this file's own cleanup removes
+                # the operation afterward if that also finds nothing,
+                # same as any other template operation that doesn't apply
+                # to this specific part).
+                recognition = selections.createNewPocketRecognitionSelection()
+                recognition.isSetupModelSelected = True
+                recognition.areHolesIncluded = True
+                _set_min_hole_diameter_from_name(recognition, name_lower)
         else:
-            # The first non-outer-profile contour2d finishing pass that
-            # needs repair on a part with a real elongated slot cutout
-            # becomes the dedicated slot operation, renamed "Feature Slot
-            # Cut" to match the reference program's own naming - built
-            # from just that slot loop's edges via ChainSelection, the
-            # same proven technique as the outer profile above, not the
-            # global PocketRecognitionSelection every other finishing pass
-            # uses (which has no way to target one specific feature and
-            # would recognize this slot along with everything else too).
-            # Every other finishing pass keeps its own template name and
-            # the existing whole-model recognition - a real part may have
-            # no slot at all, in which case this branch never fires and
-            # nothing changes from before.
-            if op.strategy == "contour2d" and not feature_slot_assigned:
-                if slot_edges_cache is None:
-                    design = _design()
-                    slot_edges_cache = _slot_loop_edges_all_bodies(design) if design else []
-                if slot_edges_cache:
-                    for edges in slot_edges_cache:
-                        chain = selections.createNewChainSelection()
-                        chain.isOpen = False
-                        chain.isReverted = False
-                        chain.inputGeometry = edges
-                    op.name = "Feature Slot Cut"
-                    feature_slot_assigned = True
-                    value.applyCurveSelections(selections)
-                    repaired.append(op.name)
-                    continue
             recognition = selections.createNewPocketRecognitionSelection()
             # Without isSetupModelSelected, a PocketRecognitionSelection
             # has no model to search at all and silently recognizes
@@ -263,9 +647,64 @@ def _repair_missing_selections(setup) -> list[str]:
             # meant for their own dedicated operation); only turn it on for
             # the operation actually named for that.
             recognition.areHolesIncluded = "circular" in name_lower and "hole" in name_lower
+            _set_min_hole_diameter_from_name(recognition, name_lower)
         value.applyCurveSelections(selections)
         repaired.append(op.name)
+
+    for op in inactive_finishing_ops:
+        try:
+            removed_name = op.name
+            op.deleteMe()
+            repaired.append(f"removed unused contour pass: {removed_name}")
+        except Exception:
+            # The final cleanup can still remove an empty operation if
+            # Fusion declines to delete it before the next regeneration.
+            pass
     return repaired
+
+
+def _cap_other_way_feedrate(setup) -> list[str]:
+    """adaptive2d (roughing) operations carry their own otherWayFeedrate
+    parameter - Fusion's own built-in strategy default for the return pass
+    of a bothWays clearing move, set independently of the tool's own
+    programmed cutting feed (tool_feedCutting) and NOT part of this
+    template's own XML (confirmed: not present anywhere in the raw
+    .f3dhsm-template file) or the tool preset dict _conservative_router_preset
+    scales - it's applied by Fusion itself at operation-creation time.
+
+    Confirmed live as a real, direct consequence of lowering
+    _ROUTER_FEED_RATE_SCALE in templateTools.py: with tool_feedCutting
+    scaled down (80 -> 20 in/min) but otherWayFeedrate untouched at its
+    original default (60in/min, now internally reported as 1524 vs 508 in
+    Fusion's own units), every adaptive2d operation failed outright with
+    "Other Way Feedrate: The other way feedrate exceeds the primary
+    cutting feedrate" and produced zero toolpath - a real regression, not
+    hypothetical (three real operations on a real part hit this: "Shape
+    Through Hole", "Small Shape Through Hole", "Shape Pocket"). Clamping
+    otherWayFeedrate down to tool_feedCutting whenever it exceeds it
+    removes the warning outright, confirmed live; whatever real "Generated
+    toolpath is empty" state remains after that (a real thin sheet part
+    generally has nothing for a bulk-roughing pass to clear at all) is
+    already handled by this file's own existing empty-toolpath cleanup
+    below, unrelated to this fix.
+    """
+    capped = []
+    for op in setup.operations:
+        if op.strategy != "adaptive2d":
+            continue
+        other_param = op.parameters.itemByName("otherWayFeedrate")
+        cutting_param = op.parameters.itemByName("tool_feedCutting")
+        if other_param is None or cutting_param is None:
+            continue
+        try:
+            other_value = other_param.value
+            cutting_value = cutting_param.value.value
+            if other_value.value > cutting_value:
+                other_value.value = cutting_value
+                capped.append(op.name)
+        except Exception:
+            continue
+    return capped
 
 
 def _has_real_pocket_floor(bodies, tolerance=1e-4) -> bool:
@@ -397,6 +836,26 @@ def DeleteToolpaths():
     allSetups = cam.setups
     # Iterate through setups
     for setup in allSetups:
+        # Fix a real regression before anything below reads a warning or
+        # decides what to delete - see _cap_other_way_feedrate's own
+        # docstring. Must run first: the empty-toolpath cleanup loop right
+        # below reads each operation's CURRENT warning, and an
+        # otherWayFeedrate violation reports a different warning entirely
+        # ("Other Way Feedrate...", not "empty"), so an uncapped roughing
+        # operation would sail through this cleanup with zero toolpath and
+        # never get caught.
+        capped = _cap_other_way_feedrate(setup)
+        if capped:
+            app.log(f"Capped otherWayFeedrate (exceeded the scaled cutting feed) on: {capped}")
+            # A parameter mutation invalidates the operation's toolpath but
+            # does not itself queue regeneration (same real gap
+            # ConfigureTabs's own mutations hit elsewhere in this file) -
+            # without this, the empty-toolpath cleanup loop right below
+            # would read each capped operation's STALE pre-fix warning
+            # instead of its real post-fix state.
+            cam.generateAllToolpaths(True)
+            waitForGeneration(setup, waitforcontour=True)
+
         # Get toolpaths in the setup
         pastCache = 0
         while True:
@@ -415,6 +874,27 @@ def DeleteToolpaths():
             # when iterating a stable snapshot avoids the skip in the first
             # place.
             for toolpath in list(live_toolpaths):
+                # A contour2d operation (the outer profile, or a candidate
+                # feature-cut finishing pass) and a hole-named pocket2d
+                # operation (the template's own dedicated big-hole cut)
+                # both get their geometry selection unconditionally
+                # rebuilt by _repair_missing_selections below, specifically
+                # BECAUSE their stale template-carried selection can read
+                # as broken/empty before that repair ever runs. Deleting
+                # them here, on that same stale pre-repair warning, skips
+                # the repair entirely - confirmed live as the exact reason
+                # the big-hole operation kept disappearing even after its
+                # own repair logic was fixed: this loop removed it first,
+                # every time, before _repair_missing_selections ever got a
+                # chance to run. Deferred to the later isToolpathValid
+                # cleanup (after generateAllToolpaths + repair have both
+                # run), which reflects their real, post-repair state.
+                name_lower = toolpath.name.lower()
+                is_deferred = toolpath.strategy == "contour2d" or (
+                    toolpath.strategy == "pocket2d" and "hole" in name_lower
+                )
+                if is_deferred:
+                    continue
                 # Check the machining time of the toolpath
                 if (
                     "Empty" in str(toolpath.warning)
@@ -429,8 +909,8 @@ def DeleteToolpaths():
 
         # Force regeneration before trusting isToolpathValid below - not
         # just settling. Root cause of a real bug: ConfigureTabs() mutates
-        # tabPositions/group_tabs/tabsPerContour on the contour/tab
-        # operation, which invalidates its toolpath, but nothing had
+        # group_tabs/tabsPerContour/noTabZones on the contour/tab operation,
+        # which invalidates its toolpath, but nothing had
         # explicitly asked Fusion to regenerate it since. Raising
         # waitForGeneration's quiet-check threshold didn't help, because
         # there was nothing actually generating to wait out - the operation
@@ -438,9 +918,9 @@ def DeleteToolpaths():
         # eventual isToolpathValid==False check below deleted a real,
         # untouched operation. Confirmed directly: a real job's log showed
         # `2D Contour2 (9), strategy=contour2d, isToolpathValid=False` at
-        # the exact deletion check, immediately after ConfigureTabs's own
-        # "tabPositions set to 4 point(s)" log line for that same operation
-        # - invalidated by the tab mutation, never regenerated afterward.
+        # the exact deletion check, immediately after ConfigureTabs changed
+        # that operation's tab configuration - invalidated by the mutation,
+        # never regenerated afterward.
         # This file already had a "regenerate everything, then wait" call,
         # but only at the very end, after the deletion decisions below had
         # already been made against stale data - too late to matter.
@@ -499,6 +979,28 @@ def DeleteToolpaths():
                 f"Toolpath: {toolpath.name}, strategy={toolpath.strategy}, "
                 f"isToolpathValid={toolpath.isToolpathValid}, Warning: {toolpath.warning}"
             )
+            # No hole-name exemption here, unlike the has_pocket_floor
+            # check further below - direct correction after this exemption
+            # was confirmed live to be wrong on a second real part
+            # (Anton plate, 1/16in aluminum): that part has no real hole
+            # meeting the big-hole operation's own diameter threshold at
+            # all, so _repair_missing_selections's own ChainSelection
+            # fallback correctly found nothing and fell back to generic
+            # recognition, which also found nothing - a genuinely empty
+            # result, not a timing artifact, since this check runs AFTER
+            # _repair_missing_selections's own regenerate+wait has already
+            # settled. Exempting it here unconditionally kept a truly
+            # inapplicable operation alive with zero toolpath, which then
+            # made cam.postProcess() fail outright with "Initialization
+            # fails" and aborted the whole job's export - a second,
+            # different real bug behind the same symptom the original
+            # exemption was written for. The ORIGINAL problem this
+            # exemption was meant to solve (the big-hole op being deleted
+            # here on a real part that DOES have a matching hole) is
+            # already fixed by is_deferred in the earlier empty-cleanup
+            # loop above, which defers hole-named pocket2d operations
+            # until after repair - this later check reflects real,
+            # post-repair state and should be trusted as such.
             if "empty" in str(toolpath.warning).lower():
                 toolpath.deleteMe()
             elif toolpath.name == "Suppress":
@@ -512,7 +1014,11 @@ def DeleteToolpaths():
                 # above, so non-Drill operations have actually finished
                 # generating by this point.
                 toolpath.deleteMe()
-            elif toolpath.strategy in _POCKET_STRATEGIES and not has_pocket_floor:
+            elif (
+                toolpath.strategy in _POCKET_STRATEGIES
+                and not has_pocket_floor
+                and not _is_dedicated_circular_hole_op(toolpath.name.lower())
+            ):
                 # Confirmed on a real job: this template's Pocket operation
                 # is configured to cut the full stock depth within
                 # ~the model's own footprint - correct for a part with a
@@ -523,6 +1029,18 @@ def DeleteToolpaths():
                 # just successfully doing the wrong thing). See
                 # _has_real_pocket_floor's own docstring for how this was
                 # confirmed and why boundaryMode isn't the actual fix.
+                #
+                # "hole" in the name is excluded on purpose: the template's
+                # own ">.3 Circular Through Hole" is a pocket2d strategy
+                # too (a bigger hole needs a real helical/pocket toolpath,
+                # not a single bore plunge) but is a genuine through-hole
+                # recognition operation, not a recessed pocket - direct
+                # instruction confirmed this operation existed in the
+                # template but was "never used" because this blanket
+                # no-pocket-floor check deleted it outright before its own
+                # hole-recognition ever got a chance to run. A real
+                # "Pocket" operation (no "hole" in its name) still has no
+                # such exemption and is still removed exactly as before.
                 toolpath.deleteMe()
             elif toolpath.isToolpathValid == False:
                 # Direct instruction: an operation the template included

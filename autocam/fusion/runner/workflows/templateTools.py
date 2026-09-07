@@ -9,6 +9,28 @@ from typing import Any, Callable, Iterable, Optional, Tuple
 _TEMPLATE_NS = "http://www.hsmworks.com/namespace/hsmworks/document/template"
 _NUM_RE = re.compile(r"[-+]?(?:\d+\.\d+|\d+|\.\d+)(?:[eE][-+]?\d+)?")
 
+# Keep newly generated Fusion Router toolpaths conservative while the team
+# validates the templates on the physical machine. This applies to every
+# cutting motion, including the through-slot operation, without changing
+# spindle speed or the reviewed source values in the tool library.
+#
+# Started at 0.5 (half of the tool library's own programmed feeds). Direct
+# feedback after watching a real generated job run: still visibly too fast
+# on the slot/contour cutting motion even at that reduction. Dropped to
+# 0.25 (quarter of the original) - still a real, working feed (the tool
+# library's own baseline, e.g. 80 in/min main cutting feed -> 20 in/min),
+# not a token gesture.
+_ROUTER_FEED_RATE_SCALE = 0.25
+_FEED_PRESET_KEYS = (
+    "v_f",
+    "v_f_leadIn",
+    "v_f_leadOut",
+    "v_f_transition",
+    "v_f_plunge",
+    "v_f_ramp",
+    "v_f_retract",
+)
+
 # A real "Bore" operation exported directly from Fusion (Setup > 2D > Bore,
 # right-click > Save as Template) - see templates/Bore.f3dhsm-template's own
 # history for why this exists as a separate file instead of guessed inline
@@ -76,6 +98,16 @@ def _parse_number(value: Any) -> Optional[float]:
         return float(match.group(0))
     except Exception:
         return None
+
+
+def _conservative_router_preset(preset: dict) -> dict:
+    """Copy a tool preset with every programmed feed reduced for the router."""
+    scaled = copy.deepcopy(preset)
+    for key in _FEED_PRESET_KEYS:
+        value = _parse_number(scaled.get(key))
+        if value is not None:
+            scaled[key] = value * _ROUTER_FEED_RATE_SCALE
+    return scaled
 
 
 def _normalize_desc(value: str) -> str:
@@ -461,7 +493,7 @@ def _apply_tool_to_elem(
     tool_library_version: Optional[Any],
     material_name: Optional[str],
 ) -> None:
-    preset = _choose_preset(tool, material_name)
+    preset = _conservative_router_preset(_choose_preset(tool, material_name))
 
     tool_guid = tool.get("guid")
     if tool_guid:

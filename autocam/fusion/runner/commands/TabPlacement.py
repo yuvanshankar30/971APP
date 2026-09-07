@@ -7,27 +7,19 @@
 # a separate, not-yet-started piece of work).
 #
 # Fusion's own tab parameters (tabsPerContour, tabWidth, tabHeight,
-# tabPositioning, tabPositions, group_tabs - see the contour2d template's
-# defaults) aren't part of the typed adsk.cam API surface at all (confirmed:
-# no hits anywhere in the installed API for "tabPositioning") - they're
-# generic, string-keyed CAM parameters Fusion defines internally per
+# tabPositioning, tabPositions, noTabZones, group_tabs - see the contour2d
+# template's defaults) aren't part of the typed adsk.cam API surface at all
+# (confirmed: no hits anywhere in the installed API for "tabPositioning") -
+# they're generic, string-keyed CAM parameters Fusion defines internally per
 # strategy, with no public documentation of valid enum values.
 #
-# A first attempt guessed at tabPositioning's enum value for "manual points"
-# mode and got it wrong (see git history) - a real Fusion export of a 2D
-# Contour operation with manually-placed tabs
-# (templates/reference-tab-positions.f3dhsm-template, description="2D Slot
-# Cut" - reference only, never loaded at runtime, same role
-# _upstream/ plays elsewhere in this repo) showed the real mechanism is
-# different from what was guessed: tabPositioning stays 'distance' even
-# with manual points -
-# it's tabPositions itself that's the actual toggle/data (shown as the
-# literal `true` in the exported template, since a template can't preserve
-# a live geometry/point reference tied to one specific part - contours=true
-# shows the same flattening for the operation's own geometry selection).
-# The reference also had group_tabs=true (default is false) alongside it.
-# So: leave tabPositioning alone, and set tabPositions to the real computed
-# points directly - no enum guessing needed here.
+# Fusion's UI has a separate Manual Tabs field (`tabPositions`) alongside
+# its automatic distance/count modes. Automatic count placement can place a
+# tab on an unsuitable portion of an otherwise valid contour, so release
+# cuts use Manual Tabs only: `tabsPerContour=0` disables automatic tabs and
+# this module supplies the selected outer edges directly. A live Fusion
+# validation with that isolating configuration placed every tab on a straight
+# G1 run, never on a corner arc.
 #
 # WHICH operation actually gets tabs: only the one the template itself
 # already designates via group_tabs=true in its own default state - a real
@@ -79,6 +71,11 @@ TARGET_TAB_SPACING_IN = 6.0
 # plus clearance on each side - an edge shorter than this can't take one
 # safely regardless of how the count/spacing math comes out.
 MIN_TAB_EDGE_LENGTH_IN = 0.5
+# Every release tab has the same operator-specified dimensions. Candidate
+# edges are selected directly, so Fusion cannot distribute a tab into a
+# corner between them.
+TAB_WIDTH_IN = 0.6
+TAB_HEIGHT_IN = 0.15
 
 
 def _is_straight_edge(edge) -> bool:
@@ -96,19 +93,27 @@ def _edge_length(edge) -> float:
 
 
 def _find_top_face(body):
-    """Largest planar, upward-facing face on a body - same "top face"
-    concept AutoArrange.py/SetupGenerator.py already use, kept independent
-    since this module has no import relationship with either.
+    """Return the highest upward-facing planar face on a body.
+
+    STEP imports can report opposing planar faces as upward-facing. Height
+    avoids the equal-area tie and unstable Fusion face iteration order.
+
+    Direct instruction: tab candidate/exclusion edges should reference the
+    upper edge of the part (unlike the outer-profile/feature-cut contour
+    selections themselves, which reference the bottom edge - see
+    DeleteToolpaths.py's _bottom_face) - tabs and the contour they sit on
+    are deliberately different edge loops here, per direct correction.
     """
     best_face = None
-    best_area = 0.0
+    best_z = None
     for face in body.faces:
         try:
             normal = face.geometry.normal
+            z = face.pointOnFace.z
         except Exception:
             continue
-        if normal.z > 0.9 and face.area > best_area:
-            best_area = face.area
+        if normal.z > 0.9 and (best_z is None or z > best_z):
+            best_z = z
             best_face = face
     return best_face
 
@@ -221,17 +226,15 @@ def _has_real_stock_backing(edge, body_center, stock_bounds, offset_cm) -> bool:
     return x_low <= point.x <= x_high and y_low <= point.y <= y_high
 
 
-def _distinct_straight_line_count(body, stock_bounds=None) -> int:
-    """How many genuinely different straight sides body's outer boundary
-    has, after collapsing multi-segment sides (a fillet/tangent
-    transition point splitting what's really one line) and filtering out
-    the same too-short/no-stock-backing edges select_tab_edges itself
-    would reject - used only to decide the target tab count (see
-    _min_tabs_for_body), not to place tabs directly.
+def _good_straight_edges(body, stock_bounds=None):
+    """Every straight, long-enough, stock-backed edge on body's own outer
+    boundary - the full set of genuinely usable tab locations (not capped
+    to any count). ``select_tab_edges`` below applies the same filter before
+    choosing a geometry-scaled, well-distributed manual-tab set.
     """
     top_face = _find_top_face(body)
     if top_face is None:
-        return 0
+        return []
     min_length_cm = MIN_TAB_EDGE_LENGTH_IN * 2.54
     stock_check_cm = STOCK_BACKING_CHECK_IN * 2.54
     body_center = adsk.core.Point3D.create(
@@ -239,13 +242,23 @@ def _distinct_straight_line_count(body, stock_bounds=None) -> int:
         (body.boundingBox.minPoint.y + body.boundingBox.maxPoint.y) / 2,
         0,
     )
-    straight_edges = [
+    return [
         e
         for e in _outer_boundary_edges(top_face)
         if _is_straight_edge(e)
         and _edge_length(e) >= min_length_cm
         and _has_real_stock_backing(e, body_center, stock_bounds, stock_check_cm)
     ]
+
+
+def _distinct_straight_line_count(body, stock_bounds=None) -> int:
+    """How many genuinely different straight sides body's outer boundary
+    has, after collapsing multi-segment sides (a fillet/tangent
+    transition point splitting what's really one line) - used only to
+    decide the target tab count (see _min_tabs_for_body), not to place
+    tabs directly.
+    """
+    straight_edges = _good_straight_edges(body, stock_bounds)
     lines: list[list] = []
     for edge in straight_edges:
         for line in lines:
@@ -279,30 +292,17 @@ def select_tab_edges(body, max_tabs: int = DEFAULT_MAX_TABS, stock_bounds=None):
     - direct instruction, not a preference to relax if a part is mostly
     rounded, small, or sitting close to the plate's own edge.
 
+    Used by ConfigureTabs as the actual Manual Tabs geometry. Each selected
+    edge is an explicit, safe release-tab location; Fusion's automatic
+    placement is disabled rather than allowed to place more tabs elsewhere.
+
     One tab per distinct line first (so at least 2 different sides get a
     tab whenever the part actually has that many straight sides), then
     fills any remaining budget from additional segments of the longest
     line(s) if the part doesn't have enough distinct straight lines to
     reach max_tabs on its own.
     """
-    top_face = _find_top_face(body)
-    if top_face is None:
-        return []
-    min_length_cm = MIN_TAB_EDGE_LENGTH_IN * 2.54
-    stock_check_cm = STOCK_BACKING_CHECK_IN * 2.54
-    body_center = adsk.core.Point3D.create(
-        (body.boundingBox.minPoint.x + body.boundingBox.maxPoint.x) / 2,
-        (body.boundingBox.minPoint.y + body.boundingBox.maxPoint.y) / 2,
-        0,
-    )
-    straight_edges = [
-        e
-        for e in _outer_boundary_edges(top_face)
-        if _is_straight_edge(e)
-        and _edge_length(e) >= min_length_cm
-        and _has_real_stock_backing(e, body_center, stock_bounds, stock_check_cm)
-    ]
-    straight_edges.sort(key=_edge_length, reverse=True)
+    straight_edges = sorted(_good_straight_edges(body, stock_bounds), key=_edge_length, reverse=True)
 
     lines: list[list] = []
     for edge in straight_edges:
@@ -326,34 +326,55 @@ def select_tab_edges(body, max_tabs: int = DEFAULT_MAX_TABS, stock_bounds=None):
     return selected
 
 
-def _apply_tab_positions(app, operation, points) -> bool:
-    """Sets tabPositions to the real computed points and group_tabs=true,
-    per a real Fusion export showing this is the actual mechanism (see this
-    module's header comment) - tabPositioning itself is left untouched.
-    Returns True only if tabPositions was actually accepted - the caller
-    falls back to safe automatic placement otherwise, and this always logs
-    which outcome happened so it's visible in Fusion's Text Commands
-    console instead of failing silently.
+def _apply_manual_tabs(app, operation, tab_edges) -> bool:
+    """Disable automatic tabs and populate Fusion's Manual Tabs field.
+
+    ``tabPositions`` receives vetted release edges, not synthesized points.
+    This deliberately does not configure automatic positioning or no-tab
+    zones: tabs are exclusively the explicit manual selections.
     """
+    width_param = operation.parameters.itemByName("tabWidth")
+    if width_param is not None:
+        try:
+            width_param.expression = f"{TAB_WIDTH_IN}in"
+        except Exception as e:
+            app.log(f"TabPlacement: failed to set tabWidth: {e}")
+
+    height_param = operation.parameters.itemByName("tabHeight")
+    if height_param is not None:
+        try:
+            height_param.expression = f"{TAB_HEIGHT_IN}in"
+        except Exception as e:
+            app.log(f"TabPlacement: failed to set tabHeight: {e}")
+
+    tabs_per_contour = operation.parameters.itemByName("tabsPerContour")
+    if tabs_per_contour is None:
+        app.log("TabPlacement: this operation has no tabsPerContour parameter.")
+        return False
+    try:
+        tabs_per_contour.expression = "0"
+    except Exception as e:
+        app.log(f"TabPlacement: failed to disable automatic tabs: {e}")
+        return False
+
     positions_param = operation.parameters.itemByName("tabPositions")
     if positions_param is None:
-        app.log("TabPlacement: this operation has no tabPositions parameter - leaving tabs at whatever the template default is.")
+        app.log("TabPlacement: this operation has no tabPositions (Manual Tabs) parameter.")
         return False
-
-    group_tabs_param = operation.parameters.itemByName("group_tabs")
-    if group_tabs_param is not None:
-        try:
-            group_tabs_param.expression = "true"
-        except Exception as e:
-            app.log(f"TabPlacement: failed to set group_tabs: {e}")
-
+    if not tab_edges:
+        app.log("TabPlacement: no candidate edges to assign to Manual Tabs.")
+        return False
     try:
-        positions_param.value.value = list(points)
+        positions_param.value.value = list(tab_edges)
     except Exception as e:
-        app.log(f"TabPlacement: setting tabPositions to {len(points)} point(s) failed: {e}")
+        app.log(f"TabPlacement: setting Manual Tabs to {len(tab_edges)} edge(s) failed: {e}")
         return False
 
-    app.log(f"TabPlacement: tabPositions set to {len(points)} point(s)")
+    app.log(
+        f"TabPlacement: automatic tabs disabled; Manual Tabs set to "
+        f"{len(tab_edges)} edge(s), {TAB_WIDTH_IN}in wide x "
+        f"{TAB_HEIGHT_IN}in tall"
+    )
     return True
 
 
@@ -451,12 +472,11 @@ def ConfigureTabs(min_tabs: int = DEFAULT_MIN_TABS, max_tabs: int = DEFAULT_MAX_
             # ONE body (the right approach for a part-specific finishing
             # pass, the wrong one for this), which always failed to match
             # and silently left this operation with NO tabs at all on every
-            # grouped job. Fixed by computing candidate edges from EVERY
-            # body on the plate and combining them, single-part or grouped -
-            # for a single-body plate this is exactly the old single_body
-            # behavior (the loop below runs once).
+            # grouped job. Fixed by computing candidate/exclusion edges from
+            # EVERY body on the plate and combining them, single-part or
+            # grouped - for a single-body plate this is exactly the old
+            # single_body behavior (the loop below runs once).
             all_candidates = []
-            total_perimeter_in = 0.0
             for body in bodies:
                 perimeter_in = _outer_perimeter_in(body)
                 body_min_tabs = _min_tabs_for_body(body, min_tabs, stock_bounds)
@@ -470,46 +490,14 @@ def ConfigureTabs(min_tabs: int = DEFAULT_MIN_TABS, max_tabs: int = DEFAULT_MAX_
                         f"{target_tabs} target, perimeter {perimeter_in:.1f}in) "
                         "- using what's available rather than placing a tab "
                         "on a rounded or too-short edge."
-                    )
+                )
                 all_candidates.extend(body_candidates)
-                total_perimeter_in += perimeter_in
             candidate_edges = all_candidates
-            perimeter_in = total_perimeter_in
 
             if not candidate_edges:
                 app.log(f"TabPlacement: '{op.name}' - no usable tab edges found on any body, skipping.")
                 continue
 
-            # A real run showed setting tabPositions to bare adsk.core.Point3D
-            # coordinates fails: "InternalValidationError:
-            # Xl::Utils::findObjectPath(item.get(), logicalPath)" - Fusion's
-            # generic parameter system resolves an object's "logical path"
-            # within the document, which a synthesized coordinate has no way
-            # to provide (it isn't a real document entity). The candidate
-            # edges themselves ARE real document entities with a resolvable
-            # path, so passing those directly instead of computed midpoints
-            # is what's used here - confirmed working against real jobs.
-            points = candidate_edges
-
-            tabs_per_contour = op.parameters.itemByName("tabsPerContour")
-            if tabs_per_contour is not None:
-                try:
-                    tabs_per_contour.expression = str(len(candidate_edges))
-                except Exception as e:
-                    app.log(f"TabPlacement: failed to set tabsPerContour: {e}")
-
-            applied = _apply_tab_positions(app, op, points)
+            applied = _apply_manual_tabs(app, op, candidate_edges)
             if not applied:
-                # Safe fallback: still automatic/distance-based, but sized
-                # so the target tab count is at least roughly achieved
-                # instead of leaving the template's default (tool_diameter
-                # * 8, usually far more than a few tabs' worth of spacing on
-                # a real plate-sized contour). Perimeter/edge count are the
-                # combined total across every body this operation cuts.
-                tab_distance = op.parameters.itemByName("tabDistance")
-                if tab_distance is not None and perimeter_in and len(candidate_edges) > 0:
-                    try:
-                        spacing_in = perimeter_in / len(candidate_edges)
-                        tab_distance.expression = f"{spacing_in:.4f} in"
-                    except Exception as e:
-                        app.log(f"TabPlacement: failed to set fallback tabDistance: {e}")
+                app.log(f"TabPlacement: '{op.name}' could not configure Manual Tabs.")

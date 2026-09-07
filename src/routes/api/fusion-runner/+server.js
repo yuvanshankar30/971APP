@@ -219,6 +219,14 @@ export async function POST({ request, url }) {
           gcode_file_name: null,
           fusion_nc_files: ncFiles,
           stats: body?.stats || null,
+          // The Runner's own coverage self-check (camPlate.py) compares the
+          // posted program against the part's CAD geometry and reports any
+          // internal feature left with no toolpath over it, or a program that
+          // never cuts through the material. A completed job can still carry
+          // these - the G-code is real - so they are recorded rather than
+          // failing the job, and are the thing to read instead of opening the
+          // simulation to check a cutout by eye.
+          warnings: Array.isArray(body?.warnings) && body.warnings.length ? body.warnings : null,
           progress: 100,
           progress_message: 'Done'
         })
