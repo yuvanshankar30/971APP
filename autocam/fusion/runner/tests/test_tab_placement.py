@@ -174,10 +174,11 @@ TabPlacement.adsk.core.Line3D = _Line3D
 
 
 class TabDistributionTests(unittest.TestCase):
-    """Direct instruction: every distinct straight side of a part gets at
-    least one tab, even a side with no real stock behind it - stock
-    backing should only decide WHICH edge to prefer within a side, never
-    whether a whole side gets zero tabs.
+    """A side with NO real stock ANYWHERE behind it cannot physically hold
+    a manual tab - confirmed live, not merely a theory - so it is excluded
+    outright rather than merely deprioritized. Its share of the tab budget
+    goes to the sides that DO have real stock instead, including a second
+    tab on the same valid side when there's no fresh side to give it to.
     """
 
     def _rectangle_body_and_edges(self):
@@ -192,16 +193,37 @@ class TabDistributionTests(unittest.TestCase):
         body = _body([face], (0, 0), (10, 5))
         return body, edges
 
-    def test_a_side_with_no_stock_behind_it_still_gets_a_tab(self):
+    def test_a_side_with_no_stock_anywhere_behind_it_is_excluded_and_replaced(self):
+        # Confirmed live: a side lying exactly on the plate's own
+        # machining boundary (or a coordinate axis) has zero real material
+        # anywhere along its outward side, and Fusion silently drops any
+        # manual tab requested there. Direct instruction: skip that side
+        # and add the tab it would have gotten onto a valid side instead -
+        # more than one tab on that side if that's what it takes, never on
+        # a curved edge or one too short to hold it.
         body, edges = self._rectangle_body_and_edges()
-        # Stock stops at x=9 - the right side (x=10) has nothing real
-        # behind it, the other three sides do.
+        # Stock stops at x=9 - EVERY point along the right side (x=10) has
+        # nothing real behind it, not just the one checked; the other
+        # three sides are fully backed.
         stock_bounds = (-1, 9, -1, 6)
 
         selected = TabPlacement.select_tab_edges(body, max_tabs=4, stock_bounds=stock_bounds)
 
         self.assertEqual(len(selected), 4)
-        self.assertIn(edges["right"], selected)
+        selected_edges = [edge for edge, _fraction in selected]
+        self.assertNotIn(edges["right"], selected_edges, "an unbacked side must not receive a tab")
+        for side in ("bottom", "top", "left"):
+            self.assertIn(edges[side], selected_edges)
+        # The 4th tab the excluded side would have gotten lands on one of
+        # the valid sides instead, so a valid edge appears more than once -
+        # this is what "add more than one tab for parts like this" means.
+        distinct_ids = {id(e) for e in selected_edges}
+        self.assertEqual(len(selected_edges), len(distinct_ids) + 1)
+        # Never place two tabs at the same spot on that doubled-up edge.
+        doubled = [e for e in distinct_ids if sum(1 for edge in selected_edges if id(edge) == e) == 2]
+        self.assertEqual(len(doubled), 1)
+        fractions = sorted(f for e, f in selected if id(e) == doubled[0])
+        self.assertEqual(fractions, [1 / 3, 2 / 3])
 
     def test_a_many_sided_part_is_capped_and_keeps_its_longest_sides(self):
         """A real teardrop bracket a few inches across picked up a tab on
@@ -227,22 +249,25 @@ class TabDistributionTests(unittest.TestCase):
         selected = TabPlacement.select_tab_edges(body, max_tabs=4, stock_bounds=None)
 
         self.assertEqual(len(selected), 4)
-        selected_ids = {id(e) for e in selected}
+        selected_ids = {id(e) for e, _fraction in selected}
         # The four longest distinct sides win; no short facet gets a tab.
         for expected in (long_a, long_b, mid_a, mid_b):
             self.assertIn(id(expected), selected_ids)
         for facet in facets:
             self.assertNotIn(id(facet), selected_ids)
 
-    def test_a_side_without_stock_still_wins_a_tab_when_it_is_long_enough(self):
-        # The no-stock-backing improvement must survive the cap: backing
-        # decides WHICH segment of a side, never whether a long side is
-        # eligible at all.
+    def test_backing_still_only_picks_the_segment_within_a_backed_side(self):
+        # A side that HAS real stock somewhere (unlike the excluded-side
+        # test above) still uses backing only to prefer which segment of
+        # that side to use - unchanged from before this fix.
         body, edges = self._rectangle_body_and_edges()
-        selected = TabPlacement.select_tab_edges(body, max_tabs=4, stock_bounds=(-1, 9, -1, 6))
-        self.assertIn(edges["right"], selected)
+        # Stock covers the whole right side here (unlike the excluded-side
+        # test), so it remains a normal, eligible, single-tab side.
+        selected = TabPlacement.select_tab_edges(body, max_tabs=4, stock_bounds=(-1, 11, -1, 6))
+        selected_edges = [edge for edge, _fraction in selected]
+        self.assertIn(edges["right"], selected_edges)
 
-    def test_stock_backed_edges_are_preferred_when_backing_is_missing_is_not_forced(self):
+    def test_every_side_backed_gets_exactly_one_tab_each(self):
         body, edges = self._rectangle_body_and_edges()
         # Every side has real stock behind it here.
         stock_bounds = (-1, 11, -1, 6)
@@ -250,7 +275,11 @@ class TabDistributionTests(unittest.TestCase):
         selected = TabPlacement.select_tab_edges(body, max_tabs=4, stock_bounds=stock_bounds)
 
         self.assertEqual(len(selected), 4)
-        self.assertEqual(set(id(e) for e in selected), set(id(e) for e in edges.values()))
+        self.assertEqual(
+            set(id(e) for e, _fraction in selected), set(id(e) for e in edges.values())
+        )
+        # No redistribution needed - one edge, one tab, each at its midpoint.
+        self.assertTrue(all(fraction == 0.5 for _edge, fraction in selected))
 
 
 class MinimumSideLengthTests(unittest.TestCase):
@@ -281,12 +310,21 @@ class MinimumSideLengthTests(unittest.TestCase):
 
         selected = TabPlacement.select_tab_edges(body, max_tabs=4, stock_bounds=None)
 
-        self.assertNotIn(id(stub), {id(e) for e in selected})
-        self.assertEqual({id(long_a), id(long_b)}, {id(e) for e in selected})
+        selected_edges = [edge for edge, _fraction in selected]
+        self.assertNotIn(stub, selected_edges)
+        # Only 2 real sides exist (the stub is too short to count), so the
+        # remaining 2 of the 4 requested tabs redistribute onto long_a and
+        # long_b rather than going unused - each has room for a second one
+        # at this length.
+        self.assertEqual(len(selected), 4)
+        self.assertEqual(set(id(e) for e in selected_edges), {id(long_a), id(long_b)})
+        self.assertEqual(selected_edges.count(long_a), 2)
+        self.assertEqual(selected_edges.count(long_b), 2)
 
     def test_filling_the_budget_cannot_re_add_a_short_side(self):
-        # The budget-filling pass runs when there are fewer sides than
-        # tabs; it must respect the same threshold or it would undo it.
+        # The redistribution pass runs when there are fewer usable sides
+        # than tabs asked for; it must never fall back to a side too short
+        # to hold one, even to make up the count.
         cm = TabPlacement.MIN_TAB_SIDE_LENGTH_IN * 2.54
         long_a = _edge(0, 0, 0, cm * 3)
         stubs = [_edge(0, 0, cm * 0.4, 0), _edge(cm, cm, cm * 1.4, cm)]
@@ -294,7 +332,14 @@ class MinimumSideLengthTests(unittest.TestCase):
 
         selected = TabPlacement.select_tab_edges(body, max_tabs=8, stock_bounds=None)
 
-        self.assertEqual([id(e) for e in selected], [id(long_a)])
+        selected_edges = [edge for edge, _fraction in selected]
+        # Every tab lands on long_a - the only real side - never on a stub,
+        # and it stops once long_a genuinely runs out of room rather than
+        # crowding all the way to max_tabs=8.
+        self.assertTrue(all(edge is long_a for edge in selected_edges))
+        self.assertGreater(len(selected), 1, "a lone valid side should still pick up more than one tab")
+        self.assertLess(len(selected), 8, "must not crowd more tabs onto a side than it has room for")
+        self.assertEqual(sorted(f for _e, f in selected), TabPlacement._tab_fractions(len(selected)))
 
     def test_a_part_with_no_qualifying_side_is_still_held(self):
         # An unheld part coming loose mid-cut is worse than a tight tab, so
@@ -385,9 +430,9 @@ class ManualTabPointTests(unittest.TestCase):
         face, _ = self._face()
         root_component = self._root_component()
         app = types.SimpleNamespace(log=lambda _message: None)
-        edges = [_edge(0, 0, 4, 0), _edge(2, 2, 2, 8)]
+        edge_fractions = [(_edge(0, 0, 4, 0), 0.5), (_edge(2, 2, 2, 8), 0.5)]
 
-        points = TabPlacement._manual_tab_points(app, root_component, face, edges)
+        points = TabPlacement._manual_tab_points(app, root_component, face, edge_fractions)
 
         self.assertEqual(len(points), 2)
         self.assertEqual([(p.point.x, p.point.y, p.point.z) for p in points], [(2, 0, 0.0), (2, 5, 0.0)])
@@ -404,11 +449,24 @@ class ManualTabPointTests(unittest.TestCase):
         edge.nativeObject = _edge(2, 0, 6, 0)
         app = types.SimpleNamespace(log=lambda _message: None)
 
-        point = TabPlacement._manual_tab_points(app, root_component, face, [edge])[0]
+        point = TabPlacement._manual_tab_points(app, root_component, face, [(edge, 0.5)])[0]
 
         selected_face, _ = root_component.sketches.created[0]
         self.assertIs(selected_face, face)
         self.assertEqual((point.point.x, point.point.y, point.point.z), (202, 0, 0.0))
+
+    def test_a_non_midpoint_fraction_lands_off_center(self):
+        # This is the whole point of carrying a fraction at all - a second
+        # tab sharing a side with the first must land at a genuinely
+        # different, non-overlapping spot along it.
+        face, _ = self._face()
+        root_component = self._root_component()
+        app = types.SimpleNamespace(log=lambda _message: None)
+        edge = _edge(0, 0, 12, 0)
+
+        points = TabPlacement._manual_tab_points(app, root_component, face, [(edge, 1 / 3), (edge, 2 / 3)])
+
+        self.assertEqual([(p.point.x, p.point.y, p.point.z) for p in points], [(4, 0, 0.0), (8, 0, 0.0)])
 
 
 class TabReadBackTests(unittest.TestCase):

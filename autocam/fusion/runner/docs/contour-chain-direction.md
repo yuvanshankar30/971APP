@@ -293,6 +293,13 @@ their chain. Three placement rules apply, in order:
    inconsistency - the previous fixed 0.5in floor was *shorter* than the
    0.6in tab it was supposed to fit, so an edge could qualify for a tab it
    could not physically contain.
+4. **No real stock, no tab - redistribute instead.** A side with **zero**
+   real stock anywhere behind it (see the next section) is excluded from
+   the one-per-side pass entirely, and its share of the tab count goes onto
+   the sides that DO have real stock - a second (or third) tab on the same
+   valid side if there's no fresh side to give it to, spread evenly along
+   that side's own interior span (never at its corners, where lead-in/
+   lead-out and the adjacent side's own tab live).
 
 ### Tab points must lie on the contour being cut
 
@@ -321,6 +328,38 @@ not. Measured on a real job's own operation:
 and for the same body, top-face outer loop `478,480..492` had **0 of 8**
 edges on the contour while bottom-face outer loop `741..748` had **8 of 8**.
 The bottom face's outer loop *is* the contour, exactly.
+
+### A side with no real stock anywhere behind it cannot hold a tab - exclude it, don't just deprioritize it
+
+This is a real reversal from an earlier version of this file, made on
+direct, live-observed evidence: **a side lying exactly on the plate's own
+machining boundary, or on a coordinate axis with zero material past it, has
+Fusion silently drop any manual tab point requested there** - not "a
+weaker tab," nothing at all, no warning, regardless of how carefully the
+point is placed. The earlier design treated stock backing as a same-side
+preference only (`is_backed` picked which segment of a side to use, never
+whether the side got a tab at all), on the theory that an unbacked tab
+still helped hold the part. That theory does not survive contact with what
+Fusion actually does with such a request.
+
+`select_tab_edges` now checks every candidate side for real backing
+*anywhere along it* (`line_is_backed`, not just at one sampled point) and
+drops a side outright if none exists, rather than keeping it in the
+one-per-side pool as a last resort. The tab count that side would have used
+is **redistributed** onto the sides that do have real stock - a second (or
+even third) tab on the same valid side, at evenly spread interior
+fractions (`_tab_fractions`, e.g. 1/3 and 2/3 for two tabs on one side, away
+from the corners), when there's no fresh side left to give it to. A line
+only gains an extra tab when it genuinely has the spare length for one at
+the same 2x-tab-width spacing every tab already requires - this can stop
+short of the requested count on a small part with no more room, which is
+correct: a crowded tab is worse than one fewer.
+
+`(edge, fraction)` is therefore the real return type of `select_tab_edges`
+and the real input type of `_manual_tab_points` - not bare edges. `fraction`
+is 0.5 for the ordinary single-tab-per-side case (so this is a strict
+superset of the old behavior, not a rewrite of it) and something else only
+when more than one tab shares an edge.
 
 ### Manual-only mode must use parameter values, not expressions
 
@@ -356,14 +395,16 @@ forcing the default dimensions onto a part that cannot contain them.
 
 Two invariants worth preserving if this is touched:
 
-- **Stock backing never disqualifies a side.** It decides *which segment*
-  of a side carries the tab (preferring one with real stock behind it), but
-  a part positioned close to the plate's edge still gets held.
+- **A side with real stock somewhere along it is never disqualified over
+  where exactly a candidate segment sits within it.** Backing still decides
+  *which segment* of a genuinely-backed side carries the tab. It is only a
+  side with **zero** backing anywhere - not merely a less-than-ideal
+  segment - that gets excluded (see above).
 - **A part is never left with zero tabs.** If no side clears the length
   threshold, `select_tab_edges` falls back to the part's longest sides
-  anyway - a tight tab beats a part coming loose mid-cut. The
-  budget-filling pass applies the same threshold, so it cannot quietly put
-  tabs back on the short facets rule 3 just excluded.
+  anyway - a tight tab beats a part coming loose mid-cut. Redistribution and
+  the last-resort segment fallback both apply the same length threshold, so
+  neither can quietly put a tab back on a short facet or a curved edge.
 
 ## Validation
 
