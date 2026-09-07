@@ -3,14 +3,43 @@
   import { onMount } from 'svelte';
   import { supabase } from '$lib/supabase.js';
   import { toastActions } from '$lib/toast.js';
-  import { fetchFusionJobs, fetchFusionJobUpdates, fetchFusionJobNcFiles, cancelFusionJob, deleteFusionJob } from '$lib/fusionCam.js';
+  import { fetchFusionJobs, fetchFusionJobUpdates, fetchFusionJobNcFiles, fetchFusionPartStepFiles, cancelFusionJob, deleteFusionJob } from '$lib/fusionCam.js';
+  import CadViewer from '$lib/components/CadViewer.svelte';
   import { formatPacificDateTimeWithZone } from '$lib/timezone.js';
-  import { ListChecks, X, Download, Trash2, Upload, AlertTriangle, ChevronDown } from 'lucide-svelte';
+  import { ListChecks, X, Download, Trash2, Upload, AlertTriangle, ChevronDown, Box } from 'lucide-svelte';
 
   let jobs = [];
   let loading = true;
   let hasMore = false;
   let loadingMore = false;
+
+  // partId -> STEP path, resolved separately because a Fusion job's own
+  // cam_jobs.step_file_name is always null (see fetchFusionPartStepFiles).
+  // Keyed by part rather than by job so several jobs for the same part
+  // share one entry.
+  let stepFileByPartId = {};
+  let cadModalJob = null;
+
+  function jobPartId(job) {
+    return job?.params?.selectedPartId || null;
+  }
+
+  function jobStepFile(job) {
+    const partId = jobPartId(job);
+    return partId ? stepFileByPartId[partId] || null : null;
+  }
+
+  // One request for a whole page of jobs, not one per row.
+  async function resolveStepFiles(rows) {
+    const ids = rows.map(jobPartId).filter((id) => id && !(id in stepFileByPartId));
+    if (!ids.length) return;
+    try {
+      stepFileByPartId = { ...stepFileByPartId, ...await fetchFusionPartStepFiles(ids) };
+    } catch (e) {
+      // A missing CAD link only hides a button - never block the job list.
+      console.error('Failed to resolve Fusion job STEP files', e);
+    }
+  }
 
   // Where a job's G-code lands when someone presses "Post to Files" below -
   // the same "manufacturing-drive" bucket /manufacture/files browses. A copy
@@ -64,6 +93,7 @@
       const page = await fetchFusionJobs();
       jobs = page.jobs;
       hasMore = page.hasMore;
+      resolveStepFiles(page.jobs);
     } catch (e) {
       toastActions.show(e.message || 'Failed to load jobs');
     } finally {
@@ -81,6 +111,7 @@
       const seen = new Set(jobs.map((job) => job.id));
       jobs = [...jobs, ...page.jobs.filter((job) => !seen.has(job.id))];
       hasMore = page.hasMore;
+      resolveStepFiles(page.jobs);
     } catch (e) {
       toastActions.show(e.message || 'Failed to load more jobs');
     } finally {
@@ -280,6 +311,11 @@
           </button>
         {/if}
         <div class="cam-list-actions">
+          {#if jobStepFile(job)}
+            <button class="btn btn-secondary btn-sm" title="Preview this job's part in 3D" on:click={() => (cadModalJob = job)}>
+              <Box size={14} /> View CAD
+            </button>
+          {/if}
           {#if job.status === 'completed' && jobKind(job) !== 'plate:arrange'}
             <div class="files-dropdown">
               <button type="button" class="btn btn-secondary btn-sm" on:click={() => toggleFiles(job)}>
@@ -322,6 +358,22 @@
       <span class="cam-form-hint">Showing the {jobs.length} most recent jobs.</span>
     </div>
   {/if}
+{/if}
+
+{#if cadModalJob}
+  <div class="modal-backdrop" on:click|self={() => (cadModalJob = null)} role="button" tabindex="0"
+       on:keydown={(e) => { if (e.key === 'Escape') (cadModalJob = null); }}>
+    <div class="modal cad-modal" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h3>CAD Preview - {cadModalJob.name || cadModalJob.id}</h3>
+        <button type="button" class="modal-close-button" aria-label="Close" on:click={() => (cadModalJob = null)}><X size={18} /></button>
+      </div>
+      <div class="modal-body">
+        <CadViewer part={null} stepFileName={jobStepFile(cadModalJob)} />
+        <p class="cam-form-hint">Drag to rotate &middot; scroll to zoom &middot; right-drag to pan</p>
+      </div>
+    </div>
+  </div>
 {/if}
 
 {#if errorModalJob}
@@ -372,6 +424,8 @@
 {/if}
 
 <style>
+  .cad-modal { width: min(900px, 94vw); }
+  .cad-modal .modal-body { min-height: 60vh; }
   .load-more-row {
     display: flex;
     align-items: center;

@@ -304,6 +304,29 @@ export async function fetchFusionJobs({ offset = 0, limit = FUSION_JOB_PAGE_SIZE
   return { jobs: rows.slice(0, limit), hasMore: rows.length > limit };
 }
 
+/**
+ * STEP file paths for a set of fusion_parts ids, as { partId: stepFileName }.
+ *
+ * A Fusion job's own cam_jobs.step_file_name is always null - the CAD lives
+ * on the fusion_parts row the job was queued for, reachable through
+ * params.selectedPartId - so "View CAD" has to resolve it separately.
+ *
+ * Batched into one request for a whole page of jobs rather than one per
+ * row, and selecting only the two columns needed, so showing the button
+ * does not undo the paging work in fetchFusionJobs.
+ */
+export async function fetchFusionPartStepFiles(partIds) {
+  const ids = [...new Set((partIds || []).filter(Boolean))];
+  if (!ids.length) return {};
+  const { data, error } = await supabase
+    .from('fusion_parts')
+    .select('id, step_file_name')
+    .in('id', ids)
+    .not('step_file_name', 'is', null);
+  if (error) throw error;
+  return Object.fromEntries((data || []).map((part) => [part.id, part.step_file_name]));
+}
+
 /** Refresh only mutable fields for the handful of jobs a Runner can change. */
 export async function fetchFusionJobUpdates(jobIds) {
   const ids = [...new Set((jobIds || []).filter(Boolean))];

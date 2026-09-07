@@ -10,13 +10,14 @@ import {
   fetchFusionJobs,
   fetchFusionJobUpdates,
   fetchFusionJobNcFiles,
+  fetchFusionPartStepFiles,
   fetchFusionJobsByManufacturingPartIds,
   isFusionOutputJob
 } from './fusionCam.js';
 
 function chain(result) {
   const query = {};
-  for (const method of ['select', 'eq', 'in', 'order', 'limit', 'range']) query[method] = vi.fn(() => query);
+  for (const method of ['select', 'eq', 'in', 'not', 'order', 'limit', 'range']) query[method] = vi.fn(() => query);
   query.single = vi.fn(async () => result);
   query.then = (resolve) => resolve(result);
   mocks.queries.push(query);
@@ -67,6 +68,25 @@ describe('Fusion CAM queue query efficiency', () => {
     mocks.from.mockReturnValue(chain({ data: [], error: null }));
     await fetchFusionJobs({ offset: FUSION_JOB_PAGE_SIZE });
     expect(mocks.queries[0].range).toHaveBeenCalledWith(FUSION_JOB_PAGE_SIZE, FUSION_JOB_PAGE_SIZE * 2);
+  });
+
+  it('resolves job CAD from fusion_parts, since cam_jobs.step_file_name is null', async () => {
+    // A Fusion job never carries its own STEP path; the CAD lives on the
+    // fusion_parts row named by params.selectedPartId.
+    mocks.from.mockReturnValue(chain({ data: [{ id: 'p1', step_file_name: 'a.step' }], error: null }));
+    await expect(fetchFusionPartStepFiles(['p1', 'p1', null])).resolves.toEqual({ p1: 'a.step' });
+    expect(mocks.from).toHaveBeenCalledWith('fusion_parts');
+    // One batched request for the page, only the two columns needed, so
+    // this does not undo the paging in fetchFusionJobs.
+    expect(mocks.from).toHaveBeenCalledTimes(1);
+    expect(mocks.queries[0].select).toHaveBeenCalledWith('id, step_file_name');
+    expect(mocks.queries[0].in).toHaveBeenCalledWith('id', ['p1']);
+  });
+
+  it('skips the CAD lookup entirely when no job has a part', async () => {
+    expect(await fetchFusionPartStepFiles([])).toEqual({});
+    expect(await fetchFusionPartStepFiles(null)).toEqual({});
+    expect(mocks.from).not.toHaveBeenCalled();
   });
 
   it('loads heavy NC artifacts only for one completed job on demand', async () => {
