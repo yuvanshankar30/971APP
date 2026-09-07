@@ -65,7 +65,7 @@
     <Package size={16} /> Parts
   </button>
   <button type="button" class:active={activeTab === 'box-tubes'} on:click={() => setActiveTab('box-tubes')}>
-    <Box size={16} /> Box Tubes
+    <Box size={16} /> Tube Stock
   </button>
   <button type="button" class:active={activeTab === 'queue'} on:click={() => setActiveTab('queue')}>
     <ListChecks size={16} /> Jobs

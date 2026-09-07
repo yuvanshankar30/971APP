@@ -17,12 +17,13 @@ import {
   fetchFusionJobsByManufacturingPartIds,
   installFusionPartCad,
   deleteAllFailedFusionJobs,
-  isFusionOutputJob
+  isFusionOutputJob,
+  queueFusionJob
 } from './fusionCam.js';
 
 function chain(result) {
   const query = {};
-  for (const method of ['select', 'eq', 'in', 'not', 'order', 'limit', 'range', 'delete']) query[method] = vi.fn(() => query);
+  for (const method of ['select', 'eq', 'in', 'not', 'order', 'limit', 'range', 'delete', 'insert']) query[method] = vi.fn(() => query);
   query.single = vi.fn(async () => result);
   query.then = (resolve) => resolve(result);
   mocks.queries.push(query);
@@ -41,6 +42,25 @@ describe('Fusion CAM queue query efficiency', () => {
     expect(isFusionOutputJob({ params: { fusionJobKind: 'box_tube' } })).toBe(true);
     expect(isFusionOutputJob({ params: { fusionJobKind: 'plate:arrange' } })).toBe(false);
     expect(isFusionOutputJob({ params: {} })).toBe(false);
+  });
+
+  it('queues tube stock directly without a plate or grouping contract', async () => {
+    mocks.from.mockReturnValue(chain({ data: { id: 'tube-job' }, error: null }));
+
+    await expect(queueFusionJob({
+      fusionJobKind: 'box_tube', boxTubeId: 'tube-1', machineId: 'router-1', toolId: 'tool-1'
+    })).resolves.toEqual({ id: 'tube-job' });
+
+    expect(mocks.from).toHaveBeenCalledWith('cam_jobs');
+    const inserted = mocks.queries[0].insert.mock.calls[0][0];
+    expect(inserted.params).toEqual({ fusionJobKind: 'box_tube', boxTubeId: 'tube-1', fusionFileName: null, fusionFolderPath: null });
+    expect(inserted.params).not.toHaveProperty('plateId');
+    expect(inserted.params).not.toHaveProperty('fusionGroupingMode');
+  });
+
+  it('refuses a tube-stock job without tube stock', async () => {
+    await expect(queueFusionJob({ fusionJobKind: 'box_tube' })).rejects.toThrow(/box tube is required/i);
+    expect(mocks.from).not.toHaveBeenCalled();
   });
 
   it('loads only the first page of job history, not the whole queue', async () => {

@@ -492,9 +492,11 @@ export async function fetchFusionFolderTree(projectName = '2026 Season CAM') {
 
 /**
  * Queues a Fusion milling job against a plate or a box tube - a cam_jobs
- * row with operation_type='milling', status='queued', and the
- * plate/box-tube reference in params.fusionJobKind/params.plateId or
- * .boxTubeId. Left at 'queued' for a Runner to claim via
+ * row with operation_type='milling', status='queued', and the matching stock
+ * reference. Plate jobs carry a plate snapshot/grouping contract; box-tube
+ * jobs are deliberately direct and carry only boxTubeId. A tube cannot be
+ * nested on a plate and must never acquire plate/grouping fields by accident.
+ * Left at 'queued' for a Runner to claim via
  * /api/fusion-runner - no synchronous generation happens here (unlike
  * turning/routing's cam-generate, this genuinely needs an external Fusion
  * 360 process).
@@ -503,15 +505,17 @@ export async function queueFusionJob({ fusionJobKind, plateId, boxTubeId, machin
   if (!FUSION_JOB_KINDS.includes(fusionJobKind)) {
     throw new Error(`Invalid fusionJobKind: ${fusionJobKind}`);
   }
+  if (fusionJobKind === 'box_tube' && !boxTubeId) {
+    throw new Error('A box tube is required for a tube-stock CAM job');
+  }
   const params = {
     fusionJobKind,
-    plateId: plateId || null,
-    boxTubeId: boxTubeId || null,
     ...(fusionJobKind.startsWith('plate:') ? {
+      plateId: plateId || null,
       fusionGroupingMode: groupingMode,
       selectedPartId: selectedPartId || null,
       selectedPartIds: Array.isArray(selectedPartIds) ? selectedPartIds : null
-    } : {}),
+    } : { boxTubeId }),
     // Where the saved Fusion document goes and what it's named - chosen at
     // queue time (Plates tab). Optional; camPlate.py falls back to its
     // existing defaults when these aren't set.

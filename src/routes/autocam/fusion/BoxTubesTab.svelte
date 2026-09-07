@@ -18,6 +18,8 @@
   let showAddForm = false;
   let newBoxTube = { name: '', epic: '', ticket: '', quantity: 1, manufacturingPartId: '' };
   let stepFile = null;
+  let newBoxTubeMachineId = '';
+  let newBoxTubeToolId = '';
   let submitting = false;
   // Which router each box tube's "Queue CAM Job" currently targets - keyed
   // by box tube id. No default - see the matching comment in
@@ -91,18 +93,48 @@
     }
   }
 
+  function handleNewBoxTubeMachineChange(machineId) {
+    newBoxTubeMachineId = machineId;
+    const eligible = toolsForMachine(machineId);
+    const machine = machines.find((m) => String(m.id) === String(machineId));
+    const defaultTool = eligible.find((tool) => String(tool.id) === String(machine?.default_tool_id));
+    newBoxTubeToolId = defaultTool?.id || '';
+  }
+
   function handleFileChange(event) {
     stepFile = event.target.files?.[0] || null;
   }
 
-  async function handleAdd() {
+  async function queueTubeCam(boxTube, machineId, toolId) {
+    await queueFusionJob({
+      fusionJobKind: 'box_tube',
+      boxTubeId: boxTube.id,
+      machineId,
+      toolId,
+      requestedBy: user?.id,
+      name: `Tube Stock CAM: ${boxTube.name}`,
+      // This is intentionally a clean 1:1 link. Tube stock is linear,
+      // never plate-nested, and has no grouping mode.
+      partId: boxTube.part_id || null
+    });
+  }
+
+  async function handleAdd(queueImmediately = false) {
     if (!newBoxTube.name || !newBoxTube.quantity) {
       toastActions.show('Name and quantity are required');
       return;
     }
+    if (queueImmediately && !stepFile) {
+      toastActions.show('Choose a STEP file before queueing tube CAM');
+      return;
+    }
+    if (queueImmediately && (!newBoxTubeMachineId || !newBoxTubeToolId)) {
+      toastActions.show('Choose a router and tool before queueing tube CAM');
+      return;
+    }
     submitting = true;
     try {
-      await createBoxTube({
+      const createdTube = await createBoxTube({
         name: newBoxTube.name,
         epic: newBoxTube.epic,
         ticket: newBoxTube.ticket,
@@ -111,13 +143,16 @@
         createdBy: user?.id,
         partId: newBoxTube.manufacturingPartId || null
       });
+      if (queueImmediately) await queueTubeCam(createdTube, newBoxTubeMachineId, newBoxTubeToolId);
       newBoxTube = { name: '', epic: '', ticket: '', quantity: 1, manufacturingPartId: '' };
       stepFile = null;
+      newBoxTubeMachineId = '';
+      newBoxTubeToolId = '';
       showAddForm = false;
       await load(false);
-      toastActions.show('Box tube added');
+      toastActions.show(queueImmediately ? 'Tube stock added and queued for Fusion CAM' : 'Tube stock added');
     } catch (e) {
-      toastActions.show(e.message || 'Failed to add box tube');
+      toastActions.show(e.message || 'Failed to add tube stock');
     } finally {
       submitting = false;
     }
@@ -153,18 +188,7 @@
       return;
     }
     try {
-      await queueFusionJob({
-        fusionJobKind: 'box_tube',
-        boxTubeId: boxTube.id,
-        machineId,
-        toolId: boxTubeToolSelections[boxTube.id],
-        requestedBy: user?.id,
-        name: `Box Tube CAM: ${boxTube.name}`,
-        // Traces the resulting cam_jobs row back to the real manufacturing
-        // request this box tube is for, if it's linked to one - a clean
-        // 1:1 (one box tube per job), unlike a plate's many-parts case.
-        partId: boxTube.part_id || null
-      });
+      await queueTubeCam(boxTube, machineId, boxTubeToolSelections[boxTube.id]);
       toastActions.show('Queued for the Fusion Runner');
     } catch (e) {
       toastActions.show(e.message || 'Failed to queue job');
@@ -178,14 +202,14 @@
   {#if canManage}
   <div class="tab-actions">
     <button class="btn btn-primary" on:click={() => (showAddForm = !showAddForm)}>
-      <Plus size={16} /> Add Box Tube
+      <Plus size={16} /> Add Tube Stock
     </button>
   </div>
 
   {/if}
   {#if showAddForm && canManage}
     <div class="card">
-      <h3>New Box Tube</h3>
+      <h3>New Tube Stock</h3>
       <div class="form-row">
         <div class="form-group">
           <label class="form-label" for="bt-name">Name</label>
@@ -222,7 +246,30 @@
           <p class="cam-form-hint">Traces this box tube back to the real request it's for - leave unlinked for ad-hoc stock.</p>
         </div>
       </div>
-      <button class="btn btn-primary" disabled={submitting} on:click={handleAdd}>{submitting ? 'Adding...' : 'Add Box Tube'}</button>
+      <div class="form-row queue-now-controls">
+        <div class="form-group">
+          <label class="form-label" for="bt-router">Router</label>
+          <select id="bt-router" class="form-select" bind:value={newBoxTubeMachineId} on:change={(e) => handleNewBoxTubeMachineChange(e.currentTarget.value)}>
+            <option value="">Choose a router...</option>
+            {#each machines as machine}
+              <option value={machine.id}>{machine.name}</option>
+            {/each}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="bt-tool">Tool</label>
+          <select id="bt-tool" class="form-select" bind:value={newBoxTubeToolId} disabled={!newBoxTubeMachineId}>
+            <option value="">{toolsForMachine(newBoxTubeMachineId).length ? 'Choose a tool...' : 'No tools installed on this router'}</option>
+            {#each toolsForMachine(newBoxTubeMachineId) as tool}
+              <option value={tool.id}>{toolLabel(tool)}</option>
+            {/each}
+          </select>
+        </div>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-secondary" disabled={submitting} on:click={() => handleAdd(false)}>{submitting ? 'Adding...' : 'Add Tube Stock'}</button>
+        <button class="btn btn-primary" disabled={submitting || !stepFile || !newBoxTubeMachineId || !newBoxTubeToolId} on:click={() => handleAdd(true)}>{submitting ? 'Queueing...' : 'Add + Queue Tube CAM'}</button>
+      </div>
     </div>
   {/if}
 
@@ -256,7 +303,7 @@
               {/each}
             </select>
             <button class="btn btn-secondary btn-sm" disabled={!boxTubeMachineSelections[boxTube.id] || !boxTubeToolSelections[boxTube.id]} on:click={() => handleQueue(boxTube)}>
-              <Send size={14} /> Queue CAM Job
+              <Send size={14} /> Queue Tube CAM
             </button>
             {#if canManage}
               <button class="btn btn-ghost btn-sm" on:click={() => handleDelete(boxTube)}>
@@ -274,6 +321,8 @@
   .tab-actions { margin-bottom: 1rem; }
   .form-row { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
   .form-row .form-group { flex: 1; min-width: 160px; }
+  .queue-now-controls { margin-top: 0.5rem; }
+  .form-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
   .cam-list { display: flex; flex-direction: column; gap: 0.75rem; }
   .cam-list-item { padding: 1rem; }
   .cam-list-header { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
