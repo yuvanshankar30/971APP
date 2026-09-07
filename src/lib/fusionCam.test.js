@@ -6,7 +6,7 @@ vi.mock('$lib/supabase.js', () => ({
 }));
 
 import {
-  FUSION_JOB_LIST_LIMIT,
+  FUSION_JOB_PAGE_SIZE,
   fetchFusionJobs,
   fetchFusionJobUpdates,
   fetchFusionJobNcFiles,
@@ -16,7 +16,7 @@ import {
 
 function chain(result) {
   const query = {};
-  for (const method of ['select', 'eq', 'in', 'order', 'limit']) query[method] = vi.fn(() => query);
+  for (const method of ['select', 'eq', 'in', 'order', 'limit', 'range']) query[method] = vi.fn(() => query);
   query.single = vi.fn(async () => result);
   query.then = (resolve) => resolve(result);
   mocks.queries.push(query);
@@ -36,11 +36,37 @@ describe('Fusion CAM queue query efficiency', () => {
     expect(isFusionOutputJob({ params: {} })).toBe(false);
   });
 
-  it('bounds the main job history query', async () => {
+  it('loads only the first page of job history, not the whole queue', async () => {
+    // A real 175-job queue was 290KB and ~340ms before a single row
+    // rendered, almost none of which is what someone opening this tab
+    // is looking at.
     mocks.from.mockReturnValue(chain({ data: [], error: null }));
     await fetchFusionJobs();
-    expect(mocks.queries[0].limit).toHaveBeenCalledWith(FUSION_JOB_LIST_LIMIT);
+    expect(mocks.queries[0].range).toHaveBeenCalledWith(0, FUSION_JOB_PAGE_SIZE);
     expect(mocks.queries[0].select.mock.calls[0][0]).not.toContain('fusion_nc_files');
+  });
+
+  it('reports another page exists without a second count query', async () => {
+    // Asks for one row past the page; its presence is the answer.
+    const rows = Array.from({ length: FUSION_JOB_PAGE_SIZE + 1 }, (_unused, index) => ({ id: `job-${index}` }));
+    mocks.from.mockReturnValue(chain({ data: rows, error: null }));
+    const page = await fetchFusionJobs();
+    expect(page.jobs).toHaveLength(FUSION_JOB_PAGE_SIZE);
+    expect(page.hasMore).toBe(true);
+    expect(mocks.from).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports the end of the history when the extra row is absent', async () => {
+    mocks.from.mockReturnValue(chain({ data: [{ id: 'job-1' }], error: null }));
+    const page = await fetchFusionJobs();
+    expect(page.jobs).toHaveLength(1);
+    expect(page.hasMore).toBe(false);
+  });
+
+  it('pages from an offset when asked for older jobs', async () => {
+    mocks.from.mockReturnValue(chain({ data: [], error: null }));
+    await fetchFusionJobs({ offset: FUSION_JOB_PAGE_SIZE });
+    expect(mocks.queries[0].range).toHaveBeenCalledWith(FUSION_JOB_PAGE_SIZE, FUSION_JOB_PAGE_SIZE * 2);
   });
 
   it('loads heavy NC artifacts only for one completed job on demand', async () => {
