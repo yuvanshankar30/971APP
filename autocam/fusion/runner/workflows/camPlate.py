@@ -199,6 +199,140 @@ def _get(payload: dict, *keys: str, default=None):
     return default
 
 
+# How little material may be left standing between two separate cuts before
+# it's worth warning about, in cm (~1/16in). Not a machining rule anyone has
+# published - chosen as the same order as the thinnest sheet this shop routes,
+# on the reasoning that a wall thinner than the stock itself has no chance of
+# staying put. Anton plate's own worst case measured 0.043in, well under this.
+_MINIMUM_WALL_CM = 0.15
+
+
+def _coverage_warnings(app, cam, nc_files) -> list:
+    """Compares the posted program against the part's own CAD geometry and
+    returns a warning per real problem found - an internal feature with no
+    toolpath over it, or a program that never cuts deep enough to break
+    through the material.
+
+    Deliberately best-effort: a failure to run this check must never fail a
+    job whose G-code is otherwise fine, so everything is wrapped and a
+    diagnostic that can't run just reports that it couldn't.
+    """
+    try:
+        import base64
+        import importlib.util
+        import os
+
+        from ..commands.DeleteToolpaths import _bottom_face
+
+        spec = importlib.util.spec_from_file_location(
+            "featureCoverage", os.path.join(os.path.dirname(os.path.dirname(__file__)), "tools/featureCoverage.py")
+        )
+        coverage = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(coverage)
+
+        design = adsk.fusion.Design.cast(
+            app.activeDocument.products.itemByProductType("DesignProductType")
+        )
+        if design is None:
+            return ["Coverage self-check skipped: no Design product to compare against."]
+
+        program_text = ""
+        for nc_file in nc_files or []:
+            try:
+                program_text += base64.b64decode(nc_file["contentBase64"]).decode("utf-8", "replace")
+                program_text += "\n"
+            except Exception:
+                continue
+        if not program_text.strip():
+            return ["Coverage self-check skipped: posted programs could not be read back."]
+
+        cut_loops = coverage.gcode_loops(program_text)
+        warnings = []
+        for occurrence in design.rootComponent.allOccurrences:
+            if occurrence.bRepBodies.count == 0:
+                continue
+            body = occurrence.bRepBodies.item(0)
+            cad_loops = coverage.internal_loop_extents(body, _bottom_face)
+            if not cad_loops:
+                continue
+            _text, detail = coverage.report(cad_loops, cut_loops)
+            for entry in detail["uncut"]:
+                loop = entry["cad"]
+                warnings.append(
+                    "A {} internal feature at ({:.3f}, {:.3f})in, {:.3f}x{:.3f}in, has no toolpath "
+                    "covering it - it will not be machined.".format(
+                        "round" if loop["circular"] else "profile",
+                        loop["cx"] / 2.54,
+                        loop["cy"] / 2.54,
+                        (loop["max_x"] - loop["min_x"]) / 2.54,
+                        (loop["max_y"] - loop["min_y"]) / 2.54,
+                    )
+                )
+
+            box = body.boundingBox
+            passes, deepest, required = coverage.breakthrough_check(
+                program_text, box.minPoint.z, box.maxPoint.z
+            )
+            if not passes:
+                warnings.append(
+                    "This program's deepest cut ({:.4f}in) never reaches the material bottom "
+                    "({:.4f}in) - nothing will be cut all the way through.".format(
+                        (deepest or 0) / 2.54, required / 2.54
+                    )
+                )
+
+        # How thin a wall this part's own geometry leaves between two separate
+        # cuts, given the tool actually being used. Nothing about the
+        # selections is wrong when this fires - both operations cut exactly
+        # what they should - but the material left standing between them can
+        # still be too fragile to survive, and rendered it looks identical to
+        # a wrongly-selected chain (two cuts appearing to merge into one),
+        # which is exactly the confusion this is here to end.
+        try:
+            tool_diameter_cm = None
+            for setup in cam.setups:
+                for operation in setup.operations:
+                    parameter = operation.tool.parameters.itemByName("tool_diameter")
+                    if parameter is not None:
+                        tool_diameter_cm = parameter.value.value
+                        break
+                if tool_diameter_cm:
+                    break
+            if tool_diameter_cm:
+                programs = []
+                for nc_file in nc_files or []:
+                    try:
+                        programs.append(
+                            (nc_file.get("name", "?"), base64.b64decode(nc_file["contentBase64"]).decode("utf-8", "replace"))
+                        )
+                    except Exception:
+                        continue
+                for i in range(len(programs)):
+                    for j in range(i + 1, len(programs)):
+                        ok, wall, _closest = coverage.thin_wall_check(
+                            programs[i][1], programs[j][1], tool_diameter_cm, _MINIMUM_WALL_CM
+                        )
+                        if not ok and wall is not None:
+                            warnings.append(
+                                "Only {:.4f}in of material is left between the cuts in '{}' and '{}' "
+                                "(minimum {:.4f}in) - these features sit too close together for a "
+                                "{:.4f}in tool, and that wall is likely to break out.".format(
+                                    wall / 2.54,
+                                    programs[i][0],
+                                    programs[j][0],
+                                    _MINIMUM_WALL_CM / 2.54,
+                                    tool_diameter_cm / 2.54,
+                                )
+                            )
+        except Exception:
+            app.log("Thin-wall self-check failed to run:\n{}".format(traceback.format_exc()))
+
+        return warnings
+    except Exception:
+        app.log("Coverage self-check failed to run:\n{}".format(traceback.format_exc()))
+        return ["Coverage self-check could not run - see the Runner log."]
+
+
 def _download_part_file(session: requests.Session, part_id: str, step_file_url: str) -> str:
     """Download the claim response's signed STEP URL to Fusion's import folder."""
     if not step_file_url:
@@ -446,11 +580,29 @@ def start(data, session):
                 "Check the Runner's log for what postProcess actually did."
             )
 
+        # Self-check the posted output against the part's own CAD geometry
+        # before calling this job done. Every "a feature silently didn't get
+        # machined" bug this pipeline has hit was invisible to the checks that
+        # already existed - the operation reported a valid toolpath, carried
+        # the right number of chains, and raised no warning, while the real
+        # G-code either never covered that feature or never cut deep enough to
+        # break through it. The only thing that reliably distinguishes those
+        # cases is comparing the actual posted program against the actual
+        # model, which is what this does. Reported as job warnings rather than
+        # raised: the G-code is real and may still be worth running, but
+        # nobody should have to open the simulation and eyeball it to find out
+        # a cutout is missing.
+        coverage_warnings = _coverage_warnings(app, cam, nc_files)
+        for warning in coverage_warnings:
+            app.log(f"COVERAGE: {warning}")
+
         completion_data = {
             "jobId": job_id,
             "runnerId": RUNNER_ID,
             "ncFiles": nc_files,
         }
+        if coverage_warnings:
+            completion_data["warnings"] = coverage_warnings
         if total_machining_time is not None:
             completion_data["stats"] = {"total_machining_time": total_machining_time}
 

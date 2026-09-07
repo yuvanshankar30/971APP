@@ -417,7 +417,10 @@ own docs are all together in one place instead of scattered across
   forked Fusion 360 add-in that actually runs CAM; unmodified copies of both
   original repos are vendored at `autocam/fusion/_upstream/` and
   `autocam/fusion/runner/_upstream/` for reference. Its active workflows
-  patch Fusion templates from the claimed tool's checked-in `.tools` archive
+  compare completed plate G-code against the part's internal CAD loops and
+  stock depth before reporting completion, surfacing missing-feature,
+  incomplete-through-cut, and unsafe thin-wall findings as job warnings.
+  They patch Fusion templates from the claimed tool's checked-in `.tools` archive
   and post with the claimed machine's checked-in `.cps` file; the filename is
   stored on `cam_tools.fusion_tool_library_file`, so an unknown tool fails
   visibly rather than falling back to Fusion's raw default. No Teams/API-key-per-team

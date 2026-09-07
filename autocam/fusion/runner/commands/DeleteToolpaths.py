@@ -254,22 +254,22 @@ def _internal_feature_loop_edges_all_bodies(design):
     purpose (see _is_circular_loop) since it already has its own dedicated
     operation; nothing else internal needs elongation to qualify.
 
-    On the TOP face (_top_face) - direct instruction confirmed the
-    feature slot cut is NOT the operation with a real problem (the
-    "still wrong" screenshots were all about the outer 2D Slot Cut
-    specifically) - left unchanged here, deliberately different from
-    _outer_loop_edges_all_bodies's own bottom face, since each was
-    independently tuned against its own live-confirmed result and this
-    one is already correct.
+    On the BOTTOM face (_bottom_face) - direct instruction, after the top
+    face was confirmed live to still leave real internal features
+    uncut on a real, more complex part (Anton plate - 8 internal loops,
+    not x44_stiffner's simpler 2). Matches _outer_loop_edges_all_bodies's
+    own bottom face now too, so the feature-cut and outer-profile
+    selections share one consistent face reference on this part instead
+    of two independently-tuned ones.
     """
     feature_edges = []
     for occ in design.rootComponent.allOccurrences:
         if occ.bRepBodies.count == 0:
             continue
-        top_face = _top_face(occ.bRepBodies.item(0))
-        if top_face is None:
+        bottom_face = _bottom_face(occ.bRepBodies.item(0))
+        if bottom_face is None:
             continue
-        for loop in top_face.loops:
+        for loop in bottom_face.loops:
             if loop.isOuter:
                 continue
             edges = [co_edge.edge for co_edge in loop.coEdges]
