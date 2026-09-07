@@ -913,24 +913,29 @@ def DeleteToolpaths():
                 f"Toolpath: {toolpath.name}, strategy={toolpath.strategy}, "
                 f"isToolpathValid={toolpath.isToolpathValid}, Warning: {toolpath.warning}"
             )
-            # "hole" is excluded here for the identical reason the
-            # _POCKET_STRATEGIES check below it already excludes it (see
-            # that check's own comment): the template's own dedicated
-            # ">.3 Circular Through Hole" pocket2d operation can still
-            # report a residual "empty"-containing warning at this exact
-            # point even after _repair_missing_selections's own
-            # regenerate+wait, on a genuinely fresh (never-before-run)
-            # template application - confirmed live as a real, fourth
-            # distinct deletion path removing this operation, found only
-            # after the other three (early empty-cleanup loop,
-            # _needs_repair flakiness, and this same has_pocket_floor
-            # check further below) were already fixed and it STILL
-            # disappeared. This check predates all three of those fixes
-            # and was never audited for the same exemption once they
-            # were added.
-            if "empty" in str(toolpath.warning).lower() and not _is_dedicated_circular_hole_op(
-                toolpath.name.lower()
-            ):
+            # No hole-name exemption here, unlike the has_pocket_floor
+            # check further below - direct correction after this exemption
+            # was confirmed live to be wrong on a second real part
+            # (Anton plate, 1/16in aluminum): that part has no real hole
+            # meeting the big-hole operation's own diameter threshold at
+            # all, so _repair_missing_selections's own ChainSelection
+            # fallback correctly found nothing and fell back to generic
+            # recognition, which also found nothing - a genuinely empty
+            # result, not a timing artifact, since this check runs AFTER
+            # _repair_missing_selections's own regenerate+wait has already
+            # settled. Exempting it here unconditionally kept a truly
+            # inapplicable operation alive with zero toolpath, which then
+            # made cam.postProcess() fail outright with "Initialization
+            # fails" and aborted the whole job's export - a second,
+            # different real bug behind the same symptom the original
+            # exemption was written for. The ORIGINAL problem this
+            # exemption was meant to solve (the big-hole op being deleted
+            # here on a real part that DOES have a matching hole) is
+            # already fixed by is_deferred in the earlier empty-cleanup
+            # loop above, which defers hole-named pocket2d operations
+            # until after repair - this later check reflects real,
+            # post-repair state and should be trusted as such.
+            if "empty" in str(toolpath.warning).lower():
                 toolpath.deleteMe()
             elif toolpath.name == "Suppress":
                 # Every template ships this as a disabled placeholder
