@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { defaultHeaderTabs, ensurePowerRankingsTab, ensureScoutingAdminTab, ensureStrategyTab, ensureGcodeConverterTab, ensureFilesTab, ensureFusionAutocamTab } from './defaultTabs.js';
+import { defaultHeaderTabs, ensurePowerRankingsTab, ensureScoutingAdminTab, ensureStrategyTab, ensureGcodeConverterTab, ensureFilesTab, ensureFusionAutocamTab, promoteChildrenOfDisabledFolders } from './defaultTabs.js';
 
 const enabled = { tabs: { powerrankings: true } };
 
@@ -85,6 +85,28 @@ describe('defaultHeaderTabs', () => {
     expect(keys).toContain('pitscout');
     expect(keys).toContain('matchscout');
     expect(keys).toContain('vision');
+  });
+});
+
+describe('promoteChildrenOfDisabledFolders', () => {
+  it('removes a saved CAD folder shell and promotes Build', () => {
+    const tabs = [{
+      type: 'folder',
+      label: 'CAD',
+      children: [
+        { key: 'cad', label: 'CAD' },
+        { key: 'build', label: 'Build' }
+      ]
+    }];
+
+    expect(promoteChildrenOfDisabledFolders(tabs, { tabs: { cad: false } })).toEqual([
+      { key: 'build', label: 'Build' }
+    ]);
+  });
+
+  it('leaves enabled and custom folders unchanged', () => {
+    const tabs = [{ type: 'folder', label: 'Competition', children: [] }];
+    expect(promoteChildrenOfDisabledFolders(tabs, { tabs: { cad: false } })).toEqual(tabs);
   });
 });
 

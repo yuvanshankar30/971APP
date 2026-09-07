@@ -38,6 +38,28 @@
 // shared starting configuration. Subsequent per-user changes remain personal.
 import navigation from '$lib/navigation.json';
 
+function normalizeTabKey(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/**
+ * Saved layouts can retain a folder whose label matches a disabled tab. When
+ * that happens, keep the folder's still-enabled children reachable without
+ * leaving the retired label in the header (for example CAD -> Build).
+ */
+export function promoteChildrenOfDisabledFolders(tabs, navConfig = navigation) {
+  if (!Array.isArray(tabs)) return tabs;
+  return tabs.flatMap((item) => {
+    if (item?.type !== 'folder') return [item];
+    const folderKey = normalizeTabKey(item.key || item.label);
+    if (navConfig?.tabs?.[folderKey] !== false) return [item];
+    return (Array.isArray(item.children) ? item.children : []).filter((child) => {
+      const childKey = normalizeTabKey(child?.key || child?.label);
+      return navConfig?.tabs?.[childKey] !== false;
+    });
+  });
+}
+
 export function defaultHeaderTabs(navConfig = navigation) {
   const tabs = [];
 

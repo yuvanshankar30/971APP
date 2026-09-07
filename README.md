@@ -32,6 +32,7 @@ browser confirmation or prompt popups.
   **AutoCAM** section below for automatic G-code generation specifically.
   Build tracking remains in the main navigation, but the Onshape-backed CAD
   tab is hidden while the Onshape integration credentials are disconnected;
+  legacy saved CAD folders are collapsed so Build appears directly instead;
   the underlying `/cad` routes remain available to existing manufacturing and
   purchasing links.
 - **AutoCAM**: automatic STEP → G-code generation for lathe turning, router
