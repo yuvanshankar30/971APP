@@ -14,8 +14,8 @@ drawing to upload - just the STEP file the part already has.
 'milling'`), implemented as a native SvelteKit/Supabase port of Team Valor
 6800's open-source AutoCAM, not written from scratch. See
 `autocam/fusion/README.md` for the full port writeup and
-`valor6800-autocam-runner-setup.md` (repo root) for how this decision was
-made relative to the original upstream project.
+`autocam/fusion/runner/docs/team-setup-guide.md` for current installation and
+`autocam/fusion/runner/README.md` for the active architecture.
 
 It follows the job lifecycle this file used to only describe as a plan:
 `queued -> claimed -> processing -> completed/failed`, using
@@ -23,7 +23,8 @@ It follows the job lifecycle this file used to only describe as a plan:
 endpoint at `src/routes/api/fusion-runner/+server.js`. The Fusion-side half
 is a forked Fusion 360 add-in at `autocam/fusion/runner/` that claims a
 queued milling job, runs real CAM in Fusion against the part's STEP file,
-and writes back `gcode` (NGC format) and `status`.
+and uploads each post-processed NC file byte-for-byte with its relative name,
+size and SHA-256 checksum before marking the job complete.
 
 `src/routes/api/cam-generate/+server.js` still rejects any job with
 `operation_type = 'milling'` immediately - that endpoint is a separate,
