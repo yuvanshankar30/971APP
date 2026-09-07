@@ -14,12 +14,25 @@
 # strategy, with no public documentation of valid enum values.
 #
 # Fusion's UI has a separate Manual Tabs field (`tabPositions`) alongside
-# its automatic distance/count modes. Automatic count placement can place a
-# tab on an unsuitable portion of an otherwise valid contour, so release
-# cuts use Manual Tabs only: `tabsPerContour=0` disables automatic tabs and
-# this module supplies the selected outer edges directly. A live Fusion
-# validation with that isolating configuration placed every tab on a straight
-# G1 run, never on a corner arc.
+# its automatic placement mode. This module supplies that manual list.
+#
+# TWO THINGS ABOUT IT ARE NOT WHAT THEY LOOK LIKE, both confirmed live
+# against a real job's operation:
+#
+# 1. `tabsPerContour = 0` does NOT disable automatic tabs. This file used to
+#    say it did. Read back from a real operation, the parameter reports a
+#    value of 1 no matter what is assigned to it (0, 1, 2 and 4 all read
+#    back as 1) because it is simply inactive in the active mode.
+# 2. There is no manual-only mode to switch to. `tabPositioning` offers
+#    exactly two choices - 'distance' and 'tabCount' (enumerated directly
+#    from the live parameter); 'points' is rejected as an invalid
+#    enumeration value even though the template's own stale tabDistance
+#    expression still reads "'points' == 'points' ? ...".
+#
+# So automatic placement is always on, and a manual tab is an ADDITION to
+# it rather than a replacement. What makes the manual list actually take
+# effect is that its edges belong to the contour being cut - see
+# _find_tab_face, which is where this went wrong for real.
 #
 # WHICH operation actually gets tabs: only the one the template itself
 # already designates via group_tabs=true in its own default state - a real
@@ -116,17 +129,34 @@ def _edge_length(edge) -> float:
         return 0.0
 
 
-def _find_top_face(body):
-    """Return the highest upward-facing planar face on a body.
+def _find_tab_face(body):
+    """Return the face whose outer loop the release contour is actually cut
+    from - the physically LOWEST planar face, matching DeleteToolpaths.py's
+    own _bottom_face.
 
-    STEP imports can report opposing planar faces as upward-facing. Height
-    avoids the equal-area tie and unstable Fusion face iteration order.
+    This must be the same face the contour uses, and that is the whole
+    point of this function. A manual tab is not a free-floating position:
+    Fusion places it on an edge OF THE SELECTED CONTOUR, so a tab edge that
+    is not part of that contour cannot be placed and is silently ignored.
 
-    Direct instruction: tab candidate/exclusion edges should reference the
-    upper edge of the part (unlike the outer-profile/feature-cut contour
-    selections themselves, which reference the bottom edge - see
-    DeleteToolpaths.py's _bottom_face) - tabs and the contour they sit on
-    are deliberately different edge loops here, per direct correction.
+    An earlier version deliberately took tab edges from the TOP face while
+    the contour came from the bottom, on the theory that tabs and their
+    contour were independent edge loops. Confirmed live that they are not,
+    and that this was the reason tabs never landed where this module chose:
+    on a real job the operation's manual tab list held edges tempId
+    478/482/486/490 at z=0.0in, while the contour it was attached to was
+    built from edges 741-748 at z=-0.0625in - an intersection of exactly
+    ZERO. Fusion's dialog listed "4 Edges" and used none of them.
+
+    What actually cut were Fusion's own automatic tabs: tabPositioning is
+    'distance' with tabDistance 0.0, which on a rectangular part happens to
+    space four tabs evenly - close enough to look correct on simple parts
+    (which is why this went unnoticed) and completely outside this module's
+    control on anything else.
+
+    Note the top face is still the RIGHT choice for anything that only has
+    to describe the part's own silhouette - but nothing here does; every
+    edge this module returns is handed to Fusion as a tab position.
     """
     best_face = None
     best_z = None
@@ -136,7 +166,9 @@ def _find_top_face(body):
             z = face.pointOnFace.z
         except Exception:
             continue
-        if normal.z > 0.9 and (best_z is None or z > best_z):
+        # abs(): a STEP import can report both opposing broad faces with the
+        # same normal sign, so height - not sign - identifies the bottom.
+        if abs(normal.z) > 0.9 and (best_z is None or z < best_z):
             best_z = z
             best_face = face
     return best_face
@@ -161,10 +193,10 @@ def _outer_boundary_edges(face):
 
 
 def _outer_perimeter_in(body) -> float:
-    top_face = _find_top_face(body)
-    if top_face is None:
+    tab_face = _find_tab_face(body)
+    if tab_face is None:
         return 0.0
-    return sum(_edge_length(e) for e in _outer_boundary_edges(top_face)) / 2.54
+    return sum(_edge_length(e) for e in _outer_boundary_edges(tab_face)) / 2.54
 
 
 def _tab_count_for_perimeter(perimeter_in: float, min_tabs: int, max_tabs: int) -> int:
@@ -271,13 +303,13 @@ def _all_straight_edges(body):
     candidate segment exists (see select_tab_edges) - never to drop a
     whole side to zero tabs.
     """
-    top_face = _find_top_face(body)
-    if top_face is None:
+    tab_face = _find_tab_face(body)
+    if tab_face is None:
         return []
     min_length_cm = MIN_TAB_EDGE_LENGTH_IN * 2.54
     return [
         e
-        for e in _outer_boundary_edges(top_face)
+        for e in _outer_boundary_edges(tab_face)
         if _is_straight_edge(e) and _edge_length(e) >= min_length_cm
     ]
 
