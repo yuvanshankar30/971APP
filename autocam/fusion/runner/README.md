@@ -127,6 +127,7 @@ left for an operator to review so its CAM work cannot be duplicated.
 | `templateTools.py` | Applies tool libraries from templates |
 | `dropFolder.py` | Resolves/creates the configured Fusion Data Panel destination |
 | `localCamAssets.py` | Resolves checked-in tool libraries and postprocessors without web fallbacks |
+| `machiningTime.py` | Uses Fusion's real CAM API to report plate and box-tube machining time consistently |
 
 ### Commands (`commands/`)
 

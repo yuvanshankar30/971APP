@@ -25,75 +25,13 @@ from ..config import (
 from .dropFolder import resolve_drop_folder
 from .job_status import ensure_completion_response, send_job_error
 from .localCamAssets import load_local_tool_library_json, resolve_local_post_processor
+from .machiningTime import total_machining_time
 from ..commands.NcArtifacts import collect_nc_artifacts
 from .templateTools import patch_cam_template_with_tool_libraries
 
 
-def _read_time_value(value) -> Optional[float]:
-    if value is None:
-        return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    for attr in ("value", "valueInSeconds", "seconds"):
-        try:
-            v = getattr(value, attr)
-        except Exception:
-            continue
-        try:
-            return float(v)
-        except Exception:
-            continue
-    return None
-
-
-def _operation_machining_time(operation) -> Optional[float]:
-    if getattr(operation, "isSuppressed", False):
-        return None
-    if hasattr(operation, "isToolpathValid") and not operation.isToolpathValid:
-        return None
-    for attr in ("machiningTime", "cycleTime", "toolpathTime"):
-        if not hasattr(operation, attr):
-            continue
-        try:
-            val = getattr(operation, attr)
-            if callable(val):
-                val = val()
-        except Exception:
-            continue
-        t = _read_time_value(val)
-        if t is not None:
-            return t
-    for attr in ("toolpathStatistics", "toolpathStatistic", "toolpathStats"):
-        if not hasattr(operation, attr):
-            continue
-        try:
-            stats = getattr(operation, attr)
-            if callable(stats):
-                stats = stats()
-        except Exception:
-            continue
-        if stats is None:
-            continue
-        for stat_attr in ("machiningTime", "cycleTime", "totalTime"):
-            if not hasattr(stats, stat_attr):
-                continue
-            t = _read_time_value(getattr(stats, stat_attr))
-            if t is not None:
-                return t
-    return None
-
-
 def _total_machining_time(cam: adsk.cam.CAM) -> Optional[float]:
-    total = 0.0
-    found = False
-    for setup in cam.setups:
-        for operation in setup.operations:
-            t = _operation_machining_time(operation)
-            if t is None:
-                continue
-            total += t
-            found = True
-    return total if found else None
+    return total_machining_time(cam, adsk.core.ObjectCollection.create)
 
 
 def _get(payload: dict, *keys: str, default=None):
