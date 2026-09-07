@@ -14,7 +14,7 @@
   import { Search, Filter, Clock, Truck, Package, Download, Zap, Wrench, FileText, Upload, ExternalLink, Pencil, Trash2, X, Users, Box, Route, CircleCheck, Layers } from 'lucide-svelte';
   import ROUTER_FLOW from '$lib/router_flow.json';
   import { getDisplayStatus, BUTTONS, getBadgeClass, getWorkflowStatuses } from '$lib/statuses.js';
-  import { summarizeRouterStages, isFullyKitted, buildRouterProgressUpdate } from '$lib/router_progress.js';
+  import { summarizeRouterStages, isFullyKitted, buildRouterProgressUpdate, canAdvanceRouterToCamReview } from '$lib/router_progress.js';
   import { isManufacturingLead, canCamReview as camReviewAllowed, canDeleteParts } from '$lib/permissions.js';
   import CadViewer from '$lib/components/CadViewer.svelte';
   import stockData from '$lib/stock.json';
@@ -1042,6 +1042,20 @@
     return `/autocam/fusion?tab=parts&manufacturingPart=${encodeURIComponent(part.id)}`;
   }
 
+  // A router request may enter human CAM review only after the real Fusion
+  // pipeline has completed its job. This replaces the old manual Start ->
+  // CAM Done ladder, which could claim CAM was ready without any generated
+  // Fusion output behind it.
+  async function advanceRouterToCamReview(part) {
+    const fusionJob = fusionJobsByPart[part.id];
+    if (!canAdvanceRouterToCamReview(part, fusionJob)) return;
+
+    if (part.status === 'pending') await updatePartStatus(part.id, 'in-progress');
+    await updateRouterMeta(part, { step: 'cam_review' });
+    if (part.status === 'pending') setLocalStatus(part.id, 'in-progress');
+    setLocalRouterMeta(part.id, { step: 'cam_review' });
+  }
+
   function openCadViewer(part) {
     cadViewerPart = part;
     showCadModal = true;
@@ -1861,6 +1875,7 @@
   <!-- Mobile Card View -->
   <div class="mobile-parts-list">
     {#each filteredParts as part (part.id)}
+      {@const fusionJob = part.workflow === 'router' ? fusionJobsByPart[part.id] : null}
       <div
         id="part-{part.id}"
         class="part-card"
@@ -1992,7 +2007,6 @@
 
           <!-- CAD / Fusion CAM action grid -->
           {#if canViewCad(part)}
-            {@const fusionJob = part.workflow === 'router' ? fusionJobsByPart[part.id] : null}
             <div class="cad-action-grid" on:click|stopPropagation on:keydown|stopPropagation role="presentation">
               <button class="btn btn-secondary btn-sm" on:click={() => openCadViewer(part)} title="View 3D model">
                 <Box size={14} /> View CAD
@@ -2013,13 +2027,13 @@
             </div>
             {#if fusionJob}
               {#if ['queued', 'claimed', 'processing'].includes(fusionJob.status)}
-                <span class="btn btn-secondary btn-sm autocam-running part-card-autocam-status" title="Fusion CAM is processing this part">
-                  <span class="autocam-spinner"></span> {FUSION_JOB_STATUS_LABELS[fusionJob.status] || fusionJob.status}
+                <span class="btn btn-secondary btn-sm fusion-cam-running part-card-fusion-status" title="Fusion CAM is processing this part">
+                  <span class="fusion-cam-spinner"></span> {FUSION_JOB_STATUS_LABELS[fusionJob.status] || fusionJob.status}
                 </span>
               {:else if fusionJob.status === 'completed'}
-                <span class="autocam-completed part-card-autocam-status"><CircleCheck size={14} /> Fusion CAM completed</span>
+                <span class="fusion-cam-completed part-card-fusion-status"><CircleCheck size={14} /> Fusion CAM completed</span>
               {:else if fusionJob.status === 'failed'}
-                <a class="autocam-failed part-card-autocam-status" href={fusionCamHref(part)} title={fusionJob.errors?.[0] || 'Unknown error'}>Fusion CAM failed - open Fusion CAM to retry</a>
+                <a class="fusion-cam-failed part-card-fusion-status" href={fusionCamHref(part)} title={fusionJob.errors?.[0] || 'Unknown error'}>Fusion CAM failed - open Fusion CAM to retry</a>
               {/if}
             {/if}
           {:else if part.workflow === 'router' || part.workflow === 'lathe'}
@@ -2035,12 +2049,11 @@
           <!-- Status action buttons -->
           {#if part.status === 'pending'}
             {#if part.workflow === 'router'}
-              <button
-                class="btn btn-primary btn-sm"
-                on:click|stopPropagation={async () => { await updatePartStatus(part.id, 'in-progress'); await updateRouterMeta(part, { step: 'cam_ing' }); setLocalStatus(part.id, 'in-progress'); setLocalRouterMeta(part.id, { step: 'cam_ing' }); }}
-              >
-                <Clock size={14} /> Start
-              </button>
+              {#if canAdvanceRouterToCamReview(part, fusionJob)}
+                <button class="btn btn-primary btn-sm" on:click|stopPropagation={() => advanceRouterToCamReview(part)}>
+                  <CircleCheck size={14} /> Review CAM
+                </button>
+              {/if}
             {:else}
               <button
                 class="btn btn-primary btn-sm"
@@ -2051,12 +2064,12 @@
             {/if}
           {:else if part.status === 'in-progress'}
             {#if part.workflow === 'router'}
-              {#if !getRouterMeta(part).step || getRouterMeta(part).step === 'cam_ing'}
+              {#if (!getRouterMeta(part).step || getRouterMeta(part).step === 'cam_ing') && canAdvanceRouterToCamReview(part, fusionJob)}
                 <button
                   class="btn btn-primary btn-sm"
-                  on:click|stopPropagation={async () => { await updateRouterMeta(part, { step: 'cam_review' }); setLocalRouterMeta(part.id, { step: 'cam_review' }); }}
+                  on:click|stopPropagation={() => advanceRouterToCamReview(part)}
                 >
-                  CAM Done
+                  <CircleCheck size={14} /> Review CAM
                 </button>
               {:else if getRouterMeta(part).step === 'cam_review'}
                 {#if canCamReview}
@@ -2108,6 +2121,7 @@
       </thead>
       <tbody>
         {#each filteredParts as part (part.id)}
+          {@const fusionJob = part.workflow === 'router' ? fusionJobsByPart[part.id] : null}
           <tr
             id="part-{part.id}"
             class="parts-row"
@@ -2119,7 +2133,6 @@
             role="button"
             tabindex="0"
             class:droppable={assignMode}
-            class:has-sub-row={(part.workflow === 'router' && getRouterProgressSummary(part)) || !!getSeasonBucket(part.created_at)}
           >
             {#if batchSelectMode}
               <td class="select-col">
@@ -2189,7 +2202,6 @@
             <td class="actions-table-col" class:hidden={assignMode}>
               <div class="row-actions">
                 {#if canViewCad(part)}
-                  {@const fusionJob = part.workflow === 'router' ? fusionJobsByPart[part.id] : null}
                   <div class="cad-action-grid" on:click|stopPropagation on:keydown|stopPropagation role="presentation">
                     <button class="btn btn-secondary btn-sm" on:click={() => openCadViewer(part)} title="View 3D model">
                       <Box size={13} /> View CAD
@@ -2210,13 +2222,13 @@
                   </div>
                   {#if fusionJob}
                     {#if ['queued', 'claimed', 'processing'].includes(fusionJob.status)}
-                      <span class="autocam-running" title="Fusion CAM is processing this part">
-                        <span class="autocam-spinner"></span> {FUSION_JOB_STATUS_LABELS[fusionJob.status] || fusionJob.status}
+                      <span class="fusion-cam-running" title="Fusion CAM is processing this part">
+                        <span class="fusion-cam-spinner"></span> {FUSION_JOB_STATUS_LABELS[fusionJob.status] || fusionJob.status}
                       </span>
                     {:else if fusionJob.status === 'completed'}
-                      <span class="autocam-completed"><CircleCheck size={14} /> Fusion CAM completed</span>
+                      <span class="fusion-cam-completed"><CircleCheck size={14} /> Fusion CAM completed</span>
                     {:else if fusionJob.status === 'failed'}
-                      <a class="autocam-failed" href={fusionCamHref(part)} title={fusionJob.errors?.[0] || 'Unknown error'}>Fusion CAM failed - open Fusion CAM to retry</a>
+                      <a class="fusion-cam-failed" href={fusionCamHref(part)} title={fusionJob.errors?.[0] || 'Unknown error'}>Fusion CAM failed - open Fusion CAM to retry</a>
                     {/if}
                   {/if}
                 {:else if part.workflow === 'router' || part.workflow === 'lathe'}
@@ -2231,13 +2243,11 @@
               </div>
               {#if part.status === 'pending'}
                 {#if part.workflow === 'router'}
-                <button
-                  class="btn btn-primary btn-sm"
-                  on:click={async () => { await updatePartStatus(part.id, 'in-progress'); await updateRouterMeta(part, { step: 'cam_ing' }); setLocalStatus(part.id, 'in-progress'); setLocalRouterMeta(part.id, { step: 'cam_ing' }); }}
-                  title="Start"
-                >
-                  <Clock size={13} /> Start
-                </button>
+                  {#if canAdvanceRouterToCamReview(part, fusionJob)}
+                    <button class="btn btn-primary btn-sm" on:click={() => advanceRouterToCamReview(part)} title="Review completed Fusion CAM output">
+                      <CircleCheck size={13} /> Review CAM
+                    </button>
+                  {/if}
                 {:else}
                 <button
                   class="btn btn-primary btn-sm"
@@ -2250,15 +2260,15 @@
 
               {:else if part.status === 'in-progress'}
                 {#if part.workflow === 'router'}
-                  <!-- Router: CAM Done appears when in CAMing sub-step or no step set -->
-                  {#if !getRouterMeta(part).step || getRouterMeta(part).step === 'cam_ing'}
+                  <!-- Fusion completion is the only path from CAMing to review. -->
+                  {#if (!getRouterMeta(part).step || getRouterMeta(part).step === 'cam_ing') && canAdvanceRouterToCamReview(part, fusionJob)}
                   <div class="actions-col">
                     <button
                       class="btn btn-primary btn-sm"
-                      on:click={async () => { await updateRouterMeta(part, { step: 'cam_review' }); setLocalRouterMeta(part.id, { step: 'cam_review' }); }}
-                      title="CAM Done"
+                      on:click={() => advanceRouterToCamReview(part)}
+                      title="Review completed Fusion CAM output"
                     >
-                      CAM Done
+                      <CircleCheck size={13} /> Review CAM
                     </button>
                   </div>
               {:else if getRouterMeta(part).step === 'cam_review'}
@@ -2684,14 +2694,14 @@
   .table tr { background: var(--surface-1); }
   .table tbody tr:hover { background: var(--surface-1); }
 
-  .autocam-running {
+  .fusion-cam-running {
     background: var(--purple-soft);
     color: var(--purple-strong);
     border-color: var(--purple-soft);
     cursor: default;
   }
 
-  .autocam-completed {
+  .fusion-cam-completed {
     display: inline-flex;
     align-items: center;
     gap: 0.35rem;
@@ -2700,11 +2710,11 @@
     font-weight: 600;
   }
 
-  .part-card-autocam-status {
+  .part-card-fusion-status {
     flex-basis: 100%;
   }
 
-  .autocam-failed {
+  .fusion-cam-failed {
     display: inline-flex;
     align-items: center;
     gap: 0.35rem;
@@ -2713,27 +2723,31 @@
     font-weight: 600;
   }
 
-  .autocam-spinner {
+  .fusion-cam-spinner {
     display: inline-block;
     width: 12px;
     height: 12px;
     border: 2px solid color-mix(in srgb, var(--purple-strong) 30%, transparent);
     border-top-color: var(--purple-strong);
     border-radius: 50%;
-    animation: autocam-spin 0.7s linear infinite;
+    animation: fusion-cam-spin 0.7s linear infinite;
   }
 
-  @keyframes autocam-spin { to { transform: rotate(360deg); } }
+  @keyframes fusion-cam-spin { to { transform: rotate(360deg); } }
 
   .cad-action-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.3rem;
+    width: 100%;
+    min-width: 0;
   }
   .cad-action-grid .btn {
+    min-width: 0;
     justify-content: center;
     text-align: center;
-    white-space: nowrap;
+    white-space: normal;
+    overflow-wrap: anywhere;
     line-height: 1.2;
     font-size: var(--font-xs, 0.75rem);
     padding: 0.3rem 0.4rem;
@@ -2832,35 +2846,6 @@
     vertical-align: middle;
     position: relative;
   }
-  /* The sub-line (season tag, router progress) is positioned absolute and
-     out of flow (see .metadata-col .metadata-sub below), so it contributes
-     nothing to this cell's own height - the row's height came entirely from
-     whatever the tallest OTHER cell happened to need (e.g. a two-line
-     wrapped part name or stock description). For a row just barely tall
-     enough for those, the sub-line's fixed offset below the primary line
-     landed right on top of the row's bottom border - "2026 OFFSEASON"
-     crowded against the divider instead of sitting inside the row.
-     Only rows that actually render a sub-line somewhere (.has-sub-row, set
-     on the <tr> from the same conditions as the {#if}s around .metadata-sub)
-     reserve the extra height, so a row with no season tag or router
-     progress stays as compact as before. Scoped to the row rather than the
-     individual cell (unlike a plain .has-sub on just the Created cell) so
-     Status/Due/Created all grow together and their primary lines stay
-     level with each other - the exact bug 1e3941db already fixed once for
-     the vertical offset, restated here for row height.
-     min-height does NOT work here - Chromium ignores min-height on a
-     table-cell for row-height purposes; height on a table-cell is treated
-     as a minimum instead (content/siblings can still make the row taller),
-     which is the behavior actually needed. */
-  .table tbody tr.has-sub-row td.metadata-col {
-    /* Derived from .metadata-sub's own top formula below, so the two stay
-       in sync: primary line centres at H/2, the sub-line starts
-       H/2 + control-height/2 + 0.3rem below that and is itself
-       control-height tall, so its bottom sits at
-       H/2 + 1.5*control-height + 0.3rem. Solving H >= that plus a matching
-       0.3rem margin gives H >= 3*control-height + 1.2rem. */
-    height: calc(var(--control-height) * 3 + 1.2rem);
-  }
   /* One shared first line for Status / Due / Created / Requested By. A
      pill badge, a date input and plain text all have different intrinsic
      box heights, so left to themselves they each sit at a different
@@ -2884,27 +2869,11 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  /* Secondary content (season tag, router progress) goes on its own line
-     underneath, where it can't nudge the primary line out of alignment -
-     it used to share the primary line's flex container and wrap. */
-  /* Hangs below the primary line without being part of what gets centred.
-     Only two of these four cells have a sub-line ("1 Pending", the season
-     tag); leaving them in flow made those cells centre the whole block, so
-     the Status badge sat ~12px above the Due input beside it instead of
-     level with it. Out of flow, every primary line lands on the row's
-     centre regardless of what hangs underneath. */
-  /* Scoped to the cell (two classes) so it outranks .router-progress-note,
-     which the status sub-line also carries. That rule's own
-     `margin-top: 0.35rem` appears later in this stylesheet and was winning,
-     so the offset here resolved to 5.6px instead of ~19px and "1 Pending"
-     sat 8px inside the badge above it. The offset now lives in `top`, where
-     a margin from a content class cannot quietly replace it. */
+  /* Keep the date/status and their secondary badge as one in-flow stack.
+     The table cell's vertical-align: middle then centres the whole group,
+     instead of absolutely positioning the badge against the bottom edge. */
   .metadata-col .metadata-sub {
-    position: absolute;
-    left: 0;
-    right: 0;
-    top: calc(50% + (var(--control-height) / 2) + 0.3rem);
-    margin-top: 0;
+    margin-top: 0.3rem;
     display: flex;
     justify-content: center;
     /* Keeps the season tag off the column edge so it never reads as though
@@ -3060,11 +3029,7 @@
 
   .parts-row {
     cursor: pointer;
-    /* A minimum, not a fixed height - CSS treats `height` on a table row as
-       a floor, so taller rows are unaffected. Guarantees room beneath the
-       centred primary line for the out-of-flow sub-line (the season tag,
-       the progress note), which otherwise spilled ~10px into the next row
-       on the shortest rows. */
+    /* A compact floor; in-flow metadata and action content can grow it. */
     height: 6rem;
   }
 
@@ -3296,6 +3261,10 @@
     flex: 1 1 auto;
     min-width: 80px;
     justify-content: center;
+  }
+
+  .part-card-actions .cad-action-grid .btn {
+    min-width: 0;
   }
 
   @media (max-width: 900px) {
