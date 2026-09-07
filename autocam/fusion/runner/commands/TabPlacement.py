@@ -229,54 +229,36 @@ def _edge_midpoint(edge):
     return adsk.core.Point3D.create((start.x + end.x) / 2, (start.y + end.y) / 2, (start.z + end.z) / 2)
 
 
-def _native_entity(entity):
-    """Return a native Fusion entity when ``entity`` is an occurrence proxy.
-
-    The sketch used for a tab point must be created in the owning component's
-    coordinate system. Fusion exposes proxy geometry in the root assembly
-    coordinate system, which makes a point look valid while placing it on the
-    wrong location once the parameter is evaluated.
-    """
-    try:
-        return entity.nativeObject or entity
-    except Exception:
-        return entity
-
-
-def _manual_tab_points(app, tab_face, tab_edges):
+def _manual_tab_points(app, root_component, tab_face, tab_edges):
     """Create explicit Manual Tabs SketchPoints at vetted edge midpoints.
 
     Fusion stores ``tabPositions`` as a CadPoints collection. Assigning BRep
     edges may display those edges in the operation dialog, but it does not
     identify a position along each edge; the CAM kernel can then retain only
-    some of them depending on chain direction. SketchPoints make each tab
-    location unambiguous and preserve the body's occurrence context for
-    grouped jobs.
+    some of them depending on chain direction. The sketch itself MUST belong
+    to the setup's root component and receive the already-arranged face proxy
+    in that root context. Creating the sketch in the source component then
+    proxying its points afterward makes Fusion evaluate some locations in the
+    unarranged local frame, which was the cause of tabs appearing on only two
+    sides of autocamtraining.
     """
     if tab_face is None or not tab_edges:
         return []
     try:
-        native_face = _native_entity(tab_face)
-        component = native_face.body.parentComponent
-        sketch = component.sketches.add(native_face)
+        sketch = root_component.sketches.add(tab_face)
         sketch.name = "AutoCAM Manual Tab Points"
         try:
             sketch.isLightBulbOn = False
         except Exception:
             pass
 
-        try:
-            assembly_context = tab_face.assemblyContext
-        except Exception:
-            assembly_context = None
-
         tab_points = []
         for edge in tab_edges:
-            native_edge = _native_entity(edge)
-            point = sketch.modelToSketchSpace(_edge_midpoint(native_edge))
+            # ``edge`` is intentionally the occurrence proxy returned from
+            # rootComponent.allOccurrences. Its geometry is already in the
+            # exact arranged coordinate frame of this setup.
+            point = sketch.modelToSketchSpace(_edge_midpoint(edge))
             sketch_point = sketch.sketchPoints.add(point)
-            if assembly_context is not None:
-                sketch_point = sketch_point.createForAssemblyContext(assembly_context)
             tab_points.append(sketch_point)
         return tab_points
     except Exception as e:
@@ -691,7 +673,7 @@ def ConfigureTabs(min_tabs: int = DEFAULT_MIN_TABS, max_tabs: int = DEFAULT_MAX_
                         "on a rounded or too-short edge."
                 )
                 tab_face = _find_tab_face(body)
-                tab_points = _manual_tab_points(app, tab_face, body_candidates)
+                tab_points = _manual_tab_points(app, comp, tab_face, body_candidates)
                 if len(tab_points) != len(body_candidates):
                     app.log(
                         f"TabPlacement: '{op.name}' - could not create all explicit tab points "
