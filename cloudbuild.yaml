@@ -153,19 +153,25 @@ steps:
       # confirmed with `gcloud projects describe spartanshub`; #309's own
       # "Required secure fix" section names a DIFFERENT, wrong project
       # number, 819718873862, corrected in a comment on that issue) already
-      # holds roles/secretmanager.secretAccessor on it. The temporary
-      # Fusion and Vision each use their own Secret Manager credential; do
-      # not map one runner's token to the other. What FUSION_RUNNER_TOKEN is for:
-      # src/routes/api/vision-runner/+server.js's authorized()/checkToken()
-      # is fail-CLOSED - Boolean(expected && supplied && ...) is always
-      # false while it's unset, so that endpoint (and the Fusion runner
-      # claim endpoint sharing its check) rejects every request, including
-      # from a legitimate runner. The Fusion add-in's own .env API_KEY must
-      # match this same secret's value.
+      # holds roles/secretmanager.secretAccessor on it. Fusion and Vision
+      # each use their own Secret Manager credential; do not map one
+      # runner's token to the other.
       #
-      # Vision Runner has its own dedicated credential. The DGX runner must
-      # receive the same value through its ignored vision/runner/.env; do not
-      # reuse the Fusion token or bake either value into an image.
+      # What FUSION_RUNNER_TOKEN is for: src/lib/server/fusion_runner_auth.js
+      # (used by api/fusion-runner) reads ONLY this variable, and fails
+      # CLOSED when it is unset - getFusionRunnerSecrets() returns an empty
+      # list and every request is rejected, including from a legitimate
+      # Runner. The Fusion add-in's own .env API_KEY must match this
+      # secret's value.
+      #
+      # VISION_RUNNER_TOKEN is a separate secret for a separate endpoint:
+      # api/vision-runner/+server.js's authorized()/checkToken() reads ONLY
+      # that variable and is independently fail-closed. The DGX runner
+      # receives the same value through its gitignored vision/runner/.env.
+      # Both secrets were re-verified on 2026-09-08 as existing with an
+      # enabled version and the accessor role on the runtime SA above (see
+      # issue #309). Do not reuse either token for the other runner, and do
+      # not bake either value into an image.
       - '--set-secrets=SUPABASE_SERVICE_KEY=SUPABASE_SERVICE_KEY:latest,SUPABASE_ANON_KEY=SUPABASE_ANON_KEY:latest,SLACK_BOT_TOKEN=SLACK_BOT_TOKEN:latest,SLACK_SIGNING_SECRET=SLACK_SIGNING_SECRET:latest,TBA_API_KEY=TBA_API_KEY:latest,CRON_NOTIFICATION_TOKEN=CRON_NOTIFICATION_TOKEN:latest,FUSION_RUNNER_TOKEN=FUSION_RUNNER_TOKEN:latest,VISION_RUNNER_TOKEN=VISION_RUNNER_TOKEN:latest'
       # ORIGIN is adapter-node's own documented fix for a real gap: "HTTP
       # doesn't give SvelteKit a reliable way to know the URL that is

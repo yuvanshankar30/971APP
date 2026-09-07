@@ -40,15 +40,19 @@ Done and verified live:
   `roles/secretmanager.secretAccessor` on it directly - verified against
   Secret Manager itself, not assumed, while chasing issue #309. The
   earlier "map FUSION_RUNNER_TOKEN to the VISION_RUNNER_TOKEN secret"
-  workaround is gone from `cloudbuild.yaml`; it was reading a secret that
-  does not exist under that name on this project at all.
-  **`VISION_RUNNER_TOKEN` (or any Vision-specific secret) does not exist
-  in Secret Manager on this project right now**, under any name - that is
-  a separate, still-open gap, not resolved by the Fusion fix. A project
-  administrator needs to create one and grant it the same role on the
-  same service account before the DGX vision worker (and
-  `api/vision-runner`) can authenticate. Neither token belongs in a
-  checked-in `.env.example` file.
+  workaround is gone from `cloudbuild.yaml`.
+  **`VISION_RUNNER_TOKEN` now also exists** as its own separate secret with
+  its own enabled version and the same `roles/secretmanager.secretAccessor`
+  binding on the same runtime service account - re-verified directly
+  against Secret Manager on 2026-09-08 (`gcloud secrets list`,
+  `gcloud secrets versions list`, `gcloud secrets get-iam-policy`), not
+  assumed. An earlier revision of this doc said it did not exist and asked
+  an administrator to create one; that is no longer true, and acting on it
+  would create a duplicate. Both runners are fully split at every layer:
+  separate secrets, separate `--set-secrets` mappings, and separate env
+  vars in code (`fusion_runner_auth.js` reads only `FUSION_RUNNER_TOKEN`,
+  `api/vision-runner/+server.js` reads only `VISION_RUNNER_TOKEN`).
+  Neither token belongs in a checked-in `.env.example` file.
 - 8 Secret Manager secrets created and wired to the Cloud Run runtime service account
   (`536793099017-compute@developer.gserviceaccount.com` - see the note above on
   where this number comes from) via
