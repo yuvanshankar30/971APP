@@ -61,5 +61,70 @@ class TemplateToolPresetTests(unittest.TestCase):
             template_tools._choose_preset(tool_with("Default preset"), "Aluminum Composite")
 
 
+class EntryFeedSafetyTests(unittest.TestCase):
+    """Issue #360: forcing every motion type to the base cutting feed sent a
+    plunge move in at full cutting speed and tore through real stock. These
+    pin the guardrail that now refuses to build such a preset.
+    """
+
+    def test_rejects_a_plunge_feed_raised_to_the_cutting_feed(self):
+        with self.assertRaisesRegex(ValueError, "Unsafe v_f_plunge"):
+            template_tools.assert_safe_entry_feeds({"v_f": 80, "v_f_plunge": 80})
+
+    def test_rejects_a_ramp_feed_raised_to_the_cutting_feed(self):
+        with self.assertRaisesRegex(ValueError, "Unsafe v_f_ramp"):
+            template_tools.assert_safe_entry_feeds({"v_f": 80, "v_f_ramp": 80})
+
+    def test_allows_the_real_library_ratios(self):
+        # ramp 1/4, plunge 1/6 - what every reviewed preset actually uses.
+        template_tools.assert_safe_entry_feeds(
+            {"v_f": 80, "v_f_ramp": 20, "v_f_plunge": 13.333}
+        )
+
+    def test_ignores_a_preset_that_programs_no_entry_feed(self):
+        # A missing entry feed is a data gap, not a hazard - it must not turn
+        # into a refusal to cut.
+        template_tools.assert_safe_entry_feeds({"v_f": 80})
+        template_tools.assert_safe_entry_feeds({"v_f_plunge": 13.333})
+
+    def test_the_router_scale_keeps_a_preset_safe(self):
+        scaled = template_tools._conservative_router_preset(
+            {"name": "Aluminum 6061", "v_f": 80, "v_f_ramp": 20, "v_f_plunge": 13.333}
+        )
+        self.assertLess(scaled["v_f_plunge"], scaled["v_f"])
+        self.assertLess(scaled["v_f_ramp"], scaled["v_f"])
+
+    def test_conservative_preset_rejects_unsafe_input_before_it_reaches_a_machine(self):
+        with self.assertRaisesRegex(ValueError, "Unsafe v_f_plunge"):
+            template_tools._conservative_router_preset(
+                {"name": "Bad preset", "v_f": 80, "v_f_plunge": 80}
+            )
+
+    def test_every_shipped_library_preset_passes(self):
+        """The real checked-in tool library, not a fixture - so retuning a
+        preset in that file can never ship an unsafe entry feed unnoticed.
+        """
+        import json
+        import zipfile
+        from pathlib import Path
+
+        library = Path(__file__).parents[1] / "tools/971-outside-plate.tools"
+        if not library.is_file():
+            self.skipTest("checked-in tool library not present")
+        with zipfile.ZipFile(library) as archive:
+            payload = json.loads(archive.read("tools.json"))
+        tools = payload.get("data") or []
+        presets = [
+            (tool.get("description") or "?", preset)
+            for tool in tools
+            for preset in tool.get("start-values", {}).get("presets", [])
+        ]
+        self.assertTrue(presets, "expected the library to contain reviewed presets")
+        for description, preset in presets:
+            with self.subTest(tool=description, preset=preset.get("name")):
+                template_tools.assert_safe_entry_feeds(preset, str(preset.get("name")))
+                template_tools._conservative_router_preset(preset)
+
+
 if __name__ == "__main__":
     unittest.main()
