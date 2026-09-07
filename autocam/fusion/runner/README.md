@@ -20,7 +20,7 @@ This is Team 971's fork of FRC Team Valor 6800's open-source [AutoCAM Runner](ht
 
 The add-in polls Spartans Hub's `/api/fusion-runner` endpoint for queued milling jobs, pulls down plate and box-tube jobs, builds Fusion CAM setups from templates, generates toolpaths, exports G-code, and reports completion back to `cam_jobs` in Spartans Hub's own database.
 
-There is no multi-tenant "team"/API-key-scopes concept here — this Runner authenticates with a single shared-secret bearer token that matches Spartans Hub's `FUSION_RUNNER_TOKEN` environment variable (see `src/lib/server/fusion_runner_auth.js`), sourced from its own `FUSION_RUNNER_TOKEN` Secret Manager secret (`cloudbuild.yaml`'s `--set-secrets`) — not shared with Vision Scouting's runner token. See issue #312 for the remaining GCP admin setup this needs before it can run against the deployed Hub instead of a local dev server.
+There is no multi-tenant "team"/API-key-scopes concept here — this Runner authenticates with a single shared-secret bearer token that matches Spartans Hub's `FUSION_RUNNER_TOKEN` environment variable (see `src/lib/server/fusion_runner_auth.js`), sourced from its own `FUSION_RUNNER_TOKEN` Secret Manager secret (`cloudbuild.yaml`'s `--set-secrets`) — not shared with Vision Scouting's runner token. The deployment-side secret binding is complete; each Fusion workstation still needs the matching value in its local, gitignored `.env`.
 
 An unmodified copy of the original upstream Runner is kept at [`_upstream/`](_upstream/) for reference/diffing — it is never built or loaded by Fusion.
 
@@ -41,9 +41,15 @@ The add-in runs a background polling thread that claims queued `cam_jobs` rows (
 - **Plate CAM** — downloads STEP files, applies tool libraries, generates toolpaths and G-code
 - **Box-tube CAM** — the same flow adapted for tubular stock
 - **2D nesting** — auto-arranges parts onto plates with envelope screenshots
+- **Grouping validation** — refuses partial/multi-envelope arrangements and
+  quantity mismatches before CAM generation
 - **Auto-orientation** — orients parts largest-face-up before setup
-- **Template-driven setups** — reusable Fusion CAM templates for plates and box tubes
+- **Template-driven setups** — reviewed machine/material mappings with locally
+  resolved tool libraries and postprocessors
+- **Holding tabs and selection repair** — places tabs on usable outer edges and
+  repairs template geometry selections against the imported job bodies
 - **Exact NC artifacts** — preserves each Fusion-posted file byte for byte instead of joining complete programs together
+- **Plate machining-time reporting** — stores Fusion's measured job time for the web queue (box-tube parity is tracked separately)
 - **Status reporting** — completion and errors pushed back to Spartans Hub's `cam_jobs` table
 
 ## Requirements
@@ -101,7 +107,7 @@ It asks which Hub to talk to (deployed, or a local dev server) and for your `FUS
 | `config.py` | Global settings (paths, base URL, runner ID, debug mode) |
 | `commands/` | Fusion 360 UI commands / utility operations |
 | `workflows/` | CAM job-processing pipelines |
-| `templates/` | Fusion CAM template files (`Plates`, `boxtubes`) |
+| `templates/` | Generic templates plus reviewed machine/material templates under `971-real/` |
 | `lib/` | Shared Fusion add-in utilities |
 | `_upstream/` | Unmodified copy of the original AutoCAM Runner, kept for reference |
 
@@ -115,19 +121,23 @@ It asks which Hub to talk to (deployed, or a local dev server) and for your `FUS
 | `job_status.py` | Reports job status back to Spartans Hub |
 | `setupTemp.py` | Setup + temp-file handling |
 | `templateTools.py` | Applies tool libraries from templates |
+| `dropFolder.py` | Resolves/creates the configured Fusion Data Panel destination |
+| `localCamAssets.py` | Resolves checked-in tool libraries and postprocessors without web fallbacks |
 
 ### Commands (`commands/`)
 
 | Module | Role |
 | --- | --- |
 | `AutoArrange.py` | 2D nesting solver |
+| `GroupingValidation.py` | Rejects incomplete or inconsistent nesting results |
 | `SetupGenerator.py` | CAM setup creation |
 | `NewNCProgram.py` | G-code export |
 | `NcArtifacts.py` | Exact-byte NC artifact collection and checksums |
 | `Orientation.py` | Auto-orient parts (largest face up) |
 | `HandleTube.py` | Box-tube handling |
 | `MultiImport.py` | Multi-part import |
-| `DeleteToolpaths.py` | Clear existing toolpaths |
+| `DeleteToolpaths.py` | Repairs selections, regenerates, and removes inapplicable/invalid operations |
+| `TabPlacement.py` | Places holding tabs on valid straight outer-profile edges |
 | `ScreenshotEnvelope.py` | Capture envelope screenshots |
 
 ## Development
