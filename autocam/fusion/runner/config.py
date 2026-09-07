@@ -3,6 +3,7 @@
 # modules (global variables).
 import os
 import re
+import sys
 
 _ADDIN_DIR = os.path.dirname(os.path.realpath(__file__))
 _ENV_PATH = os.path.join(_ADDIN_DIR, ".env")
@@ -71,6 +72,16 @@ except FileNotFoundError:
         "folder's path. See docs/team-setup-guide.md, Step 4, for exact "
         "commands."
     )
+
+if not os.path.isdir(OVERRIDE_PATH):
+    raise RuntimeError(
+        f"Dependency path {OVERRIDE_PATH!r} from {_OVERRIDEPATH_FILE} does not exist. "
+        "Install requests with `python3 -m pip install --target=<that-folder> requests`."
+    )
+if OVERRIDE_PATH not in sys.path:
+    # This must happen while config is imported by the add-in entry point,
+    # before camPlate/camTube import requests at module load time.
+    sys.path.insert(0, OVERRIDE_PATH)
 
 # Which Fusion "project" (top-level entry in the Data Panel) AutoCAM-
 # generated documents get saved into. Configurable because

@@ -7,13 +7,16 @@ import sys
 import threading
 import time
 from typing import List, Optional
+# Bootstrap the external requests dependency before workflow imports. Those
+# modules import requests at module load time, so doing this after them makes
+# a valid .overridepath ineffective and causes the add-in to stop instantly.
+from .config import *
 from .workflows import importPlate as importPlate
 from .workflows import camPlate as camPlate
 from .workflows import camTube as camTube
 from .workflows import setupTemp as setupTemp
 from .workflows.dropFolder import _is_offline_settings_error, list_data_folder_tree
 from .workflows.job_status import send_job_error
-from .config import *
 import requests
 
 _ADDIN_DIR = os.path.dirname(os.path.realpath(__file__))
