@@ -76,6 +76,17 @@
     return null;
   }
 
+  // Direct invariant: "if a part is linked to a manufacturing request, it
+  // should have the same step file" - so once a link with a real STEP file
+  // is picked, the manual STEP picker is disabled rather than left as a
+  // soft, overridable suggestion (see handleFileChange). Only true when the
+  // linked request actually HAS a resolvable STEP file - a request with no
+  // STEP of its own has nothing to enforce, so the manual picker stays
+  // available for that case rather than leaving the part stuck with none.
+  $: manufacturingHasStepFile = !!manufacturingStepFileName(
+    manufacturingParts.find((mp) => mp.id === newPart.manufacturingPartId)
+  );
+
   // Best-effort carry-over of the linked request's STEP file (so the user
   // doesn't have to re-download-then-re-upload it) and a depth estimate read
   // straight off its geometry (extractRoutingContoursFromMeshes's own
@@ -98,6 +109,12 @@
     const stepPath = manufacturingStepFileName(linkedPart);
     if (!stepPath) return;
 
+    // Never leave an older manually picked file attached while this link is
+    // loading. If the linked file cannot be downloaded, handleAdd below
+    // blocks creation rather than silently associating the request with
+    // unrelated geometry.
+    stepFile = null;
+    stepCarriedOverFrom = null;
     try {
       const { data: blob, error: downloadError } = await supabase.storage
         .from('manufacturing-files')
@@ -107,6 +124,7 @@
       stepCarriedOverFrom = linkedPart.name;
     } catch (e) {
       console.warn('Could not carry over the linked request\'s STEP file:', e.message || e);
+      toastActions.show('Could not load the linked request STEP file');
     }
 
     detectingDepth = true;
@@ -144,9 +162,17 @@
       }
       return;
     }
-    if (stepFile && !stepCarriedOverFrom) return; // user picked their own file
     const linkedPart = manufacturingParts.find((mp) => mp.id === selectedId);
     if (!linkedPart) return;
+    // Direct invariant: "if a part is linked to a manufacturing request, it
+    // should have the same step file." A manual pick made BEFORE choosing
+    // this link no longer wins - linking always carries the request's own
+    // file over, same as manufacturingHasStepFile disables the picker
+    // going forward. Only skipped when the linked request has no STEP file
+    // of its own to carry over (manufacturingStepFileName returns null) -
+    // there is nothing to enforce, so whatever manual file is already
+    // picked is left alone rather than being cleared for no replacement.
+    if (!manufacturingStepFileName(linkedPart) && stepFile && !stepCarriedOverFrom) return;
     await applyManufacturingPrefill(linkedPart);
   }
 
@@ -195,6 +221,14 @@
   onMount(load);
 
   function handleFileChange(event) {
+    // Direct invariant: "if a part is linked to a manufacturing request, it
+    // should have the same step file" - not a soft suggestion a manual pick
+    // can silently override. The file input is disabled in the markup
+    // whenever a link with a real STEP file is selected (see
+    // manufacturingHasStepFile below); this guard is defense in depth for
+    // an event that fires anyway (a disabled input's change handler should
+    // never run, but nothing here should trust that from the DOM alone).
+    if (manufacturingHasStepFile) return;
     stepFile = event.target.files?.[0] || null;
     stepCarriedOverFrom = null; // user picked their own file - the carry-over hint no longer applies
   }
@@ -209,6 +243,10 @@
   async function handleAdd() {
     if (!newPart.name || !newPart.categoryId || !newPart.quantity) {
       toastActions.show('Name, category, and quantity are required');
+      return;
+    }
+    if (manufacturingHasStepFile && !stepFile) {
+      toastActions.show('The linked request STEP file is still unavailable');
       return;
     }
     submitting = true;
@@ -397,9 +435,18 @@
           <input id="part-ticket" class="form-input" bind:value={newPart.ticket} />
         </div>
         <div class="form-group">
-          <label class="form-label" for="part-step">STEP file (optional)</label>
-          <input id="part-step" type="file" accept=".step,.stp" class="form-input" on:change={handleFileChange} />
-          {#if stepCarriedOverFrom}
+          <label class="form-label" for="part-step">STEP file {manufacturingHasStepFile ? '(from linked request)' : '(optional)'}</label>
+          <input
+            id="part-step"
+            type="file"
+            accept=".step,.stp"
+            class="form-input"
+            disabled={manufacturingHasStepFile}
+            on:change={handleFileChange}
+          />
+          {#if manufacturingHasStepFile}
+            <p class="cam-form-hint">Locked to the linked request's own STEP file - a linked part always has the same file. Unlink the request above to upload a different one.</p>
+          {:else if stepCarriedOverFrom}
             <p class="cam-form-hint">Carried over from "{stepCarriedOverFrom}" - pick a different file above to replace it.</p>
           {/if}
         </div>
