@@ -3,7 +3,7 @@
     "kitting": true,
     "build": true,
     "manufacture": true,
-    "cad": true,
+    "cad": false,
     "purchasing": true,
     "scouting": true,
     "powerrankings": true,

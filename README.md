@@ -30,6 +30,10 @@ browser confirmation or prompt popups.
   (CAM review, CAM reviewed, postprocessed, jprogged, machined, kitted -
   Router's the only workflow with this many distinct steps). See the
   **AutoCAM** section below for automatic G-code generation specifically.
+  Build tracking remains in the main navigation, but the Onshape-backed CAD
+  tab is hidden while the Onshape integration credentials are disconnected;
+  the underlying `/cad` routes remain available to existing manufacturing and
+  purchasing links.
 - **AutoCAM**: automatic STEP → G-code generation for lathe turning, router
   routering, and indexed tube-stock drilling jobs run on the router with the
   operator flipping the tube between faces by hand - either manually queued

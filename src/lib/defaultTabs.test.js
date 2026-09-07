@@ -25,14 +25,21 @@ const savedNav = () => [
 ];
 
 describe('defaultHeaderTabs', () => {
-  it('puts Manufacturing and Competition before CAD and Purchasing', () => {
+  it('puts Manufacturing and Competition before Build and Purchasing', () => {
     const order = defaultHeaderTabs().map((tab) => tab.key || tab.label);
-    expect(order).toEqual(['Manufacturing', 'Competition', 'CAD', 'purchasing', 'docs']);
+    expect(order).toEqual(['Manufacturing', 'Competition', 'build', 'purchasing', 'docs']);
   });
 
   it('matches the shared header order after the separately rendered Home tab', () => {
     const order = ['home', ...defaultHeaderTabs().map((tab) => tab.key || tab.label), 'admin'];
-    expect(order).toEqual(['home', 'Manufacturing', 'Competition', 'CAD', 'purchasing', 'docs', 'admin']);
+    expect(order).toEqual(['home', 'Manufacturing', 'Competition', 'build', 'purchasing', 'docs', 'admin']);
+  });
+
+  it('omits the disconnected CAD tab while keeping Build available', () => {
+    const tabs = defaultHeaderTabs();
+    expect(tabs.some((tab) => tab.key === 'cad')).toBe(false);
+    expect(tabs.some((tab) => tab.type === 'folder' && tab.children?.some((child) => child.key === 'cad'))).toBe(false);
+    expect(tabs).toContainEqual({ type: 'tab', key: 'build', label: 'Build' });
   });
 
   it('includes Power Rankings and Scouting Admin in the Competition folder', () => {
