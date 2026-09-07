@@ -415,12 +415,11 @@ def _repair_missing_selections(setup) -> list[str]:
         design = _design()
         feature_edges_cache = _internal_feature_loop_edges_all_bodies(design) if design else []
     # Only the ONE primary operation is treated as "the" feature-cut
-    # operation - every OTHER contour2d finishing pass in the template
-    # falls through to the ordinary conditional repair path below and,
-    # having no real feature left to give it, ends up empty and is removed
-    # by this file's own existing empty-toolpath cleanup, same as any
-    # other operation the template shipped that doesn't apply to this
-    # specific part.
+    # operation. Do not leave the other template contour passes to their
+    # stale selections: a stale selection can look healthy to Fusion even
+    # when it resolves to unrelated geometry on the newly imported part.
+    # They are removed after this pass so the browser always presents one
+    # feature operation, rather than ambiguous duplicate finishing passes.
     active_feature_ops = []
     feature_op_assignments = {}  # operationId -> list of edge-lists, this op's own share
     if finishing_pass_ops and feature_edges_cache:
@@ -429,10 +428,15 @@ def _repair_missing_selections(setup) -> list[str]:
         for i, edges in enumerate(feature_edges_cache):
             target_op = active_feature_ops[i % len(active_feature_ops)]
             feature_op_assignments.setdefault(target_op.operationId, []).append(edges)
-    feature_op_order = {op.operationId: idx for idx, op in enumerate(active_feature_ops)}
     feature_op_index = {op_id: True for op_id in feature_op_assignments}
+    inactive_finishing_ops = [
+        op for op in finishing_pass_ops if op.operationId not in feature_op_index
+    ]
+    inactive_finishing_ids = {op.operationId for op in inactive_finishing_ops}
 
     for op in ops_snapshot:
+        if op.operationId in inactive_finishing_ids:
+            continue
         is_outer = _is_outer_profile(op)
         is_feature_op = op.operationId in feature_op_index
         # The template's own dedicated big-hole operation (pocket2d,
@@ -518,16 +522,10 @@ def _repair_missing_selections(setup) -> list[str]:
                 chain.isOpen = False
                 chain.isReverted = False
                 chain.inputGeometry = [edges[0]]
-            # Only rename a generically-named finishing pass being
-            # repurposed for this (e.g. "Shape Through Finishing Pass") -
-            # a template operation already named for this purpose (the New
-            # Router metal template's own real "Slot Cut for Features")
-            # keeps its own real name as-is. A second (or later) operation
-            # gets a numbered name so it's clearly part of the same split
-            # feature-cut work, not confused for an unrelated operation.
-            if "feature" not in name_lower:
-                op_order = feature_op_order.get(op.operationId, 0)
-                op.name = "Feature Slot Cut" if op_order == 0 else f"Feature Slot Cut {op_order + 1}"
+            # The generated setup deliberately has one consolidated feature
+            # operation. Naming it consistently makes CAM review unambiguous
+            # and prevents it being confused with the final outer slot cut.
+            op.name = "Feature Slot Cut"
             # Direct instruction: no tabs on the feature slot cut at all -
             # confirmed live as a real bug, not hypothetical: the
             # template's own default (tabsPerContour=1, untouched here
@@ -641,6 +639,16 @@ def _repair_missing_selections(setup) -> list[str]:
             _set_min_hole_diameter_from_name(recognition, name_lower)
         value.applyCurveSelections(selections)
         repaired.append(op.name)
+
+    for op in inactive_finishing_ops:
+        try:
+            removed_name = op.name
+            op.deleteMe()
+            repaired.append(f"removed unused contour pass: {removed_name}")
+        except Exception:
+            # The final cleanup can still remove an empty operation if
+            # Fusion declines to delete it before the next regeneration.
+            pass
     return repaired
 
 
