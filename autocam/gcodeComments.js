@@ -50,7 +50,11 @@ function isLinuxCncBracketExpression(line, start) {
   if (before < 0 || !/[A-Za-z0-9#=+\-*/]/.test(line[before])) return false;
 
   const text = line.slice(start + 1).trimStart();
-  return /^(?:[#0-9.+\-]|abs\b|acos\b|asin\b|atan\b|cos\b|exists\b|exp\b|fix\b|fup\b|ln\b|round\b|sin\b|sqrt\b|tan\b)/i.test(text);
+  // Function names are expressions only when followed by their bracketed
+  // argument. Without that requirement, a valid WinCNC comment such as
+  // "[sin setup note]" after a move is mistaken for LinuxCNC code and never
+  // receives the normal comment cleanup.
+  return /^(?:[#0-9.+\-]|(?:abs|acos|asin|atan|cos|exists|exp|fix|fup|ln|round|sin|sqrt|tan)\s*\[)/i.test(text);
 }
 
 function findCommentStart(line, dialect) {

@@ -140,6 +140,12 @@ describe('normalizeGcodeComments - cleaning an already-generated program', () =>
       .toBe('G01 X[#1+2] Y[3*4] F20 (calculated move)');
   });
 
+  it('still cleans a WinCNC comment that begins with a function word', () => {
+    const program = 'G01 X1 [sin setup (dry run)]';
+    expect(normalizeGcodeComments(program, { dialect: 'preserve' }))
+      .toBe('G01 X1 [sin setup dry run]');
+  });
+
   it('leaves an already-clean comment exactly as it is', () => {
     const clean = 'G01 X1 Y2 F20 (rapid to hole position)';
     expect(normalizeGcodeComments(clean, { dialect: 'preserve' })).toBe(clean);
