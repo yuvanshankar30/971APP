@@ -324,8 +324,8 @@ class ManualTabTests(unittest.TestCase):
         points = [object(), object(), object(), object()]
 
         self.assertTrue(TabPlacement._apply_manual_tabs(app, operation, points))
-        self.assertEqual(parameters["tabsPerContour"].value.value, 0)
-        self.assertEqual(parameters["tabPositioning"].value.value, "tabCount")
+        self.assertEqual(parameters["tabsPerContour"].expression, "0")
+        self.assertEqual(parameters["tabPositioning"].expression, "'tabCount'")
         self.assertEqual(parameters["tabWidth"].expression, "0.6in")
         self.assertEqual(parameters["tabHeight"].expression, "0.15in")
         self.assertEqual(parameters["tabPositions"].value.value, points)
@@ -382,8 +382,9 @@ class ManualTabPointTests(unittest.TestCase):
 class TabReadBackTests(unittest.TestCase):
     """Assignments to Fusion CAM tab parameters are verified, not trusted.
 
-    A real tab-position bug was silent: positions came from the wrong face
-    so none could be placed, while the job still reported success.
+    Both of this module's real bugs were silent: tab positions came from the
+    wrong face so none could be placed, and tabsPerContour reports 1
+    whatever it is given. In both cases the job reported success.
     """
 
     def _op(self, kept):

@@ -321,23 +321,27 @@ and for the same body, top-face outer loop `478,480..492` had **0 of 8**
 edges on the contour while bottom-face outer loop `741..748` had **8 of 8**.
 The bottom face's outer loop *is* the contour, exactly.
 
-### Manual-only mode must use parameter values, not expressions
+**What was cutting instead** was Fusion's own automatic placement, which on
+a rectangular part spaces four tabs evenly - close enough to look correct
+on simple parts, and entirely outside this module's control on anything
+else. That is the tell for this class of bug: placement that looks right on
+one part and wrong on the next *regardless of what the code selected*.
 
-Fusion's `tabPositioning` and `tabsPerContour` are discrete CAM values.
-Setting their `expression` strings can appear to work while retaining the
-template's distance placement, which was the cause of a real training-part
-result with tabs only on the top/right edges. Configure manual-only tabs in
-this order:
+Two related facts about Fusion's tab parameters, both read back from a live
+operation rather than assumed - this file used to assert the opposite of
+the first:
 
-1. `group_tabs.value.value = True`
-2. `tabPositioning.value.value = 'tabCount'`
-3. `tabsPerContour.value.value = 0`
-4. `tabPositions.value.value = [SketchPoint, ...]`
+- **`tabsPerContour = 0` does not disable automatic tabs.** The parameter
+  reports a value of 1 no matter what is assigned to it (0, 1, 2 and 4 all
+  read back as 1), because it is inactive in the active mode.
+- **There is no manual-only mode.** `tabPositioning` enumerates exactly
+  `'distance'` and `'tabCount'`; `'points'` is rejected as an invalid
+  enumeration value, even though a template's stale `tabDistance`
+  expression may still read `'points' == 'points' ? ...`.
 
-`'points'` is not a valid `tabPositioning` value. The explicit
-`SketchPoint`s select locations; `tabCount` plus zero automatic tabs ensures
-that those locations, rather than the template's fallback distance tabs,
-are what the release contour machines.
+So automatic placement is always on and a manual tab is an *addition* to
+it. Manual tabs winning is a consequence of their explicit SketchPoints
+being on the contour - not of having switched Fusion into some manual mode.
 
 Two invariants worth preserving if this is touched:
 
