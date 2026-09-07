@@ -1,7 +1,6 @@
 -- Fusion CAM system
--- The Fusion-360-backed milling pipeline, ported from FRC Team Valor 6800's
--- open-source AutoCAM (github.com/AutoCAM-FRC/Website + Runner, MIT
--- licensed) - a second, separate CAM path alongside the existing pure-JS
+-- The Fusion-360-backed milling pipeline is a second, separate CAM path
+-- alongside the existing pure-JS
 -- turning/routing generator (autocam/turning.js, autocam/routing.js), which
 -- deliberately has no external dependency and is untouched by this file.
 -- This one exists because real 3-axis milling (contoured 3D surfaces) needs

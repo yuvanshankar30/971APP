@@ -28,15 +28,5 @@ export default defineConfig({
 			// never starts.
 			allow: [path.resolve('autocam'), fs.realpathSync(path.resolve('node_modules'))]
 		}
-	},
-	test: {
-		// autocam/fusion/_upstream/ and autocam/fusion/runner/_upstream/ are
-		// vendored copies of Team Valor 6800's original AutoCAM source
-		// (reference-only, never built - see autocam/fusion/README.md), not
-		// part of this app. Vitest's default include glob is broad enough to
-		// otherwise pick up their own *.test.ts files, which fail outright -
-		// they depend on next/server and other Next.js-only modules this
-		// project doesn't (and shouldn't) have.
-		exclude: ['**/node_modules/**', '**/autocam/fusion/**/_upstream/**']
 	}
 });

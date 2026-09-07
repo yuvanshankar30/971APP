@@ -1,1 +1,0 @@
-export { Request as POST } from "@/lib/api/jobs";

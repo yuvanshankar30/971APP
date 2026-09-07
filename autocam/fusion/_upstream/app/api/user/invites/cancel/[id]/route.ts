@@ -1,1 +1,0 @@
-export { DELETE } from "@/lib/api/user/invites";

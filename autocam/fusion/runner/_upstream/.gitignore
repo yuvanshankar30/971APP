@@ -1,8 +1,0 @@
-temp/
-.overridepath
-.env
-.DS_Store
-__pycache__/
-2.json
-test.ipynb
-claude.md

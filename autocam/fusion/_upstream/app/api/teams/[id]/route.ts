@@ -1,1 +1,0 @@
-export { PATCH } from "@/lib/api/teams";
