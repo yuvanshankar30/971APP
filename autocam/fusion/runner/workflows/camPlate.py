@@ -40,44 +40,51 @@ from .machiningTime import total_machining_time
 from .templateTools import patch_cam_template_with_tool_libraries, disable_geometry_dependent_leads
 
 
-def _select_plate_template_path(machine_name: Optional[str], material_name: Optional[str]) -> str:
-    """Picks the richer, real-machine-exported template for metal/polycarbonate
-    jobs on a machine that has one, falling back to the generic
-    Plates.f3dhsm-template otherwise.
+def _select_plate_template_path(machine_name: Optional[str]) -> str:
+    """Picks the richer, real-machine-exported template for the machine
+    being cut on, falling back to the generic Plates.f3dhsm-template only
+    when the machine itself isn't one of the two known routers.
 
     Direct instruction, verified against cam_machines before wiring this up
     (two real machines, not one "the router"): "UNC Router" (controller
-    linuxcnc, 971_emc.cps) is the old router - metal/Lexan jobs there use
+    linuxcnc, 971_emc.cps) is the old router - jobs there use
     templates/971-real/(DEPRECATED)971 Metal Sheet.f3dhsm-template.
     "New Router" (controller wincnc per its current DB row, though its own
     filename says "shopsabre only!!" - see the separate GitHub issue
     flagging that controller value as likely wrong) is the new router -
-    metal/Lexan jobs there use templates/971-real/new router metal sheet
-    (shopsabre only!!).f3dhsm-template. Some richer templates (e.g.
-    countersink) are flagged by the user as new-router-only; this function
-    only handles the one mapping actually requested (metal/Lexan by
-    machine), not a general per-template machine-compatibility system.
+    jobs there use templates/971-real/new router metal sheet (shopsabre
+    only!!).f3dhsm-template. Some richer templates (e.g. countersink) are
+    flagged by the user as new-router-only; this function only handles the
+    one mapping actually requested (which template a given machine uses),
+    not a general per-template machine-compatibility system.
 
-    Materials outside metal/polycarbonate (SRPP, MDF, acrylic, wood,
-    Delrin, nylon) keep using the generic Plates.f3dhsm-template - nobody
-    has asked for a richer template for those yet, and guessing one would
-    risk the exact "guessed wrong Fusion internals" failure mode this
-    project has hit before.
+    This USED to gate the rich template on material - metal/Lexan only,
+    every other material (SRPP, MDF, acrylic, wood, Delrin, nylon) fell
+    back to the generic Plates.f3dhsm-template. That fallback's own
+    operations are named "256Drill", "2D Contour2 (9)", "Pocket1 (2)" and
+    "Suppress" - none of which match DeleteToolpaths' routing rules (which
+    key off "through"/"circular"/group_tabs naming), so no real geometry
+    was ever assigned to them. Confirmed live: a real SRPP plate came out
+    with a single stray bore and nothing else, while the identical part
+    queued as aluminum machined every feature correctly.
+
+    All materials now get this same rich, machine-proven operation set.
+    Correct per-material feeds/speeds are NOT this function's job - they
+    already come from patch_cam_template_with_tool_libraries below, which
+    was already being called for the aluminum path this function used to
+    special-case, and picks a REVIEWED preset from the checked-in tool
+    library by material name (_choose_preset in templateTools.py), raising
+    rather than guessing if that material has no reviewed preset. Every
+    real router material in cam_materials already has one (confirmed by
+    reading the checked-in 971-outside-plate.tools library directly:
+    Aluminum 6061, Polycarbonate (Lexan), SRPP, Acrylic, MDF, Baltic Birch
+    Plywood, Delrin (Acetal), Nylon), so removing this gate is what lets
+    that already-correct, already-proven mechanism actually run for them -
+    it could never be reached while non-metal materials were routed to the
+    generic template's unrecognized operation names instead.
     """
     base_dir = os.path.dirname(__file__)
     fallback = os.path.join(base_dir, "../templates/Plates.f3dhsm-template")
-
-    material = (material_name or "").strip().lower()
-    is_metal_or_lexan = (
-        "aluminum" in material
-        or "aluminium" in material
-        or "6061" in material
-        or "lexan" in material
-        or "polycarb" in material
-        or ("poly" in material and "propylene" not in material)
-    )
-    if not is_metal_or_lexan:
-        return fallback
 
     machine = (machine_name or "").strip().lower()
     if machine == "unc router":
@@ -487,7 +494,7 @@ def start(data, session):
         machine_name = machine.get("name") or _get(payload, "machine")
         material_name = material.get("name") or _get(payload, "material")
         machine_post_processor_path = resolve_local_post_processor(data)
-        template_path = _select_plate_template_path(machine_name, material_name)
+        template_path = _select_plate_template_path(machine_name)
 
         _tool_info, tool_json_path = load_local_tool_library_json(data, TOOLS_PATH)
         patched_template = os.path.join(
