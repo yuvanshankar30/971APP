@@ -12,7 +12,69 @@ configured destination is a nested path - project "2026 Season CAM" ->
 "Offseason Projects" -> "AutoCAM" (all three already exist in the shop's
 account) - not a single top-level folder, so resolving it means walking
 multiple path segments, not one itemByName call.
+
+This is also the actual job-save destination, not just the web UI's folder
+picker - list_data_folder_tree's own "best-effort sync" framing doesn't
+apply to camPlate.py's own call into resolve_drop_folder below, which is
+how a completed job's document gets its real name and Data Panel location.
+A crash here used to mean "documents not being named/saved to the AutoCAM
+folder" silently - see _retry_on_offline's own docstring for why and how
+that's fixed.
 """
+import time
+
+
+def _is_offline_settings_error(exc) -> bool:
+    """True for Fusion's own "System in offline settings" / CB_NA failure -
+    confirmed live as a real, transient condition in the first several
+    seconds after a fresh Fusion launch, before its cloud connection has
+    finished establishing, not a permanent configuration problem. Matched
+    by substring since this is a generic RuntimeError with no distinct
+    exception type of its own.
+    """
+    text = str(exc)
+    return "offline settings" in text.lower() or "CB_NA" in text
+
+
+def _retry_on_offline(app, attempts=6, initial_delay_seconds=1.0):
+    """Decorator-style retry for a single Data Panel call that can fail
+    with "System in offline settings" - confirmed live, repeatedly, as a
+    real and reproducible failure mode right after Fusion starts: cloud
+    Data Panel calls (dataFolders.add, itemByName re-lookups after a lost
+    add() race) fail outright until the connection finishes establishing,
+    typically within the first several seconds. The previous behavior
+    (catch the first itemByName failure, fall through to add(), then
+    re-try itemByName as a race-recovery fallback with no retry of its
+    own) worked fine once Fusion was actually online, but had no path
+    forward at all while genuinely offline - the fallback itemByName
+    raised the identical error, uncaught, crashing the whole folder
+    resolution (and with it, on the real job-save path, silently leaving
+    the completed document unsaved and unnamed in the Data Panel).
+    Retrying the exact same call after a short, exponentially-increasing
+    pause matches what actually resolves this in practice - the
+    connection finishing establishing on its own - rather than a theory
+    about exactly why any single call fails.
+    """
+    def run(call, description):
+        delay_seconds = initial_delay_seconds
+        last_exc = None
+        for attempt in range(1, attempts + 1):
+            try:
+                return call()
+            except RuntimeError as exc:
+                if not _is_offline_settings_error(exc):
+                    raise
+                last_exc = exc
+                app.log(
+                    f"{description} failed with 'System in offline settings' "
+                    f"(attempt {attempt}/{attempts}) - Fusion's cloud "
+                    f"connection may still be establishing after startup: {exc}"
+                )
+                if attempt < attempts:
+                    time.sleep(delay_seconds)
+                    delay_seconds *= 2
+        raise last_exc
+    return run
 
 
 def resolve_data_project(app, project_name):
@@ -93,6 +155,7 @@ def resolve_drop_folder(app, project_name, folder_path):
     data_project = resolve_data_project(app, project_name)
     folder = data_project.rootFolder
     segments = [s for s in (folder_path or "").split("/") if s.strip()]
+    retry = _retry_on_offline(app)
     for segment in segments:
         # itemByName is documented to return None for a missing item, but
         # confirmed live against the real shop account: it can instead raise
@@ -101,23 +164,37 @@ def resolve_drop_folder(app, project_name, folder_path):
         # Panel sync lag, most likely - a plain retry-as-not-found recovers
         # every time this has been seen). An uncaught raise here crashed the
         # whole folder sync/job save with no fallback, even though "create
-        # it" was already the correct next step one line down.
+        # it" was already the correct next step one line down. Routed
+        # through _retry_on_offline first, since the same call can also
+        # fail with a genuine "System in offline settings" error this
+        # substring-based catch would otherwise misclassify as "not found"
+        # and try to (uselessly) create - see that function's own
+        # docstring for why a bounded retry, not a fallback path, is the
+        # real fix for that specific error.
         try:
-            next_folder = folder.dataFolders.itemByName(segment)
+            next_folder = retry(
+                lambda: folder.dataFolders.itemByName(segment), f"itemByName('{segment}')"
+            )
         except RuntimeError as exc:
             app.log(f"itemByName('{segment}') raised instead of returning None ({exc}) - treating as not found.")
             next_folder = None
         if next_folder is None:
             app.log(f"'{segment}' folder not found under '{folder.name}', creating it...")
             try:
-                next_folder = folder.dataFolders.add(segment)
+                next_folder = retry(lambda: folder.dataFolders.add(segment), f"dataFolders.add('{segment}')")
             except RuntimeError:
                 # Lost a race with another Runner/session creating the same
                 # segment between the lookup above and this add() - the
                 # folder exists now, so look it up for real instead of
                 # failing a job save over something that isn't actually a
-                # problem.
-                next_folder = folder.dataFolders.itemByName(segment)
+                # problem. Also routed through the same retry wrapper: if
+                # add() failed because Fusion is genuinely still offline
+                # (not a race), this re-lookup would otherwise hit the
+                # identical uncaught error immediately afterward.
+                next_folder = retry(
+                    lambda: folder.dataFolders.itemByName(segment),
+                    f"itemByName('{segment}') (post-add fallback)",
+                )
                 if next_folder is None:
                     raise
         folder = next_folder
