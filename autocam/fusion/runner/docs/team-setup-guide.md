@@ -31,7 +31,7 @@ Two things run this: **Spartans Hub** itself (already deployed - where you queue
 Running more than one machine at once is safe: claiming is a compare-and-swap,
 so two Runners cannot grab the same job. Every install needs its own `RUNNER_ID`
 and a required `RUNNER_MACHINE_ID`; `setup.py` prompts for both and validates
-the machine UUID. A Runner only claims jobs for that physical machine (or jobs
+the machine UUID's format. A Runner only claims jobs for that physical machine (or jobs
 the operator left unassigned).
 
 **Changed `.env` again later?** Fully quit and relaunch Fusion - Stop/Run alone doesn't reliably reload it.

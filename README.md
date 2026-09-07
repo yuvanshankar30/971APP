@@ -424,7 +424,10 @@ own docs are all together in one place instead of scattered across
   forked Fusion 360 add-in that actually runs CAM; unmodified copies of both
   original repos are vendored at `autocam/fusion/_upstream/` and
   `autocam/fusion/runner/_upstream/` for reference. Its active workflows
-  patch Fusion templates from the claimed tool's checked-in `.tools` archive
+  compare completed plate G-code against the part's internal CAD loops and
+  stock depth before reporting completion, surfacing missing-feature,
+  incomplete-through-cut, and unsafe thin-wall findings as job warnings.
+  They patch Fusion templates from the claimed tool's checked-in `.tools` archive
   and post with the claimed machine's checked-in `.cps` file; the filename is
   stored on `cam_tools.fusion_tool_library_file`, so an unknown tool fails
   visibly rather than falling back to Fusion's raw default. No Teams/API-key-per-team
@@ -448,8 +451,9 @@ own docs are all together in one place instead of scattered across
   `migrations/20260906_fusion_grouping_integrity.sql` and the updated Runner.
   Every post-claim Runner call is bound to the `RUNNER_ID` that claimed the job,
   so another installation cannot advance it. `RUNNER_MACHINE_ID` is required,
-  active jobs heartbeat through `claimed_at`, and claims older than 15 minutes
-  are safely requeued after a Runner/Fusion crash. The general `/autocam` job
+  active jobs heartbeat through `claimed_at`, and unstarted claims older than
+  15 minutes are safely requeued after a Runner crash. Processing Fusion jobs
+  require operator review rather than an automatic retry. The general `/autocam` job
   list excludes these milling rows; their retry/edit controls live only in
   `/autocam/fusion`, preventing the synchronous JS generator from mutating a
   Fusion-owned job. See
@@ -457,8 +461,8 @@ own docs are all together in one place instead of scattered across
   `autocam/docs/fusion-grouping-review.md` for the draft scope and review findings.
   It uses Supabase Auth + `canManageCamProfiles` for
   humans, same as the rest of this
-  app. See `autocam/fusion/README.md` and `valor6800-autocam-runner-setup.md`
-  (repo root) for the full port writeup and the evaluation that led to it.
+  app. See `autocam/fusion/README.md` and the Fusion Runner's own
+  `autocam/fusion/runner/README.md` for the current setup and operation guide.
 - **`autocam/fusion/turning/`** - experimental Fusion turning foundation
   ([issue #331](https://github.com/frc971/spartanshub/issues/331)): validates a
   single-part round-stock plan for the Haas TL-1 and exposes an empty draft

@@ -1,6 +1,5 @@
-// Job-claim API for the Fusion CAM Runner (autocam/fusion/runner/ - a fork
-// of Team Valor 6800's open-source AutoCAM Runner add-in). Polled by an
-// external Fusion 360 machine, not called from the browser - authenticated
+// Job-claim API for the Fusion CAM Runner (autocam/fusion/runner/). Polled by
+// an external Fusion 360 machine, not called from the browser - authenticated
 // via a shared-secret bearer token (fusion_runner_auth.js), not a Supabase
 // Auth session, so this uses the service-role client throughout (same
 // pattern as api/drive-watcher/+server.js).
@@ -32,10 +31,11 @@ function getServiceSupabase() {
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const STALE_CLAIM_MS = 15 * 60 * 1000;
 
-// claimed_at doubles as the runner heartbeat. A Fusion or workstation
-// crash otherwise strands a job forever in claimed/processing. Requeueing
-// is CAS-like: only old active milling rows are touched, so a live runner's
-// fresh heartbeat or a terminal transition wins safely.
+// claimed_at doubles as the runner heartbeat. A workstation crash before
+// Fusion begins work otherwise strands a job in claimed. Processing jobs are
+// intentionally never retried automatically: Fusion may already have changed
+// a document or exported an artifact, so retrying them could duplicate CAM
+// work. Those require an operator's explicit review.
 async function requeueStaleFusionJobs(supabase) {
   const cutoff = new Date(Date.now() - STALE_CLAIM_MS).toISOString();
   const { error } = await supabase.from('cam_jobs').update({
@@ -43,8 +43,8 @@ async function requeueStaleFusionJobs(supabase) {
     claimed_by: null,
     claimed_at: null,
     progress: 0,
-    progress_message: 'Runner heartbeat expired; queued for retry'
-  }).eq('operation_type', 'milling').in('status', ['claimed', 'processing']).lt('claimed_at', cutoff);
+    progress_message: 'Runner claim expired before processing; queued for retry'
+  }).eq('operation_type', 'milling').eq('status', 'claimed').lt('claimed_at', cutoff);
   if (error) throw new Error(`Could not recover stale Fusion jobs: ${error.message}`);
 }
 

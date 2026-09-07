@@ -44,10 +44,9 @@ The add-in runs a background polling thread that claims queued `cam_jobs` rows (
 - **Grouping validation** — refuses partial/multi-envelope arrangements and
   quantity mismatches before CAM generation
 - **Auto-orientation** — orients parts largest-face-up before setup
-- **Template-driven setups** — reviewed machine/material mappings with locally
-  resolved tool libraries and postprocessors
-- **Holding tabs and selection repair** — places tabs on usable outer edges and
-  repairs template geometry selections against the imported job bodies
+- **Template-driven setups** — reusable Fusion CAM templates for plates and box tubes
+- **Topology-aware contour repair** — rebuilds stale template selections from the imported model while preserving each internal loop's real direction
+- **Safe automatic tabs** — uses a geometry-scaled count with `0.6 in` tabs while excluding curved, short, and unsupported outer edges
 - **Exact NC artifacts** — preserves each Fusion-posted file byte for byte instead of joining complete programs together
 - **Plate machining-time reporting** — stores Fusion's measured job time for the web queue (box-tube parity is tracked separately)
 - **Status reporting** — completion and errors pushed back to Spartans Hub's `cam_jobs` table
@@ -94,7 +93,7 @@ UUID, then writes `.env` itself - see [`setup.py`](setup.py). Prefer to edit
 | `API_KEY` | Bearer token matching Spartans Hub's `FUSION_RUNNER_TOKEN` | _(required)_ |
 | `BASE_URL` | Spartans Hub deployment base URL | `https://spartanshub.spartanrobotics.org` |
 | `RUNNER_ID` | Stable identifier for this Runner install, sent on every claim | machine hostname |
-| `RUNNER_MACHINE_ID` | The `cam_machines` row UUID for this physical machine; `setup.py` validates it | _(required)_ |
+| `RUNNER_MACHINE_ID` | The `cam_machines` row UUID for this physical machine; `setup.py` validates its UUID format | _(required)_ |
 | `FUSION_DATA_PROJECT_NAME` | Which Fusion Data Panel project generated documents get saved into | `2026 Season CAM` |
 | `FUSION_DROP_FOLDER_PATH` | Nested folder path (within that project, `/`-separated) generated documents get saved into - each segment created if missing | `Offseason Projects/AutoCAM` |
 
@@ -102,8 +101,9 @@ UUID, then writes `.env` itself - see [`setup.py`](setup.py). Prefer to edit
 
 `RUNNER_MACHINE_ID` is mandatory even with one Runner. The server refuses a
 claim without it, eliminating the old claim-any-machine fallback. While Fusion
-works, the add-in sends a heartbeat every 30 seconds; if no heartbeat arrives
-for 15 minutes, the server requeues the abandoned job for another attempt.
+works, the add-in sends a heartbeat every 30 seconds. A claim that expires
+before Fusion starts is retried after 15 minutes; an expired processing job is
+left for an operator to review so its CAM work cannot be duplicated.
 
 ## Project Structure
 
@@ -142,8 +142,8 @@ for 15 minutes, the server requeues the abandoned job for another attempt.
 | `Orientation.py` | Auto-orient parts (largest face up) |
 | `HandleTube.py` | Box-tube handling |
 | `MultiImport.py` | Multi-part import |
-| `DeleteToolpaths.py` | Repairs selections, regenerates, and removes inapplicable/invalid operations |
-| `TabPlacement.py` | Places holding tabs on valid straight outer-profile edges |
+| `DeleteToolpaths.py` | Clear existing toolpaths |
+| `ContourChains.py` | Preserve face-loop direction when rebuilding contour selections |
 | `ScreenshotEnvelope.py` | Capture envelope screenshots |
 
 ## Development
@@ -155,6 +155,9 @@ python3 -m compileall -q .
 ```
 
 Toggle verbose logging to the Fusion **Text Command** window via `DEBUG = True` in `config.py`.
+
+For the contour-chain direction rule and its live-Fusion validation steps, see
+[`docs/contour-chain-direction.md`](docs/contour-chain-direction.md).
 
 See **[CONTRIBUTING.md](CONTRIBUTING.md)** for the original upstream pull-request checklist (still broadly applicable to this fork).
 

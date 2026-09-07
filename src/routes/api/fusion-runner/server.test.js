@@ -52,10 +52,11 @@ describe('Fusion Runner grouping lifecycle',()=>{
   expect(queries[0].eq).toHaveBeenCalledWith('claimed_by','runner');
   expect(queries[0].in).toHaveBeenCalledWith('status',['claimed','processing']);
  });
- it('requeues stale active jobs before claiming new work',async()=>{
+ it('requeues only stale unstarted claims before claiming new work',async()=>{
   mocks.from.mockReturnValueOnce(chain({error:null})).mockReturnValueOnce(chain({data:[]}));
   expect((await call('claim',{runnerId:'runner',machineId})).status).toBe(200);
   expect(queries[0].update).toHaveBeenCalledWith(expect.objectContaining({status:'queued',claimed_by:null,claimed_at:null}));
+  expect(queries[0].eq).toHaveBeenCalledWith('status','claimed');
   expect(queries[0].lt).toHaveBeenCalledWith('claimed_at',expect.any(String));
  });
  it('stores exact Fusion output artifacts without synthesizing a combined program',async()=>{
