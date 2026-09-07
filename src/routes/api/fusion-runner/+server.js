@@ -35,32 +35,40 @@ function getServiceSupabase() {
 // instruction: G-code should land in Files as soon as a job finishes, not
 // only when a human remembers to post it.
 //
-// "gcode" is the folder the shop actually uses, confirmed against the live
-// bucket: it holds the real, human-named programs operators pull from
-// (autocamtest43.ngc, lexancuttest1.ngc - the same files issue #359's
-// machine-limit reports were traced against). An earlier "AutoCAM" folder
-// only ever accumulated automated posts nobody browsed to. Keep this in
-// sync with JobQueueTab.svelte's own copy of these two constants: the
-// manual button and this automatic post are deliberately the same
-// destination, so a job posted either way lands in one predictable place.
+// Posted into BOTH folders, deliberately - they serve different readers:
+// "gcode" is where operators actually pull programs from (confirmed against
+// the live bucket: it holds the real, human-named programs like
+// autocamtest43.ngc and lexancuttest1.ngc, the same files issue #359's
+// machine-limit reports were traced against), while "AutoCAM" is the
+// generated-output folder. Writing one copy to each means neither audience
+// has to know about the other's folder.
+//
+// Keep in sync with JobQueueTab.svelte's own copy of these constants: the
+// manual "Post to Files" button and this automatic post are deliberately
+// the same destinations, so a job posted either way lands in the same
+// places.
 const FILES_BUCKET = 'manufacturing-drive';
-const FILES_TARGET_FOLDER = 'gcode';
+const FILES_TARGET_FOLDERS = ['gcode', 'AutoCAM'];
 
 async function postNcFilesToFiles(supabase, jobId, plateName, ncFiles) {
   if (!ncFiles?.length) return;
   const baseName = String(plateName || `Job${jobId.slice(0, 8)}`).trim().replace(/\s+/g, '') || `Job${jobId.slice(0, 8)}`;
   for (const [index, file] of ncFiles.entries()) {
     const suffix = ncFiles.length === 1 ? '' : `-${index + 1}`;
-    const path = `${FILES_TARGET_FOLDER}/${baseName}${suffix}.ngc`;
     const bytes = Buffer.from(file.contentBase64, 'base64');
-    const { error } = await supabase.storage
-      .from(FILES_BUCKET)
-      .upload(path, bytes, { upsert: true, contentType: 'text/plain' });
-    // Best-effort: a Files-posting failure is a real problem worth a log
-    // line, but must never fail the job itself - the actual G-code is
-    // already safely on the completed cam_jobs row regardless, and a human
-    // can always fall back to the manual "Post to Files" button.
-    if (error) console.error(`postNcFilesToFiles: failed to upload '${path}' for job ${jobId}:`, error.message);
+    for (const folder of FILES_TARGET_FOLDERS) {
+      const path = `${folder}/${baseName}${suffix}.ngc`;
+      const { error } = await supabase.storage
+        .from(FILES_BUCKET)
+        .upload(path, bytes, { upsert: true, contentType: 'text/plain' });
+      // Best-effort, per destination: a Files-posting failure is a real
+      // problem worth a log line, but must never fail the job itself - the
+      // actual G-code is already safely on the completed cam_jobs row
+      // regardless, and a human can always fall back to the manual "Post to
+      // Files" button. One folder failing also must not stop the other from
+      // being written.
+      if (error) console.error(`postNcFilesToFiles: failed to upload '${path}' for job ${jobId}:`, error.message);
+    }
   }
 }
 

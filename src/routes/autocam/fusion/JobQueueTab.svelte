@@ -11,14 +11,14 @@
   let loading = true;
 
   // Where a job's G-code lands when someone presses "Post to Files" below -
-  // the same "manufacturing-drive" bucket /manufacture/files browses,
-  // under one fixed folder so completed CAM output always ends up
-  // somewhere predictable instead of scattered across the drive. "gcode"
-  // is the folder the shop actually pulls programs from; keep this in sync
-  // with the same two constants in api/fusion-runner/+server.js, which
-  // posts automatically on job completion to this same destination.
+  // the same "manufacturing-drive" bucket /manufacture/files browses. A copy
+  // goes to each folder: "gcode" is where operators actually pull programs
+  // from, "AutoCAM" is the generated-output folder, so neither audience has
+  // to know about the other's. Keep in sync with the same constants in
+  // api/fusion-runner/+server.js, which posts automatically on job
+  // completion to these same destinations.
   const FILES_BUCKET = 'manufacturing-drive';
-  const FILES_TARGET_FOLDER = 'gcode';
+  const FILES_TARGET_FOLDERS = ['gcode', 'AutoCAM'];
 
   let postModalJob = null;
   let postFileName = '';
@@ -143,15 +143,17 @@
     try {
       for (const [index, file] of files.entries()) {
         const suffix = files.length === 1 ? '' : `-${index + 1}`;
-        const path = `${FILES_TARGET_FOLDER}/${baseName}${suffix}.ngc`;
         const binary = atob(file.contentBase64);
         const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-        const { error } = await supabase.storage
-          .from(FILES_BUCKET)
-          .upload(path, new Blob([bytes]), { upsert: true, contentType: 'text/plain' });
-        if (error) throw error;
+        for (const folder of FILES_TARGET_FOLDERS) {
+          const path = `${folder}/${baseName}${suffix}.ngc`;
+          const { error } = await supabase.storage
+            .from(FILES_BUCKET)
+            .upload(path, new Blob([bytes]), { upsert: true, contentType: 'text/plain' });
+          if (error) throw error;
+        }
       }
-      toastActions.show(`Posted to Files / ${FILES_TARGET_FOLDER}`);
+      toastActions.show(`Posted to Files / ${FILES_TARGET_FOLDERS.join(' and / ')}`);
       closePostModal();
     } catch (e) {
       toastActions.show(e.message || 'Failed to post to Files');
@@ -227,7 +229,7 @@
                 </div>
               {/if}
             </div>
-            <button class="btn btn-secondary btn-sm" title="Copy this job's G-code into Files / {FILES_TARGET_FOLDER}" on:click={() => openPostModal(job)}>
+            <button class="btn btn-secondary btn-sm" title="Copy this job's G-code into Files / {FILES_TARGET_FOLDERS.join(' and / ')}" on:click={() => openPostModal(job)}>
               <Upload size={14} /> Post to Files
             </button>
           {/if}
@@ -270,7 +272,7 @@
       </div>
       <div class="modal-body">
         <p class="cam-form-hint">
-          Copies this job's G-code into Files / {FILES_TARGET_FOLDER}, where anyone can grab it.
+          Copies this job's G-code into Files / {FILES_TARGET_FOLDERS.join(' and / ')}, where anyone can grab it.
           {#if postModalJob.fusion_nc_files?.length > 1}This job has {postModalJob.fusion_nc_files.length} files - each gets this name with -1, -2, etc.{/if}
         </p>
         <div class="form-group">

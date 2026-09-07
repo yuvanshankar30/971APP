@@ -75,12 +75,28 @@ describe('Fusion Runner grouping lifecycle',()=>{
   // automatically, named from the plate/part it was run against, spaces
   // stripped - same convention the manual "Post to Files" button already
   // used, just no longer requiring someone to click through to it.
-  expect(mocks.storageUpload).toHaveBeenCalledTimes(1);
-  expect(mocks.storageUpload).toHaveBeenCalledWith(
-   'gcode/x44stiffner.ngc',
-   expect.any(Buffer),
-   expect.objectContaining({upsert:true,contentType:'text/plain'})
-  );
+  // One copy per destination folder: "gcode" is where operators pull
+  // programs from, "AutoCAM" is the generated-output folder.
+  expect(mocks.storageUpload).toHaveBeenCalledTimes(2);
+  for (const folder of ['gcode','AutoCAM']) {
+   expect(mocks.storageUpload).toHaveBeenCalledWith(
+    `${folder}/x44stiffner.ngc`,
+    expect.any(Buffer),
+    expect.objectContaining({upsert:true,contentType:'text/plain'})
+   );
+  }
+ });
+ it('still posts to the other folder when one destination fails',async()=>{
+  // The two folders are independent destinations - a bucket problem on one
+  // must not silently cost the other its copy.
+  const contentBase64=Buffer.from('N10 G90\r\nM30\r\n','utf8').toString('base64');
+  mocks.from
+   .mockReturnValueOnce(chain({data:{id:'job',params:{fusionJobKind:'plate:cam',fusionPlateSnapshot:{name:'plate'}}}}))
+   .mockReturnValueOnce(chain({data:[{id:'job'}]}));
+  mocks.storageUpload.mockResolvedValueOnce({error:{message:'bucket unreachable'}}).mockResolvedValueOnce({error:null});
+  expect((await call('complete',{jobId:'job',runnerId:'runner',ncFiles:[{name:'plate.nc',contentBase64}]})).status).toBe(200);
+  expect(mocks.storageUpload).toHaveBeenCalledTimes(2);
+  expect(mocks.storageUpload).toHaveBeenCalledWith('AutoCAM/plate.ngc',expect.any(Buffer),expect.anything());
  });
  it('rejects malformed Fusion output before completing the job',async()=>{
   mocks.from.mockReturnValueOnce(chain({data:{id:'job',params:{fusionJobKind:'plate:cam'}}}));
