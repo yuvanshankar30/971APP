@@ -172,7 +172,29 @@ def _outer_loop_edges_all_bodies(design):
             continue
         for loop in bottom_face.loops:
             if loop.isOuter:
-                edges.append([co_edge.edge for co_edge in loop.coEdges])
+                co_edges = list(loop.coEdges)
+                # Each loop carries its own real chain direction, exactly
+                # like every internal-feature and circular selection in this
+                # file already does. This was the last selection still
+                # hard-coding a direction (isReverted=True for every part),
+                # and confirmed live as still wrong: on a real job where
+                # every other operation's arrow was correct, the outer
+                # "2D Slot Cut" was the only one reversed.
+                #
+                # One formula works for both outer and inner loops without
+                # a special case: Fusion winds an outer loop counter-
+                # clockwise and an inner loop clockwise, so the opposite
+                # handedness an outer release cut needs (tool outside the
+                # part, not inside the cutout) is already encoded in the
+                # loop's own co-edge ordering. Reading that instead of
+                # asserting it is what makes this correct per part rather
+                # than correct for whichever part it was last tuned against.
+                edges.append(
+                    (
+                        [co_edge.edge for co_edge in co_edges],
+                        is_reverted_for_loop_seed(co_edges[0].isOpposedToEdge),
+                    )
+                )
                 break
     return edges
 
@@ -627,22 +649,24 @@ def _repair_missing_selections(setup) -> list[str]:
             if outer_edges_cache is None:
                 design = _design()
                 outer_edges_cache = _outer_loop_edges_all_bodies(design) if design else []
-            for edges in outer_edges_cache:
+            for edges, is_reverted in outer_edges_cache:
                 chain = selections.createNewChainSelection()
                 chain.isOpen = False
-                # Direct instruction: the chain's own direction arrow
-                # (visible in Fusion's own UI) pointed the wrong way -
-                # confirmed live as the real cause of the tool merging
-                # into small holes near the boundary: with the chain
-                # wound the wrong way relative to this operation's own
-                # 'left' compensation, the tool offsets INWARD (into the
-                # part, toward its interior features) instead of OUTWARD
-                # (away from the part, into the scrap/stock side) for an
-                # outer release cut - the raw edge-to-hole clearance
-                # (confirmed live: as little as 0.1495in against a
-                # 0.1575in tool) only stays ungouged if the tool offsets
-                # away from those interior features, not into them.
-                chain.isReverted = True
+                # Follows this loop's own co-edge winding rather than
+                # asserting one direction for every part - see
+                # _outer_loop_edges_all_bodies for why one formula covers
+                # both outer and inner loops.
+                #
+                # Direction matters here for a specific, confirmed reason:
+                # with the chain wound the wrong way relative to this
+                # operation's 'left' compensation, the tool offsets INWARD
+                # (into the part, toward its interior features) instead of
+                # OUTWARD (into the scrap/stock side) for an outer release
+                # cut. The raw edge-to-hole clearance on a real part was as
+                # little as 0.1495in against a 0.1575in tool, so it only
+                # stays ungouged if the tool offsets away from those
+                # interior features.
+                chain.isReverted = is_reverted
                 chain.inputGeometry = edges
         elif is_through_shape_op:
             # Every real non-circular through feature belongs to the
