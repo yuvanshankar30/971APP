@@ -59,6 +59,22 @@ describe('Fusion Runner grouping lifecycle',()=>{
   expect(queries[0].eq).toHaveBeenCalledWith('status','claimed');
   expect(queries[0].lt).toHaveBeenCalledWith('claimed_at',expect.any(String));
  });
+ it('retries recovering stale claims past a transient Supabase fetch failure',async()=>{
+  mocks.from
+   .mockReturnValueOnce(chain({error:{message:'TypeError: fetch failed'}}))
+   .mockReturnValueOnce(chain({error:null}))
+   .mockReturnValueOnce(chain({data:[]}));
+  const result=await call('claim',{runnerId:'runner',machineId});
+  expect(result.status).toBe(200);
+  expect(queries).toHaveLength(3);
+ });
+ it('does not retry a real database error recovering stale claims',async()=>{
+  mocks.from.mockReturnValueOnce(chain({error:{message:'permission denied for table cam_jobs'}}));
+  const result=await call('claim',{runnerId:'runner',machineId});
+  expect(result.status).toBe(500);
+  expect(await result.json()).toEqual({error:'Could not recover stale Fusion jobs: permission denied for table cam_jobs'});
+  expect(queries).toHaveLength(1);
+ });
  it('stores exact Fusion output artifacts without synthesizing a combined program',async()=>{
   const contentBase64=Buffer.from('N10 G90\r\nM30\r\n','utf8').toString('base64');
   mocks.from
