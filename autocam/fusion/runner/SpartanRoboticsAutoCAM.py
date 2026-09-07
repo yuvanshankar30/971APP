@@ -10,7 +10,7 @@ from .workflows import importPlate as importPlate
 from .workflows import camPlate as camPlate
 from .workflows import camTube as camTube
 from .workflows import setupTemp as setupTemp
-from .workflows.dropFolder import list_data_folder_tree
+from .workflows.dropFolder import _is_offline_settings_error, list_data_folder_tree
 from .workflows.job_status import send_job_error
 from .config import *
 import requests
@@ -312,8 +312,21 @@ def _sync_data_folders():
             timeout=30,
         )
         response.raise_for_status()
-    except Exception:
-        _queue_log(f"Folder sync failed:\n{traceback.format_exc()}")
+    except Exception as exc:  # noqa: BLE001 - best-effort by design, see docstring
+        # Fusion's cloud connection not being up yet is the normal state for
+        # the first several seconds after launch, and this sync runs again
+        # every _FOLDER_SYNC_INTERVAL_SEC regardless - so it resolves itself
+        # without anyone doing anything. Printing a full Python traceback for
+        # it made every single Fusion launch look like the add-in had
+        # crashed. One calm line instead; a genuine failure still gets the
+        # full traceback, because that one is worth looking at.
+        if _is_offline_settings_error(exc):
+            _queue_log(
+                "Folder sync skipped: Fusion's cloud connection isn't up yet. "
+                "This is normal right after launch and retries automatically."
+            )
+        else:
+            _queue_log(f"Folder sync failed:\n{traceback.format_exc()}")
 
 
 def handleServer(temp_dir: str, stop_event: threading.Event):
