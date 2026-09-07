@@ -28,6 +28,33 @@ function getServiceSupabase() {
   return createClient(url, serviceKey);
 }
 
+// Mirrors the manual "Post to Files" button in JobQueueTab.svelte - same
+// bucket, same folder, same one-name-with--N-suffix convention - but fires
+// automatically on every completed milling job instead of waiting for
+// someone to open the Job Queue tab and click through it. Direct
+// instruction: G-code should land in Files as soon as a job finishes, not
+// only when a human remembers to post it.
+const FILES_BUCKET = 'manufacturing-drive';
+const FILES_TARGET_FOLDER = 'AutoCAM';
+
+async function postNcFilesToFiles(supabase, jobId, plateName, ncFiles) {
+  if (!ncFiles?.length) return;
+  const baseName = String(plateName || `Job${jobId.slice(0, 8)}`).trim().replace(/\s+/g, '') || `Job${jobId.slice(0, 8)}`;
+  for (const [index, file] of ncFiles.entries()) {
+    const suffix = ncFiles.length === 1 ? '' : `-${index + 1}`;
+    const path = `${FILES_TARGET_FOLDER}/${baseName}${suffix}.ngc`;
+    const bytes = Buffer.from(file.contentBase64, 'base64');
+    const { error } = await supabase.storage
+      .from(FILES_BUCKET)
+      .upload(path, bytes, { upsert: true, contentType: 'text/plain' });
+    // Best-effort: a Files-posting failure is a real problem worth a log
+    // line, but must never fail the job itself - the actual G-code is
+    // already safely on the completed cam_jobs row regardless, and a human
+    // can always fall back to the manual "Post to Files" button.
+    if (error) console.error(`postNcFilesToFiles: failed to upload '${path}' for job ${jobId}:`, error.message);
+  }
+}
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const STALE_CLAIM_MS = 15 * 60 * 1000;
 
@@ -202,6 +229,7 @@ export async function POST({ request, url }) {
         .select('id');
       if (error) throw new Error(error.message);
       if (!data?.length) return json({ error: 'Job was not in the processing state - not completed' }, { status: 409 });
+      await postNcFilesToFiles(supabase, jobId, currentJob.params?.fusionPlateSnapshot?.name, ncFiles);
       return json({ success: true });
     }
 
