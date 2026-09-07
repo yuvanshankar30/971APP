@@ -212,6 +212,66 @@ class TabDistributionTests(unittest.TestCase):
         self.assertEqual(set(id(e) for e in selected), set(id(e) for e in edges.values()))
 
 
+class MinimumSideLengthTests(unittest.TestCase):
+    """A side too short to physically contain a tab must not get one.
+    MIN_TAB_SIDE_LENGTH_IN is derived from TAB_WIDTH_IN so the two can't
+    drift apart.
+    """
+
+    def test_threshold_is_derived_from_the_tab_width(self):
+        # The previous fixed 0.5in floor was SHORTER than the 0.6in tab it
+        # was meant to fit, so an edge could qualify for a tab it could not
+        # physically contain.
+        self.assertGreater(TabPlacement.MIN_TAB_SIDE_LENGTH_IN, TabPlacement.TAB_WIDTH_IN)
+        self.assertEqual(
+            TabPlacement.MIN_TAB_SIDE_LENGTH_IN, TabPlacement.TAB_WIDTH_IN * 2
+        )
+
+    def _body_with(self, edges):
+        loop = _loop(True, edges)
+        return _body([_face(1.0, 1.0, [loop])], (0, 0), (40, 40))
+
+    def test_a_side_shorter_than_a_tab_gets_none(self):
+        cm = TabPlacement.MIN_TAB_SIDE_LENGTH_IN * 2.54
+        long_a = _edge(0, 0, 0, cm * 3)
+        long_b = _edge(cm * 3, 0, cm * 3, cm * 3)
+        stub = _edge(0, 0, cm * 0.5, 0)   # half the required length
+        body = self._body_with([long_a, long_b, stub])
+
+        selected = TabPlacement.select_tab_edges(body, max_tabs=4, stock_bounds=None)
+
+        self.assertNotIn(id(stub), {id(e) for e in selected})
+        self.assertEqual({id(long_a), id(long_b)}, {id(e) for e in selected})
+
+    def test_filling_the_budget_cannot_re_add_a_short_side(self):
+        # The budget-filling pass runs when there are fewer sides than
+        # tabs; it must respect the same threshold or it would undo it.
+        cm = TabPlacement.MIN_TAB_SIDE_LENGTH_IN * 2.54
+        long_a = _edge(0, 0, 0, cm * 3)
+        stubs = [_edge(0, 0, cm * 0.4, 0), _edge(cm, cm, cm * 1.4, cm)]
+        body = self._body_with([long_a, *stubs])
+
+        selected = TabPlacement.select_tab_edges(body, max_tabs=8, stock_bounds=None)
+
+        self.assertEqual([id(e) for e in selected], [id(long_a)])
+
+    def test_a_part_with_no_qualifying_side_is_still_held(self):
+        # An unheld part coming loose mid-cut is worse than a tight tab, so
+        # a part too small for the threshold falls back to its longest
+        # sides rather than returning nothing.
+        cm = TabPlacement.MIN_TAB_SIDE_LENGTH_IN * 2.54
+        shorts = [
+            _edge(0, 0, cm * 0.6, 0),
+            _edge(cm * 0.6, 0, cm * 0.6, cm * 0.6),
+            _edge(cm * 0.6, cm * 0.6, 0, cm * 0.6),
+        ]
+        body = self._body_with(shorts)
+
+        selected = TabPlacement.select_tab_edges(body, max_tabs=4, stock_bounds=None)
+
+        self.assertTrue(selected, "a small part must still get tabs, not none")
+
+
 class ManualTabTests(unittest.TestCase):
     def test_disables_automatic_tabs_and_sets_uniform_manual_dimensions(self):
         parameters = {
