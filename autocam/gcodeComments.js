@@ -38,6 +38,45 @@ const DIALECT_DELIMITERS = {
   wincnc: ['[', ']']
 };
 
+// In LinuxCNC, square brackets are expressions, not comments.  "preserve"
+// is used when exporting a stored program whose controller is not available
+// at the call site, so it must not mistake X[#1+2] for a WinCNC comment and
+// rewrite it as ( #1+2 ).  A bracketed expression follows an address and
+// begins with a value/parameter; this deliberately narrow check leaves
+// ordinary WinCNC prose such as "[Set G54]" eligible for cleanup.
+function isLinuxCncBracketExpression(line, start) {
+  let before = start - 1;
+  while (before >= 0 && /\s/.test(line[before])) before -= 1;
+  if (before < 0 || !/[A-Za-z0-9#=+\-*/]/.test(line[before])) return false;
+
+  const text = line.slice(start + 1).trimStart();
+  // Function names are expressions only when followed by their bracketed
+  // argument. Without that requirement, a valid WinCNC comment such as
+  // "[sin setup note]" after a move is mistaken for LinuxCNC code and never
+  // receives the normal comment cleanup.
+  return /^(?:[#0-9.+\-]|(?:abs|acos|asin|atan|cos|exists|exp|fix|fup|ln|round|sin|sqrt|tan)\s*\[)/i.test(text);
+}
+
+function findCommentStart(line, dialect) {
+  if (dialect === 'linuxcnc') return line.indexOf('(');
+  if (dialect === 'wincnc') {
+    // Generators assemble portable parenthesized comments first, then this
+    // normalizer translates them into WinCNC brackets. Existing WinCNC
+    // output may already be bracketed, so accept whichever appears first.
+    const paren = line.indexOf('(');
+    const bracket = line.indexOf('[');
+    return paren === -1 ? bracket : (bracket === -1 ? paren : Math.min(paren, bracket));
+  }
+
+  // Keep looking past LinuxCNC expressions until we find a real comment.
+  // Parentheses are comments in both stored dialects supported here.
+  for (let index = 0; index < line.length; index += 1) {
+    if (line[index] === '(') return index;
+    if (line[index] === '[' && !isLinuxCncBracketExpression(line, index)) return index;
+  }
+  return -1;
+}
+
 /**
  * The longest line LinuxCNC will read, in characters, not counting the
  * newline.
@@ -73,12 +112,10 @@ export function normalizeGcodeComments(gcode, { dialect = 'linuxcnc' } = {}) {
   return String(gcode ?? '')
     .split('\n')
     .map((line) => {
-      // Either delimiter can open a comment, so both are searched. Looking
-      // only for "(" meant a WinCNC program - which uses "[" throughout -
-      // passed through completely untouched.
-      const paren = line.indexOf('(');
-      const bracket = line.indexOf('[');
-      const start = paren === -1 ? bracket : (bracket === -1 ? paren : Math.min(paren, bracket));
+      // Stored WinCNC comments use brackets, while stored LinuxCNC programs
+      // can use brackets for arithmetic expressions. findCommentStart keeps
+      // the latter executable instead of "repairing" it into prose.
+      const start = findCommentStart(line, dialect);
       if (start === -1) return line;
 
       const opener = line[start];
