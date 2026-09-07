@@ -100,13 +100,71 @@ def _parse_number(value: Any) -> Optional[float]:
         return None
 
 
+# Entry moves (plunge straight down, ramp helically in) engage far more of
+# the tool at once than a horizontal cut does, so a CAM preset deliberately
+# programs them SLOWER than the cutting feed. Every reviewed preset in this
+# project's own tool library follows that rule with a wide margin - ramp at
+# 1/4 and plunge at 1/6 of the cutting feed, consistently across all 8
+# materials.
+#
+# This ceiling exists because collapsing that margin caused real damage, not
+# a hypothetical: issue #360 records an attempt to make feed/speed "not vary
+# between operations" that forced every motion type - plunge included - to
+# the base cutting feed. On a real test cut the bit flew through the stock
+# and ripped it instead of entering under control, on the plunge move
+# specifically.
+#
+# 0.5 is deliberately far looser than any real preset needs (the tightest is
+# 0.25) so it can never reject legitimate cutting data someone tunes later -
+# it exists to catch the specific failure mode of an entry feed being raised
+# to, or near, the cutting feed.
+_MAX_ENTRY_FEED_FRACTION_OF_CUTTING = 0.5
+_ENTRY_FEED_KEYS = ("v_f_plunge", "v_f_ramp")
+
+
+def assert_safe_entry_feeds(preset: dict, context: str = "") -> None:
+    """Raise if a preset's plunge/ramp feed is not safely below its cutting
+    feed. See _MAX_ENTRY_FEED_FRACTION_OF_CUTTING for why this is enforced
+    rather than trusted.
+
+    Only validates values that are actually present and positive - a preset
+    that simply doesn't program an entry feed is left alone rather than
+    failed on missing data, which would turn a documentation gap into a
+    refusal to cut.
+    """
+    cutting = _parse_number(preset.get("v_f"))
+    if cutting is None or cutting <= 0:
+        return
+    ceiling = cutting * _MAX_ENTRY_FEED_FRACTION_OF_CUTTING
+    where = f" for {context}" if context else ""
+    for key in _ENTRY_FEED_KEYS:
+        value = _parse_number(preset.get(key))
+        if value is None or value <= 0:
+            continue
+        if value > ceiling:
+            raise ValueError(
+                f"Unsafe {key}{where}: {value:g} is more than "
+                f"{_MAX_ENTRY_FEED_FRACTION_OF_CUTTING:g}x the cutting feed "
+                f"({cutting:g}). Entry moves engage the whole tool at once and "
+                "must stay well below the cutting feed - see issue #360, where "
+                "raising them to the cutting feed tore through real stock."
+            )
+
+
 def _conservative_router_preset(preset: dict) -> dict:
-    """Copy a tool preset with every programmed feed reduced for the router."""
+    """Copy a tool preset with every programmed feed reduced for the router.
+
+    Scaling every feed by the same factor preserves the preset's own
+    plunge:cutting and ramp:cutting ratios; the safety check afterward
+    confirms that, and catches a preset whose ratios were unsafe to begin
+    with before any of it reaches a real machine.
+    """
     scaled = copy.deepcopy(preset)
     for key in _FEED_PRESET_KEYS:
         value = _parse_number(scaled.get(key))
         if value is not None:
             scaled[key] = value * _ROUTER_FEED_RATE_SCALE
+    assert_safe_entry_feeds(scaled, str(preset.get("name") or "this preset"))
     return scaled
 
 

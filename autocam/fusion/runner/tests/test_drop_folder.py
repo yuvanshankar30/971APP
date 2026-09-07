@@ -70,6 +70,81 @@ class OfflineSettingsRetryTests(unittest.TestCase):
             retry(always_offline, "test call")
         self.assertEqual(calls["count"], 3)
 
+    def test_does_not_log_one_line_per_attempt(self):
+        # Six near-identical lines per folder segment made every Fusion
+        # launch look like a serious fault. One at the start, one on giving
+        # up.
+        app = fake_app()
+        retry = dropFolder._retry_on_offline(app, attempts=6, initial_delay_seconds=0)
+
+        def always_offline():
+            raise RuntimeError("3 : CB_NA - System in offline settings")
+
+        with self.assertRaises(RuntimeError):
+            retry(always_offline, "test call")
+        self.assertEqual(app.log.call_count, 2)
+
+
+class OfflineMustNotCreateFoldersTests(unittest.TestCase):
+    """An offline lookup failure means we do not KNOW whether a folder
+    exists. Treating it as "not found" made resolve_drop_folder go on to
+    create a folder that already exists in the team's real Data Panel -
+    confirmed in a real startup log, where an offline
+    itemByName('Offseason Projects') was followed immediately by
+    "'Offseason Projects' folder not found ... creating it".
+    """
+
+    def setUp(self):
+        # resolve_drop_folder builds its own retry with the real 1s-doubling
+        # backoff (31s across 6 attempts). These tests are about which branch
+        # is taken, not the waiting, so the sleep is stubbed out.
+        self._real_sleep = dropFolder.time.sleep
+        dropFolder.time.sleep = lambda _seconds: None
+
+    def tearDown(self):
+        dropFolder.time.sleep = self._real_sleep
+
+    def test_offline_lookup_raises_instead_of_creating_a_duplicate(self):
+        root = MagicMock()
+        root.name = "2026 Season CAM"
+        root.dataFolders.itemByName.side_effect = RuntimeError(
+            "3 : CB_NA - System in offline settings"
+        )
+        app = fake_app()
+        project = MagicMock()
+        project.name = "2026 Season CAM"
+        project.rootFolder = root
+        app.data.dataProjects.count = 1
+        app.data.dataProjects.item.return_value = project
+
+        with self.assertRaises(RuntimeError):
+            dropFolder.resolve_drop_folder(app, "2026 Season CAM", "Offseason Projects")
+
+        root.dataFolders.add.assert_not_called()
+
+    def test_a_real_not_found_still_creates_the_folder(self):
+        # The InternalValidationError flavor genuinely does mean "missing",
+        # and creating it is the correct next step - that behavior must
+        # survive the fix above.
+        created = MagicMock()
+        root = MagicMock()
+        root.name = "2026 Season CAM"
+        root.dataFolders.itemByName.side_effect = RuntimeError(
+            "2 : InternalValidationError : status.isOk() && folders"
+        )
+        root.dataFolders.add.return_value = created
+        app = fake_app()
+        project = MagicMock()
+        project.name = "2026 Season CAM"
+        project.rootFolder = root
+        app.data.dataProjects.count = 1
+        app.data.dataProjects.item.return_value = project
+
+        _project, folder = dropFolder.resolve_drop_folder(app, "2026 Season CAM", "Offseason Projects")
+
+        root.dataFolders.add.assert_called_once_with("Offseason Projects")
+        self.assertIs(folder, created)
+
 
 if __name__ == "__main__":
     unittest.main()

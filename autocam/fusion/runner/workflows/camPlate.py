@@ -180,6 +180,59 @@ def _get(payload: dict, *keys: str, default=None):
 _MINIMUM_WALL_CM = 0.15
 
 
+# A job with a genuinely broken template could otherwise report one warning
+# per operation and fill the row with near-identical text. Enough to see the
+# pattern; the Runner's own log still has every one of them.
+_MAX_OPERATION_WARNINGS = 10
+
+
+def _operation_warnings(app, cam) -> list:
+    """Every surviving operation's own Fusion-reported warning, as job
+    warnings.
+
+    Fusion raises real, non-fatal warnings on operations that still report
+    isToolpathValid=True and still post successfully - the operation just
+    quietly machines less than it should. Issue #316 is exactly this: "One or
+    more pockets were not machined because they are too small to be reached
+    with given ramping constraints" appears only in Fusion's own Text
+    Commands log on the machine that ran the job, so some small pocket or
+    corner silently doesn't get cut and nothing anywhere in the web UI says
+    so.
+
+    Only operations that survived DeleteToolpaths' cleanup are read - an
+    operation that was removed for having no applicable geometry isn't a
+    warning about this part, and the empty-toolpath warnings that drive that
+    cleanup would otherwise be reported as if they were.
+
+    Deliberately best-effort for the same reason as _coverage_warnings
+    below: a diagnostic must never fail a job whose G-code is fine.
+    """
+    warnings = []
+    try:
+        for setup in cam.setups:
+            for operation in setup.operations:
+                if len(warnings) >= _MAX_OPERATION_WARNINGS:
+                    warnings.append(
+                        "More operations reported warnings than are listed here - "
+                        "see the Runner's own log for the rest."
+                    )
+                    return warnings
+                try:
+                    text = str(operation.warning or "").strip()
+                    name = str(operation.name or "operation")
+                except Exception:
+                    continue
+                if not text:
+                    continue
+                # Collapse Fusion's own trailing newlines into one line so
+                # the warning reads cleanly in a table cell.
+                text = " ".join(text.split())
+                warnings.append(f"Fusion reported on '{name}': {text}")
+    except Exception as exc:  # noqa: BLE001 - see docstring
+        app.log(f"Operation-warning check could not run: {exc}")
+    return warnings
+
+
 def _coverage_warnings(app, cam, nc_files) -> list:
     """Compares the posted program against the part's own CAD geometry and
     returns a warning per real problem found - an internal feature with no
@@ -577,13 +630,25 @@ def start(data, session):
         for warning in coverage_warnings:
             app.log(f"COVERAGE: {warning}")
 
+        # Fusion's own per-operation warnings, which otherwise never leave
+        # the machine that ran the job (issue #316). Reported alongside the
+        # coverage check rather than instead of it: the two catch different
+        # things - Fusion knows when it declined to machine something, the
+        # coverage check catches the cases where it thought everything was
+        # fine and the program still missed a feature.
+        operation_warnings = _operation_warnings(app, cam)
+        for warning in operation_warnings:
+            app.log(f"OPERATION: {warning}")
+
+        job_warnings = coverage_warnings + operation_warnings
+
         completion_data = {
             "jobId": job_id,
             "runnerId": RUNNER_ID,
             "ncFiles": nc_files,
         }
-        if coverage_warnings:
-            completion_data["warnings"] = coverage_warnings
+        if job_warnings:
+            completion_data["warnings"] = job_warnings
         if total_machining_time is not None:
             completion_data["stats"] = {"total_machining_time": total_machining_time}
 

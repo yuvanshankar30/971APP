@@ -65,11 +65,21 @@ def _retry_on_offline(app, attempts=6, initial_delay_seconds=1.0):
                 if not _is_offline_settings_error(exc):
                     raise
                 last_exc = exc
-                app.log(
-                    f"{description} failed with 'System in offline settings' "
-                    f"(attempt {attempt}/{attempts}) - Fusion's cloud "
-                    f"connection may still be establishing after startup: {exc}"
-                )
+                # One line when it starts, one when it gives up - not one per
+                # attempt. This is an expected, self-healing startup
+                # condition, and six near-identical lines of it (per folder
+                # segment) buried the Text Commands window in what looked
+                # like a serious fault every time Fusion launched.
+                if attempt == 1:
+                    app.log(
+                        f"{description}: waiting for Fusion's cloud connection "
+                        f"(retrying up to {attempts} times)..."
+                    )
+                elif attempt == attempts:
+                    app.log(
+                        f"{description}: still offline after {attempts} attempts - "
+                        "giving up for now; this retries on its own shortly."
+                    )
                 if attempt < attempts:
                     time.sleep(delay_seconds)
                     delay_seconds *= 2
@@ -176,6 +186,20 @@ def resolve_drop_folder(app, project_name, folder_path):
                 lambda: folder.dataFolders.itemByName(segment), f"itemByName('{segment}')"
             )
         except RuntimeError as exc:
+            # Only the InternalValidationError "not found" flavor may fall
+            # through to creating the folder. An offline failure that has
+            # exhausted its retries means we still do not KNOW whether the
+            # folder exists - and confirmed live in the real startup log,
+            # this path was reached while offline and went straight on to
+            # "'Offseason Projects' folder not found ... creating it",
+            # attempting to create a folder that already exists in the
+            # team's real Data Panel. Retrying only delayed that
+            # misclassification rather than preventing it. Re-raise instead:
+            # the caller (a periodic folder sync, or a job save) is far
+            # better off failing and trying again once the connection is up
+            # than silently creating a duplicate of a real folder.
+            if _is_offline_settings_error(exc):
+                raise
             app.log(f"itemByName('{segment}') raised instead of returning None ({exc}) - treating as not found.")
             next_folder = None
         if next_folder is None:
