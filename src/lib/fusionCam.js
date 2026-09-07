@@ -566,3 +566,25 @@ export async function deleteFusionJob(id) {
   if (error) throw error;
   if (!data?.length) throw new Error('Active Fusion jobs must be cancelled before deletion');
 }
+
+/**
+ * Delete every failed Fusion job in one request, not one row at a time -
+ * a job queue can accumulate dozens of failed rows from iterating on CAM
+ * logic, and each one carries a real errors/warnings payload the jobs
+ * list has to fetch and render. `.eq('status', 'failed')` is itself the
+ * safety scope: this can never touch a queued/claimed/processing job,
+ * same as deleteFusionJob's own status allowlist.
+ *
+ * Returns the count actually deleted, so the caller can report a real
+ * number rather than assuming the whole visible list was failed.
+ */
+export async function deleteAllFailedFusionJobs() {
+  const { data, error } = await supabase
+    .from('cam_jobs')
+    .delete()
+    .eq('operation_type', 'milling')
+    .eq('status', 'failed')
+    .select('id');
+  if (error) throw error;
+  return data?.length || 0;
+}

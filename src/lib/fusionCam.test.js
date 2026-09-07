@@ -16,12 +16,13 @@ import {
   fetchFusionPartStepFiles,
   fetchFusionJobsByManufacturingPartIds,
   installFusionPartCad,
+  deleteAllFailedFusionJobs,
   isFusionOutputJob
 } from './fusionCam.js';
 
 function chain(result) {
   const query = {};
-  for (const method of ['select', 'eq', 'in', 'not', 'order', 'limit', 'range']) query[method] = vi.fn(() => query);
+  for (const method of ['select', 'eq', 'in', 'not', 'order', 'limit', 'range', 'delete']) query[method] = vi.fn(() => query);
   query.single = vi.fn(async () => result);
   query.then = (resolve) => resolve(result);
   mocks.queries.push(query);
@@ -143,5 +144,22 @@ describe('Fusion CAM queue query efficiency', () => {
       .mockResolvedValueOnce({ data: { signedUrl: 'https://example.test/decoded.step' }, error: null });
     await expect(installFusionPartCad('a%20b.step')).resolves.toBe('https://example.test/decoded.step');
     expect(mocks.createSignedUrl).toHaveBeenNthCalledWith(2, 'a b.step', 60);
+  });
+
+  it('deletes every failed Fusion job in one request and reports the real count', async () => {
+    mocks.from.mockReturnValue(chain({ data: [{ id: 'a' }, { id: 'b' }, { id: 'c' }], error: null }));
+
+    await expect(deleteAllFailedFusionJobs()).resolves.toBe(3);
+
+    expect(mocks.from).toHaveBeenCalledTimes(1);
+    expect(mocks.from).toHaveBeenCalledWith('cam_jobs');
+    expect(mocks.queries[0].delete).toHaveBeenCalled();
+    expect(mocks.queries[0].eq).toHaveBeenCalledWith('operation_type', 'milling');
+    expect(mocks.queries[0].eq).toHaveBeenCalledWith('status', 'failed');
+  });
+
+  it('reports zero rather than throwing when there is nothing failed to delete', async () => {
+    mocks.from.mockReturnValue(chain({ data: [], error: null }));
+    await expect(deleteAllFailedFusionJobs()).resolves.toBe(0);
   });
 });
