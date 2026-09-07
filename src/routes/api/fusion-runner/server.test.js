@@ -77,7 +77,7 @@ describe('Fusion Runner grouping lifecycle',()=>{
   // used, just no longer requiring someone to click through to it.
   expect(mocks.storageUpload).toHaveBeenCalledTimes(1);
   expect(mocks.storageUpload).toHaveBeenCalledWith(
-   'AutoCAM/x44stiffner.ngc',
+   'gcode/x44stiffner.ngc',
    expect.any(Buffer),
    expect.objectContaining({upsert:true,contentType:'text/plain'})
   );

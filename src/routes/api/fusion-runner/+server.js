@@ -34,8 +34,17 @@ function getServiceSupabase() {
 // someone to open the Job Queue tab and click through it. Direct
 // instruction: G-code should land in Files as soon as a job finishes, not
 // only when a human remembers to post it.
+//
+// "gcode" is the folder the shop actually uses, confirmed against the live
+// bucket: it holds the real, human-named programs operators pull from
+// (autocamtest43.ngc, lexancuttest1.ngc - the same files issue #359's
+// machine-limit reports were traced against). An earlier "AutoCAM" folder
+// only ever accumulated automated posts nobody browsed to. Keep this in
+// sync with JobQueueTab.svelte's own copy of these two constants: the
+// manual button and this automatic post are deliberately the same
+// destination, so a job posted either way lands in one predictable place.
 const FILES_BUCKET = 'manufacturing-drive';
-const FILES_TARGET_FOLDER = 'AutoCAM';
+const FILES_TARGET_FOLDER = 'gcode';
 
 async function postNcFilesToFiles(supabase, jobId, plateName, ncFiles) {
   if (!ncFiles?.length) return;

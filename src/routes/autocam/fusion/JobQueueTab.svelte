@@ -13,9 +13,12 @@
   // Where a job's G-code lands when someone presses "Post to Files" below -
   // the same "manufacturing-drive" bucket /manufacture/files browses,
   // under one fixed folder so completed CAM output always ends up
-  // somewhere predictable instead of scattered across the drive.
+  // somewhere predictable instead of scattered across the drive. "gcode"
+  // is the folder the shop actually pulls programs from; keep this in sync
+  // with the same two constants in api/fusion-runner/+server.js, which
+  // posts automatically on job completion to this same destination.
   const FILES_BUCKET = 'manufacturing-drive';
-  const FILES_TARGET_FOLDER = 'AutoCAM';
+  const FILES_TARGET_FOLDER = 'gcode';
 
   let postModalJob = null;
   let postFileName = '';
