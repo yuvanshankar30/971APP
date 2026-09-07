@@ -390,27 +390,23 @@ def _repair_missing_selections(setup) -> list[str]:
     ops_snapshot = list(setup.operations)
 
     # First pass, read-only: every non-outer-profile contour2d finishing
-    # pass in the setup. Direct instruction, after a real part (Anton
-    # plate, 8 distinct internal loops - 4 border frame slots plus 4
-    # center shapes) needed more than a single operation could reliably
-    # hold: distribute internal feature loops across every available
-    # finishing-pass operation the template provides (round-robin, capped
-    # per operation at MAX_LOOPS_PER_FEATURE_OP), not just the first one.
-    # A simple part (x44_stiffner, 2 kidney loops) still lands entirely in
-    # one operation this way - the split only engages once a part
-    # genuinely has more loops than one operation should reasonably carry
-    # - so this generalizes to "any STEP file" instead of hard-coding a
-    # single-operation assumption that only held for the simpler part it
-    # was first written against. Sorted so an operation whose template
-    # name already says "feature" (e.g. the New Router metal template's
-    # own "Slot Cut for Features") is used first - the real, purpose-built
-    # operation for this - rather than whichever generic "Shape ...
-    # Finishing Pass" happens to iterate first.
+    # pass in the setup - known up front so the second pass can pick the
+    # single primary one to hold ALL of this part's real internal features
+    # together. Direct instruction, reinforced twice: every real internal
+    # feature belongs in ONE "Feature Slot Cut" operation, not split across
+    # several - an earlier attempt at splitting across multiple operations
+    # (round-robin, capped per operation) was reverted; it was never
+    # actually the fix for the real bug (see the chain-construction
+    # comments below), just an unrelated change made at the same time.
+    # Sorted so an operation whose template name already says "feature"
+    # (e.g. the New Router metal template's own "Slot Cut for Features")
+    # is used - the real, purpose-built operation for this - rather than
+    # whichever generic "Shape ... Finishing Pass" happens to iterate
+    # first.
     #
     # Do not gate contour finishing passes on _needs_repair: Fusion can
     # report stale template selections as healthy after a fresh STEP import.
     # This pass is rebuilt from the part's current internal features.
-    MAX_LOOPS_PER_FEATURE_OP = 4
     finishing_pass_ops = sorted(
         (op for op in ops_snapshot if op.strategy == "contour2d" and not _is_outer_profile(op)),
         key=lambda op: 0 if "feature" in op.name.lower() else 1,
@@ -418,20 +414,17 @@ def _repair_missing_selections(setup) -> list[str]:
     if finishing_pass_ops:
         design = _design()
         feature_edges_cache = _internal_feature_loop_edges_all_bodies(design) if design else []
-    # Only as many finishing-pass operations as the loop count actually
-    # needs are used - any operation beyond that (a real part rarely needs
-    # more than one or two) falls through to the ordinary conditional
-    # repair path below and, having no real feature left to give it, ends
-    # up empty and is removed by this file's own existing empty-toolpath
-    # cleanup, same as any other operation the template shipped that
-    # doesn't apply to this specific part.
+    # Only the ONE primary operation is treated as "the" feature-cut
+    # operation - every OTHER contour2d finishing pass in the template
+    # falls through to the ordinary conditional repair path below and,
+    # having no real feature left to give it, ends up empty and is removed
+    # by this file's own existing empty-toolpath cleanup, same as any
+    # other operation the template shipped that doesn't apply to this
+    # specific part.
     active_feature_ops = []
     feature_op_assignments = {}  # operationId -> list of edge-lists, this op's own share
     if finishing_pass_ops and feature_edges_cache:
-        ops_needed = min(
-            len(finishing_pass_ops),
-            max(1, -(-len(feature_edges_cache) // MAX_LOOPS_PER_FEATURE_OP)),
-        )
+        ops_needed = 1
         active_feature_ops = finishing_pass_ops[:ops_needed]
         for i, edges in enumerate(feature_edges_cache):
             target_op = active_feature_ops[i % len(active_feature_ops)]
