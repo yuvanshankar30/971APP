@@ -10,6 +10,20 @@ PocketOrientation = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(PocketOrientation)
 
 
+class BlindPocketLoopTests(unittest.TestCase):
+    def test_a_cavity_that_never_reaches_the_back_face_is_a_blind_pocket(self):
+        # The cavity's wall-face walk exhausted every reachable face
+        # without ever touching the material's opposite broad face - it
+        # terminates at its own separate floor instead.
+        self.assertTrue(PocketOrientation.loop_is_blind_pocket(False))
+
+    def test_a_cavity_that_reaches_the_back_face_is_a_through_cut(self):
+        # Whether reached in one hop or several (a real cavity can have
+        # more than one wall face stacked before reaching the far side -
+        # confirmed live), reaching it at all means no floor of its own.
+        self.assertFalse(PocketOrientation.loop_is_blind_pocket(True))
+
+
 class PocketSideRankingTests(unittest.TestCase):
     def test_blind_pocket_side_beats_larger_plain_back(self):
         sides = [
