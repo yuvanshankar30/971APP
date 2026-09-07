@@ -82,27 +82,52 @@ def _loop_wall_faces(face, loop):
     return walls
 
 
-def _wall_reaches_face(wall_face, opening_face, target_face) -> bool:
-    """Whether ``wall_face`` (a cavity side wall bordering ``opening_face``
-    through the feature's own opening loop) is ALSO directly adjacent to
-    ``target_face`` through any of its other edges.
+def _cavity_reaches_face(start_walls, opening_face, target_face) -> bool:
+    """Whether the cavity behind ``opening_face``'s loop - starting from
+    its own wall face(s) ``start_walls`` - is adjacent to ``target_face``
+    at ANY depth, not just one hop from the opening.
 
-    True for a through-cut: the wall runs from the opening all the way to
-    the material's far side. False for a blind pocket: the wall instead
-    terminates at its own separate floor face before ever reaching there.
+    True for a through-cut: walking the cavity's wall faces eventually
+    reaches the material's actual far side. False for a blind pocket: the
+    walk exhausts every reachable wall face without ever getting there
+    (it instead terminates at the pocket's own floor).
+
+    Breadth-first over wall-face adjacency, not just the walls directly
+    touching the opening loop - confirmed live as a real, not
+    hypothetical, distinction: a single-hop version of this check (does
+    THIS wall directly border the far face) gave the wrong answer for a
+    real part where a cavity's own STEP-imported geometry split its wall
+    into more than one face before reaching the material's far side - an
+    independent measurement (the raw minimum Z any wall vertex reaches)
+    confirmed the cavity really did go all the way through, which the
+    one-hop version had missed.
     """
-    try:
-        edges = list(wall_face.edges)
-    except Exception:
-        return False
-    for edge in edges:
-        try:
-            edge_faces = edge.faces
-        except Exception:
-            continue
-        for f in edge_faces:
-            if f != wall_face and f == target_face:
+    seen_ids = {id(w) for w in start_walls}
+    frontier = list(start_walls)
+    while frontier:
+        next_frontier = []
+        for wall in frontier:
+            if wall == target_face:
                 return True
+            try:
+                edges = list(wall.edges)
+            except Exception:
+                continue
+            for edge in edges:
+                try:
+                    edge_faces = edge.faces
+                except Exception:
+                    continue
+                for f in edge_faces:
+                    if f == wall or f == opening_face:
+                        continue
+                    if f == target_face:
+                        return True
+                    if id(f) in seen_ids:
+                        continue
+                    seen_ids.add(id(f))
+                    next_frontier.append(f)
+        frontier = next_frontier
     return False
 
 
@@ -131,8 +156,7 @@ def _has_blind_pocket_below_face(body, face) -> bool:
         walls = _loop_wall_faces(face, loop)
         if not walls:
             continue
-        reaches = [_wall_reaches_face(w, face, back_face) for w in walls]
-        if loop_is_blind_pocket(reaches):
+        if loop_is_blind_pocket(_cavity_reaches_face(walls, face, back_face)):
             return True
     return False
 

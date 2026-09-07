@@ -11,22 +11,17 @@ spec.loader.exec_module(PocketOrientation)
 
 
 class BlindPocketLoopTests(unittest.TestCase):
-    def test_a_wall_that_never_reaches_the_back_face_is_a_blind_pocket(self):
-        # A hex cutout: 6 planar wall faces, none of them adjacent to the
-        # material's opposite broad face - they all terminate at their own
-        # separate floor face instead.
-        self.assertTrue(PocketOrientation.loop_is_blind_pocket([False] * 6))
+    def test_a_cavity_that_never_reaches_the_back_face_is_a_blind_pocket(self):
+        # The cavity's wall-face walk exhausted every reachable face
+        # without ever touching the material's opposite broad face - it
+        # terminates at its own separate floor instead.
+        self.assertTrue(PocketOrientation.loop_is_blind_pocket(False))
 
-    def test_any_wall_reaching_the_back_face_means_a_through_cut(self):
-        # A round through-hole: one cylindrical wall, directly adjacent to
-        # the opposite broad face - no floor of its own.
-        self.assertFalse(PocketOrientation.loop_is_blind_pocket([True]))
-
-    def test_one_wall_reaching_back_is_enough_to_call_it_through(self):
-        self.assertFalse(PocketOrientation.loop_is_blind_pocket([False, False, True]))
-
-    def test_no_walls_at_all_is_not_a_pocket(self):
-        self.assertFalse(PocketOrientation.loop_is_blind_pocket([]))
+    def test_a_cavity_that_reaches_the_back_face_is_a_through_cut(self):
+        # Whether reached in one hop or several (a real cavity can have
+        # more than one wall face stacked before reaching the far side -
+        # confirmed live), reaching it at all means no floor of its own.
+        self.assertFalse(PocketOrientation.loop_is_blind_pocket(True))
 
 
 class PocketSideRankingTests(unittest.TestCase):

@@ -2,6 +2,7 @@ import adsk.core, adsk.fusion, adsk.cam, traceback
 import time
 
 from .ContourChains import is_reverted_for_loop_seed
+from .Orientation import _back_face_for, _loop_wall_faces, _cavity_reaches_face
 
 
 _POCKET_STRATEGIES = ("pocket_new", "pocket_clearing", "pocket2d", "adaptive2d")
@@ -26,6 +27,18 @@ def _is_dedicated_circular_hole_op(name_lower: str) -> bool:
     was a real, job-killing bug, not just a name collision.
     """
     return "circular" in name_lower and "hole" in name_lower
+
+
+def _is_dedicated_circular_pocket_op(name_lower: str) -> bool:
+    """True only for the template's own dedicated circular-BLIND-POCKET
+    operation (">.3 Circular Pocket" et al) - requires "circular" and
+    "pocket", explicitly excluding "hole" so this never collides with
+    _is_dedicated_circular_hole_op's own through-hole operation. The two
+    are genuinely different features (a recessed floor vs. a full-depth
+    cutout) that happen to share the "circular" and diameter-threshold
+    naming convention.
+    """
+    return "circular" in name_lower and "pocket" in name_lower and "hole" not in name_lower
 
 # Maps each strategy to the name of its geometry-selection parameter - the
 # thing that actually holds WHAT to cut, separate from all the how-to-cut
@@ -218,6 +231,15 @@ def _big_circular_loop_edges_all_bodies(design, min_diameter_cm: float):
     since the bore operation doesn't call this at all - see
     _repair_missing_selections's own is_big_hole_op branch, the only
     caller.
+
+    Each entry pairs the loop's edges with its own real chain direction
+    (see is_reverted_for_loop_seed / docs/contour-chain-direction.md) -
+    confirmed live as a real bug, not hypothetical: this used to hand back
+    bare edge lists and the caller hardcoded isReverted=False for all of
+    them, same as the internal-feature loops did before that was fixed -
+    a shared BRepEdge can run either way on a given face, so a circular
+    hole's own chain direction arrow can point the wrong way exactly like
+    a polygon loop's can.
     """
     loops = []
     for occ in design.rootComponent.allOccurrences:
@@ -229,11 +251,13 @@ def _big_circular_loop_edges_all_bodies(design, min_diameter_cm: float):
         for loop in bottom_face.loops:
             if loop.isOuter:
                 continue
-            edges = [co_edge.edge for co_edge in loop.coEdges]
+            co_edges = list(loop.coEdges)
+            edges = [co_edge.edge for co_edge in co_edges]
             if not edges or not _is_circular_loop(edges):
                 continue
             if _circle_loop_diameter_cm(edges) >= min_diameter_cm:
-                loops.append(edges)
+                is_reverted = is_reverted_for_loop_seed(co_edges[0].isOpposedToEdge)
+                loops.append((edges, is_reverted))
     return loops
 
 
@@ -291,6 +315,65 @@ def _internal_feature_loop_chains_all_bodies(design):
     return feature_chains
 
 
+def _blind_pocket_loops_all_bodies(design):
+    """Every body's own real blind-pocket loop - a recessed feature with
+    its own floor, split into (circular loops, non-circular chain seeds)
+    the same way through-features already are (see
+    _big_circular_loop_edges_all_bodies / _internal_feature_loop_chains_all_bodies)
+    since the template gives circular and general pockets separate
+    dedicated operations.
+
+    Taken from the TOP face (_top_face), NOT the bottom face
+    _internal_feature_loop_chains_all_bodies uses: a through-feature's loop
+    is identical on both faces, but a blind pocket only ever has a loop on
+    the side it actually opens from - the bottom face has no loop for it
+    at all.
+
+    Blind-vs-through is decided by the same wall-adjacency topology
+    Orientation.py's own orientation logic already uses (imported
+    directly, not reimplemented, so the two can never disagree about what
+    counts as blind) - not by comparing any face's own reported normal,
+    which a STEP import can report identically for a plate's two truly
+    opposite broad faces. Confirmed live as the reason this matters, not
+    hypothetical: PocketRecognitionSelection's own automatic search
+    (isSetupModelSelected=True) came back "Generated toolpath is empty"
+    for a real, confirmed blind pocket (a hex cutout) on an actual test
+    part - the exact same class of Fusion recognition failure this file
+    already worked around for through-features and big circular holes.
+    """
+    circular_loops = []
+    other_chains = []
+    for occ in design.rootComponent.allOccurrences:
+        if occ.bRepBodies.count == 0:
+            continue
+        body = occ.bRepBodies.item(0)
+        top_face = _top_face(body)
+        if top_face is None:
+            continue
+        back_face = _back_face_for(body, top_face)
+        if back_face is None:
+            continue
+        for loop in top_face.loops:
+            if loop.isOuter:
+                continue
+            co_edges = list(loop.coEdges)
+            edges = [co_edge.edge for co_edge in co_edges]
+            if not edges:
+                continue
+            walls = _loop_wall_faces(top_face, loop)
+            if not walls:
+                continue
+            if _cavity_reaches_face(walls, top_face, back_face):
+                continue  # a through-cut, handled elsewhere - not blind
+            seed = co_edges[0]
+            is_reverted = is_reverted_for_loop_seed(seed.isOpposedToEdge)
+            if _is_circular_loop(edges):
+                circular_loops.append((edges, is_reverted))
+            else:
+                other_chains.append((seed.edge, is_reverted))
+    return circular_loops, other_chains
+
+
 def _repair_missing_selections(setup) -> list[str]:
     """A template applied to a DIFFERENT part than the one it was originally
     exported from can carry geometry selections that don't resolve - "1 of 3
@@ -330,6 +413,7 @@ def _repair_missing_selections(setup) -> list[str]:
     outer_edges_cache = None
     feature_chains_cache = None
     big_hole_edges_cache = None
+    blind_pocket_cache = None  # (circular_loops, non_circular_chains), see _blind_pocket_loops_all_bodies
 
     def _design():
         if not design_cache:
@@ -455,6 +539,9 @@ def _repair_missing_selections(setup) -> list[str]:
         # operation look "never used" before this fix. Always repaired
         # outright, same treatment as the outer/feature operations.
         is_big_hole_op = op.strategy == "pocket2d" and _is_dedicated_circular_hole_op(op.name.lower())
+        is_dedicated_circular_pocket_op = (
+            op.strategy in _POCKET_STRATEGIES and _is_dedicated_circular_pocket_op(op.name.lower())
+        )
         # Outer profile and feature-finishing-pass operations are always
         # repaired outright (see finishing_pass_ops's own comment on why
         # trusting "does this look missing" for them is flaky); everything
@@ -468,11 +555,19 @@ def _repair_missing_selections(setup) -> list[str]:
         # important for blind pockets: their recognition is only valid after
         # the importer has deliberately put the pocket-bearing side on top.
         is_generic_pocket_op = (
-            op.strategy in _POCKET_STRATEGIES and not is_big_hole_op
+            op.strategy in _POCKET_STRATEGIES
+            and not is_big_hole_op
+            and not is_dedicated_circular_pocket_op
         )
         repair_state = (
             _curve_selection_state(op)
-            if (is_outer or is_through_shape_op or is_big_hole_op or is_generic_pocket_op)
+            if (
+                is_outer
+                or is_through_shape_op
+                or is_big_hole_op
+                or is_dedicated_circular_pocket_op
+                or is_generic_pocket_op
+            )
             else _needs_repair(op)
         )
         if repair_state is None:
@@ -610,10 +705,10 @@ def _repair_missing_selections(setup) -> list[str]:
                     _big_circular_loop_edges_all_bodies(design, threshold_cm) if design else []
                 )
             if big_hole_edges_cache:
-                for edges in big_hole_edges_cache:
+                for edges, is_reverted in big_hole_edges_cache:
                     chain = selections.createNewChainSelection()
                     chain.isOpen = False
-                    chain.isReverted = False
+                    chain.isReverted = is_reverted
                     chain.inputGeometry = edges
             else:
                 # No real loop on this part actually meets this
@@ -626,19 +721,91 @@ def _repair_missing_selections(setup) -> list[str]:
                 recognition.isSetupModelSelected = True
                 recognition.areHolesIncluded = True
                 _set_min_hole_diameter_from_name(recognition, name_lower)
+        elif is_dedicated_circular_pocket_op:
+            # Same Fusion recognition failure as is_big_hole_op above, but
+            # for a real BLIND circular pocket instead of a through-hole -
+            # confirmed live: PocketRecognitionSelection(isSetupModelSelected
+            # =True) came back "Generated toolpath is empty" for a real,
+            # confirmed (topologically - see _blind_pocket_loops_all_bodies)
+            # blind circular pocket on an actual test part. Built via
+            # ChainSelection instead, from the real blind circular loops
+            # whose diameter meets this operation's own name threshold -
+            # same technique, same threshold convention as is_big_hole_op,
+            # just sourced from the TOP face's blind loops instead of the
+            # bottom face's through loops.
+            if blind_pocket_cache is None:
+                design = _design()
+                blind_pocket_cache = _blind_pocket_loops_all_bodies(design) if design else ([], [])
+            circular_blind_loops, _ = blind_pocket_cache
+            threshold_cm = _min_hole_diameter_cm_from_name(name_lower) or 0.0
+            matching = [
+                (edges, is_reverted) for edges, is_reverted in circular_blind_loops
+                if _circle_loop_diameter_cm(edges) >= threshold_cm
+            ]
+            if matching:
+                for edges, is_reverted in matching:
+                    chain = selections.createNewChainSelection()
+                    chain.isOpen = False
+                    chain.isReverted = is_reverted
+                    chain.inputGeometry = edges
+            else:
+                # No real blind circular loop on this part meets this
+                # operation's own name threshold - fall back to generic
+                # recognition, same as is_big_hole_op's own fallback.
+                recognition = selections.createNewPocketRecognitionSelection()
+                recognition.isSetupModelSelected = True
+                recognition.areHolesIncluded = True
+                _set_min_hole_diameter_from_name(recognition, name_lower)
         else:
-            recognition = selections.createNewPocketRecognitionSelection()
-            # Without isSetupModelSelected, a PocketRecognitionSelection
-            # has no model to search at all and silently recognizes
-            # nothing - confirmed live as the cause of circular pockets
-            # not generating any toolpath at all.
-            recognition.isSetupModelSelected = True
-            # areHolesIncluded is off by default (every pocket/adaptive
-            # operation would otherwise also try to cut circular holes
-            # meant for their own dedicated operation); only turn it on for
-            # the operation actually named for that.
-            recognition.areHolesIncluded = "circular" in name_lower and "hole" in name_lower
-            _set_min_hole_diameter_from_name(recognition, name_lower)
+            # The general pocket-clearing operation (e.g. "Shape Pocket") -
+            # every real blind pocket loop that ISN'T a dedicated circular
+            # pocket's own job: every non-circular blind loop, plus any
+            # blind circular loop too small to meet a dedicated circular
+            # pocket operation's own name threshold (or if this template
+            # has no such dedicated operation at all) - nothing blind is
+            # left unassigned. Built via ChainSelection for the same reason
+            # is_dedicated_circular_pocket_op is: PocketRecognitionSelection
+            # confirmed live to return a genuinely empty toolpath for a
+            # real blind pocket (a hex cutout) despite isSetupModelSelected
+            # =True finding nothing wrong with the selection itself.
+            if blind_pocket_cache is None:
+                design = _design()
+                blind_pocket_cache = _blind_pocket_loops_all_bodies(design) if design else ([], [])
+            circular_blind_loops, non_circular_blind_chains = blind_pocket_cache
+            claimed_diameters_cm = [
+                _min_hole_diameter_cm_from_name(other.name.lower())
+                for other in ops_snapshot
+                if other.strategy in _POCKET_STRATEGIES
+                and _is_dedicated_circular_pocket_op(other.name.lower())
+            ]
+            min_claimed_cm = min(
+                (d for d in claimed_diameters_cm if d is not None), default=None
+            )
+            leftover_circular = [
+                (edges, is_reverted) for edges, is_reverted in circular_blind_loops
+                if min_claimed_cm is None or _circle_loop_diameter_cm(edges) < min_claimed_cm
+            ]
+            if non_circular_blind_chains or leftover_circular:
+                for seed_edge, is_reverted in non_circular_blind_chains:
+                    chain = selections.createNewChainSelection()
+                    chain.isOpen = False
+                    chain.isReverted = is_reverted
+                    chain.inputGeometry = [seed_edge]
+                for edges, is_reverted in leftover_circular:
+                    chain = selections.createNewChainSelection()
+                    chain.isOpen = False
+                    chain.isReverted = is_reverted
+                    chain.inputGeometry = edges
+            else:
+                # No real blind pocket found on this part at all - fall
+                # back to generic recognition (harmless: this file's own
+                # cleanup removes the operation afterward if that also
+                # finds nothing, same as every other operation that
+                # doesn't apply to this specific part).
+                recognition = selections.createNewPocketRecognitionSelection()
+                recognition.isSetupModelSelected = True
+                recognition.areHolesIncluded = "circular" in name_lower and "hole" in name_lower
+                _set_min_hole_diameter_from_name(recognition, name_lower)
         value.applyCurveSelections(selections)
         repaired.append(op.name)
 
