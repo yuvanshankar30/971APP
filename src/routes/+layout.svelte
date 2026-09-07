@@ -388,7 +388,10 @@
       return hasPermission(activeProfile, 'VIEW_ADMIN_PANEL')
         || (activeProfile?.roster_keys || []).some((role) => String(role).toLowerCase() === 'scouting admin');
     }
-    return true;
+    // A disabled route stays out of the header even when an older account has
+    // it saved in header_tabs. This is what removes retired tabs for existing
+    // users instead of changing defaults only.
+    return navConfig?.tabs?.[k] !== false;
   }
 
   function toLinkItem(item) {
