@@ -269,8 +269,12 @@ use `_face_id`, not `id()` or bare equality.
 ## Tabs
 
 Tab edges are selected on the outer profile the same way as any other
-selection - real edges, not synthesized points - but tab *placement* has its
-own rules, in `TabPlacement.py`. Three, in order:
+selection, but tab *placement* has its own rules, in `TabPlacement.py`.
+The final `tabPositions` value is a `CadPoints` collection: the runner turns
+each vetted edge into a midpoint `SketchPoint` on the release face before
+assigning it. Do not assign `BRepEdge` objects to `tabPositions`; Fusion can
+display those references but cannot consistently resolve a location along
+their chain. Three placement rules apply, in order:
 
 1. **How many.** `_tab_count_for_perimeter` scales the count to the part's
    own perimeter (roughly one per `TARGET_TAB_SPACING_IN`), floored at
@@ -290,15 +294,18 @@ own rules, in `TabPlacement.py`. Three, in order:
    0.6in tab it was supposed to fit, so an edge could qualify for a tab it
    could not physically contain.
 
-### Tab edges must lie on the contour being cut
+### Tab points must lie on the contour being cut
 
 **This is the one that silently breaks everything else above.** A manual tab
-is not a free-floating position: Fusion places it on an edge *of the
-selected contour*, so a tab edge that is not part of that contour cannot be
-placed and is dropped without a warning.
+is not a free-floating position: Fusion places it on the selected contour,
+so a tab point that is not part of that contour cannot be placed and is
+dropped without a warning.
 
 Tab edges therefore come from the same face the release contour does - the
-bottom face (`_find_tab_face`, matching `DeleteToolpaths._bottom_face`).
+bottom face (`_find_tab_face`, matching `DeleteToolpaths._bottom_face`) -
+and `_manual_tab_points` creates hidden midpoint SketchPoints in that face's
+component. For occurrence proxies, it converts each point back to the same
+assembly context before assigning it to the operation.
 
 An earlier version deliberately took them from the **top** face, on the
 theory that tabs and their contour were independent edge loops. They are
@@ -314,27 +321,23 @@ and for the same body, top-face outer loop `478,480..492` had **0 of 8**
 edges on the contour while bottom-face outer loop `741..748` had **8 of 8**.
 The bottom face's outer loop *is* the contour, exactly.
 
-**What was cutting instead** was Fusion's own automatic placement, which on
-a rectangular part spaces four tabs evenly - close enough to look correct
-on simple parts, and entirely outside this module's control on anything
-else. That is the tell for this class of bug: placement that looks right on
-one part and wrong on the next *regardless of what the code selected*.
+### Manual-only mode must use parameter values, not expressions
 
-Two related facts about Fusion's tab parameters, both read back from a live
-operation rather than assumed - this file used to assert the opposite of
-the first:
+Fusion's `tabPositioning` and `tabsPerContour` are discrete CAM values.
+Setting their `expression` strings can appear to work while retaining the
+template's distance placement, which was the cause of a real training-part
+result with tabs only on the top/right edges. Configure manual-only tabs in
+this order:
 
-- **`tabsPerContour = 0` does not disable automatic tabs.** The parameter
-  reports a value of 1 no matter what is assigned to it (0, 1, 2 and 4 all
-  read back as 1), because it is inactive in the active mode.
-- **There is no manual-only mode.** `tabPositioning` enumerates exactly
-  `'distance'` and `'tabCount'`; `'points'` is rejected as an invalid
-  enumeration value, even though a template's stale `tabDistance`
-  expression may still read `'points' == 'points' ? ...`.
+1. `group_tabs.value.value = True`
+2. `tabPositioning.value.value = 'tabCount'`
+3. `tabsPerContour.value.value = 0`
+4. `tabPositions.value.value = [SketchPoint, ...]`
 
-So automatic placement is always on and a manual tab is an *addition* to
-it. Manual tabs winning is a consequence of their edges being on the
-contour - not of having switched Fusion into some manual mode.
+`'points'` is not a valid `tabPositioning` value. The explicit
+`SketchPoint`s select locations; `tabCount` plus zero automatic tabs ensures
+that those locations, rather than the template's fallback distance tabs,
+are what the release contour machines.
 
 Two invariants worth preserving if this is touched:
 
