@@ -20,6 +20,7 @@ import { env } from '$env/dynamic/private';
 import { createClient } from '@supabase/supabase-js';
 import { isAuthorizedFusionRunnerRequest } from '$lib/server/fusion_runner_auth.js';
 import { validateFusionNcFiles } from '$lib/server/fusion_nc_artifacts.js';
+import { measureNcFileExtents } from '$lib/server/fusion_program_extents.js';
 
 function getServiceSupabase() {
   const url = env.SUPABASE_URL || env.PUBLIC_SUPABASE_URL;
@@ -209,6 +210,25 @@ export async function POST({ request, url }) {
       if (currentError || !currentJob) return json({ error: 'Job was not in the processing state - not completed' }, { status: 409 });
       const kind = currentJob.params?.fusionJobKind;
       const ncFiles = kind === 'plate:arrange' ? null : validateFusionNcFiles(body?.ncFiles);
+      // How far the posted program actually travels, measured from the file
+      // itself. Issue #359: "program exceeds machine maximum" was reported
+      // repeatedly on the real router, and every time the program's own span
+      // turned out to be modest - the real cause was the machine's G54 work
+      // offset sitting tens of inches out. Proving that meant parsing the
+      // .ngc by hand each incident; recording it here answers "is the
+      // program too big?" up front so the next person goes straight to the
+      // work offset. Merged into stats rather than replacing them, and
+      // deliberately never fatal: this is diagnostic metadata, and a job
+      // with real G-code must still complete if measuring it fails.
+      let programExtents = null;
+      try {
+        programExtents = measureNcFileExtents(ncFiles);
+      } catch (extentsError) {
+        console.error(`measureNcFileExtents failed for job ${jobId}:`, extentsError.message);
+      }
+      const stats = programExtents
+        ? { ...(body?.stats || {}), program_extents: programExtents }
+        : body?.stats || null;
       const { data, error } = await supabase
         .from('cam_jobs')
         .update({
@@ -218,7 +238,7 @@ export async function POST({ request, url }) {
           gcode: null,
           gcode_file_name: null,
           fusion_nc_files: ncFiles,
-          stats: body?.stats || null,
+          stats,
           // The Runner's own coverage self-check (camPlate.py) compares the
           // posted program against the part's CAD geometry and reports any
           // internal feature left with no toolpath over it, or a program that
