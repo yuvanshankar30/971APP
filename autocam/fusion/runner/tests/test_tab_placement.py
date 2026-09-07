@@ -51,6 +51,139 @@ class _Parameters:
         return self.values.get(name)
 
 
+class _Vector3D:
+    def __init__(self, x, y, z):
+        self.x, self.y, self.z = x, y, z
+
+    @classmethod
+    def create(cls, x, y, z):
+        return cls(x, y, z)
+
+    def dotProduct(self, other):
+        return self.x * other.x + self.y * other.y + self.z * other.z
+
+    @property
+    def length(self):
+        return (self.x**2 + self.y**2 + self.z**2) ** 0.5
+
+    def normalize(self):
+        length = self.length
+        if length > 0:
+            self.x /= length
+            self.y /= length
+            self.z /= length
+
+
+class _Point3D:
+    def __init__(self, x, y, z):
+        self.x, self.y, self.z = x, y, z
+
+    @classmethod
+    def create(cls, x, y, z):
+        return cls(x, y, z)
+
+
+class _Line3D:
+    def __init__(self, start, end):
+        self.startPoint = start
+        self.endPoint = end
+
+
+def _edge(x1, y1, x2, y2):
+    e = types.SimpleNamespace()
+    e.geometry = _Line3D(_Point3D(x1, y1, 0.0), _Point3D(x2, y2, 0.0))
+    e.length = ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
+    return e
+
+
+def _loop(is_outer, edges):
+    return types.SimpleNamespace(
+        isOuter=is_outer,
+        coEdges=[types.SimpleNamespace(edge=e) for e in edges],
+    )
+
+
+def _face(normal_z, z, loops):
+    return types.SimpleNamespace(
+        geometry=types.SimpleNamespace(normal=_Vector3D(0, 0, normal_z)),
+        pointOnFace=_Point3D(0, 0, z),
+        loops=loops,
+    )
+
+
+def _body(faces, bb_min, bb_max):
+    return types.SimpleNamespace(
+        faces=faces,
+        boundingBox=types.SimpleNamespace(
+            minPoint=types.SimpleNamespace(x=bb_min[0], y=bb_min[1]),
+            maxPoint=types.SimpleNamespace(x=bb_max[0], y=bb_max[1]),
+        ),
+    )
+
+
+# select_tab_edges needs real Vector3D/Point3D/Line3D math (dot products,
+# normalization) that the blank adsk.core stub _load_tab_placement builds
+# doesn't provide - patched onto the SAME module object TabPlacement.py's
+# own `import adsk.core` bound to, so its later, dynamic attribute lookups
+# (isinstance(edge.geometry, adsk.core.Line3D), adsk.core.Vector3D.create)
+# resolve to these real implementations instead of raising.
+TabPlacement.adsk.core.Vector3D = _Vector3D
+TabPlacement.adsk.core.Point3D = _Point3D
+TabPlacement.adsk.core.Line3D = _Line3D
+
+
+class TabDistributionTests(unittest.TestCase):
+    """Direct instruction: every distinct straight side of a part gets at
+    least one tab, even a side with no real stock behind it - stock
+    backing should only decide WHICH edge to prefer within a side, never
+    whether a whole side gets zero tabs.
+    """
+
+    def _rectangle_body_and_edges(self):
+        edges = {
+            "bottom": _edge(0, 0, 10, 0),
+            "right": _edge(10, 0, 10, 5),
+            "top": _edge(10, 5, 0, 5),
+            "left": _edge(0, 5, 0, 0),
+        }
+        loop = _loop(True, list(edges.values()))
+        face = _face(1.0, 1.0, [loop])
+        body = _body([face], (0, 0), (10, 5))
+        return body, edges
+
+    def test_a_side_with_no_stock_behind_it_still_gets_a_tab(self):
+        body, edges = self._rectangle_body_and_edges()
+        # Stock stops at x=9 - the right side (x=10) has nothing real
+        # behind it, the other three sides do.
+        stock_bounds = (-1, 9, -1, 6)
+
+        selected = TabPlacement.select_tab_edges(body, max_tabs=4, stock_bounds=stock_bounds)
+
+        self.assertEqual(len(selected), 4)
+        self.assertIn(edges["right"], selected)
+
+    def test_the_per_side_guarantee_is_not_capped_by_max_tabs(self):
+        body, edges = self._rectangle_body_and_edges()
+        stock_bounds = (-1, 9, -1, 6)
+
+        # Only 2 requested, but a real rectangular part has 4 real sides -
+        # every one of them still gets its guaranteed tab.
+        selected = TabPlacement.select_tab_edges(body, max_tabs=2, stock_bounds=stock_bounds)
+
+        self.assertEqual(len(selected), 4)
+        self.assertIn(edges["right"], selected)
+
+    def test_stock_backed_edges_are_preferred_when_backing_is_missing_is_not_forced(self):
+        body, edges = self._rectangle_body_and_edges()
+        # Every side has real stock behind it here.
+        stock_bounds = (-1, 11, -1, 6)
+
+        selected = TabPlacement.select_tab_edges(body, max_tabs=4, stock_bounds=stock_bounds)
+
+        self.assertEqual(len(selected), 4)
+        self.assertEqual(set(id(e) for e in selected), set(id(e) for e in edges.values()))
+
+
 class ManualTabTests(unittest.TestCase):
     def test_disables_automatic_tabs_and_sets_uniform_manual_dimensions(self):
         parameters = {
