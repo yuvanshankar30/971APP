@@ -2,19 +2,19 @@ import { describe, expect, it } from 'vitest';
 import { getFusionRunnerSecrets, isAuthorizedFusionRunnerRequest } from './fusion_runner_auth.js';
 
 describe('fusion runner auth helpers', () => {
-  it('allows requests when no runner secret is configured', () => {
+  it('fails closed when no runner secret is configured', () => {
     expect(isAuthorizedFusionRunnerRequest({
       url: new URL('https://example.com/api/fusion-runner'),
       headers: new Headers()
-    })).toBe(true);
+    })).toBe(false);
   });
 
-  it('accepts the query token', () => {
+  it('rejects a query token so secrets do not leak into request logs', () => {
     expect(isAuthorizedFusionRunnerRequest({
       url: new URL('https://example.com/api/fusion-runner?token=runner-secret'),
       headers: new Headers(),
       env: { FUSION_RUNNER_TOKEN: 'runner-secret' }
-    })).toBe(true);
+    })).toBe(false);
   });
 
   it('accepts bearer auth', () => {

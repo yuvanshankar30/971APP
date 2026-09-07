@@ -14,6 +14,7 @@ import os
 import socket
 import subprocess
 import sys
+import uuid
 
 ADDIN_DIR = os.path.dirname(os.path.realpath(__file__))
 DEPS_DIR = os.path.join(ADDIN_DIR, "deps")
@@ -52,14 +53,19 @@ def write_env():
         token = prompt("FUSION_RUNNER_TOKEN value (ask a project administrator)")
 
     runner_id = prompt("Name for this machine", socket.gethostname() or "fusion-runner")
+    machine_id = ""
+    while not machine_id:
+        candidate = prompt("cam_machines UUID for this physical machine")
+        try:
+            machine_id = str(uuid.UUID(candidate))
+        except ValueError:
+            print("That is not a UUID. Copy the machine id from CAM Studio > Settings > Machines.")
 
     with open(ENV_FILE, "w") as f:
         f.write(f'API_KEY="{token}"\n')
         f.write(f'BASE_URL="{base_url}"\n')
         f.write(f'RUNNER_ID="{runner_id}"\n')
-        f.write('RUNNER_MACHINE_ID=""\n')
-        f.write("# Only needed if more than one physical machine polls at once - see\n")
-        f.write("# .env.example for what it's for and how to find the right value.\n")
+        f.write(f'RUNNER_MACHINE_ID="{machine_id}"\n')
     print(f"Wrote {ENV_FILE}")
 
 

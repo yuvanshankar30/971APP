@@ -349,6 +349,10 @@ own docs are all together in one place instead of scattered across
   `autocam/postprocessors/README.md` for the shop's real post-processor
   configs and a real Fusion-cammed example file, used as ground truth for
   what each dialect actually needs rather than a generic manual.
+- **`autocam/gcodeFormatting.js`** / **`autocam/geometry2d.js`** - shared
+  numeric G-code formatting, pause/dwell dialect handling, and polygon-area
+  primitives used across generators so safety-critical output rules do not
+  drift between copied implementations.
 - **`autocam/toolpathPreview.js`** - parses generated G-code back into a
   toolpath for the 2D preview and 3D simulator, including a cumulative-distance
   interpolation helper for playback (`autocam/components/ToolpathViewer.svelte`,
@@ -382,7 +386,10 @@ own docs are all together in one place instead of scattered across
 - **`autocam/drive_watcher.js`** - Google Drive input-sweep (`cad` →
   auto-queue) and output-delivery (finished G-code → dated `cammed`
   subfolder) - see `autocam/docs/drive-watcher-folder-layout.md` for the real folder
-  layout this was built for.
+  layout this was built for. Sweeps persist a cursor after each bounded
+  Changes API page, and delivery names include the job ID so two jobs
+  completed in the same second cannot overwrite or ambiguously duplicate
+  one another.
 - **`autocam/camJobs.js`** - shared job-queue helpers used by both
   `/autocam` and `/manufacture`.
 - **Machine-scoped tooling** - `cam_machine_tools` records which cutters are
@@ -440,7 +447,12 @@ own docs are all together in one place instead of scattered across
   Rollout requires
   `migrations/20260906_fusion_grouping_integrity.sql` and the updated Runner.
   Every post-claim Runner call is bound to the `RUNNER_ID` that claimed the job,
-  so another installation cannot advance it. See
+  so another installation cannot advance it. `RUNNER_MACHINE_ID` is required,
+  active jobs heartbeat through `claimed_at`, and claims older than 15 minutes
+  are safely requeued after a Runner/Fusion crash. The general `/autocam` job
+  list excludes these milling rows; their retry/edit controls live only in
+  `/autocam/fusion`, preventing the synchronous JS generator from mutating a
+  Fusion-owned job. See
   `autocam/docs/scouting-autocam-audit.md` for the consolidated audit and
   `autocam/docs/fusion-grouping-review.md` for the draft scope and review findings.
   It uses Supabase Auth + `canManageCamProfiles` for

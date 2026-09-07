@@ -47,10 +47,9 @@ RUNNER_ID = _read_env_value("RUNNER_ID") or socket.gethostname() or "fusion-runn
 # up with `select id, name from cam_machines;` in the Supabase SQL editor).
 # Sent as `machineId` on every claim request so /api/fusion-runner only
 # hands this Runner jobs meant for THIS machine (or jobs with no specific
-# machine assigned) - required once more than one physical machine is
-# polling at the same time, or a router could grab a job queued for the
-# mill. Optional/blank is fine for a single-machine setup - claiming then
-# falls back to "any queued milling job," same as before this existed.
+# machine assigned). It is required even for one Runner so a later second
+# machine cannot silently turn today's permissive setup into a wrong-machine
+# claim.
 RUNNER_MACHINE_ID = _read_env_value("RUNNER_MACHINE_ID") or None
 
 # .overridepath is how this add-in finds a `pip install --target=...`'d

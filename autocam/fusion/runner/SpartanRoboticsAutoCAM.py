@@ -11,6 +11,7 @@ from .workflows import camPlate as camPlate
 from .workflows import camTube as camTube
 from .workflows import setupTemp as setupTemp
 from .workflows.dropFolder import list_data_folder_tree
+from .workflows.job_status import send_job_error
 from .config import *
 import requests
 
@@ -29,6 +30,7 @@ _handlers = []  # type: List[adsk.core.EventHandler]
 _job_queue = queue.Queue()  # type: queue.Queue
 _log_queue = queue.Queue()  # type: queue.Queue
 _job_processing = threading.Event()
+_active_job_id = None  # type: Optional[str]
 # Set from the background poll thread (handleServer), consumed on the main
 # thread (_JobQueueEventHandler.notify) - the actual Fusion Data Panel walk
 # has to run there, same as every other Fusion API call in this add-in.
@@ -103,6 +105,7 @@ class _JobQueueEventHandler(adsk.core.CustomEventHandler):
         self.session = session
 
     def notify(self, args: "adsk.core.CustomEventArgs") -> None:
+        global _active_job_id
         try:
             while True:
                 try:
@@ -125,14 +128,17 @@ class _JobQueueEventHandler(adsk.core.CustomEventHandler):
                     break
 
                 _job_processing.set()
+                _active_job_id = str(job.get("id") or "") or None
                 try:
                     _process_job(job, session=self.session)
                 except Exception:
+                    detail = traceback.format_exc()
                     if _app:
-                        _app.log(
-                            "Error processing job:\n{}".format(traceback.format_exc())
-                        )
+                        _app.log("Error processing job:\n{}".format(detail))
+                    if _active_job_id:
+                        send_job_error(self.session, _active_job_id, detail)
                 finally:
+                    _active_job_id = None
                     _job_processing.clear()
                     _job_queue.task_done()
 
@@ -285,7 +291,9 @@ def _startup_key_gate(
 
 
 _FOLDER_SYNC_INTERVAL_SEC = 300.0
+_HEARTBEAT_INTERVAL_SEC = 30.0
 _last_folder_sync = 0.0
+_last_heartbeat = 0.0
 
 
 def _sync_data_folders():
@@ -297,22 +305,39 @@ def _sync_data_folders():
     """
     try:
         tree = list_data_folder_tree(_app, FUSION_DATA_PROJECT_NAME, FUSION_DROP_FOLDER_PATH)
-        session.post(
+        response = session.post(
             f"{BASE_URL}/api/fusion-runner",
             params={"action": "sync-folders"},
             json={"runnerId": RUNNER_ID, "projectName": tree["project"], "tree": tree["root"]},
             timeout=30,
         )
+        response.raise_for_status()
     except Exception:
         _queue_log(f"Folder sync failed:\n{traceback.format_exc()}")
 
 
 def handleServer(temp_dir: str, stop_event: threading.Event):
-    global _last_folder_sync
+    global _last_folder_sync, _last_heartbeat
     while not stop_event.is_set():
         try:
             time.sleep(5)
-            if _job_processing.is_set() or not _job_queue.empty():
+            if _job_processing.is_set():
+                now = time.monotonic()
+                if _active_job_id and now - _last_heartbeat >= _HEARTBEAT_INTERVAL_SEC:
+                    _last_heartbeat = now
+                    # Use a one-shot request rather than sharing the Session
+                    # object concurrently with Fusion's main UI thread.
+                    response = requests.post(
+                        f"{BASE_URL}/api/fusion-runner",
+                        params={"action": "heartbeat"},
+                        headers={"Authorization": session.headers.get("Authorization", "")},
+                        json={"jobId": _active_job_id, "runnerId": RUNNER_ID},
+                        timeout=30,
+                    )
+                    response.raise_for_status()
+                stop_event.wait(0.2)
+                continue
+            if not _job_queue.empty():
                 stop_event.wait(0.2)
                 continue
             if session is None:
@@ -347,19 +372,6 @@ def handleServer(temp_dir: str, stop_event: threading.Event):
             if not isinstance(data, dict):
                 raise TypeError(f"Unexpected job payload type: {type(data)}")
 
-            # TODO(fusion-cam-port): upstream's setupTemp.downloadFiles()
-            # expects payload.assignments (their Parts/PartCategoryAssignments
-            # shape) to know which STEP files to pull down. Our job doesn't
-            # carry that directly - it references a fusion_plates/
-            # fusion_box_tubes row (params.plateId / params.boxTubeId) that
-            # itself references fusion_parts rows with their own
-            # step_file_name. This still needs a real adaptation of
-            # setupTemp.py (fetch the plate/box-tube + its nested parts from
-            # our schema, not upstream's /api/plates, /api/parts) before file
-            # download actually works end to end - flagged here rather than
-            # silently guessed at, since it can't be verified without a real
-            # Fusion 360 + a real queued job to test against.
-
             if stop_event.is_set():
                 break
             _job_queue.put(data)
@@ -389,6 +401,10 @@ def run(_context):
         )
         if not api_key:
             ui.messageBox("Add-in not started (no API key set).")
+            return
+
+        if not RUNNER_MACHINE_ID:
+            ui.messageBox("Add-in not started: RUNNER_MACHINE_ID is required. Run setup.py and choose this physical machine's cam_machines UUID.")
             return
 
         session = requests.Session()

@@ -28,7 +28,11 @@ Two things run this: **Spartans Hub** itself (already deployed - where you queue
 
 3. **Confirm it's running:** open the Text Command window (Option+Cmd+C on Mac, or View -> Show/Hide Text Commands) - you should see it polling every few seconds.
 
-Ran more than one machine at once? Safe to do - claiming a job is a compare-and-swap, so two Runners can never grab the same one. Give each machine its own `RUNNER_ID` in `.env` (`setup.py` asks for this); only set `RUNNER_MACHINE_ID` too if that machine should exclusively claim jobs meant for one specific `cam_machines` row.
+Running more than one machine at once is safe: claiming is a compare-and-swap,
+so two Runners cannot grab the same job. Every install needs its own `RUNNER_ID`
+and a required `RUNNER_MACHINE_ID`; `setup.py` prompts for both and validates
+the machine UUID. A Runner only claims jobs for that physical machine (or jobs
+the operator left unassigned).
 
 **Changed `.env` again later?** Fully quit and relaunch Fusion - Stop/Run alone doesn't reliably reload it.
 

@@ -10,6 +10,7 @@ import { normalizeGcodeComments } from './gcodeComments.js';
 
 export const ACTIVE_CAM_JOB_STATUSES = ['queued', 'claimed', 'processing'];
 export const TERMINAL_CAM_JOB_STATUSES = ['completed', 'failed', 'rejected'];
+export const IN_PROCESS_OPERATION_TYPES = ['turning', 'routing', 'tubestock'];
 
 // All cam_jobs.gcode_format must stay 'ngc' - see autocam-runner/README.md.
 export const CAM_GCODE_FORMAT = 'ngc';
@@ -45,17 +46,21 @@ const VALID_GCODE_EXTENSIONS = ['ngc', 'tap'];
  * Turn a part/file name into a safe `<slug>.<ext>` filename. Extension
  * defaults to 'ngc' (this app's baseline) - pass 'tap' for a machine profile
  * that expects Mach3/Mach4-style output (currently router-only, see
- * implementations/toolchange-gcode-plan.md). gcode_format on the job row itself stays 'ngc'
+ * autocam/docs/toolchange-gcode-plan.md). gcode_format on the job row itself stays 'ngc'
  * regardless - it's a content-format marker, not the download extension.
  */
 export function gcodeFileNameFor(name, extension = 'ngc') {
-  const slug = String(name || 'part')
+  const slug = slugifyCamName(name, 'part');
+  const ext = VALID_GCODE_EXTENSIONS.includes(extension) ? extension : 'ngc';
+  return `${slug}.${ext}`;
+}
+
+export function slugifyCamName(name, fallback = 'part') {
+  return String(name || '')
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '') || 'part';
-  const ext = VALID_GCODE_EXTENSIONS.includes(extension) ? extension : 'ngc';
-  return `${slug}.${ext}`;
+    .replace(/^-+|-+$/g, '') || fallback;
 }
 
 // router/lathe workflow -> the operation_type generation dispatches on.
@@ -104,8 +109,18 @@ const PROGRESS_TIMEOUT_MS = 75000;
 async function markCamJobFailed(jobId, message) {
   const failure = { status: 'failed', errors: [message], progress_message: message };
   try {
-    const { error } = await supabase.from('cam_jobs').update(failure).eq('id', jobId);
-    if (error) console.error('Could not persist terminal CAM job status', error);
+    const { data, error } = await supabase.from('cam_jobs').update(failure)
+      .eq('id', jobId).in('status', ACTIVE_CAM_JOB_STATUSES).select('*').maybeSingle();
+    if (error) throw error;
+    if (data) return data;
+
+    // The generator may have completed between the last poll and this
+    // timeout write. Return the winning terminal row instead of lying to the
+    // UI (and, more importantly, never overwrite it).
+    const { data: current, error: readError } = await supabase.from('cam_jobs')
+      .select('*').eq('id', jobId).maybeSingle();
+    if (readError) throw readError;
+    if (current) return current;
   } catch (error) {
     // The caller still receives a terminal result even if the same database
     // outage that broke polling also prevents this best-effort status write.
@@ -215,6 +230,7 @@ export async function queueCamJobForPart(part, options = {}) {
   if (!part?.id) return { success: false, error: 'Missing part' };
   const operationType = options.operationType || WORKFLOW_OPERATION_TYPE[part.workflow];
   if (!operationType) return { success: false, error: `No CAM operation type for workflow "${part.workflow}"` };
+  if (!IN_PROCESS_OPERATION_TYPES.includes(operationType)) return { success: false, error: `Unsupported in-process CAM operation: ${operationType}` };
 
   let stepPath;
   if (options.profileFile) {
@@ -299,6 +315,7 @@ export async function queueCamJobsForParts(parts, options = {}) {
  */
 export async function queueCamJobFromUpload(profileFile, options = {}) {
   if (!options.operationType) return { success: false, error: 'operationType is required (turning, routing, or tubestock)' };
+  if (!IN_PROCESS_OPERATION_TYPES.includes(options.operationType)) return { success: false, error: `Unsupported in-process CAM operation: ${options.operationType}` };
 
   const upload = await uploadStepFile(profileFile);
   if (upload.error) return { success: false, error: upload.error };
@@ -338,16 +355,21 @@ export async function queueCamJobFromUpload(profileFile, options = {}) {
  */
 export async function retryCamJob(job, options = {}) {
   if (!job?.step_file_name) return { success: false, error: 'No stored CAM profile to retry from' };
+  if (!IN_PROCESS_OPERATION_TYPES.includes(job.operation_type)) return { success: false, error: 'Fusion milling jobs must be retried from Fusion CAM' };
 
   // Regenerates the SAME row in place (same id, same position in the jobs
   // list) rather than inserting a new one - a retry is "try this job again",
   // not a new job, and duplicate rows for every failed attempt made the
   // jobs list confusing to read.
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('cam_jobs')
     .update({ status: 'queued', gcode: null, stats: null, errors: null, progress: 0, progress_message: null })
-    .eq('id', job.id);
+    .eq('id', job.id)
+    .in('operation_type', IN_PROCESS_OPERATION_TYPES)
+    .in('status', TERMINAL_CAM_JOB_STATUSES)
+    .select('id');
   if (error) return { success: false, error: error.message };
+  if (!data?.length) return { success: false, error: 'Job changed state before it could be retried' };
 
   const finalJob = await triggerGenerationAndRefetch(job.id, options.onProgress);
   return { success: finalJob?.status === 'completed', job: finalJob, error: finalJob?.errors?.[0] };
@@ -374,16 +396,17 @@ export async function deleteCamJob(jobId) {
 /**
  * Edit an existing job's material/tool/machine/params in place and
  * regenerate from its already-uploaded STEP file - no re-upload needed.
- * Updates the same row (unlike retryCamJob, which inserts a new one to
- * preserve history) since this is an explicit edit of this specific job.
+ * Updates the same row, just like retryCamJob, so one logical job does not
+ * turn into a trail of duplicate rows.
  * @param {Object} job - the job row being edited (needs id, step_file_name)
  * @param {Object} updates - { name, notes, materialId, toolId, machineId, params, onProgress, gcodeExtension }
  */
 export async function updateCamJobAndRegenerate(job, updates = {}) {
   if (!job?.id) return { success: false, error: 'Missing job' };
   if (!job.step_file_name) return { success: false, error: 'No stored CAM profile to regenerate from' };
+  if (!IN_PROCESS_OPERATION_TYPES.includes(job.operation_type)) return { success: false, error: 'Fusion milling jobs must be edited from Fusion CAM' };
 
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('cam_jobs')
     .update({
       name: updates.name ?? job.name ?? null,
@@ -400,9 +423,13 @@ export async function updateCamJobAndRegenerate(job, updates = {}) {
       progress: 0,
       progress_message: null
     })
-    .eq('id', job.id);
+    .eq('id', job.id)
+    .in('operation_type', IN_PROCESS_OPERATION_TYPES)
+    .in('status', TERMINAL_CAM_JOB_STATUSES)
+    .select('id');
 
   if (error) return { success: false, error: error.message };
+  if (!data?.length) return { success: false, error: 'Job changed state before it could be regenerated' };
   if (updates.onQueued) updates.onQueued(job.id);
   const finalJob = await triggerGenerationAndRefetch(job.id, updates.onProgress);
   return { success: finalJob?.status === 'completed', job: finalJob, error: finalJob?.errors?.[0] };
@@ -416,11 +443,15 @@ export async function updateCamJobAndRegenerate(job, updates = {}) {
  */
 export async function cancelStuckCamJob(jobId) {
   const message = 'Cancelled by user (job was stuck)';
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('cam_jobs')
     .update({ status: 'failed', errors: [message], progress_message: message })
-    .eq('id', jobId);
-  return error ? { success: false, error: error.message } : { success: true };
+    .eq('id', jobId)
+    .in('operation_type', IN_PROCESS_OPERATION_TYPES)
+    .in('status', ACTIVE_CAM_JOB_STATUSES)
+    .select('id');
+  if (error) return { success: false, error: error.message };
+  return data?.length ? { success: true } : { success: false, error: 'Job is no longer active' };
 }
 
 /**

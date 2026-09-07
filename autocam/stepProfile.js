@@ -35,6 +35,8 @@
  * an arbitrary modeling convention.
  */
 
+import { signedArea2d as signedArea } from './geometry2d.js';
+
 // occt-import-js is Emscripten-compiled WASM; its default loader finds its
 // .wasm binary via fs.readFileSync() relative to __dirname, which breaks
 // once a bundler relocates the code away from its original node_modules
@@ -50,8 +52,9 @@
 // CadViewer.svelte already serves successfully client-side (a real Vite
 // build asset with a real URL, not a traced filesystem dependency) and
 // passes the bytes in directly via `wasmBinaryOverride`, sidestepping the
-// tracer issue entirely. See implementations/vercel-cam-generate-timeout-fix.md.
+// tracer issue entirely. See autocam/docs/vercel-cam-generate-timeout-fix.md.
 let occtPromise = null;
+
 async function getOcct(wasmBinaryOverride) {
   if (!occtPromise) {
     const { default: occtimportjsFactory } = await import('occt-import-js');
@@ -518,15 +521,6 @@ function traceBoundaryLoops(tris, projectPoint) {
     }
   }
   return loops;
-}
-
-function signedArea(points) {
-  let sum = 0;
-  for (let i = 0; i < points.length; i += 1) {
-    const a = points[i], b = points[(i + 1) % points.length];
-    sum += a.x * b.y - b.x * a.y;
-  }
-  return sum / 2;
 }
 
 // This extractor is deliberately a sheet-profile router path, not general

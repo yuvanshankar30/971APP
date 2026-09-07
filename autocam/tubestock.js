@@ -35,19 +35,7 @@ import { HEADER_WARNING } from './turning.js';
 import { normalizeGcodeComments } from './gcodeComments.js';
 import { offsetPolygon } from './routing.js';
 import { tubeCutoffPath, tubeCutoffPosition } from './tubeCutoff.js';
-
-function fmt(n, decimals = 4) {
-  return Number(n).toFixed(decimals);
-}
-
-function pauseLine(isWinCNC, promptText) {
-  return isWinCNC ? `G4 (${promptText})` : `M00 (${promptText})`;
-}
-
-function dwellLine(isWinCNC, seconds, comment) {
-  const word = isWinCNC ? 'X' : 'P';
-  return `G04 ${word}${fmt(seconds, 1)} (${comment})`;
-}
+import { formatGcodeNumber as fmt, gcodePauseLine as pauseLine, gcodeDwellLine as dwellLine } from './gcodeFormatting.js';
 
 /** Normalize rotary angles so 0, 360, and -360 identify the same tube face. */
 /**

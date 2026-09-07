@@ -33,12 +33,14 @@ def send_job_error(session: requests.Session, job_id: str, error_message: str) -
     _log('Failure Occurred: ' + error_message)
     message = (error_message or "").strip() or "Unknown job failure"
     try:
-        session.post(
+        response = session.post(
             f"{BASE_URL}/api/fusion-runner",
             params={"action": "fail"},
             json={"jobId": job_id, "runnerId": RUNNER_ID, "error": message[:2000]},
             timeout=30,
         )
+        if not response.ok:
+            _log(f"Failed to send job error: HTTP {response.status_code} {response.text}")
     except Exception as exc:
         _log(f"Failed to send job error: {exc}")
 

@@ -78,20 +78,26 @@ cd "$HOME/Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns/Sp
 python3 setup.py
 ```
 
-It asks which Hub to talk to (deployed, or a local dev server) and for your `FUSION_RUNNER_TOKEN` value (ask a project administrator), then writes `.env` itself - see [`setup.py`](setup.py). Prefer to edit `.env` by hand instead? `cp .env.example .env` and fill in the same values manually:
+It asks which Hub to talk to (deployed, or a local dev server), for your
+`FUSION_RUNNER_TOKEN` value, and for this physical machine's `cam_machines`
+UUID, then writes `.env` itself - see [`setup.py`](setup.py). Prefer to edit
+`.env` by hand instead? `cp .env.example .env` and fill in the same values manually:
 
 | Variable | Purpose | Default |
 | --- | --- | --- |
 | `API_KEY` | Bearer token matching Spartans Hub's `FUSION_RUNNER_TOKEN` | _(required)_ |
 | `BASE_URL` | Spartans Hub deployment base URL | `https://spartanshub.spartanrobotics.org` |
 | `RUNNER_ID` | Stable identifier for this Runner install, sent on every claim | machine hostname |
-| `RUNNER_MACHINE_ID` | The `cam_machines` row (a UUID) this physical machine is - look it up with `select id, name from cam_machines;` in the Supabase SQL editor | _(blank)_ |
+| `RUNNER_MACHINE_ID` | The `cam_machines` row UUID for this physical machine; `setup.py` validates it | _(required)_ |
 | `FUSION_DATA_PROJECT_NAME` | Which Fusion Data Panel project generated documents get saved into | `2026 Season CAM` |
 | `FUSION_DROP_FOLDER_PATH` | Nested folder path (within that project, `/`-separated) generated documents get saved into - each segment created if missing | `Offseason Projects/AutoCAM` |
 
 `.env` is git-ignored either way - never commit a real token.
 
-**Running more than one physical machine at once?** Set `RUNNER_MACHINE_ID` on every install (`setup.py` doesn't prompt for this one - add it to `.env` afterward if needed). Without it, a Runner claims *any* queued milling job regardless of which machine it was queued for - fine for a single machine, but a router's Runner could grab a job meant for the mill once two machines are polling at the same time. With `RUNNER_MACHINE_ID` set, a Runner only claims jobs that either target its own machine or don't target a specific machine at all.
+`RUNNER_MACHINE_ID` is mandatory even with one Runner. The server refuses a
+claim without it, eliminating the old claim-any-machine fallback. While Fusion
+works, the add-in sends a heartbeat every 30 seconds; if no heartbeat arrives
+for 15 minutes, the server requeues the abandoned job for another attempt.
 
 ## Project Structure
 

@@ -336,7 +336,7 @@ CREATE TABLE IF NOT EXISTS public.drive_watcher_files (
   drive_file_id text NOT NULL,
   cam_job_id uuid,
   processed_at timestamp with time zone DEFAULT now(),
-  status text NOT NULL DEFAULT 'queued', -- 'queued' | 'failed' - idempotency/audit trail, a file is never queued twice
+  status text NOT NULL DEFAULT 'queued', -- 'processing' | 'queued' | 'failed' - reservation/idempotency/audit trail
   error text,
   CONSTRAINT drive_watcher_files_pkey PRIMARY KEY (drive_file_id)
 );
