@@ -96,6 +96,47 @@ def _edge(x1, y1, x2, y2):
     return e
 
 
+class _SketchPoint:
+    def __init__(self, point):
+        self.point = point
+        self.context = None
+
+    def createForAssemblyContext(self, context):
+        proxy = _SketchPoint(self.point)
+        proxy.context = context
+        return proxy
+
+
+class _SketchPoints:
+    def __init__(self):
+        self.points = []
+
+    def add(self, point):
+        sketch_point = _SketchPoint(point)
+        self.points.append(sketch_point)
+        return sketch_point
+
+
+class _Sketch:
+    def __init__(self):
+        self.name = None
+        self.isLightBulbOn = True
+        self.sketchPoints = _SketchPoints()
+
+    def modelToSketchSpace(self, point):
+        return point
+
+
+class _Sketches:
+    def __init__(self):
+        self.created = []
+
+    def add(self, face):
+        sketch = _Sketch()
+        self.created.append((face, sketch))
+        return sketch
+
+
 def _loop(is_outer, edges):
     return types.SimpleNamespace(
         isOuter=is_outer,
@@ -273,33 +314,74 @@ class MinimumSideLengthTests(unittest.TestCase):
 
 
 class ManualTabTests(unittest.TestCase):
-    def test_disables_automatic_tabs_and_sets_uniform_manual_dimensions(self):
+    def test_sets_uniform_explicit_manual_tab_dimensions(self):
         parameters = {
             name: _Parameter()
-            for name in ("tabWidth", "tabHeight", "tabsPerContour", "tabPositions")
+            for name in ("tabWidth", "tabHeight", "tabsPerContour", "tabPositioning", "tabPositions")
         }
         operation = types.SimpleNamespace(parameters=_Parameters(parameters))
         app = types.SimpleNamespace(log=lambda _message: None)
-        edges = [object(), object(), object(), object()]
+        points = [object(), object(), object(), object()]
 
-        self.assertTrue(TabPlacement._apply_manual_tabs(app, operation, edges))
-        self.assertEqual(parameters["tabsPerContour"].expression, "0")
+        self.assertTrue(TabPlacement._apply_manual_tabs(app, operation, points))
+        self.assertEqual(parameters["tabsPerContour"].value.value, 0)
+        self.assertEqual(parameters["tabPositioning"].value.value, "tabCount")
         self.assertEqual(parameters["tabWidth"].expression, "0.6in")
         self.assertEqual(parameters["tabHeight"].expression, "0.15in")
-        self.assertEqual(parameters["tabPositions"].value.value, edges)
+        self.assertEqual(parameters["tabPositions"].value.value, points)
+
+
+class ManualTabPointTests(unittest.TestCase):
+    def _face(self):
+        component = types.SimpleNamespace()
+        face = types.SimpleNamespace(
+            body=types.SimpleNamespace(parentComponent=component),
+        )
+        return face, component
+
+    def _root_component(self):
+        return types.SimpleNamespace(sketches=_Sketches())
+
+    def test_creates_hidden_sketch_points_at_edge_midpoints(self):
+        face, _ = self._face()
+        root_component = self._root_component()
+        app = types.SimpleNamespace(log=lambda _message: None)
+        edges = [_edge(0, 0, 4, 0), _edge(2, 2, 2, 8)]
+
+        points = TabPlacement._manual_tab_points(app, root_component, face, edges)
+
+        self.assertEqual(len(points), 2)
+        self.assertEqual([(p.point.x, p.point.y, p.point.z) for p in points], [(2, 0, 0.0), (2, 5, 0.0)])
+        selected_face, sketch = root_component.sketches.created[0]
+        self.assertIs(selected_face, face)
+        self.assertEqual(sketch.name, "AutoCAM Manual Tab Points")
+        self.assertFalse(sketch.isLightBulbOn)
+
+    def test_uses_the_arranged_proxy_face_and_edge_coordinates(self):
+        face, _ = self._face()
+        root_component = self._root_component()
+        face.nativeObject = types.SimpleNamespace()
+        edge = _edge(200, 0, 204, 0)
+        edge.nativeObject = _edge(2, 0, 6, 0)
+        app = types.SimpleNamespace(log=lambda _message: None)
+
+        point = TabPlacement._manual_tab_points(app, root_component, face, [edge])[0]
+
+        selected_face, _ = root_component.sketches.created[0]
+        self.assertIs(selected_face, face)
+        self.assertEqual((point.point.x, point.point.y, point.point.z), (202, 0, 0.0))
 
 
 class TabReadBackTests(unittest.TestCase):
     """Assignments to Fusion CAM tab parameters are verified, not trusted.
 
-    Both of this module's real bugs were silent: tab edges came from the
-    wrong face so none could be placed, and tabsPerContour reports 1
-    whatever it is given. In both cases the job reported success.
+    A real tab-position bug was silent: positions came from the wrong face
+    so none could be placed, while the job still reported success.
     """
 
     def _op(self, kept):
         params = {n: _Parameter() for n in
-                  ("tabWidth", "tabHeight", "tabsPerContour", "tabPositions")}
+                  ("tabWidth", "tabHeight", "tabsPerContour", "tabPositioning", "tabPositions")}
         holder = params["tabPositions"]
 
         class _V:
@@ -311,14 +393,14 @@ class TabReadBackTests(unittest.TestCase):
                 return self._v
 
             @value.setter
-            def value(self, edges):
-                # Model Fusion keeping only the edges it can actually place.
-                self._v = list(edges)[:kept]
+            def value(self, points):
+                # Model Fusion keeping only the points it can actually place.
+                self._v = list(points)[:kept]
 
         holder.value = _V()
         return types.SimpleNamespace(parameters=_Parameters(params)), params
 
-    def test_warns_when_fusion_drops_some_of_the_selected_edges(self):
+    def test_warns_when_fusion_drops_some_of_the_selected_points(self):
         logged = []
         app = types.SimpleNamespace(log=logged.append)
         operation, _ = self._op(kept=2)
@@ -327,10 +409,10 @@ class TabReadBackTests(unittest.TestCase):
             app, operation, [object(), object(), object(), object()]))
 
         warnings = [m for m in logged if "WARNING" in m]
-        self.assertTrue(warnings, "dropping 2 of 4 tab edges must not be silent")
+        self.assertTrue(warnings, "dropping 2 of 4 tab points must not be silent")
         self.assertIn("kept 2", warnings[0])
 
-    def test_stays_quiet_when_every_edge_is_kept(self):
+    def test_stays_quiet_when_every_point_is_kept(self):
         logged = []
         app = types.SimpleNamespace(log=logged.append)
         operation, _ = self._op(kept=4)
