@@ -22,7 +22,11 @@ def AutoArrange(length, width, object_spacing=0.26) -> adsk.fusion.ArrangeFeatur
     arrangeDefInput.globalRotation = (
         adsk.fusion.ArrangeRotationTypes.AllRotationsArrangeRotationType
     )
-    arrangeDefInput.isGlobalDirectionFaceUp = False
+    # importPlate has already rotated every imported component so the side
+    # containing blind pockets faces +Z. Allowing Arrange to flip parts here
+    # can undo that work and leaves pocket operations looking at the plain
+    # back of a part. Keep the established face-up direction while nesting.
+    arrangeDefInput.isGlobalDirectionFaceUp = True
     arrangeDefInput.isPartInPartAllowed = True
     arrangeDefInput.isCreateCopies = False
     # Get the ArrangeComponents collection from the input objects.

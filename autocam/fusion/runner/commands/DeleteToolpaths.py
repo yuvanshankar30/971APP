@@ -33,6 +33,12 @@ def _is_dedicated_circular_hole_op(name_lower: str) -> bool:
 # by direct inspection of a real operation's parameters, not guessed.
 _SELECTION_PARAM_BY_STRATEGY = {
     "contour2d": "contours",
+    # The current plate template's real recessed-pocket operation uses
+    # pocket_new.  It has the same ``pockets`` selection parameter as the
+    # older pocket2d/adaptive variants; omitting it meant the operation could
+    # never have its stale template geometry replaced after a STEP import.
+    "pocket_new": "pockets",
+    "pocket_clearing": "pockets",
     "pocket2d": "pockets",
     "adaptive2d": "pockets",
 }
@@ -465,8 +471,19 @@ def _repair_missing_selections(setup) -> list[str]:
         # else (pocket2d/adaptive2d roughing, and any contour2d finishing
         # pass this part has no real feature left to give) keeps the
         # original conditional repair.
+        # A template's saved PocketRecognitionSelection can look healthy
+        # while still referring to the template's original model. Rebuild
+        # every generic pocket operation from the imported part, not only
+        # the ones Fusion happens to flag as missing. This is especially
+        # important for blind pockets: their recognition is only valid after
+        # the importer has deliberately put the pocket-bearing side on top.
+        is_generic_pocket_op = (
+            op.strategy in _POCKET_STRATEGIES and not is_big_hole_op
+        )
         repair_state = (
-            _curve_selection_state(op) if (is_outer or is_feature_op or is_big_hole_op) else _needs_repair(op)
+            _curve_selection_state(op)
+            if (is_outer or is_feature_op or is_big_hole_op or is_generic_pocket_op)
+            else _needs_repair(op)
         )
         if repair_state is None:
             continue
