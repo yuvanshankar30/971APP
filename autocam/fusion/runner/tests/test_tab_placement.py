@@ -332,44 +332,51 @@ class ManualTabTests(unittest.TestCase):
 
 
 class ManualTabPointTests(unittest.TestCase):
-    def _face(self):
-        component = types.SimpleNamespace()
+    def _face(self, context=None):
+        component = types.SimpleNamespace(sketches=_Sketches())
         face = types.SimpleNamespace(
             body=types.SimpleNamespace(parentComponent=component),
+            assemblyContext=context,
         )
         return face, component
 
-    def _root_component(self):
-        return types.SimpleNamespace(sketches=_Sketches())
-
     def test_creates_hidden_sketch_points_at_edge_midpoints(self):
-        face, _ = self._face()
-        root_component = self._root_component()
+        face, component = self._face()
         app = types.SimpleNamespace(log=lambda _message: None)
         edges = [_edge(0, 0, 4, 0), _edge(2, 2, 2, 8)]
 
-        points = TabPlacement._manual_tab_points(app, root_component, face, edges)
+        points = TabPlacement._manual_tab_points(app, face, edges)
 
         self.assertEqual(len(points), 2)
         self.assertEqual([(p.point.x, p.point.y, p.point.z) for p in points], [(2, 0, 0.0), (2, 5, 0.0)])
-        selected_face, sketch = root_component.sketches.created[0]
-        self.assertIs(selected_face, face)
+        _, sketch = component.sketches.created[0]
         self.assertEqual(sketch.name, "AutoCAM Manual Tab Points")
         self.assertFalse(sketch.isLightBulbOn)
 
-    def test_uses_the_arranged_proxy_face_and_edge_coordinates(self):
-        face, _ = self._face()
-        root_component = self._root_component()
-        face.nativeObject = types.SimpleNamespace()
-        edge = _edge(200, 0, 204, 0)
-        edge.nativeObject = _edge(2, 0, 6, 0)
+    def test_preserves_the_body_occurrence_context(self):
+        context = object()
+        face, _ = self._face(context)
         app = types.SimpleNamespace(log=lambda _message: None)
 
-        point = TabPlacement._manual_tab_points(app, root_component, face, [edge])[0]
+        point = TabPlacement._manual_tab_points(app, face, [_edge(0, 0, 4, 0)])[0]
 
-        selected_face, _ = root_component.sketches.created[0]
-        self.assertIs(selected_face, face)
-        self.assertEqual((point.point.x, point.point.y, point.point.z), (202, 0, 0.0))
+        self.assertIs(point.context, context)
+
+    def test_uses_native_face_and_edge_coordinates_before_proxying(self):
+        context = object()
+        native_face, component = self._face()
+        proxy_face = types.SimpleNamespace(nativeObject=native_face, assemblyContext=context)
+        native_edge = _edge(2, 0, 6, 0)
+        proxy_edge = _edge(200, 0, 204, 0)
+        proxy_edge.nativeObject = native_edge
+        app = types.SimpleNamespace(log=lambda _message: None)
+
+        point = TabPlacement._manual_tab_points(app, proxy_face, [proxy_edge])[0]
+
+        selected_face, sketch = component.sketches.created[0]
+        self.assertIs(selected_face, native_face)
+        self.assertEqual((point.point.x, point.point.y, point.point.z), (4, 0, 0.0))
+        self.assertIs(point.context, context)
 
 
 class TabReadBackTests(unittest.TestCase):

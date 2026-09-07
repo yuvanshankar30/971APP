@@ -303,10 +303,9 @@ dropped without a warning.
 
 Tab edges therefore come from the same face the release contour does - the
 bottom face (`_find_tab_face`, matching `DeleteToolpaths._bottom_face`) -
-and `_manual_tab_points` creates hidden midpoint SketchPoints in the setup's
-root component using that face proxy. The selected occurrence edges are
-already in the arranged root coordinate frame; do not convert them back to
-native component coordinates or proxy the points afterward.
+and `_manual_tab_points` creates hidden midpoint SketchPoints in that face's
+component. For occurrence proxies, it converts each point back to the same
+assembly context before assigning it to the operation.
 
 An earlier version deliberately took them from the **top** face, on the
 theory that tabs and their contour were independent edge loops. They are
