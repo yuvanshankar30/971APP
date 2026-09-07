@@ -10,6 +10,28 @@ def _planar_face_normal(face):
         return None
 
 
+def _face_id(face):
+    """A stable identity for ``face``, usable in ``==``/set/dict contexts
+    where Python's own id() or the face objects' own ``==`` cannot be
+    trusted.
+
+    Confirmed live as a real, severe bug, not a style nit: Fusion hands
+    back a NEW SWIG wrapper object every time the same underlying face is
+    reached through a different accessor (body.faces, edge.faces, ...),
+    so identity/equality checks on the face objects themselves silently
+    never matched the same real face twice. A BFS walk keyed this way
+    revisited the same handful of faces indefinitely - Fusion's own
+    process hung and had to be force-restarted mid-job, its main thread
+    stuck for 60+ seconds inside repeated BRepFace.edges calls. tempId is
+    stable across separate accessors for the same underlying geometry
+    within one document state, which id()/object identity is not.
+    """
+    try:
+        return face.tempId
+    except Exception:
+        return id(face)  # last-resort fallback, still better than nothing
+
+
 def _same_axis_faces(body, face):
     """Every other planar face on ``body`` whose normal lies along the same
     physical line as ``face``'s own (parallel OR anti-parallel), each with
@@ -32,9 +54,10 @@ def _same_axis_faces(body, face):
         origin = face.pointOnFace
     except Exception:
         return []
+    face_id = _face_id(face)
     out = []
     for other in body.faces:
-        if other == face:
+        if _face_id(other) == face_id:
             continue
         other_normal = _planar_face_normal(other)
         if other_normal is None or abs(normal.dotProduct(other_normal)) < 0.99:
@@ -70,6 +93,7 @@ def _loop_wall_faces(face, loop):
     the natural dedup, but a BRepFace proxy is not hashable in the Fusion
     API (confirmed live: TypeError on set.add()).
     """
+    face_id = _face_id(face)
     walls = []
     for co_edge in loop.coEdges:
         try:
@@ -77,38 +101,50 @@ def _loop_wall_faces(face, loop):
         except Exception:
             continue
         for f in edge_faces:
-            if f != face:
+            if _face_id(f) != face_id:
                 walls.append(f)
     return walls
 
 
-def _cavity_reaches_face(start_walls, opening_face, target_face) -> bool:
-    """Whether the cavity behind ``opening_face``'s loop - starting from
-    its own wall face(s) ``start_walls`` - is adjacent to ``target_face``
-    at ANY depth, not just one hop from the opening.
+def _cavity_walk(start_walls, opening_face, target_face):
+    """Breadth-first walk of the cavity behind ``opening_face``'s loop,
+    starting from its own wall face(s) ``start_walls``.
 
-    True for a through-cut: walking the cavity's wall faces eventually
-    reaches the material's actual far side. False for a blind pocket: the
-    walk exhausts every reachable wall face without ever getting there
-    (it instead terminates at the pocket's own floor).
+    Returns ``(reaches_target, visited_faces)``: whether the walk reached
+    ``target_face`` at any depth (not just one hop from the opening), and
+    every OTHER face actually visited along the way (excluding
+    ``opening_face`` itself) - the caller uses this second part to find a
+    blind pocket's own floor face when the walk does NOT reach the target,
+    rather than just knowing THAT it's blind.
 
-    Breadth-first over wall-face adjacency, not just the walls directly
-    touching the opening loop - confirmed live as a real, not
-    hypothetical, distinction: a single-hop version of this check (does
-    THIS wall directly border the far face) gave the wrong answer for a
-    real part where a cavity's own STEP-imported geometry split its wall
-    into more than one face before reaching the material's far side - an
-    independent measurement (the raw minimum Z any wall vertex reaches)
-    confirmed the cavity really did go all the way through, which the
-    one-hop version had missed.
+    Not single-hop: confirmed live as a real, not hypothetical, distinction
+    - a single-hop version of this check (does a wall directly touching
+    the opening border the far face) gave the wrong answer for a real part
+    where a cavity's own STEP-imported geometry split its wall into more
+    than one face before reaching the material's far side - an independent
+    measurement (the raw minimum Z any wall vertex reaches) confirmed the
+    cavity really did go all the way through, which the one-hop version
+    had missed.
+
+    Visited-face tracking uses _face_id (BRepFace.tempId), NOT Python's own
+    id() or ``==``/``in`` on the face objects themselves - see _face_id's
+    own docstring for why: an id()-keyed version of this exact walk hung
+    Fusion's own process for 60+ seconds inside repeated BRepFace.edges
+    calls, revisiting the same handful of faces indefinitely because the
+    dedup never actually matched.
     """
-    seen_ids = {id(w) for w in start_walls}
+    target_id = _face_id(target_face)
+    opening_id = _face_id(opening_face)
+    seen_ids = {_face_id(w) for w in start_walls}
+    visited = list(start_walls)
     frontier = list(start_walls)
+    reaches_target = False
     while frontier:
         next_frontier = []
         for wall in frontier:
-            if wall == target_face:
-                return True
+            if _face_id(wall) == target_id:
+                reaches_target = True
+                continue
             try:
                 edges = list(wall.edges)
             except Exception:
@@ -119,16 +155,57 @@ def _cavity_reaches_face(start_walls, opening_face, target_face) -> bool:
                 except Exception:
                     continue
                 for f in edge_faces:
-                    if f == wall or f == opening_face:
+                    f_id = _face_id(f)
+                    if f_id == _face_id(wall) or f_id == opening_id:
                         continue
-                    if f == target_face:
-                        return True
-                    if id(f) in seen_ids:
+                    if f_id == target_id:
+                        reaches_target = True
                         continue
-                    seen_ids.add(id(f))
+                    if f_id in seen_ids:
+                        continue
+                    seen_ids.add(f_id)
+                    visited.append(f)
                     next_frontier.append(f)
         frontier = next_frontier
-    return False
+    return reaches_target, visited
+
+
+def _cavity_reaches_face(start_walls, opening_face, target_face) -> bool:
+    """Whether the cavity behind ``opening_face``'s loop reaches
+    ``target_face`` at any depth - see _cavity_walk for the full walk this
+    wraps. True for a through-cut, False for a blind pocket (which
+    terminates at its own floor instead).
+    """
+    reaches, _visited = _cavity_walk(start_walls, opening_face, target_face)
+    return reaches
+
+
+def _pocket_floor_face(opening_face, visited_faces):
+    """The actual floor face of a blind pocket, among the faces visited
+    walking its cavity (see _cavity_walk) - the real geometry a pocket-
+    clearing operation should reference, not the opening loop on the
+    part's top surface.
+
+    A pocket floor is planar and shares its opening's own normal
+    direction: standing inside the cavity looking down at the floor, the
+    floor's outward normal points the same way "up," toward the opening,
+    that the opening face's own normal does - unlike the cavity's vertical
+    wall faces (not planar-comparable to the opening at all) or the
+    material's far broad face (opposite direction, and never reached for
+    a genuinely blind cavity in the first place). Returns None if no such
+    face is found - the caller falls back to the opening's own loop rather
+    than fail outright.
+    """
+    opening_normal = _planar_face_normal(opening_face)
+    if opening_normal is None:
+        return None
+    for face in visited_faces:
+        normal = _planar_face_normal(face)
+        if normal is None:
+            continue
+        if normal.dotProduct(opening_normal) > 0.99:
+            return face
+    return None
 
 
 def _has_blind_pocket_below_face(body, face) -> bool:

@@ -2,7 +2,7 @@ import adsk.core, adsk.fusion, adsk.cam, traceback
 import time
 
 from .ContourChains import is_reverted_for_loop_seed
-from .Orientation import _back_face_for, _loop_wall_faces, _cavity_reaches_face
+from .Orientation import _back_face_for, _loop_wall_faces, _cavity_walk, _pocket_floor_face
 
 
 _POCKET_STRATEGIES = ("pocket_new", "pocket_clearing", "pocket2d", "adaptive2d")
@@ -323,19 +323,25 @@ def _blind_pocket_loops_all_bodies(design):
     since the template gives circular and general pockets separate
     dedicated operations.
 
-    Taken from the TOP face (_top_face), NOT the bottom face
-    _internal_feature_loop_chains_all_bodies uses: a through-feature's loop
-    is identical on both faces, but a blind pocket only ever has a loop on
-    the side it actually opens from - the bottom face has no loop for it
-    at all.
-
-    Blind-vs-through is decided by the same wall-adjacency topology
-    Orientation.py's own orientation logic already uses (imported
+    The geometry actually selected for each blind loop is its own FLOOR
+    face's outer loop (see _pocket_floor_face), not the opening loop on
+    the part's top surface - the top face is only used to locate each
+    cavity and decide blind-vs-through, via the same wall-adjacency
+    topology Orientation.py's own orientation logic already uses (imported
     directly, not reimplemented, so the two can never disagree about what
-    counts as blind) - not by comparing any face's own reported normal,
-    which a STEP import can report identically for a plate's two truly
-    opposite broad faces. Confirmed live as the reason this matters, not
-    hypothetical: PocketRecognitionSelection's own automatic search
+    counts as blind). A real pocket-clearing operation's own selection
+    should reference where the tool actually stops (the floor), not the
+    opening it enters through - confirmed live as the real fix, not the
+    first attempt: building the chain from the OPENING loop's edges (even
+    after trying to correct its direction with a flip) still produced the
+    wrong chain arrow, because the opening loop and the floor loop are
+    entirely different edges with their own independent orientation, not
+    a simple top/bottom mirroring a boolean flip could correct for.
+
+    Also confirmed live as the reason a normal-sign comparison can't be
+    used here at all: a STEP import can report a plate's two truly
+    opposite broad faces with the IDENTICAL raw normal, and
+    PocketRecognitionSelection's own automatic search
     (isSetupModelSelected=True) came back "Generated toolpath is empty"
     for a real, confirmed blind pocket (a hex cutout) on an actual test
     part - the exact same class of Fusion recognition failure this file
@@ -356,19 +362,37 @@ def _blind_pocket_loops_all_bodies(design):
         for loop in top_face.loops:
             if loop.isOuter:
                 continue
-            co_edges = list(loop.coEdges)
-            edges = [co_edge.edge for co_edge in co_edges]
-            if not edges:
+            opening_edges = [co_edge.edge for co_edge in loop.coEdges]
+            if not opening_edges:
                 continue
             walls = _loop_wall_faces(top_face, loop)
             if not walls:
                 continue
-            if _cavity_reaches_face(walls, top_face, back_face):
+            reaches_back, visited = _cavity_walk(walls, top_face, back_face)
+            if reaches_back:
                 continue  # a through-cut, handled elsewhere - not blind
-            seed = co_edges[0]
+            # The pocket's own floor - not the opening loop on the part's
+            # top surface. Confirmed live as the real fix, not the first
+            # attempt: building the chain from the OPENING loop's edges
+            # (even after correcting for the direction that loop's own
+            # coedges implied) still gave the wrong result, because the
+            # opening loop and the floor loop are entirely different edges
+            # with their own independent orientation - not a top/bottom
+            # face mirroring that a boolean flip could correct for.
+            floor_face = _pocket_floor_face(top_face, visited)
+            if floor_face is None:
+                continue  # no real floor found - skip rather than guess
+            floor_outer_loop = next((l for l in floor_face.loops if l.isOuter), None)
+            if floor_outer_loop is None:
+                continue
+            floor_co_edges = list(floor_outer_loop.coEdges)
+            floor_edges = [ce.edge for ce in floor_co_edges]
+            if not floor_edges:
+                continue
+            seed = floor_co_edges[0]
             is_reverted = is_reverted_for_loop_seed(seed.isOpposedToEdge)
-            if _is_circular_loop(edges):
-                circular_loops.append((edges, is_reverted))
+            if _is_circular_loop(floor_edges):
+                circular_loops.append((floor_edges, is_reverted))
             else:
                 other_chains.append((seed.edge, is_reverted))
     return circular_loops, other_chains
@@ -493,11 +517,25 @@ def _repair_missing_selections(setup) -> list[str]:
     # simple pocketed plate acquired a fake feature-slot operation and wrong
     # geometry. A real Shape Through Hole / Shape Through Finishing Pass is
     # both clearer in CAM review and correctly scoped to through features.
+    # "through" in the name, not just the two originally-seen exact
+    # patterns - confirmed live as a real bug, not hypothetical: a
+    # template's own "Small Shape Through Hole" operation (adaptive2d, a
+    # smaller sibling of "Shape Through Hole") didn't match either of the
+    # original two patterns, so it fell through to the generic blind-
+    # pocket branch below instead - which fed it a real pocket's own floor
+    # geometry while its own template-default depth stayed configured for
+    # a through-cut ('from surface bottom', full material depth). Net
+    # result: a real blind pocket got machined through the material
+    # anyway, cut twice - once correctly (by whichever operation actually
+    # is the general pocket op) and once straight through (by this one).
+    # "circular" is excluded so this never collides with the dedicated
+    # circular-hole operation below (">.3 Circular Through Hole" also
+    # contains "through" but needs its own circular-loop-specific
+    # handling, not this generic one).
     through_shape_ops = [
         op
         for op in ops_snapshot
-        if op.name.lower() == "shape through hole"
-        or "shape through finishing" in op.name.lower()
+        if "through" in op.name.lower() and "circular" not in op.name.lower()
     ]
     through_chain_assignments = {}
     if through_shape_ops:

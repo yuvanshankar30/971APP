@@ -226,51 +226,67 @@ def _has_real_stock_backing(edge, body_center, stock_bounds, offset_cm) -> bool:
     return x_low <= point.x <= x_high and y_low <= point.y <= y_high
 
 
-def _good_straight_edges(body, stock_bounds=None):
-    """Every straight, long-enough, stock-backed edge on body's own outer
-    boundary - the full set of genuinely usable tab locations (not capped
-    to any count). ``select_tab_edges`` below applies the same filter before
-    choosing a geometry-scaled, well-distributed manual-tab set.
+def _body_center(body):
+    return adsk.core.Point3D.create(
+        (body.boundingBox.minPoint.x + body.boundingBox.maxPoint.x) / 2,
+        (body.boundingBox.minPoint.y + body.boundingBox.maxPoint.y) / 2,
+        0,
+    )
+
+
+def _all_straight_edges(body):
+    """Every straight, long-enough edge on body's own outer boundary -
+    deliberately NOT filtered by stock backing. Direct instruction: every
+    distinct straight side of a part gets at least one tab even when it
+    has no real stock behind it (a part positioned close to the plate's
+    own edge, or a corner placement, can leave a whole side without real
+    backing) - a tab there may not have real material to bite into, but
+    the part still needs to be physically held at every side, not just
+    the sides that happen to back onto stock. Stock backing is used only
+    to PREFER which edge to pick within a side when more than one
+    candidate segment exists (see select_tab_edges) - never to drop a
+    whole side to zero tabs.
     """
     top_face = _find_top_face(body)
     if top_face is None:
         return []
     min_length_cm = MIN_TAB_EDGE_LENGTH_IN * 2.54
-    stock_check_cm = STOCK_BACKING_CHECK_IN * 2.54
-    body_center = adsk.core.Point3D.create(
-        (body.boundingBox.minPoint.x + body.boundingBox.maxPoint.x) / 2,
-        (body.boundingBox.minPoint.y + body.boundingBox.maxPoint.y) / 2,
-        0,
-    )
     return [
         e
         for e in _outer_boundary_edges(top_face)
-        if _is_straight_edge(e)
-        and _edge_length(e) >= min_length_cm
-        and _has_real_stock_backing(e, body_center, stock_bounds, stock_check_cm)
+        if _is_straight_edge(e) and _edge_length(e) >= min_length_cm
     ]
 
 
-def _distinct_straight_line_count(body, stock_bounds=None) -> int:
-    """How many genuinely different straight sides body's outer boundary
-    has, after collapsing multi-segment sides (a fillet/tangent
-    transition point splitting what's really one line) - used only to
-    decide the target tab count (see _min_tabs_for_body), not to place
-    tabs directly.
+def _group_into_lines(edges):
+    """Collapse a body's straight edges into distinct straight sides - a
+    single straight side of a part is sometimes represented as several
+    adjoining segments rather than one edge (tangent/fillet transition
+    points splitting it); see _edges_collinear.
     """
-    straight_edges = _good_straight_edges(body, stock_bounds)
     lines: list[list] = []
-    for edge in straight_edges:
+    for edge in edges:
         for line in lines:
             if _edges_collinear(edge, line[0]):
                 line.append(edge)
                 break
         else:
             lines.append([edge])
-    return len(lines)
+    return lines
 
 
-def _min_tabs_for_body(body, min_tabs: int, stock_bounds=None) -> int:
+def _distinct_straight_line_count(body) -> int:
+    """How many genuinely different straight sides body's outer boundary
+    has - used only to decide the target tab count (see
+    _min_tabs_for_body), not to place tabs directly. Counts every real
+    straight side, stock-backed or not - a side with no stock behind it
+    still needs its own tab (see _all_straight_edges), so it still counts
+    as a real side here too.
+    """
+    return len(_group_into_lines(_all_straight_edges(body)))
+
+
+def _min_tabs_for_body(body, min_tabs: int) -> int:
     """A triangular part only has 3 real sides to begin with - padding a
     4th tab onto one already-tabbed side doesn't add real holding power,
     it just doubles up on one side. Direct instruction: 4 or more tabs
@@ -278,51 +294,57 @@ def _min_tabs_for_body(body, min_tabs: int, stock_bounds=None) -> int:
     distinct sides still uses the normal min_tabs floor (parametric -
     ConfigureTabs's own min_tabs/max_tabs arguments, not hardcoded here).
     """
-    if _distinct_straight_line_count(body, stock_bounds) == 3:
+    if _distinct_straight_line_count(body) == 3:
         return 3
     return min_tabs
 
 
 def select_tab_edges(body, max_tabs: int = DEFAULT_MAX_TABS, stock_bounds=None):
     """Straight edges on the body's own outer boundary, spread across
-    distinct straight lines (longest line first) rather than clustered
-    onto one, capped at max_tabs. Never returns a curved/filleted edge, an
-    internal-loop (hole/pocket) edge, one too short to physically hold a
-    tab, or one with no real stock behind it (see _has_real_stock_backing)
-    - direct instruction, not a preference to relax if a part is mostly
-    rounded, small, or sitting close to the plate's own edge.
+    every distinct straight side. Never returns a curved/filleted edge, an
+    internal-loop (hole/pocket) edge, or one too short to physically hold
+    a tab - direct instruction, not a preference to relax if a part is
+    mostly rounded or small.
 
     Used by ConfigureTabs as the actual Manual Tabs geometry. Each selected
     edge is an explicit, safe release-tab location; Fusion's automatic
     placement is disabled rather than allowed to place more tabs elsewhere.
 
-    One tab per distinct line first (so at least 2 different sides get a
-    tab whenever the part actually has that many straight sides), then
-    fills any remaining budget from additional segments of the longest
-    line(s) if the part doesn't have enough distinct straight lines to
-    reach max_tabs on its own.
+    Every distinct side gets exactly one guaranteed tab first, regardless
+    of max_tabs and regardless of whether that side has real stock behind
+    it (direct instruction: at least one tab per side, always) - preferring
+    a stock-backed segment of that side when one exists, falling back to
+    its longest segment otherwise so the side is never left with zero tabs
+    just because it happens to sit close to the plate's own edge. Only
+    once every side has its guaranteed tab does any remaining budget (up
+    to max_tabs) get filled from additional segments, stock-backed ones
+    preferred first.
     """
-    straight_edges = sorted(_good_straight_edges(body, stock_bounds), key=_edge_length, reverse=True)
+    stock_check_cm = STOCK_BACKING_CHECK_IN * 2.54
+    body_center = _body_center(body)
 
-    lines: list[list] = []
-    for edge in straight_edges:
-        for line in lines:
-            if _edges_collinear(edge, line[0]):
-                line.append(edge)
-                break
-        else:
-            lines.append([edge])
+    def is_backed(edge):
+        return _has_real_stock_backing(edge, body_center, stock_bounds, stock_check_cm)
+
+    all_edges = sorted(_all_straight_edges(body), key=_edge_length, reverse=True)
+    lines = _group_into_lines(all_edges)
     lines.sort(key=lambda line: _edge_length(line[0]), reverse=True)
 
-    selected = [line[0] for line in lines[:max_tabs]]
+    def best_edge_for_line(line):
+        backed = [e for e in line if is_backed(e)]
+        pool = backed if backed else line
+        return max(pool, key=_edge_length)
+
+    selected = [best_edge_for_line(line) for line in lines]
+
     if len(selected) < max_tabs:
-        for line in lines:
-            for edge in line[1:]:
-                if len(selected) >= max_tabs:
-                    break
-                selected.append(edge)
+        selected_ids = {id(e) for e in selected}
+        remaining = [e for e in all_edges if id(e) not in selected_ids]
+        remaining.sort(key=lambda e: (not is_backed(e), -_edge_length(e)))
+        for edge in remaining:
             if len(selected) >= max_tabs:
                 break
+            selected.append(edge)
     return selected
 
 
@@ -479,7 +501,7 @@ def ConfigureTabs(min_tabs: int = DEFAULT_MIN_TABS, max_tabs: int = DEFAULT_MAX_
             all_candidates = []
             for body in bodies:
                 perimeter_in = _outer_perimeter_in(body)
-                body_min_tabs = _min_tabs_for_body(body, min_tabs, stock_bounds)
+                body_min_tabs = _min_tabs_for_body(body, min_tabs)
                 target_tabs = _tab_count_for_perimeter(perimeter_in, body_min_tabs, max_tabs)
                 body_candidates = select_tab_edges(body, max_tabs=target_tabs, stock_bounds=stock_bounds)
                 if len(body_candidates) < body_min_tabs:
