@@ -5,3 +5,7 @@ ALTER TABLE public.user_profiles
 
 COMMENT ON COLUMN public.user_profiles.theme_preference IS
   'Account-selected application/login theme, including authorized special theme IDs.';
+
+-- PostgREST caches table metadata. Explicitly invalidate that cache so the
+-- REST API can accept theme_preference immediately after this migration runs.
+NOTIFY pgrst, 'reload schema';

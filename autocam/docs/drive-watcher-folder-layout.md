@@ -47,7 +47,7 @@ lost.
 ## Filename convention
 
 ```
-<machine-slug>_<part-slug>_<HHMMSS>.<ext>
+<machine-slug>_<part-slug>_<HHMMSS>_<job-id>.<ext>
 ```
 
 Example: a "Gearbox Plate" cut on the ShopSabre router at 2:05:09pm Pacific
@@ -65,6 +65,8 @@ becomes `old-router-shopsabre_gearbox-plate_140509.ngc`, delivered into
   correction) - no need to track a counter or list the folder first.
 - **Why no date in the filename**: it's already the enclosing folder's name;
   repeating it would be redundant.
+- The job-id suffix also prevents two same-name jobs that finish during the
+  same second from colliding.
 - Implemented as `driveDeliveryFileName(job, machine)` in `drive_watcher.js`,
   tested in `drive_watcher.test.js`.
 

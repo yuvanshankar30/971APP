@@ -162,8 +162,11 @@ depending on what hardware ends up hosting this:
   Docker. Install steps are in the files' header comments.
 
 Either way, `VISION_RUNNER_TOKEN` must be set to the *same* value as the web
-service's `VISION_RUNNER_TOKEN` secret. Get that value from the project
-administrator; do not generate a replacement on the runner host. `VISION_MODEL_PATH`
+service's `VISION_RUNNER_TOKEN` secret. Cloud Run receives its copy from GCP
+Secret Manager, but that does not automatically configure the DGX Spark: put
+the matching value in the DGX deployment's gitignored `.env` (or an equivalent
+host secret store). Get it from the project administrator; do not generate a
+replacement on the runner host and never commit it. `VISION_MODEL_PATH`
 must point at real trained weights (also not built yet - see
 `../training/create_placeholder_model.py` for a non-functional stand-in
 that at least exercises the claim/heartbeat/complete plumbing).

@@ -1,6 +1,5 @@
-// Job-claim API for the Fusion CAM Runner (autocam/fusion/runner/ - a fork
-// of Team Valor 6800's open-source AutoCAM Runner add-in). Polled by an
-// external Fusion 360 machine, not called from the browser - authenticated
+// Job-claim API for the Fusion CAM Runner (autocam/fusion/runner/). Polled by
+// an external Fusion 360 machine, not called from the browser - authenticated
 // via a shared-secret bearer token (fusion_runner_auth.js), not a Supabase
 // Auth session, so this uses the service-role client throughout (same
 // pattern as api/drive-watcher/+server.js).
@@ -25,10 +24,29 @@ import { validateFusionNcFiles } from '$lib/server/fusion_nc_artifacts.js';
 function getServiceSupabase() {
   const url = env.SUPABASE_URL || env.PUBLIC_SUPABASE_URL;
   const serviceKey = env.SUPABASE_SERVICE_KEY;
+  if (!url || !serviceKey) throw new Error('Fusion Runner API is missing Supabase service configuration');
   return createClient(url, serviceKey);
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const STALE_CLAIM_MS = 15 * 60 * 1000;
+
+// claimed_at doubles as the runner heartbeat. A workstation crash before
+// Fusion begins work otherwise strands a job in claimed. Processing jobs are
+// intentionally never retried automatically: Fusion may already have changed
+// a document or exported an artifact, so retrying them could duplicate CAM
+// work. Those require an operator's explicit review.
+async function requeueStaleFusionJobs(supabase) {
+  const cutoff = new Date(Date.now() - STALE_CLAIM_MS).toISOString();
+  const { error } = await supabase.from('cam_jobs').update({
+    status: 'queued',
+    claimed_by: null,
+    claimed_at: null,
+    progress: 0,
+    progress_message: 'Runner claim expired before processing; queued for retry'
+  }).eq('operation_type', 'milling').eq('status', 'claimed').lt('claimed_at', cutoff);
+  if (error) throw new Error(`Could not recover stale Fusion jobs: ${error.message}`);
+}
 
 // Claims the oldest queued milling job for this runner. Two-step: find a
 // candidate, then CAS it - a plain "UPDATE ... ORDER BY ... LIMIT 1" isn't
@@ -36,16 +54,13 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // runners might both pick the SAME candidate id) that the CAS below always
 // resolves correctly (only one caller's conditional UPDATE ever matches).
 //
-// machineId (optional): a Runner that declares which cam_machines row it
-// physically is (autocam/fusion/runner/config.py's RUNNER_MACHINE_ID) only
+// machineId: a Runner declares which cam_machines row it
+// physically is (autocam/fusion/runner/config.py's RUNNER_MACHINE_ID) and only
 // claims jobs that are either unassigned to a specific machine
 // (cam_jobs.machine_id IS NULL) or assigned to its own - so a router's
 // Runner can't accidentally grab a job queued for the mill, and vice versa,
-// once multiple physical machines are polling at once. A Runner that
-// doesn't declare a machineId (not yet configured, or a genuinely
-// single-machine deployment) falls back to the original claim-anything
-// behavior, so this stays backward compatible rather than a breaking
-// requirement.
+// once multiple physical machines are polling at once. It is required:
+// claim-anything fallback can put a program on the wrong physical machine.
 async function claimNextJob(supabase, runnerId, machineId) {
   let query = supabase
     .from('cam_jobs')
@@ -54,9 +69,7 @@ async function claimNextJob(supabase, runnerId, machineId) {
     .eq('operation_type', 'milling')
     .order('created_at', { ascending: true })
     .limit(5);
-  if (machineId) {
-    query = query.or(`machine_id.is.null,machine_id.eq.${machineId}`);
-  }
+  query = query.or(`machine_id.is.null,machine_id.eq.${machineId}`);
   const { data: candidates, error: findError } = await query;
   if (findError) throw new Error(`Could not look up queued milling jobs: ${findError.message}`);
   if (!candidates?.length) return null;
@@ -69,7 +82,8 @@ async function claimNextJob(supabase, runnerId, machineId) {
       .eq('status', 'queued') // compare-and-swap: only one runner can ever win this specific job
       .select('*, cam_tools(nose_radius, diameter, fusion_tool_library_file), cam_machines(name, controller, post_processor), cam_materials(name)')
       .single();
-    if (claimError) continue; // lost the race on this one (or a real error) - try the next candidate
+    if (claimError?.code === 'PGRST116') continue; // lost the CAS race; try the next candidate
+    if (claimError) throw new Error(`Could not claim Fusion job ${candidate.id}: ${claimError.message}`);
     if (claimed) return claimed;
   }
   return null; // every candidate got claimed by someone else between the select and our CAS attempts
@@ -88,9 +102,9 @@ export async function POST({ request, url }) {
   }
 
   const action = url.searchParams.get('action') || body?.action;
-  const supabase = getServiceSupabase();
 
   try {
+    const supabase = getServiceSupabase();
     if (action === 'sync-folders') {
       const projectName = String(body?.projectName || '').trim();
       const tree = body?.tree;
@@ -113,10 +127,9 @@ export async function POST({ request, url }) {
       // as a real UUID shape - unlike .eq(), .or() takes a raw string, so an
       // unvalidated value here would be a filter-injection risk.
       const rawMachineId = body?.machineId;
-      if (rawMachineId != null && rawMachineId !== '' && (typeof rawMachineId !== 'string' || !UUID_RE.test(rawMachineId))) {
-        return json({ error: 'machineId must be a UUID' }, { status: 400 });
-      }
-      const machineId = typeof rawMachineId === 'string' && UUID_RE.test(rawMachineId) ? rawMachineId : null;
+      if (typeof rawMachineId !== 'string' || !UUID_RE.test(rawMachineId)) return json({ error: 'machineId is required and must be a UUID' }, { status: 400 });
+      const machineId = rawMachineId;
+      await requeueStaleFusionJobs(supabase);
       const job = await claimNextJob(supabase, runnerId, machineId);
       if (!job) return json({ job: null });
       try {
@@ -140,7 +153,7 @@ export async function POST({ request, url }) {
     if (action === 'processing') {
       const { data, error } = await supabase
         .from('cam_jobs')
-        .update({ status: 'processing', progress: body?.progress ?? 10, progress_message: body?.progressMessage || 'Fusion Runner processing...' })
+        .update({ status: 'processing', claimed_at: new Date().toISOString(), progress: body?.progress ?? 10, progress_message: body?.progressMessage || 'Fusion Runner processing...' })
         .eq('id', jobId)
         .eq('operation_type', 'milling')
         .eq('claimed_by', runnerId)
@@ -148,6 +161,18 @@ export async function POST({ request, url }) {
         .select('id');
       if (error) throw new Error(error.message);
       if (!data?.length) return json({ error: 'Job was not in the claimed state (already progressed, cancelled, or claimed by another runner)' }, { status: 409 });
+      return json({ success: true });
+    }
+
+    if (action === 'heartbeat') {
+      const update = { claimed_at: new Date().toISOString() };
+      if (Number.isFinite(body?.progress)) update.progress = Math.max(0, Math.min(99, body.progress));
+      if (body?.progressMessage) update.progress_message = String(body.progressMessage).slice(0, 500);
+      const { data, error } = await supabase.from('cam_jobs').update(update)
+        .eq('id', jobId).eq('operation_type', 'milling').eq('claimed_by', runnerId)
+        .in('status', ['claimed', 'processing']).select('id');
+      if (error) throw new Error(error.message);
+      if (!data?.length) return json({ error: 'Job is not active or belongs to another runner' }, { status: 409 });
       return json({ success: true });
     }
 
@@ -200,7 +225,7 @@ export async function POST({ request, url }) {
       return json({ success: true });
     }
 
-    return json({ error: `Unknown action: ${action}. Expected one of: claim, processing, complete, fail, sync-folders` }, { status: 400 });
+    return json({ error: `Unknown action: ${action}. Expected one of: claim, processing, heartbeat, complete, fail, sync-folders` }, { status: 400 });
   } catch (error) {
     return json({ error: error?.message || 'Internal server error' }, { status: 500 });
   }

@@ -1,25 +1,26 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 const mocks=vi.hoisted(()=>({from:vi.fn(),payload:vi.fn()}));
 vi.mock('@supabase/supabase-js',()=>({createClient:()=>({from:mocks.from})}));
-vi.mock('$env/dynamic/private',()=>({env:{}}));
+vi.mock('$env/dynamic/private',()=>({env:{SUPABASE_URL:'https://example.supabase.co',SUPABASE_SERVICE_KEY:'service-key'}}));
 vi.mock('$lib/server/fusion_runner_auth.js',()=>({isAuthorizedFusionRunnerRequest:()=>true}));
 vi.mock('$autocam/fusion/jobPayload.js',()=>({buildJobPayload:mocks.payload}));
 import { POST } from './+server.js';
 const call=(action,body={})=>POST({url:new URL(`http://localhost/api/fusion-runner?action=${action}`),request:new Request('http://localhost',{method:'POST',body:JSON.stringify(body)})});
 let queries;
 beforeEach(()=>{queries=[];mocks.from.mockReset();mocks.payload.mockReset();});
+const machineId='11111111-1111-4111-8111-111111111111';
 function chain(result){
- const q={};for(const method of ['select','update','eq','in','order','limit','or'])q[method]=vi.fn(()=>q);
+ const q={};for(const method of ['select','update','eq','in','order','limit','or','lt'])q[method]=vi.fn(()=>q);
  q.single=vi.fn(async()=>result);q.then=(resolve)=>resolve(result);queries.push(q);return q;
 }
 describe('Fusion Runner grouping lifecycle',()=>{
  it('marks unresolved claimed inputs failed instead of leaving a stranded claim',async()=>{
-  mocks.from.mockReturnValueOnce(chain({data:[{id:'job'}]})).mockReturnValueOnce(chain({data:{id:'job'}})).mockReturnValueOnce(chain({data:[]}));
+  mocks.from.mockReturnValueOnce(chain({error:null})).mockReturnValueOnce(chain({data:[{id:'job'}]})).mockReturnValueOnce(chain({data:{id:'job'}})).mockReturnValueOnce(chain({data:[]}));
   mocks.payload.mockRejectedValue(new Error('Part b is missing its STEP file'));
-  const result=await call('claim',{runnerId:'runner'});
+  const result=await call('claim',{runnerId:'runner',machineId});
   expect(await result.json()).toEqual({job:null,error:'Part b is missing its STEP file'});
-  expect(queries[2].update).toHaveBeenCalledWith(expect.objectContaining({status:'failed'}));
-  expect(queries[2].eq).toHaveBeenCalledWith('status','claimed');
+  expect(queries[3].update).toHaveBeenCalledWith(expect.objectContaining({status:'failed'}));
+  expect(queries[3].eq).toHaveBeenCalledWith('status','claimed');
  });
  it('does not let a late failure overwrite terminal or non-Fusion jobs',async()=>{
   mocks.from.mockReturnValue(chain({data:[]}));
@@ -39,6 +40,24 @@ describe('Fusion Runner grouping lifecycle',()=>{
  it('rejects a malformed machine ID rather than claiming another machine’s jobs',async()=>{
   expect((await call('claim',{runnerId:'runner',machineId:'invalid'})).status).toBe(400);
   expect(mocks.from).not.toHaveBeenCalled();
+ });
+ it('requires a machine ID instead of falling back to claim-anything',async()=>{
+  expect((await call('claim',{runnerId:'runner'})).status).toBe(400);
+  expect(mocks.from).not.toHaveBeenCalled();
+ });
+ it('refreshes the ownership timestamp only for the active claiming runner',async()=>{
+  mocks.from.mockReturnValue(chain({data:[{id:'job'}]}));
+  expect((await call('heartbeat',{jobId:'job',runnerId:'runner'})).status).toBe(200);
+  expect(queries[0].update).toHaveBeenCalledWith(expect.objectContaining({claimed_at:expect.any(String)}));
+  expect(queries[0].eq).toHaveBeenCalledWith('claimed_by','runner');
+  expect(queries[0].in).toHaveBeenCalledWith('status',['claimed','processing']);
+ });
+ it('requeues only stale unstarted claims before claiming new work',async()=>{
+  mocks.from.mockReturnValueOnce(chain({error:null})).mockReturnValueOnce(chain({data:[]}));
+  expect((await call('claim',{runnerId:'runner',machineId})).status).toBe(200);
+  expect(queries[0].update).toHaveBeenCalledWith(expect.objectContaining({status:'queued',claimed_by:null,claimed_at:null}));
+  expect(queries[0].eq).toHaveBeenCalledWith('status','claimed');
+  expect(queries[0].lt).toHaveBeenCalledWith('claimed_at',expect.any(String));
  });
  it('stores exact Fusion output artifacts without synthesizing a combined program',async()=>{
   const contentBase64=Buffer.from('N10 G90\r\nM30\r\n','utf8').toString('base64');

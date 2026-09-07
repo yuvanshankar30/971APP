@@ -12,10 +12,14 @@ public manuals.
   `controller: 'linuxcnc'` (default) dialect in `routing.js`/`tubestock.js`.
 - **`shopsabre.cps`** - the shop's newer ShopSabre router's post-processor.
   Targets WinCNC. This is the `controller: 'wincnc'` dialect.
-- **`__fixtures__/1001-fusion-example.ngc`** - a real program Fusion actually
+- **`__fixtures__/1001-fusion-example.ngc`** - a real plate program Fusion actually
   generated through `971_emc.cps` (confirmed LinuxCNC/UNC-router output, not
   synthetic) - used to cross-check header sequence, decimal precision, and
   code usage against what this app's own LinuxCNC-dialect output does.
+- **`__fixtures__/tubestock-side-3-9-example.ngc`**,
+  **`tubestock-side-6-example.ngc`**, and
+  **`tubestock-side-12-example.ngc`** - real side-specific tube programs used
+  to verify rotary-side setup, work offsets and controller-compatible output.
 
 Both `.cps` files are plain JavaScript (Autodesk's post-processor API -
 `createFormat`, `writeBlock`, `onSection`, etc.) that Fusion 360 itself runs

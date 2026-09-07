@@ -73,7 +73,7 @@ Robotics' `content/cad/` endpoint, both linked from their own public product pag
 ## UI wiring (`src/routes/autocam/`)
 
 Tube stock is a third `operation_type` alongside `turning`/`routing`/`milling` (migration
-`add_tubestock_operation_type` widened the `cam_machines`/`cam_jobs` CHECK constraints). Reuses the
+`migrations/20260906_add_tubestock_operation_type.sql` widens the `cam_machines`/`cam_jobs` CHECK constraints). Reuses the
 existing Machine Profile / New Job / job-detail UI end to end - operation toggle, param form
 (`CamParamFields.svelte`: hole depth, safe height, feed rate, spindle speed), controller dialect
 (reuses routing's LinuxCNC/WinCNC selector, since this targets the same class of machine), tool-plan

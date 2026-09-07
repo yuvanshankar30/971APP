@@ -1,7 +1,7 @@
 /**
  * Google Drive integration for AutoCAM, both directions - see
- * implementations/drive-watcher-cron-plan.md (input: STEP file in a folder
- * auto-triggers a job) and implementations/direct-machine-file-transfer-plan.md
+ * autocam/docs/drive-watcher-cron-plan.md (input: STEP file in a folder
+ * auto-triggers a job) and autocam/docs/direct-machine-file-transfer-plan.md
  * (output: a completed job's G-code gets written to a separate Drive folder,
  * so a Drive desktop sync client on the machine's control PC picks it up
  * with no manual download - see runDriveWatcherSweep for input,
@@ -59,14 +59,14 @@
 import { createClient } from '@supabase/supabase-js';
 import { normalizeGcodeComments } from './gcodeComments.js';
 import { env } from '$env/dynamic/private';
-import { gcodeFileNameFor } from './camJobs.js';
+import { gcodeFileNameFor, slugifyCamName } from './camJobs.js';
 import { PACIFIC_TIME_ZONE } from '$lib/timezone.js';
 import { getServiceAccountAccessToken as getScopedAccessToken } from '$lib/server/google_service_account.js';
 
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file';
 const DRIVE_API = 'https://www.googleapis.com/drive/v3';
 const DRIVE_UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3/files';
-const MAX_FILES_PER_SWEEP_PER_MACHINE = 10;
+const MAX_CHANGES_PER_PAGE = 10;
 const STEP_NAME_RE = /\.(step|stp)$/i;
 
 // Thin Drive-scoped wrapper around the generic (JWT-signing moved to
@@ -109,28 +109,18 @@ async function getStartPageToken(accessToken, driveId) {
   return body.startPageToken;
 }
 
-// Walks the Changes API from `pageToken` to the end, returning every
-// candidate file change plus the cursor to persist for next time. Multiple
-// changes.list pages are followed within one sweep (bounded by Drive's own
-// page size, not by our batch cap - the per-file batch cap below limits how
-// much work one sweep actually DOES, not how much cursor-walking it needs).
+// Reads exactly one bounded Changes API page. The returned cursor advances
+// only past changes this sweep actually inspected; walking to the end and
+// then slicing the first ten permanently discarded everything else.
 // `driveId` (see getFileDriveId) scopes this to a specific Shared Drive when
 // the watched folder lives in one - required, not optional, for the sweep
 // to see anything happening inside a Shared Drive at all.
-async function listChangesSince(accessToken, pageToken, driveId) {
-  let token = pageToken;
-  const changes = [];
+export async function listChangesSince(accessToken, pageToken, driveId) {
   const scope = driveId ? `&driveId=${encodeURIComponent(driveId)}&includeItemsFromAllDrives=true&corpora=drive` : '';
-  for (let guard = 0; guard < 50; guard += 1) { // hard stop - never loop forever on a misbehaving response
-    const fields = 'newStartPageToken,nextPageToken,changes(fileId,removed,file(id,name,mimeType,parents,trashed))';
-    const res = await driveFetch(accessToken, `/changes?pageToken=${encodeURIComponent(token)}&fields=${encodeURIComponent(fields)}&pageSize=100${scope}`);
-    const body = await res.json();
-    changes.push(...(body.changes || []));
-    if (body.newStartPageToken) return { changes, nextPageToken: body.newStartPageToken };
-    if (!body.nextPageToken) return { changes, nextPageToken: token }; // shouldn't happen per Drive's API contract, but don't lose the cursor if it does
-    token = body.nextPageToken;
-  }
-  return { changes, nextPageToken: token };
+  const fields = 'newStartPageToken,nextPageToken,changes(fileId,removed,file(id,name,mimeType,parents,trashed))';
+  const res = await driveFetch(accessToken, `/changes?pageToken=${encodeURIComponent(pageToken)}&fields=${encodeURIComponent(fields)}&pageSize=${MAX_CHANGES_PER_PAGE}${scope}`);
+  const body = await res.json();
+  return { changes: body.changes || [], nextPageToken: body.nextPageToken || body.newStartPageToken || pageToken };
 }
 
 async function downloadFile(accessToken, fileId) {
@@ -178,19 +168,6 @@ export function todayDriveDateFolderName() {
   }).format(new Date());
 }
 
-// Same slugify rule as gcodeFileNameFor (camJobs.js) - kept as a tiny local
-// copy rather than exported/reused from there, since that function's
-// contract (produce a plain "<slug>.<ext>" for one file, used all over the
-// app for downloads/display) shouldn't have to know about this module's
-// extra machine-prefix/collision-suffix needs.
-function slugify(value, fallback) {
-  return String(value || '')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '') || fallback;
-}
-
 // HHMMSS in Pacific time - see todayDriveDateFolderName for why Pacific, not
 // server/UTC time.
 function nowDriveTimeSuffix() {
@@ -205,7 +182,7 @@ function nowDriveTimeSuffix() {
   return `${get('hour')}${get('minute')}${get('second')}`;
 }
 
-// Naming convention for a file delivered to Drive: <machine>_<part>_<HHMMSS>.<ext>
+// Naming convention: <machine>_<part>_<HHMMSS>_<job-id>.<ext>.
 // The machine prefix and time suffix exist for one concrete reason: multiple
 // machines can be (and, per the real setup this was built for, ARE) configured
 // to share the SAME drive_output_folder_id, so more than one machine's output
@@ -218,11 +195,12 @@ function nowDriveTimeSuffix() {
 // itself is deliberately NOT repeated here (see todayDriveDateFolderName) -
 // it's already the enclosing folder's name.
 export function driveDeliveryFileName(job, machine) {
-  const machineSlug = slugify(machine?.name, 'machine');
+  const machineSlug = slugifyCamName(machine?.name, 'machine');
   const rawName = (job.gcode_file_name || 'output.ngc').replace(/\.[a-z0-9]+$/i, '');
-  const partSlug = slugify(rawName, 'part');
+  const partSlug = slugifyCamName(rawName, 'part');
   const ext = (job.gcode_file_name || 'output.ngc').match(/\.([a-z0-9]+)$/i)?.[1] || 'ngc';
-  return `${machineSlug}_${partSlug}_${nowDriveTimeSuffix()}.${ext}`;
+  const jobSuffix = slugifyCamName(job?.id, 'no-id');
+  return `${machineSlug}_${partSlug}_${nowDriveTimeSuffix()}_${jobSuffix}.${ext}`;
 }
 
 // Finds a child folder of `parentFolderId` named exactly `folderName`
@@ -230,7 +208,7 @@ export function driveDeliveryFileName(job, machine) {
 // doesn't exist yet. Used to group each day's delivered G-code into one
 // dated subfolder ("2026-08-20") inside the machine's output folder, shared
 // across every job delivered that same day - see
-// implementations/drive-watcher-implementation.md's architecture note.
+// autocam/docs/drive-watcher-implementation.md's architecture note.
 // `driveId` (see getFileDriveId, same pattern the input-sweep side already
 // uses for the Changes API) scopes files.list to that specific Shared
 // Drive - more correct AND faster than the blanket corpora=allDrives
@@ -304,7 +282,11 @@ async function queueJobForDriveFile(supabase, machine, file, bytes, appOrigin) {
     })
     .select()
     .single();
-  if (insertError) throw new Error(`cam_jobs insert failed: ${insertError.message}`);
+  if (insertError) {
+    const { error: cleanupError } = await supabase.storage.from('manufacturing-files').remove([storagePath]);
+    if (cleanupError) console.error(`Drive watcher: failed to remove orphaned upload ${storagePath}`, cleanupError.message);
+    throw new Error(`cam_jobs insert failed: ${insertError.message}`);
+  }
 
   if (machine.operation_type === 'routing') {
     const res = await fetch(`${appOrigin}/api/cam-generate`, {
@@ -366,7 +348,8 @@ export async function runDriveWatcherSweep({ appOrigin } = {}) {
     const folderId = machine.drive_folder_id;
     try {
       const driveId = await getFileDriveId(accessToken, folderId); // null if this folder is in a personal "My Drive", the Shared Drive's ID otherwise
-      const { data: state } = await supabase.from('drive_watcher_state').select('page_token').eq('folder_id', folderId).maybeSingle();
+      const { data: state, error: stateError } = await supabase.from('drive_watcher_state').select('page_token').eq('folder_id', folderId).maybeSingle();
+      if (stateError) throw new Error(`Could not load Drive watcher cursor: ${stateError.message}`);
       const startToken = state?.page_token || (await getStartPageToken(accessToken, driveId));
 
       const { changes, nextPageToken } = await listChangesSince(accessToken, startToken, driveId);
@@ -380,25 +363,32 @@ export async function runDriveWatcherSweep({ appOrigin } = {}) {
       );
 
       let queuedCount = 0;
-      for (const change of candidates.slice(0, MAX_FILES_PER_SWEEP_PER_MACHINE)) {
+      for (const change of candidates) {
         const file = change.file;
-        const { data: already } = await supabase.from('drive_watcher_files').select('drive_file_id').eq('drive_file_id', file.id).maybeSingle();
-        if (already) continue; // idempotency - never process the same Drive file twice
+        const { error: reserveError } = await supabase.from('drive_watcher_files').insert({ drive_file_id: file.id, status: 'processing' });
+        if (reserveError?.code === '23505') continue;
+        if (reserveError) throw new Error(`Could not reserve Drive file ${file.id}: ${reserveError.message}`);
 
         try {
           const bytes = await downloadFile(accessToken, file.id);
           if (!looksLikeStepFile(bytes)) throw new Error('Downloaded file does not look like a STEP file (no ISO-10303 header)');
           const job = await queueJobForDriveFile(supabase, machine, file, bytes, resolvedOrigin);
-          await supabase.from('drive_watcher_files').insert({ drive_file_id: file.id, cam_job_id: job.id, status: 'queued' });
+          const { error: auditError } = await supabase.from('drive_watcher_files')
+            .update({ cam_job_id: job.id, status: 'queued', error: null }).eq('drive_file_id', file.id);
+          if (auditError) throw new Error(`Could not record queued Drive file: ${auditError.message}`);
           queuedCount += 1;
         } catch (fileError) {
           const message = fileError?.message || String(fileError);
-          await supabase.from('drive_watcher_files').insert({ drive_file_id: file.id, status: 'failed', error: message });
+          const { error: auditError } = await supabase.from('drive_watcher_files')
+            .update({ status: 'failed', error: message }).eq('drive_file_id', file.id);
+          if (auditError) throw new Error(`${message}; additionally failed to record the failure: ${auditError.message}`);
           console.error(`Drive watcher: "${file.name}" in folder mapped to "${machine.name}" failed to queue`, message);
         }
       }
 
-      await supabase.from('drive_watcher_state').upsert({ folder_id: folderId, page_token: nextPageToken, updated_at: new Date().toISOString() });
+      const { error: cursorError } = await supabase.from('drive_watcher_state')
+        .upsert({ folder_id: folderId, page_token: nextPageToken, updated_at: new Date().toISOString() });
+      if (cursorError) throw new Error(`Could not save Drive watcher cursor: ${cursorError.message}`);
       results.push({ machineId: machine.id, machineName: machine.name, folderId, candidates: candidates.length, queued: queuedCount });
     } catch (machineError) {
       const message = machineError?.message || String(machineError);
@@ -418,7 +408,7 @@ export async function runDriveWatcherSweep({ appOrigin } = {}) {
  * findOrCreateDateFolder/todayDriveDateFolderName and the file header's
  * FOLDER ARCHITECTURE note) so a Drive desktop sync client on the machine's
  * control PC picks it up with no manual download - see
- * implementations/direct-machine-file-transfer-plan.md. Applies to ANY
+ * autocam/docs/direct-machine-file-transfer-plan.md. Applies to ANY
  * completed job on that machine, not just Drive-triggered ones - delivery
  * is a property of the machine, not of how the job started.
  *

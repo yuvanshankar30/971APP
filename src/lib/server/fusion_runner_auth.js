@@ -1,7 +1,9 @@
-// Shared-secret bearer-token auth for the Fusion CAM Runner - same idiom as
-// cron_auth.js's isAuthorizedCronRequest (bearer token or ?token= query
-// param, checked against a configured secret, fail-open only when nothing
-// is configured). Kept as its own module rather than reusing cron_auth.js
+// Shared-secret bearer-token auth for the Fusion CAM Runner. Unlike cron
+// URLs, this never accepts a query-string token: URLs are routinely stored
+// in proxy and request logs. This endpoint uses a service
+// role client, so a missing secret must fail closed instead of turning a
+// deployment mistake into unauthenticated database access. Kept as its own
+// module rather than reusing cron_auth.js
 // directly: the Runner is a different trust boundary (an external Fusion
 // 360 machine polling for jobs, not a cron-triggered sweep), so it gets its
 // own secret/env var, even though the underlying technique is identical.
@@ -27,12 +29,9 @@ function getBearerToken(headers) {
   return match ? match[1].trim() : '';
 }
 
-export function isAuthorizedFusionRunnerRequest({ url, headers, env: envLike = {} }) {
+export function isAuthorizedFusionRunnerRequest({ headers, env: envLike = {} }) {
   const expectedSecrets = getFusionRunnerSecrets(envLike);
-  if (!expectedSecrets.length) return true; // fail-open for local dev - see cron_auth.js for the same tradeoff; must be set in production
-
-  const queryToken = String(url?.searchParams?.get('token') || '').trim();
-  if (queryToken && expectedSecrets.includes(queryToken)) return true;
+  if (!expectedSecrets.length) return false;
 
   const bearerToken = getBearerToken(headers);
   if (bearerToken && expectedSecrets.includes(bearerToken)) return true;

@@ -32,6 +32,7 @@ changed and why; they are **not** kept up to date afterward.
 | [BUILD_TAB_QUICK_REF.md](changes/BUILD_TAB_QUICK_REF.md) | — | Visual before/after reference for the build tab work |
 | [BUILD_TAB_TESTING.md](changes/BUILD_TAB_TESTING.md) | — | Testing checklist for the build tab work |
 | [MIGRATION_README.md](changes/MIGRATION_README.md) | — | Removal of the build approval workflow (DB migration) |
+| [SEASON_TAGGING_CHANGES.md](changes/SEASON_TAGGING_CHANGES.md) | — | Season tagging and filtering changes |
 
 ## `plans/` — proposed work, not yet built
 
@@ -52,3 +53,14 @@ once the underlying app has moved on.
 |---|---|
 | [google-cloud-run.md](deployment/google-cloud-run.md) | Cloud Run deployment: Cloud Build trigger, secrets, `.dockerignore` gotchas |
 | [supabase-alternative-design.md](deployment/supabase-alternative-design.md) | Design notes on Supabase's role in the current architecture |
+
+## `design/` — product and interface standards
+
+| Doc | Covers |
+|---|---|
+| [avoiding-ai-slop.md](design/avoiding-ai-slop.md) | Concrete interface-writing and visual-design standards for this app |
+
+## `issue-assets/` — issue attachments
+
+Screenshots and other evidence referenced by GitHub issues. These are supporting
+artifacts, not living product documentation.
