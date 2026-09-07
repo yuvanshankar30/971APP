@@ -30,9 +30,10 @@
 #    expression still reads "'points' == 'points' ? ...".
 #
 # So automatic placement is always on, and a manual tab is an ADDITION to
-# it rather than a replacement. What makes the manual list actually take
-# effect is that its edges belong to the contour being cut - see
-# _find_tab_face, which is where this went wrong for real.
+# it rather than a replacement. The Manual Tabs parameter does not accept a
+# bare edge as a location, though: it is a CadPoints collection. Each tab is
+# therefore represented by a SketchPoint placed at the midpoint of a vetted
+# edge on the release contour - see _manual_tab_points.
 #
 # WHICH operation actually gets tabs: only the one the template itself
 # already designates via group_tabs=true in its own default state - a real
@@ -136,17 +137,17 @@ def _find_tab_face(body):
 
     This must be the same face the contour uses, and that is the whole
     point of this function. A manual tab is not a free-floating position:
-    Fusion places it on an edge OF THE SELECTED CONTOUR, so a tab edge that
-    is not part of that contour cannot be placed and is silently ignored.
+    its SketchPoint must be on the selected contour, so a point created on
+    an edge that is not part of that contour is silently ignored.
 
     An earlier version deliberately took tab edges from the TOP face while
     the contour came from the bottom, on the theory that tabs and their
     contour were independent edge loops. Confirmed live that they are not,
     and that this was the reason tabs never landed where this module chose:
-    on a real job the operation's manual tab list held edges tempId
-    478/482/486/490 at z=0.0in, while the contour it was attached to was
-    built from edges 741-748 at z=-0.0625in - an intersection of exactly
-    ZERO. Fusion's dialog listed "4 Edges" and used none of them.
+    on a real job the operation's manual tab list held top-face edge
+    references at z=0.0in, while the contour it was attached to was built
+    from edges at z=-0.0625in - an intersection of exactly ZERO. Fusion's
+    dialog listed four selections and used none of them.
 
     What actually cut were Fusion's own automatic tabs: tabPositioning is
     'distance' with tabDistance 0.0, which on a rectangular part happens to
@@ -242,6 +243,61 @@ def _edge_midpoint(edge):
     geom = edge.geometry
     start, end = geom.startPoint, geom.endPoint
     return adsk.core.Point3D.create((start.x + end.x) / 2, (start.y + end.y) / 2, (start.z + end.z) / 2)
+
+
+def _native_entity(entity):
+    """Return a native Fusion entity when ``entity`` is an occurrence proxy.
+
+    The sketch used for a tab point must be created in the owning component's
+    coordinate system. Fusion exposes proxy geometry in the root assembly
+    coordinate system, which makes a point look valid while placing it on the
+    wrong location once the parameter is evaluated.
+    """
+    try:
+        return entity.nativeObject or entity
+    except Exception:
+        return entity
+
+
+def _manual_tab_points(app, tab_face, tab_edges):
+    """Create explicit Manual Tabs SketchPoints at vetted edge midpoints.
+
+    Fusion stores ``tabPositions`` as a CadPoints collection. Assigning BRep
+    edges may display those edges in the operation dialog, but it does not
+    identify a position along each edge; the CAM kernel can then retain only
+    some of them depending on chain direction. SketchPoints make each tab
+    location unambiguous and preserve the body's occurrence context for
+    grouped jobs.
+    """
+    if tab_face is None or not tab_edges:
+        return []
+    try:
+        native_face = _native_entity(tab_face)
+        component = native_face.body.parentComponent
+        sketch = component.sketches.add(native_face)
+        sketch.name = "AutoCAM Manual Tab Points"
+        try:
+            sketch.isLightBulbOn = False
+        except Exception:
+            pass
+
+        try:
+            assembly_context = tab_face.assemblyContext
+        except Exception:
+            assembly_context = None
+
+        tab_points = []
+        for edge in tab_edges:
+            native_edge = _native_entity(edge)
+            point = sketch.modelToSketchSpace(_edge_midpoint(native_edge))
+            sketch_point = sketch.sketchPoints.add(point)
+            if assembly_context is not None:
+                sketch_point = sketch_point.createForAssemblyContext(assembly_context)
+            tab_points.append(sketch_point)
+        return tab_points
+    except Exception as e:
+        app.log(f"TabPlacement: could not create explicit Manual Tab points: {e}")
+        return []
 
 
 def _edge_outward_point(edge, body_center, offset_cm):
@@ -441,12 +497,12 @@ def select_tab_edges(body, max_tabs: int = DEFAULT_MAX_TABS, stock_bounds=None):
     return selected
 
 
-def _apply_manual_tabs(app, operation, tab_edges) -> bool:
-    """Disable automatic tabs and populate Fusion's Manual Tabs field.
+def _apply_manual_tabs(app, operation, tab_points) -> bool:
+    """Configure uniform explicit positions in Fusion's Manual Tabs field.
 
-    ``tabPositions`` receives vetted release edges, not synthesized points.
-    This deliberately does not configure automatic positioning or no-tab
-    zones: tabs are exclusively the explicit manual selections.
+    ``tabPositions`` receives explicit SketchPoints on the release contour.
+    The points, rather than edge references, make the requested location and
+    its chain direction unambiguous to Fusion's CAM kernel.
     """
     width_param = operation.parameters.itemByName("tabWidth")
     if width_param is not None:
@@ -472,25 +528,32 @@ def _apply_manual_tabs(app, operation, tab_edges) -> bool:
         app.log(f"TabPlacement: failed to disable automatic tabs: {e}")
         return False
 
+    positioning_param = operation.parameters.itemByName("tabPositioning")
+    if positioning_param is not None:
+        try:
+            positioning_param.expression = "'tabCount'"
+        except Exception as e:
+            app.log(f"TabPlacement: failed to set tabPositioning: {e}")
+
     positions_param = operation.parameters.itemByName("tabPositions")
     if positions_param is None:
         app.log("TabPlacement: this operation has no tabPositions (Manual Tabs) parameter.")
         return False
-    if not tab_edges:
-        app.log("TabPlacement: no candidate edges to assign to Manual Tabs.")
+    if not tab_points:
+        app.log("TabPlacement: no candidate points to assign to Manual Tabs.")
         return False
     try:
-        positions_param.value.value = list(tab_edges)
+        positions_param.value.value = list(tab_points)
     except Exception as e:
-        app.log(f"TabPlacement: setting Manual Tabs to {len(tab_edges)} edge(s) failed: {e}")
+        app.log(f"TabPlacement: setting Manual Tabs to {len(tab_points)} point(s) failed: {e}")
         return False
 
     # Read back what Fusion actually kept, rather than assuming the
     # assignment above stuck.
     #
     # Nothing here used to verify anything, and that is exactly how this
-    # module's two real bugs stayed invisible. Tab edges were being taken
-    # from the wrong face for a long time - every one of them off the
+    # module's two real bugs stayed invisible. Tab positions were being
+    # taken from the wrong face for a long time - every one of them off the
     # contour, so not a single manual tab could be placed - and the job
     # still reported success every time, because Fusion's own automatic
     # placement quietly produced tabs that looked plausible on simple
@@ -505,16 +568,15 @@ def _apply_manual_tabs(app, operation, tab_edges) -> bool:
         accepted = len(positions_param.value.value)
     except Exception:
         pass
-    if accepted is not None and accepted != len(tab_edges):
+    if accepted is not None and accepted != len(tab_points):
         app.log(
-            f"TabPlacement: WARNING - selected {len(tab_edges)} tab edge(s) but the "
-            f"operation kept {accepted}. The dropped edges are not on the contour "
-            f"being cut, so Fusion cannot place a tab on them; any tabs that do "
-            f"appear are its own automatic placement, not this module's choice."
+            f"TabPlacement: WARNING - selected {len(tab_points)} tab point(s) but the "
+            f"operation kept {accepted}. The dropped points are not on the contour "
+            f"being cut, so Fusion cannot place a tab on them."
         )
 
     app.log(
-        f"TabPlacement: Manual Tabs set to {len(tab_edges)} edge(s) "
+        f"TabPlacement: Manual Tabs set to {len(tab_points)} point(s) "
         f"(operation kept {accepted}), {TAB_WIDTH_IN}in wide x "
         f"{TAB_HEIGHT_IN}in tall"
     )
@@ -619,7 +681,7 @@ def ConfigureTabs(min_tabs: int = DEFAULT_MIN_TABS, max_tabs: int = DEFAULT_MAX_
             # EVERY body on the plate and combining them, single-part or
             # grouped - for a single-body plate this is exactly the old
             # single_body behavior (the loop below runs once).
-            all_candidates = []
+            all_tab_points = []
             for body in bodies:
                 perimeter_in = _outer_perimeter_in(body)
                 body_min_tabs = _min_tabs_for_body(body, min_tabs)
@@ -634,13 +696,21 @@ def ConfigureTabs(min_tabs: int = DEFAULT_MIN_TABS, max_tabs: int = DEFAULT_MAX_
                         "- using what's available rather than placing a tab "
                         "on a rounded or too-short edge."
                 )
-                all_candidates.extend(body_candidates)
-            candidate_edges = all_candidates
+                tab_face = _find_tab_face(body)
+                tab_points = _manual_tab_points(app, tab_face, body_candidates)
+                if len(tab_points) != len(body_candidates):
+                    app.log(
+                        f"TabPlacement: '{op.name}' - could not create all explicit tab points "
+                        f"for a nested body; leaving this operation unchanged."
+                    )
+                    all_tab_points = []
+                    break
+                all_tab_points.extend(tab_points)
 
-            if not candidate_edges:
-                app.log(f"TabPlacement: '{op.name}' - no usable tab edges found on any body, skipping.")
+            if not all_tab_points:
+                app.log(f"TabPlacement: '{op.name}' - no usable explicit tab points found on any body, skipping.")
                 continue
 
-            applied = _apply_manual_tabs(app, op, candidate_edges)
+            applied = _apply_manual_tabs(app, op, all_tab_points)
             if not applied:
                 app.log(f"TabPlacement: '{op.name}' could not configure Manual Tabs.")
