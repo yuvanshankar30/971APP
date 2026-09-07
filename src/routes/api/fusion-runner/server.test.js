@@ -1,14 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-const mocks=vi.hoisted(()=>({from:vi.fn(),payload:vi.fn()}));
-vi.mock('@supabase/supabase-js',()=>({createClient:()=>({from:mocks.from})}));
+const mocks=vi.hoisted(()=>({from:vi.fn(),payload:vi.fn(),storageUpload:vi.fn(async()=>({error:null}))}));
+vi.mock('@supabase/supabase-js',()=>({createClient:()=>({from:mocks.from,storage:{from:()=>({upload:mocks.storageUpload})}})}));
 vi.mock('$env/dynamic/private',()=>({env:{SUPABASE_URL:'https://example.supabase.co',SUPABASE_SERVICE_KEY:'service-key'}}));
 vi.mock('$lib/server/fusion_runner_auth.js',()=>({isAuthorizedFusionRunnerRequest:()=>true}));
 vi.mock('$autocam/fusion/jobPayload.js',()=>({buildJobPayload:mocks.payload}));
 import { POST } from './+server.js';
 const call=(action,body={})=>POST({url:new URL(`http://localhost/api/fusion-runner?action=${action}`),request:new Request('http://localhost',{method:'POST',body:JSON.stringify(body)})});
 let queries;
-beforeEach(()=>{queries=[];mocks.from.mockReset();mocks.payload.mockReset();});
 const machineId='11111111-1111-4111-8111-111111111111';
+beforeEach(()=>{queries=[];mocks.from.mockReset();mocks.payload.mockReset();mocks.storageUpload.mockReset();mocks.storageUpload.mockResolvedValue({error:null});});
 function chain(result){
  const q={};for(const method of ['select','update','eq','in','order','limit','or','lt'])q[method]=vi.fn(()=>q);
  q.single=vi.fn(async()=>result);q.then=(resolve)=>resolve(result);queries.push(q);return q;
@@ -62,7 +62,7 @@ describe('Fusion Runner grouping lifecycle',()=>{
  it('stores exact Fusion output artifacts without synthesizing a combined program',async()=>{
   const contentBase64=Buffer.from('N10 G90\r\nM30\r\n','utf8').toString('base64');
   mocks.from
-   .mockReturnValueOnce(chain({data:{id:'job',params:{fusionJobKind:'plate:cam'}}}))
+   .mockReturnValueOnce(chain({data:{id:'job',params:{fusionJobKind:'plate:cam',fusionPlateSnapshot:{name:'x44 stiffner'}}}}))
    .mockReturnValueOnce(chain({data:[{id:'job'}]}));
   const result=await call('complete',{jobId:'job',runnerId:'runner',ncFiles:[{name:'plate.nc',contentBase64}]});
   expect(result.status).toBe(200);
@@ -71,6 +71,16 @@ describe('Fusion Runner grouping lifecycle',()=>{
    gcode_file_name:null,
    fusion_nc_files:[expect.objectContaining({name:'plate.nc',contentBase64,size:14})]
   }));
+  // Direct instruction: a completed job's G-code should land in Files
+  // automatically, named from the plate/part it was run against, spaces
+  // stripped - same convention the manual "Post to Files" button already
+  // used, just no longer requiring someone to click through to it.
+  expect(mocks.storageUpload).toHaveBeenCalledTimes(1);
+  expect(mocks.storageUpload).toHaveBeenCalledWith(
+   'AutoCAM/x44stiffner.ngc',
+   expect.any(Buffer),
+   expect.objectContaining({upsert:true,contentType:'text/plain'})
+  );
  });
  it('rejects malformed Fusion output before completing the job',async()=>{
   mocks.from.mockReturnValueOnce(chain({data:{id:'job',params:{fusionJobKind:'plate:cam'}}}));
@@ -78,5 +88,16 @@ describe('Fusion Runner grouping lifecycle',()=>{
   expect(result.status).toBe(500);
   expect((await result.json()).error).toMatch(/filenames/);
   expect(mocks.from).toHaveBeenCalledTimes(1);
+  expect(mocks.storageUpload).not.toHaveBeenCalled();
+ });
+ it('still reports the job completed even if posting to Files fails',async()=>{
+  const contentBase64=Buffer.from('N10 G90\r\nM30\r\n','utf8').toString('base64');
+  mocks.from
+   .mockReturnValueOnce(chain({data:{id:'job',params:{fusionJobKind:'plate:cam'}}}))
+   .mockReturnValueOnce(chain({data:[{id:'job'}]}));
+  mocks.storageUpload.mockResolvedValue({error:{message:'bucket unreachable'}});
+  const result=await call('complete',{jobId:'job',runnerId:'runner',ncFiles:[{name:'plate.nc',contentBase64}]});
+  expect(result.status).toBe(200);
+  expect(await result.json()).toEqual({success:true});
  });
 });
