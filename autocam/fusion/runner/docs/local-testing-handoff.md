@@ -7,8 +7,7 @@ touching `autocam/fusion/` if you're picking this up cold.
 
 ## The short version
 
-The Fusion CAM Runner (`autocam/fusion/runner/`, forked from Team Valor
-6800's AutoCAM) works by polling a running Spartans Hub instance for queued
+The Fusion CAM Runner (`autocam/fusion/runner/`) works by polling a running Spartans Hub instance for queued
 `cam_jobs` rows, downloading STEP files, building a Fusion CAM setup from a
 template, generating toolpaths, exporting G-code, and reporting back. Right
 now it's being pointed at a **local dev server**
@@ -27,7 +26,7 @@ convention on reading a branch's PR before resuming work on it.
 
 1. **Fusion 360** installed, with this add-in placed at
    `~/Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns/SpartanRoboticsAutoCAM/`
-   (macOS) - see the repo root's `valor6800-autocam-runner-setup.md` for the
+   (macOS) - see [`team-setup-guide.md`](team-setup-guide.md) for the
    full walkthrough, including the `.overridepath`/`requests`-package
    workaround Fusion's bundled Python needs (it has no third-party packages
    otherwise).

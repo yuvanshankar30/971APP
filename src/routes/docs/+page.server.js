@@ -9,13 +9,10 @@
 // part of the compiled bundle itself, so it ships regardless of what the
 // deploy pipeline does or doesn't copy from the raw source tree.
 //
-// Excludes node_modules (some packages ship their own README.md - not ours
-// to browse here) and autocam/fusion/**/_upstream (vendored, reference-only
-// copies of Team Valor 6800's original AutoCAM source - same "not really
-// part of this app" reasoning vite.config.js already applies to excluding
-// that tree from the test runner).
+// Excludes node_modules because some packages ship README.md files that are
+// not project documentation.
 const rawFiles = import.meta.glob(
-  ['/**/*.md', '!/**/node_modules/**', '!/**/autocam/fusion/**/_upstream/**'],
+  ['/**/*.md', '!/**/node_modules/**'],
   { eager: true, query: '?raw', import: 'default' }
 );
 

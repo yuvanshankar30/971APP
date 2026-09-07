@@ -89,10 +89,9 @@
 
 <style>
   /* This page used to redefine the site's own --background/--accent/etc.
-     custom properties to force Valor 6800 AutoCAM's black/blue/gold look
+     custom properties to force a black/blue/gold look
      regardless of which Spartans Hub theme (light/dark/modern/legacy) was
-     actually selected - a deliberate "restyle like the vendored original"
-     decision at the time (see autocam/fusion/README.md). That's reversed
+     actually selected. That's reversed
      now: this page should look like the rest of Spartans Hub, using
      whatever theme the user has picked, the same way /autocam's own page
      already does (compare its .page-header/tab structure - no page-scoped

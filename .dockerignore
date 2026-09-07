@@ -11,11 +11,9 @@ build
 # in svelte.config.js) - excluding it here broke every Cloud Build image
 # build with ENOENT on those imports, since `COPY . .` in the Dockerfile
 # respects this file. Do not re-exclude the whole folder; if a narrower
-# exclude is ever wanted (e.g. the large vendored autocam/fusion/_upstream/
-# and autocam/fusion/runner/ reference/Python folders, which genuinely
-# aren't imported by the SvelteKit app), scope it to those exact paths and
-# verify with a real `docker build` first - this exact mistake is easy to
-# reintroduce by accident.
+# exclude is ever wanted, scope it to the exact non-runtime paths and verify
+# with a real `docker build` first - this exact mistake is easy to reintroduce
+# by accident.
 autocam-runner
 implementations
 docs

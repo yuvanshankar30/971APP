@@ -7,8 +7,8 @@ Router and the explicitly ShopSabre-only template for the New Router. Other
 machine/material combinations use the generic `../Plates.f3dhsm-template`.
 `camTube.py` still uses `../boxtubes.f3dhsm-template`.
 
-Confirmed real (not Valor's) by reading the XML directly - `<description>`
-tags reference "971 Main Bit", not Valor's tool names.
+Confirmed by reading the XML directly - `<description>` tags reference
+"971 Main Bit", the tool used by this Runner.
 
 ## What's here
 

@@ -279,7 +279,7 @@ browser confirmation or prompt popups.
   string import), not read from disk per-request - the production Docker
   image never gets the raw source tree, only compiled `build/` output, so
   a request-time `fs.readdir` would find nothing there. Excludes
-  `node_modules` and the vendored `autocam/fusion/**/_upstream` trees.
+  `node_modules`.
 - **Integrations**: Onshape (CAD source of truth for parts), Slack (bot
   notifications/DMs, `971bot`), The Blue Alliance (competition data),
   Google Drive (AutoCAM input/output watcher), Sentry (error monitoring),
@@ -422,17 +422,14 @@ own docs are all together in one place instead of scattered across
   are synchronous in-process math; milling needs an actual external Fusion
   360 Runner) - now built as **Fusion CAM**, see the next bullet.
 - **`autocam/fusion/`** (reachable from `/autocam/fusion`) - **Fusion CAM**:
-  a native SvelteKit/Supabase port of Team Valor 6800's open-source AutoCAM
-  (`AutoCAM-FRC/Website` + `AutoCAM-FRC/Runner`, MIT licensed), fills the
-  milling gap the rest of AutoCAM deliberately doesn't solve (real 3-axis
+  a native SvelteKit/Supabase milling pipeline that fills the gap the rest
+  of AutoCAM deliberately doesn't solve (real 3-axis
   contoured toolpaths via Fusion 360's own CAM engine, not flat 2.5D
   profiles). Backed by new `fusion_parts`/`fusion_plates`/`fusion_box_tubes`/
   `fusion_part_categories` tables plus the reused `cam_jobs`/`cam_machines`/
   `cam_tools`/`cam_materials` tables and a claim/complete/fail endpoint at
   `src/routes/api/fusion-runner/+server.js`. `autocam/fusion/runner/` is the
-  forked Fusion 360 add-in that actually runs CAM; unmodified copies of both
-  original repos are vendored at `autocam/fusion/_upstream/` and
-  `autocam/fusion/runner/_upstream/` for reference. Its active workflows
+  Fusion 360 add-in that actually runs CAM. Its active workflows
   compare completed plate G-code against the part's internal CAD loops and
   stock depth before reporting completion, surfacing missing-feature,
   incomplete-through-cut, and unsafe thin-wall findings as job warnings.

@@ -1,1 +1,0 @@
-export { PUT } from "@/lib/api/pc/assignments";
