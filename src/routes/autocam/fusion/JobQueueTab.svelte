@@ -3,7 +3,7 @@
   import { onMount } from 'svelte';
   import { supabase } from '$lib/supabase.js';
   import { toastActions } from '$lib/toast.js';
-  import { fetchFusionJobs, cancelFusionJob, deleteFusionJob } from '$lib/fusionCam.js';
+  import { fetchFusionJobs, fetchFusionJobUpdates, fetchFusionJobNcFiles, cancelFusionJob, deleteFusionJob } from '$lib/fusionCam.js';
   import { formatPacificDateTimeWithZone } from '$lib/timezone.js';
   import { ListChecks, X, Download, Trash2, Upload, AlertTriangle, ChevronDown } from 'lucide-svelte';
 
@@ -22,6 +22,7 @@
   let posting = false;
   let errorModalJob = null;
   let openFilesJobId = null;
+  let refreshing = false;
 
   // Python tracebacks are many lines of stack frames ending in the one line
   // that actually says what went wrong (ExceptionType: message) - showing
@@ -60,13 +61,27 @@
     }
   }
 
+  async function refreshActiveJobs() {
+    if (refreshing || document.hidden) return;
+    const activeIds = jobs.filter((job) => ['queued', 'claimed', 'processing'].includes(job.status)).map((job) => job.id);
+    if (!activeIds.length) return;
+    refreshing = true;
+    try {
+      const updates = await fetchFusionJobUpdates(activeIds);
+      const updatesById = new Map(updates.map((update) => [update.id, update]));
+      jobs = jobs.map((job) => updatesById.has(job.id) ? { ...job, ...updatesById.get(job.id) } : job);
+    } catch (e) {
+      console.error('Failed to refresh active Fusion jobs', e);
+    } finally {
+      refreshing = false;
+    }
+  }
+
   onMount(() => {
     load();
     // Active jobs (queued/claimed/processing) can change outside this tab -
     // a Runner claims/completes them independently - so poll while any are active.
-    const interval = setInterval(() => {
-      if (jobs.some((j) => ['queued', 'claimed', 'processing'].includes(j.status))) load(false);
-    }, 10000);
+    const interval = setInterval(refreshActiveJobs, 10000);
     return () => clearInterval(interval);
   });
 
@@ -111,7 +126,35 @@
     return rem ? `about ${hours}h ${rem}m` : `about ${hours}h`;
   }
 
-  function openPostModal(job) {
+  async function ensureNcFiles(job) {
+    if (Array.isArray(job.fusion_nc_files)) return job.fusion_nc_files;
+    const files = await fetchFusionJobNcFiles(job.id);
+    job.fusion_nc_files = files;
+    jobs = jobs.map((item) => item.id === job.id ? { ...item, fusion_nc_files: files } : item);
+    return files;
+  }
+
+  async function toggleFiles(job) {
+    if (openFilesJobId === job.id) {
+      openFilesJobId = null;
+      return;
+    }
+    try {
+      const files = await ensureNcFiles(job);
+      if (!files.length) return toastActions.show('This job has no G-code files');
+      openFilesJobId = job.id;
+    } catch (e) {
+      toastActions.show(e.message || 'Failed to load G-code files');
+    }
+  }
+
+  async function openPostModal(job) {
+    try {
+      const files = await ensureNcFiles(job);
+      if (!files.length) return toastActions.show('This job has no G-code to post');
+    } catch (e) {
+      return toastActions.show(e.message || 'Failed to load G-code files');
+    }
     postModalJob = job;
     postFileName = (job.name || `Job${job.id.slice(0, 8)}`).replace(/\s+/g, '');
   }
@@ -208,10 +251,10 @@
           </button>
         {/if}
         <div class="cam-list-actions">
-          {#if job.status === 'completed' && job.fusion_nc_files?.length}
+          {#if job.status === 'completed' && jobKind(job) !== 'plate:arrange'}
             <div class="files-dropdown">
-              <button type="button" class="btn btn-secondary btn-sm" on:click={() => (openFilesJobId = openFilesJobId === job.id ? null : job.id)}>
-                <Download size={14} /> {job.fusion_nc_files.length} file{job.fusion_nc_files.length === 1 ? '' : 's'} <ChevronDown size={13} />
+              <button type="button" class="btn btn-secondary btn-sm" on:click={() => toggleFiles(job)}>
+                <Download size={14} /> {Array.isArray(job.fusion_nc_files) ? `${job.fusion_nc_files.length} file${job.fusion_nc_files.length === 1 ? '' : 's'}` : 'Files'} <ChevronDown size={13} />
               </button>
               {#if openFilesJobId === job.id}
                 <div class="files-dropdown-menu">

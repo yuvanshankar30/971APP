@@ -7,6 +7,16 @@ describe('Fusion plate payloads',()=>{
   const payload=await buildJobPayload(db(),job());
   expect(payload.assignments.map(p=>[p.part_id,p.quantity])).toEqual([['a',2],['b',3]]);
  });
+ it('signs independent STEP inputs concurrently instead of serializing storage latency',async()=>{
+  const resolvers=[];
+  const createSignedUrl=vi.fn((fileName)=>new Promise((resolve)=>resolvers.push(()=>resolve({data:{signedUrl:`https://example.invalid/${fileName}`}}))));
+  const pending=buildJobPayload({storage:{from:()=>({createSignedUrl})}},job());
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(createSignedUrl).toHaveBeenCalledTimes(2);
+  resolvers.forEach((resolve)=>resolve());
+  await expect(pending).resolves.toMatchObject({assignments:[{part_id:'a'},{part_id:'b'}]});
+ });
  it('fails the entire plate when any file is missing or cannot be signed',async()=>{
   const j=job(); j.params.fusionPlateSnapshot.assignments[1].step_file_name=null;
   await expect(buildJobPayload(db(),j)).rejects.toThrow(/Part b/);
