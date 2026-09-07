@@ -31,9 +31,24 @@ def _is_offline_settings_error(exc) -> bool:
     finished establishing, not a permanent configuration problem. Matched
     by substring since this is a generic RuntimeError with no distinct
     exception type of its own.
+
+    Walks the exception chain (__cause__/__context__), not just the
+    exception handed in. Confirmed live as the reason a fresh launch still
+    printed a full traceback after the first fix: being offline surfaced as
+    an offline error DURING handling of an unrelated
+    InternalValidationError, so the exception that finally reached the
+    caller was the validation error with the real, recognizable cause
+    buried one level down.
     """
-    text = str(exc)
-    return "offline settings" in text.lower() or "CB_NA" in text
+    seen = set()
+    current = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        text = str(current)
+        if "offline settings" in text.lower() or "CB_NA" in text:
+            return True
+        current = current.__cause__ or current.__context__
+    return False
 
 
 def _retry_on_offline(app, attempts=6, initial_delay_seconds=1.0):
@@ -206,15 +221,22 @@ def resolve_drop_folder(app, project_name, folder_path):
             app.log(f"'{segment}' folder not found under '{folder.name}', creating it...")
             try:
                 next_folder = retry(lambda: folder.dataFolders.add(segment), f"dataFolders.add('{segment}')")
-            except RuntimeError:
-                # Lost a race with another Runner/session creating the same
-                # segment between the lookup above and this add() - the
-                # folder exists now, so look it up for real instead of
-                # failing a job save over something that isn't actually a
-                # problem. Also routed through the same retry wrapper: if
-                # add() failed because Fusion is genuinely still offline
-                # (not a race), this re-lookup would otherwise hit the
-                # identical uncaught error immediately afterward.
+            except RuntimeError as add_error:
+                # An offline add() means the cloud simply isn't reachable
+                # yet - there is nothing to recover from and nothing the
+                # fallback below can find, so stop here. Confirmed live: the
+                # fallback was reached in exactly this state and raised its
+                # own InternalValidationError, which is what produced the
+                # full traceback on every fresh Fusion launch. Re-raising
+                # the offline error instead keeps the real cause intact for
+                # the caller to recognize.
+                if _is_offline_settings_error(add_error):
+                    raise
+                # Otherwise: lost a race with another Runner/session
+                # creating the same segment between the lookup above and
+                # this add() - the folder exists now, so look it up for real
+                # instead of failing a job save over something that isn't
+                # actually a problem.
                 next_folder = retry(
                     lambda: folder.dataFolders.itemByName(segment),
                     f"itemByName('{segment}') (post-add fallback)",
