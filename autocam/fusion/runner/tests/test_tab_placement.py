@@ -289,5 +289,57 @@ class ManualTabTests(unittest.TestCase):
         self.assertEqual(parameters["tabPositions"].value.value, edges)
 
 
+class TabReadBackTests(unittest.TestCase):
+    """Assignments to Fusion CAM tab parameters are verified, not trusted.
+
+    Both of this module's real bugs were silent: tab edges came from the
+    wrong face so none could be placed, and tabsPerContour reports 1
+    whatever it is given. In both cases the job reported success.
+    """
+
+    def _op(self, kept):
+        params = {n: _Parameter() for n in
+                  ("tabWidth", "tabHeight", "tabsPerContour", "tabPositions")}
+        holder = params["tabPositions"]
+
+        class _V:
+            def __init__(self):
+                self._v = []
+
+            @property
+            def value(self):
+                return self._v
+
+            @value.setter
+            def value(self, edges):
+                # Model Fusion keeping only the edges it can actually place.
+                self._v = list(edges)[:kept]
+
+        holder.value = _V()
+        return types.SimpleNamespace(parameters=_Parameters(params)), params
+
+    def test_warns_when_fusion_drops_some_of_the_selected_edges(self):
+        logged = []
+        app = types.SimpleNamespace(log=logged.append)
+        operation, _ = self._op(kept=2)
+
+        self.assertTrue(TabPlacement._apply_manual_tabs(
+            app, operation, [object(), object(), object(), object()]))
+
+        warnings = [m for m in logged if "WARNING" in m]
+        self.assertTrue(warnings, "dropping 2 of 4 tab edges must not be silent")
+        self.assertIn("kept 2", warnings[0])
+
+    def test_stays_quiet_when_every_edge_is_kept(self):
+        logged = []
+        app = types.SimpleNamespace(log=logged.append)
+        operation, _ = self._op(kept=4)
+
+        self.assertTrue(TabPlacement._apply_manual_tabs(
+            app, operation, [object(), object(), object(), object()]))
+
+        self.assertEqual([m for m in logged if "WARNING" in m], [])
+
+
 if __name__ == "__main__":
     unittest.main()
