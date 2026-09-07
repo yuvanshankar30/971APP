@@ -148,3 +148,67 @@ class OfflineMustNotCreateFoldersTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OfflineDuringAnotherErrorTests(unittest.TestCase):
+    """The real fresh-launch sequence, reproduced: itemByName raises the
+    InternalValidationError "not found" flavor, the code correctly moves on
+    to create the folder, and add() then fails because the cloud isn't up
+    yet. Before this, the post-add fallback ran anyway and raised its own
+    validation error, which is what printed a full traceback on every
+    Fusion launch.
+    """
+
+    def setUp(self):
+        self._real_sleep = dropFolder.time.sleep
+        dropFolder.time.sleep = lambda _seconds: None
+
+    def tearDown(self):
+        dropFolder.time.sleep = self._real_sleep
+
+    def _app_and_project(self, root):
+        app = fake_app()
+        project = MagicMock()
+        project.name = "2026 Season CAM"
+        project.rootFolder = root
+        app.data.dataProjects.count = 1
+        app.data.dataProjects.item.return_value = project
+        return app
+
+    def test_offline_add_does_not_run_the_race_fallback(self):
+        root = MagicMock()
+        root.name = "2026 Season CAM"
+        root.dataFolders.itemByName.side_effect = RuntimeError(
+            "2 : InternalValidationError : status.isOk() && folders"
+        )
+        root.dataFolders.add.side_effect = RuntimeError("3 : CB_NA - System in offline settings")
+        app = self._app_and_project(root)
+
+        with self.assertRaises(RuntimeError) as caught:
+            dropFolder.resolve_drop_folder(app, "2026 Season CAM", "Offseason Projects")
+
+        # The offline cause must survive to the caller so it can be
+        # recognized and reported calmly instead of as a crash.
+        self.assertTrue(dropFolder._is_offline_settings_error(caught.exception))
+        # itemByName ran only for the initial lookup, never as a post-add
+        # fallback that cannot succeed while offline.
+        self.assertEqual(root.dataFolders.itemByName.call_count, 1)
+
+    def test_detects_offline_buried_in_an_exception_chain(self):
+        offline = RuntimeError("3 : CB_NA - System in offline settings")
+        try:
+            try:
+                raise offline
+            except RuntimeError:
+                raise RuntimeError("2 : InternalValidationError : status.isOk() && folders")
+        except RuntimeError as chained:
+            self.assertTrue(dropFolder._is_offline_settings_error(chained))
+
+    def test_still_false_when_nothing_in_the_chain_is_offline(self):
+        try:
+            try:
+                raise RuntimeError("some other failure")
+            except RuntimeError:
+                raise RuntimeError("2 : InternalValidationError : status.isOk() && folders")
+        except RuntimeError as chained:
+            self.assertFalse(dropFolder._is_offline_settings_error(chained))
