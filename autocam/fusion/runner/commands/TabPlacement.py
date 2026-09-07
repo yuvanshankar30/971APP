@@ -76,6 +76,11 @@ TARGET_TAB_SPACING_IN = 6.0
 # corner between them.
 TAB_WIDTH_IN = 0.6
 TAB_HEIGHT_IN = 0.15
+# Tab height is remaining material, so it can never exceed the sheet itself.
+# Keep one geometry for every tab in a job, using the thinnest nested body
+# for grouped plates. 70% preserves the existing 0.15in height on 0.25in
+# stock while leaving a physically valid 0.044in tab on 0.063in sheet.
+MAX_TAB_HEIGHT_FRACTION = 0.70
 
 # The shortest side that may carry a tab, derived from the tab itself
 # rather than picked as a round number.
@@ -182,6 +187,24 @@ def _outer_perimeter_in(body) -> float:
     if tab_face is None:
         return 0.0
     return sum(_edge_length(e) for e in _outer_boundary_edges(tab_face)) / 2.54
+
+
+def _body_thickness_in(body) -> float:
+    try:
+        bounds = body.boundingBox
+        return abs(float(bounds.maxPoint.z) - float(bounds.minPoint.z)) / 2.54
+    except Exception:
+        return 0.0
+
+
+def _tab_height_for_bodies(bodies) -> float:
+    """Return one safe, uniform tab height for all bodies in this setup."""
+    thicknesses = [thickness for thickness in (_body_thickness_in(body) for body in bodies) if thickness > 0]
+    if not thicknesses:
+        # Geometry inspection should not turn into an unheld part. Preserve
+        # the established maximum when Fusion cannot report a body thickness.
+        return TAB_HEIGHT_IN
+    return min(TAB_HEIGHT_IN, min(thicknesses) * MAX_TAB_HEIGHT_FRACTION)
 
 
 def _tab_count_for_perimeter(perimeter_in: float, min_tabs: int, max_tabs: int) -> int:
@@ -463,7 +486,7 @@ def select_tab_edges(body, max_tabs: int = DEFAULT_MAX_TABS, stock_bounds=None):
     return selected
 
 
-def _apply_manual_tabs(app, operation, tab_points) -> bool:
+def _apply_manual_tabs(app, operation, tab_points, tab_height_in: float = TAB_HEIGHT_IN) -> bool:
     """Configure uniform explicit positions in Fusion's Manual Tabs field.
 
     ``tabPositions`` receives explicit SketchPoints on the release contour.
@@ -480,7 +503,7 @@ def _apply_manual_tabs(app, operation, tab_points) -> bool:
     height_param = operation.parameters.itemByName("tabHeight")
     if height_param is not None:
         try:
-            height_param.expression = f"{TAB_HEIGHT_IN}in"
+            height_param.expression = f"{tab_height_in}in"
         except Exception as e:
             app.log(f"TabPlacement: failed to set tabHeight: {e}")
 
@@ -554,7 +577,7 @@ def _apply_manual_tabs(app, operation, tab_points) -> bool:
     app.log(
         f"TabPlacement: Manual Tabs set to {len(tab_points)} point(s) "
         f"(operation kept {accepted}), {TAB_WIDTH_IN}in wide x "
-        f"{TAB_HEIGHT_IN}in tall"
+        f"{tab_height_in:.4f}in tall"
     )
     return True
 
@@ -583,6 +606,13 @@ def ConfigureTabs(min_tabs: int = DEFAULT_MIN_TABS, max_tabs: int = DEFAULT_MAX_
     if not bodies:
         app.log("TabPlacement: no bodies found, skipping tab configuration")
         return
+
+    tab_height_in = _tab_height_for_bodies(bodies)
+    if tab_height_in < TAB_HEIGHT_IN:
+        app.log(
+            f"TabPlacement: reduced tab height from {TAB_HEIGHT_IN}in to "
+            f"{tab_height_in:.4f}in for the thinnest nested body."
+        )
 
     cam = adsk.cam.CAM.cast(
         app.activeDocument.products.itemByProductType("CAMProductType")
@@ -687,6 +717,6 @@ def ConfigureTabs(min_tabs: int = DEFAULT_MIN_TABS, max_tabs: int = DEFAULT_MAX_
                 app.log(f"TabPlacement: '{op.name}' - no usable explicit tab points found on any body, skipping.")
                 continue
 
-            applied = _apply_manual_tabs(app, op, all_tab_points)
+            applied = _apply_manual_tabs(app, op, all_tab_points, tab_height_in)
             if not applied:
                 app.log(f"TabPlacement: '{op.name}' could not configure Manual Tabs.")

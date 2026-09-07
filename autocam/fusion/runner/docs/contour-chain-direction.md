@@ -340,6 +340,15 @@ this order:
 that those locations, rather than the template's fallback distance tabs,
 are what the release contour machines.
 
+### Tab height must fit the stock
+
+`tabHeight` is the material deliberately left at each tab. A fixed `0.15in`
+height is valid on common quarter-inch plate but impossible on `0.063in`
+sheet. The runner therefore uses one height for every tab in a job: the
+requested `0.15in` maximum, capped at 70% of the thinnest nested body. This
+keeps all tabs geometrically consistent while preventing Fusion from silently
+dropping thin-stock tab locations.
+
 Two invariants worth preserving if this is touched:
 
 - **Stock backing never disqualifies a side.** It decides *which segment*
