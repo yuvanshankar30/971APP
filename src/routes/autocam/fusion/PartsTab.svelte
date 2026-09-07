@@ -86,7 +86,7 @@
     newPart = {
       ...newPart,
       name: newPart.name || linkedPart.name || '',
-      manufacturingPartId: initialManufacturingPartId
+      manufacturingPartId: linkedPart.id
     };
     if (!newPart.fusionFileName) {
       const derived = (linkedPart.name || '').trim().replace(/\s+/g, '');
@@ -118,6 +118,35 @@
     } finally {
       detectingDepth = false;
     }
+  }
+
+  // Picking a request from the dropdown carries its STEP file over too,
+  // not just arriving via the "Open Fusion CAM" deep link. A part linked to
+  // a manufacturing request is meant to BE that request's part, so it
+  // should already have that request's STEP file - previously the carry-over
+  // only ran on the deep-link path, so linking a request by hand left the
+  // file picker empty and the same STEP had to be downloaded from the
+  // request and re-uploaded here by hand.
+  //
+  // A file the user chose themselves is never replaced: only a carried-over
+  // file (stepCarriedOverFrom) or an empty picker is filled in, so
+  // re-pointing the link can't silently swap out a deliberate upload.
+  async function handleManufacturingLinkChange() {
+    const selectedId = newPart.manufacturingPartId;
+    if (!selectedId) {
+      // Unlinking clears a file that only came from the previous link -
+      // leaving it attached would quietly ship the wrong geometry.
+      if (stepCarriedOverFrom) {
+        stepFile = null;
+        stepCarriedOverFrom = null;
+        detectedDepthInches = null;
+      }
+      return;
+    }
+    if (stepFile && !stepCarriedOverFrom) return; // user picked their own file
+    const linkedPart = manufacturingParts.find((mp) => mp.id === selectedId);
+    if (!linkedPart) return;
+    await applyManufacturingPrefill(linkedPart);
   }
 
   // Runs once, as soon as both the deep-link target and the manufacturing
@@ -375,13 +404,13 @@
       <div class="form-row">
         <div class="form-group">
           <label class="form-label" for="part-manufacturing-link">Manufacturing request (optional)</label>
-          <select id="part-manufacturing-link" class="form-select" bind:value={newPart.manufacturingPartId}>
+          <select id="part-manufacturing-link" class="form-select" bind:value={newPart.manufacturingPartId} on:change={handleManufacturingLinkChange}>
             <option value="">Not linked to a request</option>
             {#each manufacturingParts as mp}
               <option value={mp.id}>{mp.name}{mp.project_id ? ` (${mp.project_id})` : ''}</option>
             {/each}
           </select>
-          <p class="cam-form-hint">Traces this stock back to the real request it's for - leave unlinked for ad-hoc/prototype stock.</p>
+          <p class="cam-form-hint">Traces this stock back to the real request it's for - leave unlinked for ad-hoc/prototype stock. Linking one carries its STEP file over automatically.</p>
         </div>
       </div>
       <button class="btn btn-primary" disabled={submitting} on:click={handleAdd}>{submitting ? 'Adding...' : 'Add Part'}</button>
