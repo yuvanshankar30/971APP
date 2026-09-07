@@ -2738,7 +2738,7 @@
   .cad-action-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.3rem;
+    gap: 0.35rem;
     width: 100%;
     min-width: 0;
   }
@@ -2750,7 +2750,17 @@
     overflow-wrap: anywhere;
     line-height: 1.2;
     font-size: var(--font-xs, 0.75rem);
-    padding: 0.3rem 0.4rem;
+    padding: 0.35rem 0.45rem;
+    /* app.css's base .btn pins a fixed `height: var(--btn-height)`. These
+       buttons deliberately wrap instead (white-space: normal above), and a
+       label that wraps to two lines - "Open Fusion CAM" is the one that
+       actually does at this column width - is taller than that fixed
+       height, so the text rendered outside the button's own background
+       rather than growing it. Height has to become a minimum for wrapping
+       to work at all; without this the wrap settings above have nothing to
+       grow into. */
+    height: auto;
+    min-height: var(--btn-height);
   }
 
   .deep-link-highlight {
