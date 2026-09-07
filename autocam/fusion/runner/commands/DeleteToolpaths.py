@@ -219,6 +219,84 @@ def _is_circular_loop(edges) -> bool:
     return True
 
 
+# What separates a FEATURE from a SHAPE.
+#
+# These are two genuinely different things to machine, and the real
+# templates model them as separate operations ("Slot Cut for Features" vs
+# "Shape Through Hole"/"Shape Pocket"):
+#
+# - A FEATURE is a slot: long and narrow, barely wider than the cutter, so
+#   the tool essentially just traces it. There is no interior to clear.
+# - A SHAPE is broad: a polygon or blob with real area inside it, which
+#   wants an adaptive/pocketing pass to clear that area out.
+#
+# Measured as the bounding box's long side over its short side, which is
+# shape-agnostic - it does not care whether a slot is a straight bar, an
+# I, a dogbone, a kidney or a pill, only that it is elongated. That is the
+# point: this must hold for ANY slot-like feature, not one example shape.
+#
+# 2.5 calibrated against a real 19-loop training part, measuring every
+# internal loop's own aspect ratio:
+#
+#   3.30  <- the one real slot (0.326 x 1.077in, ~2x the 0.1575in cutter)
+#   1.80, 1.73, 1.34, 1.29, 1.17, 1.15, 1.05, 1.04, 1.02   <- broad shapes
+#
+# The gap between 3.30 and 1.80 is wide, so the threshold sits comfortably
+# between the two populations rather than splitting a cluster.
+#
+# A previous attempt at aspect-ratio slot detection was removed after real
+# kidney/pill cutouts (2.25 and 1.28) failed it. That removal was correct
+# AT THE TIME for a different reason: anything not classified as a slot
+# fell through to generic PocketRecognitionSelection, which found nothing,
+# so a misclassified feature was machined as nothing at all. Shapes now
+# have working operations of their own, so classifying a rounder cutout as
+# a shape is a correct outcome rather than a silent loss.
+_FEATURE_ASPECT_RATIO = 2.5
+
+
+def _loop_aspect_ratio(edges) -> float:
+    """Bounding-box elongation of a closed loop - long side / short side.
+
+    Samples each edge's endpoints plus a point along it, so an arc-sided
+    loop (a pill, a dogbone's rounded ends) is measured by the space it
+    actually occupies rather than by its vertices alone. Returns 0.0 when
+    the loop cannot be measured, which reads as "not elongated" and leaves
+    it classified as a shape - the safer default, since a shape operation
+    can machine a slot's area but a slot pass cannot clear a shape's.
+    """
+    xs, ys = [], []
+    for edge in edges:
+        for getter in ("startVertex", "endVertex"):
+            try:
+                point = getattr(edge, getter).geometry
+                xs.append(point.x)
+                ys.append(point.y)
+            except Exception:
+                continue
+        try:
+            point = edge.pointOnEdge
+            xs.append(point.x)
+            ys.append(point.y)
+        except Exception:
+            pass
+    if len(xs) < 2:
+        return 0.0
+    width, height = max(xs) - min(xs), max(ys) - min(ys)
+    longer, shorter = max(width, height), min(width, height)
+    if shorter <= 1e-6:
+        return 0.0
+    return longer / shorter
+
+
+def _is_feature_slot_op(name_lower: str) -> bool:
+    """True for the template's own dedicated feature-slot operation
+    ("Slot Cut for Features"). Requires both "slot" and "feature" so it can
+    never match the outer release cut, which is also slot-named ("2D Slot
+    Cut", "Slot Cut for Edges") but is identified by group_tabs instead.
+    """
+    return "slot" in name_lower and "feature" in name_lower
+
+
 def _circle_loop_diameter_cm(edges) -> float:
     """The real diameter of a circular loop, in cm - only defined for the
     common case of a single full-circle edge (every circular hole this
@@ -284,11 +362,13 @@ def _big_circular_loop_edges_all_bodies(design, min_diameter_cm: float):
 
 
 def _internal_feature_loop_chains_all_bodies(design):
-    """Every body's own internal (non-outer), non-circular loop - a real
-    through-cut feature (a slot, kidney, pill, or any other non-round
-    cutout) that needs its own dedicated ChainSelection-based finishing
-    pass, combined across every body (same reasoning as
-    _outer_loop_edges_all_bodies).
+    """Every body's own internal (non-outer), non-circular through-loop,
+    split into ``(shape_chains, slot_chains)`` - see _FEATURE_ASPECT_RATIO
+    for what separates the two and why they are machined differently.
+
+    Both halves carry the same (seed edge, is_reverted) shape, so a caller
+    that has no dedicated feature operation can simply concatenate them and
+    treat everything as it did before.
 
     This used to only collect loops whose bounding box was elongated past
     a 2.5:1 aspect-ratio threshold (treating anything rounder as "not a
@@ -314,7 +394,8 @@ def _internal_feature_loop_chains_all_bodies(design):
     selections share one consistent face reference on this part instead
     of two independently-tuned ones.
     """
-    feature_chains = []
+    shape_chains = []
+    slot_chains = []
     for occ in design.rootComponent.allOccurrences:
         if occ.bRepBodies.count == 0:
             continue
@@ -333,8 +414,12 @@ def _internal_feature_loop_chains_all_bodies(design):
             # in ChainSelection rather than imposing one direction on every
             # imported feature.  See docs/contour-chain-direction.md.
             seed = co_edges[0]
-            feature_chains.append((seed.edge, is_reverted_for_loop_seed(seed.isOpposedToEdge)))
-    return feature_chains
+            entry = (seed.edge, is_reverted_for_loop_seed(seed.isOpposedToEdge))
+            if _loop_aspect_ratio(edges) >= _FEATURE_ASPECT_RATIO:
+                slot_chains.append(entry)
+            else:
+                shape_chains.append(entry)
+    return shape_chains, slot_chains
 
 
 def _blind_pocket_loops_all_bodies(design):
@@ -559,13 +644,35 @@ def _repair_missing_selections(setup) -> list[str]:
         for op in ops_snapshot
         if "through" in op.name.lower() and "circular" not in op.name.lower()
     ]
+    # The template's own dedicated feature-slot operation, if it ships one.
+    # Confirmed against the two real templates: the New Router's
+    # "new router metal sheet" template has "Slot Cut for Features"
+    # (contour2d, group_tabs=false) alongside "Slot Cut for Edges"
+    # (contour2d, group_tabs=true - the outer release cut), while the UNC
+    # Router's "(DEPRECATED)971 Metal Sheet" template has only "2D Slot
+    # Cut" and no feature-slot operation at all.
+    feature_slot_ops = [op for op in ops_snapshot if _is_feature_slot_op(op.name.lower())]
+
     through_chain_assignments = {}
-    if through_shape_ops:
+    if through_shape_ops or feature_slot_ops:
         design = _design()
-        feature_chains_cache = _internal_feature_loop_chains_all_bodies(design) if design else []
-        if feature_chains_cache:
+        shape_chains, slot_chains = (
+            _internal_feature_loop_chains_all_bodies(design) if design else ([], [])
+        )
+        # A slot only goes to a feature operation if the template actually
+        # has one. Where it doesn't, slots stay with the through-shape
+        # operations exactly as before - that keeps every template without
+        # a feature operation working unchanged rather than silently
+        # dropping its slots on the floor.
+        if feature_slot_ops and slot_chains:
+            for op in feature_slot_ops:
+                through_chain_assignments[op.operationId] = slot_chains
+            shape_only = shape_chains
+        else:
+            shape_only = shape_chains + slot_chains
+        if shape_only:
             for op in through_shape_ops:
-                through_chain_assignments[op.operationId] = feature_chains_cache
+                through_chain_assignments[op.operationId] = shape_only
 
     # Pocket finishing passes are not a substitute for a real Shape Pocket:
     # their stale template references are removed. The adaptive Shape Pocket

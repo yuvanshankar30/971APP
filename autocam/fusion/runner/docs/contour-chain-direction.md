@@ -51,6 +51,66 @@ this one) - and the through cut won physically. Fixed by matching any
 operation with `"through"` in its name (excluding `"circular"`, which is
 handled by its own dedicated branch).
 
+## Feature vs. shape: two different things to machine
+
+A **feature** and a **shape** are not the same cutout with different names,
+and the real templates model them as separate operations:
+
+| | Feature (slot) | Shape |
+|---|---|---|
+| Geometry | Long and narrow, barely wider than the cutter | Broad - a polygon or blob with real area inside |
+| Machining | The tool essentially traces it; nothing to clear | Wants an adaptive/pocketing pass to clear the area |
+| Operation | `Slot Cut for Features` | `Shape Through Hole` / `Shape Pocket` |
+
+The rule is `_FEATURE_ASPECT_RATIO`: a loop whose bounding box is at least
+2.5x longer than it is wide is a feature; anything rounder is a shape.
+
+It is deliberately **shape-agnostic** - it measures elongation only, not any
+particular outline - so it holds for any slot-like cutout (a straight bar,
+an I, a dogbone, a pill), not one example shape.
+
+2.5 was calibrated against a real 19-loop training part by measuring every
+internal loop:
+
+```
+3.30   <- the one real slot (0.326 x 1.077in, ~2x the 0.1575in cutter)
+1.80, 1.73, 1.34, 1.29, 1.17, 1.15, 1.05, 1.04, 1.02   <- broad shapes
+```
+
+The gap between 3.30 and 1.80 is wide, so the threshold sits between two
+populations rather than splitting a cluster.
+
+**An earlier aspect-ratio attempt was removed, and that was right at the
+time** - real kidney/pill cutouts measuring 2.25 and 1.28 failed it, and
+back then anything not classified as a slot fell through to generic
+`PocketRecognitionSelection`, which found nothing, so a misclassified
+feature was machined as *nothing at all*. Shapes now have working
+operations of their own, so classifying a rounder cutout as a shape is a
+correct outcome rather than a silent loss. That is what makes the rule
+safe to reintroduce.
+
+### Which operation slots go to
+
+`Slot Cut for Features` is matched by name requiring **both** "slot" and
+"feature". That matters because the outer release cut is *also* slot-named
+(`2D Slot Cut`, `Slot Cut for Edges`) - it is identified by `group_tabs`
+instead, and must never be captured by this match or the part would never
+be released from the stock.
+
+Not every template ships a feature operation. Confirmed against the two
+real ones:
+
+- `new router metal sheet` - has `Slot Cut for Features` (contour2d,
+  `group_tabs=false`) **and** `Slot Cut for Edges` (contour2d,
+  `group_tabs=true`, the outer release cut).
+- `(DEPRECATED)971 Metal Sheet` - has only `2D Slot Cut`, no feature
+  operation at all.
+
+**Where a template has no feature operation, slots stay with the
+through-shape operations exactly as before.** That keeps every such
+template working unchanged rather than silently dropping its slots. Slots
+are through-cuts either way, so they get the same depth handling.
+
 ## Blind pocket vs. through-cut: don't trust face normal sign
 
 Whether an internal loop is a genuine blind pocket (has its own floor) or a
