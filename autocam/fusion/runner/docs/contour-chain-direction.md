@@ -103,8 +103,10 @@ real ones:
 - `new router metal sheet` - has `Slot Cut for Features` (contour2d,
   `group_tabs=false`) **and** `Slot Cut for Edges` (contour2d,
   `group_tabs=true`, the outer release cut).
-- `(DEPRECATED)971 Metal Sheet` - has only `2D Slot Cut`, no feature
-  operation at all.
+- `(DEPRECATED)971 Metal Sheet` (UNC Router) - has only `2D Slot Cut`, no
+  feature operation, **deliberately**. One was added here and then removed
+  again on direct instruction: feature slot cuts are for the New Router
+  only. Do not re-add it to this template.
 
 **Where a template has no feature operation, slots stay with the
 through-shape operations exactly as before.** That keeps every such
