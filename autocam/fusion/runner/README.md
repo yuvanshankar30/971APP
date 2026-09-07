@@ -43,6 +43,7 @@ The add-in runs a background polling thread that claims queued `cam_jobs` rows (
 - **2D nesting** — auto-arranges parts onto plates with envelope screenshots
 - **Auto-orientation** — orients parts largest-face-up before setup
 - **Template-driven setups** — reusable Fusion CAM templates for plates and box tubes
+- **Topology-aware contour repair** — rebuilds stale template selections from the imported model while preserving each internal loop's real direction
 - **Exact NC artifacts** — preserves each Fusion-posted file byte for byte instead of joining complete programs together
 - **Status reporting** — completion and errors pushed back to Spartans Hub's `cam_jobs` table
 
@@ -128,6 +129,7 @@ It asks which Hub to talk to (deployed, or a local dev server) and for your `FUS
 | `HandleTube.py` | Box-tube handling |
 | `MultiImport.py` | Multi-part import |
 | `DeleteToolpaths.py` | Clear existing toolpaths |
+| `ContourChains.py` | Preserve face-loop direction when rebuilding contour selections |
 | `ScreenshotEnvelope.py` | Capture envelope screenshots |
 
 ## Development
@@ -139,6 +141,9 @@ python3 -m compileall -q .
 ```
 
 Toggle verbose logging to the Fusion **Text Command** window via `DEBUG = True` in `config.py`.
+
+For the contour-chain direction rule and its live-Fusion validation steps, see
+[`docs/contour-chain-direction.md`](docs/contour-chain-direction.md).
 
 See **[CONTRIBUTING.md](CONTRIBUTING.md)** for the original upstream pull-request checklist (still broadly applicable to this fork).
 

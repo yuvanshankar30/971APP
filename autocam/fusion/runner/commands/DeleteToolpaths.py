@@ -1,6 +1,8 @@
 import adsk.core, adsk.fusion, adsk.cam, traceback
 import time
 
+from .ContourChains import is_reverted_for_loop_seed
+
 
 _POCKET_STRATEGIES = ("pocket_new", "pocket_clearing", "pocket2d", "adaptive2d")
 
@@ -164,7 +166,7 @@ def _is_circular_loop(edges) -> bool:
     operations' own dedicated hole-recognition machinery. A polygon-ish
     loop (a slot, kidney, or other pill/rounded-rectangle shape mixing
     straight and arc segments) is not circular and needs the dedicated
-    ChainSelection-based finishing pass _internal_feature_loop_edges_all_bodies
+    ChainSelection-based finishing pass _internal_feature_loop_chains_all_bodies
     feeds instead.
     """
     if not edges:
@@ -198,7 +200,7 @@ def _big_circular_loop_edges_all_bodies(design, min_diameter_cm: float):
     min_diameter_cm, combined across every body (same reasoning as
     _outer_loop_edges_all_bodies) - the template's own dedicated big-hole
     operation needs a real ChainSelection built from these, for the exact
-    same reason _internal_feature_loop_edges_all_bodies needed one instead
+    same reason _internal_feature_loop_chains_all_bodies needed one instead
     of generic PocketRecognitionSelection: confirmed live that
     PocketRecognitionSelection's areHolesIncluded hole-search finds
     nothing for this part's real big circular through-hole even with
@@ -231,7 +233,7 @@ def _big_circular_loop_edges_all_bodies(design, min_diameter_cm: float):
     return loops
 
 
-def _internal_feature_loop_edges_all_bodies(design):
+def _internal_feature_loop_chains_all_bodies(design):
     """Every body's own internal (non-outer), non-circular loop - a real
     through-cut feature (a slot, kidney, pill, or any other non-round
     cutout) that needs its own dedicated ChainSelection-based finishing
@@ -262,7 +264,7 @@ def _internal_feature_loop_edges_all_bodies(design):
     selections share one consistent face reference on this part instead
     of two independently-tuned ones.
     """
-    feature_edges = []
+    feature_chains = []
     for occ in design.rootComponent.allOccurrences:
         if occ.bRepBodies.count == 0:
             continue
@@ -272,11 +274,17 @@ def _internal_feature_loop_edges_all_bodies(design):
         for loop in bottom_face.loops:
             if loop.isOuter:
                 continue
-            edges = [co_edge.edge for co_edge in loop.coEdges]
+            co_edges = list(loop.coEdges)
+            edges = [co_edge.edge for co_edge in co_edges]
             if not edges or _is_circular_loop(edges):
                 continue
-            feature_edges.append(edges)
-    return feature_edges
+            # A BRepEdge's direction is global, but this selected face's
+            # BRepCoEdge records the loop direction.  Preserve that relation
+            # in ChainSelection rather than imposing one direction on every
+            # imported feature.  See docs/contour-chain-direction.md.
+            seed = co_edges[0]
+            feature_chains.append((seed.edge, is_reverted_for_loop_seed(seed.isOpposedToEdge)))
+    return feature_chains
 
 
 def _repair_missing_selections(setup) -> list[str]:
@@ -316,7 +324,7 @@ def _repair_missing_selections(setup) -> list[str]:
     # per operation. design is shared by both caches below.
     design_cache = []  # single-item list used as a mutable box (no `nonlocal` needed)
     outer_edges_cache = None
-    feature_edges_cache = None
+    feature_chains_cache = None
     big_hole_edges_cache = None
 
     def _design():
@@ -413,7 +421,7 @@ def _repair_missing_selections(setup) -> list[str]:
     )
     if finishing_pass_ops:
         design = _design()
-        feature_edges_cache = _internal_feature_loop_edges_all_bodies(design) if design else []
+        feature_chains_cache = _internal_feature_loop_chains_all_bodies(design) if design else []
     # Only the ONE primary operation is treated as "the" feature-cut
     # operation. Do not leave the other template contour passes to their
     # stale selections: a stale selection can look healthy to Fusion even
@@ -421,13 +429,13 @@ def _repair_missing_selections(setup) -> list[str]:
     # They are removed after this pass so the browser always presents one
     # feature operation, rather than ambiguous duplicate finishing passes.
     active_feature_ops = []
-    feature_op_assignments = {}  # operationId -> list of edge-lists, this op's own share
-    if finishing_pass_ops and feature_edges_cache:
+    feature_op_assignments = {}  # operationId -> list of (seed edge, reversal), this op's own share
+    if finishing_pass_ops and feature_chains_cache:
         ops_needed = 1
         active_feature_ops = finishing_pass_ops[:ops_needed]
-        for i, edges in enumerate(feature_edges_cache):
+        for i, chain_input in enumerate(feature_chains_cache):
             target_op = active_feature_ops[i % len(active_feature_ops)]
-            feature_op_assignments.setdefault(target_op.operationId, []).append(edges)
+            feature_op_assignments.setdefault(target_op.operationId, []).append(chain_input)
     feature_op_index = {op_id: True for op_id in feature_op_assignments}
     inactive_finishing_ops = [
         op for op in finishing_pass_ops if op.operationId not in feature_op_index
@@ -517,11 +525,14 @@ def _repair_missing_selections(setup) -> list[str]:
             # loop.coEdges already being in the exact order/winding
             # Fusion's chain builder expects, the way passing every edge
             # explicitly does.
-            for edges in feature_op_assignments.get(op.operationId, []):
+            for seed_edge, is_reverted in feature_op_assignments.get(op.operationId, []):
                 chain = selections.createNewChainSelection()
                 chain.isOpen = False
-                chain.isReverted = False
-                chain.inputGeometry = [edges[0]]
+                # Follow this loop's co-edge orientation. A shared BRepEdge
+                # can run either way on a face, so a hard-coded False made
+                # some imported feature chains point the wrong way.
+                chain.isReverted = is_reverted
+                chain.inputGeometry = [seed_edge]
             # The generated setup deliberately has one consolidated feature
             # operation. Naming it consistently makes CAM review unambiguous
             # and prevents it being confused with the final outer slot cut.
