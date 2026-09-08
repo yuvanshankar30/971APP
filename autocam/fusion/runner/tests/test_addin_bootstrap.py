@@ -32,6 +32,11 @@ class DependencyBootstrapTests(unittest.TestCase):
 
         self.assertTrue(manifest["runOnStartup"])
 
+    def test_folder_picker_defaults_to_the_scoped_autocam_subtree(self):
+        config = (RUNNER_DIR / "config.py").read_text()
+
+        self.assertIn('FUSION_DROP_FOLDER_PATH = _read_env_value("FUSION_DROP_FOLDER_PATH") or "Offseason Projects/AutoCAM"', config)
+
 
 if __name__ == "__main__":
     unittest.main()
