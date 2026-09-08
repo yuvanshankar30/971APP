@@ -14,6 +14,7 @@
   import RoutingToolSequence from '$autocam/components/RoutingToolSequence.svelte';
   import TurningFinishTool from '$autocam/components/TurningFinishTool.svelte';
   import TurningDrilling from '$autocam/components/TurningDrilling.svelte';
+  import AtcSlotConfig from '$autocam/components/AtcSlotConfig.svelte';
   import CadViewer from '$lib/components/CadViewer.svelte';
   import ToolpathViewer from '$autocam/components/ToolpathViewer.svelte';
   import { toastActions } from '$lib/toast.js';
@@ -1121,6 +1122,21 @@
     machineForm.params = emptyParamsFor(op);
   }
 
+  // Tools with a real physical slot number (tool_number) are configured in
+  // their own dedicated ATC Slots modal (AtcSlotConfig.svelte), not here -
+  // a slot can hold exactly one tool at a time (the library's real #5 and
+  // #6 collisions are exactly why), which that modal enforces by making
+  // each slot a single-select. This checklist stays for unnumbered/general
+  // tools only, which were never assigned to a physical ATC position.
+  let showAtcModal = false;
+  let atcModalMachineId = null;
+  let atcModalMachineName = '';
+  function openAtcModal(machine) {
+    atcModalMachineId = machine.id;
+    atcModalMachineName = machine.name;
+    showAtcModal = true;
+  }
+
   async function saveMachine() {
     if (!machineForm.name.trim()) { toastActions.show('Machine profile needs a name'); return; }
     savingMachine = true;
@@ -1258,6 +1274,11 @@
             <button class="btn btn-secondary btn-sm" on:click={() => openMachineModal(mc)}>
               <Settings size={14} /> Edit
             </button>
+            {#if tools.some((t) => t.enabled && t.tool_number != null)}
+              <button class="btn btn-secondary btn-sm" on:click={() => openAtcModal(mc)}>
+                <Wrench size={14} /> ATC Slots
+              </button>
+            {/if}
           </div>
         </div>
       {/each}
@@ -2105,6 +2126,16 @@
   </div>
 {/if}
 
+<AtcSlotConfig
+  bind:open={showAtcModal}
+  machineId={atcModalMachineId}
+  machineName={atcModalMachineName}
+  {tools}
+  userId={user?.id || null}
+  on:applied={loadReferenceData}
+  on:toolsChanged={loadReferenceData}
+/>
+
 {#if showMachineModal}
   <div class="modal-backdrop" on:click|self={closeMachineModal} role="button" tabindex="0" on:keydown={(e) => { if (e.key === 'Escape') closeMachineModal(); }}>
     <div class="modal" role="dialog" aria-modal="true">
@@ -2184,14 +2215,14 @@
         <fieldset class="form-group machine-tools-fieldset">
           <legend class="form-label">Installed Tools</legend>
           <div class="machine-tool-options">
-            {#each tools.filter((tool) => tool.enabled) as tool}
+            {#each tools.filter((tool) => tool.enabled && tool.tool_number == null) as tool}
               <label class="machine-tool-option">
                 <input type="checkbox" bind:group={machineForm.tool_ids} value={tool.id} />
                 <span>{tool.name}{tool.diameter ? ` (${tool.diameter}\" dia)` : ''}</span>
               </label>
             {/each}
           </div>
-          <p class="cam-form-hint">Only these tools appear after this machine is selected for an AutoCAM job. The default tool is always included when saved.</p>
+          <p class="cam-form-hint">Only these tools appear after this machine is selected for an AutoCAM job. The default tool is always included when saved. Tools with a physical ATC slot number are configured separately - see the "ATC Slots" button on this machine's card.</p>
         </fieldset>
 
         <div class="form-row">
