@@ -3,6 +3,7 @@ from ..commands.GroupingValidation import (
     require_grouping_mode_matches_assignments,
     plate_spacing,
     require_positive_quantity,
+    PlateFitError,
 )
 from ..commands.NcArtifacts import collect_nc_artifacts
 import adsk.core, adsk.fusion, adsk.cam, traceback
@@ -170,6 +171,34 @@ def _normalize_assignments(payload: dict) -> list[dict]:
             }
         )
     return normalized
+
+
+def _apply_snapshot_part_names(data: dict, assignments: list[dict], occurrences) -> None:
+    """Restore human-readable part names after STEP import.
+
+    Downloaded files are intentionally stored under their part UUID, so the
+    importer's default component name is opaque.  The immutable job snapshot
+    is the authoritative place to recover the operator-facing name.
+    """
+    snapshot_assignments = ((data.get('params') or {}).get('fusionPlateSnapshot') or {}).get('assignments') or []
+    names_by_part_id = {
+        str(item.get('part_id')): str(item.get('name'))
+        for item in snapshot_assignments
+        if isinstance(item, dict) and item.get('part_id') and item.get('name')
+    }
+    names = []
+    for assignment in assignments:
+        name = names_by_part_id.get(str(assignment['part_id']))
+        if not name:
+            continue
+        names.extend([name] * int(assignment['quantity']))
+    if len(names) != len(occurrences):
+        return
+    for occurrence, name in zip(occurrences, names):
+        try:
+            occurrence.component.name = name
+        except Exception:
+            pass
 
 
 def _get(payload: dict, *keys: str, default=None):
@@ -469,8 +498,17 @@ def start(data, session):
         true_depth = float(_get(payload, "true_depth", "trueDepth", default=0.125))
 
         occurrences = list(design.rootComponent.allOccurrences)
+        _apply_snapshot_part_names(data, assignments, occurrences)
         spacing = plate_spacing((data.get('cam_tools') or {}).get('diameter'))
-        arrange = AutoArrange(length, width, object_spacing=spacing)
+        try:
+            arrange = AutoArrange(length, width, object_spacing=spacing)
+        except RuntimeError as error:
+            if 'ARRANGE_ERROR_NO_ROOM' not in str(error):
+                raise
+            raise PlateFitError(
+                f'Fusion could not fit every selected part on the {length:.2f} x '
+                f'{width:.2f}in plate. Select larger stock or reduce the group.'
+            ) from error
         require_complete_arrangement(arrange, occurrences)
 
         # Extract tool_items (specific tool GUIDs from within libraries)
@@ -678,6 +716,10 @@ def start(data, session):
         # finished document (setups, operations, generated toolpaths)
         # immediately, without Fusion clearing it out from under them.
 
+    except PlateFitError as error:
+        if app:
+            app.log(f"Plate fit failed: {error}")
+        send_job_error(session, job_id, str(error))
     except Exception:
         if app:
             app.log("Failed:\n{}".format(traceback.format_exc()))

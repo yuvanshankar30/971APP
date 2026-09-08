@@ -42,6 +42,20 @@ class GroupingValidationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 grouping.plate_spacing(value)
 
+    def test_rejects_a_single_part_that_cannot_fit_the_plate(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            r'BellyPan is 33.00 x 21.00in.*23.00 x 23.00in usable area.*24.00 x 24.00in plate',
+        ):
+            grouping.require_individual_footprints_fit(
+                [('BellyPan', 33, 21)], 24, 24
+            )
+
+    def test_accepts_a_part_that_fits_after_rotation(self):
+        grouping.require_individual_footprints_fit(
+            [('RotatedPart', 20, 23)], 24, 22
+        )
+
     def test_quantities_cannot_be_truncated_or_defaulted(self):
         self.assertEqual(grouping.require_positive_quantity(3), 3)
         for value in [0, -1, 1.5, True, None, '3']:

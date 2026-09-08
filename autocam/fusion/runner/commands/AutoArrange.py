@@ -1,6 +1,20 @@
 import traceback
 import adsk.core
 import adsk.fusion
+from .GroupingValidation import require_individual_footprints_fit
+
+
+FRAME_WIDTH_IN = 0.5
+
+
+def _occurrence_footprint_in(occurrence):
+    """Return an imported occurrence's XY bounds in Fusion's cm-to-inch units."""
+    body = occurrence.bRepBodies.item(0)
+    bounds = body.boundingBox
+    x_span = abs(bounds.maxPoint.x - bounds.minPoint.x) / 2.54
+    y_span = abs(bounds.maxPoint.y - bounds.minPoint.y) / 2.54
+    name = getattr(occurrence.component, 'name', None) or getattr(occurrence, 'name', None) or 'Part'
+    return name, x_span, y_span
 
 
 def AutoArrange(length, width, object_spacing=0.26) -> adsk.fusion.ArrangeFeature:
@@ -34,6 +48,12 @@ def AutoArrange(length, width, object_spacing=0.26) -> adsk.fusion.ArrangeFeatur
 
     # Get the occurrences to arrange.
     occ1 = list(comp.allOccurrences)
+    require_individual_footprints_fit(
+        [_occurrence_footprint_in(occurrence) for occurrence in occ1],
+        length,
+        width,
+        FRAME_WIDTH_IN,
+    )
     for occ in occ1:
         occ.isGrounded = False
         occ.isGroundToParent = False
@@ -74,7 +94,7 @@ def AutoArrange(length, width, object_spacing=0.26) -> adsk.fusion.ArrangeFeatur
     # frameWidth (below) is the property that actually applies here - the
     # margin from THIS one plate's own edge - and objectSpacing (above)
     # already covers the gap between nested parts within it.
-    planeEnv.frameWidth = adsk.core.ValueInput.createByString("0.5 in")
+    planeEnv.frameWidth = adsk.core.ValueInput.createByString(f"{FRAME_WIDTH_IN} in")
 
     # Create the arrange feature.
     arrange = arrangeFeats.add(arrangeInput)

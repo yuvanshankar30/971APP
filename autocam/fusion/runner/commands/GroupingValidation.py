@@ -2,6 +2,10 @@
 import math
 
 
+class PlateFitError(ValueError):
+    """A selected plate cannot safely contain the requested part geometry."""
+
+
 def require_positive_quantity(value):
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         raise ValueError('Every plate assignment needs a positive integer quantity')
@@ -13,6 +17,37 @@ def plate_spacing(tool_diameter):
     if not math.isfinite(diameter) or diameter <= 0:
         raise ValueError('Plate CAM requires a finite, positive tool diameter')
     return max(0.26, diameter + 0.01)
+
+
+def require_individual_footprints_fit(footprints, length_in, width_in, frame_width_in=0.5):
+    """Reject an individually oversized part before Fusion's Arrange solver.
+
+    Arrange reports the same generic ``NO_ROOM`` result for an oversized
+    single part and for a genuinely crowded group.  Checking the imported
+    planar bounds first gives the operator the actual part and usable-stock
+    dimensions instead of a Fusion stack trace.
+    """
+    length_in = float(length_in)
+    width_in = float(width_in)
+    frame_width_in = float(frame_width_in)
+    usable_length = length_in - 2 * frame_width_in
+    usable_width = width_in - 2 * frame_width_in
+    if usable_length <= 0 or usable_width <= 0:
+        raise PlateFitError('Plate dimensions must exceed the required edge margin')
+
+    for name, x_span, y_span in footprints:
+        x_span = float(x_span)
+        y_span = float(y_span)
+        fits = (
+            (x_span <= usable_length and y_span <= usable_width)
+            or (y_span <= usable_length and x_span <= usable_width)
+        )
+        if not fits:
+            raise PlateFitError(
+                f'{name} is {x_span:.2f} x {y_span:.2f}in and cannot fit the '
+                f'{usable_length:.2f} x {usable_width:.2f}in usable area of the '
+                f'{length_in:.2f} x {width_in:.2f}in plate. Select larger stock.'
+            )
 
 
 def require_grouping_mode_matches_assignments(assignments, grouping_mode):
