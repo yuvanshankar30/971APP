@@ -123,6 +123,7 @@ def export(name, post_processor_path, setup_program_names=None):
             )
         )
 
+    posted_program_names = []
     for index, setup in enumerate(allSetups):
         operations = [op for op in setup.operations if op.name != "Suppress"]
         app.log(
@@ -153,3 +154,6 @@ def export(name, post_processor_path, setup_program_names=None):
         # still fails that is a genuine failure and has to surface as one,
         # rather than a job reporting success with G-code missing from it.
         _post_process_with_retry(app, cam, setup, postProcessInput)
+        posted_program_names.append(program_name)
+
+    return posted_program_names

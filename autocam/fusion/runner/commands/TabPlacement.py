@@ -57,7 +57,7 @@ import adsk.cam
 
 
 DEFAULT_MIN_TABS = 4
-DEFAULT_MAX_TABS = 8
+DEFAULT_MAX_TABS = 10
 # How far outward (beyond the candidate edge) to check for real stock -
 # just enough to tell "is there material here at all", not "is there a lot
 # of it". Matches the same order of magnitude as MIN_TAB_EDGE_LENGTH_IN
@@ -70,7 +70,7 @@ STOCK_BACKING_CHECK_IN = 0.2
 # regardless of size. No single authoritative number exists for this; chosen
 # as the middle of commonly cited CNC sheet-tabbing guidance (roughly every
 # 4-8in of perimeter for thin plate) rather than picked arbitrarily.
-TARGET_TAB_SPACING_IN = 6.0
+TARGET_TAB_SPACING_IN = 4.0
 # Every release tab has the same operator-specified dimensions. Candidate
 # edges are selected directly, so Fusion cannot distribute a tab into a
 # corner between them.
@@ -107,7 +107,7 @@ MAX_TAB_HEIGHT_FRACTION = 0.70
 # unnecessary on a part that size and the worst place to put one. If a part
 # is so small that NO side qualifies, select_tab_edges falls back to its
 # longest sides anyway: an unheld part is worse than a tight tab.
-MIN_TAB_SIDE_LENGTH_IN = TAB_WIDTH_IN * 2
+MIN_TAB_SIDE_LENGTH_IN = TAB_WIDTH_IN * 1.5
 
 # Kept as the coarse "is this edge even worth considering" filter. The real
 # gate is MIN_TAB_SIDE_LENGTH_IN above, applied per side after collinear
@@ -524,10 +524,10 @@ def select_tab_edges(
         return any(is_backed(e) for e in line)
 
     # Drop sides too short to actually hold a tab (see
-    # tab_width_in * 2). Measured on the segment that would carry the
+    # tab_width_in * 1.5). Measured on the segment that would carry the
     # tab, not the side's summed length: a side split into several short
     # collinear pieces still has to fit the tab within ONE of them.
-    min_side_cm = tab_width_in * 2 * 2.54
+    min_side_cm = tab_width_in * 1.5 * 2.54
     usable = [line for line in lines if _edge_length(best_edge_for_line(line)) >= min_side_cm]
     if not usable:
         usable = lines

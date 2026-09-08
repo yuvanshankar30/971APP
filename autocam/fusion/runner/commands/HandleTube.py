@@ -221,42 +221,70 @@ def _apply_chains(operation, parameter_name, specs):
     if not specs:
         return False
 
-    def apply_with_winding(invert_winding):
+    def apply_single(spec, reverted):
         selections = parameter.value.getCurveSelections()
         selections.clear()
-        for spec in specs:
-            selection = selections.createNewChainSelection()
-            selection.isOpen = False
-            selection.isReverted = spec["is_reverted"] != invert_winding
-            # A single edge is a deliberate chain seed. Fusion closes the
-            # tangent-connected loop itself; passing every edge works for a
-            # circle but makes imported irregular through-shape loops invalid
-            # or ambiguously directed.
-            selection.inputGeometry = [spec["edges"][0]]
+        selection = selections.createNewChainSelection()
+        selection.isOpen = False
+        selection.isReverted = reverted
+        # A single edge is a deliberate chain seed. Fusion closes the
+        # tangent-connected loop itself; passing every edge works for a
+        # circle but makes imported irregular through-shape loops invalid
+        # or ambiguously directed.
+        selection.inputGeometry = [spec["edges"][0]]
         parameter.value.applyCurveSelections(selections)
 
-    # The co-edge direction is the normal case. Some imported STEP faces
-    # carry the opposite parameterization relative to the operation's tool
-    # side, so validate the inverse convention only when Fusion rejects the
-    # topological one. This produces one deliberate, valid direction rather
-    # than silently keeping a warning or machining the wrong side.
-    try:
-        apply_with_winding(False)
-    except RuntimeError as direct_error:
+    # Each loop's correct winding is resolved on its own, never assumed to
+    # match any other loop's - confirmed live: two independent through-shape
+    # loops on the same wall needed opposite directions, and applying every
+    # loop in one batch with a single shared guess (direct, then everything
+    # inverted) does not fail loudly when that guess is wrong for only SOME
+    # of them. Fusion does not raise in that case; it silently resolves the
+    # mismatched loop into a differently-sized, wrong chain instead of the
+    # small feature actually selected, and machines whatever that wrong
+    # chain traces - confirmed live as a toolpath sprawled across nearly the
+    # entire wall instead of the one small loop asked for.
+    #
+    # Resolving one loop in isolation, with nothing else in the selection
+    # collection, is what makes Fusion's own validation actually catch a
+    # wrong direction and raise - the same mechanism this function already
+    # relied on for a single chain, just no longer diluted by a second,
+    # unrelated loop sharing the same collection.
+    resolved = []
+    for spec in specs:
         try:
-            apply_with_winding(True)
+            apply_single(spec, spec["is_reverted"])
+            resolved.append(spec["is_reverted"])
+            continue
+        except RuntimeError as direct_error:
+            pass
+        try:
+            apply_single(spec, not spec["is_reverted"])
+            resolved.append(not spec["is_reverted"])
             adsk.core.Application.get().log(
-                "Tube chain winding inverted for valid {} selection in '{}'".format(
-                    parameter_name, operation.name
+                "Tube chain winding inverted for valid {} selection in '{}' (seed edge {})".format(
+                    parameter_name, operation.name, spec["edges"][0].tempId
                 )
             )
         except RuntimeError as inverted_error:
             raise RuntimeError(
-                "No valid {} chain selection for tube operation {!r}; "
+                "No valid {} chain selection for tube operation {!r}, loop seed edge {}; "
                 "topology and inverse windings were both rejected: {} / {}".format(
-                    parameter_name, operation.name, direct_error, inverted_error
+                    parameter_name, operation.name, spec["edges"][0].tempId, direct_error, inverted_error
                 )
             )
+
+    # Every loop resolved to its own correct, independently-validated
+    # direction - now apply them together as the operation's real final
+    # selection.
+    selections = parameter.value.getCurveSelections()
+    selections.clear()
+    for spec, reverted in zip(specs, resolved):
+        selection = selections.createNewChainSelection()
+        selection.isOpen = False
+        selection.isReverted = reverted
+        selection.inputGeometry = [spec["edges"][0]]
+    parameter.value.applyCurveSelections(selections)
     return True
 
 
@@ -383,6 +411,7 @@ def _make_setup(cam, body, face, clock, tube_axis, horizontal, template, wall_th
     _bind_setup_to_face(setup, body, face, tube_axis, horizontal)
     adsk.doEvents()
     _configure_face_operations(setup, face, wall_thickness_in)
+    return setup
 
 
 def _active_cam_product(app, doc):
@@ -445,5 +474,15 @@ def handleTube(template_filename, orientation=None, program_base_name="tube"):
     for clock, face, wall_thickness_in in _ordered_wall_faces(body):
         _make_setup(cam, body, face, clock, tube_axis, horizontal, template, wall_thickness_in)
         names.append(tube_face_program_name(program_base_name, clock))
+    # Defensive invariant, not just a byproduct of the loop above: a tube is
+    # always exactly four indexed setups, never fewer. Catches a future
+    # refactor of _ordered_wall_faces/TUBE_FACE_CLOCKS breaking that
+    # guarantee before it ever reaches export/post.
+    if len(names) != 4 or cam.setups.count != 4:
+        raise RuntimeError(
+            "Box-tube CAM must always produce exactly four setups; got {} program name(s) and {} setup(s)".format(
+                len(names), cam.setups.count
+            )
+        )
     app.log("Box-tube CAM created four indexed setups: {}".format(", ".join(names)))
     return names

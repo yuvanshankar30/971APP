@@ -294,7 +294,7 @@ class MinimumSideLengthTests(unittest.TestCase):
         # physically contain.
         self.assertGreater(TabPlacement.MIN_TAB_SIDE_LENGTH_IN, TabPlacement.TAB_WIDTH_IN)
         self.assertEqual(
-            TabPlacement.MIN_TAB_SIDE_LENGTH_IN, TabPlacement.TAB_WIDTH_IN * 2
+            TabPlacement.MIN_TAB_SIDE_LENGTH_IN, TabPlacement.TAB_WIDTH_IN * 1.5
         )
 
     def _body_with(self, edges):

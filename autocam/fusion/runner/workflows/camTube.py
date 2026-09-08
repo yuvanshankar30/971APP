@@ -11,6 +11,7 @@ from typing import Optional
 from ..commands.MultiImport import importFiles
 from ..commands.NewNCProgram import export
 from ..commands.HandleTube import handleTube
+from ..commands.OperationDiagnostics import failed_operations, operation_warnings
 from ..config import (
     BASE_URL,
     FINAL_PATH,
@@ -42,6 +43,20 @@ def _generate_tube_toolpaths(cam: adsk.cam.CAM) -> None:
             raise TimeoutError("Fusion did not finish generating box-tube toolpaths")
         adsk.doEvents()
         time.sleep(0.2)
+    # "Generation completed" is not the same claim as "every operation has a
+    # real toolpath" - confirmed live: right after handleTube() creates
+    # operations, every one of them briefly shows Fusion's own "not yet
+    # generated" state (an orange icon in the browser, not an error) until
+    # this function's own wait above resolves it. A genuine failure - an
+    # operation Fusion could not compute anything for at all - would
+    # otherwise silently reach export/post with nothing real to post for
+    # that feature. Fail the whole job outright instead; see
+    # OperationDiagnostics.failed_operations's own docstring.
+    failed = failed_operations(cam)
+    if failed:
+        raise RuntimeError(
+            "Box-tube CAM produced no valid toolpath for: {}".format(", ".join(failed))
+        )
 
 
 def _get(payload: dict, *keys: str, default=None):
@@ -193,6 +208,9 @@ def start(data, session):
         if not cam:
             raise RuntimeError("No CAM product available after creating box-tube setups")
         _generate_tube_toolpaths(cam)
+        job_warnings = operation_warnings(app, cam)
+        for warning in job_warnings:
+            app.log("OPERATION: {}".format(warning))
 
         total_machining_time = None
         try:
@@ -232,15 +250,17 @@ def start(data, session):
         except FileNotFoundError:
             pass
 
-        export(box_tube_id, machine_post_processor_path, face_program_names)
+        posted_program_names = export(
+            box_tube_id, machine_post_processor_path, face_program_names
+        )
 
         # Preserve each Fusion-posted setup program byte-for-byte and keep
         # independent setup/WCS programs as separate downloads.
         nc_files = collect_nc_artifacts(export_dir)
-        if len(nc_files) != len(face_program_names):
+        if len(nc_files) != len(posted_program_names):
             raise RuntimeError(
-                "Fusion posted {} tube programs for {} face setups; refusing a partial tube job".format(
-                    len(nc_files), len(face_program_names)
+                "Fusion posted {} tube programs for {} active face setups; refusing a partial tube job".format(
+                    len(nc_files), len(posted_program_names)
                 )
             )
         shutil.rmtree(export_dir, ignore_errors=True)
@@ -253,9 +273,11 @@ def start(data, session):
         completion_data["stats"] = {
             "facePrograms": [
                 {"label": "Side {}".format(name.rsplit("-side-", 1)[-1]), "programName": name}
-                for name in face_program_names
+                for name in posted_program_names
             ],
         }
+        if job_warnings:
+            completion_data["warnings"] = job_warnings
         if total_machining_time is not None:
             completion_data["stats"]["total_machining_time"] = total_machining_time
 
