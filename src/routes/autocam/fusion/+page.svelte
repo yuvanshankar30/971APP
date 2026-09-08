@@ -5,11 +5,12 @@
   import { supabase } from '$lib/supabase.js';
   import { userStore, loadUserFromUUID } from '$lib/stores/user.js';
   import { canManageCamProfiles } from '$lib/permissions.js';
-  import { Layers, Package, Box, ListChecks, SlidersHorizontal, BookOpen, HelpCircle, Send } from 'lucide-svelte';
+  import { Layers, Package, Box, ListChecks, SlidersHorizontal, BookOpen, HelpCircle, Send, RotateCcw } from 'lucide-svelte';
   import PartsTab from './PartsTab.svelte';
   import BoxTubesTab from './BoxTubesTab.svelte';
   import JobQueueTab from './JobQueueTab.svelte';
   import StockCategoriesTab from './StockCategoriesTab.svelte';
+  import TurningTab from './TurningTab.svelte';
 
   // Deep link from Manufacturing's "Open Fusion CAM" button
   // (/manufacture's fusionCamHref) - ?tab=parts&manufacturingPart=<id>
@@ -17,10 +18,11 @@
   // is accepted too and mapped onto 'parts' for old links/bookmarks from
   // before #448 merged the separate Plates tab into this one - a plate's
   // stock category now renders directly under that category's parts here.
-  const VALID_TABS = ['parts', 'box-tubes', 'queue', 'stock-categories'];
+  const VALID_TABS = ['parts', 'box-tubes', 'turning', 'queue', 'stock-categories'];
   const TAB_PATHS = {
     parts: '/autocam/fusion/parts',
     'box-tubes': '/autocam/fusion/tubes',
+    turning: '/autocam/fusion/turning',
     queue: '/autocam/fusion/jobs',
     'stock-categories': '/autocam/fusion/stock-categories'
   };
@@ -97,6 +99,9 @@
   <button type="button" class:active={activeTab === 'box-tubes'} on:click={() => setActiveTab('box-tubes')}>
     <Box size={16} /> Tube Stock
   </button>
+  <button type="button" class:active={activeTab === 'turning'} on:click={() => setActiveTab('turning')}>
+    <RotateCcw size={16} /> Turning
+  </button>
   <button type="button" class:active={activeTab === 'queue'} on:click={() => setActiveTab('queue')}>
     <ListChecks size={16} /> Jobs
   </button>
@@ -111,6 +116,8 @@
   <StockCategoriesTab {canManage} />
 {:else if activeTab === 'box-tubes'}
   <BoxTubesTab bind:this={boxTubesTabRef} {user} {canManage} />
+{:else if activeTab === 'turning'}
+  <TurningTab />
 {:else if activeTab === 'queue'}
   <JobQueueTab />
 {/if}

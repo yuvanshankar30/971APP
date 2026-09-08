@@ -58,7 +58,7 @@ browser confirmation or prompt popups.
   Fusion AutoCAM** action queues both sheet parts and rectangular box tube stock,
   with the same Fusion document name and Data Panel folder selection;
   its views have stable routes at `/autocam/fusion/parts`,
-  `/autocam/fusion/tubes`, `/autocam/fusion/jobs`, and
+  `/autocam/fusion/tubes`, `/autocam/fusion/turning`, `/autocam/fusion/jobs`, and
   `/autocam/fusion/stock-categories` (the legacy root redirects to Parts);
   the box-tube path creates four face-scoped Fusion setups and posts separate `Side 12`,
   `Side 3`, `Side 6`, and `Side 9` files for manual indexing. See the
