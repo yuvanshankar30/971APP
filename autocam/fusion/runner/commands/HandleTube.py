@@ -40,7 +40,16 @@ def _edge_length(edge):
 
 
 def _face_normal(face):
-    return _normalized(face.geometry.normal)
+    # ``geometry.normal`` is the underlying surface parameter normal, not
+    # necessarily the topological normal of this BRep face. Imported STEP
+    # faces can reverse that parameterization; using it directly can point a
+    # tube setup into the wall and makes valid closed chains fail CAM's side
+    # validation. Honor the face reversal so WCS +Z and loop winding describe
+    # the same physical exterior side.
+    normal = _normalized(face.geometry.normal)
+    if face.isParamReversed:
+        normal.scaleBy(-1)
+    return normal
 
 
 def _long_axis(body):

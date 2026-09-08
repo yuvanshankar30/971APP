@@ -69,6 +69,11 @@ class TubeFaceProgramTests(unittest.TestCase):
         self.assertIn('"holeDiameterMaximum", "100 in"', handler)
         self.assertIn("_apply_circular_faces(operation, circular_faces)", handler)
 
+    def test_tube_wcs_uses_the_topological_face_normal(self):
+        handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
+        self.assertIn("if face.isParamReversed:", handler)
+        self.assertIn("normal.scaleBy(-1)", handler)
+
 
 if __name__ == "__main__":
     unittest.main()
