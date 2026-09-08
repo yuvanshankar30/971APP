@@ -11,6 +11,7 @@
 
   let boxTubes = [];
   let machines = [];
+  let materials = [];
   // Real manufacturing requests this box tube can optionally be linked to -
   // see PartsTab.svelte's matching field for the full reasoning.
   let manufacturingParts = [];
@@ -20,6 +21,7 @@
   let stepFile = null;
   let newBoxTubeMachineId = '';
   let newBoxTubeToolId = '';
+  let newBoxTubeMaterialId = '';
   let submitting = false;
   // Which router each box tube's "Queue CAM Job" currently targets - keyed
   // by box tube id. No default - see the matching comment in
@@ -27,6 +29,7 @@
   // more than one real router is eligible.
   let boxTubeMachineSelections = {};
   let boxTubeToolSelections = {};
+  let boxTubeMaterialSelections = {};
   // machine_id -> cam_tools rows actually installed on that machine - see
   // PlatesTab.svelte's matching comment for why (this app's own existing
   // "job creation only offers the tools installed on its machine" rule).
@@ -55,6 +58,8 @@
       boxTubes = await fetchBoxTubes();
       const { data: machineRows } = await supabase.from('cam_machines').select('*').eq('can_run_box_tubes', true).eq('enabled', true).order('name');
       machines = machineRows || [];
+      const { data: materialRows } = await supabase.from('cam_materials').select('id, name, enabled').eq('enabled', true).order('name');
+      materials = materialRows || [];
       const { data: machineToolRows } = await supabase
         .from('cam_machine_tools')
         .select('machine_id, cam_tools(id, name, diameter, tool_type)')
@@ -91,6 +96,9 @@
       const defaultTool = eligible.find((t) => String(t.id) === String(machine?.default_tool_id));
       boxTubeToolSelections = { ...boxTubeToolSelections, [boxTube.id]: defaultTool?.id || '' };
     }
+    if (!boxTubeMaterialSelections[boxTube.id] && machine?.default_material_id) {
+      boxTubeMaterialSelections = { ...boxTubeMaterialSelections, [boxTube.id]: machine.default_material_id };
+    }
   }
 
   function handleNewBoxTubeMachineChange(machineId) {
@@ -99,18 +107,20 @@
     const machine = machines.find((m) => String(m.id) === String(machineId));
     const defaultTool = eligible.find((tool) => String(tool.id) === String(machine?.default_tool_id));
     newBoxTubeToolId = defaultTool?.id || '';
+    if (!newBoxTubeMaterialId && machine?.default_material_id) newBoxTubeMaterialId = machine.default_material_id;
   }
 
   function handleFileChange(event) {
     stepFile = event.target.files?.[0] || null;
   }
 
-  async function queueTubeCam(boxTube, machineId, toolId) {
+  async function queueTubeCam(boxTube, machineId, toolId, materialId) {
     await queueFusionJob({
       fusionJobKind: 'box_tube',
       boxTubeId: boxTube.id,
       machineId,
       toolId,
+      materialId,
       requestedBy: user?.id,
       name: `Tube Stock CAM: ${boxTube.name}`,
       // This is intentionally a clean 1:1 link. Tube stock is linear,
@@ -128,8 +138,8 @@
       toastActions.show('Choose a STEP file before queueing tube CAM');
       return;
     }
-    if (queueImmediately && (!newBoxTubeMachineId || !newBoxTubeToolId)) {
-      toastActions.show('Choose a router and tool before queueing tube CAM');
+    if (queueImmediately && (!newBoxTubeMachineId || !newBoxTubeToolId || !newBoxTubeMaterialId)) {
+      toastActions.show('Choose a router, tool, and material before queueing tube CAM');
       return;
     }
     submitting = true;
@@ -143,11 +153,12 @@
         createdBy: user?.id,
         partId: newBoxTube.manufacturingPartId || null
       });
-      if (queueImmediately) await queueTubeCam(createdTube, newBoxTubeMachineId, newBoxTubeToolId);
+      if (queueImmediately) await queueTubeCam(createdTube, newBoxTubeMachineId, newBoxTubeToolId, newBoxTubeMaterialId);
       newBoxTube = { name: '', epic: '', ticket: '', quantity: 1, manufacturingPartId: '' };
       stepFile = null;
       newBoxTubeMachineId = '';
       newBoxTubeToolId = '';
+      newBoxTubeMaterialId = '';
       showAddForm = false;
       await load(false);
       toastActions.show(queueImmediately ? 'Tube stock added and queued for Fusion CAM' : 'Tube stock added');
@@ -187,8 +198,12 @@
       toastActions.show('Choose a tool before queueing');
       return;
     }
+    if (!boxTubeMaterialSelections[boxTube.id]) {
+      toastActions.show('Choose a material before queueing tube CAM');
+      return;
+    }
     try {
-      await queueTubeCam(boxTube, machineId, boxTubeToolSelections[boxTube.id]);
+      await queueTubeCam(boxTube, machineId, boxTubeToolSelections[boxTube.id], boxTubeMaterialSelections[boxTube.id]);
       toastActions.show('Queued for the Fusion Runner');
     } catch (e) {
       toastActions.show(e.message || 'Failed to queue job');
@@ -265,10 +280,19 @@
             {/each}
           </select>
         </div>
+        <div class="form-group">
+          <label class="form-label" for="bt-material">Material</label>
+          <select id="bt-material" class="form-select" bind:value={newBoxTubeMaterialId}>
+            <option value="">Choose a material...</option>
+            {#each materials as material}
+              <option value={material.id}>{material.name}</option>
+            {/each}
+          </select>
+        </div>
       </div>
       <div class="form-actions">
         <button class="btn btn-secondary" disabled={submitting} on:click={() => handleAdd(false)}>{submitting ? 'Adding...' : 'Add Tube Stock'}</button>
-        <button class="btn btn-primary" disabled={submitting || !stepFile || !newBoxTubeMachineId || !newBoxTubeToolId} on:click={() => handleAdd(true)}>{submitting ? 'Queueing...' : 'Add + Queue Tube CAM'}</button>
+        <button class="btn btn-primary" disabled={submitting || !stepFile || !newBoxTubeMachineId || !newBoxTubeToolId || !newBoxTubeMaterialId} on:click={() => handleAdd(true)}>{submitting ? 'Queueing...' : 'Add + Queue Tube CAM'}</button>
       </div>
     </div>
   {/if}
@@ -302,7 +326,13 @@
                 <option value={t.id}>{toolLabel(t)}</option>
               {/each}
             </select>
-            <button class="btn btn-secondary btn-sm" disabled={!boxTubeMachineSelections[boxTube.id] || !boxTubeToolSelections[boxTube.id]} on:click={() => handleQueue(boxTube)}>
+            <select class="form-select router-select" bind:value={boxTubeMaterialSelections[boxTube.id]} aria-label="Material for {boxTube.name}">
+              <option value="">Choose a material...</option>
+              {#each materials as material}
+                <option value={material.id}>{material.name}</option>
+              {/each}
+            </select>
+            <button class="btn btn-secondary btn-sm" disabled={!boxTubeMachineSelections[boxTube.id] || !boxTubeToolSelections[boxTube.id] || !boxTubeMaterialSelections[boxTube.id]} on:click={() => handleQueue(boxTube)}>
               <Send size={14} /> Queue Tube CAM
             </button>
             {#if canManage}
