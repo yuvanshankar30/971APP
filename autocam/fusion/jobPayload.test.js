@@ -44,6 +44,20 @@ describe('Fusion plate payloads',()=>{
   const value=job(); value.params.singleToolMode=true; value.cam_tools={tool_type:'endmill'};
   await expect(buildJobPayload(db(),value)).resolves.toMatchObject({single_tool_mode:true});
  });
+ it('sends loaded endmill and drill candidates, not every installed tool, for auto multi-tool CAM',async()=>{
+  const value=job(); value.machine_id='router'; value.tool_id='endmill'; value.params.multiToolMode=true;
+  const database={
+   storage:db().storage,
+   from:(table)=>table==='cam_machine_tools'?{select:()=>({eq:async()=>({data:[
+    {tool_id:'endmill',cam_tools:{tool_library_guid:'endmill-guid',tool_type:'flat end mill'}},
+    {tool_id:'drill',cam_tools:{tool_library_guid:'drill-guid',tool_type:'drill'}},
+    {tool_id:'counter',cam_tools:{tool_library_guid:'counter-guid',tool_type:'counter sink'}}
+   ]})})}:null
+  };
+  await expect(buildJobPayload(database,value)).resolves.toMatchObject({
+   multi_tool_mode:true, tool_items:[{tool_guid:'endmill-guid'},{tool_guid:'drill-guid'}]
+  });
+ });
  it('only passes a loaded, approved ShopSabre countersink to the Runner',async()=>{
   const j=job(); j.machine_id='router'; j.params.countersinkToolId='counter';
   const countersink={id:'counter',tool_type:'countersink',diameter:0.372,tool_number:5,tip_angle:82,tool_library_guid:'61a8645a-9015-4aba-958b-70297d26b19e',source_tool_library_file:'Normal router tools (use this).tools'};

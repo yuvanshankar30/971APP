@@ -515,7 +515,7 @@
     const eligible = toolsForMachine(machineId);
     const machine = machines.find((m) => String(m.id) === String(machineId));
     const singleToolMode = isNewRouter(machineId);
-    const eligibleForMode = singleToolMode ? eligible.filter(isEndmill) : eligible;
+    const eligibleForMode = isNewRouter(machineId) ? eligible.filter(isEndmill) : eligible;
     categorySingleToolModes = { ...categorySingleToolModes, [categoryId]: singleToolMode };
     categoryCountersinkSelections = { ...categoryCountersinkSelections, [categoryId]: '' };
     const stillValid = eligibleForMode.some((t) => String(t.id) === String(categoryToolSelections[categoryId]));
@@ -923,6 +923,7 @@
         fusionFolderPath: queueFolderPath || null,
         tabCount: queueTabCount === '' ? null : queueTabCount,
         singleToolMode: Boolean(categorySingleToolModes[categoryId]),
+        multiToolMode: isNewRouter(categoryMachineSelections[categoryId]) && !categorySingleToolModes[categoryId],
         countersinkToolId: categoryCountersinkSelections[categoryId] || null
       });
       toastActions.show('Queued for the Fusion Runner');
@@ -1337,7 +1338,7 @@
                 <label class="form-label" for={`queue-tool-${group.categoryId}`}>Tool</label>
                 <select id={`queue-tool-${group.categoryId}`} class="form-select" bind:value={categoryToolSelections[group.categoryId]} disabled={!categoryMachineSelections[group.categoryId]}>
                   <option value="">{toolsForMachine(categoryMachineSelections[group.categoryId]).length ? 'Choose a tool...' : 'No tools installed'}</option>
-                  {#each toolsForMachine(categoryMachineSelections[group.categoryId]).filter((tool) => !categorySingleToolModes[group.categoryId] || isEndmill(tool)) as t}
+                  {#each toolsForMachine(categoryMachineSelections[group.categoryId]).filter((tool) => !isNewRouter(categoryMachineSelections[group.categoryId]) || isEndmill(tool)) as t}
                     <option value={t.id}>{toolLabel(t)}</option>
                   {/each}
                 </select>
@@ -1348,9 +1349,9 @@
                 <span class="form-label">Tool mode</span>
                 <div class="segmented-control" aria-label="Tool mode for New Router">
                   <button type="button" class:active={categorySingleToolModes[group.categoryId]} on:click={() => (categorySingleToolModes = { ...categorySingleToolModes, [group.categoryId]: true })}>Single tool</button>
-                  <button type="button" disabled title="Multi-tool CAM remains disabled until the physical ShopSabre setup is confirmed.">Multi-tool</button>
+                  <button type="button" class:active={!categorySingleToolModes[group.categoryId]} on:click={() => (categorySingleToolModes = { ...categorySingleToolModes, [group.categoryId]: false })}>Auto multi-tool</button>
                 </div>
-                <p class="cam-form-hint">Single-tool mode uses only the selected loaded endmill.</p>
+                <p class="cam-form-hint">Auto multi-tool considers every loaded cutter, then uses only the high-throughput cutter and any smaller cutter required for detail. Unused candidates do not create a tool swap.</p>
               </div>
               <div class="form-group">
                 <label class="form-label" for={`queue-countersink-${group.categoryId}`}>Countersink</label>
