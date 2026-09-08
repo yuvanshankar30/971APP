@@ -28,9 +28,19 @@ def _feed(tool: dict) -> float:
 
 
 def _rate(tool: dict) -> float:
-    # Width of cut times programmed feed is a conservative, unit-consistent
-    # proxy for planar material-removal rate when axial engagement is shared.
-    return (_diameter(tool) or 0.0) * _feed(tool)
+    # Programmed feed alone, used only to break a tie between two tools of
+    # the *same* diameter - never to outrank diameter itself. Width of cut
+    # for these shipped strategies (contour2d/adaptive2d/pocket2d) scales
+    # with the tool's own diameter (stepover is a percentage of it), so a
+    # genuinely bigger tool clears more material per pass regardless of
+    # whatever linear feed rate its library entry happens to be programmed
+    # with. Real counterexample confirmed against this exact library: the
+    # 6mm endmill (dia 0.2362in, feed 100) computes a higher diameter*feed
+    # product than the 0.25in endmill (feed 60) - 23.6 vs 15.0 - despite
+    # being the physically smaller tool. Ranking by that product picked the
+    # smaller tool as "roughing" and discarded the actually-larger one as
+    # dominated, backwards from this module's own stated intent.
+    return _feed(tool)
 
 
 def plan_endmills(tools: list[dict], *, multi_tool_mode: bool) -> dict:
@@ -48,7 +58,9 @@ def plan_endmills(tools: list[dict], *, multi_tool_mode: bool) -> dict:
     if not multi_tool_mode:
         return {"tools": [endmills[0]], "reason": "single-tool mode"}
 
-    roughing = max(endmills, key=lambda tool: (_rate(tool), _diameter(tool) or 0.0))
+    # Diameter first, feed only as a tiebreak among equal-diameter tools -
+    # see _rate's docstring for the real, confirmed case this fixes.
+    roughing = max(endmills, key=lambda tool: (_diameter(tool) or 0.0, _rate(tool)))
     detail = min(endmills, key=lambda tool: _diameter(tool) or float("inf"))
     chosen = [roughing]
     # A near-identical cutter cannot unlock tighter geometry. Avoid paying an
