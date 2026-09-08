@@ -114,7 +114,28 @@ async function requeueStaleFusionJobs(supabase) {
 // Runner can't accidentally grab a job queued for the mill, and vice versa,
 // once multiple physical machines are polling at once. It is required:
 // claim-anything fallback can put a program on the wrong physical machine.
+//
+// cam_machines.authorized_runner_id closes a real gap in that: nothing
+// stopped two different physical computers from both configuring the SAME
+// machineId (both laptops thinking they're "New Router"), and whichever
+// one polled first would win the claim even if it wasn't the computer
+// actually wired to the real machine - confirmed live (two different
+// hostnames both syncing as the same machine). NULL means "no
+// restriction," unchanged behavior. When set, a mismatched runnerId is
+// silently limited to only unassigned (machine_id IS NULL) jobs for this
+// machineId - not an error, since "nothing to claim right now" is the
+// correct, quiet outcome for a computer that legitimately isn't the
+// authorized one, same as if nothing were queued at all.
 async function claimNextJob(supabase, runnerId, machineId) {
+  const { data: machine, error: machineError } = await supabase
+    .from('cam_machines')
+    .select('authorized_runner_id')
+    .eq('id', machineId)
+    .maybeSingle();
+  if (machineError) throw new Error(`Could not check machine authorization: ${machineError.message}`);
+  const isAuthorizedForThisMachine =
+    !machine?.authorized_runner_id || machine.authorized_runner_id === runnerId;
+
   let query = supabase
     .from('cam_jobs')
     .select('id')
@@ -122,7 +143,9 @@ async function claimNextJob(supabase, runnerId, machineId) {
     .eq('operation_type', 'milling')
     .order('created_at', { ascending: true })
     .limit(5);
-  query = query.or(`machine_id.is.null,machine_id.eq.${machineId}`);
+  query = isAuthorizedForThisMachine
+    ? query.or(`machine_id.is.null,machine_id.eq.${machineId}`)
+    : query.is('machine_id', null);
   const { data: candidates, error: findError } = await query;
   if (findError) throw new Error(`Could not look up queued milling jobs: ${findError.message}`);
   if (!candidates?.length) return null;
