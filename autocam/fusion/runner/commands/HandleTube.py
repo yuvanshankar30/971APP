@@ -437,9 +437,14 @@ def _cap_other_way_feedrate(setup):
         if other is None or cutting is None:
             continue
         try:
+            both_ways = operation.parameters.itemByName("bothWays")
+            if both_ways is not None and both_ways.expression.strip().lower() != "false":
+                both_ways.expression = "false"
+                capped.append(operation.name)
             if other.expression.strip() != "tool_feedCutting":
                 other.expression = "tool_feedCutting"
-                capped.append(operation.name)
+                if operation.name not in capped:
+                    capped.append(operation.name)
         except Exception:
             continue
     return capped

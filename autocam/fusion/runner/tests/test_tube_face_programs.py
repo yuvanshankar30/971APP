@@ -1,6 +1,7 @@
 from pathlib import Path
 import sys
 import unittest
+import xml.etree.ElementTree as ET
 
 
 RUNNER_DIR = Path(__file__).parents[1]
@@ -94,7 +95,27 @@ class TubeFaceProgramTests(unittest.TestCase):
         self.assertIn("def _cap_other_way_feedrate(setup):", handler)
         self.assertIn("otherWayFeedrate", handler)
         self.assertIn('other.expression = "tool_feedCutting"', handler)
+        self.assertIn('both_ways.expression = "false"', handler)
         self.assertIn("_cap_other_way_feedrate(setup)", handler)
+
+    def test_shape_through_templates_are_one_way_with_a_safe_fallback_feed(self):
+        template = ET.parse(
+            RUNNER_DIR / "templates" / "971-real" / "Tubestock(with Cutter Comp).f3dhsm-template"
+        )
+        shape_templates = [
+            item for item in template.iter()
+            if item.tag.endswith("template")
+            and item.get("description") in {"Shape Through Hole", "Small Shape Through Hole"}
+        ]
+        self.assertEqual(len(shape_templates), 2)
+        for operation in shape_templates:
+            parameters = {
+                item.get("name"): item.get("expression")
+                for item in operation
+                if item.tag.endswith("parameter")
+            }
+            self.assertEqual(parameters["bothWays"], "false")
+            self.assertEqual(parameters["otherWayFeedrate"], "tool_feedCutting")
 
     def test_tube_closed_non_circular_features_use_shape_through_not_slot_cut(self):
         handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()

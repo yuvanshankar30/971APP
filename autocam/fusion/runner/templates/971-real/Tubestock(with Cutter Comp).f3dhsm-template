@@ -1607,11 +1607,11 @@
     <parameter expression=".1in" name="optimalLoad"/>
     <parameter expression="(optimalLoad&lt;(tool_diameter-optimalLoad*0.20))?(optimalLoad*0.10):(tool_diameter-optimalLoad)/2" name="loadDeviation"/>
     <parameter expression="optimalLoad + loadDeviation" name="maximumLoad"/>
-    <parameter expression="true" name="bothWays"/>
+    <parameter expression="false" name="bothWays"/>
     <parameter expression="optimalLoad" name="optimalLoadOtherWay"/>
     <parameter expression="(optimalLoadOtherWay&lt;(tool_diameter-optimalLoadOtherWay*0.20))?(optimalLoadOtherWay*0.10):(tool_diameter-optimalLoadOtherWay)/2" name="loadDeviationOtherWay"/>
     <parameter expression="optimalLoadOtherWay + loadDeviationOtherWay" name="maximumLoadOtherWay"/>
-    <parameter expression="60in/min" name="otherWayFeedrate"/>
+    <parameter expression="tool_feedCutting" name="otherWayFeedrate"/>
     <parameter expression="Math.max(tool_cornerRadius - Math.sqrt(Math.max((tool_cornerRadius * tool_cornerRadius) - (Math.max(Math.min(maximumLoad-(tool_diameter/2-tool_cornerRadius); tool_cornerRadius) ; 0.0) * Math.max(Math.min(maximumLoad-(tool_diameter/2-tool_cornerRadius); tool_cornerRadius) ; 0.0)); 0.0)); tool_cornerRadius * 0.001)" name="maximumCuspHeight"/>
     <parameter expression="0in" name="minimumCuttingRadius"/>
     <parameter expression="minimumCuttingRadius" name="minimumCuttingRadiusJl"/>
@@ -1957,11 +1957,11 @@
     <parameter expression=".1in" name="optimalLoad"/>
     <parameter expression="(optimalLoad&lt;(tool_diameter-optimalLoad*0.20))?(optimalLoad*0.10):(tool_diameter-optimalLoad)/2" name="loadDeviation"/>
     <parameter expression="optimalLoad + loadDeviation" name="maximumLoad"/>
-    <parameter expression="true" name="bothWays"/>
+    <parameter expression="false" name="bothWays"/>
     <parameter expression="optimalLoad" name="optimalLoadOtherWay"/>
     <parameter expression="(optimalLoadOtherWay&lt;(tool_diameter-optimalLoadOtherWay*0.20))?(optimalLoadOtherWay*0.10):(tool_diameter-optimalLoadOtherWay)/2" name="loadDeviationOtherWay"/>
     <parameter expression="optimalLoadOtherWay + loadDeviationOtherWay" name="maximumLoadOtherWay"/>
-    <parameter expression="60in/min" name="otherWayFeedrate"/>
+    <parameter expression="tool_feedCutting" name="otherWayFeedrate"/>
     <parameter expression="Math.max(tool_cornerRadius - Math.sqrt(Math.max((tool_cornerRadius * tool_cornerRadius) - (Math.max(Math.min(maximumLoad-(tool_diameter/2-tool_cornerRadius); tool_cornerRadius) ; 0.0) * Math.max(Math.min(maximumLoad-(tool_diameter/2-tool_cornerRadius); tool_cornerRadius) ; 0.0)); 0.0)); tool_cornerRadius * 0.001)" name="maximumCuspHeight"/>
     <parameter expression="0in" name="minimumCuttingRadius"/>
     <parameter expression="minimumCuttingRadius" name="minimumCuttingRadiusJl"/>
