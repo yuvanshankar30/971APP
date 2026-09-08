@@ -46,7 +46,21 @@
   let categories = [];
   $: stockGroups = buildStockGroups(parts, plates, categories);
   $: partsByCreatedAt = [...parts].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
-  $: recentQueueableParts = partsByCreatedAt.filter((part) => Number(part.quantity) > 0).slice(0, 10);
+  // Once a stock category is chosen (picked directly, or implied by a
+  // just-selected recent part), narrow "Recent parts" to that category
+  // instead of mixing every category together - a category already in
+  // focus means recent parts from OTHER categories aren't useful here.
+  $: queueableByCreatedAt = partsByCreatedAt
+    .filter((part) => Number(part.quantity) > 0)
+    .filter((part) => !queuePickerCategoryId || String(part.category_id) === String(queuePickerCategoryId));
+  $: recentPartsSearchTerm = recentPartsSearch.trim().toLowerCase();
+  $: recentQueueableParts = recentPartsSearchTerm
+    ? queueableByCreatedAt.filter((part) => part.name?.toLowerCase().includes(recentPartsSearchTerm))
+    : queueableByCreatedAt.slice(0, 6);
+  $: groupedPartsSearchTerm = groupedPartsSearch.trim().toLowerCase();
+  $: selectedQueuePickerCategory = queuePickerCategoryId
+    ? stockGroups.find((g) => g.categoryId === queuePickerCategoryId)?.category
+    : null;
 
   function buildStockGroups(currentParts, currentPlates, currentCategories) {
     const knownCategories = new Map(currentCategories.map((category) => [String(category.id), category]));
@@ -122,6 +136,14 @@
   let queuePickerOpen = false;
   let queuePickerCategoryId = '';
   let queuePickerDate = '';
+  // Free-text search over "Recent parts" - empty shows the 6 most recent
+  // queueable parts (recentQueueableParts is already newest-first), typing
+  // searches every queueable part by name instead of only the newest 10.
+  let recentPartsSearch = '';
+  // Same idea, scoped to the grouped-CAM picker's current stock category -
+  // empty shows its 6 most recently created part types, typing searches
+  // every queueable part type in that category.
+  let groupedPartsSearch = '';
 
   // 'YYYY-MM-DD' in Pacific time, matching a <input type="date">'s own
   // value format - lets a part's created_at be compared directly against
@@ -137,11 +159,15 @@
   export function openQueuePicker() {
     queuePickerOpen = true;
     queuePickerDate = pacificDateKey(new Date());
+    recentPartsSearch = '';
+    groupedPartsSearch = '';
   }
 
   function closeQueuePicker() {
     queuePickerOpen = false;
     queuePickerCategoryId = '';
+    recentPartsSearch = '';
+    groupedPartsSearch = '';
   }
 
   // Fusion filename + folder picker, shown as a confirmation step right
@@ -599,6 +625,7 @@
     // actually selectable.
     queuePickerDate = '';
     queuePickerCategoryId = group.categoryId;
+    groupedPartsSearch = '';
     categoryQueueModes = { ...categoryQueueModes, [group.categoryId]: 'single' };
     categorySinglePartSelections = { ...categorySinglePartSelections, [group.categoryId]: part.id };
     handleSinglePartPick(group);
@@ -626,6 +653,20 @@
     }
     categoryGroupedPartSelections = { ...categoryGroupedPartSelections, [categoryId]: [...selected] };
     categoryGroupedPartQuantities = { ...categoryGroupedPartQuantities, [categoryId]: quantities };
+  }
+
+  function selectAllGroupedParts(group, queueable) {
+    const categoryId = group.categoryId;
+    const quantities = {};
+    for (const part of queueable) quantities[part.id] = Number(part.quantity);
+    categoryGroupedPartSelections = { ...categoryGroupedPartSelections, [categoryId]: queueable.map((p) => p.id) };
+    categoryGroupedPartQuantities = { ...categoryGroupedPartQuantities, [categoryId]: quantities };
+  }
+
+  function clearGroupedParts(group) {
+    const categoryId = group.categoryId;
+    categoryGroupedPartSelections = { ...categoryGroupedPartSelections, [categoryId]: [] };
+    categoryGroupedPartQuantities = { ...categoryGroupedPartQuantities, [categoryId]: {} };
   }
 
   // Everything queueing a job actually needs, checked before the filename/
@@ -993,7 +1034,7 @@
           </div>
           <div class="form-group">
             <label class="form-label" for="queue-picker-category">Stock category</label>
-            <select id="queue-picker-category" class="form-select" bind:value={queuePickerCategoryId}>
+            <select id="queue-picker-category" class="form-select" bind:value={queuePickerCategoryId} on:change={() => (groupedPartsSearch = '')}>
               <option value="">Choose a stock category...</option>
               {#each stockGroups.filter((g) => g.categoryId && queueableParts(g).length) as g}
                 <option value={g.categoryId}>{categoryLabel(g.category)}</option>
@@ -1004,17 +1045,38 @@
         {#if queuePickerDate && !stockGroups.some((g) => g.categoryId && queueableParts(g).length)}
           <p class="cam-form-hint">No parts were created on this date - try another date or "Show all dates".</p>
         {/if}
-        {#if recentQueueableParts.length}
+        {#if queueableByCreatedAt.length}
           <div class="recent-queue-picker">
-            <span class="form-label">Recent parts</span>
-            <div class="recent-queue-grid">
-              {#each recentQueueableParts as part}
-                <button type="button" class="recent-queue-button" title={part.name} on:click={() => selectRecentPart(part)}>
-                  <span class="recent-queue-name">{part.name}</span>
-                  <span class="recent-queue-detail">{categoryLabel(part.fusion_part_categories)}</span>
-                </button>
-              {/each}
+            <div class="recent-queue-header">
+              <span class="form-label">
+                {#if recentPartsSearchTerm}
+                  Search results
+                {:else if selectedQueuePickerCategory}
+                  Recent parts in {categoryLabel(selectedQueuePickerCategory)}
+                {:else}
+                  Recent parts
+                {/if}
+              </span>
+              <input
+                type="search"
+                class="form-input recent-queue-search"
+                placeholder="Search parts by name..."
+                bind:value={recentPartsSearch}
+                aria-label="Search recent parts by name"
+              />
             </div>
+            {#if recentQueueableParts.length}
+              <div class="recent-queue-grid">
+                {#each recentQueueableParts as part}
+                  <button type="button" class="recent-queue-button" title={part.name} on:click={() => selectRecentPart(part)}>
+                    <span class="recent-queue-name">{part.name}</span>
+                    <span class="recent-queue-detail">{categoryLabel(part.fusion_part_categories)}</span>
+                  </button>
+                {/each}
+              </div>
+            {:else}
+              <p class="cam-form-hint">No parts match "{recentPartsSearch}".</p>
+            {/if}
           </div>
         {/if}
         {#if queuePickerCategoryId}
@@ -1051,26 +1113,72 @@
                 {/if}
               </div>
             {:else if categoryQueueModes[group.categoryId] === 'grouped'}
+              {@const selectedIds = categoryGroupedPartSelections[group.categoryId] || []}
+              {@const selectedCount = selectedIds.length}
+              {@const totalPieces = selectedIds.reduce((sum, id) => sum + (Number(categoryGroupedPartQuantities[group.categoryId]?.[id]) || 0), 0)}
+              {@const displayedQueueable = groupedPartsSearchTerm
+                ? queueable.filter((part) => part.name?.toLowerCase().includes(groupedPartsSearchTerm))
+                : queueable.filter((part, index) => index < 6 || selectedIds.includes(part.id))}
               <fieldset class="group-part-picker">
                 <legend>Select parts for grouped CAM</legend>
-                {#each queueable as part}
-                  {@const checked = (categoryGroupedPartSelections[group.categoryId] || []).includes(part.id)}
-                  <label>
-                    <input type="checkbox" {checked} on:change={() => toggleGroupedPart(group, part)} />
-                    {part.name}
-                  </label>
-                  {#if checked}
-                    <input
-                      type="number"
-                      min="1"
-                      max={maximumQueueQuantity(group, part)}
-                      step="1"
-                      class="form-input grouped-qty-input"
-                      aria-label="Quantity of {part.name}"
-                      bind:value={categoryGroupedPartQuantities[group.categoryId][part.id]}
-                    />
-                  {/if}
-                {/each}
+                <div class="group-part-summary">
+                  <span>
+                    {#if selectedCount}
+                      {selectedCount} of {queueable.length} part {selectedCount === 1 ? 'type' : 'types'} selected &middot; {totalPieces} piece{totalPieces === 1 ? '' : 's'} total
+                    {:else}
+                      No parts selected yet
+                    {/if}
+                  </span>
+                  <div class="group-part-summary-actions">
+                    <button type="button" class="btn btn-ghost btn-sm" on:click={() => selectAllGroupedParts(group, queueable)} disabled={selectedCount === queueable.length}>Select all</button>
+                    <button type="button" class="btn btn-ghost btn-sm" on:click={() => clearGroupedParts(group)} disabled={!selectedCount}>Clear</button>
+                  </div>
+                </div>
+                {#if queueable.length > 6}
+                  <input
+                    type="search"
+                    class="form-input group-part-search"
+                    placeholder="Search this category's parts by name..."
+                    bind:value={groupedPartsSearch}
+                    aria-label="Search this stock category's parts by name"
+                  />
+                {/if}
+                <div class="group-part-grid">
+                  {#each displayedQueueable as part}
+                    {@const checked = selectedIds.includes(part.id)}
+                    <div class="group-part-card" class:selected={checked}>
+                      <button
+                        type="button"
+                        class="group-part-toggle"
+                        aria-pressed={checked}
+                        on:click={() => toggleGroupedPart(group, part)}
+                      >
+                        <span class="group-part-check"><Check size={12} /></span>
+                        <span class="group-part-name">{part.name}</span>
+                        <span class="group-part-available">{part.quantity} available</span>
+                      </button>
+                      {#if checked}
+                        <label class="group-part-qty">
+                          Qty
+                          <input
+                            type="number"
+                            min="1"
+                            max={maximumQueueQuantity(group, part)}
+                            step="1"
+                            class="form-input grouped-qty-input"
+                            aria-label="Quantity of {part.name}"
+                            bind:value={categoryGroupedPartQuantities[group.categoryId][part.id]}
+                          />
+                        </label>
+                      {/if}
+                    </div>
+                  {/each}
+                </div>
+                {#if groupedPartsSearchTerm && !displayedQueueable.length}
+                  <p class="cam-form-hint">No parts match "{groupedPartsSearch}".</p>
+                {:else if queueable.length < 2}
+                  <p class="cam-form-hint">Only {queueable.length} part {queueable.length === 1 ? 'type is' : 'types are'} available for this date filter - try "Show all dates" above to see more parts to group.</p>
+                {/if}
               </fieldset>
             {/if}
             <div class="form-row">
@@ -1178,6 +1286,8 @@
   .group-header { flex-wrap: wrap; margin-bottom: 0.75rem; }
   .group-header h3 { margin: 0; }
   .recent-queue-picker { margin: 0.75rem 0; }
+  .recent-queue-header { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.4rem; }
+  .recent-queue-search { max-width: 220px; height: 2rem; padding: 0.25rem 0.5rem; font-size: 0.8rem; }
   .recent-queue-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.45rem; }
   .recent-queue-button {
     display: grid;
@@ -1208,9 +1318,20 @@
   .quantity-control { display: inline-flex; }
   .quantity-input { min-width: 4rem; width: 4rem; }
   .cam-list-actions { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; flex-wrap: wrap; }
-  .group-part-picker { display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.4rem 0.6rem; }
+  .group-part-picker { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.6rem 0.75rem; margin: 0 0 0.75rem; }
   .group-part-picker legend { color: var(--text-muted); font-size: 0.75rem; padding: 0 0.25rem; }
-  .group-part-picker label { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.85rem; }
+  .group-part-summary { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.5rem; }
+  .group-part-search { height: 2rem; padding: 0.25rem 0.5rem; font-size: 0.8rem; margin-bottom: 0.5rem; }
+  .group-part-summary-actions { display: flex; gap: 0.4rem; }
+  .group-part-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 0.5rem; }
+  .group-part-card { border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--primary); transition: border-color 0.15s, background 0.15s; }
+  .group-part-card.selected { border-color: var(--accent); background: var(--surface); }
+  .group-part-toggle { display: flex; flex-direction: column; align-items: flex-start; gap: 0.15rem; width: 100%; padding: 0.5rem 0.6rem; background: none; border: none; cursor: pointer; text-align: left; font: inherit; color: inherit; }
+  .group-part-check { display: inline-flex; align-items: center; justify-content: center; width: 1rem; height: 1rem; border: 1px solid var(--border); border-radius: 3px; color: transparent; }
+  .group-part-card.selected .group-part-check { color: var(--accent-contrast, #fff); background: var(--accent); border-color: var(--accent); }
+  .group-part-name { font-weight: 600; font-size: 0.82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+  .group-part-available { font-size: 0.72rem; color: var(--text-muted); }
+  .group-part-qty { display: flex; align-items: center; justify-content: space-between; gap: 0.4rem; font-size: 0.75rem; color: var(--text-muted); padding: 0 0.6rem 0.5rem; }
   .grouped-qty-input { min-width: 4rem; width: 4rem; height: var(--control-height, 2.25rem); }
   .empty-state { color: var(--text-muted, #888); padding: 2rem 0; text-align: center; }
   .cam-form-hint { color: var(--text-muted, #888); font-size: 0.85rem; margin: 0.25rem 0 0; }
