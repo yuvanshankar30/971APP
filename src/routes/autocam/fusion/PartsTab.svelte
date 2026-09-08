@@ -51,7 +51,7 @@
   // instead of mixing every category together - a category already in
   // focus means recent parts from OTHER categories aren't useful here.
   $: queueableByCreatedAt = partsByCreatedAt
-    .filter((part) => Number(part.quantity) > 0)
+    .filter((part) => Number(part.original_quantity) > 0)
     .filter((part) => !queuePickerCategoryId || String(part.category_id) === String(queuePickerCategoryId));
   $: recentPartsSearchTerm = recentPartsSearch.trim().toLowerCase();
   $: recentQueueableParts = recentPartsSearchTerm
@@ -66,7 +66,7 @@
     const knownCategories = new Map(currentCategories.map((category) => [String(category.id), category]));
     const groups = new Map();
     function groupFor(key, category) {
-      if (!groups.has(key)) groups.set(key, { key, categoryId: category ? String(category.id) : null, category: category || null, parts: [], plates: [], remainingQuantity: 0 });
+      if (!groups.has(key)) groups.set(key, { key, categoryId: category ? String(category.id) : null, category: category || null, parts: [], plates: [] });
       return groups.get(key);
     }
     for (const part of currentParts) {
@@ -74,8 +74,6 @@
       const category = knownCategories.get(categoryId);
       const group = groupFor(category ? `category:${categoryId}` : `unresolved-part:${part.id}`, category);
       group.parts.push(part);
-      const quantity = Number(part.quantity);
-      if (Number.isSafeInteger(quantity) && quantity > 0) group.remainingQuantity += quantity;
     }
     for (const plate of currentPlates) {
       const categoryId = plate.category_id == null ? null : String(plate.category_id);
@@ -598,16 +596,17 @@
     }
   }
 
+  // Quantity for queueing purposes is the part's full requested quantity,
+  // not a shrinking "remaining unassigned" count - a part can be requeued
+  // as many times as needed (reprints, retries), so there's no reason to
+  // cap or hide it once it's been queued once.
   function maximumQueueQuantity(group, part) {
-    return Number(part.quantity);
+    return Number(part.original_quantity);
   }
 
-  // A fully committed part has no remaining physical quantity to add to a
-  // new CAM job.  Keep it visible in the dated catalog, but never offer it
-  // in the Send picker where selecting it would create duplicate work.
   function queueableParts(group) {
     return group.parts.filter((part) =>
-      Number(part.quantity) > 0
+      Number(part.original_quantity) > 0
       && (!queuePickerDate || pacificDateKey(part.created_at) === queuePickerDate)
     );
   }
@@ -635,8 +634,7 @@
     const categoryId = group.categoryId;
     const part = group.parts.find((p) => p.id === categorySinglePartSelections[categoryId]);
     if (!part) return;
-    const remaining = Number(part.quantity);
-    categorySinglePartQuantities = { ...categorySinglePartQuantities, [categoryId]: remaining };
+    categorySinglePartQuantities = { ...categorySinglePartQuantities, [categoryId]: Number(part.original_quantity) };
   }
 
   function toggleGroupedPart(group, part) {
@@ -648,8 +646,7 @@
       delete quantities[part.id];
     } else {
       selected.add(part.id);
-      const remaining = Number(part.quantity);
-      quantities[part.id] = remaining;
+      quantities[part.id] = Number(part.original_quantity);
     }
     categoryGroupedPartSelections = { ...categoryGroupedPartSelections, [categoryId]: [...selected] };
     categoryGroupedPartQuantities = { ...categoryGroupedPartQuantities, [categoryId]: quantities };
@@ -658,7 +655,7 @@
   function selectAllGroupedParts(group, queueable) {
     const categoryId = group.categoryId;
     const quantities = {};
-    for (const part of queueable) quantities[part.id] = Number(part.quantity);
+    for (const part of queueable) quantities[part.id] = Number(part.original_quantity);
     categoryGroupedPartSelections = { ...categoryGroupedPartSelections, [categoryId]: queueable.map((p) => p.id) };
     categoryGroupedPartQuantities = { ...categoryGroupedPartQuantities, [categoryId]: quantities };
   }
@@ -962,7 +959,7 @@
                 <p class="cam-form-hint">
                   {#if editingQuantityId === part.id}
                     <span class="rename-control quantity-control">
-                      Total needed:
+                      Quantity:
                       <input
                         type="number"
                         min="0"
@@ -976,12 +973,9 @@
                     </span>
                   {:else}
                     <span class="rename-control quantity-control">
-                      {part.original_quantity} needed total - {part.quantity} remaining to queue
-                      {#if part.original_quantity - part.quantity > 0}
-                        ({part.original_quantity - part.quantity} already queued)
-                      {/if}
+                      Quantity: {part.original_quantity}
                       {#if canManage}
-                        <button type="button" class="btn btn-ghost btn-sm" title="Edit total quantity needed" on:click={() => startEditQuantity(part)}><Pencil size={13} /></button>
+                        <button type="button" class="btn btn-ghost btn-sm" title="Edit quantity" on:click={() => startEditQuantity(part)}><Pencil size={13} /></button>
                       {/if}
                     </span>
                   {/if}
@@ -1070,7 +1064,7 @@
                 {#each recentQueueableParts as part}
                   <button type="button" class="recent-queue-button" title={part.name} on:click={() => selectRecentPart(part)}>
                     <span class="recent-queue-name">{part.name}</span>
-                    <span class="recent-queue-detail">{categoryLabel(part.fusion_part_categories)}</span>
+                    <span class="recent-queue-detail">{categoryLabel(part.fusion_part_categories)} &middot; qty {part.original_quantity}</span>
                   </button>
                 {/each}
               </div>
@@ -1100,7 +1094,7 @@
                   <select id={`queue-single-part-${group.categoryId}`} class="form-select" bind:value={categorySinglePartSelections[group.categoryId]} on:change={() => handleSinglePartPick(group)}>
                     <option value="">{queueable.length ? 'Choose a part...' : 'No parts available'}</option>
                     {#each queueable as part}
-                      <option value={part.id}>{part.name} ({part.quantity} remaining)</option>
+                      <option value={part.id}>{part.name} (qty {part.original_quantity})</option>
                     {/each}
                   </select>
                 </div>
@@ -1155,7 +1149,7 @@
                       >
                         <span class="group-part-check"><Check size={12} /></span>
                         <span class="group-part-name">{part.name}</span>
-                        <span class="group-part-available">{part.quantity} available</span>
+                        <span class="group-part-available">qty {part.original_quantity}</span>
                       </button>
                       {#if checked}
                         <label class="group-part-qty">

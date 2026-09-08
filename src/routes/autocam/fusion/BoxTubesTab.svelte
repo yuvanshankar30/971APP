@@ -49,11 +49,17 @@
   let renameTubeValue = '';
   let editingQuantityId = null;
   let quantityValue = '';
+  // Free-text search over "Recent tube stock" - empty shows the 6 most
+  // recent queueable tubes, typing searches every queueable tube by name.
+  let recentTubeSearch = '';
   $: aluminumMaterials = materials.filter((material) => /alumin(?:um|ium)/i.test(material.name || ''));
-  $: recentQueueableTubes = [...boxTubes]
+  $: queueableTubesByCreatedAt = [...boxTubes]
     .filter((tube) => tube.step_file_name && Number(tube.quantity) > 0)
-    .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
-    .slice(0, 8);
+    .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+  $: recentTubeSearchTerm = recentTubeSearch.trim().toLowerCase();
+  $: recentQueueableTubes = recentTubeSearchTerm
+    ? queueableTubesByCreatedAt.filter((tube) => tube.name?.toLowerCase().includes(recentTubeSearchTerm))
+    : queueableTubesByCreatedAt.slice(0, 6);
 
   async function loadManufacturingParts() {
     const { data, error } = await supabase
@@ -165,11 +171,13 @@
   export function openQueuePicker() {
     queuePickerOpen = true;
     if (!queuedTubeId) queuedTubeId = boxTubes.find((tube) => tube.step_file_name)?.id || '';
+    recentTubeSearch = '';
   }
 
   function closeQueuePicker() {
     queuePickerOpen = false;
     queuedTubeId = '';
+    recentTubeSearch = '';
   }
 
   function selectRecentTube(tube) {
@@ -437,7 +445,7 @@
           <p class="cam-form-hint">
             {#if editingQuantityId === boxTube.id}
               <span class="rename-control quantity-control">
-                Total needed:
+                Quantity:
                 <input
                   type="number"
                   min="0"
@@ -451,9 +459,9 @@
               </span>
             {:else}
               <span class="rename-control quantity-control">
-                {boxTube.quantity} needed total
+                Quantity: {boxTube.quantity}
                 {#if canManage}
-                  <button type="button" class="btn btn-ghost btn-sm" title="Edit total quantity needed" on:click={() => startEditQuantity(boxTube)}><Pencil size={13} /></button>
+                  <button type="button" class="btn btn-ghost btn-sm" title="Edit quantity" on:click={() => startEditQuantity(boxTube)}><Pencil size={13} /></button>
                 {/if}
               </span>
             {/if}
@@ -521,17 +529,30 @@
             </select>
           </div>
         </div>
-        {#if recentQueueableTubes.length}
+        {#if queueableTubesByCreatedAt.length}
           <div class="recent-queue-picker">
-            <span class="form-label">Recent tube stock</span>
-            <div class="recent-queue-grid">
-              {#each recentQueueableTubes as tube}
-                <button type="button" class="recent-queue-button" title={tube.name} on:click={() => selectRecentTube(tube)}>
-                  <span class="recent-queue-name">{tube.name}</span>
-                  <span class="recent-queue-detail">Qty {tube.quantity}</span>
-                </button>
-              {/each}
+            <div class="recent-queue-header">
+              <span class="form-label">{recentTubeSearchTerm ? 'Search results' : 'Recent tube stock'}</span>
+              <input
+                type="search"
+                class="form-input recent-queue-search"
+                placeholder="Search tube stock by name..."
+                bind:value={recentTubeSearch}
+                aria-label="Search recent tube stock by name"
+              />
             </div>
+            {#if recentQueueableTubes.length}
+              <div class="recent-queue-grid">
+                {#each recentQueueableTubes as tube}
+                  <button type="button" class="recent-queue-button" title={tube.name} on:click={() => selectRecentTube(tube)}>
+                    <span class="recent-queue-name">{tube.name}</span>
+                    <span class="recent-queue-detail">Qty {tube.quantity}</span>
+                  </button>
+                {/each}
+              </div>
+            {:else}
+              <p class="cam-form-hint">No tube stock matches "{recentTubeSearch}".</p>
+            {/if}
           </div>
         {/if}
         {#if queuedTubeId}
@@ -639,6 +660,8 @@
   .cad-modal .modal-body { min-height: 60vh; }
   .queue-picker-modal { --modal-width: 46rem; }
   .recent-queue-picker { margin: 0.75rem 0; }
+  .recent-queue-header { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.4rem; }
+  .recent-queue-search { max-width: 220px; height: 2rem; padding: 0.25rem 0.5rem; font-size: 0.8rem; }
   .recent-queue-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.45rem; }
   .recent-queue-button {
     display: grid;
