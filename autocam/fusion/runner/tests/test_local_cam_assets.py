@@ -68,5 +68,29 @@ class SingleToolLibraryTests(unittest.TestCase):
             self.assertEqual([entry["guid"] for entry in countersinks], [countersink_guid])
 
 
+class PostProcessorSelectionTests(unittest.TestCase):
+    def test_new_router_uses_the_bundled_shopsabre_post_when_the_profile_value_is_missing(self):
+        path = Path(local_cam_assets.resolve_local_post_processor({
+            "cam_machines": {"name": "New Router", "post_processor": None}
+        }))
+
+        self.assertEqual(path.name, "shopsabre.cps")
+        post = path.read_text()
+        self.assertIn('description = "ShopSabre with WinCNC control"', post)
+        self.assertIn('extension = "tap"', post)
+
+    def test_new_router_rejects_a_conflicting_post_processor(self):
+        with self.assertRaisesRegex(ValueError, r"New Router must use shopsabre\.cps"):
+            local_cam_assets.resolve_local_post_processor({
+                "cam_machines": {"name": "New Router", "post_processor": "971_emc.cps"}
+            })
+
+    def test_unc_router_keeps_its_linuxcnc_post_processor(self):
+        path = Path(local_cam_assets.resolve_local_post_processor({
+            "cam_machines": {"name": "UNC Router", "post_processor": None}
+        }))
+        self.assertEqual(path.name, "971_emc.cps")
+
+
 if __name__ == "__main__":
     unittest.main()

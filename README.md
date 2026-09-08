@@ -482,6 +482,9 @@ own docs are all together in one place instead of scattered across
   and 0.5in 82-degree T5 countersinks; no countersink operation is generated
   unless one is selected, and the Runner independently verifies that exact
   loaded-tool record before adding its feature-recognized hole operation.
+  Every New Router Fusion job is post-processed with the bundled ShopSabre
+  WinCNC `shopsabre.cps` post and emits native `.tap` output; a contradictory
+  machine-profile post setting fails the job before post-processing.
   The Parts and Tube Stock send dialogs each include up to eight recent,
   queueable records in a compact quick-selection grid alongside their full
   selectors.

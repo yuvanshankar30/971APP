@@ -28,6 +28,14 @@ _POST_PROCESSOR_FILES = {
     "wincnc": "shopsabre.cps",
 }
 
+# Physical-machine invariants, not operator-tunable preferences. A New Router
+# job is always for the ShopSabre Pro 408; a stale profile must never post
+# LinuxCNC code to it.
+_MACHINE_POST_PROCESSORS = {
+    "new router": "shopsabre.cps",
+    "unc router": "971_emc.cps",
+}
+
 
 def _joined_record(data: dict, key: str) -> dict:
     value = data.get(key)
@@ -180,10 +188,25 @@ def resolve_local_post_processor(data: dict) -> str:
     machine = _joined_record(data, "cam_machines")
     configured_post = machine.get("post_processor")
     machine_name = machine.get("name") or "selected machine"
-    if not isinstance(configured_post, str) or not configured_post.strip():
-        raise ValueError(f"{machine_name} has no Fusion post processor configured")
+    required_post = _MACHINE_POST_PROCESSORS.get(str(machine_name).strip().lower())
+    normalized_configured_post = (
+        configured_post.strip().lower()
+        if isinstance(configured_post, str) and configured_post.strip()
+        else None
+    )
 
-    file_name = _POST_PROCESSOR_FILES.get(configured_post.strip().lower())
+    if required_post:
+        configured_file = _POST_PROCESSOR_FILES.get(normalized_configured_post)
+        if normalized_configured_post and configured_file != required_post:
+            raise ValueError(
+                f"{machine_name} must use {required_post}, not {configured_post}"
+            )
+        file_name = required_post
+    elif not normalized_configured_post:
+        raise ValueError(f"{machine_name} has no Fusion post processor configured")
+    else:
+        file_name = _POST_PROCESSOR_FILES.get(normalized_configured_post)
+
     if not file_name:
         raise ValueError(
             f"{machine_name} uses unsupported Fusion post processor: {configured_post}"
