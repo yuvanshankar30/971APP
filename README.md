@@ -477,6 +477,9 @@ own docs are all together in one place instead of scattered across
   and the Runner rejects incomplete groups before CAM. Completed Fusion jobs keep
   every postprocessor output as a separate, byte-exact downloadable file with its
   size and SHA-256 checksum; queued and terminal jobs can be deleted from the queue.
+  The Parts and Tube Stock send dialogs each include up to eight recent,
+  queueable records in a compact quick-selection grid alongside their full
+  selectors.
   The Jobs tab loads the newest 200 lightweight rows once, then polls only mutable
   fields for active job IDs; base64 NC artifacts load on demand only when someone
   downloads or posts them. Manufacturing status lookups query only the relevant plate/tube
