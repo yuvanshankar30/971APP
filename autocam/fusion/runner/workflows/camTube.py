@@ -35,9 +35,9 @@ def _total_machining_time(cam: adsk.cam.CAM) -> Optional[float]:
 
 def _generate_tube_toolpaths(cam: adsk.cam.CAM) -> None:
     """Generate the face-scoped setups without invoking plate cleanup logic."""
-    cam.generateAllToolpaths(True)
+    future = cam.generateAllToolpaths(True)
     deadline = time.time() + 180
-    while cam.isGenerating:
+    while not future.isGenerationCompleted:
         if time.time() >= deadline:
             raise TimeoutError("Fusion did not finish generating box-tube toolpaths")
         adsk.doEvents()

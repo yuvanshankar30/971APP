@@ -91,6 +91,12 @@ class TubeFaceProgramTests(unittest.TestCase):
         shape_index = handler.index('elif "shape" in name')
         self.assertLess(cutoff_index, shape_index)
 
+    def test_tube_toolpath_generation_uses_its_future(self):
+        workflow = (RUNNER_DIR / "workflows" / "camTube.py").read_text()
+        self.assertIn("future = cam.generateAllToolpaths(True)", workflow)
+        self.assertIn("while not future.isGenerationCompleted:", workflow)
+        self.assertNotIn("cam.isGenerating", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()
