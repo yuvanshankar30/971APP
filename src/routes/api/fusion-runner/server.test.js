@@ -36,6 +36,14 @@ describe('Fusion Runner machine self-registration',()=>{
   expect(mocks.from).not.toHaveBeenCalled();
  });
 });
+describe('Fusion Runner managed updates',()=>{
+ it('returns the deployment-local checksum manifest without querying Supabase',async()=>{
+  const result=await call('update-manifest');
+  expect(result.status).toBe(200);
+  expect(await result.json()).toEqual({manifestUrl:'http://localhost/downloads/SpartanRoboticsAutoCAM-FusionAddIn.manifest.json'});
+  expect(mocks.from).not.toHaveBeenCalled();
+ });
+});
 describe('Fusion Runner grouping lifecycle',()=>{
  it('marks unresolved claimed inputs failed instead of leaving a stranded claim',async()=>{
   mocks.from.mockReturnValueOnce(chain({error:null})).mockReturnValueOnce(chain({data:[{id:'job'}]})).mockReturnValueOnce(chain({data:{id:'job'}})).mockReturnValueOnce(chain({data:[]}));

@@ -66,6 +66,10 @@ Brief API connection resets are retried automatically with bounded backoff. If
 the Text Command window shows a reset repeatedly, check the network or the
 server; do not restart Fusion just for one transient reset.
 
+## Runner updates
+
+On every add-in start, the Runner asks the authenticated Hub update API for the current release manifest. When the deployed Runner revision differs, it downloads the packaged add-in, verifies its SHA-256 checksum, and replaces the Runner code, templates, and configuration defaults. It always preserves this workstation's `.env`, `.overridepath`, `deps`, and `temp` folders. Fusion must then be fully quit and reopened before the updated Python modules can run. A failed update check is logged but never prevents an otherwise configured Runner from processing jobs.
+
 For box tube, the Runner creates four manually indexed setups (Sides 12, 3, 6, and 9). Only sides containing real operations produce NC files; blank sides remain visible in Fusion without a blank file. Verify the setup side, toolpath direction, and near-wall-only breakthrough in Fusion before cutting a new tube/template combination.
 
 Templates aren't a config file or code change - they're a real Fusion CAM setup someone with machine knowledge has to build once by hand. [`cam-engineering-plan.md`](cam-engineering-plan.md) alongside this file lays out exactly what's needed (tool library, post-processor, the template itself) for whoever's doing that.

@@ -1,10 +1,11 @@
 <script>
   import { onMount, tick } from 'svelte';
+  import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import { supabase } from '$lib/supabase.js';
   import { userStore, loadUserFromUUID } from '$lib/stores/user.js';
   import { canManageCamProfiles } from '$lib/permissions.js';
-  import { Layers, Package, Box, ListChecks, SlidersHorizontal, BookOpen, HelpCircle, Send, X } from 'lucide-svelte';
+  import { Layers, Package, Box, ListChecks, SlidersHorizontal, BookOpen, HelpCircle, Send } from 'lucide-svelte';
   import PartsTab from './PartsTab.svelte';
   import BoxTubesTab from './BoxTubesTab.svelte';
   import JobQueueTab from './JobQueueTab.svelte';
@@ -17,12 +18,20 @@
   // before #448 merged the separate Plates tab into this one - a plate's
   // stock category now renders directly under that category's parts here.
   const VALID_TABS = ['parts', 'box-tubes', 'queue', 'stock-categories'];
+  const TAB_PATHS = {
+    parts: '/autocam/fusion/parts',
+    'box-tubes': '/autocam/fusion/tubes',
+    queue: '/autocam/fusion/jobs',
+    'stock-categories': '/autocam/fusion/stock-categories'
+  };
+  export let forcedTab = null;
   const requestedTab = $page.url.searchParams.get('tab');
   const normalizedRequestedTab = requestedTab === 'plates' ? 'parts' : requestedTab;
   const initialManufacturingPartId = $page.url.searchParams.get('manufacturingPart') || null;
+  const openQueueOnMount = $page.url.searchParams.get('openQueue') === '1';
 
   let user = null;
-  let activeTab = VALID_TABS.includes(normalizedRequestedTab) ? normalizedRequestedTab : 'parts';
+  let activeTab = VALID_TABS.includes(forcedTab) ? forcedTab : (VALID_TABS.includes(normalizedRequestedTab) ? normalizedRequestedTab : 'parts');
   // Reference to the mounted PartsTab instance, so the page-level "Send to
   // Fusion CAM" button (see openSendToFusionCam below) can open its queue
   // picker popup from outside the Parts tab - direct instruction: this
@@ -30,42 +39,33 @@
   // per-stock-group inside the parts list.
   let partsTabRef;
   let boxTubesTabRef;
-  let sendPickerOpen = false;
-  let sendPickerKind = 'plates';
 
   $: canManage = canManageCamProfiles(user);
 
   function setActiveTab(tab) {
-    activeTab = tab;
+    goto(TAB_PATHS[tab]);
   }
 
   // Switches to the Parts tab first if it isn't already active - PartsTab
   // (and partsTabRef) only exists in the DOM while that tab is showing, so
   // openQueuePicker() can't be called until after it mounts. tick() waits
   // for that mount to actually happen before calling it.
-  function openSendToFusionCam() {
-    // One queue entry point for every stock type. Plates are the normal
-    // workflow, so retain them as the default regardless of the active tab.
-    sendPickerKind = 'plates';
-    sendPickerOpen = true;
-  }
-
-  async function continueToQueuePicker() {
-    const tubeStock = sendPickerKind === 'tubes';
-    sendPickerOpen = false;
-    const targetTab = tubeStock ? 'box-tubes' : 'parts';
-    if (activeTab !== targetTab) {
-      activeTab = targetTab;
-      await tick();
-    }
-    if (tubeStock) boxTubesTabRef?.openQueuePicker();
-    else partsTabRef?.openQueuePicker();
+  async function openSendToFusionCam() {
+    // A tab route already establishes the stock type. Do not make the
+    // operator choose it again in an intermediate dialog.
+    if (activeTab === 'box-tubes') boxTubesTabRef?.openQueuePicker();
+    else if (activeTab === 'parts') partsTabRef?.openQueuePicker();
+    else await goto('/autocam/fusion/parts?openQueue=1');
   }
 
   onMount(() => {
     const unsub = userStore.subscribe((v) => { user = v; });
     (async () => {
       await loadUserFromUUID(supabase);
+      if (openQueueOnMount) {
+        await tick();
+        partsTabRef?.openQueuePicker();
+      }
     })();
     return unsub;
   });
@@ -90,7 +90,7 @@
   </div>
 </div>
 
-<nav class="tab-nav" role="tablist" aria-label="Fusion CAM sections">
+<nav class="tab-nav" aria-label="Fusion AutoCAM sections">
   <button type="button" class:active={activeTab === 'parts'} on:click={() => setActiveTab('parts')}>
     <Package size={16} /> Parts
   </button>
@@ -115,30 +115,6 @@
   <JobQueueTab />
 {/if}
 
-{#if canManage && sendPickerOpen}
-  <div class="modal-overlay" role="presentation" on:click={() => (sendPickerOpen = false)}>
-    <div class="modal send-kind-modal" role="dialog" aria-labelledby="send-kind-title" on:click|stopPropagation>
-      <div class="modal-header">
-        <h3 id="send-kind-title">Send to Fusion CAM</h3>
-        <button type="button" class="btn btn-ghost btn-sm" title="Close" aria-label="Close" on:click={() => (sendPickerOpen = false)}><X size={16} /></button>
-      </div>
-      <div class="modal-body">
-        <div class="form-group">
-          <label class="form-label" for="send-stock-kind">Stock type</label>
-          <select id="send-stock-kind" class="form-select" bind:value={sendPickerKind}>
-            <option value="plates">Plates</option>
-            <option value="tubes">Tube stock</option>
-          </select>
-        </div>
-      </div>
-      <div class="modal-footer-actions">
-        <button type="button" class="btn btn-ghost" on:click={() => (sendPickerOpen = false)}>Cancel</button>
-        <button type="button" class="btn btn-primary" on:click={continueToQueuePicker}><Send size={14} /> Continue</button>
-      </div>
-    </div>
-  </div>
-{/if}
-
 <style>
   /* This page used to redefine the site's own --background/--accent/etc.
      custom properties to force a black/blue/gold look
@@ -154,7 +130,6 @@
     display: flex;
     gap: 0.5rem;
   }
-  .send-kind-modal { --modal-width: 28rem; }
   .tab-nav {
     display: flex;
     gap: 0.5rem;

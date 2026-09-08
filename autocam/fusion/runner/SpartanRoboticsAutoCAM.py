@@ -17,6 +17,7 @@ from .workflows import camTube as camTube
 from .workflows import setupTemp as setupTemp
 from .workflows.dropFolder import _is_offline_settings_error, list_data_folder_tree
 from .workflows.job_status import send_job_error
+from .RunnerUpdate import check_and_stage_update
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -456,6 +457,22 @@ def run(_context):
         session = requests.Session()
         session.headers.update({"Authorization": f"Bearer {api_key}"})
         _configure_http_retries(session)
+
+        try:
+            updated_version = check_and_stage_update(session, BASE_URL, _ADDIN_DIR)
+        except Exception as update_error:
+            # An unavailable update service must never stop a working router
+            # from processing queued jobs. Log the diagnostic and continue.
+            fusion_app.log(f"Runner update check failed: {update_error}")
+        else:
+            if updated_version:
+                message = (
+                    f"Fusion AutoCAM Runner updated to {updated_version}. "
+                    "Fully quit and reopen Fusion before running jobs."
+                )
+                fusion_app.log(message)
+                ui.messageBox(message)
+                return
 
         _job_processing.clear()
         _drain_queue(_job_queue)
