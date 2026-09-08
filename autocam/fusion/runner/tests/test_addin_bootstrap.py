@@ -56,6 +56,15 @@ class DependencyBootstrapTests(unittest.TestCase):
         self.assertIn("_schedule_folder_sync_chunk()", entrypoint)
         self.assertIn("FusionFolderSyncUpload", entrypoint)
 
+    def test_folder_sync_never_touches_data_panel_while_a_modal_command_is_active(self):
+        entrypoint = (RUNNER_DIR / "SpartanRoboticsAutoCAM.py").read_text()
+        advance = entrypoint[entrypoint.index("def _advance_folder_sync"):entrypoint.index("def handleServer")]
+
+        self.assertIn('_IDLE_COMMAND_IDS = {"", "SelectCommand", "Select"}', entrypoint)
+        self.assertIn("def _can_advance_folder_sync()", entrypoint)
+        self.assertLess(advance.index("if not _can_advance_folder_sync()"), advance.index("FolderTreeWalker("))
+        self.assertIn("_schedule_folder_sync_chunk()", advance)
+
 
 if __name__ == "__main__":
     unittest.main()
