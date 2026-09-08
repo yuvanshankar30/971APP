@@ -66,6 +66,18 @@
   $: if (queuedTubeId && aluminumMaterials.length && !boxTubeMaterialSelections[queuedTubeId]) {
     boxTubeMaterialSelections = { ...boxTubeMaterialSelections, [queuedTubeId]: aluminumMaterials[0].id };
   }
+  // Search box above the main tube stock list itself (separate from the
+  // queue picker's own "Recent tube stock" search) - matches name and the
+  // linked manufacturing project id, the fields shown on each card.
+  let boxTubesListSearch = '';
+  $: boxTubesListSearchTerm = boxTubesListSearch.trim().toLowerCase();
+  $: boxTubesByCreatedAt = [...boxTubes].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+  $: filteredBoxTubesByCreatedAt = boxTubesListSearchTerm
+    ? boxTubesByCreatedAt.filter((tube) =>
+        tube.name?.toLowerCase().includes(boxTubesListSearchTerm)
+        || tube.project_id?.toLowerCase().includes(boxTubesListSearchTerm)
+      )
+    : boxTubesByCreatedAt;
   $: queueableTubesByCreatedAt = [...boxTubes]
     .filter((tube) => tube.step_file_name && Number(tube.quantity) > 0)
     .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
@@ -445,8 +457,20 @@
   {#if boxTubes.length === 0}
     <p class="empty-state">No box tubes yet. Add one above.</p>
   {:else}
+    <div class="tab-list-search">
+      <input
+        type="search"
+        class="form-input"
+        placeholder="Search tube stock by name or project..."
+        bind:value={boxTubesListSearch}
+        aria-label="Search tube stock"
+      />
+    </div>
+    {#if filteredBoxTubesByCreatedAt.length === 0}
+      <p class="empty-state">No tube stock matches "{boxTubesListSearch}".</p>
+    {/if}
     <div class="cam-list">
-      {#each boxTubes as boxTube (boxTube.id)}
+      {#each filteredBoxTubesByCreatedAt as boxTube (boxTube.id)}
         <div class="card cam-list-item">
           <div class="cam-list-header">
             {#if renamingTubeId === boxTube.id}
@@ -670,6 +694,7 @@
 
 <style>
   .tab-actions { margin-bottom: 1rem; }
+  .tab-list-search { margin-bottom: 1rem; max-width: 24rem; }
   .form-row { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
   .form-row-final { padding-top: 0.75rem; border-top: 1px solid var(--border); }
   .form-row .form-group { flex: 1; min-width: 160px; }

@@ -87,6 +87,24 @@
     rejected: 'Rejected'
   };
 
+  // Free-text search over the currently loaded page(s) of jobs - matches
+  // name, machine, and tool (the fields shown on each card), plus status
+  // label so e.g. typing "failed" finds every failed job on screen. Client
+  // side only: fetchFusionJobs is paginated (see load/loadMore below), so a
+  // search only reaches jobs already loaded - the "Load older jobs" hint
+  // below the list makes that limit visible instead of silently missing
+  // older matches.
+  let jobsSearch = '';
+  $: jobsSearchTerm = jobsSearch.trim().toLowerCase();
+  $: filteredJobs = jobsSearchTerm
+    ? jobs.filter((job) =>
+        job.name?.toLowerCase().includes(jobsSearchTerm)
+        || job.cam_machines?.name?.toLowerCase().includes(jobsSearchTerm)
+        || job.cam_tools?.name?.toLowerCase().includes(jobsSearchTerm)
+        || (STATUS_LABELS[job.status] || job.status || '').toLowerCase().includes(jobsSearchTerm)
+      )
+    : jobs;
+
   // showLoading=false for refreshes after an action, and for the polling
   // interval below - flipping loading back to true replaced the whole table
   // with a loading state and back, a jarring flash. With the 10s poll this
@@ -315,12 +333,22 @@
   <p class="empty-state">No Fusion CAM jobs yet - queue one from the Plates or Box Tubes tab.</p>
 {:else}
   <div class="cam-list-toolbar">
+    <input
+      type="search"
+      class="form-input tab-list-search"
+      placeholder="Search jobs by name, machine, tool, or status..."
+      bind:value={jobsSearch}
+      aria-label="Search jobs"
+    />
     <button type="button" class="btn btn-ghost btn-sm" on:click={handleDeleteAllFailed} disabled={deletingFailed}>
       <Trash2 size={14} /> {deletingFailed ? 'Deleting...' : 'Delete all failed jobs'}
     </button>
   </div>
+  {#if jobsSearchTerm && filteredJobs.length === 0}
+    <p class="empty-state">No jobs match "{jobsSearch}".</p>
+  {/if}
   <div class="cam-list">
-    {#each jobs as job (job.id)}
+    {#each filteredJobs as job (job.id)}
       <div class="card cam-list-item">
         <div class="cam-list-header">
           <strong><ListChecks size={16} /> {job.name || `Job ${job.id.slice(0, 8)}`}</strong>
@@ -399,7 +427,9 @@
       <button class="btn btn-secondary" disabled={loadingMore} on:click={loadMore}>
         {loadingMore ? 'Loading...' : 'Load older jobs'}
       </button>
-      <span class="cam-form-hint">Showing the {jobs.length} most recent jobs.</span>
+      <span class="cam-form-hint">
+        Showing the {jobs.length} most recent jobs.{jobsSearchTerm ? ' Search only covers jobs already loaded - load older jobs to search further back.' : ''}
+      </span>
     </div>
   {/if}
 {/if}
@@ -477,7 +507,8 @@
     justify-content: center;
     margin-top: var(--space-3);
   }
-  .cam-list-toolbar { display: flex; justify-content: flex-end; margin-bottom: 0.5rem; }
+  .cam-list-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; flex-wrap: wrap; }
+  .tab-list-search { max-width: 24rem; flex: 1 1 16rem; margin: 0; }
   .cam-list { display: flex; flex-direction: column; gap: 0.75rem; }
   .cam-list-item { padding: 1rem; }
   .cam-list-header { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }

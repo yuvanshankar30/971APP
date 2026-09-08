@@ -46,6 +46,19 @@
   let categories = [];
   $: stockGroups = buildStockGroups(parts, plates, categories);
   $: partsByCreatedAt = [...parts].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+  // Free-text search over the main parts list (separate from the queue
+  // picker's own "Recent parts" search above) - matches name, the linked
+  // manufacturing project id, and stock category label, since those are
+  // the fields shown on each card and the ones a user would actually
+  // search by.
+  $: partsListSearchTerm = partsListSearch.trim().toLowerCase();
+  $: filteredPartsByCreatedAt = partsListSearchTerm
+    ? partsByCreatedAt.filter((part) =>
+        part.name?.toLowerCase().includes(partsListSearchTerm)
+        || part.project_id?.toLowerCase().includes(partsListSearchTerm)
+        || categoryLabel(part.fusion_part_categories).toLowerCase().includes(partsListSearchTerm)
+      )
+    : partsByCreatedAt;
   // Once a stock category is chosen (picked directly, or implied by a
   // just-selected recent part), narrow "Recent parts" to that category
   // instead of mixing every category together - a category already in
@@ -99,6 +112,9 @@
   // /autocam page's tool picker), not a new rule invented here.
   let machineTools = {};
   let loading = true;
+
+  // Search box above the main parts list itself, not the queue picker's.
+  let partsListSearch = '';
 
   let showAddPartForm = false;
   // True when the New Part form was opened from the page-level "Quick
@@ -933,7 +949,19 @@
   {#if partsByCreatedAt.length === 0}
     <p class="empty-state">No parts yet. {canManage ? 'Add one above to get started.' : 'Ask a manufacturing lead to add one.'}</p>
   {:else}
-    {#each [{ key: 'all-parts', parts: partsByCreatedAt }] as group (group.key)}
+    <div class="tab-list-search">
+      <input
+        type="search"
+        class="form-input"
+        placeholder="Search parts by name, project, or material..."
+        bind:value={partsListSearch}
+        aria-label="Search parts"
+      />
+    </div>
+    {#if filteredPartsByCreatedAt.length === 0}
+      <p class="empty-state">No parts match "{partsListSearch}".</p>
+    {/if}
+    {#each [{ key: 'all-parts', parts: filteredPartsByCreatedAt }] as group (group.key)}
       <section class="stock-group">
           <div class="cam-list">
             {#each group.parts as part (part.id)}
@@ -1312,6 +1340,7 @@
   .recent-queue-detail { color: var(--text-muted); font-size: 0.72rem; }
   @media (max-width: 640px) { .recent-queue-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   .tab-actions { margin-bottom: 1rem; display: flex; gap: 0.5rem; flex-wrap: wrap; }
+  .tab-list-search { margin-bottom: 1rem; max-width: 24rem; }
   .form-row { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
   .form-row-final { padding-top: 0.75rem; border-top: 1px solid var(--border); }
   .form-row .form-group { flex: 1; min-width: 160px; }
