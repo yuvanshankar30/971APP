@@ -129,6 +129,15 @@ export async function POST({ request, url }) {
   const action = url.searchParams.get('action') || body?.action;
 
   try {
+    if (action === 'update-manifest') {
+      // The manifest is generated alongside the downloadable Runner zip at
+      // build time and contains its version and checksum. Keep discovery
+      // authenticated even though the static artifact itself is served by
+      // the app, so only configured Runner instances poll for updates.
+      return json({
+        manifestUrl: `${url.origin}/downloads/SpartanRoboticsAutoCAM-FusionAddIn.manifest.json`
+      });
+    }
     const supabase = getServiceSupabase();
     if (action === 'sync-folders') {
       const projectName = String(body?.projectName || '').trim();

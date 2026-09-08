@@ -52,11 +52,14 @@ browser confirmation or prompt popups.
   and machine-folder delivery. No external CAM software
   involved (pure JS geometry math). Real
   3-axis milling (contoured toolpaths a flat 2.5D profile can't represent)
-  is a separate sub-section, **Fusion AutoCAM** (`/autocam/fusion`), backed by
+  is a separate sub-section, **Fusion AutoCAM** (`/autocam/fusion/parts`), backed by
   an actual Fusion 360 Runner rather than in-process math; it is intentionally
   absent from the New AutoCAM Job operation picker. The shared **Send to
   Fusion AutoCAM** action queues both sheet parts and rectangular box tube stock,
   with the same Fusion document name and Data Panel folder selection;
+  its views have stable routes at `/autocam/fusion/parts`,
+  `/autocam/fusion/tubes`, `/autocam/fusion/jobs`, and
+  `/autocam/fusion/stock-categories` (the legacy root redirects to Parts);
   the box-tube path creates four face-scoped Fusion setups and posts separate `Side 12`,
   `Side 3`, `Side 6`, and `Side 9` files for manual indexing. See the
   **AutoCAM** section below for the code-level detail on all three.
@@ -428,7 +431,7 @@ own docs are all together in one place instead of scattered across
 - **`autocam/runner/README.md`** - the milling Runner concept (turning/routering
   are synchronous in-process math; milling needs an actual external Fusion
   360 Runner) - now built as **Fusion AutoCAM**, see the next bullet.
-- **`autocam/fusion/`** (reachable from `/autocam/fusion`) - **Fusion AutoCAM**:
+- **`autocam/fusion/`** (reachable from `/autocam/fusion/parts`; the legacy root redirects there) - **Fusion AutoCAM**:
   a native SvelteKit/Supabase milling pipeline that fills the gap the rest
   of AutoCAM deliberately doesn't solve (real 3-axis
   contoured toolpaths via Fusion 360's own CAM engine, not flat 2.5D

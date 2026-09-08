@@ -2,7 +2,7 @@
 
 **The Fusion 360 add-in that turns Spartans Hub's Fusion CAM job queue into real CAM setups and G-code.**
 
-Pairs with Spartans Hub's `/autocam/fusion` section and its `/api/fusion-runner` endpoint — not the original AutoCAM WebUI.
+Pairs with Spartans Hub's `/autocam/fusion/parts` section and its `/api/fusion-runner` endpoint — not the original AutoCAM WebUI.
 
 ![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![Autodesk Fusion](https://img.shields.io/badge/Autodesk_Fusion_360-F16529?style=for-the-badge&logo=autodesk&logoColor=white)
@@ -16,7 +16,7 @@ Pairs with Spartans Hub's `/autocam/fusion` section and its `/api/fusion-runner`
 
 ## Overview
 
-This is Team 971's Fusion CAM Runner, built to run against **Spartans Hub** (this repo). It is the Fusion 360 side of Spartans Hub's **Fusion CAM** section (`/autocam/fusion`) — the real-milling counterpart to the existing pure-JS turning/routing pipeline documented in the repo root's `README.md`.
+This is Team 971's Fusion CAM Runner, built to run against **Spartans Hub** (this repo). It is the Fusion 360 side of Spartans Hub's **Fusion AutoCAM** section (`/autocam/fusion/parts`) — the real-milling counterpart to the existing pure-JS turning/routing pipeline documented in the repo root's `README.md`.
 
 The add-in polls Spartans Hub's `/api/fusion-runner` endpoint for queued milling jobs, pulls down plate and box-tube jobs, builds Fusion CAM setups from templates, generates toolpaths, exports G-code, and reports completion back to `cam_jobs` in Spartans Hub's own database.
 
@@ -55,6 +55,7 @@ but an unchanged snapshot is not posted or written to the database again.
 - **Exact NC artifacts** — preserves each Fusion-posted file byte for byte instead of joining complete programs together
 - **Plate machining-time reporting** — stores Fusion's measured job time for the web queue (box-tube parity is tracked separately)
 - **Status reporting** — completion and errors pushed back to Spartans Hub's `cam_jobs` table
+- **Managed updates** — checks the authenticated release manifest at add-in startup, verifies the Runner zip checksum, and preserves local credentials/dependencies while staging a newer release for the next Fusion restart
 
 ## Requirements
 

@@ -1,7 +1,9 @@
 # Using Fusion CAM
 
-This is about the web page - the Parts/Plates/Job Queue tabs at
-`/autocam/fusion`. For installing the Runner add-in in Fusion 360 itself,
+This is about the web page: [Parts](/autocam/fusion/parts),
+[Tube Stock](/autocam/fusion/tubes), [Jobs](/autocam/fusion/jobs), and
+[Stock Categories](/autocam/fusion/stock-categories). The legacy
+`/autocam/fusion` URL redirects to Parts. For installing the Runner add-in in Fusion 360 itself,
 see the [Setup Guide](/autocam/fusion/setup) instead.
 
 ## Parts
@@ -73,11 +75,11 @@ as a ballpark for comparing jobs, not a promise.
 ## Tube Stock and Stock Categories
 
 **Tube Stock** is direct-to-CAM: add one STEP-backed tube, then use the
-page-level **Send to Fusion CAM** action, select **Tube Stock** in the stock
-type filter, then choose the tube, router, tool, and aluminum material. It is
-not mounted to a plate and it is not grouped with other tubes. The same Send
-action defaults to **Plates**, whose familiar date and stock filters remain
-unchanged. Both paths finish with the same Fusion document confirmation: set
+page-level **Send to Fusion CAM** action. On the Tube Stock page it opens the
+tube queue directly; choose the tube, router, tool, and aluminum material. It
+is not mounted to a plate and it is not grouped with other tubes. The same
+Send action on Parts opens the plate queue directly. Both paths finish with
+the same Fusion document confirmation: set
 the no-space file name and, when the Runner has published its folder tree,
 choose a Data Panel destination. Those values are saved on the queued job and
 used by the Runner for the new Fusion document. Tube stock currently exposes
