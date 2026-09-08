@@ -704,11 +704,14 @@ def _apply_manual_tabs(
 
 
 def _disable_tabs(app, operation) -> bool:
-    """Disable template tabs when no valid manual-tab geometry exists."""
+    """Disable tab geometry without changing the release contour's identity.
+
+    ``group_tabs`` is also the template's durable marker for the outer
+    release contour. DeleteToolpaths uses that marker to rebuild the actual
+    outside chain. Clearing it here made a tabless release cut look like an
+    unused internal finishing pass, so it was deleted before CAM generation.
+    """
     try:
-        group_tabs = operation.parameters.itemByName("group_tabs")
-        if group_tabs is not None:
-            group_tabs.value.value = False
         tabs_per_contour = operation.parameters.itemByName("tabsPerContour")
         if tabs_per_contour is not None:
             tabs_per_contour.value.value = 0

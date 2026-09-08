@@ -598,10 +598,17 @@ def _repair_missing_selections(setup) -> list[str]:
         # a finishing pass for one specific internal feature (a hole,
         # pocket, or slot/kidney/pill a sibling roughing operation already
         # cleared).
+        if op.strategy != "contour2d":
+            return False
+        name_lower = op.name.lower()
+        # ``group_tabs`` is the primary marker. Keep the known template
+        # names as a fallback because an older/failed tab cleanup may have
+        # already cleared that parameter before geometry repair runs.
+        if "2d slot cut" in name_lower or "slot cut for edges" in name_lower:
+            return True
         group_tabs_param = op.parameters.itemByName("group_tabs")
         return (
-            op.strategy == "contour2d"
-            and group_tabs_param is not None
+            group_tabs_param is not None
             and str(group_tabs_param.expression).strip().lower() == "true"
         )
 
