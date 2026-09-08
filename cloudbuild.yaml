@@ -104,6 +104,7 @@ steps:
         --build-arg=PUBLIC_ROUTES=${_PUBLIC_ROUTES}
         --build-arg=PUBLIC_TBA_API_KEY=${_PUBLIC_TBA_API_KEY}
         --build-arg=PUBLIC_AUTO_VENDOR=${_PUBLIC_AUTO_VENDOR}
+        --build-arg=FUSION_RUNNER_RELEASE_VERSION=$COMMIT_SHA
         -t ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE_NAME}:$BUILD_ID
         -t ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE_NAME}:latest
         .
