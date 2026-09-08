@@ -254,15 +254,16 @@ def _is_circular_loop(edges) -> bool:
 _FEATURE_ASPECT_RATIO = 2.5
 
 
-def _loop_aspect_ratio(edges) -> float:
-    """Bounding-box elongation of a closed loop - long side / short side.
+def _loop_bounding_box_dims(edges):
+    """(width, height) of a closed loop's own bounding box, in Fusion's
+    internal cm units - shared by _loop_aspect_ratio and
+    _loop_min_dimension_cm below so both measure the same geometry the
+    same way.
 
     Samples each edge's endpoints plus a point along it, so an arc-sided
     loop (a pill, a dogbone's rounded ends) is measured by the space it
-    actually occupies rather than by its vertices alone. Returns 0.0 when
-    the loop cannot be measured, which reads as "not elongated" and leaves
-    it classified as a shape - the safer default, since a shape operation
-    can machine a slot's area but a slot pass cannot clear a shape's.
+    actually occupies rather than by its vertices alone. Returns (0.0, 0.0)
+    when the loop cannot be measured.
     """
     xs, ys = [], []
     for edge in edges:
@@ -280,12 +281,118 @@ def _loop_aspect_ratio(edges) -> float:
         except Exception:
             pass
     if len(xs) < 2:
-        return 0.0
-    width, height = max(xs) - min(xs), max(ys) - min(ys)
+        return 0.0, 0.0
+    return max(xs) - min(xs), max(ys) - min(ys)
+
+
+def _loop_aspect_ratio(edges) -> float:
+    """Bounding-box elongation of a closed loop - long side / short side.
+
+    Returns 0.0 when the loop cannot be measured, which reads as "not
+    elongated" and leaves it classified as a shape - the safer default,
+    since a shape operation can machine a slot's area but a slot pass
+    cannot clear a shape's.
+    """
+    width, height = _loop_bounding_box_dims(edges)
     longer, shorter = max(width, height), min(width, height)
     if shorter <= 1e-6:
         return 0.0
     return longer / shorter
+
+
+def _loop_min_dimension_cm(edges) -> float:
+    """The narrower of a closed loop's own bounding-box width/height, in
+    cm - a proxy for "how much room is there for a roughing tool to
+    actually get inside and clear this feature," used to split the
+    "through" roughing operations by feature size (see
+    _split_through_roughing_ops). Returns 0.0 when unmeasurable, which
+    reads as "too narrow for anything" - the safer direction, since it
+    routes the chain to the smallest available tool rather than assigning
+    it to one that cannot physically clear it.
+    """
+    width, height = _loop_bounding_box_dims(edges)
+    return min(width, height)
+
+
+def _operation_tool_diameter_cm(op):
+    """This operation's assigned tool diameter, in cm - None if it can't
+    be read (no tool assigned yet, or the parameter is missing). Same
+    live API pattern already used in camPlate.py's own wall-thickness
+    warning (operation.tool.parameters.itemByName("tool_diameter")).
+    """
+    try:
+        parameter = op.tool.parameters.itemByName("tool_diameter")
+        if parameter is None:
+            return None
+        return float(parameter.value.value)
+    except Exception:
+        return None
+
+
+# A chain is only routed to a "big" roughing tool when there's real
+# clearance beyond the tool's own diameter to maneuver inside the
+# feature, not just barely fit - a modest, explained margin, matching
+# this file's own convention of a small deliberate safety margin over
+# the bare minimum (see e.g. STOCK_BACKING_CHECK_IN in TabPlacement.py).
+# A chain narrower than that goes to whichever "small"-named roughing
+# operation the template ships instead.
+_ROUGHING_FIT_CLEARANCE_FACTOR = 1.5
+
+
+def _split_through_roughing_ops(roughing_ops, shape_only):
+    """Routes each (edge, is_reverted, min_dimension_cm) chain in
+    shape_only to whichever of roughing_ops can actually clear it,
+    returning {operationId: [(edge, is_reverted), ...]}.
+
+    Direct instruction after live confirmation: a real template's "Shape
+    Through Hole" and "Small Shape Through Hole" (both adaptive2d
+    roughing) were both being assigned the SAME full chain list -
+    Fusion computing a full adaptive-clearing roughing pass twice over
+    identical geometry on every job, real, measurable wasted computation
+    on exactly the large/complex parts that already take the longest.
+    "Small Shape Through Hole" is meant to be a genuinely smaller-scoped
+    pass (mirroring the same big/small split this file already does for
+    circular holes, see _MIN_HOLE_DIAMETER_NAME_THRESHOLDS_IN), not a
+    second full-part pass. Only ever called with adaptive2d/pocket2d
+    roughing operations - a contour2d finishing pass (e.g. "Shape Through
+    Finishing Pass") is never one of these; it gets every chain regardless
+    of size (see the caller), since a finishing pass just follows the
+    boundary line and has no tool-clearance problem a roughing pass does.
+
+    Falls back to giving every roughing op every chain (the original
+    behavior before this split existed) whenever the split can't be
+    trusted: fewer than two distinctly-named ops, or a real tool diameter
+    couldn't be read for one of the "big" ones. Guessing a split without a
+    real number to split on risks silently starving an operation of
+    geometry it should have had - the exact class of bug this file exists
+    to prevent, not reproduce.
+    """
+    stripped_all = [(edge, is_reverted) for edge, is_reverted, _min_dim in shape_only]
+    small_ops = [op for op in roughing_ops if "small" in op.name.lower()]
+    small_ids = {op.operationId for op in small_ops}
+    big_ops = [op for op in roughing_ops if op.operationId not in small_ids]
+    if not small_ops or not big_ops:
+        return {op.operationId: stripped_all for op in roughing_ops}
+
+    big_diameters_cm = [d for d in (_operation_tool_diameter_cm(op) for op in big_ops) if d]
+    if len(big_diameters_cm) != len(big_ops):
+        return {op.operationId: stripped_all for op in roughing_ops}
+
+    # The thinnest of the "big" tools sets the bar - every op in that
+    # group must be able to actually clear whatever chain it's given.
+    threshold_cm = min(big_diameters_cm) * _ROUGHING_FIT_CLEARANCE_FACTOR
+    small_entries = [(edge, is_reverted) for edge, is_reverted, min_dim in shape_only if min_dim < threshold_cm]
+    big_entries = [(edge, is_reverted) for edge, is_reverted, min_dim in shape_only if min_dim >= threshold_cm]
+    assignments = {}
+    for op in small_ops:
+        # Empty on a part with nothing genuinely narrow is correct, not a
+        # bug - the same as any other operation this file finds
+        # inapplicable to a given part: its toolpath comes out empty and
+        # the existing cleanup below removes it.
+        assignments[op.operationId] = small_entries
+    for op in big_ops:
+        assignments[op.operationId] = big_entries
+    return assignments
 
 
 def _is_feature_slot_op(name_lower: str) -> bool:
@@ -366,9 +473,15 @@ def _internal_feature_loop_chains_all_bodies(design):
     split into ``(shape_chains, slot_chains)`` - see _FEATURE_ASPECT_RATIO
     for what separates the two and why they are machined differently.
 
-    Both halves carry the same (seed edge, is_reverted) shape, so a caller
-    that has no dedicated feature operation can simply concatenate them and
-    treat everything as it did before.
+    Both halves carry the same (seed edge, is_reverted, min_dimension_cm)
+    shape - the third element is this loop's own narrow bounding
+    dimension (see _loop_min_dimension_cm), used by
+    _split_through_roughing_ops to route a feature too narrow for the
+    main roughing tool to the template's dedicated small-tool operation
+    instead. A caller with no use for that (no dedicated feature
+    operation, or building a contour2d finishing pass's own selection,
+    which needs every chain regardless of size) can simply drop it and
+    concatenate both halves, same as before this field existed.
 
     This used to only collect loops whose bounding box was elongated past
     a 2.5:1 aspect-ratio threshold (treating anything rounder as "not a
@@ -414,7 +527,11 @@ def _internal_feature_loop_chains_all_bodies(design):
             # in ChainSelection rather than imposing one direction on every
             # imported feature.  See docs/contour-chain-direction.md.
             seed = co_edges[0]
-            entry = (seed.edge, is_reverted_for_loop_seed(seed.isOpposedToEdge))
+            entry = (
+                seed.edge,
+                is_reverted_for_loop_seed(seed.isOpposedToEdge),
+                _loop_min_dimension_cm(edges),
+            )
             if _loop_aspect_ratio(edges) >= _FEATURE_ASPECT_RATIO:
                 slot_chains.append(entry)
             else:
@@ -672,14 +789,24 @@ def _repair_missing_selections(setup) -> list[str]:
         # a feature operation working unchanged rather than silently
         # dropping its slots on the floor.
         if feature_slot_ops and slot_chains:
+            stripped_slots = [(edge, is_reverted) for edge, is_reverted, _min_dim in slot_chains]
             for op in feature_slot_ops:
-                through_chain_assignments[op.operationId] = slot_chains
+                through_chain_assignments[op.operationId] = stripped_slots
             shape_only = shape_chains
         else:
             shape_only = shape_chains + slot_chains
         if shape_only:
-            for op in through_shape_ops:
-                through_chain_assignments[op.operationId] = shape_only
+            # A finishing pass (contour2d) just follows the boundary line -
+            # no tool-clearance problem a roughing pass has - so it always
+            # gets every chain regardless of size. Only the roughing
+            # operations get split by feature size; see
+            # _split_through_roughing_ops for why and how.
+            finishing_ops = [op for op in through_shape_ops if op.strategy == "contour2d"]
+            roughing_ops = [op for op in through_shape_ops if op.strategy != "contour2d"]
+            stripped_shape_only = [(edge, is_reverted) for edge, is_reverted, _min_dim in shape_only]
+            for op in finishing_ops:
+                through_chain_assignments[op.operationId] = stripped_shape_only
+            through_chain_assignments.update(_split_through_roughing_ops(roughing_ops, shape_only))
 
     # Pocket finishing passes are not a substitute for a real Shape Pocket:
     # their stale template references are removed. The adaptive Shape Pocket
