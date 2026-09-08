@@ -215,6 +215,21 @@
     groupedPartsSearch = '';
   }
 
+  // First Escape clears whichever search box has text (matching the
+  // "search box, then close" convention of most filterable pickers) -
+  // only once both are already empty does a second Escape close the
+  // picker itself, rather than the first press unexpectedly closing it
+  // out from under someone still refining a search.
+  function handleQueuePickerKeydown(event) {
+    if (!queuePickerOpen || event.key !== 'Escape') return;
+    if (recentPartsSearch || groupedPartsSearch) {
+      recentPartsSearch = '';
+      groupedPartsSearch = '';
+      return;
+    }
+    closeQueuePicker();
+  }
+
   // Fusion filename + folder picker, shown as a confirmation step right
   // before a job actually queues. folderTreeRow is the cached Data Panel
   // tree (see fetchFusionFolderTree) - null until a Runner has synced at
@@ -868,6 +883,8 @@
     }
   }
 </script>
+
+<svelte:window on:keydown={handleQueuePickerKeydown} />
 
 {#if loading}
   <p>Loading parts...</p>

@@ -222,6 +222,18 @@
     recentTubeSearch = '';
   }
 
+  // See PartsTab.svelte's matching handler - first Escape clears an active
+  // search instead of closing the picker out from under someone still
+  // typing; a second Escape (search already empty) closes it.
+  function handleQueuePickerKeydown(event) {
+    if (!queuePickerOpen || event.key !== 'Escape') return;
+    if (recentTubeSearch) {
+      recentTubeSearch = '';
+      return;
+    }
+    closeQueuePicker();
+  }
+
   function selectRecentTube(tube) {
     queuedTubeId = tube.id;
   }
@@ -403,6 +415,8 @@
     }
   }
 </script>
+
+<svelte:window on:keydown={handleQueuePickerKeydown} />
 
 {#if loading}
   <p>Loading box tubes...</p>
