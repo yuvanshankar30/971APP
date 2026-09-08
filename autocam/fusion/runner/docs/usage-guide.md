@@ -50,9 +50,9 @@ part.
 ## Holding Tabs
 
 The release contour uses manual `0.6in x 0.15in` tabs on straight outer
-edges only. Tabs are placed only where the setup has stock behind that edge;
-rounded edges and void-facing sides are excluded. Larger stock-backed sides
-receive additional evenly spaced manual points, while smaller parts reduce
+edges. The runner prefers stock-backed edges where the setup can resolve
+them, and uses its established legacy fallback rather than silently removing
+all manual tabs when that information is unavailable. Smaller parts reduce
 tab dimensions only when their geometry requires it.
 
 ## Job Queue

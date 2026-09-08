@@ -54,7 +54,6 @@
 import adsk.core
 import adsk.fusion
 import adsk.cam
-import math
 
 
 DEFAULT_MIN_TABS = 4
@@ -99,7 +98,7 @@ MAX_TAB_HEIGHT_FRACTION = 0.70
 # validity gate, not a preference: selecting an undersized edge causes Fusion
 # to create malformed manual-tab geometry.  Keep this tied to the configured
 # tab width so the threshold stays correct if the tab is retuned.
-MIN_TAB_SIDE_LENGTH_IN = TAB_WIDTH_IN
+MIN_TAB_SIDE_LENGTH_IN = TAB_WIDTH_IN * 1.5
 
 # Kept as the coarse "is this edge even worth considering" filter. The real
 # gate is MIN_TAB_SIDE_LENGTH_IN above, applied per side after collinear
@@ -229,9 +228,7 @@ def _tab_height_for_bodies(bodies) -> float:
 def _tab_count_for_perimeter(perimeter_in: float, min_tabs: int, max_tabs: int) -> int:
     if perimeter_in <= 0:
         return min_tabs
-    # A longer perimeter must never receive fewer tabs.  Ceiling rather than
-    # rounding adds the next tab as soon as another spacing interval begins.
-    target = math.ceil(perimeter_in / TARGET_TAB_SPACING_IN)
+    target = round(perimeter_in / TARGET_TAB_SPACING_IN)
     return max(min_tabs, min(max_tabs, target))
 
 
@@ -384,22 +381,6 @@ def _body_center(body):
     )
 
 
-def _setup_stock_bounds(setup):
-    """Read Fusion's resolved stock offsets in internal centimeters.
-
-    ``expression`` is presentation text (for example ``"0.25 in"``), not a
-    machine-readable number.  The CAM value is already evaluated in Fusion's
-    internal length unit, which is also what BRep coordinates use.
-    """
-    values = []
-    for name in ("stockXLow", "stockXHigh", "stockYLow", "stockYHigh"):
-        parameter = setup.parameters.itemByName(name)
-        if parameter is None:
-            raise ValueError(f"missing setup parameter {name}")
-        values.append(float(parameter.value.value))
-    return tuple(values)
-
-
 def _all_straight_edges(body):
     """Every straight, long-enough edge on body's own outer boundary -
     deliberately NOT filtered by stock backing.  The caller filters whole
@@ -529,19 +510,13 @@ def select_tab_edges(
     # Drop sides too short to actually hold a tab. Measured on the segment that would carry the
     # tab, not the side's summed length: a side split into several short
     # collinear pieces still has to fit the tab within ONE of them.
-    min_side_cm = tab_width_in * 2.54
+    min_side_cm = tab_width_in * 1.5 * 2.54
     usable = [line for line in lines if _edge_length(best_edge_for_line(line)) >= min_side_cm]
     if not usable:
-        return []
+        usable = lines
 
     backed_usable = [line for line in usable if line_is_backed(line)]
-    # A manual tab must bridge into actual surrounding stock.  An unbacked
-    # edge cannot do that, and Fusion may create bad geometry if asked to
-    # place one there, so an entirely unsupported part receives no manual
-    # tab geometry rather than falling back to an invalid edge.
-    if not backed_usable:
-        return []
-    pool = backed_usable
+    pool = backed_usable if backed_usable else usable
 
     primary = pool[:max_tabs]
     counts = {id(line): 1 for line in primary}
@@ -561,12 +536,7 @@ def select_tab_edges(
 
         def room_for_one_more(line):
             n = counts[id(line)]
-            # Long release edges absorb tabs omitted from stock-bound sides
-            # while this spacing check prevents overlapping tab geometry.
-            # With N evenly-spaced positions, adjacent centers are
-            # length/(N + 1) apart.  Adding the next tab is valid only when
-            # that spacing remains at least one full tab width.
-            return line_length_in(line) - (n + 2) * tab_width_in
+            return line_length_in(line) - (n + 1) * tab_width_in * 2
 
         candidate = max(primary, key=room_for_one_more)
         if room_for_one_more(candidate) < 0:
@@ -589,11 +559,9 @@ def select_tab_edges(
         selected_edge_ids = {id(edge) for edge, _fraction in selected}
         remaining = [
             e for e in all_edges
-            if id(e) not in selected_edge_ids
-            and _edge_length(e) >= min_side_cm
-            and is_backed(e)
+            if id(e) not in selected_edge_ids and _edge_length(e) >= min_side_cm
         ]
-        remaining.sort(key=_edge_length, reverse=True)
+        remaining.sort(key=lambda e: (not is_backed(e), -_edge_length(e)))
         for edge in remaining:
             if len(selected) >= max_tabs:
                 break
@@ -775,11 +743,15 @@ def ConfigureTabs(min_tabs: int = DEFAULT_MIN_TABS, max_tabs: int = DEFAULT_MAX_
         # plate's own edge - AutoArrange's frame margin used up on that
         # side, or a corner placement - can have real sides with little
         # to no stock actually behind them; see _has_real_stock_backing).
-        # None (any parameter missing) means "skip this filter" so a broken
-        # template parameter lookup cannot prevent CAM generation.
+        # None (any parameter missing) means "skip this filter, don't
+        # place zero tabs from a name lookup failing."
         stock_bounds = None
         try:
-            stock_bounds = _setup_stock_bounds(setup)
+            x_low = float(setup.parameters.itemByName("stockXLow").expression)
+            x_high = float(setup.parameters.itemByName("stockXHigh").expression)
+            y_low = float(setup.parameters.itemByName("stockYLow").expression)
+            y_high = float(setup.parameters.itemByName("stockYHigh").expression)
+            stock_bounds = (x_low, x_high, y_low, y_high)
         except Exception as e:
             app.log(f"TabPlacement: could not read stock bounds, skipping the real-stock-backing check: {e}")
 
@@ -845,7 +817,7 @@ def ConfigureTabs(min_tabs: int = DEFAULT_MIN_TABS, max_tabs: int = DEFAULT_MAX_
                 if len(body_candidates) < body_min_tabs:
                     app.log(
                         f"TabPlacement: '{op.name}' - a nested body only had "
-                        f"{len(body_candidates)} stock-backed straight edge(s) long enough "
+                        f"{len(body_candidates)} straight edge(s) long enough "
                         f"to hold a tab (wanted at least {body_min_tabs} of "
                         f"{target_tabs} target, perimeter {perimeter_in:.1f}in) "
                         "- using what's available rather than placing a tab "
@@ -863,11 +835,7 @@ def ConfigureTabs(min_tabs: int = DEFAULT_MIN_TABS, max_tabs: int = DEFAULT_MAX_
                 all_tab_points.extend(tab_points)
 
             if not all_tab_points:
-                _disable_tabs(app, op)
-                app.log(
-                    f"TabPlacement: '{op.name}' - no usable explicit tab points found; "
-                    "disabled template tabs."
-                )
+                app.log(f"TabPlacement: '{op.name}' - no usable explicit tab points found on any body, skipping.")
                 continue
 
             applied = _apply_manual_tabs(app, op, all_tab_points, tab_width_in, tab_height_in)

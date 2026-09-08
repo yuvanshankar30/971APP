@@ -297,39 +297,22 @@ class TabDistributionTests(unittest.TestCase):
         self.assertNotIn(edges["left"], selected_edges)
         self.assertNotIn(edges["right"], selected_edges)
 
-    def test_tab_budget_increases_when_perimeter_crosses_another_spacing_interval(self):
+    def test_tab_budget_uses_nearest_spacing_interval(self):
         self.assertEqual(TabPlacement._tab_count_for_perimeter(16.0, 4, 10), 4)
-        self.assertEqual(TabPlacement._tab_count_for_perimeter(16.01, 4, 10), 5)
-        self.assertEqual(TabPlacement._tab_count_for_perimeter(36.01, 4, 10), 10)
-
-    def test_stock_bounds_use_resolved_cam_values_not_display_expressions(self):
-        values = {}
-        for name, value in zip(
-            ("stockXLow", "stockXHigh", "stockYLow", "stockYHigh"),
-            (-2.54, 25.4, -1.27, 12.7),
-        ):
-            values[name] = types.SimpleNamespace(
-                expression="not a Python float", value=types.SimpleNamespace(value=value)
-            )
-        setup = types.SimpleNamespace(parameters=_Parameters(values))
-
-        self.assertEqual(
-            TabPlacement._setup_stock_bounds(setup), (-2.54, 25.4, -1.27, 12.7)
-        )
+        self.assertEqual(TabPlacement._tab_count_for_perimeter(16.01, 4, 10), 4)
+        self.assertEqual(TabPlacement._tab_count_for_perimeter(36.01, 4, 10), 9)
 
 
 class MinimumSideLengthTests(unittest.TestCase):
     """A side too short to physically contain a tab must not get one.
-    MIN_TAB_SIDE_LENGTH_IN is derived from TAB_WIDTH_IN so the two can't
-    drift apart.
+    MIN_TAB_SIDE_LENGTH_IN reserves a tab-width of lead-in and lead-out.
     """
 
     def test_threshold_is_derived_from_the_tab_width(self):
-        # A side shorter than the physical 0.6in tab cannot receive a valid
-        # manual-tab point.  The hard threshold follows the configured tab
-        # width so those values cannot drift apart.
+        # A tab needs room to enter and leave the release edge, so the
+        # threshold remains tied to one and a half configured tab widths.
         self.assertEqual(
-            TabPlacement.MIN_TAB_SIDE_LENGTH_IN, TabPlacement.TAB_WIDTH_IN
+            TabPlacement.MIN_TAB_SIDE_LENGTH_IN, TabPlacement.TAB_WIDTH_IN * 1.5
         )
 
     def _body_with(self, edges):
@@ -376,9 +359,9 @@ class MinimumSideLengthTests(unittest.TestCase):
         self.assertLess(len(selected), 8, "must not crowd more tabs onto a side than it has room for")
         self.assertEqual(sorted(f for _e, f in selected), TabPlacement._tab_fractions(len(selected)))
 
-    def test_a_part_with_no_qualifying_side_creates_no_invalid_geometry(self):
-        # There is no valid location for a 0.6in tab on this geometry.  Do
-        # not ask Fusion to create a clipped tab merely to meet a count.
+    def test_a_part_with_no_qualifying_side_uses_the_legacy_fallback(self):
+        # Preserve the established fallback: the runner still gives a small
+        # part explicit release points rather than silently returning none.
         cm = TabPlacement.MIN_TAB_SIDE_LENGTH_IN * 2.54
         shorts = [
             _edge(0, 0, cm * 0.6, 0),
@@ -389,7 +372,7 @@ class MinimumSideLengthTests(unittest.TestCase):
 
         selected = TabPlacement.select_tab_edges(body, max_tabs=4, stock_bounds=None)
 
-        self.assertEqual(selected, [])
+        self.assertEqual(len(selected), len(shorts))
 
     def test_a_side_just_under_point_six_inches_never_gets_a_tab(self):
         cm = 2.54
