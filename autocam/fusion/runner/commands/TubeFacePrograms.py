@@ -9,6 +9,10 @@ next.
 """
 
 TUBE_FACE_CLOCKS = (12, 3, 6, 9)
+# Fusion silently truncates longer post program names. Leave room for the
+# meaningful face suffix so the four indexed setups cannot overwrite one
+# another when the base name contains tube/job UUIDs.
+FUSION_PROGRAM_NAME_MAX_LENGTH = 40
 
 
 def tube_face_label(clock):
@@ -25,4 +29,5 @@ def tube_face_program_name(base_name, clock):
     """Filename stem for one face; Fusion's post processor adds .ngc/.nc."""
     tube_face_label(clock)  # validates clock
     base = str(base_name or "tube").strip() or "tube"
-    return "{}-side-{}".format(base, clock)
+    suffix = "-side-{}".format(clock)
+    return "{}{}".format(base[:FUSION_PROGRAM_NAME_MAX_LENGTH - len(suffix)], suffix)

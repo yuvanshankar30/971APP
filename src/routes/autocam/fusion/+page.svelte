@@ -71,10 +71,10 @@
   });
 </script>
 
-<svelte:head><title>Fusion CAM | Spartans Hub</title></svelte:head>
+<svelte:head><title>Fusion AutoCAM | Spartans Hub</title></svelte:head>
 
 <div class="page-header">
-  <h1><Layers size={28} /> Fusion CAM</h1>
+  <h1><Layers size={28} /> Fusion AutoCAM</h1>
   <div class="header-guide-links">
     {#if canManage}
       <button type="button" class="btn btn-primary btn-sm" on:click={openSendToFusionCam}>
