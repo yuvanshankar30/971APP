@@ -55,7 +55,8 @@ browser confirmation or prompt popups.
   is a separate sub-section, **Fusion CAM** (`/autocam/fusion`), backed by
   an actual Fusion 360 Runner rather than in-process math; it is intentionally
   absent from the New AutoCAM Job operation picker. The shared **Send to
-  Fusion CAM** action queues both sheet parts and rectangular box tube stock;
+  Fusion CAM** action queues both sheet parts and rectangular box tube stock,
+  with the same Fusion document name and Data Panel folder selection;
   the box-tube path creates four face-scoped Fusion setups and posts separate `Side 12`,
   `Side 3`, `Side 6`, and `Side 9` files for manual indexing. See the
   **AutoCAM** section below for the code-level detail on all three.

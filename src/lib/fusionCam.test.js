@@ -19,7 +19,9 @@ import {
   deleteAllFailedFusionJobs,
   isFusionOutputJob,
   queueFusionJob,
-  updatePartQuantity
+  updatePartQuantity,
+  renameBoxTube,
+  updateBoxTubeQuantity
 } from './fusionCam.js';
 
 function chain(result) {
@@ -76,6 +78,24 @@ describe('Fusion CAM queue query efficiency', () => {
 
   it('refuses a tube-stock job without tube stock', async () => {
     await expect(queueFusionJob({ fusionJobKind: 'box_tube' })).rejects.toThrow(/box tube is required/i);
+    expect(mocks.from).not.toHaveBeenCalled();
+  });
+
+  it('persists tube name and quantity edits used by the Tube Stock cards', async () => {
+    mocks.from.mockImplementation(() => chain({ data: { id: 'tube-1', name: 'Renamed Tube', quantity: 3 }, error: null }));
+
+    await expect(renameBoxTube('tube-1', '  Renamed Tube  ')).resolves.toMatchObject({ name: 'Renamed Tube' });
+    expect(mocks.from).toHaveBeenNthCalledWith(1, 'fusion_box_tubes');
+    expect(mocks.queries[0].update).toHaveBeenCalledWith({ name: 'Renamed Tube' });
+
+    await expect(updateBoxTubeQuantity('tube-1', 3)).resolves.toMatchObject({ quantity: 3 });
+    expect(mocks.from).toHaveBeenNthCalledWith(2, 'fusion_box_tubes');
+    expect(mocks.queries[1].update).toHaveBeenCalledWith({ quantity: 3 });
+  });
+
+  it('rejects invalid tube card edits before querying Supabase', async () => {
+    await expect(renameBoxTube('tube-1', '   ')).rejects.toThrow(/name is required/i);
+    await expect(updateBoxTubeQuantity('tube-1', -1)).rejects.toThrow(/whole number/i);
     expect(mocks.from).not.toHaveBeenCalled();
   });
 

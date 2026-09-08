@@ -289,6 +289,33 @@ export async function deleteBoxTube(id) {
   if (error) throw error;
 }
 
+export async function renameBoxTube(id, name) {
+  const cleanedName = name?.trim();
+  if (!cleanedName) throw new Error('Tube stock name is required');
+  const { data, error } = await supabase
+    .from('fusion_box_tubes')
+    .update({ name: cleanedName })
+    .eq('id', id)
+    .select('*, parts(id, name, project_id, workflow)')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateBoxTubeQuantity(id, quantity) {
+  if (!Number.isInteger(quantity) || quantity < 0) {
+    throw new Error('Quantity must be a whole number, zero or more');
+  }
+  const { data, error } = await supabase
+    .from('fusion_box_tubes')
+    .update({ quantity })
+    .eq('id', id)
+    .select('*, parts(id, name, project_id, workflow)')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 /* ── Job queue (reuses cam_jobs - see file header) ───────────────────── */
 
 /**
