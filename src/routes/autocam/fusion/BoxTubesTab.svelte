@@ -135,6 +135,12 @@
     stepFile = event.target.files?.[0] || null;
   }
 
+  function cancelAdd() {
+    newBoxTube = { name: '', epic: '', ticket: '', quantity: 1, manufacturingPartId: '' };
+    stepFile = null;
+    showAddForm = false;
+  }
+
   export function openQueuePicker() {
     queuePickerOpen = true;
     if (!queuedTubeId) queuedTubeId = boxTubes.find((tube) => tube.step_file_name)?.id || '';
@@ -363,6 +369,7 @@
       </div>
       <div class="form-actions">
         <button class="btn btn-primary" disabled={submitting} on:click={handleAdd}>{submitting ? 'Adding...' : 'Add Tube Stock'}</button>
+        <button class="btn btn-secondary" disabled={submitting} on:click={cancelAdd}>Cancel</button>
       </div>
     </div>
   {/if}
