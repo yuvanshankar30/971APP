@@ -1,7 +1,7 @@
 import importlib.util
 from pathlib import Path
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 
 spec = importlib.util.spec_from_file_location(
@@ -144,6 +144,107 @@ class OfflineMustNotCreateFoldersTests(unittest.TestCase):
 
         root.dataFolders.add.assert_called_once_with("Offseason Projects")
         self.assertIs(folder, created)
+
+
+def _fake_folder(name, children=()):
+    """A MagicMock standing in for a Fusion DataFolder: .name, and
+    .dataFolders.count/.item(i) backed by `children` (also _fake_folder
+    instances), matching how list_data_folder_tree's walk() actually
+    reads a real folder.
+    """
+    folder = MagicMock()
+    folder.name = name
+    folder.dataFolders.count = len(children)
+    folder.dataFolders.item.side_effect = lambda i, _c=children: _c[i]
+    return folder
+
+
+class FolderTreeBudgetTests(unittest.TestCase):
+    """list_data_folder_tree can now be pointed at the project ROOT
+    (FUSION_DROP_FOLDER_PATH defaults to "" - see config.py), not just a
+    pre-scoped subfolder - direct instruction: the picker should show
+    every folder under the project, not just the configured drop folder's
+    own subtree. A full, unbounded walk from the root was confirmed live
+    to time out the MCP bridge, so max_folders bounds the real cost driver
+    (dataFolders.item() calls, each a genuine Fusion cloud round-trip)
+    instead of relying on scope alone to keep this fast.
+    """
+
+    def _app_for(self, root):
+        app = fake_app()
+        project = MagicMock()
+        project.name = "2026 Season CAM"
+        project.rootFolder = root
+        app.data.dataProjects.count = 1
+        app.data.dataProjects.item.return_value = project
+        return app
+
+    def test_walks_the_whole_tree_when_well_under_budget(self):
+        leaf_a = _fake_folder("Turning")
+        leaf_b = _fake_folder("Tubes")
+        root = _fake_folder("2026 Season CAM", [leaf_a, leaf_b])
+        app = self._app_for(root)
+
+        result = dropFolder.list_data_folder_tree(app, "2026 Season CAM", "", max_folders=200)
+
+        names = sorted(child["name"] for child in result["root"]["children"])
+        self.assertEqual(names, ["Tubes", "Turning"])
+        self.assertNotIn("truncated", result["root"])
+        for child in result["root"]["children"]:
+            self.assertNotIn("truncated", child)
+
+    def test_stops_early_and_marks_truncation_once_the_budget_runs_out(self):
+        # 5 real folders at the root; a budget of 2 must not visit the
+        # other 3 (each unvisited .item() call is exactly the cost this
+        # budget exists to bound) or hang trying to.
+        children = [_fake_folder(f"Folder{i}") for i in range(5)]
+        root = _fake_folder("2026 Season CAM", children)
+        app = self._app_for(root)
+
+        result = dropFolder.list_data_folder_tree(app, "2026 Season CAM", "", max_folders=2)
+
+        self.assertEqual(len(result["root"]["children"]), 2)
+        self.assertTrue(result["root"]["truncated"])
+        root.dataFolders.item.assert_has_calls([call(0), call(1)])
+        self.assertEqual(root.dataFolders.item.call_count, 2)
+
+    def test_budget_is_shared_across_the_whole_walk_not_per_node(self):
+        # A wide-then-deep tree: 3 folders at the root, one of which has 3
+        # of its own children. A budget of 4 must spend some on the root's
+        # own siblings and leave only 1 for that subfolder's children -
+        # confirming the budget is a single running total, not reset per
+        # recursion level (which would let a pathological tree blow past
+        # it depth by depth).
+        grandchildren = [_fake_folder(f"Sub{i}") for i in range(3)]
+        child_with_kids = _fake_folder("HasKids", grandchildren)
+        siblings = [child_with_kids, _fake_folder("Plain1"), _fake_folder("Plain2")]
+        root = _fake_folder("2026 Season CAM", siblings)
+        app = self._app_for(root)
+
+        result = dropFolder.list_data_folder_tree(app, "2026 Season CAM", "", max_folders=4)
+
+        self.assertEqual(root.dataFolders.item.call_count, 3)
+        self.assertFalse(result["root"].get("truncated", False))
+        has_kids_node = next(c for c in result["root"]["children"] if c["name"] == "HasKids")
+        self.assertEqual(len(has_kids_node["children"]), 1)
+        self.assertTrue(has_kids_node["truncated"])
+
+    def test_max_depth_still_bounds_recursion_independent_of_budget(self):
+        deep_child = _fake_folder("TooDeep")
+        mid = _fake_folder("Mid", [deep_child])
+        root = _fake_folder("2026 Season CAM", [mid])
+        app = self._app_for(root)
+
+        result = dropFolder.list_data_folder_tree(app, "2026 Season CAM", "", max_depth=1, max_folders=200)
+
+        mid_node = result["root"]["children"][0]
+        self.assertEqual(mid_node["name"], "Mid")
+        self.assertEqual(mid_node["children"], [])
+        self.assertNotIn("truncated", mid_node)
+        # A budget-exhaustion truncation would look identical in shape to
+        # a depth cutoff if this weren't checked - depth stopping must not
+        # spend budget it didn't need to.
+        deep_child.dataFolders.item.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -125,45 +125,74 @@ def resolve_data_project(app, project_name):
     return app.data.activeProject
 
 
-def list_data_folder_tree(app, project_name, base_folder_path, max_depth=3):
+def list_data_folder_tree(app, project_name, base_folder_path, max_depth=3, max_folders=200):
     """Walks the Data Panel folder tree starting at base_folder_path (e.g.
-    "Offseason Projects/AutoCAM", the configured drop folder) and returns
-    it as nested plain dicts - {"name", "path", "children": [...]}, path
-    being the "/"-joined segments from the PROJECT ROOT, not base_folder_path
-    (what resolve_drop_folder's folder_path argument expects back).
+    "" for the project root itself, or "Offseason Projects/AutoCAM" for a
+    subfolder) and returns it as nested plain dicts - {"name", "path",
+    "children": [...]}, path being the "/"-joined segments from the
+    PROJECT ROOT, not base_folder_path (what resolve_drop_folder's
+    folder_path argument expects back).
 
     This is read-only enumeration for the web UI's folder picker (see
     "sync-folders" in the fusion-runner API route) - not involved in
     resolving where a document actually gets saved, that's still
     resolve_drop_folder above.
 
-    Deliberately scoped to base_folder_path rather than the whole project:
-    confirmed live against the real shop account that even a shallow
-    (depth-3) walk from the project ROOT blocked Fusion's main thread long
-    enough to time out the MCP bridge twice in a row - "2026 Season CAM"
-    has enough unrelated top-level folders that enumerating them all is
-    genuinely too slow for a periodic sync, each dataFolders access being
-    a real synchronous Autodesk cloud round-trip. Jumping straight to the
-    AutoCAM folder via resolve_drop_folder's existing (already fast, used
-    on every job) walk and only recursing from there keeps this to the
-    part of the tree someone queueing a job actually needs to browse.
-    Folders outside this subtree still work fine as a save destination via
-    resolve_drop_folder; they just don't appear in the picker.
+    max_folders bounds the total number of dataFolders.item() calls across
+    the whole walk (each is a real, synchronous Autodesk cloud round-trip)
+    - direct instruction: the picker should be able to show every folder
+    under the project root (FUSION_DROP_FOLDER_PATH's own default - see
+    config.py), not just the one subtree under the configured drop folder.
+    That matters here specifically because a full, unbounded walk from the
+    project ROOT was confirmed live against the real shop account to block
+    Fusion's main thread long enough to time out the MCP bridge twice in a
+    row - "2026 Season CAM" has enough top-level folders that enumerating
+    all of them (let alone descending 3 levels into each) is genuinely
+    slow. Rather than pre-scoping the walk to a small subfolder to dodge
+    that cost (the previous fix - workable, but it made "browse the whole
+    project" and "the picker's default view" the same setting, which they
+    aren't), bound the real cost driver directly: once the budget runs
+    out, a node stops enumerating further children and is marked
+    "truncated": true, so the picker gets a genuinely complete top end of
+    the tree with an honest partial mid/bottom rather than either an
+    unbounded blocking call or an artificially narrow default scope.
+
+    Breadth-first, deliberately not the more obvious depth-first
+    recursion: every folder at a given depth gets its own direct children
+    listed before any of them recurses deeper. A depth-first walk would
+    let the very first top-level folder's own subtree consume the whole
+    budget before a second top-level folder was ever listed at all - for
+    a picker whose whole point is showing the breadth of what exists
+    under the project root, that reproduces the exact "only one subtree
+    visible" complaint this function's root-walk support was added to
+    fix, just one level removed instead of solved.
     """
     data_project, base_folder = resolve_drop_folder(app, project_name, base_folder_path)
+    budget = [max_folders]
+    root_node = {"name": base_folder.name, "path": base_folder_path, "children": []}
+    level = [(base_folder, root_node, 0)]
+    while level:
+        next_level = []
+        for folder, node, depth in level:
+            if depth >= max_depth or budget[0] <= 0:
+                if budget[0] <= 0:
+                    node["truncated"] = True
+                continue
+            count = folder.dataFolders.count
+            for i in range(count):
+                if budget[0] <= 0:
+                    node["truncated"] = True
+                    break
+                budget[0] -= 1
+                child = folder.dataFolders.item(i)
+                child_path = f"{node['path']}/{child.name}" if node['path'] else child.name
+                child_node = {"name": child.name, "path": child_path, "children": []}
+                node["children"].append(child_node)
+                next_level.append((child, child_node, depth + 1))
+            node["children"].sort(key=lambda n: n["name"].lower())
+        level = next_level
 
-    def walk(folder, path, depth):
-        node = {"name": folder.name, "path": path, "children": []}
-        if depth >= max_depth:
-            return node
-        for i in range(folder.dataFolders.count):
-            child = folder.dataFolders.item(i)
-            child_path = f"{path}/{child.name}" if path else child.name
-            node["children"].append(walk(child, child_path, depth + 1))
-        node["children"].sort(key=lambda n: n["name"].lower())
-        return node
-
-    return {"project": data_project.name, "root": walk(base_folder, base_folder_path, 0)}
+    return {"project": data_project.name, "root": root_node}
 
 
 def resolve_drop_folder(app, project_name, folder_path):
