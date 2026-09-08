@@ -13,7 +13,7 @@ import time
 
 from .ContourChains import is_reverted_for_loop_seed
 from .TubeFacePrograms import TUBE_FACE_CLOCKS, tube_face_program_name, tube_face_setup_name
-from .TubeHeightMath import bottom_height_expression
+from .TubeHeightMath import bottom_height_expression, cluster_by_projection, PLANE_CLUSTER_TOLERANCE_CM
 
 
 _PARALLEL_TOLERANCE = 0.985
@@ -116,27 +116,34 @@ def _wall_face_families(body, axis):
     origin = adsk.core.Point3D.create()
     for family in families:
         direction = _face_normal(family[0])
-        # Inner walls live between the two exterior-wall projections. Pick
-        # the extrema, which works for every rectangular cross-section.
-        ordered = sorted(
-            family,
-            key=lambda face: origin.vectorTo(face.centroid).dotProduct(direction),
+        projected = sorted(
+            ((origin.vectorTo(face.centroid).dotProduct(direction), face) for face in family),
+            key=lambda item: item[0],
         )
-        if len(ordered) < 2:
+        # See TubeHeightMath.cluster_by_projection - a wall can be split
+        # into several coplanar BRepFace pieces, so adjacency has to be
+        # resolved by plane, not by raw face, before anything downstream
+        # (exterior selection, wall thickness) touches it.
+        planes = cluster_by_projection(projected, PLANE_CLUSTER_TOLERANCE_CM)
+        for plane in planes:
+            plane["faces"] = plane.pop("items")
+        if len(planes) < 2:
             raise ValueError("Could not find both exterior walls for one tube dimension")
-        exterior_pairs.append((ordered[0], ordered[-1]))
-        # A face immediately adjacent to an exterior extremum in this sorted
-        # order is that wall's own paired interior face - the distance
-        # between two parallel planar faces is just the difference of their
-        # (already-computed) signed projections along the shared normal.
-        # Genuinely solid stock (no modeled wall thickness - only the two
-        # exterior extrema present) has no such pairing; those faces are
+        # The exterior wall can still be represented by several coplanar
+        # pieces; the largest one is the most reliable choice for the axis/
+        # WCS detection and loop selection that follow.
+        exterior_near = max(planes[0]["faces"], key=lambda face: face.area)
+        exterior_far = max(planes[-1]["faces"], key=lambda face: face.area)
+        exterior_pairs.append((exterior_near, exterior_far))
+        # Inner walls live between the two exterior-wall planes. A wall
+        # thickness is only known when a third, distinct plane exists
+        # inward of an exterior extremum - genuinely solid stock (only the
+        # two exterior planes present) has no such pairing; that face is
         # simply absent from the map, and the caller falls back to treating
         # that dimension as solid all the way to the opposite wall.
-        if len(ordered) >= 3:
-            projections = [origin.vectorTo(face.centroid).dotProduct(direction) for face in ordered]
-            wall_thickness_by_face[_face_id(ordered[0])] = abs(projections[1] - projections[0]) / _CM_PER_IN
-            wall_thickness_by_face[_face_id(ordered[-1])] = abs(projections[-1] - projections[-2]) / _CM_PER_IN
+        if len(planes) >= 3:
+            wall_thickness_by_face[_face_id(exterior_near)] = abs(planes[1]["projection"] - planes[0]["projection"]) / _CM_PER_IN
+            wall_thickness_by_face[_face_id(exterior_far)] = abs(planes[-1]["projection"] - planes[-2]["projection"]) / _CM_PER_IN
     return exterior_pairs, wall_thickness_by_face
 
 
