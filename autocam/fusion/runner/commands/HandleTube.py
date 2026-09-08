@@ -13,9 +13,11 @@ import time
 
 from .ContourChains import is_reverted_for_loop_seed
 from .TubeFacePrograms import TUBE_FACE_CLOCKS, tube_face_program_name, tube_face_setup_name
+from .TubeHeightMath import bottom_height_expression
 
 
 _PARALLEL_TOLERANCE = 0.985
+_CM_PER_IN = 2.54
 
 
 def _normalized(vector):
@@ -36,6 +38,17 @@ def _edge_vector(edge):
 def _edge_length(edge):
     line = adsk.core.Line3D.cast(edge.geometry)
     return line.startPoint.distanceTo(line.endPoint)
+
+
+def _face_id(face):
+    """Stable identity for ``face`` in dict/set contexts - see Orientation.py's
+    ``_face_id`` for why the face objects themselves (Python id() or ==)
+    cannot be trusted: Fusion hands back a new wrapper object for the same
+    underlying face through different accessors."""
+    try:
+        return face.tempId
+    except Exception:
+        return id(face)  # last-resort fallback, still better than nothing
 
 
 def _face_normal(face):
@@ -66,7 +79,16 @@ def _long_axis(body):
 
 
 def _wall_face_families(body, axis):
-    """Return the two pairs of exterior walls, excluding inner tube faces."""
+    """Return the two pairs of exterior walls, and each one's wall thickness.
+
+    A hollow tube wall has its own paired interior face - the inside surface
+    of that same wall, parallel to it and sitting between the two exterior
+    extrema in this family. That pairing is exactly what's needed to know
+    how deep a hole or cutout on the exterior face may go before it breaks
+    into the hollow interior, so it's computed here (where both faces are
+    already in hand) rather than re-deriving it later from just the chosen
+    exterior face.
+    """
     candidates = []
     for face in body.faces:
         if face.geometry.objectType != adsk.core.Plane.classType():
@@ -90,6 +112,7 @@ def _wall_face_families(body, axis):
         raise ValueError("Expected two perpendicular wall-normal families; found {}".format(len(families)))
 
     exterior_pairs = []
+    wall_thickness_by_face = {}
     origin = adsk.core.Point3D.create()
     for family in families:
         direction = _face_normal(family[0])
@@ -102,16 +125,32 @@ def _wall_face_families(body, axis):
         if len(ordered) < 2:
             raise ValueError("Could not find both exterior walls for one tube dimension")
         exterior_pairs.append((ordered[0], ordered[-1]))
-    return exterior_pairs
+        # A face immediately adjacent to an exterior extremum in this sorted
+        # order is that wall's own paired interior face - the distance
+        # between two parallel planar faces is just the difference of their
+        # (already-computed) signed projections along the shared normal.
+        # Genuinely solid stock (no modeled wall thickness - only the two
+        # exterior extrema present) has no such pairing; those faces are
+        # simply absent from the map, and the caller falls back to treating
+        # that dimension as solid all the way to the opposite wall.
+        if len(ordered) >= 3:
+            projections = [origin.vectorTo(face.centroid).dotProduct(direction) for face in ordered]
+            wall_thickness_by_face[_face_id(ordered[0])] = abs(projections[1] - projections[0]) / _CM_PER_IN
+            wall_thickness_by_face[_face_id(ordered[-1])] = abs(projections[-1] - projections[-2]) / _CM_PER_IN
+    return exterior_pairs, wall_thickness_by_face
 
 
 def _ordered_wall_faces(body):
     axis = _long_axis(body)
-    pair_a, pair_b = _wall_face_families(body, axis)
+    (pair_a, pair_b), wall_thickness_by_face = _wall_face_families(body, axis)
     # These are fixture order labels, not claims about a STEP model's
     # arbitrary global orientation. The operator labels the real tube 12/3/6/9
     # to match the four emitted files before machining it.
-    return list(zip(TUBE_FACE_CLOCKS, (pair_a[1], pair_b[1], pair_a[0], pair_b[0])))
+    faces = (pair_a[1], pair_b[1], pair_a[0], pair_b[0])
+    return [
+        (clock, face, wall_thickness_by_face.get(_face_id(face)))
+        for clock, face in zip(TUBE_FACE_CLOCKS, faces)
+    ]
 
 
 def _axes_for_face(face, tube_axis, horizontal):
@@ -231,18 +270,21 @@ def _set_expression(operation, parameter_name, expression):
         parameter.expression = expression
 
 
-def _set_face_stock_heights(operation):
+def _set_face_stock_heights(operation, wall_thickness_in):
     """Use the current setup's face-local stock, never template coordinates."""
     _set_expression(operation, "topHeight_mode", "'from stock top'")
     _set_expression(operation, "topHeight_offset", "0 in")
     # Each indexed setup aligns +Z with its exterior wall normal, so this is
     # specifically the stock below the face being machined, not a global-Z
-    # bottom from a different tube side or a stale template point.
-    _set_expression(operation, "bottomHeight_mode", "'from stock bottom'")
-    _set_expression(operation, "bottomHeight_offset", "0 in")
+    # bottom from a different tube side or a stale template point. See
+    # TubeHeightMath.bottom_height_expression for why this can no longer be
+    # a blanket 'from stock bottom' - that's the FAR wall on a hollow tube.
+    bottom_mode, bottom_offset = bottom_height_expression(wall_thickness_in)
+    _set_expression(operation, "bottomHeight_mode", bottom_mode)
+    _set_expression(operation, "bottomHeight_offset", bottom_offset)
 
 
-def _configure_face_operations(setup, face):
+def _configure_face_operations(setup, face, wall_thickness_in):
     """Rebind every kept template operation to loops on this wall only."""
     loops = _loop_specs(face)
     # Every non-circular tube loop is a closed through feature. Even a long,
@@ -292,7 +334,7 @@ def _configure_face_operations(setup, face):
         elif "slot" in name and operation.strategy == "contour2d":
             keep = False
         if keep:
-            _set_face_stock_heights(operation)
+            _set_face_stock_heights(operation, wall_thickness_in)
         else:
             operation.deleteMe()
 
@@ -315,7 +357,7 @@ def _bind_setup_to_face(setup, body, face, tube_axis, horizontal):
     setup.parameters.itemByName("wcs_origin_boxPoint").value.value = "top 1"
 
 
-def _make_setup(cam, body, face, clock, tube_axis, horizontal, template):
+def _make_setup(cam, body, face, clock, tube_axis, horizontal, template, wall_thickness_in):
     setup_input = cam.setups.createInput(0)
     setup_input.name = tube_face_setup_name(clock)
     setup = cam.setups.add(setup_input)
@@ -333,7 +375,7 @@ def _make_setup(cam, body, face, clock, tube_axis, horizontal, template):
     # this setup's actual CAM model tree, never in the template's old model.
     _bind_setup_to_face(setup, body, face, tube_axis, horizontal)
     adsk.doEvents()
-    _configure_face_operations(setup, face)
+    _configure_face_operations(setup, face, wall_thickness_in)
 
 
 def _active_cam_product(app, doc):
@@ -393,8 +435,8 @@ def handleTube(template_filename, orientation=None, program_base_name="tube"):
     tube_axis = _long_axis(body)
     horizontal = str(orientation or "").strip().lower() == "horizontal"
     names = []
-    for clock, face in _ordered_wall_faces(body):
-        _make_setup(cam, body, face, clock, tube_axis, horizontal, template)
+    for clock, face, wall_thickness_in in _ordered_wall_faces(body):
+        _make_setup(cam, body, face, clock, tube_axis, horizontal, template, wall_thickness_in)
         names.append(tube_face_program_name(program_base_name, clock))
     app.log("Box-tube CAM created four indexed setups: {}".format(", ".join(names)))
     return names
