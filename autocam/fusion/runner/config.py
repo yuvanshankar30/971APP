@@ -54,9 +54,8 @@ RUNNER_ID = _read_env_value("RUNNER_ID") or socket.gethostname() or "fusion-runn
 RUNNER_MACHINE_ID = _read_env_value("RUNNER_MACHINE_ID") or None
 
 # .overridepath is how this add-in finds a `pip install --target=...`'d
-# copy of `requests` (Fusion's bundled Python has no third-party packages) -
-# see docs/team-setup-guide.md, Step 4, for the real
-# gotcha this works around. Genuinely missing on first install (git-ignored,
+# copy of `requests` (Fusion's bundled Python has no third-party packages).
+# Genuinely missing on first install (git-ignored,
 # never checked in) - fail with a clear, actionable message instead of a
 # bare FileNotFoundError with no context, same "loud and specific beats
 # silent or cryptic" standard the rest of this app holds itself to.
@@ -69,14 +68,14 @@ except FileNotFoundError:
         f"Missing {_OVERRIDEPATH_FILE} - this add-in needs a `pip install "
         "--target=<some-folder> requests` (Fusion's bundled Python has no "
         "third-party packages) and a .overridepath file containing that "
-        "folder's path. See docs/team-setup-guide.md, Step 4, for exact "
-        "commands."
+        "folder's path. Re-run `python3 setup.py` from this add-in folder "
+        "to install it automatically; see docs/team-setup-guide.md."
     )
 
 if not os.path.isdir(OVERRIDE_PATH):
     raise RuntimeError(
         f"Dependency path {OVERRIDE_PATH!r} from {_OVERRIDEPATH_FILE} does not exist. "
-        "Install requests with `python3 -m pip install --target=<that-folder> requests`."
+        "Re-run `python3 setup.py` from this add-in folder to repair it."
     )
 if OVERRIDE_PATH not in sys.path:
     # This must happen while config is imported by the add-in entry point,

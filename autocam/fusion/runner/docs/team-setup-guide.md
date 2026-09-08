@@ -24,6 +24,12 @@ Two things run this: **Spartans Hub** itself (already deployed - where you queue
 
    **Updating an existing install?** Re-run the exact same command. It copies over the existing folder and deliberately never overwrites `.env` or `.overridepath`, so your token and machine id survive. Fully quit and relaunch Fusion after an update; stopping and starting an add-in does not reliably reload its Python modules or `.env`.
 
+   **Missing `.overridepath` or `requests` at startup?** The install was
+   copied without its generated dependency folder. From the installed add-in
+   directory, run `python3 setup.py` again. It recreates `deps/` and
+   `.overridepath`; use the existing Hub, token, and machine-id values when it
+   prompts. Then fully quit and relaunch Fusion.
+
    **Never want to reinstall again?** Point Fusion's AddIns folder at a live git checkout with a symlink, so updates become `git pull` and nothing ever needs copying again:
    ```bash
    git clone https://github.com/frc971/spartanshub.git ~/spartanshub
