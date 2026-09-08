@@ -477,6 +477,11 @@ own docs are all together in one place instead of scattered across
   and the Runner rejects incomplete groups before CAM. Completed Fusion jobs keep
   every postprocessor output as a separate, byte-exact downloadable file with its
   size and SHA-256 checksum; queued and terminal jobs can be deleted from the queue.
+  New Router plate jobs remain single-endmill by default, with an optional,
+  explicit countersink selector. It exposes only the loaded ShopSabre 0.372in
+  and 0.5in 82-degree T5 countersinks; no countersink operation is generated
+  unless one is selected, and the Runner independently verifies that exact
+  loaded-tool record before adding its feature-recognized hole operation.
   The Parts and Tube Stock send dialogs each include up to eight recent,
   queueable records in a compact quick-selection grid alongside their full
   selectors.

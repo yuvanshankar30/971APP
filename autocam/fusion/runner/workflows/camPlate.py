@@ -624,6 +624,9 @@ def start(data, session):
                         filter_guids.add(str(guid))
             if not filter_guids:
                 filter_guids = None
+        countersink_guid = (payload.get("countersink_tool") or {}).get("guid") if isinstance(payload, dict) else None
+        if countersink_guid:
+            filter_guids = (filter_guids or set()) | {str(countersink_guid)}
 
         # The claim response already joins these records. Keep the Runner
         # offline after a claim: the old /api/tools, /api/materials, and
@@ -646,6 +649,7 @@ def start(data, session):
             [tool_json_path],
             material_name=material_name,
             filter_guids=filter_guids,
+            countersink_guid=countersink_guid,
         )
         if patch_info.get("missing"):
             app.log(f"Template tool matches missing: {patch_info.get('missing')}")

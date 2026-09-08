@@ -61,6 +61,25 @@ def _is_drill_entry(entry: dict) -> bool:
     return "drill" in str(entry.get("type") or "").lower()
 
 
+def _is_endmill_entry(entry: dict) -> bool:
+    tool_type = str(entry.get("type") or "").lower()
+    return "end mill" in tool_type or "endmill" in tool_type
+
+
+def _is_countersink_entry(entry: dict) -> bool:
+    return "counter sink" in str(entry.get("type") or "").lower()
+
+
+def _tool_number(entry: dict):
+    post = entry.get("post-process")
+    if not isinstance(post, dict):
+        return None
+    try:
+        return int(post.get("number"))
+    except (TypeError, ValueError):
+        return None
+
+
 def load_local_tool_library_json(data: dict, dest_dir: str) -> tuple[dict, str]:
     """Extract the selected checked-in Fusion tool library for template patching."""
     tool = _joined_record(data, "cam_tools")
@@ -90,11 +109,31 @@ def load_local_tool_library_json(data: dict, dest_dir: str) -> tuple[dict, str]:
         raise ValueError(f"Fusion tool library {file_name} does not contain a JSON object")
 
     selected_diameter = _selected_diameter(tool)
+    payload = data.get("payload")
+    single_tool_mode = isinstance(payload, dict) and payload.get("single_tool_mode") is True
+    countersink = payload.get("countersink_tool") if isinstance(payload, dict) else None
+    countersink_guid = countersink.get("guid") if isinstance(countersink, dict) else None
+    if single_tool_mode and not _is_endmill_entry({"type": tool.get("tool_type")}):
+        raise ValueError("Single-tool Fusion CAM requires an endmill selected on the job")
+    selected_tool_number = tool.get("tool_number") if single_tool_mode else None
     entries = parsed.get("data")
     matching_entries = []
     if isinstance(entries, list):
         for entry in entries:
             if not isinstance(entry, dict):
+                continue
+            if single_tool_mode:
+                # Prefer the physical slot when known. Legacy tools without
+                # slot metadata retain the established diameter fallback.
+                if selected_tool_number is not None:
+                    if _tool_number(entry) == selected_tool_number:
+                        matching_entries.append(entry)
+                elif _is_endmill_entry(entry):
+                    entry_diameter = _tool_diameter(entry)
+                    if entry_diameter is not None and abs(entry_diameter - selected_diameter) < 0.0001:
+                        matching_entries.append(entry)
+                if countersink_guid and entry.get("guid") == countersink_guid and _is_countersink_entry(entry):
+                    matching_entries.append(entry)
                 continue
             # Keep every drill regardless of diameter - a drill isn't "a
             # variant of the selected endmill" the way a same-named
@@ -111,6 +150,9 @@ def load_local_tool_library_json(data: dict, dest_dir: str) -> tuple[dict, str]:
             if _is_drill_entry(entry):
                 matching_entries.append(entry)
                 continue
+            if countersink_guid and entry.get("guid") == countersink_guid and _is_countersink_entry(entry):
+                matching_entries.append(entry)
+                continue
             entry_diameter = _tool_diameter(entry)
             if entry_diameter is not None and abs(entry_diameter - selected_diameter) < 0.0001:
                 matching_entries.append(entry)
@@ -123,7 +165,7 @@ def load_local_tool_library_json(data: dict, dest_dir: str) -> tuple[dict, str]:
     # A library can contain several variants of a similarly named bit. Keep
     # only the diameter selected on the web job so templateTools cannot choose
     # a different cutter merely because it is larger.
-    parsed["data"] = matching_entries
+    parsed["data"] = list({entry.get("guid"): entry for entry in matching_entries if entry.get("guid")}.values())
     tools_json = json.dumps(parsed, indent=2).encode("utf-8")
 
     os.makedirs(dest_dir, exist_ok=True)

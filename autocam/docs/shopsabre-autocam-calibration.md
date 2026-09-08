@@ -57,3 +57,12 @@ Several tools across these libraries are explicitly labeled **"for toolchanger"*
 - Does not touch the legacy `routing.js` / `toolchange-gcode-plan.md` path at all.
 - Does not change UNC Router's behavior in any way - it stays single-tool exactly as today.
 - Does not attempt to guess/default `hasToolChanger` without a real answer from whoever runs the machine.
+
+## Implementation status
+
+- The draft ShopSabre implementation now has a New Router plate-queue
+  single-tool mode. It only permits an endmill, persists the intent on the
+  queued job, and makes the Runner reduce the Fusion library to the selected
+  tool before template patching. This is the safe parity path for a first
+  New Router job; multi-tool and countersink operation paths remain disabled
+  pending physical machine confirmation.

@@ -42,6 +42,9 @@ _FEED_PRESET_KEYS = (
 _BORE_TEMPLATE_PATH = os.path.join(
     os.path.dirname(__file__), "..", "templates", "Bore.f3dhsm-template"
 )
+_COUNTERSINK_TEMPLATE_PATH = os.path.join(
+    os.path.dirname(__file__), "..", "templates", "971-real", "countersink.f3dhsm-template"
+)
 
 
 def _q(tag: str) -> str:
@@ -61,6 +64,18 @@ def _load_bore_template() -> Optional[ET.Element]:
     except ET.ParseError:
         return None
     return _find_template(tree.getroot(), strategy="bore")
+
+
+def _load_countersink_template() -> Optional[ET.Element]:
+    """Load the real exported ShopSabre countersink operation."""
+    path = os.path.normpath(_COUNTERSINK_TEMPLATE_PATH)
+    if not os.path.isfile(path):
+        return None
+    try:
+        tree = ET.parse(path)
+    except ET.ParseError:
+        return None
+    return _find_template(tree.getroot(), strategy="drill")
 
 
 def _as_bool_str(value: Any) -> str:
@@ -141,7 +156,11 @@ def assert_safe_entry_feeds(preset: dict, context: str = "") -> None:
         value = _parse_number(preset.get(key))
         if value is None or value <= 0:
             continue
-        if value > ceiling:
+        # Presets at exactly the approved boundary can acquire a microscopic
+        # rounding residue after the conservative rate scale (for example
+        # 30 * .25 vs. 60 * .25). Do not turn that equal-value case into a
+        # false unsafe-feed failure, while retaining the real upper bound.
+        if value > ceiling + 1e-9:
             raise ValueError(
                 f"Unsafe {key}{where}: {value:g} is more than "
                 f"{_MAX_ENTRY_FEED_FRACTION_OF_CUTTING:g}x the cutting feed "
@@ -312,6 +331,10 @@ def _is_drill_tool(tool: dict) -> bool:
 
 def _is_endmill_tool(tool: dict) -> bool:
     return _tool_matches_keyword(tool, ("end mill", "endmill"))
+
+
+def _is_countersink_tool(tool: dict) -> bool:
+    return _tool_matches_keyword(tool, ("counter sink", "countersink"))
 
 
 def _tool_display_name(tool: dict) -> str:
@@ -916,6 +939,7 @@ def patch_cam_template_with_tool_libraries(
     *,
     material_name: Optional[str] = None,
     filter_guids: Optional[set[str]] = None,
+    countersink_guid: Optional[str] = None,
 ) -> dict:
     if not tool_library_paths:
         raise ValueError("tool_library_paths must not be empty")
@@ -1136,11 +1160,44 @@ def patch_cam_template_with_tool_libraries(
         handled_templates.add(id(template_elem))
         replaced += 1
 
+    countersink = None
+    if countersink_guid:
+        matches = [item for item in _select_tools(indexes, _is_countersink_tool) if item[0].get("guid") == countersink_guid]
+        if not matches:
+            raise ValueError("Requested countersink is not available in the selected tool library")
+        countersink_template = _load_countersink_template()
+        if countersink_template is None:
+            raise ValueError("The bundled ShopSabre countersink template is unavailable")
+        tool, idx, _ = matches[0]
+        clone = _clone_template(countersink_template)
+        tool_elem = clone.find(_q("tool"))
+        if tool_elem is None:
+            raise ValueError("The bundled ShopSabre countersink template has no tool")
+        _apply_tool_to_elem(clone, tool_elem, tool, tool_library_version=idx.get("version"), material_name=material_name)
+        # The exported template's selected faces belong to its source model.
+        # Imported jobs need Fusion's feature recognition over this job's own
+        # geometry, constrained to the reviewed standard hole range.
+        _set_parameter_expression(clone, "holeMode", "'diameter'")
+        _set_parameter_expression(clone, "holePoints", "false")
+        _set_parameter_expression(clone, "holeFaces", "false")
+        _set_parameter_expression(clone, "holeDiameterMinimum", "0.2in")
+        _set_parameter_expression(clone, "holeDiameterMaximum", "0.4in")
+        clone.set("description", f"Countersink ({_tool_display_name(tool)})")
+        children = list(root)
+        insert_at = next((i for i, element in enumerate(children)
+                          if element.tag == _q("template")
+                          and element.get("strategy") == "contour2d"
+                          and element.get("description") != "Suppress"), len(children))
+        root.insert(insert_at, clone)
+        replaced += 1
+        countersink = {"guid": countersink_guid, "tool": _tool_display_name(tool), "hole_diameter_range_in": [0.2, 0.4]}
+
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     tree.write(output_path, encoding="utf-8", xml_declaration=True)
     return {
         "replaced": replaced,
         "missing": missing,
         "bore_fallback": bore_fallback,
+        "countersink": countersink,
         "output_path": output_path,
     }
