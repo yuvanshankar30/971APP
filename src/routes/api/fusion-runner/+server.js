@@ -29,15 +29,34 @@ function getServiceSupabase() {
   return createClient(url, serviceKey);
 }
 
-// Completing a job deliberately does NOT copy its G-code into the Files
-// tab. That is the "Post to Files" button's job in JobQueueTab.svelte, and
-// it stays a deliberate human action - direct instruction, after an earlier
-// automatic version filled the shared Files folders with output from test
-// and retry jobs nobody wanted kept. The G-code is always safely on the
-// completed cam_jobs row either way, so nothing is lost by waiting to be
-// asked.
+const AUTOCAM_FILES_BUCKET = 'manufacturing-drive';
+const AUTOCAM_FILES_FOLDER = 'AutoCAM';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const STALE_CLAIM_MS = 15 * 60 * 1000;
+
+function autoCamArtifactPath(jobId, artifact, index) {
+  // Fusion validates artifact names before this point. Keep the original
+  // program identity, while the job prefix prevents retries or same-named
+  // tube faces from overwriting another job in the shared AutoCAM folder.
+  const leafName = String(artifact.name || `program-${index + 1}.nc`)
+    .split('/').at(-1)
+    .replace(/[^A-Za-z0-9._-]/g, '_');
+  return `${AUTOCAM_FILES_FOLDER}/${jobId.slice(0, 8)}-${leafName}`;
+}
+
+async function publishNcArtifactsToAutoCamFiles(supabase, jobId, ncFiles) {
+  if (!ncFiles?.length) return;
+  for (const [index, artifact] of ncFiles.entries()) {
+    const path = autoCamArtifactPath(jobId, artifact, index);
+    const { error } = await supabase.storage
+      .from(AUTOCAM_FILES_BUCKET)
+      .upload(path, Buffer.from(artifact.contentBase64, 'base64'), {
+        upsert: true,
+        contentType: 'text/plain'
+      });
+    if (error) throw new Error(`Could not post ${artifact.name} to Files/AutoCAM: ${error.message}`);
+  }
+}
 
 // claimed_at doubles as the runner heartbeat. A workstation crash before
 // Fusion begins work otherwise strands a job in claimed. Processing jobs are
@@ -264,6 +283,10 @@ export async function POST({ request, url }) {
       const stats = programExtents
         ? { ...(body?.stats || {}), program_extents: programExtents }
         : body?.stats || null;
+      // Files is the permanent operator-facing copy. Publish every exact
+      // artifact before the status change, so a completed job always has its
+      // separate plate or tube-face programs available in Files/AutoCAM.
+      await publishNcArtifactsToAutoCamFiles(supabase, currentJob.id, ncFiles);
       const { data, error } = await supabase
         .from('cam_jobs')
         .update({

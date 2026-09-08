@@ -118,10 +118,34 @@ describe('Fusion Runner grouping lifecycle',()=>{
    gcode_file_name:null,
    fusion_nc_files:[expect.objectContaining({name:'plate.nc',contentBase64,size:14})]
   }));
-  // Completing a job must NOT copy G-code into Files - that is the
-  // "Post to Files" button's job, kept a deliberate human action so test
-  // and retry jobs don't fill the shared folders.
-  expect(mocks.storageUpload).not.toHaveBeenCalled();
+  expect(mocks.storageUpload).toHaveBeenCalledWith(
+   'AutoCAM/job-plate.nc',
+   expect.any(Buffer),
+   {upsert:true,contentType:'text/plain'}
+  );
+ });
+ it('posts every separate tube-face program to Files/AutoCAM before completing',async()=>{
+  const side12=Buffer.from('G20\nM30\n','utf8').toString('base64');
+  const side3=Buffer.from('G20\nM30\n','utf8').toString('base64');
+  mocks.from
+   .mockReturnValueOnce(chain({data:{id:'tube-job',params:{fusionJobKind:'box_tube'}}}))
+   .mockReturnValueOnce(chain({data:[{id:'tube-job'}]}));
+  expect((await call('complete',{jobId:'tube-job',runnerId:'runner',ncFiles:[
+   {name:'Bottom Tube-side-12.nc',contentBase64:side12},
+   {name:'Bottom Tube-side-3.nc',contentBase64:side3}
+  ]})).status).toBe(200);
+  expect(mocks.storageUpload.mock.calls.map(([path])=>path)).toEqual([
+   'AutoCAM/tube-job-Bottom_Tube-side-12.nc',
+   'AutoCAM/tube-job-Bottom_Tube-side-3.nc'
+  ]);
+ });
+ it('does not mark a job complete when publishing Files/AutoCAM fails',async()=>{
+  mocks.storageUpload.mockResolvedValueOnce({error:{message:'storage unavailable'}});
+  mocks.from.mockReturnValueOnce(chain({data:{id:'job',params:{fusionJobKind:'plate:cam'}}}));
+  const result=await call('complete',{jobId:'job',runnerId:'runner',ncFiles:[{name:'plate.nc',contentBase64:'TTAw'}]});
+  expect(result.status).toBe(500);
+  expect((await result.json()).error).toMatch(/Files\/AutoCAM/);
+  expect(queries).toHaveLength(1);
  });
  it('records how far the posted program travels so a machine-limit report can be triaged',async()=>{
   // Issue #359: "program exceeds machine maximum" kept being reported when
