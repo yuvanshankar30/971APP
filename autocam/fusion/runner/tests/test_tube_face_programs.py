@@ -77,11 +77,19 @@ class TubeFaceProgramTests(unittest.TestCase):
     def test_tube_shape_chains_use_one_topology_seed_edge(self):
         handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
         self.assertIn('selection.inputGeometry = [spec["edges"][0]]', handler)
+        self.assertIn("apply_with_winding(False)", handler)
+        self.assertIn("apply_with_winding(True)", handler)
 
     def test_tube_operations_reference_stock_under_the_active_face(self):
         handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
         self.assertIn('"bottomHeight_mode", "\'from stock bottom\'"', handler)
         self.assertIn("_set_face_stock_heights(operation)", handler)
+
+    def test_tube_cutoff_is_deleted_before_other_geometry_binding(self):
+        handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
+        cutoff_index = handler.index('if "tube cutoff" in str(operation.name or "").lower():')
+        shape_index = handler.index('elif "shape" in name')
+        self.assertLess(cutoff_index, shape_index)
 
 
 if __name__ == "__main__":

@@ -180,23 +180,46 @@ def _apply_chains(operation, parameter_name, specs):
     parameter = operation.parameters.itemByName(parameter_name)
     if parameter is None or not hasattr(parameter.value, "getCurveSelections"):
         return False
-    selections = parameter.value.getCurveSelections()
-    selections.clear()
-    for spec in specs:
-        selection = selections.createNewChainSelection()
-        selection.isOpen = False
-        selection.isReverted = spec["is_reverted"]
-        # A single edge is a deliberate chain seed. Fusion closes the
-        # tangent-connected loop itself; passing every edge works for a
-        # circle but makes imported irregular through-shape loops invalid or
-        # ambiguously directed. This matches the proven feature-cut repair
-        # used by plate CAM while remaining tube-local here.
-        selection.inputGeometry = [spec["edges"][0]]
-    # Curve-selection APIs are implemented by the parameter value, not the
-    # CAMParameter wrapper. Calling the wrapper succeeds nowhere in Fusion
-    # and fails only once a live tube has a selectable pocket/shape.
-    parameter.value.applyCurveSelections(selections)
-    return bool(specs)
+    if not specs:
+        return False
+
+    def apply_with_winding(invert_winding):
+        selections = parameter.value.getCurveSelections()
+        selections.clear()
+        for spec in specs:
+            selection = selections.createNewChainSelection()
+            selection.isOpen = False
+            selection.isReverted = spec["is_reverted"] != invert_winding
+            # A single edge is a deliberate chain seed. Fusion closes the
+            # tangent-connected loop itself; passing every edge works for a
+            # circle but makes imported irregular through-shape loops invalid
+            # or ambiguously directed.
+            selection.inputGeometry = [spec["edges"][0]]
+        parameter.value.applyCurveSelections(selections)
+
+    # The co-edge direction is the normal case. Some imported STEP faces
+    # carry the opposite parameterization relative to the operation's tool
+    # side, so validate the inverse convention only when Fusion rejects the
+    # topological one. This produces one deliberate, valid direction rather
+    # than silently keeping a warning or machining the wrong side.
+    try:
+        apply_with_winding(False)
+    except RuntimeError as direct_error:
+        try:
+            apply_with_winding(True)
+            adsk.core.Application.get().log(
+                "Tube chain winding inverted for valid {} selection in '{}'".format(
+                    parameter_name, operation.name
+                )
+            )
+        except RuntimeError as inverted_error:
+            raise RuntimeError(
+                "No valid {} chain selection for tube operation {!r}; "
+                "topology and inverse windings were both rejected: {} / {}".format(
+                    parameter_name, operation.name, direct_error, inverted_error
+                )
+            )
+    return True
 
 
 def _apply_circular_faces(operation, faces):
@@ -235,16 +258,21 @@ def _configure_face_operations(setup, face):
     have_shape_roughing = False
     circular_faces = [face for loop in loops if loop["circular"] for face in loop["circular_faces"]]
 
+    # Delete the deliberately unsupported cutoff before applying any feature
+    # selection. If a later shape/slot binding fails, Fusion retains the
+    # partial setup for inspection; it must not misleadingly show the stale
+    # template cutoff as an active errored operation in that partial state.
+    operations = []
     for operation in list(setup.operations):
+        if "tube cutoff" in str(operation.name or "").lower():
+            operation.deleteMe()
+        else:
+            operations.append(operation)
+
+    for operation in operations:
         name = str(operation.name or "").lower()
         keep = False
-        if "tube cutoff" in name:
-            # Finished-length/cutoff data is not in the Fusion box-tube
-            # payload yet. Never inherit the template author's old cutoff.
-            # The reviewed template keeps this operation ready for the
-            # future payload; it is not replaced with a plate contour.
-            keep = False
-        elif operation.strategy == "bore" or "drill" in name:
+        if operation.strategy == "bore" or "drill" in name:
             # Bore's circularFaces accepts the actual cylindrical hole walls,
             # unlike 2D Pocket's curve parameter. The reviewed Bore template
             # uses the same flat end mill as the large-hole pocket sibling,
