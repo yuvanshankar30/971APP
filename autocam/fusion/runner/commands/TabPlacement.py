@@ -273,14 +273,42 @@ def _edges_collinear(edge_a, edge_b, tolerance: float = 1e-3) -> bool:
     return abs(connecting.dotProduct(dir_a)) > 1 - tolerance
 
 
-def _edge_midpoint(edge):
+def _edge_point_at_fraction(edge, fraction: float):
+    """A point ``fraction`` of the way from an edge's start to its end -
+    0.5 is the midpoint, used for the normal one-tab-per-side case; other
+    values let more than one tab share a single straight side (see
+    _tab_fractions and select_tab_edges).
+    """
     geom = edge.geometry
     start, end = geom.startPoint, geom.endPoint
-    return adsk.core.Point3D.create((start.x + end.x) / 2, (start.y + end.y) / 2, (start.z + end.z) / 2)
+    return adsk.core.Point3D.create(
+        start.x + (end.x - start.x) * fraction,
+        start.y + (end.y - start.y) * fraction,
+        start.z + (end.z - start.z) * fraction,
+    )
 
 
-def _manual_tab_points(app, root_component, tab_face, tab_edges):
-    """Create explicit Manual Tabs SketchPoints at vetted edge midpoints.
+def _edge_midpoint(edge):
+    return _edge_point_at_fraction(edge, 0.5)
+
+
+def _tab_fractions(n: int) -> list[float]:
+    """``n`` positions evenly spread along an edge's interior span, away
+    from its own two corners - where lead-in/lead-out and the adjacent
+    side's own tab live. A single tab still lands at the midpoint
+    (fraction 0.5, matching (i+1)/(n+1) for n=1), so this is a strict
+    generalization of every prior version of this module, not a behavior
+    change for the common one-tab-per-side case.
+    """
+    if n <= 0:
+        return []
+    return [(i + 1) / (n + 1) for i in range(n)]
+
+
+def _manual_tab_points(app, root_component, tab_face, tab_edge_fractions):
+    """Create explicit Manual Tabs SketchPoints at the vetted (edge,
+    fraction) positions - see select_tab_edges for what fraction means and
+    why more than one position can share the same edge.
 
     Fusion stores ``tabPositions`` as a CadPoints collection. Assigning BRep
     edges may display those edges in the operation dialog, but it does not
@@ -292,7 +320,7 @@ def _manual_tab_points(app, root_component, tab_face, tab_edges):
     unarranged local frame, which was the cause of tabs appearing on only two
     sides of autocamtraining.
     """
-    if tab_face is None or not tab_edges:
+    if tab_face is None or not tab_edge_fractions:
         return []
     try:
         sketch = root_component.sketches.add(tab_face)
@@ -303,11 +331,11 @@ def _manual_tab_points(app, root_component, tab_face, tab_edges):
             pass
 
         tab_points = []
-        for edge in tab_edges:
+        for edge, fraction in tab_edge_fractions:
             # ``edge`` is intentionally the occurrence proxy returned from
             # rootComponent.allOccurrences. Its geometry is already in the
             # exact arranged coordinate frame of this setup.
-            point = sketch.modelToSketchSpace(_edge_midpoint(edge))
+            point = sketch.modelToSketchSpace(_edge_point_at_fraction(edge, fraction))
             sketch_point = sketch.sketchPoints.add(point)
             tab_points.append(sketch_point)
         return tab_points
@@ -433,24 +461,46 @@ def select_tab_edges(
     stock_bounds=None,
     tab_width_in: float = TAB_WIDTH_IN,
 ):
-    """Straight edges on the body's own outer boundary, spread across
-    every distinct straight side. Never returns a curved/filleted edge, an
-    internal-loop (hole/pocket) edge, or one too short to physically hold
-    a tab - direct instruction, not a preference to relax if a part is
-    mostly rounded or small.
+    """(edge, fraction) positions on the body's own outer boundary, spread
+    across every distinct USABLE straight side. Never returns a
+    curved/filleted edge, an internal-loop (hole/pocket) edge, or one too
+    short to physically hold a tab - direct instruction, not a preference
+    to relax if a part is mostly rounded or small. ``fraction`` (0-1)
+    marks where along that edge the tab sits - 0.5 for the normal single
+    tab, other values when more than one tab shares a side (see below).
 
-    Used by ConfigureTabs as the actual Manual Tabs geometry. Each selected
-    edge is an explicit, safe release-tab location; Fusion's automatic
-    placement is disabled rather than allowed to place more tabs elsewhere.
+    Used by ConfigureTabs as the actual Manual Tabs geometry, via
+    _manual_tab_points. Each selected position is an explicit, safe
+    release-tab location; Fusion's automatic placement is disabled rather
+    than allowed to place more tabs elsewhere.
 
-    One tab per distinct side, longest side first, capped at max_tabs
-    (which _tab_count_for_perimeter has already scaled to the part's own
-    size). A side is never skipped just because it has no real stock
-    behind it - within a side a stock-backed segment is preferred, falling
-    back to its longest segment otherwise, so a part sitting close to the
-    plate's edge still gets held. Only if the part has fewer distinct
-    sides than tabs asked for do additional segments of those sides get
-    used, stock-backed ones first.
+    A side with NO real stock ANYWHERE behind it is excluded outright, not
+    merely deprioritized. Confirmed live: a side lying exactly on the
+    plate's own machining boundary or a coordinate axis - so that every
+    point along it has zero material on the outward side - silently drops
+    any manual tab position requested there, no matter how carefully it is
+    placed; Fusion has nothing to attach it to. An earlier version of this
+    module treated stock backing as a same-side preference only ("which
+    edge to pick within a side," never "whether the side gets a tab at
+    all") on the theory that a tab there, while not anchored into real
+    material, still helped hold the part. That theory does not survive
+    contact with what Fusion actually does with such a request.
+
+    Rather than let an excluded side simply reduce the tab count, its
+    share of the budget is put onto the sides that DO have real stock -
+    including a SECOND (or third) tab on the same valid side when there
+    isn't a fresh side to give it to. Direct instruction: "just add more
+    tabs to these parts on sides that are already there (you can add more
+    than one tab for parts like this)". Extra tabs only ever land on a
+    side with real spare length for them (see the redistribution loop
+    below) and only on sides already past the straight-edge / minimum-
+    length gates - never on a curved edge or a facet too short to hold one.
+
+    Longest-first, capped at max_tabs (which _tab_count_for_perimeter has
+    already scaled to the part's own size, so a small part asks for ~4 and
+    a large one for more): the long structural sides win over a fan of
+    short facets - confirmed live on a real teardrop bracket that had been
+    picking up a tab on every one of its short bottom facets.
     """
     stock_check_cm = STOCK_BACKING_CHECK_IN * 2.54
     body_center = _body_center(body)
@@ -467,54 +517,75 @@ def select_tab_edges(
         pool = backed if backed else line
         return max(pool, key=_edge_length)
 
-    # One tab per distinct side, longest side first, capped at max_tabs.
-    #
-    # The cap is the point. An earlier version guaranteed a tab on EVERY
-    # distinct straight side regardless of max_tabs, which is right for a
-    # rectangle (4 sides, 4 tabs) but wrong for the shape this pipeline
-    # actually cuts most often: a small bracket whose outline is a long
-    # profile plus a fan of short facets. Confirmed live on a real part -
-    # a teardrop bracket a few inches across picked up a tab on every one
-    # of its little bottom facets, far more than a part that size needs to
-    # stay put, and clustered where they were least useful.
-    #
-    # Longest-first is what makes the cap land well: the long structural
-    # sides get the tabs and the short facets lose out, which is also where
-    # a tab actually has room to hold. _tab_count_for_perimeter has already
-    # scaled max_tabs to the part's own size before this is called, so a
-    # small part asks for ~4 and a large one asks for more.
+    def line_length_in(line) -> float:
+        return _edge_length(best_edge_for_line(line)) / 2.54
+
+    def line_is_backed(line) -> bool:
+        return any(is_backed(e) for e in line)
+
     # Drop sides too short to actually hold a tab (see
     # tab_width_in * 2). Measured on the segment that would carry the
     # tab, not the side's summed length: a side split into several short
     # collinear pieces still has to fit the tab within ONE of them.
     min_side_cm = tab_width_in * 2 * 2.54
     usable = [line for line in lines if _edge_length(best_edge_for_line(line)) >= min_side_cm]
-
-    # Never return nothing. On a part so small that no side clears the
-    # threshold, a tab that is tight is still better than a part that comes
-    # loose mid-cut, so fall back to its longest sides.
     if not usable:
         usable = lines
 
-    selected = [best_edge_for_line(line) for line in usable[:max_tabs]]
+    backed_usable = [line for line in usable if line_is_backed(line)]
+    # A degenerate part with no backed side anywhere (should not happen on
+    # a real nested job) still must not end up with zero tabs - a doomed
+    # tab request is safer than a guaranteed-loose part.
+    pool = backed_usable if backed_usable else usable
 
-    # Only if the part genuinely has fewer distinct sides than tabs asked
-    # for (a triangle, say) do additional segments of the sides it does
-    # have get used, stock-backed ones first. These are held to the same
-    # length threshold as the first pass - otherwise filling the budget
-    # would quietly put tabs back on exactly the short facets the
-    # threshold just excluded.
+    primary = pool[:max_tabs]
+    counts = {id(line): 1 for line in primary}
+
+    # Redistribute whatever the exclusion above left unfilled: add a
+    # second (or third) tab to one of the already-selected valid sides,
+    # longest/roomiest first, rather than reaching for a shorter facet or
+    # a side that cannot hold one. A line only gains another tab when it
+    # genuinely has the spare length for it, at the same 2x-tab-width
+    # spacing every tab on this module already requires - this can stop
+    # short of max_tabs on a small part with no more room, which is
+    # correct: a crowded tab is worse than one fewer.
+    remaining_budget = max_tabs - len(primary)
+    guard = 0
+    while remaining_budget > 0 and primary and guard < max_tabs * 6:
+        guard += 1
+
+        def room_for_one_more(line):
+            n = counts[id(line)]
+            return line_length_in(line) - (n + 1) * tab_width_in * 2
+
+        candidate = max(primary, key=room_for_one_more)
+        if room_for_one_more(candidate) < 0:
+            break
+        counts[id(candidate)] += 1
+        remaining_budget -= 1
+
+    selected = []
+    for line in primary:
+        edge = best_edge_for_line(line)
+        for fraction in _tab_fractions(counts[id(line)]):
+            selected.append((edge, fraction))
+
+    # Only if the part genuinely has fewer distinct USABLE sides than tabs
+    # asked for even after doubling up wherever there was room (a triangle
+    # with two very short sides, say) do additional, different edges get
+    # pulled in as a last resort - stock-backed ones first, same threshold
+    # as everything above so this can't quietly re-add a short facet.
     if len(selected) < max_tabs:
-        selected_ids = {id(e) for e in selected}
+        selected_edge_ids = {id(edge) for edge, _fraction in selected}
         remaining = [
             e for e in all_edges
-            if id(e) not in selected_ids and _edge_length(e) >= min_side_cm
+            if id(e) not in selected_edge_ids and _edge_length(e) >= min_side_cm
         ]
         remaining.sort(key=lambda e: (not is_backed(e), -_edge_length(e)))
         for edge in remaining:
             if len(selected) >= max_tabs:
                 break
-            selected.append(edge)
+            selected.append((edge, 0.5))
     return selected
 
 
