@@ -453,6 +453,10 @@ own docs are all together in one place instead of scattered across
   compare completed plate G-code against the part's internal CAD loops and
   stock depth before reporting completion, surfacing missing-feature,
   incomplete-through-cut, and unsafe thin-wall findings as job warnings.
+  Plate release tabs are generated only on straight outer edges with actual
+  surrounding stock: stock-bound edges receive no tabs, their allocation is
+  redistributed by available release-edge length, and edges below the `0.6in`
+  tab-width minimum are rejected before Fusion receives any tab geometry.
   They patch Fusion templates from the claimed tool's checked-in `.tools` archive
   and post with the claimed machine's checked-in `.cps` file; the filename is
   stored on `cam_tools.fusion_tool_library_file`, so an unknown tool fails
