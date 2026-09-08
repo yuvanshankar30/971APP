@@ -10,7 +10,6 @@ from typing import Optional
 
 from ..commands.MultiImport import importFiles
 from ..commands.NewNCProgram import export
-from ..commands.DeleteToolpaths import DeleteToolpaths
 from ..commands.HandleTube import handleTube
 from ..config import (
     BASE_URL,
@@ -32,6 +31,17 @@ from .templateTools import patch_cam_template_with_tool_libraries
 
 def _total_machining_time(cam: adsk.cam.CAM) -> Optional[float]:
     return total_machining_time(cam, adsk.core.ObjectCollection.create)
+
+
+def _generate_tube_toolpaths(cam: adsk.cam.CAM) -> None:
+    """Generate the face-scoped setups without invoking plate cleanup logic."""
+    future = cam.generateAllToolpaths(True)
+    deadline = time.time() + 180
+    while not future.isGenerationCompleted:
+        if time.time() >= deadline:
+            raise TimeoutError("Fusion did not finish generating box-tube toolpaths")
+        adsk.doEvents()
+        time.sleep(0.2)
 
 
 def _get(payload: dict, *keys: str, default=None):
@@ -147,13 +157,18 @@ def start(data, session):
         machine_name = machine.get("name") or _get(payload, "machine")
         material_name = material.get("name") or _get(payload, "material")
         machine_post_processor_path = resolve_local_post_processor(data)
+        # This is the reviewed, cutter-compensated tube-stock template. The
+        # older generic boxtubes template is retained as an archive only: it
+        # has stale drill/contour operations and cannot represent the real
+        # Shape Through / Side 12-3-6-9 workflow.
         template_path = os.path.join(
-            os.path.dirname(__file__), "../templates/boxtubes.f3dhsm-template"
+            os.path.dirname(__file__),
+            "../templates/971-real/Tubestock(with Cutter Comp).f3dhsm-template",
         )
 
         _tool_info, tool_json_path = load_local_tool_library_json(data, TOOLS_PATH)
         patched_template = os.path.join(
-            TOOLS_PATH, f"Boxtubes_job{job_id}.f3dhsm-template"
+            TOOLS_PATH, f"Tubestock_job{job_id}.f3dhsm-template"
         )
         patch_info = patch_cam_template_with_tool_libraries(
             template_path,
@@ -166,19 +181,25 @@ def start(data, session):
             app.log(f"Template tool matches missing: {patch_info.get('missing')}")
         template_path = patched_template
 
-        handleTube(template_path, orientation)
-        DeleteToolpaths()
+        box_tube_id = str(_get(payload, "box_tube_id", default="cam_tube"))
+        face_program_names = handleTube(
+            template_path,
+            orientation,
+            program_base_name="Tube{}Job{}".format(box_tube_id, job_id),
+        )
+
+        cam_product = app.activeDocument.products.itemByProductType("CAMProductType")
+        cam = adsk.cam.CAM.cast(cam_product) if cam_product else None
+        if not cam:
+            raise RuntimeError("No CAM product available after creating box-tube setups")
+        _generate_tube_toolpaths(cam)
 
         total_machining_time = None
         try:
-            cam_product = app.activeDocument.products.itemByProductType("CAMProductType")
-            cam = adsk.cam.CAM.cast(cam_product) if cam_product else None
-            if cam:
-                total_machining_time = _total_machining_time(cam)
+            total_machining_time = _total_machining_time(cam)
         except Exception:
             app.log("Failed to compute machining time:\n{}".format(traceback.format_exc()))
 
-        box_tube_id = str(_get(payload, "box_tube_id", default="cam_tube"))
         doc_name = f"Tube{box_tube_id}Job{job_id}"
 
         # Save the document to the configured AutoCAM drop folder
@@ -211,11 +232,17 @@ def start(data, session):
         except FileNotFoundError:
             pass
 
-        export(box_tube_id, machine_post_processor_path)
+        export(box_tube_id, machine_post_processor_path, face_program_names)
 
         # Preserve each Fusion-posted setup program byte-for-byte and keep
         # independent setup/WCS programs as separate downloads.
         nc_files = collect_nc_artifacts(export_dir)
+        if len(nc_files) != len(face_program_names):
+            raise RuntimeError(
+                "Fusion posted {} tube programs for {} face setups; refusing a partial tube job".format(
+                    len(nc_files), len(face_program_names)
+                )
+            )
         shutil.rmtree(export_dir, ignore_errors=True)
 
         completion_data = {
@@ -223,8 +250,14 @@ def start(data, session):
             "runnerId": RUNNER_ID,
             "ncFiles": nc_files,
         }
+        completion_data["stats"] = {
+            "facePrograms": [
+                {"label": "Side {}".format(name.rsplit("-side-", 1)[-1]), "programName": name}
+                for name in face_program_names
+            ],
+        }
         if total_machining_time is not None:
-            completion_data["stats"] = {"total_machining_time": total_machining_time}
+            completion_data["stats"]["total_machining_time"] = total_machining_time
 
         resp = session.post(
             f"{BASE_URL}/api/fusion-runner",

@@ -1,441 +1,400 @@
-import adsk.core, adsk.fusion, adsk.cam, traceback
-from enum import Enum
-import math
-import os
+"""Build four independent Fusion setups for a rectangular box tube.
+
+The router has no rotary axis. Each exterior wall is a separate, manually
+indexed fixture setup and is posted as its own NC program. Do not turn this
+into one setup with four face selections: the operator turns the tube between
+programs and re-zeros Z for the newly exposed wall.
+"""
+
+import adsk.core
+import adsk.fusion
+import adsk.cam
 import time
 
+from .ContourChains import is_reverted_for_loop_seed
+from .TubeFacePrograms import TUBE_FACE_CLOCKS, tube_face_program_name, tube_face_setup_name
 
-class SetupWCSPoint(Enum):
-    TOP_CENTER = "top center"
-    TOP_XMIN_YMIN = "top 1"
-    TOP_XMAX_YMIN = "top 2"
-    TOP_XMIN_YMAX = "top 3"
-    TOP_XMAX_YMAX = "top 4"
-    TOP_SIDE_YMIN = "top side 1"
-    TOP_SIDE_XMAX = "top side 2"
-    TOP_SIDE_YMAX = "top side 3"
-    TOP_SIDE_XMIN = "top side 4"
-    CENTER = "center"
-    MIDDLE_XMIN_YMIN = "middle 1"
-    MIDDLE_XMAX_YMIN = "middle 2"
-    MIDDLE_XMIN_YMAX = "middle 3"
-    MIDDLE_XMAX_YMAX = "middle 4"
-    MIDDLE_SIDE_YMIN = "middle side 1"
-    MIDDLE_SIDE_XMAX = "middle side 2"
-    MIDDLE_SIDE_YMAX = "middle side 3"
-    MIDDLE_SIDE_XMIN = "middle side 4"
-    BOTTOM_CENTER = "bottom center"
-    BOTTOM_XMIN_YMIN = "bottom 1"
-    BOTTOM_XMAX_YMIN = "bottom 2"
-    BOTTOM_XMIN_YMAX = "bottom 3"
-    BOTTOM_XMAX_YMAX = "bottom 4"
-    BOTTOM_SIDE_YMIN = "bottom side 1"
-    BOTTOM_SIDE_XMAX = "bottom side 2"
-    BOTTOM_SIDE_YMAX = "bottom side 3"
-    BOTTOM_SIDE_XMIN = "bottom side 4"
 
-def edge_dir(edge: adsk.fusion.BRepEdge) -> adsk.core.Vector3D:
+_PARALLEL_TOLERANCE = 0.985
+
+
+def _normalized(vector):
+    value = adsk.core.Vector3D.create(vector.x, vector.y, vector.z)
+    value.normalize()
+    return value
+
+
+def _linear_edges(face):
+    return [edge for edge in face.edges if edge.geometry.objectType == adsk.core.Line3D.classType()]
+
+
+def _edge_vector(edge):
     line = adsk.core.Line3D.cast(edge.geometry)
-    v = line.startPoint.vectorTo(line.endPoint)  # start -> end
-    v.normalize()
-    return v
-
-def _linetovector(line: adsk.core.Line3D) -> adsk.core.Vector3D:
-    geom = line.geometry
-    start = geom.startPoint
-    end = geom.endPoint
-    vector = end.vectorTo(start)
-    vector.normalize()
-    return vector
+    return _normalized(line.startPoint.vectorTo(line.endPoint))
 
 
-def _angle_between_lines(line1: adsk.core.Line3D, line2: adsk.core.Line3D) -> float:
-    v1 = _linetovector(line1)
-    v2 = _linetovector(line2)
-    angle = v1.angleTo(v2)
-    angle = (angle / (2 * math.pi)) * 360
-    return angle
+def _edge_length(edge):
+    line = adsk.core.Line3D.cast(edge.geometry)
+    return line.startPoint.distanceTo(line.endPoint)
 
 
-def _lengthofline(line: adsk.core.Line3D) -> float:
-    geom = line.geometry
-    start = geom.startPoint
-    end = geom.endPoint
-    length = abs(start.distanceTo(end)) * 0.393701
-    return length
+def _face_normal(face):
+    # ``geometry.normal`` is the underlying surface parameter normal, not
+    # necessarily the topological normal of this BRep face. Imported STEP
+    # faces can reverse that parameterization; using it directly can point a
+    # tube setup into the wall and makes valid closed chains fail CAM's side
+    # validation. Honor the face reversal so WCS +Z and loop winding describe
+    # the same physical exterior side.
+    normal = _normalized(face.geometry.normal)
+    if face.isParamReversed:
+        normal.scaleBy(-1)
+    return normal
 
 
-def _alignEdgeToAxis(
-    edge: adsk.fusion.BRepEdge,
-    occ: adsk.fusion.Occurrence,
-    axis: adsk.core.Vector3D,
-):
-    """Rotate occurrence so edge direction aligns to given axis (in world)."""
-    geom: adsk.core.Line3D = edge.geometry
-    start = geom.startPoint
-    end = geom.endPoint
-    edge_vec = end.vectorTo(start)
-    edge_vec.normalize()
-
-    # Already aligned
-    if abs(edge_vec.angleTo(axis)) < 1e-3:
-        return
-
-    rot_axis = edge_vec.crossProduct(axis)
-    rot_axis.normalize()
-    angle = edge_vec.angleTo(axis)
-
-    transform = adsk.core.Matrix3D.create()
-    center = occ.physicalProperties.centerOfMass
-    transform.setToRotation(angle, rot_axis, center)
-
-    occ_t = occ.transform
-    occ_t.transformBy(transform)
-    occ.transform = occ_t
-
-
-def _normalize_orientation(value):
-    if value is None:
-        return "vertical"
-    try:
-        text = str(value).strip().lower()
-    except Exception:
-        return "vertical"
-    if text == "horizontal":
-        return "horizontal"
-    return "vertical"
-
-
-def handleTube(template_filename: str, orientation: str = None):
-    app = adsk.core.Application.get()
-    ui = app.userInterface
-    doc = app.activeDocument
-    
-    if not doc:
-        ui.messageBox("No active document.")
-        return
-
-    products = doc.products
-    design = adsk.fusion.Design.cast(products.itemByProductType("DesignProductType"))
-    selection = design.rootComponent.occurrences.item(0)
-    camWS = ui.workspaces.itemById("CAMEnvironment")
-    camWS.activate()
-    cam = adsk.cam.CAM.cast(products.itemByProductType("CAMProductType"))
-    
-
-    root = design.rootComponent
-    if root.occurrences.count < 1:
-        ui.messageBox("No occurrences found in the root component.")
-        return
-
-    # Using first occurrence (matches your add-in behavior)
-    occ = root.occurrences.item(0)
-    if occ.bRepBodies.count < 1:
-        ui.messageBox("First occurrence has no bodies.")
-        return
-
-    body = adsk.fusion.BRepBody.cast(occ.bRepBodies.item(0))
-    if not body:
-        ui.messageBox("Failed to get body from the first occurrence.")
-        return
-
-    orientation_mode = _normalize_orientation(orientation)
-    use_horizontal = orientation_mode == "horizontal"
-
-    # Resolve template path relative to this script file.
-    script_dir = os.path.dirname(__file__)
-    template_path = os.path.join(script_dir, template_filename)
-    if not os.path.exists(template_path):
-        ui.messageBox(f"CAM template not found:\n{template_path}")
-        return
-
-    tubesTemplateFile = adsk.cam.CAMTemplate.createFromFile(template_path)
-    tubesTemplate = adsk.cam.CreateFromCAMTemplateInput.create()
-    tubesTemplate.camTemplate = tubesTemplateFile
-
-    # ---- Identify faces / edges (your original logic) ----
-    side_faces = []
-    two_faces = []
-    one_faces = []
-    bad_faces = []
-    longest_vectors = [0]
-
-    # find 8 longest unique edges across planar faces
-    for _ in range(8):
-        longest_edge_length = 0
-        longest_edge = None
-        for face in body.faces:
-            if face.geometry.objectType != adsk.core.Plane.classType():
-                continue
-            for edge in face.edges:
-                curve = edge.geometry
-                if curve.objectType != adsk.core.Line3D.classType():
-                    continue
-                (rv, startPoint, endPoint) = curve.evaluator.getEndPoints()
-                length = abs(startPoint.distanceTo(endPoint)) * 0.393701
-                if length > longest_edge_length and edge not in longest_vectors:
-                    longest_edge_length = length
-                    longest_edge = edge
-        longest_vectors.append(longest_edge)
-
-    facedown = None
+def _long_axis(body):
+    """Find the tube's longitudinal direction without assuming 1x2 stock."""
+    longest = None
     for face in body.faces:
         if face.geometry.objectType != adsk.core.Plane.classType():
             continue
+        for edge in _linear_edges(face):
+            if longest is None or _edge_length(edge) > _edge_length(longest):
+                longest = edge
+    if longest is None:
+        raise ValueError("Could not find a straight longitudinal edge on the box tube")
+    return _edge_vector(longest)
 
-        edge_count = 0
-        good_edge = None
-        for edge in face.edges:
-            if edge in longest_vectors:
-                edge_count += 1
-                good_edge = edge
 
-        if edge_count > 1:
-            for edge in face.edges:
-                curve = edge.geometry
-                if curve.objectType != adsk.core.Line3D.classType():
-                    continue
-
-                (rv, startPoint, endPoint) = curve.evaluator.getEndPoints()
-                length = abs(startPoint.distanceTo(endPoint)) * 0.393701
-
-                try:
-                    inter_pt = curve.intersectWithCurve(good_edge.geometry)[0]
-                except Exception:
-                    continue
-
-                is_perp = 80 < _angle_between_lines(edge, good_edge) < 100
-                contains_intersection = face.boundingBox.contains(inter_pt)
-
-                if (1.9 < length < 2.1 and face not in side_faces and face not in two_faces and is_perp and contains_intersection):
-                    side_faces.append(face)
-                    two_faces.append(face)
-                    facedown = face
-                elif (0.9 < length < 1.1 and face not in side_faces and face not in one_faces and is_perp and contains_intersection):
-                    side_faces.append(face)
-                    one_faces.append(face)
-                elif (face not in side_faces and face not in two_faces and face not in one_faces and face not in bad_faces):
-                    nowork = False
-                    for face2 in side_faces:
-                        if abs(app.measureManager.measureMinimumDistance(face, face2).value) < 0.1:
-                            nowork = True
-                            break
-                    if not nowork:
-                        bad_faces.append(face)
-
-    if len(two_faces) != 2 and one_faces:
-        facedown = one_faces[0]
-    if not facedown:
-        ui.messageBox("Could not determine a 'facedown' face. Make sure the part is a simple box tube.")
-        return
-
-    # longest edge on facedown
-    longest_edge_length = 0
-    longest_edge = None
-    for edge in facedown.edges:
-        curve = edge.geometry
-        if curve.objectType != adsk.core.Line3D.classType():
+def _wall_face_families(body, axis):
+    """Return the two pairs of exterior walls, excluding inner tube faces."""
+    candidates = []
+    for face in body.faces:
+        if face.geometry.objectType != adsk.core.Plane.classType():
             continue
-        (rv, startPoint, endPoint) = curve.evaluator.getEndPoints()
-        length = abs(startPoint.distanceTo(endPoint)) * 0.393701
-        if length > longest_edge_length:
-            longest_edge_length = length
-            longest_edge = edge
+        normal = _face_normal(face)
+        if abs(normal.dotProduct(axis)) > 1.0 - _PARALLEL_TOLERANCE:
+            continue  # end cap
+        if any(abs(_edge_vector(edge).dotProduct(axis)) >= _PARALLEL_TOLERANCE for edge in _linear_edges(face)):
+            candidates.append(face)
 
-    # align longest edge to +Y
-    _alignEdgeToAxis(longest_edge, occ, adsk.core.Vector3D.create(0, 1, 0))
+    families = []
+    for face in candidates:
+        normal = _face_normal(face)
+        for family in families:
+            if abs(normal.dotProduct(_face_normal(family[0]))) >= _PARALLEL_TOLERANCE:
+                family.append(face)
+                break
+        else:
+            families.append([face])
+    if len(families) != 2:
+        raise ValueError("Expected two perpendicular wall-normal families; found {}".format(len(families)))
 
-    # find perpendicular "bottom_edge" and align to +X
-    bottom_edge = None
-    for edge in facedown.edges:
-        curve = edge.geometry
-        if curve.objectType != adsk.core.Line3D.classType():
-            continue
-        (rv, startPoint, endPoint) = curve.evaluator.getEndPoints()
-        length = abs(startPoint.distanceTo(endPoint)) * 0.393701
-        if (1.5 < length < 2.5 and 80 < _angle_between_lines(edge, longest_edge) < 100):
-            bottom_edge = edge
-            break
-
-    if not bottom_edge:
-        ui.messageBox("Could not find perpendicular bottom edge on facedown face.")
-        return
-
-    _alignEdgeToAxis(bottom_edge, occ, adsk.core.Vector3D.create(1, 0, 0))
-
-    # classify side faces into top/bottom and left/right based on normals
-    top_bottom = []
-    left_right = []
-    for face in side_faces:
-        n = face.geometry.normal
-        n.normalize()
-        nx, ny, nz = n.asArray()
-        if (nz > 0.9 or nz < -0.9) and face not in top_bottom:
-            top_bottom.append(face)
-        elif (nx > 0.9 or nx < -0.9) and face not in left_right:
-            left_right.append(face)
-
-    if len(top_bottom) != 2 or len(left_right) != 2:
-        ui.messageBox("Failed to classify tube side faces (expected 2 top/bottom and 2 left/right).")
-        return
-
-    # ordering logic (yours)
-    if top_bottom[0].edges[0].geometry.startPoint.z < top_bottom[1].edges[0].geometry.startPoint.z:
-        top_bottom.reverse()
-    if left_right[0].edges[0].geometry.startPoint.x < left_right[1].edges[0].geometry.startPoint.x:
-        left_right.reverse()
+    exterior_pairs = []
+    origin = adsk.core.Point3D.create()
+    for family in families:
+        direction = _face_normal(family[0])
+        # Inner walls live between the two exterior-wall projections. Pick
+        # the extrema, which works for every rectangular cross-section.
+        ordered = sorted(
+            family,
+            key=lambda face: origin.vectorTo(face.centroid).dotProduct(direction),
+        )
+        if len(ordered) < 2:
+            raise ValueError("Could not find both exterior walls for one tube dimension")
+        exterior_pairs.append((ordered[0], ordered[-1]))
+    return exterior_pairs
 
 
-    ordered_faces = [top_bottom[0], left_right[0], top_bottom[1], left_right[1]]
+def _ordered_wall_faces(body):
+    axis = _long_axis(body)
+    pair_a, pair_b = _wall_face_families(body, axis)
+    # These are fixture order labels, not claims about a STEP model's
+    # arbitrary global orientation. The operator labels the real tube 12/3/6/9
+    # to match the four emitted files before machining it.
+    return list(zip(TUBE_FACE_CLOCKS, (pair_a[1], pair_b[1], pair_a[0], pair_b[0])))
 
-    pointBox = [
-        SetupWCSPoint.TOP_XMIN_YMIN.value,
-        SetupWCSPoint.TOP_XMIN_YMIN.value,
-        SetupWCSPoint.TOP_XMIN_YMIN.value,
-        SetupWCSPoint.TOP_XMIN_YMIN.value,
+
+def _axes_for_face(face, tube_axis, horizontal):
+    edges = _linear_edges(face)
+    long_edges = [edge for edge in edges if abs(_edge_vector(edge).dotProduct(tube_axis)) >= _PARALLEL_TOLERANCE]
+    if not long_edges:
+        raise ValueError("Tube wall has no usable longitudinal reference edge")
+    long_edge = max(long_edges, key=_edge_length)
+    transverse_edges = [
+        edge for edge in edges
+        if abs(_edge_vector(edge).dotProduct(_edge_vector(long_edge))) < 1.0 - _PARALLEL_TOLERANCE
     ]
-    Xflip = [True, True, False, False]
-    Yflip = [False, False, False, False]
-    names = ["Top", "Right", "Bottom", "Left"]
+    if not transverse_edges:
+        raise ValueError("Tube wall has no usable transverse reference edge")
+    transverse_edge = max(transverse_edges, key=_edge_length)
+    return (long_edge, transverse_edge) if horizontal else (transverse_edge, long_edge)
 
-    # ---- Build set-ups + apply template ----
-    top = True
-    for name1, flipX, flipY, boxPoint, face in zip(names, Xflip, Yflip, pointBox, ordered_faces):
-        setupInput = cam.setups.createInput(0)
-        setupInput.name = name1
-        setup = cam.setups.add(setupInput)
 
-        setup.stockMode = adsk.cam.SetupStockModes.RelativeBoxStock
-
-        good_one = None
-        other_vectors = []
-        extreme_edges = []
-
-        for edge in face.edges:
-            curve = edge.geometry
-            if curve.objectType != adsk.core.Line3D.classType():
-                continue
-            if edge in longest_vectors:
-                good_one = edge
-            else:
-                other_vectors.append(edge)
-
-        if not good_one:
-            ui.messageBox(f"Could not find reference edge on face '{name1}'.")
-            return
-
-        expected_length = 2 if face in two_faces else 1 if face in one_faces else 0
-        for edge in other_vectors:
-            if (
-                80 < _angle_between_lines(good_one, edge) < 100
-                and expected_length > 0
-                and expected_length - 0.1 < _lengthofline(edge) < expected_length + 0.1
-            ):
-                extreme_edges.append(edge)
-
-        if not extreme_edges:
-            # fallback: just pick any perpendicular edge
-            for edge in other_vectors:
-                if 80 < _angle_between_lines(good_one, edge) < 100:
-                    extreme_edges.append(edge)
-                    break
-
-        if not extreme_edges:
-            ui.messageBox(f"Could not find perpendicular edge(s) on face '{name1}'.")
-            return
-
-        if not top:
-            setup.parameters.itemByName("job_stockMode").expression = "'previoussetup'"
-        top = False
-
-        setup.parameters.itemByName("job_stockOffsetMode").expression = "'all'"
-        setup.parameters.itemByName("job_stockOffsetSides").expression = "0 mm"
-        setup.parameters.itemByName("job_stockOffsetTop").expression = "0 mm"
-
-        setup.parameters.itemByName("wcs_orientation_mode").value.value = "axesXY"
-
-        axis_x_edge = good_one if use_horizontal else extreme_edges[0]
-        axis_y_edge = extreme_edges[0] if use_horizontal else good_one
-        setup.parameters.itemByName("wcs_orientation_axisX").value.value = [axis_x_edge]
-        setup.parameters.itemByName("wcs_orientation_axisY").value.value = [axis_y_edge]
-
-        setup.parameters.itemByName("job_model").value.value = [body]
-        if name1 == "Top" or name1 == "Bottom":
-            if(edge_dir(axis_x_edge).x == 1):
-                flip_x_value = not flipX
-            else:
-                flip_x_value = flipX
-            if(edge_dir(axis_y_edge).y == 1):
-                flip_y_value = flipY
-            else:
-                flip_y_value = not flipY
-        elif name1 == "Left" or name1 == "Right":
-            if(edge_dir(axis_x_edge).z == 1):
-                flip_x_value = flipX
-            else:
-                flip_x_value = not flipX
-            if(edge_dir(axis_y_edge).y == 1):
-                flip_y_value = flipY
-            else:
-                flip_y_value = not flipY
-        setup.parameters.itemByName("wcs_orientation_flipY").value.value = flip_y_value
-        setup.parameters.itemByName("wcs_orientation_flipX").value.value = flip_x_value
-
-        setup.parameters.itemByName("wcs_origin_boxPoint").value.value = boxPoint
-
-        setup.createFromCAMTemplate2(tubesTemplate)
-
-        # post-template operation tweaks (yours)
-        for operation in setup.operations:
-            offset = 0.508
-
-            if operation.strategy == "pocket2d":
-                pocketSelection: adsk.cam.CadContours2dParameterValue = operation.parameters.itemByName("pockets").value
-                chains: adsk.cam.CurveSelections = pocketSelection.getCurveSelections()
-                chains.clear()
-                chain = chains.createNewFaceContourSelection()
-                chain.inputGeometry = [face]
-                pocketSelection.applyCurveSelections(chains)
-
-            if operation.strategy == "drill":
-                operation.parameters.itemByName("bottomHeight_mode").value.value = "from point"
-
-            if operation.strategy in ("drill", "pocket2d"):
-                for bad_face in bad_faces:
-                    n1 = bad_face.geometry.normal
-                    n2 = face.geometry.normal
-                    n1.normalize()
-                    n2.normalize()
-                    dot = n1.dotProduct(n2)
-                    if (dot < -0.9) or (dot > 0.9 and bad_face.centroid.distanceTo(face.centroid) < 0.4):
-                        offset = bad_face.centroid.distanceTo(face.centroid) + 0.125
-                        operation.parameters.itemByName("bottomHeight_ref").value.value = [bad_face]
-
-            elif operation.strategy == "contour2d":
-                max_distance = 0
-                edgeMax = None
-                for edge in extreme_edges:
-                    curve: adsk.core.Line3D = edge.geometry
-                    if curve.objectType != adsk.core.Line3D.classType():
+def _loop_specs(face):
+    specs = []
+    for loop in face.loops:
+        if loop.isOuter:
+            continue
+        coedges = list(loop.coEdges)
+        # Use the loop's edges, not BRepCoEdge.edge.  The loop belongs to
+        # the occurrence-body selected as this setup's model, and its edge
+        # collection retains that occurrence context for Fusion's CAM model
+        # tree lookup.  Co-edges are still needed below for loop direction.
+        edges = list(loop.edges)
+        if not edges:
+            continue
+        circular = len(edges) == 1 and isinstance(edges[0].geometry, adsk.core.Circle3D)
+        boxes = [edge.boundingBox for edge in edges]
+        circular_faces = []
+        if circular:
+            # Bore's ``circularFaces`` parameter does not mean the planar
+            # wall face that *contains* a hole. It means the cylindrical
+            # BRep face forming the hole wall. Selecting the planar face was
+            # a subtle but real API mismatch: it can remain accepted as a
+            # generic BRepFace while producing no bore, or selecting a
+            # different cylindrical feature from stale template geometry.
+            for edge in edges:
+                for adjacent_face in edge.faces:
+                    if adjacent_face.geometry.objectType != adsk.core.Cylinder.classType():
                         continue
-                    p_end = curve.evaluator.getParameterAtPoint(curve.endPoint)[1]
-                    p_start = curve.evaluator.getParameterAtPoint(curve.startPoint)[1]
-                    p = p_end if p_end > p_start else p_start
-                    if p > max_distance:
-                        max_distance = p
-                        edgeMax = edge
+                    if adjacent_face not in circular_faces:
+                        circular_faces.append(adjacent_face)
+        specs.append({
+            "edges": edges,
+            "is_reverted": is_reverted_for_loop_seed(coedges[0].isOpposedToEdge),
+            "circular": circular,
+            "circular_faces": circular_faces,
+        })
+    return specs
 
-                if edgeMax:
-                    parameter: adsk.cam.CadContours2dParameterValue = operation.parameters.itemByName("contours").value
-                    selection: adsk.cam.CurveSelections = parameter.getCurveSelections()
-                    selection.clear()
-                    chain = selection.createNewChainSelection()
-                    chain.isOpen = True
-                    chain.isReverted = True if name1 in ("Top", "Right") else False
-                    chain.inputGeometry = [edgeMax]
-                    parameter.applyCurveSelections(selection)
 
-                operation.parameters.itemByName("bottomHeight_mode").value.value = "from stock top"
-                operation.parameters.itemByName("bottomHeight_offset").expression = f"-{offset} cm"
+def _apply_chains(operation, parameter_name, specs):
+    parameter = operation.parameters.itemByName(parameter_name)
+    if parameter is None or not hasattr(parameter.value, "getCurveSelections"):
+        return False
+    if not specs:
+        return False
 
-    cam.generateAllToolpaths(skipValid=False)
+    def apply_with_winding(invert_winding):
+        selections = parameter.value.getCurveSelections()
+        selections.clear()
+        for spec in specs:
+            selection = selections.createNewChainSelection()
+            selection.isOpen = False
+            selection.isReverted = spec["is_reverted"] != invert_winding
+            # A single edge is a deliberate chain seed. Fusion closes the
+            # tangent-connected loop itself; passing every edge works for a
+            # circle but makes imported irregular through-shape loops invalid
+            # or ambiguously directed.
+            selection.inputGeometry = [spec["edges"][0]]
+        parameter.value.applyCurveSelections(selections)
+
+    # The co-edge direction is the normal case. Some imported STEP faces
+    # carry the opposite parameterization relative to the operation's tool
+    # side, so validate the inverse convention only when Fusion rejects the
+    # topological one. This produces one deliberate, valid direction rather
+    # than silently keeping a warning or machining the wrong side.
+    try:
+        apply_with_winding(False)
+    except RuntimeError as direct_error:
+        try:
+            apply_with_winding(True)
+            adsk.core.Application.get().log(
+                "Tube chain winding inverted for valid {} selection in '{}'".format(
+                    parameter_name, operation.name
+                )
+            )
+        except RuntimeError as inverted_error:
+            raise RuntimeError(
+                "No valid {} chain selection for tube operation {!r}; "
+                "topology and inverse windings were both rejected: {} / {}".format(
+                    parameter_name, operation.name, direct_error, inverted_error
+                )
+            )
+    return True
+
+
+def _apply_circular_faces(operation, faces):
+    parameter = operation.parameters.itemByName("circularFaces")
+    if parameter is None or not faces:
+        return False
+    try:
+        parameter.value.value = faces
+        return True
+    except Exception:
+        return False
+
+
+def _set_expression(operation, parameter_name, expression):
+    parameter = operation.parameters.itemByName(parameter_name)
+    if parameter is not None:
+        parameter.expression = expression
+
+
+def _set_face_stock_heights(operation):
+    """Use the current setup's face-local stock, never template coordinates."""
+    _set_expression(operation, "topHeight_mode", "'from stock top'")
+    _set_expression(operation, "topHeight_offset", "0 in")
+    # Each indexed setup aligns +Z with its exterior wall normal, so this is
+    # specifically the stock below the face being machined, not a global-Z
+    # bottom from a different tube side or a stale template point.
+    _set_expression(operation, "bottomHeight_mode", "'from stock bottom'")
+    _set_expression(operation, "bottomHeight_offset", "0 in")
+
+
+def _configure_face_operations(setup, face):
+    """Rebind every kept template operation to loops on this wall only."""
+    loops = _loop_specs(face)
+    # Every non-circular tube loop is a closed through feature. Even a long,
+    # narrow cutout needs the Shape Through clearing strategy; 2D Slot Cut
+    # follows a centerline-style path and machines those closed profiles
+    # incorrectly on tube walls.
+    shapes = [loop for loop in loops if not loop["circular"]]
+    have_shape_roughing = False
+    circular_faces = [face for loop in loops if loop["circular"] for face in loop["circular_faces"]]
+
+    # Delete the deliberately unsupported cutoff before applying any feature
+    # selection. If a later shape/slot binding fails, Fusion retains the
+    # partial setup for inspection; it must not misleadingly show the stale
+    # template cutoff as an active errored operation in that partial state.
+    operations = []
+    for operation in list(setup.operations):
+        if "tube cutoff" in str(operation.name or "").lower():
+            operation.deleteMe()
+        else:
+            operations.append(operation)
+
+    for operation in operations:
+        name = str(operation.name or "").lower()
+        keep = False
+        if operation.strategy == "bore" or "drill" in name:
+            # Bore's circularFaces accepts the actual cylindrical hole walls,
+            # unlike 2D Pocket's curve parameter. The reviewed Bore template
+            # uses the same flat end mill as the large-hole pocket sibling,
+            # so broaden its diameter range and let the correct API own all
+            # circular through holes on this indexed face.
+            _set_expression(operation, "holeDiameterMinimum", "0 in")
+            _set_expression(operation, "holeDiameterMaximum", "100 in")
+            keep = bool(circular_faces) and _apply_circular_faces(operation, circular_faces)
+        elif "circular" in name and "hole" in name:
+            # 2D Pocket rejects the circular through-hole chains on an
+            # imported tube wall. Its geometry is handled by the Bore above,
+            # which selects cylindrical walls directly and produces the
+            # correct face-scoped result.
+            keep = False
+        elif "shape" in name and "through" in name and operation.strategy in ("adaptive2d", "pocket2d"):
+            # The current template has regular and Small roughing siblings.
+            # Do not cut every profile twice: use the first applicable one.
+            keep = bool(shapes) and not have_shape_roughing and _apply_chains(operation, "pockets", shapes)
+            have_shape_roughing = have_shape_roughing or keep
+        elif "shape" in name and operation.strategy == "contour2d":
+            keep = _apply_chains(operation, "contours", shapes)
+        elif "slot" in name and operation.strategy == "contour2d":
+            keep = False
+        if keep:
+            _set_face_stock_heights(operation)
+        else:
+            operation.deleteMe()
+
+
+def _bind_setup_to_face(setup, body, face, tube_axis, horizontal):
+    """Bind the real tube body and face-local WCS after template changes."""
+    setup.stockMode = adsk.cam.SetupStockModes.RelativeBoxStock
+    setup.parameters.itemByName("job_stockOffsetMode").expression = "'all'"
+    setup.parameters.itemByName("job_stockOffsetSides").expression = "0 mm"
+    setup.parameters.itemByName("job_stockOffsetTop").expression = "0 mm"
+    setup.parameters.itemByName("job_model").value.value = [body]
+
+    axis_x, axis_y = _axes_for_face(face, tube_axis, horizontal)
+    derived_normal = _edge_vector(axis_x).crossProduct(_edge_vector(axis_y))
+    setup.parameters.itemByName("wcs_orientation_mode").value.value = "axesXY"
+    setup.parameters.itemByName("wcs_orientation_axisX").value.value = [axis_x]
+    setup.parameters.itemByName("wcs_orientation_axisY").value.value = [axis_y]
+    setup.parameters.itemByName("wcs_orientation_flipX").value.value = derived_normal.dotProduct(_face_normal(face)) < 0
+    setup.parameters.itemByName("wcs_orientation_flipY").value.value = False
+    setup.parameters.itemByName("wcs_origin_boxPoint").value.value = "top 1"
+
+
+def _make_setup(cam, body, face, clock, tube_axis, horizontal, template):
+    setup_input = cam.setups.createInput(0)
+    setup_input.name = tube_face_setup_name(clock)
+    setup = cam.setups.add(setup_input)
+    _bind_setup_to_face(setup, body, face, tube_axis, horizontal)
+    setup.createFromCAMTemplate2(template)
+    # createFromCAMTemplate2 returns before Fusion has fully attached the
+    # copied operations to this setup's CAM model tree.  A selection applied
+    # in that same API turn is rejected as "Do not have valid curve
+    # selections", even though the BRep edges are valid. Let Fusion finish
+    # resolving the imported template before rebinding it to this wall.
+    adsk.doEvents()
+    time.sleep(0.1)
+    # A template can carry its own setup context. Reapply our occurrence body
+    # and face-local WCS after the import so every selection below resolves in
+    # this setup's actual CAM model tree, never in the template's old model.
+    _bind_setup_to_face(setup, body, face, tube_axis, horizontal)
+    adsk.doEvents()
+    _configure_face_operations(setup, face)
+
+
+def _active_cam_product(app, doc):
+    """Activate Manufacture and wait for Fusion to attach CAM to ``doc``.
+
+    A new Fusion design document initially has only a Design product. CAM is
+    attached lazily when Manufacture is activated, so looking it up directly
+    after STEP import fails with "failed to find product". Plate CAM already
+    establishes this workspace prerequisite in SetupGenerator; tube CAM must
+    do it here too because it creates its own four setups.
+    """
+    try:
+        workspace = app.userInterface.workspaces.itemById("CAMEnvironment")
+        if workspace:
+            workspace.activate()
+    except Exception:
+        # The lookup below supplies the actionable error if Manufacture cannot
+        # be activated on this Fusion installation.
+        pass
+
+    for _ in range(20):
+        try:
+            product = doc.products.itemByProductType("CAMProductType")
+        except RuntimeError:
+            product = None
+        cam = adsk.cam.CAM.cast(product) if product else None
+        if cam:
+            return cam
+        adsk.doEvents()
+        time.sleep(0.1)
+    raise RuntimeError(
+        "Fusion did not create a CAM product after activating Manufacture; "
+        "verify the Manufacturing extension is available."
+    )
+
+
+def handleTube(template_filename, orientation=None, program_base_name="tube"):
+    """Create four indexed setups and return their matching output stems."""
+    app = adsk.core.Application.get()
+    doc = app.activeDocument
+    if not doc:
+        raise RuntimeError("No active document for box-tube CAM")
+    design = adsk.fusion.Design.cast(doc.products.itemByProductType("DesignProductType"))
+    if not design:
+        raise RuntimeError("Box-tube CAM requires an active Design product")
+    cam = _active_cam_product(app, doc)
+    if design.rootComponent.occurrences.count != 1:
+        raise ValueError("Box-tube CAM requires exactly one imported tube occurrence")
+    occurrence = design.rootComponent.occurrences.item(0)
+    if occurrence.bRepBodies.count != 1:
+        raise ValueError("Box-tube CAM requires exactly one solid body")
+    body = occurrence.bRepBodies.item(0)
+
+    template_file = adsk.cam.CAMTemplate.createFromFile(template_filename)
+    template = adsk.cam.CreateFromCAMTemplateInput.create()
+    template.camTemplate = template_file
+    tube_axis = _long_axis(body)
+    horizontal = str(orientation or "").strip().lower() == "horizontal"
+    names = []
+    for clock, face in _ordered_wall_faces(body):
+        _make_setup(cam, body, face, clock, tube_axis, horizontal, template)
+        names.append(tube_face_program_name(program_base_name, clock))
+    app.log("Box-tube CAM created four indexed setups: {}".format(", ".join(names)))
+    return names

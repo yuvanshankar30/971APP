@@ -1,8 +1,8 @@
 # Fusion CAM
 
 The production Fusion-360-backed milling pipeline, separate from `autocam/`'s
-pure-JavaScript turning/routing generator. It handles plate nesting, box tube,
-real 3-axis toolpaths, machine-specific templates and exact post-processed NC
+pure-JavaScript turning/routing generator. It handles plate nesting, direct
+box-tube jobs, real 3-axis toolpaths, machine-specific templates, and exact post-processed NC
 artifacts through a Fusion add-in polling Spartans Hub's `cam_jobs` queue.
 
 ## Structure
@@ -12,7 +12,8 @@ artifacts through a Fusion add-in polling Spartans Hub's `cam_jobs` queue.
 - **`jobPayload.js`** - turns a claimed job snapshot into signed Runner input.
 - **`runner/`** - the active Fusion add-in: claims work from
   `/api/fusion-runner`, imports STEP files, arranges parts, applies templates,
-  generates toolpaths and uploads exact NC artifacts.
+  generates toolpaths and uploads exact NC artifacts. Box-tube jobs create one
+  manually indexed setup and NC artifact for each of the four faces.
 - **`runner/templates/`** - generic and reviewed team templates. Plate jobs
   select the reviewed machine/material template when a mapping exists and
   fail back to the generic template only for combinations without one.

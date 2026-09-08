@@ -11,7 +11,7 @@ The Fusion CAM Runner (`autocam/fusion/runner/`) works by polling a running Spar
 `cam_jobs` rows, downloading STEP files, building a Fusion CAM setup from a
 template, generating toolpaths, exporting G-code, and reporting back. Right
 now it's being pointed at a **local dev server**
-(`BASE_URL=http://127.0.0.1:5173` in the Runner's own `.env`), not the
+(`BASE_URL=http://localhost:5173` in the Runner's own `.env`), not the
 deployed `spartanshub.spartanrobotics.org`, because real local testing has
 been finding and fixing genuine logic bugs in the Runner's Python that would
 otherwise ship straight to production. All of that work lives on branch
@@ -33,7 +33,7 @@ convention on reading a branch's PR before resuming work on it.
 2. `autocam/fusion/runner/.env` (in the **live add-in folder**, not the
    repo checkout - Fusion loads from there) set to:
    ```
-   BASE_URL="http://127.0.0.1:5173"
+   BASE_URL="http://localhost:5173"
    API_KEY="<the local dev server's FUSION_RUNNER_TOKEN value>"
    RUNNER_ID="<a name for this machine>"
    ```
@@ -48,7 +48,7 @@ convention on reading a branch's PR before resuming work on it.
 
 1. **Start the app's dev server** from the repo root:
    ```
-   npm run dev -- --host 127.0.0.1 --port 5173
+   npm run dev -- --host localhost --port 5173
    ```
    This is what the Runner's `BASE_URL` above points at. Leave it running.
 2. **Sync any Python changes to the live add-in.** Editing files under
@@ -141,7 +141,7 @@ pocket/corner region.
 ## Moving off local dev
 
 Two things need to happen before pointing the Runner at the deployed Hub
-instead of `127.0.0.1:5173`:
+instead of `localhost:5173`:
 1. PR #311's fixes need to be confirmed working end to end on a real job (or
    several), then merged.
 2. The GCP-admin-side setup in

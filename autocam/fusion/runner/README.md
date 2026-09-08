@@ -41,7 +41,10 @@ but an unchanged snapshot is not posted or written to the database again.
 
 - **Automatic job polling** — background thread claims queued jobs and dispatches by kind
 - **Plate CAM** — downloads STEP files, applies tool libraries, generates toolpaths and G-code
-- **Box-tube CAM** — the same flow adapted for tubular stock
+- **Box-tube CAM** — a geometry-derived rectangular-tube workflow: four
+  face-scoped Fusion setups are posted as `-side-12`, `-side-3`, `-side-6`,
+  and `-side-9` programs for manual indexing, never as one unsafe all-face
+  program
 - **2D nesting** — auto-arranges parts onto plates with envelope screenshots
 - **Grouping validation** — refuses partial/multi-envelope arrangements and
   quantity mismatches before CAM generation
@@ -89,6 +92,11 @@ It asks which Hub to talk to (deployed, or a local dev server), for your
 `FUSION_RUNNER_TOKEN` value, and for this physical machine's `cam_machines`
 UUID, then writes `.env` itself - see [`setup.py`](setup.py). Prefer to edit
 `.env` by hand instead? `cp .env.example .env` and fill in the same values manually:
+
+For local testing, start Spartans Hub with
+`npm run dev -- --host localhost --port 5173` and choose the local option. `setup.py` writes
+`http://localhost:5173`, rather than a literal IPv4 loopback address, so it
+also reaches Vite when it is bound on IPv6 loopback.
 
 | Variable | Purpose | Default |
 | --- | --- | --- |
