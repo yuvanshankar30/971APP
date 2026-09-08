@@ -124,20 +124,36 @@ describe('Fusion Runner grouping lifecycle',()=>{
    {upsert:true,contentType:'text/plain'}
   );
  });
- it('posts every separate tube-face program to Files/AutoCAM before completing',async()=>{
+ it('posts all four separate tube-face programs inside one Files/AutoCAM folder before completing',async()=>{
   const side12=Buffer.from('G20\nM30\n','utf8').toString('base64');
   const side3=Buffer.from('G20\nM30\n','utf8').toString('base64');
+  const side6=Buffer.from('G20\nM30\n','utf8').toString('base64');
+  const side9=Buffer.from('G20\nM30\n','utf8').toString('base64');
   mocks.from
    .mockReturnValueOnce(chain({data:{id:'tube-job',params:{fusionJobKind:'box_tube'}}}))
    .mockReturnValueOnce(chain({data:[{id:'tube-job'}]}));
   expect((await call('complete',{jobId:'tube-job',runnerId:'runner',ncFiles:[
    {name:'Bottom Tube-side-12.nc',contentBase64:side12},
-   {name:'Bottom Tube-side-3.nc',contentBase64:side3}
+   {name:'Bottom Tube-side-3.nc',contentBase64:side3},
+   {name:'Bottom Tube-side-6.nc',contentBase64:side6},
+   {name:'Bottom Tube-side-9.nc',contentBase64:side9}
   ]})).status).toBe(200);
   expect(mocks.storageUpload.mock.calls.map(([path])=>path)).toEqual([
-   'AutoCAM/tube-job-Bottom_Tube-side-12.nc',
-   'AutoCAM/tube-job-Bottom_Tube-side-3.nc'
+   'AutoCAM/tube-job/Bottom_Tube-side-12.nc',
+   'AutoCAM/tube-job/Bottom_Tube-side-3.nc',
+   'AutoCAM/tube-job/Bottom_Tube-side-6.nc',
+   'AutoCAM/tube-job/Bottom_Tube-side-9.nc'
   ]);
+ });
+ it('rejects a tube completion that is missing a setup program',async()=>{
+  mocks.from.mockReturnValueOnce(chain({data:{id:'tube-job',params:{fusionJobKind:'box_tube'}}}));
+  const program=Buffer.from('G20\nM30\n','utf8').toString('base64');
+  const result=await call('complete',{jobId:'tube-job',runnerId:'runner',ncFiles:[
+   {name:'tube-side-12.nc',contentBase64:program}, {name:'tube-side-3.nc',contentBase64:program}, {name:'tube-side-6.nc',contentBase64:program}
+  ]});
+  expect(result.status).toBe(500);
+  expect((await result.json()).error).toMatch(/exactly four/i);
+  expect(mocks.storageUpload).not.toHaveBeenCalled();
  });
  it('does not mark a job complete when publishing Files/AutoCAM fails',async()=>{
   mocks.storageUpload.mockResolvedValueOnce({error:{message:'storage unavailable'}});

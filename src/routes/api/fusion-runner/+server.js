@@ -34,20 +34,29 @@ const AUTOCAM_FILES_FOLDER = 'AutoCAM';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const STALE_CLAIM_MS = 15 * 60 * 1000;
 
-function autoCamArtifactPath(jobId, artifact, index) {
+function autoCamArtifactPath(jobId, artifact, index, kind) {
   // Fusion validates artifact names before this point. Keep the original
   // program identity, while the job prefix prevents retries or same-named
   // tube faces from overwriting another job in the shared AutoCAM folder.
   const leafName = String(artifact.name || `program-${index + 1}.nc`)
     .split('/').at(-1)
     .replace(/[^A-Za-z0-9._-]/g, '_');
-  return `${AUTOCAM_FILES_FOLDER}/${jobId.slice(0, 8)}-${leafName}`;
+  return kind === 'box_tube'
+    ? `${AUTOCAM_FILES_FOLDER}/${jobId.slice(0, 8)}/${leafName}`
+    : `${AUTOCAM_FILES_FOLDER}/${jobId.slice(0, 8)}-${leafName}`;
 }
 
-async function publishNcArtifactsToAutoCamFiles(supabase, jobId, ncFiles) {
+function validateTubeNcArtifacts(ncFiles) {
+  const sides = ncFiles.map((artifact) => String(artifact.name).match(/-side-(12|3|6|9)\.(?:nc|ngc)$/i)?.[1]);
+  if (ncFiles.length !== 4 || new Set(sides).size !== 4 || sides.some((side) => !side)) {
+    throw new Error('Box-tube CAM must post exactly four per-setup NC files: Side 12, Side 3, Side 6, and Side 9');
+  }
+}
+
+async function publishNcArtifactsToAutoCamFiles(supabase, jobId, ncFiles, kind) {
   if (!ncFiles?.length) return;
   for (const [index, artifact] of ncFiles.entries()) {
-    const path = autoCamArtifactPath(jobId, artifact, index);
+    const path = autoCamArtifactPath(jobId, artifact, index, kind);
     const { error } = await supabase.storage
       .from(AUTOCAM_FILES_BUCKET)
       .upload(path, Buffer.from(artifact.contentBase64, 'base64'), {
@@ -264,6 +273,7 @@ export async function POST({ request, url }) {
       if (currentError || !currentJob) return json({ error: 'Job was not in the processing state - not completed' }, { status: 409 });
       const kind = currentJob.params?.fusionJobKind;
       const ncFiles = kind === 'plate:arrange' ? null : validateFusionNcFiles(body?.ncFiles);
+      if (kind === 'box_tube') validateTubeNcArtifacts(ncFiles);
       // How far the posted program actually travels, measured from the file
       // itself. Issue #359: "program exceeds machine maximum" was reported
       // repeatedly on the real router, and every time the program's own span
@@ -286,7 +296,7 @@ export async function POST({ request, url }) {
       // Files is the permanent operator-facing copy. Publish every exact
       // artifact before the status change, so a completed job always has its
       // separate plate or tube-face programs available in Files/AutoCAM.
-      await publishNcArtifactsToAutoCamFiles(supabase, currentJob.id, ncFiles);
+      await publishNcArtifactsToAutoCamFiles(supabase, currentJob.id, ncFiles, kind);
       const { data, error } = await supabase
         .from('cam_jobs')
         .update({

@@ -71,7 +71,8 @@ browser confirmation or prompt popups.
   `Side 3`, `Side 6`, and `Side 9` files for manual indexing. See the
   **AutoCAM** section below for the code-level detail on all three.
   Every completed Fusion NC artifact is automatically published to the Files
-  `AutoCAM` folder, retaining distinct programs for each tube face.
+  `AutoCAM` folder. Each tube job gets its own subfolder containing exactly
+  four distinct programs, one for each indexed setup: Side 12, 3, 6, and 9.
   Completed routering, turning, and tube-stock jobs all get a 3D toolpath
   simulator (routering/turning also get a switchable 2D preview; tube stock
   has no useful 2D representation of a per-face drilling program, so it goes
