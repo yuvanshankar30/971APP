@@ -70,10 +70,13 @@ grouped with other tubes. The material is required so the Runner can select
 the reviewed feeds, speeds, and template for that stock.
 
 For rectangular box tube, one queued tube job creates four manually indexed
-Fusion setups and four NC files: Side 12, Side 3, Side 6, and Side 9. Rotate
-the physical tube in that order between files. The Tube Cutoff operation is
-not automatically posted yet because a safe cutoff needs an explicit finished
-length and fixture reference; do not assume a generic tube job includes it.
+Fusion setups: Side 12, Side 3, Side 6, and Side 9. Fusion posts one NC file
+for each side that actually contains machining; an unfeatured side stays as a
+visible setup but does not produce a blank program. Rotate the physical tube
+to match each posted side and re-zero Z before machining it. Holes and cutouts
+break through the near wall only, never across the hollow tube into the far
+wall. The Tube Cutoff operation is not automatically posted yet because a safe
+cutoff needs an explicit finished length and fixture reference.
 
 Stock Categories are the material + thickness combinations parts and
 plates get matched against (e.g. "Polycarbonate (Lexan) - 0.0625\""). Add a

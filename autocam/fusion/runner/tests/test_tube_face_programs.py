@@ -77,8 +77,9 @@ class TubeFaceProgramTests(unittest.TestCase):
     def test_tube_shape_chains_use_one_topology_seed_edge(self):
         handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
         self.assertIn('selection.inputGeometry = [spec["edges"][0]]', handler)
-        self.assertIn("apply_with_winding(False)", handler)
-        self.assertIn("apply_with_winding(True)", handler)
+        self.assertIn("apply_single(spec, spec[\"is_reverted\"])", handler)
+        self.assertIn("apply_single(spec, not spec[\"is_reverted\"])", handler)
+        self.assertIn("for spec, reverted in zip(specs, resolved):", handler)
 
     def test_tube_closed_non_circular_features_use_shape_through_not_slot_cut(self):
         handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
@@ -103,11 +104,24 @@ class TubeFaceProgramTests(unittest.TestCase):
         self.assertIn("from .TubeHeightMath import bottom_height_expression", handler)
         self.assertIn("bottom_mode, bottom_offset = bottom_height_expression(wall_thickness_in)", handler)
 
-    def test_tube_cutoff_is_deleted_before_other_geometry_binding(self):
+    def test_tube_cutoff_is_not_inherited_without_explicit_cutoff_data(self):
         handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
         cutoff_index = handler.index('if "tube cutoff" in str(operation.name or "").lower():')
         shape_index = handler.index('elif "shape" in name')
         self.assertLess(cutoff_index, shape_index)
+
+    def test_tube_keeps_four_setups_but_posts_only_active_faces(self):
+        handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
+        workflow = (RUNNER_DIR / "workflows" / "camTube.py").read_text()
+        self.assertIn("if len(names) != 4 or cam.setups.count != 4:", handler)
+        self.assertNotIn("produced no operations for Side", handler)
+        self.assertIn("posted_program_names = export(", workflow)
+        self.assertIn("len(nc_files) != len(posted_program_names)", workflow)
+
+    def test_tube_checks_generated_operations_before_export(self):
+        workflow = (RUNNER_DIR / "workflows" / "camTube.py").read_text()
+        self.assertIn("failed = failed_operations(cam)", workflow)
+        self.assertIn("job_warnings = operation_warnings(app, cam)", workflow)
 
     def test_tube_toolpath_generation_uses_its_future(self):
         workflow = (RUNNER_DIR / "workflows" / "camTube.py").read_text()
