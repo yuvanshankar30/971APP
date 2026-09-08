@@ -408,7 +408,15 @@ def _bind_setup_to_face(setup, body, face, tube_axis, horizontal):
 
 
 def _cap_other_way_feedrate(setup):
-    """Keep adaptive return feed no faster than the material-scaled cut feed."""
+    """Keep adaptive return feed no faster than the material-scaled cut feed.
+
+    This must be an expression reference, rather than copying the current
+    numeric value.  Fusion applies material/tool scaling after a template is
+    instantiated; assigning the pre-scale number lets ``otherWayFeedrate``
+    become larger than the final ``tool_feedCutting`` again and triggers its
+    blocking warning.  Keeping both parameters linked also covers a later
+    operator-approved material preset change before generation.
+    """
     capped = []
     for operation in setup.operations:
         if operation.strategy != "adaptive2d":
@@ -418,8 +426,8 @@ def _cap_other_way_feedrate(setup):
         if other is None or cutting is None:
             continue
         try:
-            if other.value.value > cutting.value.value:
-                other.value.value = cutting.value.value
+            if other.expression.strip() != "tool_feedCutting":
+                other.expression = "tool_feedCutting"
                 capped.append(operation.name)
         except Exception:
             continue
