@@ -96,14 +96,18 @@ if OVERRIDE_PATH not in sys.path:
 FUSION_DATA_PROJECT_NAME = _read_env_value("FUSION_DATA_PROJECT_NAME") or "2026 Season CAM"
 
 # Nested Data Panel folder path (within the resolved project above) that
-# AutoCAM-generated Fusion documents get saved into - "/"-separated,
-# each segment created automatically if it doesn't already exist. Defaults
-# to "Offseason Projects/AutoCAM" - the real folder the team already uses
-# for this, confirmed live against the actual account. Was a single
-# hardcoded "AutoCAM Drop" string duplicated in camPlate.py and camTube.py;
-# centralized in workflows/dropFolder.py so both stay in sync and a team
-# can repoint this without touching Python logic.
-FUSION_DROP_FOLDER_PATH = _read_env_value("FUSION_DROP_FOLDER_PATH") or "Offseason Projects/AutoCAM"
+# AutoCAM-generated Fusion documents get saved into - "/"-separated, each
+# segment created automatically if it doesn't already exist; an empty
+# string means the project's own root folder, no subfolder at all (see
+# resolve_drop_folder in workflows/dropFolder.py - splitting "" produces
+# zero path segments, so it returns data_project.rootFolder directly).
+# Direct instruction: default here, not nested under "Offseason
+# Projects/AutoCAM" (the previous default) - documents should land at the
+# base of the 2026 Season CAM project itself. Was a single hardcoded
+# "AutoCAM Drop" string duplicated in camPlate.py and camTube.py before
+# being centralized in workflows/dropFolder.py so both stay in sync and a
+# team can repoint this without touching Python logic.
+FUSION_DROP_FOLDER_PATH = _read_env_value("FUSION_DROP_FOLDER_PATH") or ""
 
 TEMP_PATH = os.path.join(os.path.dirname(__file__), "temp")
 INITIAL_PATH = os.path.join(TEMP_PATH, "initial")

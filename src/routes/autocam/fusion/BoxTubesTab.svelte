@@ -58,6 +58,14 @@
   // recent queueable tubes, typing searches every queueable tube by name.
   let recentTubeSearch = '';
   $: aluminumMaterials = materials.filter((material) => /alumin(?:um|ium)/i.test(material.name || ''));
+  // Tube stock only ever uses aluminum (see the Runner's own docs) - default
+  // straight to the first (only, in practice) aluminum material as soon as
+  // a tube is selected for queueing, rather than leaving Material blank
+  // until a router happens to have its own default_material_id configured
+  // (see handleMachineChange) or the operator picks one by hand every time.
+  $: if (queuedTubeId && aluminumMaterials.length && !boxTubeMaterialSelections[queuedTubeId]) {
+    boxTubeMaterialSelections = { ...boxTubeMaterialSelections, [queuedTubeId]: aluminumMaterials[0].id };
+  }
   $: queueableTubesByCreatedAt = [...boxTubes]
     .filter((tube) => tube.step_file_name && Number(tube.quantity) > 0)
     .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
@@ -652,11 +660,11 @@
               <FolderTreeNode node={folderTreeRow.tree} selectedPath={queueFolderPath} onSelect={(path) => (queueFolderPath = path)} />
             </div>
             <p class="cam-form-hint">
-              {queueFolderPath ? `Selected: ${queueFolderPath}` : "Using the default AutoCAM folder - click a folder above to save somewhere else."}
+              {queueFolderPath ? `Selected: ${queueFolderPath}` : "Using the 2026 Season CAM project root - click a folder above to save somewhere else."}
               Folder list as of {new Date(folderTreeRow.synced_at).toLocaleString()}.
             </p>
           {:else}
-            <p class="cam-form-hint">No folder list yet - a Fusion Runner needs to have run at least once to share it. This will save to the default AutoCAM folder.</p>
+            <p class="cam-form-hint">No folder list yet - a Fusion Runner needs to have run at least once to share it. This will save to the 2026 Season CAM project root.</p>
           {/if}
         </div>
       </div>

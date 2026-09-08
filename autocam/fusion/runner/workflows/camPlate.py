@@ -648,11 +648,15 @@ def start(data, session):
 
             # Save the document
             doc.saveAs(doc_name, autocam_drop_folder, "", "")
-            app.log(f"Saved document '{doc_name}' to '{data_project.name}/{FUSION_DROP_FOLDER_PATH}'")
+            app.log(f"Saved document '{doc_name}' to '{data_project.name}/{folder_path}'")
 
         except Exception as e:
+            # folder_path (the queue-time override, or FUSION_DROP_FOLDER_PATH)
+            # is what resolve_drop_folder actually tried above - the module
+            # default alone would misreport where a custom-folder job
+            # actually failed to save.
             app.log(
-                f"Failed to save document to '{FUSION_DROP_FOLDER_PATH}' folder:\n{traceback.format_exc()}"
+                f"Failed to save document to '{folder_path}' folder:\n{traceback.format_exc()}"
             )
 
         export_dir = os.path.join(FINAL_PATH, plate_id)

@@ -112,7 +112,7 @@ also reaches Vite when it is bound on IPv6 loopback.
 | `RUNNER_ID` | Stable identifier for this Runner install, sent on every claim | machine hostname |
 | `RUNNER_MACHINE_ID` | The `cam_machines` row UUID for this physical machine; `setup.py` registers (or reuses) it automatically by name via `action=register-machine`, falling back to a manual UUID prompt only if the Hub can't be reached | _(required)_ |
 | `FUSION_DATA_PROJECT_NAME` | Which Fusion Data Panel project generated documents get saved into | `2026 Season CAM` |
-| `FUSION_DROP_FOLDER_PATH` | Nested folder path (within that project, `/`-separated) generated documents get saved into - each segment created if missing | `Offseason Projects/AutoCAM` |
+| `FUSION_DROP_FOLDER_PATH` | Nested folder path (within that project, `/`-separated) generated documents get saved into - each segment created if missing; empty means the project's own root folder | _(empty - project root)_ |
 
 `.env` is git-ignored either way - never commit a real token.
 
