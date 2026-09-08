@@ -43,6 +43,11 @@ class TubeFaceProgramTests(unittest.TestCase):
         self.assertIn("adsk.core.Cylinder.classType()", handler)
         self.assertIn('loop["circular_faces"]', handler)
 
+    def test_tube_workflow_activates_manufacture_before_requesting_cam(self):
+        handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
+        self.assertIn('workspaces.itemById("CAMEnvironment")', handler)
+        self.assertIn("Fusion did not create a CAM product", handler)
+
 
 if __name__ == "__main__":
     unittest.main()

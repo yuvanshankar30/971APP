@@ -9,6 +9,7 @@ programs and re-zeros Z for the newly exposed wall.
 import adsk.core
 import adsk.fusion
 import adsk.cam
+import time
 
 from .ContourChains import is_reverted_for_loop_seed
 from .TubeFacePrograms import TUBE_FACE_CLOCKS, tube_face_program_name, tube_face_setup_name
@@ -249,6 +250,40 @@ def _make_setup(cam, body, face, clock, tube_axis, horizontal, template):
     _configure_face_operations(setup, face)
 
 
+def _active_cam_product(app, doc):
+    """Activate Manufacture and wait for Fusion to attach CAM to ``doc``.
+
+    A new Fusion design document initially has only a Design product. CAM is
+    attached lazily when Manufacture is activated, so looking it up directly
+    after STEP import fails with "failed to find product". Plate CAM already
+    establishes this workspace prerequisite in SetupGenerator; tube CAM must
+    do it here too because it creates its own four setups.
+    """
+    try:
+        workspace = app.userInterface.workspaces.itemById("CAMEnvironment")
+        if workspace:
+            workspace.activate()
+    except Exception:
+        # The lookup below supplies the actionable error if Manufacture cannot
+        # be activated on this Fusion installation.
+        pass
+
+    for _ in range(20):
+        try:
+            product = doc.products.itemByProductType("CAMProductType")
+        except RuntimeError:
+            product = None
+        cam = adsk.cam.CAM.cast(product) if product else None
+        if cam:
+            return cam
+        adsk.doEvents()
+        time.sleep(0.1)
+    raise RuntimeError(
+        "Fusion did not create a CAM product after activating Manufacture; "
+        "verify the Manufacturing extension is available."
+    )
+
+
 def handleTube(template_filename, orientation=None, program_base_name="tube"):
     """Create four indexed setups and return their matching output stems."""
     app = adsk.core.Application.get()
@@ -256,9 +291,9 @@ def handleTube(template_filename, orientation=None, program_base_name="tube"):
     if not doc:
         raise RuntimeError("No active document for box-tube CAM")
     design = adsk.fusion.Design.cast(doc.products.itemByProductType("DesignProductType"))
-    cam = adsk.cam.CAM.cast(doc.products.itemByProductType("CAMProductType"))
-    if not design or not cam:
-        raise RuntimeError("Box-tube CAM requires active Design and CAM products")
+    if not design:
+        raise RuntimeError("Box-tube CAM requires an active Design product")
+    cam = _active_cam_product(app, doc)
     if design.rootComponent.occurrences.count != 1:
         raise ValueError("Box-tube CAM requires exactly one imported tube occurrence")
     occurrence = design.rootComponent.occurrences.item(0)
