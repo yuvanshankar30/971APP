@@ -95,6 +95,13 @@ class PlateTemplateSelectionTests(unittest.TestCase):
         self.assertTrue((_TEMPLATES_DIR / "971-real" / _UNC_TEMPLATE).is_file())
         self.assertTrue((_TEMPLATES_DIR / "971-real" / _NEW_ROUTER_TEMPLATE).is_file())
 
+    def test_successful_plate_jobs_close_their_document_after_completion(self):
+        workflow = (Path(__file__).parents[1] / "workflows" / "camPlate.py").read_text()
+        completion_index = workflow.index("ensure_completion_response(")
+        close_index = workflow.index("doc.close(False)", completion_index)
+
+        self.assertLess(completion_index, close_index)
+
 
 if __name__ == "__main__":
     unittest.main()

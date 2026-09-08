@@ -738,11 +738,17 @@ def start(data, session):
             job_id,
             f"Plate {plate_id} job {job_id} completion upload",
         )
-        # Left open on purpose - direct instruction to remove the earlier
-        # "close it and return to Fusion's Start screen between jobs"
-        # behavior. Whoever's watching a job run can now inspect the real
-        # finished document (setups, operations, generated toolpaths)
-        # immediately, without Fusion clearing it out from under them.
+        # Everything durable is now finished: the Fusion document is saved,
+        # NC files are uploaded, and the queue accepted completion. Keeping
+        # documents open between jobs accumulates stale designs and can make
+        # a later job operate on the wrong active document.
+        doc.close(False)
+        app.log(f"Closed document '{doc_name}'")
+
+        try:
+            ui.workspaces.itemById("FusionSolidEnvironment").activate()
+        except Exception:
+            pass
 
     except PlateFitError as error:
         if app:
