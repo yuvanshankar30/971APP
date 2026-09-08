@@ -53,6 +53,13 @@ class TubeFaceProgramTests(unittest.TestCase):
         self.assertIn("parameter.value.applyCurveSelections(selections)", handler)
         self.assertNotIn("parameter.applyCurveSelections(selections)", handler)
 
+    def test_tube_waits_for_template_operations_before_rebinding_geometry(self):
+        handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
+        template_index = handler.index("setup.createFromCAMTemplate2(template)")
+        configure_index = handler.index("_configure_face_operations(setup, face)", template_index)
+        self.assertLess(template_index, configure_index)
+        self.assertIn("adsk.doEvents()", handler[template_index:configure_index])
+
 
 if __name__ == "__main__":
     unittest.main()

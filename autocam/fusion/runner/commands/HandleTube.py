@@ -250,6 +250,13 @@ def _make_setup(cam, body, face, clock, tube_axis, horizontal, template):
     setup.parameters.itemByName("wcs_orientation_flipY").value.value = False
     setup.parameters.itemByName("wcs_origin_boxPoint").value.value = "top 1"
     setup.createFromCAMTemplate2(template)
+    # createFromCAMTemplate2 returns before Fusion has fully attached the
+    # copied operations to this setup's CAM model tree.  A selection applied
+    # in that same API turn is rejected as "Do not have valid curve
+    # selections", even though the BRep edges are valid. Let Fusion finish
+    # resolving the imported template before rebinding it to this wall.
+    adsk.doEvents()
+    time.sleep(0.1)
     _configure_face_operations(setup, face)
 
 
