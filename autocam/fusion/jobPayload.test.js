@@ -37,3 +37,20 @@ describe('Fusion plate payloads',()=>{
   await expect(buildJobPayload(db(),single)).rejects.toThrow(/exactly one/);
  });
 });
+
+describe('Fusion box-tube payloads',()=>{
+ const tubeJob=()=>({params:{fusionJobKind:'box_tube',boxTubeId:'tube-1',fusionFileName:'BottomTube',fusionFolderPath:'Offseason Projects/AutoCAM/Tubes'}});
+ const tubeDb=()=>({
+  storage:{from:()=>({createSignedUrl:vi.fn(async()=>({data:{signedUrl:'https://example.invalid/tube.step'}}))})},
+  from:()=>({select:()=>({eq:()=>({single:async()=>({data:{id:'tube-1',step_file_name:'tube.step'}})})})})
+ });
+ it('forwards the requested Fusion document name and folder to the runner',async()=>{
+  await expect(buildJobPayload(tubeDb(),tubeJob())).resolves.toMatchObject({
+   box_tube_id:'tube-1', fusion_file_name:'BottomTube', fusion_folder_path:'Offseason Projects/AutoCAM/Tubes'
+  });
+ });
+ it('keeps old tube jobs compatible when no save destination was selected',async()=>{
+  const value=tubeJob(); delete value.params.fusionFileName; delete value.params.fusionFolderPath;
+  await expect(buildJobPayload(tubeDb(),value)).resolves.toMatchObject({fusion_file_name:null,fusion_folder_path:null});
+ });
+});

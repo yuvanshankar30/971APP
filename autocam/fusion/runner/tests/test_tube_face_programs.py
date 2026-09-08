@@ -170,6 +170,12 @@ class TubeFaceProgramTests(unittest.TestCase):
         self.assertIn("posted_program_names = export(", workflow)
         self.assertIn("len(nc_files) != len(posted_program_names)", workflow)
 
+    def test_tube_save_honors_the_shared_queue_filename_and_folder(self):
+        workflow = (RUNNER_DIR / "workflows" / "camTube.py").read_text()
+        self.assertIn('custom_name = _get(payload, "fusion_file_name")', workflow)
+        self.assertIn('folder_path = _get(payload, "fusion_folder_path") or FUSION_DROP_FOLDER_PATH', workflow)
+        self.assertIn('app, FUSION_DATA_PROJECT_NAME, folder_path', workflow)
+
     def test_tube_checks_generated_operations_before_export(self):
         workflow = (RUNNER_DIR / "workflows" / "camTube.py").read_text()
         self.assertIn("failed = failed_operations(cam)", workflow)
