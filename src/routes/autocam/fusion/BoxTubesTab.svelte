@@ -3,9 +3,14 @@
   import { onMount } from 'svelte';
   import { supabase } from '$lib/supabase.js';
   import { toastActions } from '$lib/toast.js';
-  import { fetchBoxTubes, createBoxTube, deleteBoxTube, fetchFusionFolderTree, queueFusionJob } from '$lib/fusionCam.js';
+  import {
+    fetchBoxTubes, createBoxTube, deleteBoxTube, renameBoxTube, updateBoxTubeQuantity,
+    fetchFusionFolderTree, installFusionPartCad, queueFusionJob
+  } from '$lib/fusionCam.js';
+  import { formatPacificDateTime } from '$lib/timezone.js';
+  import CadViewer from '$lib/components/CadViewer.svelte';
   import FolderTreeNode from './FolderTreeNode.svelte';
-  import { Plus, Trash2, Box, Send, X } from 'lucide-svelte';
+  import { Plus, Trash2, Box, Send, X, Pencil, Check, Download } from 'lucide-svelte';
 
   export let user;
   export let canManage;
@@ -39,6 +44,11 @@
   let queueFileName = '';
   let queueFolderPath = '';
   let queueSubmitting = false;
+  let cadModalTube = null;
+  let renamingTubeId = null;
+  let renameTubeValue = '';
+  let editingQuantityId = null;
+  let quantityValue = '';
   $: aluminumMaterials = materials.filter((material) => /alumin(?:um|ium)/i.test(material.name || ''));
 
   async function loadManufacturingParts() {
@@ -192,6 +202,60 @@
     }
   }
 
+  function startRenameTube(boxTube) {
+    renamingTubeId = boxTube.id;
+    renameTubeValue = boxTube.name;
+  }
+
+  function cancelRenameTube() {
+    renamingTubeId = null;
+    renameTubeValue = '';
+  }
+
+  async function saveRenameTube(boxTube) {
+    try {
+      const updated = await renameBoxTube(boxTube.id, renameTubeValue);
+      boxTubes = boxTubes.map((tube) => tube.id === boxTube.id ? updated : tube);
+      cancelRenameTube();
+    } catch (error) {
+      toastActions.show(error.message || 'Failed to rename tube stock');
+    }
+  }
+
+  function startEditQuantity(boxTube) {
+    editingQuantityId = boxTube.id;
+    quantityValue = String(boxTube.quantity);
+  }
+
+  function cancelEditQuantity() {
+    editingQuantityId = null;
+    quantityValue = '';
+  }
+
+  async function saveQuantity(boxTube) {
+    const quantity = Number(quantityValue);
+    if (!Number.isInteger(quantity) || quantity < 0) {
+      toastActions.show('Quantity must be a whole number, zero or more');
+      return;
+    }
+    try {
+      const updated = await updateBoxTubeQuantity(boxTube.id, quantity);
+      boxTubes = boxTubes.map((tube) => tube.id === boxTube.id ? updated : tube);
+      cancelEditQuantity();
+    } catch (error) {
+      toastActions.show(error.message || 'Failed to update tube quantity');
+    }
+  }
+
+  async function handleInstallCad(boxTube) {
+    try {
+      const url = await installFusionPartCad(boxTube.step_file_name);
+      window.open(url, '_blank');
+    } catch (error) {
+      toastActions.show(error.message || 'Failed to download STEP file');
+    }
+  }
+
   async function handleQueue(boxTube) {
     if (!boxTube.step_file_name) {
       toastActions.show('This box tube has no STEP file attached - add one before queuing');
@@ -310,16 +374,65 @@
       {#each boxTubes as boxTube (boxTube.id)}
         <div class="card cam-list-item">
           <div class="cam-list-header">
-            <strong><Box size={16} /> {boxTube.name}</strong>
-            <span class="tag">Qty {boxTube.quantity}</span>
+            {#if renamingTubeId === boxTube.id}
+              <span class="rename-control">
+                <Box size={16} />
+                <input
+                  class="form-input rename-input"
+                  bind:value={renameTubeValue}
+                  on:keydown={(event) => { if (event.key === 'Enter') saveRenameTube(boxTube); if (event.key === 'Escape') cancelRenameTube(); }}
+                />
+                <button type="button" class="btn btn-ghost btn-sm" title="Save" on:click={() => saveRenameTube(boxTube)}><Check size={14} /></button>
+                <button type="button" class="btn btn-ghost btn-sm" title="Cancel" on:click={cancelRenameTube}><X size={14} /></button>
+              </span>
+            {:else}
+              <span class="rename-control">
+                <strong><Box size={16} /> {boxTube.name}</strong>
+                {#if canManage}
+                  <button type="button" class="btn btn-ghost btn-sm" title="Rename" on:click={() => startRenameTube(boxTube)}><Pencil size={13} /></button>
+                {/if}
+              </span>
+            {/if}
+            <span class="tag">ALUMINUM TUBE</span>
           </div>
           <p class="cam-form-hint">
+            {#if editingQuantityId === boxTube.id}
+              <span class="rename-control quantity-control">
+                Total needed:
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  class="form-input rename-input quantity-input"
+                  bind:value={quantityValue}
+                  on:keydown={(event) => { if (event.key === 'Enter') saveQuantity(boxTube); if (event.key === 'Escape') cancelEditQuantity(); }}
+                />
+                <button type="button" class="btn btn-ghost btn-sm" title="Save" on:click={() => saveQuantity(boxTube)}><Check size={14} /></button>
+                <button type="button" class="btn btn-ghost btn-sm" title="Cancel" on:click={cancelEditQuantity}><X size={14} /></button>
+              </span>
+            {:else}
+              <span class="rename-control quantity-control">
+                {boxTube.quantity} needed total
+                {#if canManage}
+                  <button type="button" class="btn btn-ghost btn-sm" title="Edit total quantity needed" on:click={() => startEditQuantity(boxTube)}><Pencil size={13} /></button>
+                {/if}
+              </span>
+            {/if}
             {#if boxTube.epic}{boxTube.epic}{/if}
             {#if boxTube.ticket} - {boxTube.ticket}{/if}
             {#if !boxTube.step_file_name} - <em>no STEP file attached</em>{/if}
             {#if boxTube.parts} - linked to <strong>{boxTube.parts.name}</strong>{/if}
+            {#if boxTube.created_at} - added {formatPacificDateTime(boxTube.created_at)}{/if}
           </p>
           <div class="cam-list-actions">
+            {#if boxTube.step_file_name}
+              <button class="btn btn-secondary btn-sm" on:click={() => (cadModalTube = boxTube)}>
+                <Box size={14} /> View CAD
+              </button>
+              <button class="btn btn-secondary btn-sm" on:click={() => handleInstallCad(boxTube)}>
+                <Download size={14} /> Install CAD
+              </button>
+            {/if}
             {#if canManage}
               <button class="btn btn-ghost btn-sm" on:click={() => handleDelete(boxTube)}>
                 <Trash2 size={14} /> Delete
@@ -330,6 +443,22 @@
       {/each}
     </div>
   {/if}
+{/if}
+
+{#if cadModalTube}
+  <div class="modal-backdrop" on:click|self={() => (cadModalTube = null)} role="button" tabindex="0"
+       on:keydown={(event) => { if (event.key === 'Escape') cadModalTube = null; }}>
+    <div class="modal cad-modal" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h3>CAD Preview - {cadModalTube.name}</h3>
+        <button type="button" class="modal-close-button" aria-label="Close" on:click={() => (cadModalTube = null)}><X size={18} /></button>
+      </div>
+      <div class="modal-body">
+        <CadViewer part={null} stepFileName={cadModalTube.step_file_name} />
+        <p class="cam-form-hint">Drag to rotate &middot; scroll to zoom &middot; right-drag to pan</p>
+      </div>
+    </div>
+  </div>
 {/if}
 
 {#if canManage && queuePickerOpen}
@@ -444,10 +573,16 @@
   .cam-list { display: flex; flex-direction: column; gap: 0.75rem; }
   .cam-list-item { padding: 1rem; }
   .cam-list-header { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+  .rename-control { display: flex; align-items: center; gap: 0.35rem; min-width: 0; }
+  .rename-input { padding: 0.2rem 0.4rem; height: auto; width: auto; min-width: 10rem; }
+  .quantity-control { display: inline-flex; }
+  .quantity-input { min-width: 4rem; width: 4rem; }
   .cam-list-actions { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; flex-wrap: wrap; }
   .empty-state { color: var(--text-muted, #888); padding: 2rem 0; text-align: center; }
   .cam-form-hint { color: var(--text-muted, #888); font-size: 0.85rem; margin: 0.25rem 0 0; }
   .queue-modal { max-width: 32rem; }
+  .cad-modal { width: min(900px, 94vw); }
+  .cad-modal .modal-body { min-height: 60vh; }
   .queue-picker-modal { --modal-width: 46rem; }
   .folder-tree-box {
     max-height: 16rem;

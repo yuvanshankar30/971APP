@@ -83,6 +83,11 @@ choose a Data Panel destination. Those values are saved on the queued job and
 used by the Runner for the new Fusion document. Tube stock currently exposes
 aluminum choices only so the Runner uses a reviewed tube feed/speed preset.
 
+Tube cards use the same catalog controls as parts: rename the tube, edit its
+total quantity, preview its attached STEP with **View CAD**, or download it
+with **Install CAD**. A tube's quantity is its inventory total; it is not
+consumed by the direct tube CAM queue.
+
 For rectangular box tube, one queued tube job creates four manually indexed
 Fusion setups: Side 12, Side 3, Side 6, and Side 9. Fusion posts one NC file
 for each side that actually contains machining; an unfeatured side stays as a
