@@ -18,12 +18,13 @@ import {
   installFusionPartCad,
   deleteAllFailedFusionJobs,
   isFusionOutputJob,
-  queueFusionJob
+  queueFusionJob,
+  updatePartQuantity
 } from './fusionCam.js';
 
 function chain(result) {
   const query = {};
-  for (const method of ['select', 'eq', 'in', 'not', 'order', 'limit', 'range', 'delete', 'insert']) query[method] = vi.fn(() => query);
+  for (const method of ['select', 'eq', 'in', 'not', 'order', 'limit', 'range', 'delete', 'insert', 'update']) query[method] = vi.fn(() => query);
   query.single = vi.fn(async () => result);
   query.then = (resolve) => resolve(result);
   mocks.queries.push(query);
@@ -37,6 +38,21 @@ beforeEach(() => {
 });
 
 describe('Fusion CAM queue query efficiency', () => {
+  it('keeps a linked manufacturing request quantity aligned with Fusion CAM', async () => {
+    mocks.from.mockImplementation((table) => {
+      if (table === 'fusion_parts' && mocks.queries.length === 0) {
+        return chain({ data: { quantity: 2, original_quantity: 3, part_id: 'manufacturing-part' }, error: null });
+      }
+      if (table === 'fusion_parts') return chain({ data: { id: 'fusion-part', original_quantity: 5, quantity: 4 }, error: null });
+      return chain({ data: null, error: null });
+    });
+
+    await expect(updatePartQuantity('fusion-part', 5)).resolves.toMatchObject({ original_quantity: 5, quantity: 4 });
+    expect(mocks.from).toHaveBeenNthCalledWith(3, 'parts');
+    expect(mocks.queries[2].update).toHaveBeenCalledWith(expect.objectContaining({ quantity: 5 }));
+    expect(mocks.queries[2].eq).toHaveBeenCalledWith('id', 'manufacturing-part');
+  });
+
   it('shows only jobs that produce machine output on manufacturing cards', () => {
     expect(isFusionOutputJob({ params: { fusionJobKind: 'plate:cam' } })).toBe(true);
     expect(isFusionOutputJob({ params: { fusionJobKind: 'box_tube' } })).toBe(true);

@@ -5,11 +5,10 @@
   import { supabase } from '$lib/supabase.js';
   import {
     fetchParts, createPart, deletePart, renamePart, updatePartQuantity, fetchPartCategories, installFusionPartCad,
-    fetchPlates, createPlate, assignPartToPlate, removePartFromPlate, queueFusionJob, fetchFusionFolderTree
+    fetchPlates, createPlate, assignPartToPlate, queueFusionJob, fetchFusionFolderTree
   } from '$lib/fusionCam.js';
-  import { platePartQuantity } from '$autocam/fusion/grouping.js';
   import { PACIFIC_TIME_ZONE, formatPacificDateTime } from '$lib/timezone.js';
-  import { fetchStepMeshes } from '$lib/stepMeshLoader.js';
+  import { fetchStepMeshes, readStepMeshes } from '$lib/stepMeshLoader.js';
   import { extractRoutingContoursFromMeshes } from '$autocam/stepProfile.js';
   import CadViewer from '$lib/components/CadViewer.svelte';
   import FolderTreeNode from './FolderTreeNode.svelte';
@@ -43,6 +42,8 @@
   let plates = [];
   let categories = [];
   $: stockGroups = buildStockGroups(parts, plates, categories);
+  $: partsByCreatedAt = [...parts].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+  $: recentQueueableParts = partsByCreatedAt.filter((part) => Number(part.quantity) > 0).slice(0, 8);
 
   function buildStockGroups(currentParts, currentPlates, currentCategories) {
     const knownCategories = new Map(currentCategories.map((category) => [String(category.id), category]));
@@ -172,7 +173,7 @@
   async function loadManufacturingParts() {
     const { data, error } = await supabase
       .from('parts')
-      .select('id, name, project_id, workflow, file_name, file_url')
+      .select('id, name, project_id, workflow, quantity, file_name, file_url')
       .order('created_at', { ascending: false })
       .limit(200);
     if (error) {
@@ -218,6 +219,9 @@
     newPart = {
       ...newPart,
       name: newPart.name || linkedPart.name || '',
+      quantity: newPart.quantity === 1 && Number.isInteger(Number(linkedPart.quantity)) && Number(linkedPart.quantity) > 0
+        ? Number(linkedPart.quantity)
+        : newPart.quantity,
       manufacturingPartId: linkedPart.id
     };
     if (!newPart.fusionFileName) {
@@ -308,7 +312,7 @@
     } else {
       supabase
         .from('parts')
-        .select('id, name, project_id, workflow, file_name, file_url')
+        .select('id, name, project_id, workflow, quantity, file_name, file_url')
         .eq('id', initialManufacturingPartId)
         .maybeSingle()
         .then(({ data, error }) => {
@@ -378,7 +382,23 @@
     }
   }
 
-  function handleFileChange(event) {
+  async function detectStepThickness(bytes) {
+    detectingDepth = true;
+    detectedDepthInches = null;
+    try {
+      const meshes = await readStepMeshes(bytes);
+      const { thickness } = extractRoutingContoursFromMeshes(meshes);
+      detectedDepthInches = thickness;
+      const matchingCategory = categories.find((category) => Math.abs(Number(category.thickness) - thickness) <= 0.002);
+      if (matchingCategory) newPart = { ...newPart, categoryId: String(matchingCategory.id) };
+    } catch (e) {
+      console.warn('Could not estimate depth from this STEP file:', e.message || e);
+    } finally {
+      detectingDepth = false;
+    }
+  }
+
+  async function handleFileChange(event) {
     // Direct invariant: "if a part is linked to a manufacturing request, it
     // should have the same step file" - not a soft suggestion a manual pick
     // can silently override. The file input is disabled in the markup
@@ -389,6 +409,8 @@
     if (manufacturingHasStepFile) return;
     stepFile = event.target.files?.[0] || null;
     stepCarriedOverFrom = null; // user picked their own file - the carry-over hint no longer applies
+    if (stepFile) await detectStepThickness(new Uint8Array(await stepFile.arrayBuffer()));
+    else detectedDepthInches = null;
   }
 
   // Strips spaces as you type rather than rejecting on submit - this
@@ -426,7 +448,7 @@
       detectedDepthInches = null;
       showAddPartForm = false;
       await load(false);
-      toastActions.show('Part added - send it to Fusion CAM from its stock group below');
+      toastActions.show('Part added - send it to Fusion CAM when you are ready');
     } catch (e) {
       toastActions.show(e.message || 'Failed to add part');
     } finally {
@@ -537,55 +559,29 @@
     }
   }
 
-  // How much of this part is already committed to a pending/queued Fusion
-  // job in this stock group - summed across the group's plate(s), which in
-  // practice is always zero or one plate now (see resolveCategoryPlateId).
-  // Kept as a sum rather than assuming exactly one plate so a category that
-  // somehow still has more than one plate (pre-existing data from before
-  // this change) reports correctly instead of silently undercounting.
-  function committedQuantity(group, part) {
-    return group.plates.reduce((sum, plate) => sum + platePartQuantity(plate, part), 0);
-  }
-
   function maximumQueueQuantity(group, part) {
-    return Number(part.quantity) + committedQuantity(group, part);
+    return Number(part.quantity);
   }
 
-  // Parts a human can still pick for a CAM job from this stock group -
-  // either stock still remains, or some is already committed (so its
-  // quantity can be adjusted rather than the part disappearing from the
-  // picker the moment it's fully committed).
+  // A fully committed part has no remaining physical quantity to add to a
+  // new CAM job.  Keep it visible in the dated catalog, but never offer it
+  // in the Send picker where selecting it would create duplicate work.
   function queueableParts(group) {
     return group.parts.filter((part) =>
-      (Number(part.quantity) > 0 || committedQuantity(group, part) > 0)
+      Number(part.quantity) > 0
       && (!queuePickerDate || pacificDateKey(part.created_at) === queuePickerDate)
     );
   }
 
-  // Flattened list of { part, quantity, plateId } already committed to a
-  // job in this group, for the "already queued" chips and their remove
-  // buttons - the only remaining trace of "plates" a human ever sees, and
-  // only as a quantity + a way to undo it, never a name or size to manage.
-  function committedParts(group) {
-    const rows = [];
-    for (const plate of group.plates) {
-      for (const assignment of plate.fusion_part_category_assignments || []) {
-        const part = group.parts.find((p) => p.id === assignment.fusion_parts?.id) || assignment.fusion_parts;
-        if (part) rows.push({ part, quantity: assignment.quantity, plateId: plate.id });
-      }
-    }
-    return rows;
-  }
-
-  async function handleRemoveCommitted(plateId, part) {
-    if (!await requestConfirmation({ title: 'Remove from queue', message: `Remove ${part.name} from the Fusion CAM queue for this stock group?`, confirmLabel: 'Remove', danger: true })) return;
-    try {
-      await removePartFromPlate({ plateId, partId: part.id });
-      await load(false);
-      toastActions.show(`${part.name} removed from the queue`);
-    } catch (e) {
-      toastActions.show(e.message || 'Failed to remove from the queue');
-    }
+  function selectRecentPart(part) {
+    const group = stockGroups.find((candidate) =>
+      candidate.categoryId && String(candidate.categoryId) === String(part.category_id)
+    );
+    if (!group) return;
+    queuePickerCategoryId = group.categoryId;
+    categoryQueueModes = { ...categoryQueueModes, [group.categoryId]: 'single' };
+    categorySinglePartSelections = { ...categorySinglePartSelections, [group.categoryId]: part.id };
+    handleSinglePartPick(group);
   }
 
   function handleSinglePartPick(group) {
@@ -593,10 +589,7 @@
     const part = group.parts.find((p) => p.id === categorySinglePartSelections[categoryId]);
     if (!part) return;
     const remaining = Number(part.quantity);
-    categorySinglePartQuantities = {
-      ...categorySinglePartQuantities,
-      [categoryId]: remaining > 0 ? remaining : (committedQuantity(group, part) || 1)
-    };
+    categorySinglePartQuantities = { ...categorySinglePartQuantities, [categoryId]: remaining };
   }
 
   function toggleGroupedPart(group, part) {
@@ -609,7 +602,7 @@
     } else {
       selected.add(part.id);
       const remaining = Number(part.quantity);
-      quantities[part.id] = remaining > 0 ? remaining : (committedQuantity(group, part) || 1);
+      quantities[part.id] = remaining;
     }
     categoryGroupedPartSelections = { ...categoryGroupedPartSelections, [categoryId]: [...selected] };
     categoryGroupedPartQuantities = { ...categoryGroupedPartQuantities, [categoryId]: quantities };
@@ -870,21 +863,11 @@
     </div>
   {/if}
 
-  {#if stockGroups.length === 0}
+  {#if partsByCreatedAt.length === 0}
     <p class="empty-state">No parts yet. {canManage ? 'Add one above to get started.' : 'Ask a manufacturing lead to add one.'}</p>
   {:else}
-    {#each stockGroups as group (group.key)}
+    {#each [{ key: 'all-parts', parts: partsByCreatedAt }] as group (group.key)}
       <section class="stock-group">
-        <div class="cam-list-header group-header">
-          <div>
-            <h3>{group.category ? categoryLabel(group.category) : 'Stock category unavailable'}</h3>
-            <p class="cam-form-hint">{group.parts.length} part types &middot; {group.remainingQuantity} remaining to queue</p>
-          </div>
-        </div>
-
-        {#if group.parts.length === 0}
-          <p class="cam-form-hint">No parts in this stock group yet.</p>
-        {:else}
           <div class="cam-list">
             {#each group.parts as part (part.id)}
               <div class="card cam-list-item">
@@ -960,22 +943,6 @@
               </div>
             {/each}
           </div>
-        {/if}
-
-        {#if group.categoryId && committedParts(group).length}
-          <div class="queue-subsection">
-            <h4 class="queue-subheader"><Send size={15} /> Fusion CAM</h4>
-            <div class="cam-list-actions">
-              <span class="cam-form-hint">Already queued:</span>
-              {#each committedParts(group) as row}
-                <span class="cam-form-hint">{row.quantity}x {row.part.name}</span>
-                {#if canManage}
-                  <button class="btn btn-ghost btn-sm" type="button" title="Remove {row.part.name} from the queue" aria-label="Remove {row.part.name} from the queue" on:click={() => handleRemoveCommitted(row.plateId, row.part)}>×</button>
-                {/if}
-              {/each}
-            </div>
-          </div>
-        {/if}
       </section>
     {/each}
   {/if}
@@ -1009,6 +976,18 @@
         </div>
         {#if queuePickerDate && !stockGroups.some((g) => g.categoryId && queueableParts(g).length)}
           <p class="cam-form-hint">No parts were created on this date - try another date or "Show all dates".</p>
+        {/if}
+        {#if recentQueueableParts.length}
+          <div class="recent-part-picker">
+            <span class="form-label">Recent parts</span>
+            <div class="cam-list-actions">
+              {#each recentQueueableParts as part}
+                <button type="button" class="btn btn-secondary btn-sm" on:click={() => selectRecentPart(part)}>
+                  {part.name} <span class="recent-part-stock">{categoryLabel(part.fusion_part_categories)}</span>
+                </button>
+              {/each}
+            </div>
+          </div>
         {/if}
         {#if queuePickerCategoryId}
           {@const group = stockGroups.find((g) => g.categoryId === queuePickerCategoryId)}
@@ -1170,6 +1149,9 @@
   .stock-group:first-of-type { margin-top: 1rem; padding-top: 0; border-top: none; }
   .group-header { flex-wrap: wrap; margin-bottom: 0.75rem; }
   .group-header h3 { margin: 0; }
+  .recent-part-picker { margin: 0.75rem 0; }
+  .recent-part-picker .cam-list-actions { gap: 0.4rem; }
+  .recent-part-stock { color: var(--text-muted); font-size: 0.75rem; }
   .tab-actions { margin-bottom: 1rem; display: flex; gap: 0.5rem; flex-wrap: wrap; }
   .form-row { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
   .form-row .form-group { flex: 1; min-width: 160px; }

@@ -19,9 +19,6 @@
   let showAddForm = false;
   let newBoxTube = { name: '', epic: '', ticket: '', quantity: 1, manufacturingPartId: '' };
   let stepFile = null;
-  let newBoxTubeMachineId = '';
-  let newBoxTubeToolId = '';
-  let newBoxTubeMaterialId = '';
   let submitting = false;
   // Which router each box tube's "Queue CAM Job" currently targets - keyed
   // by box tube id. No default - see the matching comment in
@@ -34,6 +31,8 @@
   // PartsTab.svelte's matching comment for why (this app's own existing
   // "job creation only offers the tools installed on its machine" rule).
   let machineTools = {};
+  let queuePickerOpen = false;
+  let queuedTubeId = '';
 
   async function loadManufacturingParts() {
     const { data, error } = await supabase
@@ -101,17 +100,18 @@
     }
   }
 
-  function handleNewBoxTubeMachineChange(machineId) {
-    newBoxTubeMachineId = machineId;
-    const eligible = toolsForMachine(machineId);
-    const machine = machines.find((m) => String(m.id) === String(machineId));
-    const defaultTool = eligible.find((tool) => String(tool.id) === String(machine?.default_tool_id));
-    newBoxTubeToolId = defaultTool?.id || '';
-    if (!newBoxTubeMaterialId && machine?.default_material_id) newBoxTubeMaterialId = machine.default_material_id;
-  }
-
   function handleFileChange(event) {
     stepFile = event.target.files?.[0] || null;
+  }
+
+  export function openQueuePicker() {
+    queuePickerOpen = true;
+    if (!queuedTubeId) queuedTubeId = boxTubes.find((tube) => tube.step_file_name)?.id || '';
+  }
+
+  function closeQueuePicker() {
+    queuePickerOpen = false;
+    queuedTubeId = '';
   }
 
   async function queueTubeCam(boxTube, machineId, toolId, materialId) {
@@ -129,17 +129,9 @@
     });
   }
 
-  async function handleAdd(queueImmediately = false) {
+  async function handleAdd() {
     if (!newBoxTube.name || !newBoxTube.quantity) {
       toastActions.show('Name and quantity are required');
-      return;
-    }
-    if (queueImmediately && !stepFile) {
-      toastActions.show('Choose a STEP file before queueing tube CAM');
-      return;
-    }
-    if (queueImmediately && (!newBoxTubeMachineId || !newBoxTubeToolId || !newBoxTubeMaterialId)) {
-      toastActions.show('Choose a router, tool, and material before queueing tube CAM');
       return;
     }
     submitting = true;
@@ -153,15 +145,11 @@
         createdBy: user?.id,
         partId: newBoxTube.manufacturingPartId || null
       });
-      if (queueImmediately) await queueTubeCam(createdTube, newBoxTubeMachineId, newBoxTubeToolId, newBoxTubeMaterialId);
       newBoxTube = { name: '', epic: '', ticket: '', quantity: 1, manufacturingPartId: '' };
       stepFile = null;
-      newBoxTubeMachineId = '';
-      newBoxTubeToolId = '';
-      newBoxTubeMaterialId = '';
       showAddForm = false;
       await load(false);
-      toastActions.show(queueImmediately ? 'Tube stock added and queued for Fusion CAM' : 'Tube stock added');
+      toastActions.show('Tube stock added');
     } catch (e) {
       toastActions.show(e.message || 'Failed to add tube stock');
     } finally {
@@ -205,6 +193,7 @@
     try {
       await queueTubeCam(boxTube, machineId, boxTubeToolSelections[boxTube.id], boxTubeMaterialSelections[boxTube.id]);
       toastActions.show('Queued for the Fusion Runner');
+      closeQueuePicker();
     } catch (e) {
       toastActions.show(e.message || 'Failed to queue job');
     }
@@ -261,38 +250,8 @@
           <p class="cam-form-hint">Traces this box tube back to the real request it's for - leave unlinked for ad-hoc stock.</p>
         </div>
       </div>
-      <div class="form-row queue-now-controls">
-        <div class="form-group">
-          <label class="form-label" for="bt-router">Router</label>
-          <select id="bt-router" class="form-select" bind:value={newBoxTubeMachineId} on:change={(e) => handleNewBoxTubeMachineChange(e.currentTarget.value)}>
-            <option value="">Choose a router...</option>
-            {#each machines as machine}
-              <option value={machine.id}>{machine.name}</option>
-            {/each}
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="bt-tool">Tool</label>
-          <select id="bt-tool" class="form-select" bind:value={newBoxTubeToolId} disabled={!newBoxTubeMachineId}>
-            <option value="">{toolsForMachine(newBoxTubeMachineId).length ? 'Choose a tool...' : 'No tools installed on this router'}</option>
-            {#each toolsForMachine(newBoxTubeMachineId) as tool}
-              <option value={tool.id}>{toolLabel(tool)}</option>
-            {/each}
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="bt-material">Material</label>
-          <select id="bt-material" class="form-select" bind:value={newBoxTubeMaterialId}>
-            <option value="">Choose a material...</option>
-            {#each materials as material}
-              <option value={material.id}>{material.name}</option>
-            {/each}
-          </select>
-        </div>
-      </div>
       <div class="form-actions">
-        <button class="btn btn-secondary" disabled={submitting} on:click={() => handleAdd(false)}>{submitting ? 'Adding...' : 'Add Tube Stock'}</button>
-        <button class="btn btn-primary" disabled={submitting || !stepFile || !newBoxTubeMachineId || !newBoxTubeToolId || !newBoxTubeMaterialId} on:click={() => handleAdd(true)}>{submitting ? 'Queueing...' : 'Add + Queue Tube CAM'}</button>
+        <button class="btn btn-primary" disabled={submitting} on:click={handleAdd}>{submitting ? 'Adding...' : 'Add Tube Stock'}</button>
       </div>
     </div>
   {/if}
@@ -314,27 +273,6 @@
             {#if boxTube.parts} - linked to <strong>{boxTube.parts.name}</strong>{/if}
           </p>
           <div class="cam-list-actions">
-            <select class="form-select router-select" value={boxTubeMachineSelections[boxTube.id]} on:change={(e) => handleMachineChange(boxTube, e.currentTarget.value)} aria-label="Router for {boxTube.name}">
-              <option value={undefined}>Choose a router...</option>
-              {#each machines as m}
-                <option value={m.id}>{m.name}</option>
-              {/each}
-            </select>
-            <select class="form-select router-select" bind:value={boxTubeToolSelections[boxTube.id]} aria-label="Tool for {boxTube.name}" disabled={!boxTubeMachineSelections[boxTube.id]}>
-              <option value="">{toolsForMachine(boxTubeMachineSelections[boxTube.id]).length ? 'Choose a tool...' : 'No tools installed on this router'}</option>
-              {#each toolsForMachine(boxTubeMachineSelections[boxTube.id]) as t}
-                <option value={t.id}>{toolLabel(t)}</option>
-              {/each}
-            </select>
-            <select class="form-select router-select" bind:value={boxTubeMaterialSelections[boxTube.id]} aria-label="Material for {boxTube.name}">
-              <option value="">Choose a material...</option>
-              {#each materials as material}
-                <option value={material.id}>{material.name}</option>
-              {/each}
-            </select>
-            <button class="btn btn-secondary btn-sm" disabled={!boxTubeMachineSelections[boxTube.id] || !boxTubeToolSelections[boxTube.id] || !boxTubeMaterialSelections[boxTube.id]} on:click={() => handleQueue(boxTube)}>
-              <Send size={14} /> Queue Tube CAM
-            </button>
             {#if canManage}
               <button class="btn btn-ghost btn-sm" on:click={() => handleDelete(boxTube)}>
                 <Trash2 size={14} /> Delete
@@ -347,17 +285,74 @@
   {/if}
 {/if}
 
+{#if canManage && queuePickerOpen}
+  <div class="modal-overlay" role="presentation" on:click={closeQueuePicker}>
+    <div class="modal queue-picker-modal" role="dialog" aria-labelledby="tube-queue-title" on:click|stopPropagation>
+      <div class="modal-header">
+        <h3 id="tube-queue-title">Send Tube Stock to Fusion CAM</h3>
+        <button type="button" class="btn btn-ghost btn-sm" title="Close" on:click={closeQueuePicker}>×</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="tube-queue-part">Tube stock</label>
+            <select id="tube-queue-part" class="form-select" bind:value={queuedTubeId}>
+              <option value="">Choose tube stock...</option>
+              {#each boxTubes.filter((tube) => tube.step_file_name) as tube}
+                <option value={tube.id}>{tube.name} (Qty {tube.quantity})</option>
+              {/each}
+            </select>
+          </div>
+        </div>
+        {#if queuedTubeId}
+          {@const tube = boxTubes.find((item) => item.id === queuedTubeId)}
+          {#if tube}
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label" for="tube-queue-router">Router</label>
+                <select id="tube-queue-router" class="form-select" value={boxTubeMachineSelections[tube.id]} on:change={(e) => handleMachineChange(tube, e.currentTarget.value)}>
+                  <option value="">Choose a router...</option>
+                  {#each machines as machine}<option value={machine.id}>{machine.name}</option>{/each}
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="tube-queue-tool">Tool</label>
+                <select id="tube-queue-tool" class="form-select" bind:value={boxTubeToolSelections[tube.id]} disabled={!boxTubeMachineSelections[tube.id]}>
+                  <option value="">{toolsForMachine(boxTubeMachineSelections[tube.id]).length ? 'Choose a tool...' : 'No tools installed on this router'}</option>
+                  {#each toolsForMachine(boxTubeMachineSelections[tube.id]) as tool}<option value={tool.id}>{toolLabel(tool)}</option>{/each}
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="tube-queue-material">Material</label>
+                <select id="tube-queue-material" class="form-select" bind:value={boxTubeMaterialSelections[tube.id]}>
+                  <option value="">Choose a material...</option>
+                  {#each materials as material}<option value={material.id}>{material.name}</option>{/each}
+                </select>
+              </div>
+            </div>
+          {/if}
+        {/if}
+      </div>
+      <div class="modal-footer-actions">
+        <button class="btn btn-ghost" type="button" on:click={closeQueuePicker}>Cancel</button>
+        {#if queuedTubeId}
+          {@const tube = boxTubes.find((item) => item.id === queuedTubeId)}
+          <button class="btn btn-primary" type="button" disabled={!tube || !boxTubeMachineSelections[tube.id] || !boxTubeToolSelections[tube.id] || !boxTubeMaterialSelections[tube.id]} on:click={() => handleQueue(tube)}><Send size={14} /> Queue CAM Job</button>
+        {/if}
+      </div>
+    </div>
+  </div>
+{/if}
+
 <style>
   .tab-actions { margin-bottom: 1rem; }
   .form-row { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
   .form-row .form-group { flex: 1; min-width: 160px; }
-  .queue-now-controls { margin-top: 0.5rem; }
   .form-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
   .cam-list { display: flex; flex-direction: column; gap: 0.75rem; }
   .cam-list-item { padding: 1rem; }
   .cam-list-header { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
   .cam-list-actions { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; flex-wrap: wrap; }
-  .router-select { width: auto; min-width: 160px; height: var(--control-height, 2.25rem); }
   .empty-state { color: var(--text-muted, #888); padding: 2rem 0; text-align: center; }
   .cam-form-hint { color: var(--text-muted, #888); font-size: 0.85rem; margin: 0.25rem 0 0; }
 </style>

@@ -54,8 +54,9 @@ browser confirmation or prompt popups.
   3-axis milling (contoured toolpaths a flat 2.5D profile can't represent)
   is a separate sub-section, **Fusion CAM** (`/autocam/fusion`), backed by
   an actual Fusion 360 Runner rather than in-process math; it is intentionally
-  absent from the New AutoCAM Job operation picker. Its rectangular box-tube
-  path creates four face-scoped Fusion setups and posts separate `Side 12`,
+  absent from the New AutoCAM Job operation picker. The shared **Send to
+  Fusion CAM** action queues both sheet parts and rectangular box tube stock;
+  the box-tube path creates four face-scoped Fusion setups and posts separate `Side 12`,
   `Side 3`, `Side 6`, and `Side 9` files for manual indexing. See the
   **AutoCAM** section below for the code-level detail on all three.
   Completed routering, turning, and tube-stock jobs all get a 3D toolpath
