@@ -43,7 +43,7 @@ A plate job needs, in this order:
      name: 'Plate CAM: <descriptive name>',
      source_type: 'upload',
      operation_type: 'milling',
-     params: { fusionJobKind: 'plate:cam', plateId, boxTubeId: null },
+     params: { fusionJobKind: 'plate:cam', plateId, boxTubeId: null, singleToolMode: false },
      material_id, tool_id, machine_id,
      status: 'queued',
      requested_by: <a real user id - see below>,
@@ -139,6 +139,13 @@ await supabase.storage.from('manufacturing-drive')
 ```
 
 ## Gotchas learned the hard way
+
+- **New Router single-tool jobs must say so explicitly.** Set
+  `params.singleToolMode: true` only with an endmill selected in `tool_id`.
+  The queue and Runner both reject drills/countersinks in this mode, and the
+  Runner restricts the extracted Fusion library to that selected tool rather
+  than silently adding drilling operations from the same library. Multi-tool
+  and countersink jobs remain hardware-gated; do not hand-author one.
 
 - **The Fusion add-in caches its own already-imported Python modules.**
   Editing `autocam/fusion/runner/**/*.py` (or `.tools` tool libraries) and

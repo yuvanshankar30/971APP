@@ -152,6 +152,7 @@
   // mode/selection per stock category.
   let categoryMachineSelections = {};
   let categoryToolSelections = {};
+  let categorySingleToolModes = {};
   let categoryQueueModes = {};
   let categorySinglePartSelections = {};
   let categorySinglePartQuantities = {};
@@ -483,6 +484,14 @@
     return `${tool.name}${tool.diameter ? ` (${tool.diameter}")` : ''}`;
   }
 
+  function isNewRouter(machineId) {
+    return machines.find((machine) => String(machine.id) === String(machineId))?.name?.trim().toLowerCase() === 'new router';
+  }
+
+  function isEndmill(tool) {
+    return /end\s*mill/i.test(String(tool?.tool_type || ''));
+  }
+
   // Picking a router pre-selects that machine's default tool (if it's
   // actually installed on it) rather than leaving the tool blank - same
   // "profile picks reasonable defaults, human can still override" pattern
@@ -492,10 +501,13 @@
     categoryMachineSelections = { ...categoryMachineSelections, [categoryId]: machineId };
     const eligible = toolsForMachine(machineId);
     const machine = machines.find((m) => String(m.id) === String(machineId));
-    const stillValid = eligible.some((t) => String(t.id) === String(categoryToolSelections[categoryId]));
+    const singleToolMode = isNewRouter(machineId);
+    const eligibleForMode = singleToolMode ? eligible.filter(isEndmill) : eligible;
+    categorySingleToolModes = { ...categorySingleToolModes, [categoryId]: singleToolMode };
+    const stillValid = eligibleForMode.some((t) => String(t.id) === String(categoryToolSelections[categoryId]));
     if (!stillValid) {
-      const defaultTool = eligible.find((t) => String(t.id) === String(machine?.default_tool_id));
-      categoryToolSelections = { ...categoryToolSelections, [categoryId]: defaultTool?.id || '' };
+      const defaultTool = eligibleForMode.find((t) => String(t.id) === String(machine?.default_tool_id));
+      categoryToolSelections = { ...categoryToolSelections, [categoryId]: defaultTool?.id || eligibleForMode[0]?.id || '' };
     }
   }
 
@@ -761,6 +773,11 @@
     // this is required here rather than left optional like machineId
     // originally was before routers were made explicit too.
     if (!categoryToolSelections[categoryId]) return 'Choose a tool before queueing';
+    if (categorySingleToolModes[categoryId]) {
+      const selectedTool = toolsForMachine(categoryMachineSelections[categoryId])
+        .find((tool) => String(tool.id) === String(categoryToolSelections[categoryId]));
+      if (!isEndmill(selectedTool)) return 'Single-tool CAM requires an endmill';
+    }
     const mode = categoryQueueModes[categoryId];
     if (!['single', 'grouped'].includes(mode)) return 'Choose single-part or grouped CAM';
     if (mode === 'single') {
@@ -883,7 +900,8 @@
         name: `${mode === 'grouped' ? 'Grouped Fusion CAM' : 'Fusion CAM'}: ${queueModalLabel}`,
         fusionFileName: queueFileName.trim() || null,
         fusionFolderPath: queueFolderPath || null,
-        tabCount: queueTabCount === '' ? null : queueTabCount
+        tabCount: queueTabCount === '' ? null : queueTabCount,
+        singleToolMode: Boolean(categorySingleToolModes[categoryId])
       });
       toastActions.show('Queued for the Fusion Runner');
       categoryQueueModes = { ...categoryQueueModes, [categoryId]: '' };
@@ -1297,12 +1315,22 @@
                 <label class="form-label" for={`queue-tool-${group.categoryId}`}>Tool</label>
                 <select id={`queue-tool-${group.categoryId}`} class="form-select" bind:value={categoryToolSelections[group.categoryId]} disabled={!categoryMachineSelections[group.categoryId]}>
                   <option value="">{toolsForMachine(categoryMachineSelections[group.categoryId]).length ? 'Choose a tool...' : 'No tools installed'}</option>
-                  {#each toolsForMachine(categoryMachineSelections[group.categoryId]) as t}
+                  {#each toolsForMachine(categoryMachineSelections[group.categoryId]).filter((tool) => !categorySingleToolModes[group.categoryId] || isEndmill(tool)) as t}
                     <option value={t.id}>{toolLabel(t)}</option>
                   {/each}
                 </select>
               </div>
             </div>
+            {#if isNewRouter(categoryMachineSelections[group.categoryId])}
+              <div class="form-group queue-tool-mode">
+                <span class="form-label">Tool mode</span>
+                <div class="segmented-control" aria-label="Tool mode for New Router">
+                  <button type="button" class:active={categorySingleToolModes[group.categoryId]} on:click={() => (categorySingleToolModes = { ...categorySingleToolModes, [group.categoryId]: true })}>Single tool</button>
+                  <button type="button" disabled title="Multi-tool CAM remains disabled until the physical ShopSabre setup is confirmed.">Multi-tool</button>
+                </div>
+                <p class="cam-form-hint">Single-tool mode uses only the selected loaded endmill.</p>
+              </div>
+            {/if}
           {/if}
         {/if}
       </div>
@@ -1555,6 +1583,12 @@
     margin: 0 0 0.75rem;
   }
   .queue-subsection { margin-top: 1rem; padding-left: 0.75rem; border-left: 2px solid var(--border); }
+  .queue-tool-mode { margin-bottom: 0.75rem; }
+  .segmented-control { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-sm, 6px); overflow: hidden; }
+  .segmented-control button { min-height: 2rem; padding: 0.35rem 0.65rem; border: 0; border-right: 1px solid var(--border); background: var(--surface-2, #f7f7f5); color: var(--text); font: inherit; cursor: pointer; }
+  .segmented-control button:last-child { border-right: 0; }
+  .segmented-control button.active { background: var(--accent); color: var(--accent-contrast, #fff); }
+  .segmented-control button:disabled { color: var(--text-muted); cursor: not-allowed; }
   .queue-subheader { display: flex; align-items: center; gap: 0.4rem; margin: 0 0 0.5rem; font-size: 0.95rem; }
   .queue-modal { max-width: 32rem; }
   .queue-picker-modal { --modal-width: 46rem; }

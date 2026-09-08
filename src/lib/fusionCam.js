@@ -556,7 +556,7 @@ export async function fetchFusionFolderTree(projectName = '2026 Season CAM') {
  * turning/routing's cam-generate, this genuinely needs an external Fusion
  * 360 process).
  */
-export async function queueFusionJob({ fusionJobKind, plateId, boxTubeId, machineId, materialId, toolId, requestedBy, name, partId, groupingMode, selectedPartId, selectedPartIds, fusionFileName, fusionFolderPath, tabCount }) {
+export async function queueFusionJob({ fusionJobKind, plateId, boxTubeId, machineId, materialId, toolId, requestedBy, name, partId, groupingMode, selectedPartId, selectedPartIds, fusionFileName, fusionFolderPath, tabCount, singleToolMode = false }) {
   if (!FUSION_JOB_KINDS.includes(fusionJobKind)) {
     throw new Error(`Invalid fusionJobKind: ${fusionJobKind}`);
   }
@@ -582,7 +582,9 @@ export async function queueFusionJob({ fusionJobKind, plateId, boxTubeId, machin
     // queue time (Plates tab). Optional; camPlate.py falls back to its
     // existing defaults when these aren't set.
     fusionFileName: fusionFileName || null,
-    fusionFolderPath: fusionFolderPath || null
+    fusionFolderPath: fusionFolderPath || null,
+    // Runner safety contract, not merely a UI preference.
+    singleToolMode: Boolean(singleToolMode)
   };
   const { data, error } = await supabase
     .from('cam_jobs')

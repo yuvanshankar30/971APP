@@ -381,7 +381,9 @@ This is large enough to split before implementation:
    - Machine loaded-tool table, warnings, manager-only mutation path.
 
 3. **Add queue-time single-tool mode**
-   - Parts and box-tube queue dialogs, params, validation, Runner support.
+   - Parts queue dialog, params, validation, and Runner support landed in
+     the current draft implementation. Box-tube UI parity remains pending;
+     the payload contract already carries the flag for that flow.
 
 4. **Add resolved operation/tool preview**
    - Server preview endpoint, UI panel, queue-card metadata.

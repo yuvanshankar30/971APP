@@ -22,6 +22,10 @@ export async function buildJobPayload(supabase, job) {
   const tab_count = Number.isFinite(rawTabCount)
     ? Math.max(TAB_COUNT_MIN, Math.min(TAB_COUNT_MAX, Math.round(rawTabCount)))
     : null;
+  const single_tool_mode = params.singleToolMode === true;
+  if (single_tool_mode && !/end\s*mill/i.test(String(job.cam_tools?.tool_type || ''))) {
+    throw new Error('Single-tool Fusion CAM requires an endmill selected on the job');
+  }
   async function signedUrl(fileName, partId) {
     if (typeof fileName !== 'string' || !fileName.trim()) throw new Error(`Part ${partId} is missing its STEP file`);
     const { data, error } = await supabase.storage.from('manufacturing-files').createSignedUrl(fileName, 3600);
@@ -60,7 +64,7 @@ export async function buildJobPayload(supabase, job) {
       step_file_url: await signedUrl(part.step_file_name, part.part_id),
       fusion_file_name: part.fusion_file_name || null
     })));
-    return { plate_id: snapshot.plate_id, grouping_mode: snapshot.grouping_mode || null, machine_id, tool_id, length: Number(snapshot.length),
+    return { plate_id: snapshot.plate_id, grouping_mode: snapshot.grouping_mode || null, machine_id, tool_id, single_tool_mode, length: Number(snapshot.length),
       width: Number(snapshot.width), true_depth: Number(snapshot.true_depth), thickness: Number(snapshot.thickness),
       material: snapshot.material, assignments,
       // Set at queue time on the Plates tab (folder-tree picker + filename
@@ -83,6 +87,7 @@ export async function buildJobPayload(supabase, job) {
       box_tube_id: data.id,
       machine_id,
       tool_id,
+      single_tool_mode,
       step_file_url: await signedUrl(data.step_file_name, data.id),
       // Match plate jobs: the shared queue confirmation controls the saved
       // Fusion document and must reach the local Runner for tube jobs too.

@@ -36,6 +36,14 @@ describe('Fusion plate payloads',()=>{
   const single=job(); single.params.fusionPlateSnapshot.grouping_mode='single';
   await expect(buildJobPayload(db(),single)).rejects.toThrow(/exactly one/);
  });
+ it('refuses a non-endmill before a single-tool job reaches the Runner',async()=>{
+  const value=job(); value.params.singleToolMode=true; value.cam_tools={tool_type:'drill'};
+  await expect(buildJobPayload(db(),value)).rejects.toThrow(/requires an endmill/i);
+ });
+ it('passes the single-tool safety contract through to a valid plate payload',async()=>{
+  const value=job(); value.params.singleToolMode=true; value.cam_tools={tool_type:'endmill'};
+  await expect(buildJobPayload(db(),value)).resolves.toMatchObject({single_tool_mode:true});
+ });
 });
 
 describe('Fusion plate payload tab_count override',()=>{

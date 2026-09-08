@@ -71,7 +71,7 @@ describe('Fusion CAM queue query efficiency', () => {
 
     expect(mocks.from).toHaveBeenCalledWith('cam_jobs');
     const inserted = mocks.queries[0].insert.mock.calls[0][0];
-    expect(inserted.params).toEqual({ fusionJobKind: 'box_tube', boxTubeId: 'tube-1', fusionFileName: null, fusionFolderPath: null });
+    expect(inserted.params).toEqual({ fusionJobKind: 'box_tube', boxTubeId: 'tube-1', fusionFileName: null, fusionFolderPath: null, singleToolMode: false });
     expect(inserted.params).not.toHaveProperty('plateId');
     expect(inserted.params).not.toHaveProperty('fusionGroupingMode');
   });
