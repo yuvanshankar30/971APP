@@ -2891,7 +2891,7 @@
             <div class="form-group">
               <label class="form-label" for="manufacture-fusion-tool">Tool</label>
               <select id="manufacture-fusion-tool" class="form-select" bind:value={fusionQueueToolId} disabled={!fusionQueueMachineId}>
-                <option value="">{fusionQueueTools(fusionQueueMachineId).length ? 'Choose a tool...' : 'No tools installed on this router'}</option>
+                <option value="">{fusionQueueTools(fusionQueueMachineId).length ? 'Choose a tool...' : 'No tools installed'}</option>
                 {#each fusionQueueTools(fusionQueueMachineId) as tool}<option value={tool.id}>{fusionQueueToolLabel(tool)}</option>{/each}
               </select>
             </div>

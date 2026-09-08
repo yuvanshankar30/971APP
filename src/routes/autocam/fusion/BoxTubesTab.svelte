@@ -548,7 +548,7 @@
               <div class="form-group">
                 <label class="form-label" for="tube-queue-tool">Tool</label>
                 <select id="tube-queue-tool" class="form-select" bind:value={boxTubeToolSelections[tube.id]} disabled={!boxTubeMachineSelections[tube.id]}>
-                  <option value="">{toolsForMachine(boxTubeMachineSelections[tube.id]).length ? 'Choose a tool...' : 'No tools installed on this router'}</option>
+                  <option value="">{toolsForMachine(boxTubeMachineSelections[tube.id]).length ? 'Choose a tool...' : 'No tools installed'}</option>
                   {#each toolsForMachine(boxTubeMachineSelections[tube.id]) as tool}<option value={tool.id}>{toolLabel(tool)}</option>{/each}
                 </select>
               </div>

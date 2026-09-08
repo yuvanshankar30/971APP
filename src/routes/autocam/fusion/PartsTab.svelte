@@ -46,7 +46,7 @@
   let categories = [];
   $: stockGroups = buildStockGroups(parts, plates, categories);
   $: partsByCreatedAt = [...parts].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
-  $: recentQueueableParts = partsByCreatedAt.filter((part) => Number(part.quantity) > 0).slice(0, 8);
+  $: recentQueueableParts = partsByCreatedAt.filter((part) => Number(part.quantity) > 0).slice(0, 10);
 
   function buildStockGroups(currentParts, currentPlates, currentCategories) {
     const knownCategories = new Map(currentCategories.map((category) => [String(category.id), category]));
@@ -591,6 +591,13 @@
       candidate.categoryId && String(candidate.categoryId) === String(part.category_id)
     );
     if (!group) return;
+    // A recent part may not have been created on the picker's default
+    // "today" date filter, which would otherwise leave it out of both the
+    // Stock category and Part option lists below - the bound value then
+    // matches no <option> and both selects render blank. Clearing the
+    // filter (same as "Show all dates") guarantees the part just picked is
+    // actually selectable.
+    queuePickerDate = '';
     queuePickerCategoryId = group.categoryId;
     categoryQueueModes = { ...categoryQueueModes, [group.categoryId]: 'single' };
     categorySinglePartSelections = { ...categorySinglePartSelections, [group.categoryId]: part.id };
@@ -1079,7 +1086,7 @@
               <div class="form-group">
                 <label class="form-label" for={`queue-tool-${group.categoryId}`}>Tool</label>
                 <select id={`queue-tool-${group.categoryId}`} class="form-select" bind:value={categoryToolSelections[group.categoryId]} disabled={!categoryMachineSelections[group.categoryId]}>
-                  <option value="">{toolsForMachine(categoryMachineSelections[group.categoryId]).length ? 'Choose a tool...' : 'No tools installed on this router'}</option>
+                  <option value="">{toolsForMachine(categoryMachineSelections[group.categoryId]).length ? 'Choose a tool...' : 'No tools installed'}</option>
                   {#each toolsForMachine(categoryMachineSelections[group.categoryId]) as t}
                     <option value={t.id}>{toolLabel(t)}</option>
                   {/each}
