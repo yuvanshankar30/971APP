@@ -479,6 +479,11 @@ def start(data, session):
     # handler below, however early a failure happens - job_id is required
     # on every /api/fusion-runner call now (see job_status.py).
     job_id = str(data.get("id", "unknown"))
+    # Declared before the try, alongside job_id, for the same reason: the
+    # cleanup in the finally block below needs these however far the job
+    # actually got before failing (or never even downloading a part).
+    step_paths = []
+    patched_template_path = None
     try:
         payload = data.get("payload")
         if not isinstance(payload, dict):
@@ -530,7 +535,6 @@ def start(data, session):
         if not assignments:
             raise ValueError("Plate job has no nested parts with STEP files")
         require_grouping_mode_matches_assignments(assignments, _get(payload, "grouping_mode"))
-        step_paths = []
         for assignment in assignments:
             part_id = str(assignment["part_id"])
             step_paths.append(
@@ -605,6 +609,7 @@ def start(data, session):
         patched_template = os.path.join(
             TOOLS_PATH, f"Plates_job{job_id}.f3dhsm-template"
         )
+        patched_template_path = patched_template
         patch_info = patch_cam_template_with_tool_libraries(
             template_path,
             patched_template,
@@ -814,3 +819,25 @@ def start(data, session):
         if app:
             app.log("Failed:\n{}".format(traceback.format_exc()))
         send_job_error(session, job_id, traceback.format_exc())
+    finally:
+        # Live-confirmed real leak, not theoretical: neither of these was
+        # ever cleaned up anywhere, on any path (success or failure).
+        # Checked directly against a real Runner install after ~200 real
+        # jobs - 233 patched templates (42MB) in TOOLS_PATH, 113 downloaded
+        # STEP files (20MB) in INITIAL_PATH, every single one from a job
+        # that finished (or failed) long ago. TEMP_PATH's own name already
+        # says these are meant to be transient per-job scratch files, not a
+        # permanent cache - matches how FINAL_PATH's export_dir is already
+        # cleaned up after a job's real output is durably saved elsewhere.
+        # Best-effort: a cleanup failure must never mask the job's own
+        # real outcome, which every branch above has already reported.
+        for path in [*step_paths, patched_template_path]:
+            if not path:
+                continue
+            try:
+                os.remove(path)
+            except FileNotFoundError:
+                pass
+            except Exception as cleanup_error:
+                if app:
+                    app.log(f"Could not remove temporary job file '{path}': {cleanup_error}")

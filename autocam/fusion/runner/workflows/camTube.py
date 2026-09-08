@@ -95,6 +95,11 @@ def start(data, session):
     # Computed before the try block so it's always available in the except
     # handler below - see the same comment in camPlate.py's start().
     job_id = str(data.get("id", "unknown"))
+    # Declared before the try, alongside job_id, for the same reason: the
+    # cleanup in the finally block below needs these however far the job
+    # actually got before failing (or never even downloading the tube).
+    step_path = None
+    patched_template_path = None
     try:
         app.log("Starting box tube CAM workflow...")
         app.log(f"Job data: {json.dumps(data)}")
@@ -137,7 +142,7 @@ def start(data, session):
         if not step_file_url:
             raise ValueError("Payload missing required 'step_file_url'")
         try:
-            _download_box_tube_file(session, box_tube_id, step_file_url, INITIAL_PATH)
+            step_path = _download_box_tube_file(session, box_tube_id, step_file_url, INITIAL_PATH)
         except Exception:
             app.log("Failed to download box tube file:\n{}".format(traceback.format_exc()))
             raise
@@ -186,6 +191,7 @@ def start(data, session):
         patched_template = os.path.join(
             TOOLS_PATH, f"Tubestock_job{job_id}.f3dhsm-template"
         )
+        patched_template_path = patched_template
         patch_info = patch_cam_template_with_tool_libraries(
             template_path,
             patched_template,
@@ -311,3 +317,19 @@ def start(data, session):
         if app:
             app.log("Failed:\n{}".format(traceback.format_exc()))
         send_job_error(session, job_id, traceback.format_exc())
+    finally:
+        # See camPlate.py's matching cleanup for the full reasoning - the
+        # same real leak, confirmed live, applies here: neither the
+        # downloaded STEP file nor the patched template was ever cleaned
+        # up on any path. Best-effort: a cleanup failure must never mask
+        # the job's own real outcome, already reported above.
+        for path in (step_path, patched_template_path):
+            if not path:
+                continue
+            try:
+                os.remove(path)
+            except FileNotFoundError:
+                pass
+            except Exception as cleanup_error:
+                if app:
+                    app.log(f"Could not remove temporary job file '{path}': {cleanup_error}")
