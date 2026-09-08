@@ -105,7 +105,7 @@ export async function fetchParts() {
  * (public.parts) - see the migration this shipped with for why it's
  * nullable. Not every Fusion CAM part is for an existing request.
  */
-export async function createPart({ name, epic, ticket, quantity, categoryId, stepFile, createdBy, partId, fusionFileName }) {
+export async function createPart({ name, epic, ticket, quantity, categoryId, stepFile, createdBy, partId, fusionFileName, projectId, stockAssignment }) {
   const stepFileName = await uploadFusionStep({ name, fallback: 'part', stepFile });
 
   // No spaces - this becomes the Fusion document name (camPlate.py) and
@@ -125,7 +125,9 @@ export async function createPart({ name, epic, ticket, quantity, categoryId, ste
       step_file_name: stepFileName,
       created_by: createdBy || null,
       part_id: partId || null,
-      fusion_file_name: cleanedFusionFileName || null
+      fusion_file_name: cleanedFusionFileName || null,
+      project_id: projectId || null,
+      stock_assignment: stockAssignment || null
     })
     .select('*, fusion_part_categories(thickness, cam_materials(name, category)), parts(id, name, project_id, workflow)')
     .single();
@@ -264,7 +266,7 @@ export async function fetchBoxTubes() {
 
 // partId (optional) links this box tube to a real manufacturing request -
 // see createPart's own doc comment, same reasoning.
-export async function createBoxTube({ name, epic, ticket, quantity, stepFile, createdBy, partId }) {
+export async function createBoxTube({ name, epic, ticket, quantity, stepFile, createdBy, partId, projectId, stockAssignment }) {
   const stepFileName = await uploadFusionStep({ name, fallback: 'boxtube', stepFile });
 
   const { data, error } = await supabase
@@ -276,7 +278,9 @@ export async function createBoxTube({ name, epic, ticket, quantity, stepFile, cr
       quantity: quantity ?? 1,
       step_file_name: stepFileName,
       created_by: createdBy || null,
-      part_id: partId || null
+      part_id: partId || null,
+      project_id: projectId || null,
+      stock_assignment: stockAssignment || null
     })
     .select('*, parts(id, name, project_id, workflow)')
     .single();

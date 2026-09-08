@@ -1152,11 +1152,11 @@
     try {
       const stepFile = await manufacturingStepFile(part);
       if (fusionQueueKind === 'tube') {
-        const tube = await createBoxTube({ name: part.name, epic: part.epic, ticket: part.ticket, quantity, stepFile, createdBy: user?.id, partId: part.id });
+        const tube = await createBoxTube({ name: part.name, epic: part.epic, ticket: part.ticket, quantity, stepFile, createdBy: user?.id, partId: part.id, projectId: part.project_id, stockAssignment: part.stock_assignment });
         await queueFusionJob({ fusionJobKind: 'box_tube', boxTubeId: tube.id, machineId: fusionQueueMachineId, toolId: fusionQueueToolId, materialId: fusionQueueMaterialId, requestedBy: user?.id, partId: part.id, name: `Tube Stock CAM: ${part.name}`, fusionFileName: fusionQueueFileName.trim() || null, fusionFolderPath: fusionQueueFolderPath || null });
       } else {
         const category = fusionQueueCategories.find((candidate) => String(candidate.id) === String(fusionQueueCategoryId));
-        const fusionPart = await createPart({ name: part.name, epic: part.epic, ticket: part.ticket, quantity, categoryId: category.id, stepFile, createdBy: user?.id, partId: part.id, fusionFileName: fusionQueueFileName.trim() || null });
+        const fusionPart = await createPart({ name: part.name, epic: part.epic, ticket: part.ticket, quantity, categoryId: category.id, stepFile, createdBy: user?.id, partId: part.id, fusionFileName: fusionQueueFileName.trim() || null, projectId: part.project_id, stockAssignment: part.stock_assignment });
         const plates = await fetchPlates();
         let plate = plates.find((candidate) => String(candidate.category_id) === String(category.id));
         if (!plate) plate = await createPlate({ name: `Auto stock - ${fusionQueueCategoryLabel(category)}`, width: 24, length: 24, trueDepth: Number(category.thickness), categoryId: category.id });

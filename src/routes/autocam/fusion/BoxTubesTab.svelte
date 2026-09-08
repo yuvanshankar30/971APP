@@ -23,7 +23,7 @@
   let manufacturingParts = [];
   let loading = true;
   let showAddForm = false;
-  let newBoxTube = { name: '', epic: '', ticket: '', quantity: 1, manufacturingPartId: '' };
+  let newBoxTube = { name: '', epic: '', ticket: '', quantity: 1, manufacturingPartId: '', projectId: '', stockAssignment: '' };
   let stepFile = null;
   let submitting = false;
   // Which router each box tube's "Queue CAM Job" currently targets - keyed
@@ -54,7 +54,7 @@
   async function loadManufacturingParts() {
     const { data, error } = await supabase
       .from('parts')
-      .select('id, name, project_id, workflow')
+      .select('id, name, project_id, workflow, quantity, file_name, file_url, stock_assignment')
       .order('created_at', { ascending: false })
       .limit(200);
     if (error) {
@@ -135,8 +135,25 @@
     stepFile = event.target.files?.[0] || null;
   }
 
+  async function handleManufacturingLinkChange() {
+    const linked = manufacturingParts.find((part) => part.id === newBoxTube.manufacturingPartId);
+    if (!linked) return;
+    newBoxTube = { ...newBoxTube, name: linked.name || newBoxTube.name, quantity: Number(linked.quantity) || newBoxTube.quantity, projectId: linked.project_id || '', stockAssignment: linked.stock_assignment || '' };
+    let stepPath = null;
+    try { stepPath = JSON.parse(linked.file_url || '{}')?.step_file; } catch {}
+    stepPath ||= linked.file_name && /\.(step|stp)$/i.test(linked.file_name) ? linked.file_name : null;
+    if (!stepPath) return;
+    try {
+      const { data, error } = await supabase.storage.from('manufacturing-files').download(stepPath);
+      if (error || !data) throw error || new Error('Empty download');
+      stepFile = new File([data], stepPath.split('/').pop(), { type: data.type || 'application/step' });
+    } catch (error) {
+      toastActions.show(error.message || 'Could not load the linked request STEP file');
+    }
+  }
+
   function cancelAdd() {
-    newBoxTube = { name: '', epic: '', ticket: '', quantity: 1, manufacturingPartId: '' };
+    newBoxTube = { name: '', epic: '', ticket: '', quantity: 1, manufacturingPartId: '', projectId: '', stockAssignment: '' };
     stepFile = null;
     showAddForm = false;
   }
@@ -182,9 +199,11 @@
         quantity: Number(newBoxTube.quantity),
         stepFile,
         createdBy: user?.id,
-        partId: newBoxTube.manufacturingPartId || null
+        partId: newBoxTube.manufacturingPartId || null,
+        projectId: newBoxTube.projectId || null,
+        stockAssignment: newBoxTube.stockAssignment || null
       });
-      newBoxTube = { name: '', epic: '', ticket: '', quantity: 1, manufacturingPartId: '' };
+      newBoxTube = { name: '', epic: '', ticket: '', quantity: 1, manufacturingPartId: '', projectId: '', stockAssignment: '' };
       stepFile = null;
       showAddForm = false;
       await load(false);
@@ -333,6 +352,11 @@
       <h3>New Tube Stock</h3>
       <div class="form-row">
         <div class="form-group">
+          <label class="form-label" for="bt-project-id">Project ID (optional)</label>
+          <input id="bt-project-id" class="form-input" list="tube-project-ids" bind:value={newBoxTube.projectId} />
+          <datalist id="tube-project-ids">{#each [...new Set(manufacturingParts.map((part) => part.project_id).filter(Boolean))].sort() as projectId}<option value={projectId} />{/each}</datalist>
+        </div>
+        <div class="form-group">
           <label class="form-label" for="bt-name">Name</label>
           <input id="bt-name" class="form-input" bind:value={newBoxTube.name} placeholder="e.g. Drivebase Rail" />
         </div>
@@ -358,7 +382,7 @@
       <div class="form-row">
         <div class="form-group">
           <label class="form-label" for="bt-manufacturing-link">Manufacturing request (optional)</label>
-          <select id="bt-manufacturing-link" class="form-select" bind:value={newBoxTube.manufacturingPartId}>
+          <select id="bt-manufacturing-link" class="form-select" bind:value={newBoxTube.manufacturingPartId} on:change={handleManufacturingLinkChange}>
             <option value="">Not linked to a request</option>
             {#each manufacturingParts as mp}
               <option value={mp.id}>{mp.name}{mp.project_id ? ` (${mp.project_id})` : ''}</option>
@@ -369,7 +393,7 @@
       </div>
       <div class="form-actions">
         <button class="btn btn-primary" disabled={submitting} on:click={handleAdd}>{submitting ? 'Adding...' : 'Add Tube Stock'}</button>
-        <button class="btn btn-secondary" disabled={submitting} on:click={cancelAdd}>Cancel</button>
+        <button type="button" class="btn btn-secondary" disabled={submitting} on:click={cancelAdd}>Cancel</button>
       </div>
     </div>
   {/if}
@@ -427,6 +451,8 @@
             {/if}
             {#if boxTube.epic}{boxTube.epic}{/if}
             {#if boxTube.ticket} - {boxTube.ticket}{/if}
+            {#if boxTube.project_id} - project <strong>{boxTube.project_id}</strong>{/if}
+            {#if boxTube.stock_assignment} - stock <strong>{boxTube.stock_assignment}</strong>{/if}
             {#if !boxTube.step_file_name} - <em>no STEP file attached</em>{/if}
             {#if boxTube.parts} - linked to <strong>{boxTube.parts.name}</strong>{/if}
             {#if boxTube.created_at} - added {formatPacificDateTime(boxTube.created_at)}{/if}
