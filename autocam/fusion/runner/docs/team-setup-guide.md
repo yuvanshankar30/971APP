@@ -22,7 +22,7 @@ Two things run this: **Spartans Hub** itself (already deployed - where you queue
 
    No repo clone? Download the ready-made zip from the [Fusion AutoCAM Setup page](/autocam/fusion/setup), unzip it anywhere, and run `python3 setup.py` from inside it - it installs itself to the right place from there too.
 
-   **Updating an existing install?** Re-run the exact same command. It copies over the existing folder and deliberately never overwrites `.env` or `.overridepath`, so your token and machine id survive. Fully quit and relaunch Fusion after an update; stopping and starting an add-in does not reliably reload its Python modules or `.env`.
+   **Updating an existing install?** Re-run the exact same command. It copies over the existing folder, preserves `.env` and `.overridepath`, and detects that this is an update so it does not ask setup questions or replace your token and machine id. Fully quit and relaunch Fusion after an update; stopping and starting an add-in does not reliably reload its Python modules or `.env`.
 
    **Missing `.overridepath` or `requests` at startup?** The install was
    copied without its generated dependency folder. From the installed add-in
