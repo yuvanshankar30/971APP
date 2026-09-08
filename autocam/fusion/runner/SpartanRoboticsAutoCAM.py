@@ -309,6 +309,12 @@ _dispatch_retry = [0]
 _last_folder_sync = 0.0
 _last_heartbeat = 0.0
 _last_folder_tree_json = None  # type: Optional[str]
+# Fusion's default idle command is SelectCommand. Data Panel enumeration is a
+# synchronous cloud operation and must not run while a modal Fusion command
+# owns the UI. A CER report on 2026-09-08 captured a crash in
+# ToolLibraryCmd -> DataFolders.item() while this background sync advanced.
+# Keep the sync pending and resume it once the command returns to idle.
+_IDLE_COMMAND_IDS = {"", "SelectCommand", "Select"}
 
 
 def _schedule_folder_sync_chunk():
@@ -318,10 +324,26 @@ def _schedule_folder_sync_chunk():
     timer.start()
 
 
+def _can_advance_folder_sync() -> bool:
+    """Return whether Fusion is in its normal non-modal command state."""
+    if _app is None:
+        return False
+    try:
+        return str(_app.activeCommand or "") in _IDLE_COMMAND_IDS
+    except Exception:
+        # If Fusion cannot report command state, leave cloud work alone. The
+        # pending sync will be retried by the normal timer instead of risking
+        # a native crash from a Data Panel call at the wrong time.
+        return False
+
+
 def _advance_folder_sync():
     """Advance one Data Panel call, then return to Fusion's UI loop."""
     global _folder_sync_walker, _last_folder_tree_json
     try:
+        if not _can_advance_folder_sync():
+            _schedule_folder_sync_chunk()
+            return
         if _folder_sync_walker is None:
             _folder_sync_walker = FolderTreeWalker(
                 _app, FUSION_DATA_PROJECT_NAME, FUSION_DROP_FOLDER_PATH or ""
