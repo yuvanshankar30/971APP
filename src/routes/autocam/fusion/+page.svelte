@@ -4,7 +4,7 @@
   import { supabase } from '$lib/supabase.js';
   import { userStore, loadUserFromUUID } from '$lib/stores/user.js';
   import { canManageCamProfiles } from '$lib/permissions.js';
-  import { Layers, Package, Box, ListChecks, SlidersHorizontal, BookOpen, HelpCircle, Send } from 'lucide-svelte';
+  import { Layers, Package, Box, ListChecks, SlidersHorizontal, BookOpen, HelpCircle, Send, X } from 'lucide-svelte';
   import PartsTab from './PartsTab.svelte';
   import BoxTubesTab from './BoxTubesTab.svelte';
   import JobQueueTab from './JobQueueTab.svelte';
@@ -30,6 +30,8 @@
   // per-stock-group inside the parts list.
   let partsTabRef;
   let boxTubesTabRef;
+  let sendPickerOpen = false;
+  let sendPickerKind = 'plates';
 
   $: canManage = canManageCamProfiles(user);
 
@@ -41,16 +43,23 @@
   // (and partsTabRef) only exists in the DOM while that tab is showing, so
   // openQueuePicker() can't be called until after it mounts. tick() waits
   // for that mount to actually happen before calling it.
-  async function openSendToFusionCam() {
-    if (activeTab === 'box-tubes') {
-      boxTubesTabRef?.openQueuePicker();
-      return;
-    }
-    if (activeTab !== 'parts') {
-      activeTab = 'parts';
+  function openSendToFusionCam() {
+    // One queue entry point for every stock type. Plates are the normal
+    // workflow, so retain them as the default regardless of the active tab.
+    sendPickerKind = 'plates';
+    sendPickerOpen = true;
+  }
+
+  async function continueToQueuePicker() {
+    const tubeStock = sendPickerKind === 'tubes';
+    sendPickerOpen = false;
+    const targetTab = tubeStock ? 'box-tubes' : 'parts';
+    if (activeTab !== targetTab) {
+      activeTab = targetTab;
       await tick();
     }
-    partsTabRef?.openQueuePicker();
+    if (tubeStock) boxTubesTabRef?.openQueuePicker();
+    else partsTabRef?.openQueuePicker();
   }
 
   onMount(() => {
@@ -106,6 +115,30 @@
   <JobQueueTab />
 {/if}
 
+{#if canManage && sendPickerOpen}
+  <div class="modal-overlay" role="presentation" on:click={() => (sendPickerOpen = false)}>
+    <div class="modal send-kind-modal" role="dialog" aria-labelledby="send-kind-title" on:click|stopPropagation>
+      <div class="modal-header">
+        <h3 id="send-kind-title">Send to Fusion CAM</h3>
+        <button type="button" class="btn btn-ghost btn-sm" title="Close" aria-label="Close" on:click={() => (sendPickerOpen = false)}><X size={16} /></button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label" for="send-stock-kind">Stock type</label>
+          <select id="send-stock-kind" class="form-select" bind:value={sendPickerKind}>
+            <option value="plates">Plates</option>
+            <option value="tubes">Tube stock</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer-actions">
+        <button type="button" class="btn btn-ghost" on:click={() => (sendPickerOpen = false)}>Cancel</button>
+        <button type="button" class="btn btn-primary" on:click={continueToQueuePicker}><Send size={14} /> Continue</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
 <style>
   /* This page used to redefine the site's own --background/--accent/etc.
      custom properties to force a black/blue/gold look
@@ -121,6 +154,7 @@
     display: flex;
     gap: 0.5rem;
   }
+  .send-kind-modal { --modal-width: 28rem; }
   .tab-nav {
     display: flex;
     gap: 0.5rem;

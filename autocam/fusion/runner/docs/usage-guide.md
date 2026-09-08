@@ -73,10 +73,12 @@ as a ballpark for comparing jobs, not a promise.
 ## Tube Stock and Stock Categories
 
 **Tube Stock** is direct-to-CAM: add one STEP-backed tube, then use the
-page-level **Send to Fusion CAM** action while the Tube Stock tab is open to
-choose the tube, router, tool, and material. It is not mounted to a plate and
-it is not grouped with other tubes. The material is required so the Runner can
-select the reviewed feeds, speeds, and template for that stock.
+page-level **Send to Fusion CAM** action, select **Tube Stock** in the stock
+type filter, then choose the tube, router, tool, and aluminum material. It is
+not mounted to a plate and it is not grouped with other tubes. The same Send
+action defaults to **Plates**, whose familiar date and stock filters remain
+unchanged. Tube stock currently exposes aluminum choices only so the Runner
+uses a reviewed tube feed/speed preset.
 
 For rectangular box tube, one queued tube job creates four manually indexed
 Fusion setups: Side 12, Side 3, Side 6, and Side 9. Fusion posts one NC file
