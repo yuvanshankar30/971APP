@@ -24,9 +24,14 @@ The template selections are replaced on each wall. Round holes use Bore,
 selected from each hole's actual cylindrical wall face rather than the tube's
 planar exterior face. Every non-round closed feature uses Shape Through
 roughing plus its finishing contour; 2D Slot Cut is removed because its
-centerline-style behavior is wrong for closed tube cutouts. An operation with
-no matching geometry is deleted before generation, so a stale selection stored
-in the template can never machine a different tube wall.
+centerline-style behavior is wrong for closed tube cutouts. The setup WCS is
+still anchored to the exterior wall being machined, but Shape Through chains
+come from that wall's paired interior (material-bottom) face; this prevents
+Fusion from interpreting an exterior-face loop as a wall-spanning adaptive
+clear. Each closed chain derives its direction from its own BRep coedge
+topology and retries the inverse direction only when Fusion rejects it. An
+operation with no matching geometry is deleted before generation, so a stale
+selection stored in the template can never machine a different tube wall.
 
 Each kept operation is limited to the thickness of its near wall plus the
 template's small breakthrough allowance. The wall measurement clusters
