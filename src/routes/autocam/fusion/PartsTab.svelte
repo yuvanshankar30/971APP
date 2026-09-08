@@ -9,6 +9,8 @@
   } from '$lib/fusionCam.js';
   import { PACIFIC_TIME_ZONE, formatPacificDateTime } from '$lib/timezone.js';
   import { fetchStepMeshes, readStepMeshes } from '$lib/stepMeshLoader.js';
+  import stockData from '$lib/stock.json';
+  import { buildStockMaterialIndex, materialIdForStockAssignment, stockCatalogIdForStockAssignment } from '$autocam/stockMaterial.js';
   import { extractRoutingContoursFromMeshes } from '$autocam/stepProfile.js';
   import CadViewer from '$lib/components/CadViewer.svelte';
   import FolderTreeNode from './FolderTreeNode.svelte';
@@ -23,6 +25,7 @@
   // geometry. Material/thickness is deliberately left for the user to pick
   // and cross-check against the detected depth - see handlePrefill below.
   export let initialManufacturingPartId = null;
+  const manufacturingStockMaterialIndex = buildStockMaterialIndex(stockData);
 
   // Parts and Plates used to be two separate tabs, then briefly a single
   // tab with Plates still a manually-managed entity inside it. Direct
@@ -86,7 +89,7 @@
   let loading = true;
 
   let showAddPartForm = false;
-  let newPart = { name: '', epic: '', ticket: '', quantity: 1, categoryId: '', manufacturingPartId: '', fusionFileName: '' };
+  let newPart = { name: '', epic: '', ticket: '', quantity: 1, categoryId: '', manufacturingPartId: '', fusionFileName: '', projectId: '', stockAssignment: '' };
   let stepFile = null;
   let submitting = false;
   let renamingPartId = null;
@@ -173,7 +176,7 @@
   async function loadManufacturingParts() {
     const { data, error } = await supabase
       .from('parts')
-      .select('id, name, project_id, workflow, quantity, file_name, file_url')
+    .select('id, name, project_id, workflow, quantity, file_name, file_url, stock_assignment')
       .order('created_at', { ascending: false })
       .limit(200);
     if (error) {
@@ -222,12 +225,20 @@
       quantity: newPart.quantity === 1 && Number.isInteger(Number(linkedPart.quantity)) && Number(linkedPart.quantity) > 0
         ? Number(linkedPart.quantity)
         : newPart.quantity,
-      manufacturingPartId: linkedPart.id
+      manufacturingPartId: linkedPart.id,
+      projectId: linkedPart.project_id || '',
+      stockAssignment: linkedPart.stock_assignment || ''
     };
     if (!newPart.fusionFileName) {
       const derived = (linkedPart.name || '').trim().replace(/\s+/g, '');
       if (derived) newPart.fusionFileName = derived;
     }
+    const { data: materials } = await supabase.from('cam_materials').select('id, name').eq('enabled', true);
+    const materialId = materialIdForStockAssignment(manufacturingStockMaterialIndex, materials || [], linkedPart.stock_assignment, stockData);
+    const stockId = stockCatalogIdForStockAssignment(stockData, linkedPart.stock_assignment);
+    const thickness = (stockData.router || []).find((stock) => stock.id === stockId)?.thickness;
+    const stockCategory = categories.find((category) => String(category.material_id) === String(materialId) && Number.isFinite(thickness) && Math.abs(Number(category.thickness) - thickness) < 0.002);
+    if (stockCategory) newPart = { ...newPart, categoryId: String(stockCategory.id) };
     showAddPartForm = true;
 
     const stepPath = manufacturingStepFileName(linkedPart);
@@ -312,7 +323,7 @@
     } else {
       supabase
         .from('parts')
-        .select('id, name, project_id, workflow, quantity, file_name, file_url')
+        .select('id, name, project_id, workflow, quantity, file_name, file_url, stock_assignment')
         .eq('id', initialManufacturingPartId)
         .maybeSingle()
         .then(({ data, error }) => {
@@ -440,9 +451,11 @@
         stepFile,
         createdBy: user?.id,
         partId: newPart.manufacturingPartId || null,
-        fusionFileName: newPart.fusionFileName || null
+        fusionFileName: newPart.fusionFileName || null,
+        projectId: newPart.projectId || null,
+        stockAssignment: newPart.stockAssignment || null
       });
-      newPart = { name: '', epic: '', ticket: '', quantity: 1, categoryId: '', manufacturingPartId: '', fusionFileName: '' };
+      newPart = { name: '', epic: '', ticket: '', quantity: 1, categoryId: '', manufacturingPartId: '', fusionFileName: '', projectId: '', stockAssignment: '' };
       stepFile = null;
       stepCarriedOverFrom = null;
       detectedDepthInches = null;
@@ -461,7 +474,7 @@
   // starts clean instead of showing whatever was left half-filled-in.
   function handleCancelAddPart() {
     showAddPartForm = false;
-    newPart = { name: '', epic: '', ticket: '', quantity: 1, categoryId: '', manufacturingPartId: '', fusionFileName: '' };
+    newPart = { name: '', epic: '', ticket: '', quantity: 1, categoryId: '', manufacturingPartId: '', fusionFileName: '', projectId: '', stockAssignment: '' };
     stepFile = null;
     stepCarriedOverFrom = null;
     detectedDepthInches = null;
@@ -770,6 +783,11 @@
       {/if}
       <div class="form-row">
         <div class="form-group">
+          <label class="form-label" for="part-project-id">Project ID (optional)</label>
+          <input id="part-project-id" class="form-input" list="part-project-ids" bind:value={newPart.projectId} />
+          <datalist id="part-project-ids">{#each [...new Set(manufacturingParts.map((part) => part.project_id).filter(Boolean))].sort() as projectId}<option value={projectId} />{/each}</datalist>
+        </div>
+        <div class="form-group">
           <label class="form-label" for="part-name">Name</label>
           <input id="part-name" class="form-input" bind:value={newPart.name} placeholder="e.g. Gearbox Side Plate" />
         </div>
@@ -858,7 +876,7 @@
       </div>
       <div class="cam-list-actions">
         <button class="btn btn-primary" disabled={submitting} on:click={handleAddPart}>{submitting ? 'Adding...' : 'Add Part'}</button>
-        <button type="button" class="btn btn-ghost" disabled={submitting} on:click={handleCancelAddPart}>Cancel</button>
+        <button type="button" class="btn btn-secondary" disabled={submitting} on:click={handleCancelAddPart}>Cancel</button>
       </div>
     </div>
   {/if}
@@ -921,6 +939,8 @@
                   {/if}
                   {#if part.epic} - {part.epic}{/if}
                   {#if part.ticket} - {part.ticket}{/if}
+                  {#if part.project_id} - project <strong>{part.project_id}</strong>{/if}
+                  {#if part.stock_assignment} - stock <strong>{part.stock_assignment}</strong>{/if}
                   {#if part.parts} - linked to <strong>{part.parts.name}</strong>{/if}
                   {#if part.fusion_file_name} - Fusion file name: <strong>{part.fusion_file_name}</strong>{/if}
                   {#if part.created_at} - added {formatPacificDateTime(part.created_at)}{/if}

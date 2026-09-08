@@ -63,7 +63,10 @@ browser confirmation or prompt popups.
   Manufacturing's per-request **AutoCAM** action stays in Manufacturing and
   opens its own queue dialog, where the operator selects plate or tube stock
   before the request's quantity, STEP file, stock, and identifiers are copied
-  into the linked Fusion CAM record.
+  into the linked Fusion CAM record. Fusion Parts and Tube Stock retain the
+  copied project ID and stock assignment in their own rows, display both in
+  their lists, and offer the existing Manufacturing project IDs for ad-hoc
+  AutoCAM records.
   The box-tube path creates four face-scoped Fusion setups and posts separate `Side 12`,
   `Side 3`, `Side 6`, and `Side 9` files for manual indexing. See the
   **AutoCAM** section below for the code-level detail on all three.
