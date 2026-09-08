@@ -6,7 +6,7 @@
 		"":	"Fusion CAM Runner - processes milling CAM jobs queued by Spartans Hub's Fusion CAM section."
 	},
 	"version":	"0.1.0",
-	"runOnStartup":	false,
+	"runOnStartup":	true,
 	"supportedOS":	"windows|mac",
 	"editEnabled":	true,
 	"iconFilename":	"AddInIcon.svg"

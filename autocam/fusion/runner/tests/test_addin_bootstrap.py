@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 import unittest
 
@@ -18,6 +19,18 @@ class DependencyBootstrapTests(unittest.TestCase):
         config = (RUNNER_DIR / "config.py").read_text()
 
         self.assertIn("sys.path.insert(0, OVERRIDE_PATH)", config)
+
+    def test_stored_api_key_does_not_pump_fusion_events_during_startup(self):
+        entrypoint = (RUNNER_DIR / "SpartanRoboticsAutoCAM.py").read_text()
+        gate = entrypoint[entrypoint.index("def _startup_key_gate"):entrypoint.index("_FOLDER_SYNC_INTERVAL_SEC")]
+
+        self.assertNotIn("createProgressDialog(", gate)
+        self.assertNotIn("adsk.doEvents(", gate)
+
+    def test_runner_manifest_starts_the_addin_automatically(self):
+        manifest = json.loads((RUNNER_DIR / "SpartanRoboticsAutoCAM.manifest").read_text())
+
+        self.assertTrue(manifest["runOnStartup"])
 
 
 if __name__ == "__main__":
