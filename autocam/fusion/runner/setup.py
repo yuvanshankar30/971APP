@@ -34,7 +34,11 @@ SOURCE_DIR = os.path.dirname(os.path.realpath(__file__))
 ADDIN_FOLDER_NAME = "SpartanRoboticsAutoCAM"
 
 DEPLOYED_URL = "https://spartanshub.spartanrobotics.org"
-LOCAL_URL = "http://127.0.0.1:5173"
+# Vite commonly binds its local dev server on IPv6 loopback (::1).  Fusion's
+# bundled requests client treats a literal 127.0.0.1 URL as IPv4-only, which
+# then fails with ConnectionRefusedError even though localhost is healthy.
+# Let the OS resolve localhost to the server's active loopback family.
+LOCAL_URL = "http://localhost:5173"
 
 # Never copied into the install: build output and machine-specific config.
 # .env/.overridepath are gitignored (so never in a checkout anyway), but are
