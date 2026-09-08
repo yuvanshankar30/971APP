@@ -1,6 +1,6 @@
 <script>
   import { requestConfirmation } from '$lib/confirmation.js';
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { toastActions } from '$lib/toast.js';
   import { supabase } from '$lib/supabase.js';
   import {
@@ -101,6 +101,12 @@
   let loading = true;
 
   let showAddPartForm = false;
+  // True when the New Part form was opened from the page-level "Quick
+  // Queue" button (see openQuickQueue below) rather than the normal "Add
+  // Part" button - on save, chains straight into the queue picker with
+  // this part pre-selected instead of just closing the form, so adding a
+  // brand new part and sending it to Fusion CAM is one flow instead of two.
+  let quickQueueMode = false;
   let newPart = { name: '', epic: '', ticket: '', quantity: 1, categoryId: '', manufacturingPartId: '', fusionFileName: '', projectId: '', stockAssignment: '' };
   let stepFile = null;
   let submitting = false;
@@ -159,6 +165,16 @@
     queuePickerDate = pacificDateKey(new Date());
     recentPartsSearch = '';
     groupedPartsSearch = '';
+  }
+
+  // Called externally via bind:this from +page.svelte's "Quick Queue"
+  // button, after the user has already chosen "Plate" there. Opens the
+  // same New Part form used everywhere else - handleAddPart below checks
+  // quickQueueMode to chain into the queue picker on save instead of just
+  // closing the form.
+  export function openQuickQueue() {
+    quickQueueMode = true;
+    showAddPartForm = true;
   }
 
   function closeQueuePicker() {
@@ -458,8 +474,9 @@
       return;
     }
     submitting = true;
+    const wasQuickQueue = quickQueueMode;
     try {
-      await createPart({
+      const created = await createPart({
         name: newPart.name,
         epic: newPart.epic,
         ticket: newPart.ticket,
@@ -477,8 +494,20 @@
       stepCarriedOverFrom = null;
       detectedDepthInches = null;
       showAddPartForm = false;
+      quickQueueMode = false;
       await load(false);
-      toastActions.show('Part added - send it to Fusion CAM when you are ready');
+      if (wasQuickQueue && created) {
+        // stockGroups is a reactive derivation off `parts` (just refreshed
+        // above by load()) - wait for it to actually recompute before
+        // selectRecentPart looks up this brand-new part's category group,
+        // which may not have existed in stockGroups before this part did.
+        await tick();
+        openQueuePicker();
+        selectRecentPart(created);
+        toastActions.show('Part added - choose a router and tool to queue it');
+      } else {
+        toastActions.show('Part added - send it to Fusion CAM when you are ready');
+      }
     } catch (e) {
       toastActions.show(e.message || 'Failed to add part');
     } finally {
@@ -491,6 +520,7 @@
   // starts clean instead of showing whatever was left half-filled-in.
   function handleCancelAddPart() {
     showAddPartForm = false;
+    quickQueueMode = false;
     newPart = { name: '', epic: '', ticket: '', quantity: 1, categoryId: '', manufacturingPartId: '', fusionFileName: '', projectId: '', stockAssignment: '' };
     stepFile = null;
     stepCarriedOverFrom = null;
@@ -815,10 +845,14 @@
   {#if showAddPartForm && canManage}
     <div class="card">
       <div class="cam-list-header">
-        <h3>New Part</h3>
+        <h3>{quickQueueMode ? 'Quick Queue: New Part' : 'New Part'}</h3>
         <button type="button" class="btn btn-ghost btn-sm" title="Close" aria-label="Close without adding a part" on:click={handleCancelAddPart}><X size={16} /></button>
       </div>
-      <p class="cam-form-hint">A named quantity of stock waiting to be sent to Fusion CAM.</p>
+      <p class="cam-form-hint">
+        {quickQueueMode
+          ? 'Fill this in, then choose a router and tool on the next screen to queue it right away.'
+          : 'A named quantity of stock waiting to be sent to Fusion CAM.'}
+      </p>
       {#if newPart.manufacturingPartId && prefillApplied}
         <p class="prefill-banner">
           <Sparkles size={14} /> Pre-filled from the linked manufacturing request - check material/thickness below before saving.
@@ -905,7 +939,7 @@
         </div>
       </div>
       <div class="cam-list-actions">
-        <button class="btn btn-primary" disabled={submitting} on:click={handleAddPart}>{submitting ? 'Adding...' : 'Add Part'}</button>
+        <button class="btn btn-primary" disabled={submitting} on:click={handleAddPart}>{submitting ? 'Adding...' : (quickQueueMode ? 'Add & Continue to Queue' : 'Add Part')}</button>
         <button type="button" class="btn btn-secondary" disabled={submitting} on:click={handleCancelAddPart}>Cancel</button>
       </div>
     </div>

@@ -1,6 +1,6 @@
 <script>
   import { requestConfirmation } from '$lib/confirmation.js';
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { supabase } from '$lib/supabase.js';
   import { toastActions } from '$lib/toast.js';
   import {
@@ -23,6 +23,11 @@
   let manufacturingParts = [];
   let loading = true;
   let showAddForm = false;
+  // True when this form was opened from the page-level "Quick Queue"
+  // button (see openQuickQueue below) rather than the normal "Add Tube
+  // Stock" button - see PartsTab.svelte's matching flag for the full
+  // reasoning.
+  let quickQueueMode = false;
   let newBoxTube = { name: '', epic: '', ticket: '', quantity: 1, manufacturingPartId: '', projectId: '', stockAssignment: '' };
   let stepFile = null;
   let submitting = false;
@@ -166,12 +171,20 @@
     newBoxTube = { name: '', epic: '', ticket: '', quantity: 1, manufacturingPartId: '', projectId: '', stockAssignment: '' };
     stepFile = null;
     showAddForm = false;
+    quickQueueMode = false;
   }
 
   export function openQueuePicker() {
     queuePickerOpen = true;
     if (!queuedTubeId) queuedTubeId = boxTubes.find((tube) => tube.step_file_name)?.id || '';
     recentTubeSearch = '';
+  }
+
+  // Called externally via bind:this from +page.svelte's "Quick Queue"
+  // button, after the user has already chosen "Tube" there.
+  export function openQuickQueue() {
+    quickQueueMode = true;
+    showAddForm = true;
   }
 
   function closeQueuePicker() {
@@ -207,6 +220,7 @@
       return;
     }
     submitting = true;
+    const wasQuickQueue = quickQueueMode;
     try {
       const createdTube = await createBoxTube({
         name: newBoxTube.name,
@@ -222,8 +236,16 @@
       newBoxTube = { name: '', epic: '', ticket: '', quantity: 1, manufacturingPartId: '', projectId: '', stockAssignment: '' };
       stepFile = null;
       showAddForm = false;
+      quickQueueMode = false;
       await load(false);
-      toastActions.show('Tube stock added');
+      if (wasQuickQueue && createdTube) {
+        await tick();
+        openQueuePicker();
+        selectRecentTube(createdTube);
+        toastActions.show('Tube stock added - choose a router and tool to queue it');
+      } else {
+        toastActions.show('Tube stock added');
+      }
     } catch (e) {
       toastActions.show(e.message || 'Failed to add tube stock');
     } finally {
@@ -366,10 +388,14 @@
   {#if showAddForm && canManage}
     <div class="card">
       <div class="cam-list-header">
-        <h3>New Tube Stock</h3>
+        <h3>{quickQueueMode ? 'Quick Queue: New Tube Stock' : 'New Tube Stock'}</h3>
         <button type="button" class="btn btn-ghost btn-sm" title="Close" aria-label="Close without adding tube stock" on:click={cancelAdd}><X size={16} /></button>
       </div>
-      <p class="cam-form-hint">A named quantity of tube stock waiting to be sent to Fusion CAM.</p>
+      <p class="cam-form-hint">
+        {quickQueueMode
+          ? 'Fill this in, then choose a router and tool on the next screen to queue it right away.'
+          : 'A named quantity of tube stock waiting to be sent to Fusion CAM.'}
+      </p>
       <div class="form-row">
         <div class="form-group">
           <label class="form-label" for="bt-name">Name</label>
@@ -412,7 +438,7 @@
         </div>
       </div>
       <div class="form-actions">
-        <button class="btn btn-primary" disabled={submitting} on:click={handleAdd}>{submitting ? 'Adding...' : 'Add Tube Stock'}</button>
+        <button class="btn btn-primary" disabled={submitting} on:click={handleAdd}>{submitting ? 'Adding...' : (quickQueueMode ? 'Add & Continue to Queue' : 'Add Tube Stock')}</button>
         <button type="button" class="btn btn-secondary" disabled={submitting} on:click={cancelAdd}>Cancel</button>
       </div>
     </div>
