@@ -129,7 +129,11 @@ def _loop_specs(face):
         if loop.isOuter:
             continue
         coedges = list(loop.coEdges)
-        edges = [coedge.edge for coedge in coedges]
+        # Use the loop's edges, not BRepCoEdge.edge.  The loop belongs to
+        # the occurrence-body selected as this setup's model, and its edge
+        # collection retains that occurrence context for Fusion's CAM model
+        # tree lookup.  Co-edges are still needed below for loop direction.
+        edges = list(loop.edges)
         if not edges:
             continue
         circular = len(edges) == 1 and isinstance(edges[0].geometry, adsk.core.Circle3D)

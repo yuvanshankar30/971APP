@@ -52,6 +52,7 @@ class TubeFaceProgramTests(unittest.TestCase):
         handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
         self.assertIn("parameter.value.applyCurveSelections(selections)", handler)
         self.assertNotIn("parameter.applyCurveSelections(selections)", handler)
+        self.assertIn("edges = list(loop.edges)", handler)
 
     def test_tube_waits_for_template_operations_before_rebinding_geometry(self):
         handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
