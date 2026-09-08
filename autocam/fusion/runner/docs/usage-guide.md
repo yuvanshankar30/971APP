@@ -45,6 +45,14 @@ tool changes and setup time compared to running each part as a separate
 job. The Job Queue tab tags a job "Grouped" when it covers more than one
 part.
 
+## Holding Tabs
+
+The release contour uses manual `0.6in x 0.15in` tabs on straight outer
+edges only. Tabs are placed only where the setup has stock behind that edge;
+rounded edges and void-facing sides are excluded. Larger stock-backed sides
+receive additional evenly spaced manual points, while smaller parts reduce
+tab dimensions only when their geometry requires it.
+
 ## Job Queue
 
 Each row is one Fusion job, from queued through completed (or failed).

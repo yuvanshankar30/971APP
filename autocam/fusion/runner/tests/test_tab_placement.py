@@ -196,7 +196,7 @@ class TabDistributionTests(unittest.TestCase):
 
         selected = TabPlacement.select_tab_edges(body, max_tabs=4, stock_bounds=stock_bounds)
 
-        self.assertEqual(len(selected), 3)
+        self.assertEqual(len(selected), 4)
         self.assertNotIn(edges["right"], selected)
 
     def test_a_many_sided_part_is_capped_and_keeps_its_longest_sides(self):
@@ -258,7 +258,7 @@ class MinimumSideLengthTests(unittest.TestCase):
         # physically contain.
         self.assertGreater(TabPlacement.MIN_TAB_SIDE_LENGTH_IN, TabPlacement.TAB_WIDTH_IN)
         self.assertEqual(
-            TabPlacement.MIN_TAB_SIDE_LENGTH_IN, TabPlacement.TAB_WIDTH_IN * 2
+            TabPlacement.MIN_TAB_SIDE_LENGTH_IN, TabPlacement.TAB_WIDTH_IN * 1.5
         )
 
     def _body_with(self, edges):
@@ -287,7 +287,7 @@ class MinimumSideLengthTests(unittest.TestCase):
 
         selected = TabPlacement.select_tab_edges(body, max_tabs=8, stock_bounds=None)
 
-        self.assertEqual([id(e) for e in selected], [id(long_a)])
+        self.assertEqual([id(e) for e in selected], [id(long_a)] * 8)
 
     def test_a_part_with_no_qualifying_side_is_still_held(self):
         # An unheld part coming loose mid-cut is worse than a tight tab, so
@@ -304,6 +304,14 @@ class MinimumSideLengthTests(unittest.TestCase):
         selected = TabPlacement.select_tab_edges(body, max_tabs=4, stock_bounds=None)
 
         self.assertTrue(selected, "a small part must still get tabs, not none")
+
+    def test_extra_tabs_repeat_only_the_longest_stock_backed_sides(self):
+        body, edges = TabDistributionTests()._rectangle_body_and_edges()
+        selected = TabPlacement.select_tab_edges(body, max_tabs=8, stock_bounds=(-1, 11, -1, 6))
+
+        self.assertEqual(len(selected), 8)
+        self.assertGreaterEqual(selected.count(edges["bottom"]), 2)
+        self.assertGreaterEqual(selected.count(edges["top"]), 2)
 
 
 class ManualTabTests(unittest.TestCase):
@@ -402,6 +410,16 @@ class ManualTabPointTests(unittest.TestCase):
         selected_face, _ = root_component.sketches.created[0]
         self.assertIs(selected_face, face)
         self.assertEqual((point.point.x, point.point.y, point.point.z), (202, 0, 0.0))
+
+    def test_distributes_multiple_tabs_on_one_long_edge(self):
+        face, _ = self._face()
+        root_component = self._root_component()
+        app = types.SimpleNamespace(log=lambda _message: None)
+        edge = _edge(0, 0, 9, 0)
+
+        points = TabPlacement._manual_tab_points(app, root_component, face, [edge, edge, edge])
+
+        self.assertEqual([(p.point.x, p.point.y) for p in points], [(2.25, 0.0), (4.5, 0.0), (6.75, 0.0)])
 
 
 class TabReadBackTests(unittest.TestCase):

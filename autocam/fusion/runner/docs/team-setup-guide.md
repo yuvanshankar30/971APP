@@ -62,6 +62,10 @@ so two Runners cannot grab the same job.
 
 Queuing a job in the web UI (`/autocam/fusion`) just inserts a `queued` row into `cam_jobs`. The Runner polls `/api/fusion-runner` every few seconds, claims a queued row (compare-and-swap, so two Runners never grab the same job), and downloads the part's STEP file. It then imports that geometry into a fresh Fusion document, applies a pre-built Fusion CAM template - feeds/speeds/tool assignments someone built once by hand in Fusion's own CAM workspace, not a machining strategy invented from scratch - patches in the selected tool library and reviewed material feed/speed preset, generates toolpaths, exports G-code with the machine's post-processor, and reports the result back so the Job Queue tab shows `completed` (with a G-code download) or `failed` (with the real error). A material without a reviewed preset is rejected instead of receiving guessed feeds.
 
+Brief API connection resets are retried automatically with bounded backoff. If
+the Text Command window shows a reset repeatedly, check the network or the
+server; do not restart Fusion just for one transient reset.
+
 For box tube, the Runner creates four manually indexed setups (Sides 12, 3, 6, and 9). Only sides containing real operations produce NC files; blank sides remain visible in Fusion without a blank file. Verify the setup side, toolpath direction, and near-wall-only breakthrough in Fusion before cutting a new tube/template combination.
 
 Templates aren't a config file or code change - they're a real Fusion CAM setup someone with machine knowledge has to build once by hand. [`cam-engineering-plan.md`](cam-engineering-plan.md) alongside this file lays out exactly what's needed (tool library, post-processor, the template itself) for whoever's doing that.

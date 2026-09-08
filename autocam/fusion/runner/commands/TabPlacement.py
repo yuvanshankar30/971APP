@@ -23,7 +23,7 @@
 # ``tabPositioning.value.value = 'tabCount'`` and
 # ``tabsPerContour.value.value = 0``. The Manual Tabs parameter itself is a
 # CadPoints collection, not a list of bare edges, so every selected release
-# edge becomes a midpoint SketchPoint - see _manual_tab_points.
+# edge becomes an explicit SketchPoint - see _manual_tab_points.
 #
 # WHICH operation actually gets tabs: only the one the template itself
 # already designates via group_tabs=true in its own default state - a real
@@ -57,7 +57,7 @@ import adsk.cam
 
 
 DEFAULT_MIN_TABS = 4
-DEFAULT_MAX_TABS = 8
+DEFAULT_MAX_TABS = 10
 # How far outward (beyond the candidate edge) to check for real stock -
 # just enough to tell "is there material here at all", not "is there a lot
 # of it". Matches the same order of magnitude as MIN_TAB_EDGE_LENGTH_IN
@@ -70,7 +70,7 @@ STOCK_BACKING_CHECK_IN = 0.2
 # regardless of size. No single authoritative number exists for this; chosen
 # as the middle of commonly cited CNC sheet-tabbing guidance (roughly every
 # 4-8in of perimeter for thin plate) rather than picked arbitrarily.
-TARGET_TAB_SPACING_IN = 6.0
+TARGET_TAB_SPACING_IN = 4.0
 # Every release tab has the same operator-specified dimensions. Candidate
 # edges are selected directly, so Fusion cannot distribute a tab into a
 # corner between them.
@@ -107,7 +107,7 @@ MAX_TAB_HEIGHT_FRACTION = 0.70
 # unnecessary on a part that size and the worst place to put one. If a part
 # is so small that NO side qualifies, select_tab_edges falls back to its
 # longest sides anyway: an unheld part is worse than a tight tab.
-MIN_TAB_SIDE_LENGTH_IN = TAB_WIDTH_IN * 2
+MIN_TAB_SIDE_LENGTH_IN = TAB_WIDTH_IN * 1.5
 
 # Kept as the coarse "is this edge even worth considering" filter. The real
 # gate is MIN_TAB_SIDE_LENGTH_IN above, applied per side after collinear
@@ -279,8 +279,19 @@ def _edge_midpoint(edge):
     return adsk.core.Point3D.create((start.x + end.x) / 2, (start.y + end.y) / 2, (start.z + end.z) / 2)
 
 
+def _edge_point_at_fraction(edge, fraction):
+    """A stable manual-tab point within a straight edge's usable span."""
+    geom = edge.geometry
+    start, end = geom.startPoint, geom.endPoint
+    return adsk.core.Point3D.create(
+        start.x + (end.x - start.x) * fraction,
+        start.y + (end.y - start.y) * fraction,
+        start.z + (end.z - start.z) * fraction,
+    )
+
+
 def _manual_tab_points(app, root_component, tab_face, tab_edges):
-    """Create explicit Manual Tabs SketchPoints at vetted edge midpoints.
+    """Create explicit Manual Tabs SketchPoints at vetted edge locations.
 
     Fusion stores ``tabPositions`` as a CadPoints collection. Assigning BRep
     edges may display those edges in the operation dialog, but it does not
@@ -302,12 +313,22 @@ def _manual_tab_points(app, root_component, tab_face, tab_edges):
         except Exception:
             pass
 
+        occurrence_counts = {}
+        for edge in tab_edges:
+            occurrence_counts[id(edge)] = occurrence_counts.get(id(edge), 0) + 1
+        occurrence_indexes = {}
         tab_points = []
         for edge in tab_edges:
             # ``edge`` is intentionally the occurrence proxy returned from
             # rootComponent.allOccurrences. Its geometry is already in the
             # exact arranged coordinate frame of this setup.
-            point = sketch.modelToSketchSpace(_edge_midpoint(edge))
+            occurrence_indexes[id(edge)] = occurrence_indexes.get(id(edge), 0) + 1
+            count = occurrence_counts[id(edge)]
+            # An extra tab on a long side must be a different point, not the
+            # same midpoint repeated. Fractions divide the edge into equal,
+            # corner-safe spans: 1 tab -> midpoint; 2 -> 1/3 and 2/3, etc.
+            fraction = occurrence_indexes[id(edge)] / (count + 1)
+            point = sketch.modelToSketchSpace(_edge_point_at_fraction(edge, fraction))
             sketch_point = sketch.sketchPoints.add(point)
             tab_points.append(sketch_point)
         return tab_points
@@ -475,7 +496,7 @@ def select_tab_edges(
     # tab_width_in * 2). Measured on the segment that would carry the
     # tab, not the side's summed length: a side split into several short
     # collinear pieces still has to fit the tab within ONE of them.
-    min_side_cm = tab_width_in * 2 * 2.54
+    min_side_cm = tab_width_in * 1.5 * 2.54
     usable = [
         line for line in lines
         if best_edge_for_line(line) is not None
@@ -508,6 +529,16 @@ def select_tab_edges(
             if len(selected) >= max_tabs:
                 break
             selected.append(edge)
+
+    # A long stock-backed side carries more than one tab on a large sheet.
+    # Extra candidates are deliberately limited to the longest class of
+    # already-valid sides, preserving the rule that a void-facing or rounded
+    # side can never gain a tab just to fill a count.
+    if len(selected) < max_tabs and selected:
+        longest = _edge_length(selected[0])
+        long_sides = [edge for edge in selected if _edge_length(edge) >= longest * 0.8]
+        for index in range(max_tabs - len(selected)):
+            selected.append(long_sides[index % len(long_sides)])
     return selected
 
 

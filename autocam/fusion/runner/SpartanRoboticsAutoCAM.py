@@ -18,6 +18,8 @@ from .workflows import setupTemp as setupTemp
 from .workflows.dropFolder import _is_offline_settings_error, list_data_folder_tree
 from .workflows.job_status import send_job_error
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 _ADDIN_DIR = os.path.dirname(os.path.realpath(__file__))
 _ENV_PATH = os.path.join(_ADDIN_DIR, ".env")
@@ -44,6 +46,27 @@ _active_job_id = None  # type: Optional[str]
 _folder_sync_requested = threading.Event()
 
 _JOB_QUEUE_EVENT_ID = f"{ADDIN_NAME}_job_queue_event"
+
+
+def _configure_http_retries(http_session: requests.Session) -> None:
+    """Retry transient resets from the Runner API without duplicating jobs.
+
+    Claim/heartbeat/status endpoints are idempotent at the API level through
+    their job and runner IDs. A reset before Fusion receives an HTTP response
+    should therefore retry a few times instead of printing a full traceback
+    and leaving the poll loop idle until its next cycle.
+    """
+    retry_options = dict(
+        total=3, connect=3, read=3, status=3, backoff_factor=0.5,
+        status_forcelist=(429, 500, 502, 503, 504), raise_on_status=False,
+    )
+    try:
+        retry = Retry(allowed_methods=None, **retry_options)
+    except TypeError:  # urllib3 bundled by an older Fusion requests install.
+        retry = Retry(method_whitelist=False, **retry_options)
+    adapter = HTTPAdapter(max_retries=retry)
+    http_session.mount("https://", adapter)
+    http_session.mount("http://", adapter)
 
 
 def _drain_queue(q: "queue.Queue") -> None:
@@ -432,6 +455,7 @@ def run(_context):
 
         session = requests.Session()
         session.headers.update({"Authorization": f"Bearer {api_key}"})
+        _configure_http_retries(session)
 
         _job_processing.clear()
         _drain_queue(_job_queue)
