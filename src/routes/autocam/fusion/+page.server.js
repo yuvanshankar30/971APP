@@ -5,6 +5,7 @@ const TAB_PATHS = {
   plates: 'parts',
   'box-tubes': 'tubes',
   tubes: 'tubes',
+  turning: 'turning',
   queue: 'jobs',
   jobs: 'jobs',
   'stock-categories': 'stock-categories'
