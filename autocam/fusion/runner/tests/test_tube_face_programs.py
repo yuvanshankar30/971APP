@@ -61,6 +61,11 @@ class TubeFaceProgramTests(unittest.TestCase):
         self.assertLess(template_index, configure_index)
         self.assertIn("adsk.doEvents()", handler[template_index:configure_index])
 
+    def test_tube_routes_all_circular_holes_through_bore_faces(self):
+        handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
+        self.assertIn('"holeDiameterMaximum", "100 in"', handler)
+        self.assertIn("_apply_circular_faces(operation, circular_faces)", handler)
+
 
 if __name__ == "__main__":
     unittest.main()

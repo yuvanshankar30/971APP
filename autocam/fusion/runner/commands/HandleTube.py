@@ -16,7 +16,6 @@ from .TubeFacePrograms import TUBE_FACE_CLOCKS, tube_face_program_name, tube_fac
 
 
 _PARALLEL_TOLERANCE = 0.985
-_CIRCULAR_HOLE_SPLIT_CM = 0.3 * 2.54
 _SLOT_ASPECT_RATIO = 2.5
 
 
@@ -137,7 +136,6 @@ def _loop_specs(face):
         if not edges:
             continue
         circular = len(edges) == 1 and isinstance(edges[0].geometry, adsk.core.Circle3D)
-        diameter = edges[0].geometry.radius * 2 if circular else 0.0
         boxes = [edge.boundingBox for edge in edges]
         spans = [
             max(box.maxPoint.asArray()[axis] for box in boxes) - min(box.minPoint.asArray()[axis] for box in boxes)
@@ -164,7 +162,6 @@ def _loop_specs(face):
             "is_reverted": is_reverted_for_loop_seed(coedges[0].isOpposedToEdge),
             "circular": circular,
             "circular_faces": circular_faces,
-            "diameter": diameter,
             "slot": not circular and aspect >= _SLOT_ASPECT_RATIO,
         })
     return specs
@@ -199,15 +196,19 @@ def _apply_circular_faces(operation, faces):
         return False
 
 
+def _set_expression(operation, parameter_name, expression):
+    parameter = operation.parameters.itemByName(parameter_name)
+    if parameter is not None:
+        parameter.expression = expression
+
+
 def _configure_face_operations(setup, face):
     """Rebind every kept template operation to loops on this wall only."""
     loops = _loop_specs(face)
-    small_circles = [loop for loop in loops if loop["circular"] and loop["diameter"] < _CIRCULAR_HOLE_SPLIT_CM]
-    large_circles = [loop for loop in loops if loop["circular"] and loop["diameter"] >= _CIRCULAR_HOLE_SPLIT_CM]
     slots = [loop for loop in loops if loop["slot"]]
     shapes = [loop for loop in loops if not loop["circular"] and not loop["slot"]]
     have_shape_roughing = False
-    small_circular_faces = [face for loop in small_circles for face in loop["circular_faces"]]
+    circular_faces = [face for loop in loops if loop["circular"] for face in loop["circular_faces"]]
 
     for operation in list(setup.operations):
         name = str(operation.name or "").lower()
@@ -219,9 +220,20 @@ def _configure_face_operations(setup, face):
             # future payload; it is not replaced with a plate contour.
             keep = False
         elif operation.strategy == "bore" or "drill" in name:
-            keep = bool(small_circles) and _apply_circular_faces(operation, small_circular_faces)
+            # Bore's circularFaces accepts the actual cylindrical hole walls,
+            # unlike 2D Pocket's curve parameter. The reviewed Bore template
+            # uses the same flat end mill as the large-hole pocket sibling,
+            # so broaden its diameter range and let the correct API own all
+            # circular through holes on this indexed face.
+            _set_expression(operation, "holeDiameterMinimum", "0 in")
+            _set_expression(operation, "holeDiameterMaximum", "100 in")
+            keep = bool(circular_faces) and _apply_circular_faces(operation, circular_faces)
         elif "circular" in name and "hole" in name:
-            keep = _apply_chains(operation, "pockets", large_circles)
+            # 2D Pocket rejects the circular through-hole chains on an
+            # imported tube wall. Its geometry is handled by the Bore above,
+            # which selects cylindrical walls directly and produces the
+            # correct face-scoped result.
+            keep = False
         elif "shape" in name and "through" in name and operation.strategy in ("adaptive2d", "pocket2d"):
             # The current template has regular and Small roughing siblings.
             # Do not cut every profile twice: use the first applicable one.
