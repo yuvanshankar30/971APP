@@ -448,13 +448,6 @@
     else detectedDepthInches = null;
   }
 
-  // Strips spaces as you type rather than rejecting on submit - this
-  // becomes the Fusion document name (see camPlate.py), which treats it as
-  // one filename token. Matches the DB check constraint.
-  function handleFusionFileNameInput(event) {
-    newPart.fusionFileName = event.target.value.replace(/\s+/g, '');
-  }
-
   async function handleAddPart() {
     if (!newPart.name || !newPart.categoryId || !newPart.quantity) {
       toastActions.show('Name, category, and quantity are required');
@@ -833,11 +826,6 @@
       {/if}
       <div class="form-row">
         <div class="form-group">
-          <label class="form-label" for="part-project-id">Project ID (optional)</label>
-          <input id="part-project-id" class="form-input" list="part-project-ids" bind:value={newPart.projectId} />
-          <datalist id="part-project-ids">{#each [...new Set(manufacturingParts.map((part) => part.project_id).filter(Boolean))].sort() as projectId}<option value={projectId} />{/each}</datalist>
-        </div>
-        <div class="form-group">
           <label class="form-label" for="part-name">Name</label>
           <input id="part-name" class="form-input" bind:value={newPart.name} placeholder="e.g. Gearbox Side Plate" />
         </div>
@@ -872,6 +860,23 @@
           <input id="part-ticket" class="form-input" bind:value={newPart.ticket} />
         </div>
         <div class="form-group">
+          <label class="form-label" for="part-manufacturing-link">Manufacturing request (optional)</label>
+          <select id="part-manufacturing-link" class="form-select" bind:value={newPart.manufacturingPartId} on:change={handleManufacturingLinkChange}>
+            <option value="">Not linked to a request</option>
+            {#each manufacturingParts as mp}
+              <option value={mp.id}>{mp.name}{mp.project_id ? ` (${mp.project_id})` : ''}</option>
+            {/each}
+          </select>
+          <p class="cam-form-hint">Traces this stock back to the real request it's for - leave unlinked for ad-hoc/prototype stock. Linking one carries its STEP file over automatically.</p>
+        </div>
+      </div>
+      <div class="form-row form-row-final">
+        <div class="form-group">
+          <label class="form-label" for="part-project-id">Project ID (optional)</label>
+          <input id="part-project-id" class="form-input" list="part-project-ids" bind:value={newPart.projectId} />
+          <datalist id="part-project-ids">{#each [...new Set(manufacturingParts.map((part) => part.project_id).filter(Boolean))].sort() as projectId}<option value={projectId} />{/each}</datalist>
+        </div>
+        <div class="form-group">
           <label class="form-label" for="part-step">STEP file {manufacturingHasStepFile ? '(from linked request)' : '(optional)'}</label>
           {#if manufacturingHasStepFile}
             <!-- A real <input type="file"> can only ever show a filename the
@@ -897,31 +902,6 @@
               <p class="cam-form-hint">Carried over from "{stepCarriedOverFrom}" - pick a different file above to replace it.</p>
             {/if}
           {/if}
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label" for="part-fusion-file-name">Fusion file name (optional, no spaces)</label>
-          <input
-            id="part-fusion-file-name"
-            class="form-input"
-            value={newPart.fusionFileName}
-            on:input={handleFusionFileNameInput}
-            placeholder="e.g. GearboxSidePlate"
-          />
-          <p class="cam-form-hint">Used as the saved Fusion document name instead of the default job-name default.</p>
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label" for="part-manufacturing-link">Manufacturing request (optional)</label>
-          <select id="part-manufacturing-link" class="form-select" bind:value={newPart.manufacturingPartId} on:change={handleManufacturingLinkChange}>
-            <option value="">Not linked to a request</option>
-            {#each manufacturingParts as mp}
-              <option value={mp.id}>{mp.name}{mp.project_id ? ` (${mp.project_id})` : ''}</option>
-            {/each}
-          </select>
-          <p class="cam-form-hint">Traces this stock back to the real request it's for - leave unlinked for ad-hoc/prototype stock. Linking one carries its STEP file over automatically.</p>
         </div>
       </div>
       <div class="cam-list-actions">
@@ -1310,6 +1290,7 @@
   @media (max-width: 640px) { .recent-queue-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   .tab-actions { margin-bottom: 1rem; display: flex; gap: 0.5rem; flex-wrap: wrap; }
   .form-row { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
+  .form-row-final { padding-top: 0.75rem; border-top: 1px solid var(--border); }
   .form-row .form-group { flex: 1; min-width: 160px; }
   .cam-list { display: flex; flex-direction: column; gap: 0.75rem; }
   .cam-list-item { padding: 1rem; }

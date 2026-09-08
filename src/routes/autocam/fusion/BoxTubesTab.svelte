@@ -365,13 +365,12 @@
   {/if}
   {#if showAddForm && canManage}
     <div class="card">
-      <h3>New Tube Stock</h3>
+      <div class="cam-list-header">
+        <h3>New Tube Stock</h3>
+        <button type="button" class="btn btn-ghost btn-sm" title="Close" aria-label="Close without adding tube stock" on:click={cancelAdd}><X size={16} /></button>
+      </div>
+      <p class="cam-form-hint">A named quantity of tube stock waiting to be sent to Fusion CAM.</p>
       <div class="form-row">
-        <div class="form-group">
-          <label class="form-label" for="bt-project-id">Project ID (optional)</label>
-          <input id="bt-project-id" class="form-input" list="tube-project-ids" bind:value={newBoxTube.projectId} />
-          <datalist id="tube-project-ids">{#each [...new Set(manufacturingParts.map((part) => part.project_id).filter(Boolean))].sort() as projectId}<option value={projectId} />{/each}</datalist>
-        </div>
         <div class="form-group">
           <label class="form-label" for="bt-name">Name</label>
           <input id="bt-name" class="form-input" bind:value={newBoxTube.name} placeholder="e.g. Drivebase Rail" />
@@ -391,12 +390,6 @@
           <input id="bt-ticket" class="form-input" bind:value={newBoxTube.ticket} />
         </div>
         <div class="form-group">
-          <label class="form-label" for="bt-step">STEP file</label>
-          <input id="bt-step" type="file" accept=".step,.stp" class="form-input" on:change={handleFileChange} />
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
           <label class="form-label" for="bt-manufacturing-link">Manufacturing request (optional)</label>
           <select id="bt-manufacturing-link" class="form-select" bind:value={newBoxTube.manufacturingPartId} on:change={handleManufacturingLinkChange}>
             <option value="">Not linked to a request</option>
@@ -405,6 +398,17 @@
             {/each}
           </select>
           <p class="cam-form-hint">Traces this box tube back to the real request it's for - leave unlinked for ad-hoc stock.</p>
+        </div>
+      </div>
+      <div class="form-row form-row-final">
+        <div class="form-group">
+          <label class="form-label" for="bt-project-id">Project ID (optional)</label>
+          <input id="bt-project-id" class="form-input" list="tube-project-ids" bind:value={newBoxTube.projectId} />
+          <datalist id="tube-project-ids">{#each [...new Set(manufacturingParts.map((part) => part.project_id).filter(Boolean))].sort() as projectId}<option value={projectId} />{/each}</datalist>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="bt-step">STEP file</label>
+          <input id="bt-step" type="file" accept=".step,.stp" class="form-input" on:change={handleFileChange} />
         </div>
       </div>
       <div class="form-actions">
@@ -643,6 +647,7 @@
 <style>
   .tab-actions { margin-bottom: 1rem; }
   .form-row { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
+  .form-row-final { padding-top: 0.75rem; border-top: 1px solid var(--border); }
   .form-row .form-group { flex: 1; min-width: 160px; }
   .form-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
   .cam-list { display: flex; flex-direction: column; gap: 0.75rem; }
