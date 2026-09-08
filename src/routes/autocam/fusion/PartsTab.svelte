@@ -134,9 +134,8 @@
   // queuePickerCategoryId is which stock category is currently chosen
   // inside the popup - '' until the user picks one. queuePickerDate
   // narrows the part pickers to parts created on one day (Pacific, to
-  // match the rest of the app's date conventions) - defaults to today
-  // each time the popup opens, clearable to see every part regardless of
-  // when it was added.
+  // match the rest of the app's date conventions). An empty value is the
+  // default all-dates view.
   let queuePickerOpen = false;
   let queuePickerCategoryId = '';
   let queuePickerDate = '';
@@ -162,7 +161,7 @@
   // Called externally via bind:this from +page.svelte's header button.
   export function openQueuePicker() {
     queuePickerOpen = true;
-    queuePickerDate = pacificDateKey(new Date());
+    queuePickerDate = '';
     recentPartsSearch = '';
     groupedPartsSearch = '';
   }
@@ -637,12 +636,8 @@
       candidate.categoryId && String(candidate.categoryId) === String(part.category_id)
     );
     if (!group) return;
-    // A recent part may not have been created on the picker's default
-    // "today" date filter, which would otherwise leave it out of both the
-    // Stock category and Part option lists below - the bound value then
-    // matches no <option> and both selects render blank. Clearing the
-    // filter (same as "Show all dates") guarantees the part just picked is
-    // actually selectable.
+    // A recent part can be outside an active date filter. Clear it so the
+    // bound category and part selections always remain available.
     queuePickerDate = '';
     queuePickerCategoryId = group.categoryId;
     groupedPartsSearch = '';
@@ -1032,7 +1027,11 @@
             <label class="form-label" for="queue-picker-date">Parts created on</label>
             <div class="date-with-clear">
               <input id="queue-picker-date" type="date" class="form-input" bind:value={queuePickerDate} />
-              <button type="button" class="btn btn-ghost btn-sm" disabled={!queuePickerDate} on:click={() => (queuePickerDate = '')}>Show all dates</button>
+              {#if queuePickerDate}
+                <button type="button" class="btn btn-ghost btn-sm" on:click={() => (queuePickerDate = '')}>Show all dates</button>
+              {:else}
+                <span class="cam-form-hint">All dates</span>
+              {/if}
             </div>
           </div>
           <div class="form-group">
