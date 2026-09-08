@@ -125,6 +125,17 @@ def resolve_data_project(app, project_name):
     return app.data.activeProject
 
 
+# Folder names (case-insensitive) that get first claim on the shared
+# max_folders budget at every depth of list_data_folder_tree's walk - see
+# that function's own comment at the sort call for why this exists.
+# "Offseason Projects" is where AutoCAM documents actually live
+# (resolve_drop_folder's own docstring uses "Offseason Projects/AutoCAM"
+# as its real, established example) - the one subtree the picker must
+# never leave empty, even when the rest of a large project can't all fit
+# in the same budget.
+_PRIORITY_FOLDER_NAMES = {"offseason projects"}
+
+
 def list_data_folder_tree(app, project_name, base_folder_path, max_depth=3, max_folders=150):
     """Walks the Data Panel folder tree starting at base_folder_path (e.g.
     "" for the project root itself, or "Offseason Projects/AutoCAM" for a
@@ -209,6 +220,22 @@ def list_data_folder_tree(app, project_name, base_folder_path, max_depth=3, max_
                 node["children"].append(child_node)
                 next_level.append((child, child_node, depth + 1))
             node["children"].sort(key=lambda n: n["name"].lower())
+        # Live-measured, not assumed: the real project has 12 top-level
+        # folders, and raising max_folders alone (60 -> 150) still left
+        # "Offseason Projects" - the folder AutoCAM documents actually
+        # live under - with zero children and truncated=true, because 7
+        # of those 12 folders' own child listings happened to exhaust the
+        # shared depth-2 budget before Offseason Projects' turn came up
+        # in whatever order the Data Panel API happened to return them.
+        # A flat budget can't be both fast and complete for a project
+        # this size - reordering so the one subtree that actually matters
+        # gets first claim on whatever budget remains, every time, fixes
+        # the real complaint directly instead of chasing a bigger number.
+        # Every top-level folder is still listed by name either way (that
+        # part was never the problem - see the module's own root-walk
+        # history); this only decides whose CHILDREN get walked when
+        # budget is tight.
+        next_level.sort(key=lambda entry: entry[1]["name"].strip().lower() not in _PRIORITY_FOLDER_NAMES)
         level = next_level
 
     return {"project": data_project.name, "root": root_node}
