@@ -23,7 +23,7 @@ from ..commands.NewNCProgram import export
 from ..commands.DeleteToolpaths import DeleteToolpaths
 from ..commands.AutoArrange import AutoArrange
 from ..commands.Orientation import orient_plate_pocket_side_up
-from ..commands.TabPlacement import ConfigureTabs
+from ..commands.TabPlacement import ConfigureTabs, DEFAULT_MAX_TABS, DEFAULT_MIN_TABS
 from ..config import (
     BASE_URL,
     FINAL_PATH,
@@ -227,6 +227,36 @@ def _get(payload: dict, *keys: str, default=None):
         if key in payload:
             return payload[key]
     return default
+
+
+def _resolve_tab_count_override(payload: dict, log):
+    """An operator can force an exact tab count for this job instead of
+    the perimeter-based automatic target (TabPlacement._tab_count_for_
+    perimeter) - returns None (stay automatic, this job's existing
+    default) when nothing was set.
+
+    Clamped to [DEFAULT_MIN_TABS, DEFAULT_MAX_TABS] - the same range the
+    automatic system already treats as reasonable - server-side too (see
+    jobPayload.js), but re-checked here rather than trusting a single
+    layer: "cannot be too much" is a real constraint (this session's own
+    over-tabbing incident), not just a UI hint. A malformed value falls
+    back to automatic rather than raising - the caller's own try/except
+    around ConfigureTabs would otherwise turn one bad value into zero
+    tabs for the whole job, a much worse outcome than ignoring it.
+
+    The caller passes min_tabs=max_tabs=this value to ConfigureTabs,
+    forcing every body in the job to exactly that count, overriding the
+    per-body perimeter scaling entirely - that is what "set the amount
+    of tabs" means once an operator has taken explicit manual control.
+    """
+    raw_value = _get(payload, "tab_count")
+    if raw_value is None:
+        return None
+    try:
+        return max(DEFAULT_MIN_TABS, min(DEFAULT_MAX_TABS, int(raw_value)))
+    except (TypeError, ValueError):
+        log(f"Ignoring invalid tab_count override '{raw_value}': using the automatic default instead")
+        return None
 
 
 # How little material may be left standing between two separate cuts before
@@ -646,7 +676,12 @@ def start(data, session):
             template_path=template_path,
         )
         try:
-            ConfigureTabs()
+            tab_count_override = _resolve_tab_count_override(payload, app.log)
+            if tab_count_override is not None:
+                app.log(f"Using operator-specified tab count: {tab_count_override}")
+                ConfigureTabs(min_tabs=tab_count_override, max_tabs=tab_count_override)
+            else:
+                ConfigureTabs()
         except Exception:
             app.log("TabPlacement failed:\n{}".format(traceback.format_exc()))
         DeleteToolpaths()

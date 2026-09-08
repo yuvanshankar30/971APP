@@ -556,7 +556,7 @@ export async function fetchFusionFolderTree(projectName = '2026 Season CAM') {
  * turning/routing's cam-generate, this genuinely needs an external Fusion
  * 360 process).
  */
-export async function queueFusionJob({ fusionJobKind, plateId, boxTubeId, machineId, materialId, toolId, requestedBy, name, partId, groupingMode, selectedPartId, selectedPartIds, fusionFileName, fusionFolderPath }) {
+export async function queueFusionJob({ fusionJobKind, plateId, boxTubeId, machineId, materialId, toolId, requestedBy, name, partId, groupingMode, selectedPartId, selectedPartIds, fusionFileName, fusionFolderPath, tabCount }) {
   if (!FUSION_JOB_KINDS.includes(fusionJobKind)) {
     throw new Error(`Invalid fusionJobKind: ${fusionJobKind}`);
   }
@@ -569,7 +569,14 @@ export async function queueFusionJob({ fusionJobKind, plateId, boxTubeId, machin
       plateId: plateId || null,
       fusionGroupingMode: groupingMode,
       selectedPartId: selectedPartId || null,
-      selectedPartIds: Array.isArray(selectedPartIds) ? selectedPartIds : null
+      selectedPartIds: Array.isArray(selectedPartIds) ? selectedPartIds : null,
+      // Optional operator override for TabPlacement's tab count - stays
+      // automatic (this job's existing default) when not set. Plate jobs
+      // only, same as the fields above; box-tube CAM never runs
+      // TabPlacement at all. Re-clamped server-side (buildJobPayload) and
+      // again in the Runner itself (camPlate.py) - never trust a single
+      // layer for "cannot be too much".
+      tabCount: tabCount === '' || tabCount == null ? null : Number(tabCount)
     } : { boxTubeId }),
     // Where the saved Fusion document goes and what it's named - chosen at
     // queue time (Plates tab). Optional; camPlate.py falls back to its

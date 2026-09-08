@@ -242,6 +242,17 @@
   let queueModalLabel = '';
   let queueFileName = '';
   let queueFolderPath = '';
+  // Optional operator override for how many release tabs this job's
+  // parts get, instead of the automatic perimeter-based target - blank
+  // (the default) means stay automatic, this job's existing behavior.
+  // Bounded to the same [4, 20] range TabPlacement.py's own
+  // DEFAULT_MIN_TABS/DEFAULT_MAX_TABS already treat as reasonable for
+  // the automatic target - direct instruction: this "cannot be too
+  // much," re-clamped server-side (buildJobPayload) and again in the
+  // Runner itself, not just enforced by this input's own min/max.
+  const TAB_COUNT_MIN = 4;
+  const TAB_COUNT_MAX = 20;
+  let queueTabCount = '';
   // Free-text search over the synced Data Panel tree. The picker walks from
   // the "2026 Season CAM" project root, which has far too many nested
   // subsystem folders to browse by scrolling - typing filters to a flat
@@ -826,6 +837,7 @@
         : categoryLabel(group.category);
       queueFileName = queueModalLabel.replace(/\s+/g, '');
       queueFolderPath = '';
+      queueTabCount = '';
       folderSearch = '';
       closeQueuePicker();
     } catch (e) {
@@ -841,6 +853,7 @@
     // Otherwise a stale search term hides the whole tree the next time this
     // modal opens, which reads as "the folder list disappeared."
     folderSearch = '';
+    queueTabCount = '';
   }
 
   async function confirmQueue() {
@@ -869,7 +882,8 @@
         requestedBy: user?.id,
         name: `${mode === 'grouped' ? 'Grouped Fusion CAM' : 'Fusion CAM'}: ${queueModalLabel}`,
         fusionFileName: queueFileName.trim() || null,
-        fusionFolderPath: queueFolderPath || null
+        fusionFolderPath: queueFolderPath || null,
+        tabCount: queueTabCount === '' ? null : queueTabCount
       });
       toastActions.show('Queued for the Fusion Runner');
       categoryQueueModes = { ...categoryQueueModes, [categoryId]: '' };
@@ -1340,6 +1354,20 @@
             placeholder="e.g. GearboxSidePlate"
           />
           <p class="cam-form-hint">No spaces - this becomes the saved document's name in Fusion's Data Panel.</p>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="queue-tab-count">Release tab count <span class="text-muted">(optional)</span></label>
+          <input
+            id="queue-tab-count"
+            class="form-input"
+            type="number"
+            min={TAB_COUNT_MIN}
+            max={TAB_COUNT_MAX}
+            step="1"
+            bind:value={queueTabCount}
+            placeholder="Automatic"
+          />
+          <p class="cam-form-hint">Overrides the automatic tab count ({TAB_COUNT_MIN}-{TAB_COUNT_MAX}) for this job - leave blank to size tabs from the part automatically. Too many tabs adds real cutting time for no real stability benefit; only ask for more than the automatic default if a specific part needs it.</p>
         </div>
         <div class="form-group">
           <div class="folder-picker-header">

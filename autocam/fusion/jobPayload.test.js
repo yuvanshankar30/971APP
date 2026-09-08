@@ -38,6 +38,36 @@ describe('Fusion plate payloads',()=>{
  });
 });
 
+describe('Fusion plate payload tab_count override',()=>{
+ // Direct instruction: an operator can force an exact tab count instead
+ // of the automatic perimeter-based target - "cannot be too much", so
+ // this must clamp rather than pass a value through as-is.
+ it('is null when the operator never set one - stays automatic',async()=>{
+  const payload=await buildJobPayload(db(),job());
+  expect(payload.tab_count).toBeNull();
+ });
+ it('passes a normal in-range value through unchanged',async()=>{
+  const j=job(); j.params.tabCount=8;
+  const payload=await buildJobPayload(db(),j);
+  expect(payload.tab_count).toBe(8);
+ });
+ it('clamps an excessive value to the max instead of sending it as-is',async()=>{
+  const j=job(); j.params.tabCount=500;
+  const payload=await buildJobPayload(db(),j);
+  expect(payload.tab_count).toBe(20);
+ });
+ it('clamps a too-low value up to the minimum',async()=>{
+  const j=job(); j.params.tabCount=0;
+  const payload=await buildJobPayload(db(),j);
+  expect(payload.tab_count).toBe(4);
+ });
+ it('treats a non-numeric value the same as unset rather than sending garbage',async()=>{
+  const j=job(); j.params.tabCount='not-a-number';
+  const payload=await buildJobPayload(db(),j);
+  expect(payload.tab_count).toBeNull();
+ });
+});
+
 describe('Fusion box-tube payloads',()=>{
  const tubeJob=()=>({params:{fusionJobKind:'box_tube',boxTubeId:'tube-1',fusionFileName:'BottomTube',fusionFolderPath:'Offseason Projects/AutoCAM/Tubes'}});
  const tubeDb=()=>({
@@ -52,5 +82,9 @@ describe('Fusion box-tube payloads',()=>{
  it('keeps old tube jobs compatible when no save destination was selected',async()=>{
   const value=tubeJob(); delete value.params.fusionFileName; delete value.params.fusionFolderPath;
   await expect(buildJobPayload(tubeDb(),value)).resolves.toMatchObject({fusion_file_name:null,fusion_folder_path:null});
+ });
+ it('never includes tab_count - TabPlacement never runs for tube stock',async()=>{
+  const payload=await buildJobPayload(tubeDb(),tubeJob());
+  expect(payload).not.toHaveProperty('tab_count');
  });
 });
