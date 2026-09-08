@@ -302,6 +302,17 @@ class TabDistributionTests(unittest.TestCase):
         self.assertEqual(TabPlacement._tab_count_for_perimeter(16.01, 4, 10), 5)
         self.assertEqual(TabPlacement._tab_count_for_perimeter(36.01, 4, 10), 10)
 
+    def test_default_max_tabs_does_not_flatten_a_large_real_plate(self):
+        # Real bug: a 33 x 21in BellyPan plate (perimeter ~130.14in with its
+        # actual notched outline, well over a plain rectangle's 108in) was
+        # still landing on exactly 10 tabs under the old DEFAULT_MAX_TABS=10
+        # cap - the same count a much smaller part would get. With the
+        # default raised, its budget keeps rising with perimeter instead of
+        # saturating at a small-part count.
+        target = TabPlacement._tab_count_for_perimeter(130.14, TabPlacement.DEFAULT_MIN_TABS, TabPlacement.DEFAULT_MAX_TABS)
+        self.assertGreater(target, 10)
+        self.assertEqual(target, TabPlacement.math.ceil(130.14 / TabPlacement.TARGET_TAB_SPACING_IN))
+
     def test_stock_bounds_use_resolved_cam_values_not_display_expressions(self):
         values = {}
         for name, value in zip(
@@ -576,6 +587,215 @@ class TabReadBackTests(unittest.TestCase):
             app, operation, [object(), object(), object(), object()]))
 
         self.assertEqual([m for m in logged if "WARNING" in m], [])
+
+
+class TabMinimumCountTests(unittest.TestCase):
+    """A triangular part only has 3 real sides - forcing a 4th tab onto one
+    already-tabbed side doesn't add real holding power, it just doubles up
+    on one side for no benefit. Direct instruction: exactly 3 for a
+    triangle, the normal min_tabs floor for everything else. Previously
+    untested end to end - _min_tabs_for_body existed and was wired into
+    ConfigureTabs, but nothing verified it actually reduces the floor for a
+    real triangle, leaves other shapes alone, or that select_tab_edges
+    actually places one tab per side (not a forced 4th) once it does.
+    """
+
+    def _rectangle_body(self):
+        edges = {
+            "bottom": _edge(0, 0, 10, 0),
+            "right": _edge(10, 0, 10, 5),
+            "top": _edge(10, 5, 0, 5),
+            "left": _edge(0, 5, 0, 0),
+        }
+        loop = _loop(True, list(edges.values()))
+        body = _body([_face(1.0, 1.0, [loop])], (0, 0), (10, 5))
+        return body, edges
+
+    def _triangle_body(self):
+        edges = {
+            "bottom": _edge(0, 0, 10, 0),
+            "right": _edge(10, 0, 5, 8),
+            "left": _edge(5, 8, 0, 0),
+        }
+        loop = _loop(True, list(edges.values()))
+        body = _body([_face(1.0, 1.0, [loop])], (0, 0), (10, 8))
+        return body, edges
+
+    def _two_sided_body(self, side_length=10.0):
+        # A stadium/racetrack shape: two long straight sides, two curved
+        # ends. _is_straight_edge excludes the curved ones outright (their
+        # .geometry is not a Line3D), so only the 2 straight sides ever
+        # reach _all_straight_edges / _distinct_straight_line_count.
+        curved = types.SimpleNamespace(geometry=types.SimpleNamespace(), length=6.0)
+        edges = {
+            "top": _edge(0, side_length, 10, side_length),
+            "bottom": _edge(10, 0, 0, 0),
+        }
+        loop = _loop(True, [edges["top"], curved, edges["bottom"], curved])
+        body = _body([_face(1.0, 1.0, [loop])], (0, 0), (10, side_length))
+        return body, edges
+
+    def test_distinct_straight_line_count_ignores_curved_edges(self):
+        body, _edges = self._two_sided_body()
+        self.assertEqual(TabPlacement._distinct_straight_line_count(body), 2)
+
+    def test_distinct_straight_line_count_for_a_triangle_is_3(self):
+        body, _edges = self._triangle_body()
+        self.assertEqual(TabPlacement._distinct_straight_line_count(body), 3)
+
+    def test_min_tabs_for_a_triangle_is_3_not_the_default_floor(self):
+        body, _edges = self._triangle_body()
+        self.assertEqual(
+            TabPlacement._min_tabs_for_body(body, TabPlacement.DEFAULT_MIN_TABS), 3
+        )
+
+    def test_min_tabs_for_a_rectangle_keeps_the_passed_in_floor(self):
+        body, _edges = self._rectangle_body()
+        self.assertEqual(
+            TabPlacement._min_tabs_for_body(body, TabPlacement.DEFAULT_MIN_TABS),
+            TabPlacement.DEFAULT_MIN_TABS,
+        )
+
+    def test_min_tabs_for_a_two_sided_shape_keeps_the_passed_in_floor(self):
+        # Only a triangle (exactly 3 real sides) gets the reduced floor - a
+        # 2-sided shape still asks for the normal minimum and relies on
+        # select_tab_edges's own redistribution to double up across its 2
+        # real sides, rather than a special case forcing an impossible 3rd
+        # distinct side to appear.
+        body, _edges = self._two_sided_body()
+        self.assertEqual(
+            TabPlacement._min_tabs_for_body(body, TabPlacement.DEFAULT_MIN_TABS),
+            TabPlacement.DEFAULT_MIN_TABS,
+        )
+
+    def test_a_triangle_gets_exactly_one_tab_per_side_not_a_forced_fourth(self):
+        # End to end, mirroring what ConfigureTabs actually does: compute
+        # this body's own min-tabs floor, feed it into the perimeter-scaled
+        # target, then select edges with that target as the cap.
+        body, edges = self._triangle_body()
+        body_min_tabs = TabPlacement._min_tabs_for_body(body, TabPlacement.DEFAULT_MIN_TABS)
+        perimeter_in = sum(TabPlacement._edge_length(e) for e in edges.values()) / 2.54
+        target = TabPlacement._tab_count_for_perimeter(
+            perimeter_in, body_min_tabs, TabPlacement.DEFAULT_MAX_TABS
+        )
+
+        selected = TabPlacement.select_tab_edges(body, max_tabs=target, stock_bounds=None)
+
+        self.assertEqual(len(selected), 3)
+        selected_ids = [id(e) for e, _fraction in selected]
+        self.assertEqual(len(set(selected_ids)), 3, "one tab per side, never a doubled-up 4th")
+        for side in ("bottom", "right", "left"):
+            self.assertIn(id(edges[side]), selected_ids)
+
+    def test_a_two_sided_shape_doubles_up_instead_of_forcing_a_third_side(self):
+        body, edges = self._two_sided_body(side_length=10.0)
+        body_min_tabs = TabPlacement._min_tabs_for_body(body, TabPlacement.DEFAULT_MIN_TABS)
+        self.assertEqual(body_min_tabs, TabPlacement.DEFAULT_MIN_TABS)
+
+        selected = TabPlacement.select_tab_edges(body, max_tabs=body_min_tabs, stock_bounds=None)
+
+        # 4 tabs requested (the default floor), only 2 real straight sides
+        # exist - both get doubled up (2 tabs each) instead of a tab ever
+        # landing on a curved end.
+        self.assertEqual(len(selected), 4)
+        selected_edges = [e for e, _fraction in selected]
+        self.assertEqual(selected_edges.count(edges["top"]), 2)
+        self.assertEqual(selected_edges.count(edges["bottom"]), 2)
+
+    def test_tab_count_for_perimeter_never_drops_below_the_bodys_own_floor(self):
+        # A tiny triangle (perimeter well under one TARGET_TAB_SPACING_IN
+        # interval) must still get its 3-tab floor, not fewer.
+        self.assertEqual(
+            TabPlacement._tab_count_for_perimeter(3.0, 3, TabPlacement.DEFAULT_MAX_TABS), 3
+        )
+
+
+class ZeroMarginOriginSideTests(unittest.TestCase):
+    """SetupGenerator.py gives a setup's combined RelativeBoxStock ZERO
+    margin on its near-origin (low-X, low-Y) sides (job_stockOffsetXBack =
+    "0 in" - origin sits at the bottom-left corner, stock starts exactly at
+    the part's own edge there). A tab on an edge running along that
+    boundary has nothing real to anchor into - real, live-confirmed bug: on
+    a real BellyPan run, tabs piled onto exactly that edge instead of being
+    excluded, because the only exclusion check that existed
+    (_has_real_stock_backing, gated on the setup's own CAM-parameter
+    stock_bounds) went unfiltered when that read didn't succeed. This
+    exclusion is checked directly from geometry instead, so it can't
+    silently no-op the same way.
+    """
+
+    def _rectangle_body_and_edges(self):
+        edges = {
+            "bottom": _edge(0, 0, 10, 0),
+            "right": _edge(10, 0, 10, 5),
+            "top": _edge(10, 5, 0, 5),
+            "left": _edge(0, 5, 0, 0),
+        }
+        loop = _loop(True, list(edges.values()))
+        body = _body([_face(1.0, 1.0, [loop])], (0, 0), (10, 5))
+        return body, edges
+
+    def test_combined_min_bounds_is_the_bodys_own_low_corner(self):
+        body, _edges = self._rectangle_body_and_edges()
+        self.assertEqual(TabPlacement._combined_min_bounds_cm([body]), (0, 0))
+
+    def test_combined_min_bounds_spans_every_body_sharing_a_setup(self):
+        # A grouped job's zero-margin side is the GROUP's shared boundary,
+        # not any one body's individual bounding box.
+        body_a = _body([], (2, 3), (8, 9))
+        body_b = _body([], (-4, 1), (5, 6))
+        self.assertEqual(TabPlacement._combined_min_bounds_cm([body_a, body_b]), (-4, 1))
+
+    def test_edges_on_the_low_x_or_low_y_boundary_are_flagged(self):
+        _body_unused, edges = self._rectangle_body_and_edges()
+        self.assertTrue(TabPlacement._lies_on_zero_margin_origin_side(edges["left"], 0, 0))
+        self.assertTrue(TabPlacement._lies_on_zero_margin_origin_side(edges["bottom"], 0, 0))
+
+    def test_edges_away_from_the_origin_corner_are_not_flagged(self):
+        _body_unused, edges = self._rectangle_body_and_edges()
+        self.assertFalse(TabPlacement._lies_on_zero_margin_origin_side(edges["right"], 0, 0))
+        self.assertFalse(TabPlacement._lies_on_zero_margin_origin_side(edges["top"], 0, 0))
+
+    def test_an_edge_only_touching_the_origin_corner_is_not_flagged(self):
+        # Touches (0, 0) at one endpoint but runs away from both boundary
+        # lines - real stock exists along its own length, unlike an edge
+        # that runs the entire way along low-X or low-Y.
+        diagonal = _edge(0, 0, 6, 4)
+        self.assertFalse(TabPlacement._lies_on_zero_margin_origin_side(diagonal, 0, 0))
+
+    def test_select_tab_edges_excludes_the_zero_margin_side_even_without_stock_bounds(self):
+        # The exact failure mode observed live: stock_bounds unavailable
+        # (None) must not be the reason a zero-margin edge slips through -
+        # this check has to hold on its own.
+        body, edges = self._rectangle_body_and_edges()
+
+        selected = TabPlacement.select_tab_edges(
+            body, max_tabs=4, stock_bounds=None, combined_min_bounds_cm=(0, 0)
+        )
+
+        selected_edges = [e for e, _fraction in selected]
+        self.assertNotIn(edges["left"], selected_edges)
+        self.assertNotIn(edges["bottom"], selected_edges)
+        # Both excluded sides' budget lands on the two real ones instead -
+        # no tab is silently dropped just because two of the four sides
+        # were unusable. "right" (5cm/~1.97in) only has room for one tab at
+        # the required spacing, so the extra 3rd tab goes to "top"
+        # (10cm/~3.94in) instead, not split evenly regardless of fit.
+        self.assertEqual(len(selected_edges), 4)
+        self.assertEqual(selected_edges.count(edges["top"]), 3)
+        self.assertEqual(selected_edges.count(edges["right"]), 1)
+
+    def test_select_tab_edges_ignores_the_zero_margin_check_when_not_given(self):
+        # Backward compatible: existing callers that don't pass
+        # combined_min_bounds_cm keep their previous behavior exactly (no
+        # new exclusion applied).
+        body, edges = self._rectangle_body_and_edges()
+
+        selected = TabPlacement.select_tab_edges(body, max_tabs=4, stock_bounds=None)
+
+        selected_edges = [e for e, _fraction in selected]
+        self.assertIn(edges["left"], selected_edges)
+        self.assertIn(edges["bottom"], selected_edges)
 
 
 if __name__ == "__main__":

@@ -58,7 +58,19 @@ import math
 
 
 DEFAULT_MIN_TABS = 4
-DEFAULT_MAX_TABS = 10
+# Real bug, not a theoretical one: a 33 x 21in BellyPan plate (perimeter
+# ~130in) landed on exactly 10 tabs - _tab_count_for_perimeter's own target
+# (perimeter / TARGET_TAB_SPACING_IN) wanted ~33, but the old cap of 10 was
+# tuned when this comment block said FRC-scale parts meant "a few inches to
+# a couple feet around." A part significantly bigger than that (now
+# routine now that plates default to 100x100in and no longer reject an
+# oversized single part - see AutoArrange.py) still needs tab count to keep
+# rising with its perimeter, same as a small part does - fewer tabs than
+# the spacing target calls for on a large, heavy plate is a real
+# workholding risk during machining, not just a cosmetic undercount.
+# Raised well past anything realistic for a single sheet part rather than
+# re-tuned to this one BellyPan's exact perimeter.
+DEFAULT_MAX_TABS = 40
 # How far outward (beyond the candidate edge) to check for real stock -
 # just enough to tell "is there material here at all", not "is there a lot
 # of it". Matches the same order of magnitude as MIN_TAB_EDGE_LENGTH_IN
@@ -66,10 +78,11 @@ DEFAULT_MAX_TABS = 10
 # anchor point," just measured along different axes of the same tab.
 STOCK_BACKING_CHECK_IN = 0.2
 # Roughly one tab per this many inches of a part's own outer perimeter -
-# FRC-scale sheet parts (a few inches to a couple feet around) land in the
-# 3-8 tab range this way rather than every part getting the same flat count
-# regardless of size. No single authoritative number exists for this; chosen
-# as the middle of commonly cited CNC sheet-tabbing guidance (roughly every
+# small FRC-scale sheet parts (a few inches to a couple feet around) land
+# in the 3-8 tab range this way, and it keeps rising for genuinely large
+# ones instead of flattening out at a small part's typical count (see
+# DEFAULT_MAX_TABS). No single authoritative number exists for this;
+# chosen as the middle of commonly cited CNC sheet-tabbing guidance (roughly every
 # 4-8in of perimeter for thin plate) rather than picked arbitrarily.
 TARGET_TAB_SPACING_IN = 4.0
 # Every release tab has the same operator-specified dimensions. Candidate
@@ -376,6 +389,58 @@ def _has_real_stock_backing(edge, body_center, stock_bounds, offset_cm) -> bool:
     return x_low <= point.x <= x_high and y_low <= point.y <= y_high
 
 
+# SetupGenerator.py deliberately gives a setup's combined RelativeBoxStock
+# ZERO margin on its near-origin (low-X, low-Y) sides -
+# job_stockOffsetXBack is explicitly "0 in" (origin sits at the bottom-left
+# corner; stock starts exactly at the nested geometry's own edge there),
+# unlike the 0.5in margin job_stockOffsetXFront/YFront give the far
+# (high-X/high-Y) sides. A candidate edge running along that same
+# near-origin boundary therefore NEVER has real stock behind it - a fact
+# knowable directly from the nested bodies' own combined bounding box,
+# independent of whether _setup_stock_bounds's CAM-parameter read
+# succeeds. Confirmed live as a real, not theoretical, gap: on a real
+# BellyPan run tabs piled onto exactly this edge instead of being excluded
+# - _has_real_stock_backing's stock_bounds check alone did not catch it (a
+# missing/renamed CAM parameter silently disables that entire check via
+# ConfigureTabs's own except-Exception fallback to "don't filter" - see
+# its own docstring). This check has no such failure mode: it only needs
+# the geometry already in hand.
+ZERO_MARGIN_TOLERANCE_CM = 1e-3
+
+
+def _lies_on_zero_margin_origin_side(edge, min_x_cm, min_y_cm) -> bool:
+    """True if `edge` runs the entire way along the setup's near-origin
+    (low-X or low-Y) stock boundary - both endpoints on that line, not
+    merely touching it at one corner (an edge that only touches the corner
+    and runs away from it still has real stock along its own length).
+    """
+    geom = edge.geometry
+    start, end = geom.startPoint, geom.endPoint
+    on_min_x = (
+        abs(start.x - min_x_cm) <= ZERO_MARGIN_TOLERANCE_CM
+        and abs(end.x - min_x_cm) <= ZERO_MARGIN_TOLERANCE_CM
+    )
+    on_min_y = (
+        abs(start.y - min_y_cm) <= ZERO_MARGIN_TOLERANCE_CM
+        and abs(end.y - min_y_cm) <= ZERO_MARGIN_TOLERANCE_CM
+    )
+    return on_min_x or on_min_y
+
+
+def _combined_min_bounds_cm(bodies):
+    """The near-origin (low-X, low-Y) corner of every nested body's own
+    combined bounding box, in cm - matches what SetupGenerator.py's
+    RelativeBoxStock is actually built from (every body assigned to a
+    setup shares one combined stock box, not one each), so a grouped job's
+    zero-margin side is the group's own shared boundary, not any single
+    body's individual one.
+    """
+    return (
+        min(body.boundingBox.minPoint.x for body in bodies),
+        min(body.boundingBox.minPoint.y for body in bodies),
+    )
+
+
 def _body_center(body):
     return adsk.core.Point3D.create(
         (body.boundingBox.minPoint.x + body.boundingBox.maxPoint.x) / 2,
@@ -463,6 +528,7 @@ def select_tab_edges(
     max_tabs: int = DEFAULT_MAX_TABS,
     stock_bounds=None,
     tab_width_in: float = TAB_WIDTH_IN,
+    combined_min_bounds_cm=None,
 ):
     """(edge, fraction) positions on the body's own outer boundary, spread
     across every distinct USABLE straight side. Never returns a
@@ -504,11 +570,22 @@ def select_tab_edges(
     a large one for more): the long structural sides win over a fan of
     short facets - confirmed live on a real teardrop bracket that had been
     picking up a tab on every one of its short bottom facets.
+
+    combined_min_bounds_cm, when given, is the (min_x, min_y) corner of
+    every body sharing this setup's own combined bounding box - the
+    near-origin sides of a RelativeBoxStock setup always get zero real
+    margin there (see _lies_on_zero_margin_origin_side), a fact checked
+    unconditionally alongside stock_bounds rather than only when the
+    latter happens to be available.
     """
     stock_check_cm = STOCK_BACKING_CHECK_IN * 2.54
     body_center = _body_center(body)
 
     def is_backed(edge):
+        if combined_min_bounds_cm is not None:
+            min_x_cm, min_y_cm = combined_min_bounds_cm
+            if _lies_on_zero_margin_origin_side(edge, min_x_cm, min_y_cm):
+                return False
         return _has_real_stock_backing(edge, body_center, stock_bounds, stock_check_cm)
 
     all_edges = sorted(_all_straight_edges(body), key=_edge_length, reverse=True)
@@ -746,6 +823,13 @@ def ConfigureTabs(min_tabs: int = DEFAULT_MIN_TABS, max_tabs: int = DEFAULT_MAX_
         app.log("TabPlacement: no bodies found, skipping tab configuration")
         return
 
+    # Every body here shares the one Setup this add-in creates per document
+    # (see SetupGenerator.py) - their combined bounding box is exactly what
+    # RelativeBoxStock builds the setup's stock from, and its near-origin
+    # (low-X, low-Y) corner is where that stock always has zero real margin
+    # (see _lies_on_zero_margin_origin_side).
+    combined_min_bounds_cm = _combined_min_bounds_cm(bodies)
+
     tab_width_in = _tab_width_for_bodies(bodies)
     tab_height_in = _tab_height_for_bodies(bodies)
     if tab_width_in < TAB_WIDTH_IN:
@@ -838,6 +922,7 @@ def ConfigureTabs(min_tabs: int = DEFAULT_MIN_TABS, max_tabs: int = DEFAULT_MAX_
                     max_tabs=target_tabs,
                     stock_bounds=stock_bounds,
                     tab_width_in=tab_width_in,
+                    combined_min_bounds_cm=combined_min_bounds_cm,
                 )
                 if len(body_candidates) < body_min_tabs:
                     app.log(
