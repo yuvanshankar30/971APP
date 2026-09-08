@@ -281,6 +281,42 @@ class TabDistributionTests(unittest.TestCase):
         # No redistribution needed - one edge, one tab, each at its midpoint.
         self.assertTrue(all(fraction == 0.5 for _edge, fraction in selected))
 
+    def test_two_supported_sides_absorb_tabs_from_stock_bound_sides(self):
+        body, edges = self._rectangle_body_and_edges()
+        # Stock exists beyond the top and bottom edges, but stops short of
+        # both vertical edges.  Tabs can only anchor into the two horizontal
+        # release sides, so their longer runs receive the whole budget.
+        selected = TabPlacement.select_tab_edges(
+            body, max_tabs=6, stock_bounds=(0.2, 9.8, -1, 6)
+        )
+
+        self.assertEqual(len(selected), 6)
+        selected_edges = [edge for edge, _fraction in selected]
+        self.assertEqual(selected_edges.count(edges["top"]), 3)
+        self.assertEqual(selected_edges.count(edges["bottom"]), 3)
+        self.assertNotIn(edges["left"], selected_edges)
+        self.assertNotIn(edges["right"], selected_edges)
+
+    def test_tab_budget_increases_when_perimeter_crosses_another_spacing_interval(self):
+        self.assertEqual(TabPlacement._tab_count_for_perimeter(16.0, 4, 10), 4)
+        self.assertEqual(TabPlacement._tab_count_for_perimeter(16.01, 4, 10), 5)
+        self.assertEqual(TabPlacement._tab_count_for_perimeter(36.01, 4, 10), 10)
+
+    def test_stock_bounds_use_resolved_cam_values_not_display_expressions(self):
+        values = {}
+        for name, value in zip(
+            ("stockXLow", "stockXHigh", "stockYLow", "stockYHigh"),
+            (-2.54, 25.4, -1.27, 12.7),
+        ):
+            values[name] = types.SimpleNamespace(
+                expression="not a Python float", value=types.SimpleNamespace(value=value)
+            )
+        setup = types.SimpleNamespace(parameters=_Parameters(values))
+
+        self.assertEqual(
+            TabPlacement._setup_stock_bounds(setup), (-2.54, 25.4, -1.27, 12.7)
+        )
+
 
 class MinimumSideLengthTests(unittest.TestCase):
     """A side too short to physically contain a tab must not get one.
@@ -289,12 +325,11 @@ class MinimumSideLengthTests(unittest.TestCase):
     """
 
     def test_threshold_is_derived_from_the_tab_width(self):
-        # The previous fixed 0.5in floor was SHORTER than the 0.6in tab it
-        # was meant to fit, so an edge could qualify for a tab it could not
-        # physically contain.
-        self.assertGreater(TabPlacement.MIN_TAB_SIDE_LENGTH_IN, TabPlacement.TAB_WIDTH_IN)
+        # A side shorter than the physical 0.6in tab cannot receive a valid
+        # manual-tab point.  The hard threshold follows the configured tab
+        # width so those values cannot drift apart.
         self.assertEqual(
-            TabPlacement.MIN_TAB_SIDE_LENGTH_IN, TabPlacement.TAB_WIDTH_IN * 1.5
+            TabPlacement.MIN_TAB_SIDE_LENGTH_IN, TabPlacement.TAB_WIDTH_IN
         )
 
     def _body_with(self, edges):
@@ -341,10 +376,9 @@ class MinimumSideLengthTests(unittest.TestCase):
         self.assertLess(len(selected), 8, "must not crowd more tabs onto a side than it has room for")
         self.assertEqual(sorted(f for _e, f in selected), TabPlacement._tab_fractions(len(selected)))
 
-    def test_a_part_with_no_qualifying_side_is_still_held(self):
-        # An unheld part coming loose mid-cut is worse than a tight tab, so
-        # a part too small for the threshold falls back to its longest
-        # sides rather than returning nothing.
+    def test_a_part_with_no_qualifying_side_creates_no_invalid_geometry(self):
+        # There is no valid location for a 0.6in tab on this geometry.  Do
+        # not ask Fusion to create a clipped tab merely to meet a count.
         cm = TabPlacement.MIN_TAB_SIDE_LENGTH_IN * 2.54
         shorts = [
             _edge(0, 0, cm * 0.6, 0),
@@ -355,10 +389,34 @@ class MinimumSideLengthTests(unittest.TestCase):
 
         selected = TabPlacement.select_tab_edges(body, max_tabs=4, stock_bounds=None)
 
-        self.assertTrue(selected, "a small part must still get tabs, not none")
+        self.assertEqual(selected, [])
+
+    def test_a_side_just_under_point_six_inches_never_gets_a_tab(self):
+        cm = 2.54
+        valid = _edge(0, 0, 0, 3 * cm)
+        undersized = _edge(0, 0, 0.599 * cm, 0)
+        body = self._body_with([valid, undersized])
+
+        selected = TabPlacement.select_tab_edges(body, max_tabs=4, stock_bounds=None)
+
+        self.assertTrue(selected)
+        self.assertTrue(all(edge is valid for edge, _fraction in selected))
 
 
 class ManualTabTests(unittest.TestCase):
+    def test_disables_template_tabs_when_no_safe_manual_point_exists(self):
+        parameters = {
+            name: _Parameter()
+            for name in ("group_tabs", "tabsPerContour", "tabPositions")
+        }
+        operation = types.SimpleNamespace(parameters=_Parameters(parameters))
+        app = types.SimpleNamespace(log=lambda _message: None)
+
+        self.assertTrue(TabPlacement._disable_tabs(app, operation))
+        self.assertFalse(parameters["group_tabs"].value.value)
+        self.assertEqual(parameters["tabsPerContour"].value.value, 0)
+        self.assertEqual(parameters["tabPositions"].value.value, [])
+
     def test_sets_uniform_explicit_manual_tab_dimensions(self):
         parameters = {
             name: _Parameter()
