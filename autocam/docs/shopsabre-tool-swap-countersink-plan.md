@@ -1,6 +1,20 @@
 # ShopSabre calibration: tool swapping + countersinking implementation plan
 
-**No code in this PR.** One data asset (the real tool library, see below) and this plan. Draft, not for merge.
+**Draft PR, not for merge as a feature yet.** Implementation of everything that doesn't require physical ShopSabre hardware confirmation is now in scope on this branch (see "Non-goals for this plan" below for the exact split). Multi-tool/countersink enablement and the first-article cut stay gated on the physical open questions.
+
+## Current reliability state (Fusion hang/crash fixes already shipped, separately from this plan)
+
+Fusion Runner reliability work landed this session as its own series of merged PRs (#517-#525), independent of the ShopSabre feature work below. Anyone picking up this plan should treat these as the current baseline, not as open problems to re-solve:
+
+- **Startup hang**: root-caused to `_sync_data_folders` firing immediately at add-in launch and colliding with Fusion's own boot sequence; fixed by deferring that sync.
+- **Folder-walk cloud-call bursts**: an unpaced burst of ~150-170 cloud calls during a folder walk correlated with a real Fusion crash; walk calls are now paced.
+- **Folder-tree truncation**: "Offseason Projects" was being dropped from deep folder trees; fixed via a priority-reordering walk (`_PRIORITY_FOLDER_NAMES`).
+- **Per-job temp-file leak**: an unbounded per-job leak (233 template files + 113 STEP files, 62MB observed) was the root cause of a hang "after ~200 document closes"; now cleaned up per job.
+- **Tab-placement over/under-provisioning** and **duplicate roughing-pass computation**: both fixed (`PER_SIDE_EXTRA_TAB_SPACING_IN`, `_tab_desired_count`).
+- **Per-machine job locking**: a job queued by one operator's computer can no longer be claimed/completed by a different physical computer (`authorized_runner_id`).
+- **Operator tab-count override**: bounded (4-20) optional override added to the Parts queue modal, defaulting to existing behavior when unset.
+
+This does not mean Fusion is guaranteed hang-free now - it means these specific, previously-diagnosed causes are fixed. Whoever picks up the crash/hang audit below should verify against the *current* code (these fixes are already merged to `main`) rather than re-diagnosing symptoms these PRs already addressed, and should still watch for hangs/crashes surfaced fresh in this ShopSabre work itself (new template loads, new tool-library reads, new UI flows) since those are new code paths these fixes don't cover.
 
 ## Relationship to the existing brainstorm doc
 
@@ -381,48 +395,14 @@ This is large enough to split before implementation:
 7. **Calibrate ShopSabre machine timing and physical cut gates**
    - Machine-specific tool-change time, dry-run, first-article record, docs.
 
-## UI plan: selecting which tools are loaded in the router
+## Template source detail (folds into "Template and asset plan" above)
 
-**Where**: the existing Machines/Stock Categories management surface already lists `cam_machine_tools` per machine (this is what populates `toolsForMachine()` / the per-category tool `<select>` in `PartsTab.svelte` and `BoxTubesTab.svelte` today). Extend that same admin view rather than building a new one - it already has the machine → tools relationship; today it just has one row to manage per machine.
-
-**What changes**:
-1. A "Loaded tools" panel per machine, sourced from the machine's assigned `fusion_tool_library_file` (once New Router has one) - lists every tool the *library* defines (all 7, from the table above), each with a toggle for "physically loaded right now." Checked ones write/delete rows in `cam_machine_tools`, exactly as adding the single existing tool does today - no new mechanism, just more rows and a real library to read them from instead of one hardcoded entry.
-2. Surface the tool-quality issues above directly in this panel, not just in this doc: the #5/#6 collisions should render as a visible warning ("two tools both claim slot 5 - confirm before loading both") rather than a silent double-toggle, so whoever maintains the physical table catches it the first time they open this screen.
-3. At queue time (`PartsTab.svelte`/`BoxTubesTab.svelte`'s existing router+tool picker), the tool `<select>` already only offers `toolsForMachine(machineId)` - i.e., already scoped to loaded tools. No change needed there once (1) is populated; it already does the right thing given real data.
-4. New: once a machine has more than one loaded tool, offer an **operation preview** before queueing - "this job will use: 971 Main Bit (roughing/finishing), 82° countersink (T5)" - read from a dry-run of the tool-matching logic (`_find_matching_tool` against the template's own operations) rather than requiring the operator to guess which tools a job needs before it's already running. This is new UI, backed by an also-new (small) API surface: given a plate/category + machine, return the resolved tool list without actually queueing anything.
-
-## Single-tool mode: New Router opt-out of tool swapping
-
-Direct instruction: New Router must also support running a job the same way UNC Router does today - one endmill, no tool changes at all - as an explicit choice, not only the multi-tool path above.
-
-- **Queue-time toggle**, alongside the router+tool picker in `PartsTab.svelte`/`BoxTubesTab.svelte`: "Single tool (no tool changes)" vs. the default multi-tool behavior once New Router has more than one tool loaded. Off by default only in the sense that multi-tool is the more capable path; either is a legitimate, first-class choice, not a fallback.
-- **When on**, the tool picker offers exactly what it offers for UNC Router today - a single tool selection - **restricted to `tool_type = endmill`**. This is a hard validation, not a UI hint: a job cannot be queued in single-tool mode with a drill or countersink selected, since a job that skips every hole/countersink operation entirely (nothing else that strategy could cut with) is not a real single-endmill job, it's a broken one. Reject at the same queue-time validation point `queueValidationError` (`PartsTab.svelte`) already gates router/tool selection on.
-- **Mechanically**, this is not new template-patching logic - it's the *existing* one-tool path (`_find_matching_tool`/`largest_endmill` given a library of exactly one usable tool) applied to New Router instead of only UNC Router, with the countersink-wiring step (above) and the per-operation-category preference (roughing/finishing split) both skipped outright: every operation gets the one selected endmill, same as today's UNC Router behavior, byte-for-byte the same code path. No drill/bore/countersink operation is inserted or matched in this mode - a hole that would otherwise get a dedicated small-hole bore or countersink instead gets whatever the current single-tool fallback already does for those operations on UNC Router today (the existing `largest_endmill`-as-bore-fallback path documented in `templateTools.py:999-1038`).
-- This is *also* the natural fallback when the open questions above haven't been answered yet, or the physical tool table is mid-correction (the #5/#6 collisions) - single-tool mode needs none of that resolved, since it never reads past the one selected tool.
-
-## Job-queueing algorithm: "most efficient" tool-swap ordering
-
-This is less new algorithm work than it sounds, once the actual mechanics are laid out - **the sequencing itself is not this pipeline's job at all**. Fusion's own `cam.generateAllToolpaths()` already groups a setup's operations by tool and only emits a tool-change block when `isToolChangeNeeded()` is true between consecutive operations (`shopsabre.cps:368`, standard Autodesk post behavior) - it does not re-derive an optimal order on its own, it follows the setup's own operation order. Since every plate/tube template here has a **fixed, hand-authored operation sequence** (bore → big hole → shape roughing → shape finishing → pocket → slot cut, per `SetupGenerator`/the templates themselves), and every operation of a given strategy already shares one tool assignment (see `_apply_tool_to_elem` above), **operations already run in an order that visits each tool once, in one contiguous block, with zero redundant swaps** - matching the "efficient" ask directly, without new sequencing code.
-
-What "efficient tool swapping" actually needs from this pipeline, concretely:
-
-1. **Correct tool assignment per operation category** - this session's `largest_endmill`/`_find_largest_endmill` preference already picks the single biggest endmill for every `contour2d`/`adaptive2d`/`pocket2d` operation. That's right for roughing (clears bulk material fastest) but not for a finishing pass on a tight internal corner, which wants the *smallest* endmill that still fits - and drill/countersink operations need their own dedicated tool type entirely, never an endmill. This is the real, still-open work (the older doc's item #6): a per-operation-category preference - roughing → biggest fitting endmill, finishing → smallest fitting endmill, drill/countersink/bore → the one tool of that exact type - instead of today's single blanket "biggest wins" rule applied everywhere. With this library (a 4mm, 6mm, and 0.25in endmill all present), this is no longer a hypothetical: there are genuinely different-sized tools to choose between per operation.
-2. **The countersink operation itself has to exist in the pipeline** - see below. Right now it doesn't; "efficient tool swapping" has nothing to schedule for countersinking until this exists.
-3. **Failing loudly if a job needs a tool that isn't actually loaded** - `_find_matching_tool` already returns `None` on no match; what happens today when nothing matches is a silent fallback to `largest_endmill` (correct for roughing/finishing, wrong for a countersink - there's no sane "fallback tool" for a countersink). Needs an explicit check: a countersink-type operation with no matching countersink tool in the job's loaded set should fail the job with a clear message ("queue this on New Router once a countersink is loaded"), not silently substitute a bit that will produce a flat hole instead of a countersunk one.
-
-## Countersink operation integration plan
-
-The template already exists and is already real, calibrated data - it does not need to be authored, only wired in:
+Both real countersink templates already exist and are already real, calibrated data - neither needs to be authored, only wired in:
 
 - `autocam/fusion/runner/templates/971-real/router countersink.f3dhsm-template` - two operations: `<.3 Circluar Through Hole (3)` (bore, the standard small-hole op) + `Drill1 (3)` (strategy `drill`, the real 82°/0.372in countersink tool, `tool_number=5`, `manual-tool-change=false`).
-- `autocam/fusion/runner/templates/971-real/countersink.f3dhsm-template` - the same `Drill1` operation alone, no bore op alongside it. Reads like a "Save as Template" export of just the one operation - the more direct source for a `_load_countersink_template()`-style clone, mirroring exactly how `_load_bore_template()` (`templateTools.py:51-63`) already works for the bore strategy: load a real exported single-operation template, clone it, substitute the real tool via `_apply_tool_to_elem`, insert into the job's own template.
-
-Proposed mechanism, following the existing bore-fallback pattern in `patch_cam_template_with_tool_libraries` almost exactly:
-
-1. If the job's loaded tool set has a `counter sink`-type tool (matched the same way `_is_drill_tool`/`_select_tools` already filter by type), load `countersink.f3dhsm-template`'s `Drill1` operation, clone it, apply the real matched tool via `_apply_tool_to_elem` (already handles diameter/RPM/feed/tool-number/manual-change correctly - no new logic needed there).
-2. Insert the cloned operation into the patched template **after** the existing hole/pocket operations and **before** the final release cut (`2D Slot Cut`/`Slot Cut for Edges`) - countersinking a hole that hasn't been drilled yet, or after the part has already been cut free of stock, are both wrong; it needs to run once the base holes exist and before the part can move.
-3. Gate this on `useToolCall` effectively being available - i.e., only offer/apply a countersink operation when the target machine's tool set has more than one distinct tool type loaded (today, functionally, New Router only). This is the "New-Router-only operation type" gating the older doc's item #8 already called for - now concrete: check `cam_machine_tools` for the target machine has a countersink-type tool, not just "is this New Router" by name, so the check stays correct if UNC Router is ever upgraded or another machine is added.
-4. `DeleteToolpaths.py`'s existing cleanup (isToolpathValid checks, empty-toolpath deletion) applies to this new operation with zero changes - it already generically prunes any operation the part's real geometry doesn't apply to (e.g., a part with no counterbore-diameter holes at all).
+- `autocam/fusion/runner/templates/971-real/countersink.f3dhsm-template` - the same `Drill1` operation alone, no bore op alongside it. Reads like a "Save as Template" export of just the one operation - the more direct source for `_load_countersink_template()`, mirroring exactly how `_load_bore_template()` (`templateTools.py:51-63`) already works for the bore strategy.
+- The existing `largest_endmill`-as-bore-fallback path is at `templateTools.py:999-1038` - the reference point for how single-tool mode's bore/drill fallback already behaves and should keep behaving.
+- `isToolChangeNeeded()` (standard Autodesk post behavior, exercised at `shopsabre.cps:368`) is why the "Operation ordering" item above needs no new sequencing code: every template here already has one fixed, hand-authored operation order with one tool per strategy, so tool changes already happen in one contiguous block per tool with zero redundant swaps - confirm this holds during live Fusion tests rather than re-deriving it in code.
 
 ## Post-processor findings, precisely
 
@@ -526,9 +506,13 @@ These require Fusion because `adsk` APIs cannot run in normal Python:
 
 ## Rollout plan
 
-1. Keep this PR draft/docs-only until the physical ShopSabre answers are
-   collected.
-2. Land the implementation in smaller PRs following the issue breakdown above.
+1. Keep this PR in draft until the physical ShopSabre answers are collected -
+   code for issues 1-6 (data model, API, UI, Runner tool selection, countersink
+   wiring, tests) lands on this PR/branch now; only actual multi-tool/countersink
+   enablement and the first-article cut (issue 7) wait on the physical answers.
+2. Land the implementation in smaller commits on this branch following the
+   issue breakdown above (split into separate PRs later only if this one grows
+   unreviewably large).
 3. Deploy database migration before UI code that expects new columns.
 4. Ship loaded-tool management disabled or read-only until the slot collisions
    are resolved.
@@ -596,5 +580,5 @@ The feature is done when:
 
 - Does not touch the legacy `routing.js` / `toolchange-gcode-plan.md` path.
 - Does not change UNC Router's behavior in any way - single-tool, exactly as today.
-- Does not implement any code in this PR - data asset (the tool library file) plus this plan only, per direct instruction.
-- Does not resolve the open questions above by guessing - they need a real answer from whoever runs the machine before step 3 of the phased plan can start for real.
+- Implementation on this PR is authorized for everything that doesn't require physical ShopSabre confirmation: data model/migration, API and data-layer changes, UI (loaded-tool panel, single-tool toggle, operation/tool preview), Runner per-operation tool selection and countersink template wiring, and all automated tests (issues 1-6 of the breakdown above). This PR stays in draft, and multi-tool/countersink code paths stay disabled or gated behind loaded-tool checks, until the physical answers below are collected - actual multi-tool enablement and any first-article cut (issue 7, step 8 of the phased plan) remain gated on that hardware confirmation, not on more code.
+- Does not resolve the open questions above by guessing - they need a real answer from whoever runs the machine before step 3 of the phased plan (multi-tool enablement) can start for real; single-tool mode and the data/UI/Runner scaffolding above need none of them.
