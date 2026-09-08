@@ -51,11 +51,10 @@ but an unchanged snapshot is not posted or written to the database again.
 - **Auto-orientation** — orients parts largest-face-up before setup
 - **Template-driven setups** — reusable Fusion CAM templates for plates and box tubes
 - **Topology-aware contour repair** — rebuilds stale template selections from the imported model while preserving each internal loop's real direction
-- **Safe manual tabs** — places uniform explicit tabs only on straight,
-  stock-backed outer release edges. Stock-bound sides receive none; their
-  budget is redistributed across the remaining release edges in proportion
-  to usable length. The count rises with perimeter, and edges shorter than
-  the `0.6in` tab width are rejected rather than creating invalid geometry.
+- **Manual release tabs** — restores the established explicit-tab placement
+  behavior on straight outer release edges. It prefers stock-backed edges
+  when that information is available, but retains a legacy fallback so a
+  valid release contour is never silently left without manual-tab points.
   Width is capped for the narrowest nested part and height at 70% of the
   thinnest nested stock.
 - **Exact NC artifacts** — preserves each Fusion-posted file byte for byte instead of joining complete programs together

@@ -278,28 +278,20 @@ their chain. Three placement rules apply, in order:
 
 1. **How many.** `_tab_count_for_perimeter` scales the count to the part's
    own perimeter (roughly one per `TARGET_TAB_SPACING_IN`), floored at
-   `min_tabs` and capped at `max_tabs`. A small bracket asks for ~4, a
-   large plate for more.
+   `min_tabs` and capped at `max_tabs` using the established nearest-spacing
+   rule.
 2. **Which sides.** One tab per distinct straight side, **longest side
    first**, capped at that count. This is not "one per side unconditionally"
    - an earlier version was, and on a real teardrop bracket it put a tab on
    every one of its short bottom facets. Longest-first is what makes the cap
    land on the long structural sides instead.
-3. **Minimum side length.** A side shorter than `MIN_TAB_SIDE_LENGTH_IN`
-   gets no tab at all. That threshold is *derived* from `TAB_WIDTH_IN`
-   (twice it), not picked as a round number: the tab occupies its own width
-   of the edge and the cutter still has to ramp on and off it, so the flat
-   has to be meaningfully longer than the tab. Deriving it also fixed a real
-   inconsistency - the previous fixed 0.5in floor was *shorter* than the
-   0.6in tab it was supposed to fit, so an edge could qualify for a tab it
-   could not physically contain.
-4. **No real stock, no tab - redistribute instead.** A side with **zero**
-   real stock anywhere behind it (see the next section) is excluded from
-   the one-per-side pass entirely, and its share of the tab count goes onto
-   the sides that DO have real stock - a second (or third) tab on the same
-   valid side if there's no fresh side to give it to, spread evenly along
-   that side's own interior span (never at its corners, where lead-in/
-   lead-out and the adjacent side's own tab live).
+3. **Minimum side length.** The normal threshold remains tied to `1.5` tab
+   widths, preserving lead-in and lead-out room. If no edge reaches that
+   threshold, the legacy fallback still supplies outer-edge candidates
+   instead of silently producing an unheld release contour.
+4. **Stock preference and fallback.** Backed sides are preferred when setup
+   stock bounds are readable. When they are not, the runner uses the prior
+   straight-edge fallback so manual tabs remain present.
 
 ### Tab points must lie on the contour being cut
 
@@ -329,29 +321,15 @@ and for the same body, top-face outer loop `478,480..492` had **0 of 8**
 edges on the contour while bottom-face outer loop `741..748` had **8 of 8**.
 The bottom face's outer loop *is* the contour, exactly.
 
-### A side with no real stock anywhere behind it cannot hold a tab - exclude it, don't just deprioritize it
+### Stock-backing fallback
 
-This is a real reversal from an earlier version of this file, made on
-direct, live-observed evidence: **a side lying exactly on the plate's own
-machining boundary, or on a coordinate axis with zero material past it, has
-Fusion silently drop any manual tab point requested there** - not "a
-weaker tab," nothing at all, no warning, regardless of how carefully the
-point is placed. The earlier design treated stock backing as a same-side
-preference only (`is_backed` picked which segment of a side to use, never
-whether the side got a tab at all), on the theory that an unbacked tab
-still helped hold the part. That theory does not survive contact with what
-Fusion actually does with such a request.
-
-`select_tab_edges` now checks every candidate side for real backing
-*anywhere along it* (`line_is_backed`, not just at one sampled point) and
-drops a side outright if none exists, rather than keeping it in the
-one-per-side pool as a last resort. The tab count that side would have used
-is **redistributed** onto the sides that do have real stock - a second (or
-even third) tab on the same valid side, at evenly spread interior
-fractions (`_tab_fractions`, e.g. 1/3 and 2/3 for two tabs on one side, away
-from the corners), when there's no fresh side left to give it to. A line
-only gains an extra tab when it genuinely has the spare length for one at
-the same 2x-tab-width spacing every tab already requires - this can stop
+The runner prefers an edge with surrounding stock when Fusion exposes usable
+stock bounds. The compatibility behavior intentionally falls back to the
+previous straight-edge selection when those bounds are unavailable or do not
+yield a candidate, because a release contour with no manual tabs is worse
+than preserving the known working tab configuration. A line only gains an
+extra tab when it genuinely has spare length at the established spacing; it
+can stop
 short of the requested count on a small part with no more room, which is
 correct: a crowded tab is worse than one fewer.
 
