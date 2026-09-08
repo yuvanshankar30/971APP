@@ -91,6 +91,7 @@ class TubeFaceProgramTests(unittest.TestCase):
         handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
         self.assertIn("def _cap_other_way_feedrate(setup):", handler)
         self.assertIn("otherWayFeedrate", handler)
+        self.assertIn('other.expression = "tool_feedCutting"', handler)
         self.assertIn("_cap_other_way_feedrate(setup)", handler)
 
     def test_tube_closed_non_circular_features_use_shape_through_not_slot_cut(self):
