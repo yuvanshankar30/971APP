@@ -135,6 +135,17 @@ def resolve_data_project(app, project_name):
 # in the same budget.
 _PRIORITY_FOLDER_NAMES = {"offseason projects"}
 
+# A brief pause between each dataFolders.item() call in the walk below -
+# live-confirmed: a real sync (148 calls, fired back-to-back) coincided
+# with Fusion itself crashing right around when the walk finished. Not a
+# confirmed root cause (a native crash dump isn't something this codebase
+# can fully diagnose), but a reasonable, low-cost mitigation: the same
+# total call count and tree completeness, spread over a bit more
+# wall-clock time instead of hammering the Data Panel client in one
+# unbroken burst. 0.15s adds ~22s to a full 150-call walk - real, but
+# small next to the walk's own ~75-135s of real network time.
+_FOLDER_WALK_CALL_PACING_SEC = 0.15
+
 
 def list_data_folder_tree(app, project_name, base_folder_path, max_depth=3, max_folders=150):
     """Walks the Data Panel folder tree starting at base_folder_path (e.g.
@@ -215,6 +226,15 @@ def list_data_folder_tree(app, project_name, base_folder_path, max_depth=3, max_
                     break
                 budget[0] -= 1
                 child = folder.dataFolders.item(i)
+                # Live-confirmed: a real sync (148 dataFolders.item() calls,
+                # fired back-to-back with no pause) coincided with Fusion
+                # itself crashing (a real crash dump, not just a slow UI) at
+                # almost exactly the point the walk finished. Spacing calls
+                # out instead of hammering the Data Panel client in one
+                # unbroken burst is a real mitigation for that, even without
+                # a confirmed root cause - the same total call count and
+                # tree completeness, over a bit more wall-clock time.
+                time.sleep(_FOLDER_WALK_CALL_PACING_SEC)
                 child_path = f"{node['path']}/{child.name}" if node['path'] else child.name
                 child_node = {"name": child.name, "path": child_path, "children": []}
                 node["children"].append(child_node)

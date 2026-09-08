@@ -1,7 +1,7 @@
 import importlib.util
 from pathlib import Path
 import unittest
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock, call, patch
 
 
 spec = importlib.util.spec_from_file_location(
@@ -169,6 +169,17 @@ class FolderTreeBudgetTests(unittest.TestCase):
     (dataFolders.item() calls, each a genuine Fusion cloud round-trip)
     instead of relying on scope alone to keep this fast.
     """
+
+    def setUp(self):
+        # The walk now paces real dataFolders.item() calls with a real
+        # sleep (see _FOLDER_WALK_CALL_PACING_SEC) - genuinely useful
+        # against Fusion's live API, pure overhead in a unit test with a
+        # mocked one. Patched to a no-op for every test in this class
+        # rather than per-test, since it's not what any of them are
+        # actually testing.
+        patcher = patch.object(dropFolder.time, "sleep")
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def _app_for(self, root):
         app = fake_app()
