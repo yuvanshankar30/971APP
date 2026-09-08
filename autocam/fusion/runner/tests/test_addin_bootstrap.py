@@ -46,11 +46,15 @@ class DependencyBootstrapTests(unittest.TestCase):
         # from the picker.
         entrypoint = (RUNNER_DIR / "SpartanRoboticsAutoCAM.py").read_text()
 
-        self.assertIn(
-            'list_data_folder_tree(_app, FUSION_DATA_PROJECT_NAME, FUSION_DROP_FOLDER_PATH or "")',
-            entrypoint,
-        )
+        self.assertIn("FolderTreeWalker", entrypoint)
+        self.assertIn("_advance_folder_sync()", entrypoint)
         self.assertNotIn("Offseason Projects/AutoCAM", entrypoint)
+
+    def test_folder_sync_yields_between_data_panel_calls(self):
+        entrypoint = (RUNNER_DIR / "SpartanRoboticsAutoCAM.py").read_text()
+        self.assertIn("_FOLDER_SYNC_CHUNK_DELAY_SEC", entrypoint)
+        self.assertIn("_schedule_folder_sync_chunk()", entrypoint)
+        self.assertIn("FusionFolderSyncUpload", entrypoint)
 
 
 if __name__ == "__main__":
