@@ -1114,6 +1114,7 @@ def waitForGeneration(setup, waitforcontour=False, quiet_checks_required=30):
     # invalid with quiet_checks_required=5 on a real job. Raised well past
     # what was observed necessary rather than re-tuning to the exact edge.
     quiet_streak = 0
+    iteration = 0
     while quiet_streak < quiet_checks_required:
         adsk.doEvents()
         # activeViewport is None whenever Fusion's window isn't the active
@@ -1129,11 +1130,21 @@ def waitForGeneration(setup, waitforcontour=False, quiet_checks_required=30):
         # progress, not something the wait loop actually depends on to
         # function correctly - so a failing refresh must never abort the
         # whole CAM job over a nudge that didn't need to succeed.
-        if app.activeViewport is not None:
+        #
+        # Only every 3rd iteration: redrawing the viewport is real,
+        # measurable work (the whole plate's toolpaths), and every-iteration
+        # is more of it than the "help Fusion notice progress" purpose
+        # needs. isGenerating is still polled every iteration below at the
+        # full 0.1s cadence - only the redraw itself is throttled, so
+        # generation-completion detection accuracy (quiet_checks_required,
+        # tuned against real regressions - see its own docstring) is
+        # unaffected.
+        if iteration % 3 == 0 and app.activeViewport is not None:
             try:
                 app.activeViewport.refresh()
             except RuntimeError:
                 pass
+        iteration += 1
         time.sleep(0.1)
         if waitforcontour:
             generating = [
