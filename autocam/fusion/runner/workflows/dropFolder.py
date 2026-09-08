@@ -125,7 +125,7 @@ def resolve_data_project(app, project_name):
     return app.data.activeProject
 
 
-def list_data_folder_tree(app, project_name, base_folder_path, max_depth=3, max_folders=60):
+def list_data_folder_tree(app, project_name, base_folder_path, max_depth=3, max_folders=150):
     """Walks the Data Panel folder tree starting at base_folder_path (e.g.
     "" for the project root itself, or "Offseason Projects/AutoCAM" for a
     subfolder) and returns it as nested plain dicts - {"name", "path",
@@ -157,18 +157,24 @@ def list_data_folder_tree(app, project_name, base_folder_path, max_depth=3, max_
     the tree with an honest partial mid/bottom rather than either an
     unbounded blocking call or an artificially narrow default scope.
 
-    Lowered from 200 to 60 after a second live incident: even bounded by
-    count, 200 real sequential Autodesk cloud calls at ~0.5-0.9s each is
-    ~2-3 minutes of continuous blocking - confirmed directly from a real
-    crash-report log showing exactly that (219 getFolderContents calls,
-    13:28:09-13:30:30) coinciding with Fusion appearing hung on its own
-    "Preparing your experience" startup screen. The actual startup
-    collision is fixed at the call site (SpartanRoboticsAutoCAM.py's
-    handleServer no longer fires the first sync immediately on launch) -
-    this lower default is a second, independent margin: even a
-    mid-session sync taking under a minute rather than several is safer
-    to run unattended on a background thread that shares Fusion's engine
-    with whatever the operator is actually doing.
+    Lowered from 200 to 60, then raised to 150, across two more live
+    incidents. 60 fixed the startup-hang symptom (root cause was actually
+    timing, not budget size - see below) but confirmed live to be too
+    tight for this project's real structure: "Offseason Projects" (the
+    actual AutoCAM save destination's parent) came back with zero
+    children and truncated=true, its whole subtree consumed by other
+    top-level folders enumerated earlier in the same breadth-first pass.
+    That's a real usability regression, not a safe trade-off - the
+    picker's whole point is showing what's actually there.
+    The real root cause of the original hang was SpartanRoboticsAutoCAM.py
+    firing the first sync immediately on launch, fixed independently at
+    that call site (handleServer now waits ~90s past startup before its
+    first sync). With that timing collision actually fixed, this budget
+    no longer needs to be nearly this defensive - 150 real sequential
+    calls at ~0.5-0.9s each is still bounded (~75-135s), comfortably
+    covering this project's real folder count (12 top-level folders)
+    without the multi-minute cost the original 200 had, while no longer
+    truncating a subtree that matters.
 
     Breadth-first, deliberately not the more obvious depth-first
     recursion: every folder at a given depth gets its own direct children

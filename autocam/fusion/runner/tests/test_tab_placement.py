@@ -347,6 +347,36 @@ class TabDistributionTests(unittest.TestCase):
             "a side this much longer than its competitors must get more than one tab",
         )
 
+    def test_a_moderately_long_side_on_an_already_well_tabbed_part_does_not_get_extra_tabs(self):
+        # Live-confirmed bug, reported directly against a real plate: an
+        # 8.211in side on a part that already had plenty of tabs elsewhere
+        # received THREE tabs. Direct instruction: "too much tabs is not
+        # good... only enough tabs to make the part stable" - a side this
+        # length does not need more than one once the part already has
+        # real breadth (6 distinct sides here, well past DEFAULT_MIN_TABS),
+        # even with a generous max_tabs budget that has plenty of room left
+        # to redistribute into if nothing capped it.
+        target_side = _edge(0, 0, 0, 8.211 * 2.54)  # 8.211in, matching the live report
+        # 2.5cm (~0.98in) each - comfortably above MIN_TAB_SIDE_LENGTH_IN
+        # (0.75in) so these count as real, distinct, usable sides, and
+        # comfortably shorter than the 8.211in target so it stays the
+        # longest/most "room" candidate throughout redistribution.
+        other_sides = [
+            _edge(0, 0, 2.5 * math.cos(i * 0.9 + 0.2), 2.5 * math.sin(i * 0.9 + 0.2))
+            for i in range(5)
+        ]
+        edges = [target_side, *other_sides]
+        loop = _loop(True, edges)
+        body = _body([_face(1.0, 1.0, [loop])], (0, 0), (10, 21))
+
+        selected = TabPlacement.select_tab_edges(body, max_tabs=TabPlacement.DEFAULT_MAX_TABS, stock_bounds=None)
+
+        target_side_tabs = sum(1 for edge, _fraction in selected if edge is target_side)
+        self.assertEqual(
+            target_side_tabs, 1,
+            "an 8.211in side on an already well-tabbed part must not receive extra tabs",
+        )
+
 
 class MinimumSideLengthTests(unittest.TestCase):
     """A side too short to physically contain a tab must not get one.

@@ -88,6 +88,21 @@ STOCK_BACKING_CHECK_IN = 0.2
 # as the middle of commonly cited CNC sheet-tabbing guidance (roughly every
 # 4-8in of perimeter for thin plate) rather than picked arbitrarily.
 TARGET_TAB_SPACING_IN = 4.0
+# How much of its OWN length a single straight side needs before it earns
+# a second (or third) tab, in the common case where nothing was excluded
+# for lack of real stock backing (see select_tab_edges' has_excluded_sides
+# below). Deliberately much larger than TARGET_TAB_SPACING_IN - that
+# constant scales a body's TOTAL tab count off its whole perimeter, a
+# different question from "does this one side need more than one." Direct,
+# live-confirmed correction: a real part with plenty of tabs already
+# elsewhere still put 3 tabs on a single 8.211in side - too many for that
+# side alone, wasted machining time, no real stability benefit over one.
+# 8.0 keeps that same 8.211in side at exactly 1 tab (round(8.211/8.0)=1)
+# while still giving the earlier-reported 16.317in starved-long-side case
+# (see DEFAULT_MAX_TABS's own history above) its needed 2nd tab
+# (round(16.317/8.0)=2) - tuned to both real, live-reported cases, not
+# picked arbitrarily.
+PER_SIDE_EXTRA_TAB_SPACING_IN = 8.0
 # Every release tab has the same operator-specified dimensions. Candidate
 # edges are selected directly, so Fusion cannot distribute a tab into a
 # corner between them.
@@ -247,6 +262,15 @@ def _tab_count_for_perimeter(perimeter_in: float, min_tabs: int, max_tabs: int) 
         return min_tabs
     target = round(perimeter_in / TARGET_TAB_SPACING_IN)
     return max(min_tabs, min(max_tabs, target))
+
+
+def _tab_desired_count(line_length_in: float) -> int:
+    """How many tabs a single straight side's own length calls for - see
+    PER_SIDE_EXTRA_TAB_SPACING_IN for why this uses a much larger spacing
+    than the whole-body budget does. Never below 1: only ever consulted
+    for a line that already holds at least one tab.
+    """
+    return max(1, round(line_length_in / PER_SIDE_EXTRA_TAB_SPACING_IN))
 
 
 def _edge_direction_and_point(edge):
@@ -535,8 +559,32 @@ def select_tab_edges(
     backed_usable = [line for line in usable if line_is_backed(line)]
     pool = backed_usable if backed_usable else usable
 
+    # True only when some real, sufficiently-long side got dropped for
+    # lacking real stock backing (see _has_real_stock_backing) - the
+    # specific case "just add more tabs to these parts on sides that are
+    # already there" (direct instruction) was written for: an excluded
+    # side's share of the budget has to land somewhere, more than one
+    # extra tab on the same valid side if that's what it takes. When
+    # nothing was excluded, max_tabs is just this body's overall ceiling
+    # (see _tab_count_for_perimeter) - a side earning extra tabs simply
+    # because that ceiling happens to be generous relative to how many
+    # real sides this part has is the reported bug (an 8.211in side on an
+    # already well-tabbed part getting 3 tabs it did not need), not the
+    # behavior that instruction asked for.
+    has_excluded_sides = len(pool) < len(usable)
+
     primary = pool[:max_tabs]
     counts = {id(line): 1 for line in primary}
+
+    # The per-side cap below (has_excluded_sides being False) only applies
+    # once the part already has real breadth - at least DEFAULT_MIN_TABS
+    # distinct sides already holding a tab. A part with genuinely few real
+    # sides (a couple of long edges, everything else too short to qualify)
+    # still needs the older "fill remaining room" behavior to reach a
+    # reasonable total tab count at all - the cap's whole point is
+    # stopping a well-covered part from over-tabbing one side, not
+    # under-tabbing a small part that has nowhere else to put tabs.
+    apply_per_side_cap = not has_excluded_sides and len(primary) >= DEFAULT_MIN_TABS
 
     # Redistribute whatever the exclusion above left unfilled: add a
     # second (or third) tab to one of the already-selected valid sides,
@@ -545,7 +593,11 @@ def select_tab_edges(
     # genuinely has the spare length for it, at the same 2x-tab-width
     # spacing every tab on this module already requires - this can stop
     # short of max_tabs on a small part with no more room, which is
-    # correct: a crowded tab is worse than one fewer.
+    # correct: a crowded tab is worse than one fewer. Once
+    # apply_per_side_cap is true, a line also stops once it reaches its
+    # own _tab_desired_count - too many tabs is not good, only enough to
+    # make the part stable, and stability is a property of the whole part
+    # (breadth) more than of any one side (depth).
     remaining_budget = max_tabs - len(primary)
     guard = 0
     while remaining_budget > 0 and primary and guard < max_tabs * 6:
@@ -553,6 +605,8 @@ def select_tab_edges(
 
         def room_for_one_more(line):
             n = counts[id(line)]
+            if apply_per_side_cap and n >= _tab_desired_count(line_length_in(line)):
+                return float("-inf")
             return line_length_in(line) - (n + 1) * tab_width_in * 2
 
         candidate = max(primary, key=room_for_one_more)
