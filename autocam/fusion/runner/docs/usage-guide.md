@@ -62,10 +62,18 @@ estimate, not a stopwatch reading: actual time on the machine depends on
 things like feed overrides and how the operator runs the job, so treat it
 as a ballpark for comparing jobs, not a promise.
 
-## Box Tubes and Stock Categories
+## Tube Stock and Stock Categories
 
-Box Tubes works the same way as Plates, but for tube stock instead of flat
-sheet - one job per face (or a grouped run), same queue.
+**Tube Stock** is direct-to-CAM: upload one STEP file, choose the router,
+tool, and material, then queue it. It is not mounted to a plate and it is not
+grouped with other tubes. The material is required so the Runner can select
+the reviewed feeds, speeds, and template for that stock.
+
+For rectangular box tube, one queued tube job creates four manually indexed
+Fusion setups and four NC files: Side 12, Side 3, Side 6, and Side 9. Rotate
+the physical tube in that order between files. The Tube Cutoff operation is
+not automatically posted yet because a safe cutoff needs an explicit finished
+length and fixture reference; do not assume a generic tube job includes it.
 
 Stock Categories are the material + thickness combinations parts and
 plates get matched against (e.g. "Polycarbonate (Lexan) - 0.0625\""). Add a

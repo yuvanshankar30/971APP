@@ -11,7 +11,10 @@ Two things run this: **Spartans Hub** itself (already deployed - where you queue
    That's the whole install. It finds Fusion's AddIns folder for your OS (creating it if Fusion hasn't yet - a fresh Fusion install doesn't make it until you open Scripts and Add-Ins once), copies the add-in in under the exact name Fusion requires, installs `requests` for Fusion's bundled Python, and writes `.env` from a few prompts. Same command on macOS and Windows; you never type or substitute a path.
 
    It asks for three things:
-   - **Which Hub** - the deployed one (normal) or a local dev server.
+   - **Which Hub** - the deployed one (normal) or a local dev server. Choose
+     local only while testing a checkout running at `http://localhost:5173`;
+     `setup.py` deliberately uses `localhost` rather than `127.0.0.1` so the
+     Fusion add-in can reach a Vite server that is listening on IPv6 loopback.
    - **`FUSION_RUNNER_TOKEN`** - one shared secret for the whole team. Ask a project administrator; don't generate your own or commit it anywhere.
    - **This machine's `RUNNER_MACHINE_ID`** - see step 2.
 
@@ -19,7 +22,7 @@ Two things run this: **Spartans Hub** itself (already deployed - where you queue
 
    No repo clone? Download the ready-made zip from the [Fusion AutoCAM Setup page](/autocam/fusion/setup), unzip it anywhere, and run `python3 setup.py` from inside it - it installs itself to the right place from there too.
 
-   **Updating an existing install?** Re-run the exact same command. It copies over the existing folder and deliberately never overwrites `.env` or `.overridepath`, so your token and machine id survive.
+   **Updating an existing install?** Re-run the exact same command. It copies over the existing folder and deliberately never overwrites `.env` or `.overridepath`, so your token and machine id survive. Fully quit and relaunch Fusion after an update; stopping and starting an add-in does not reliably reload its Python modules or `.env`.
 
    **Never want to reinstall again?** Point Fusion's AddIns folder at a live git checkout with a symlink, so updates become `git pull` and nothing ever needs copying again:
    ```bash

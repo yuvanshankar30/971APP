@@ -93,6 +93,11 @@ It asks which Hub to talk to (deployed, or a local dev server), for your
 UUID, then writes `.env` itself - see [`setup.py`](setup.py). Prefer to edit
 `.env` by hand instead? `cp .env.example .env` and fill in the same values manually:
 
+For local testing, start Spartans Hub with
+`npm run dev -- --host localhost --port 5173` and choose the local option. `setup.py` writes
+`http://localhost:5173`, rather than a literal IPv4 loopback address, so it
+also reaches Vite when it is bound on IPv6 loopback.
+
 | Variable | Purpose | Default |
 | --- | --- | --- |
 | `API_KEY` | Bearer token matching Spartans Hub's `FUSION_RUNNER_TOKEN` | _(required)_ |
