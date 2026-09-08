@@ -58,7 +58,7 @@ class TubeFaceProgramTests(unittest.TestCase):
         handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
         template_index = handler.index("setup.createFromCAMTemplate2(template)")
         bind_index = handler.index("_bind_setup_to_face(setup, body, face, tube_axis, horizontal)", template_index)
-        configure_index = handler.index("_configure_face_operations(setup, face, wall_thickness_in)", template_index)
+        configure_index = handler.index("_configure_face_operations(setup, selection_face, wall_thickness_in)", template_index)
         self.assertLess(template_index, configure_index)
         self.assertLess(template_index, bind_index)
         self.assertLess(bind_index, configure_index)
@@ -80,6 +80,18 @@ class TubeFaceProgramTests(unittest.TestCase):
         self.assertIn("apply_single(spec, spec[\"is_reverted\"])", handler)
         self.assertIn("apply_single(spec, not spec[\"is_reverted\"])", handler)
         self.assertIn("for spec, reverted in zip(specs, resolved):", handler)
+
+    def test_tube_shape_chains_use_the_paired_bottom_wall_not_the_exterior_wcs_face(self):
+        handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
+        self.assertIn("selection_face_by_exterior", handler)
+        self.assertIn("_configure_face_operations(setup, selection_face, wall_thickness_in)", handler)
+        self.assertIn("loops = _loop_specs(selection_face)", handler)
+
+    def test_tube_adaptive_operations_cap_other_way_feedrate_after_material_scaling(self):
+        handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
+        self.assertIn("def _cap_other_way_feedrate(setup):", handler)
+        self.assertIn("otherWayFeedrate", handler)
+        self.assertIn("_cap_other_way_feedrate(setup)", handler)
 
     def test_tube_closed_non_circular_features_use_shape_through_not_slot_cut(self):
         handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()

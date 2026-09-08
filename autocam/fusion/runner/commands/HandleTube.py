@@ -113,6 +113,7 @@ def _wall_face_families(body, axis):
 
     exterior_pairs = []
     wall_thickness_by_face = {}
+    selection_face_by_exterior = {}
     origin = adsk.core.Point3D.create()
     for family in families:
         direction = _face_normal(family[0])
@@ -142,20 +143,34 @@ def _wall_face_families(body, axis):
         # simply absent from the map, and the caller falls back to treating
         # that dimension as solid all the way to the opposite wall.
         if len(planes) >= 3:
+            inner_near = max(planes[1]["faces"], key=lambda face: face.area)
+            inner_far = max(planes[-2]["faces"], key=lambda face: face.area)
             wall_thickness_by_face[_face_id(exterior_near)] = abs(planes[1]["projection"] - planes[0]["projection"]) / _CM_PER_IN
             wall_thickness_by_face[_face_id(exterior_far)] = abs(planes[-1]["projection"] - planes[-2]["projection"]) / _CM_PER_IN
-    return exterior_pairs, wall_thickness_by_face
+            # Shape Through's chain must be on the material's bottom face.
+            # The exterior wall remains the exposed setup/WCS face, but its
+            # paired inner wall is where Fusion traces the actual breakout
+            # contour. Selecting the exterior loop here made adaptive clear
+            # from the wrong side and produced the wall-spanning zig-zags.
+            selection_face_by_exterior[_face_id(exterior_near)] = inner_near
+            selection_face_by_exterior[_face_id(exterior_far)] = inner_far
+    return exterior_pairs, wall_thickness_by_face, selection_face_by_exterior
 
 
 def _ordered_wall_faces(body):
     axis = _long_axis(body)
-    (pair_a, pair_b), wall_thickness_by_face = _wall_face_families(body, axis)
+    (pair_a, pair_b), wall_thickness_by_face, selection_face_by_exterior = _wall_face_families(body, axis)
     # These are fixture order labels, not claims about a STEP model's
     # arbitrary global orientation. The operator labels the real tube 12/3/6/9
     # to match the four emitted files before machining it.
     faces = (pair_a[1], pair_b[1], pair_a[0], pair_b[0])
     return [
-        (clock, face, wall_thickness_by_face.get(_face_id(face)))
+        (
+            clock,
+            face,
+            selection_face_by_exterior.get(_face_id(face), face),
+            wall_thickness_by_face.get(_face_id(face)),
+        )
         for clock, face in zip(TUBE_FACE_CLOCKS, faces)
     ]
 
@@ -319,9 +334,9 @@ def _set_face_stock_heights(operation, wall_thickness_in):
     _set_expression(operation, "bottomHeight_offset", bottom_offset)
 
 
-def _configure_face_operations(setup, face, wall_thickness_in):
-    """Rebind every kept template operation to loops on this wall only."""
-    loops = _loop_specs(face)
+def _configure_face_operations(setup, selection_face, wall_thickness_in):
+    """Rebind operations to the active wall's material-bottom loops only."""
+    loops = _loop_specs(selection_face)
     # Every non-circular tube loop is a closed through feature. Even a long,
     # narrow cutout needs the Shape Through clearing strategy; 2D Slot Cut
     # follows a centerline-style path and machines those closed profiles
@@ -392,7 +407,26 @@ def _bind_setup_to_face(setup, body, face, tube_axis, horizontal):
     setup.parameters.itemByName("wcs_origin_boxPoint").value.value = "top 1"
 
 
-def _make_setup(cam, body, face, clock, tube_axis, horizontal, template, wall_thickness_in):
+def _cap_other_way_feedrate(setup):
+    """Keep adaptive return feed no faster than the material-scaled cut feed."""
+    capped = []
+    for operation in setup.operations:
+        if operation.strategy != "adaptive2d":
+            continue
+        other = operation.parameters.itemByName("otherWayFeedrate")
+        cutting = operation.parameters.itemByName("tool_feedCutting")
+        if other is None or cutting is None:
+            continue
+        try:
+            if other.value.value > cutting.value.value:
+                other.value.value = cutting.value.value
+                capped.append(operation.name)
+        except Exception:
+            continue
+    return capped
+
+
+def _make_setup(cam, body, face, selection_face, clock, tube_axis, horizontal, template, wall_thickness_in):
     setup_input = cam.setups.createInput(0)
     setup_input.name = tube_face_setup_name(clock)
     setup = cam.setups.add(setup_input)
@@ -410,7 +444,12 @@ def _make_setup(cam, body, face, clock, tube_axis, horizontal, template, wall_th
     # this setup's actual CAM model tree, never in the template's old model.
     _bind_setup_to_face(setup, body, face, tube_axis, horizontal)
     adsk.doEvents()
-    _configure_face_operations(setup, face, wall_thickness_in)
+    _configure_face_operations(setup, selection_face, wall_thickness_in)
+    capped = _cap_other_way_feedrate(setup)
+    if capped:
+        adsk.core.Application.get().log(
+            "Tube CAM: capped otherWayFeedrate on {}".format(capped)
+        )
     return setup
 
 
@@ -471,8 +510,8 @@ def handleTube(template_filename, orientation=None, program_base_name="tube"):
     tube_axis = _long_axis(body)
     horizontal = str(orientation or "").strip().lower() == "horizontal"
     names = []
-    for clock, face, wall_thickness_in in _ordered_wall_faces(body):
-        _make_setup(cam, body, face, clock, tube_axis, horizontal, template, wall_thickness_in)
+    for clock, face, selection_face, wall_thickness_in in _ordered_wall_faces(body):
+        _make_setup(cam, body, face, selection_face, clock, tube_axis, horizontal, template, wall_thickness_in)
         names.append(tube_face_program_name(program_base_name, clock))
     # Defensive invariant, not just a byproduct of the loop above: a tube is
     # always exactly four indexed setups, never fewer. Catches a future
