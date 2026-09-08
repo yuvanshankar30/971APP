@@ -125,7 +125,7 @@ def resolve_data_project(app, project_name):
     return app.data.activeProject
 
 
-def list_data_folder_tree(app, project_name, base_folder_path, max_depth=3, max_folders=200):
+def list_data_folder_tree(app, project_name, base_folder_path, max_depth=3, max_folders=60):
     """Walks the Data Panel folder tree starting at base_folder_path (e.g.
     "" for the project root itself, or "Offseason Projects/AutoCAM" for a
     subfolder) and returns it as nested plain dicts - {"name", "path",
@@ -156,6 +156,19 @@ def list_data_folder_tree(app, project_name, base_folder_path, max_depth=3, max_
     "truncated": true, so the picker gets a genuinely complete top end of
     the tree with an honest partial mid/bottom rather than either an
     unbounded blocking call or an artificially narrow default scope.
+
+    Lowered from 200 to 60 after a second live incident: even bounded by
+    count, 200 real sequential Autodesk cloud calls at ~0.5-0.9s each is
+    ~2-3 minutes of continuous blocking - confirmed directly from a real
+    crash-report log showing exactly that (219 getFolderContents calls,
+    13:28:09-13:30:30) coinciding with Fusion appearing hung on its own
+    "Preparing your experience" startup screen. The actual startup
+    collision is fixed at the call site (SpartanRoboticsAutoCAM.py's
+    handleServer no longer fires the first sync immediately on launch) -
+    this lower default is a second, independent margin: even a
+    mid-session sync taking under a minute rather than several is safer
+    to run unattended on a background thread that shares Fusion's engine
+    with whatever the operator is actually doing.
 
     Breadth-first, deliberately not the more obvious depth-first
     recursion: every folder at a given depth gets its own direct children

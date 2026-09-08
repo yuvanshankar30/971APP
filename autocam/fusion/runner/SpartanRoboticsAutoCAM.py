@@ -344,6 +344,20 @@ def _sync_data_folders():
 
 def handleServer(temp_dir: str, stop_event: threading.Event):
     global _last_folder_sync, _last_heartbeat
+    # Confirmed live and directly root-caused from a real crash-report log:
+    # _last_folder_sync starting at module-load's 0.0 meant the very first
+    # folder sync fired on this thread's first loop iteration - seconds
+    # after Fusion launches, right during its own "Preparing your
+    # experience" startup. The synced tree walk is real, sequential cloud
+    # API calls (confirmed: 219 of them, ~0.5-0.9s each, ~2.5 minutes total
+    # in the log), and those calls appear to contend with Fusion's own
+    # startup work badly enough to make the whole app look hung, not just
+    # slow. Starting the clock here instead of at module load means the
+    # first eligible sync is the same _FOLDER_SYNC_INTERVAL_SEC (5 minutes)
+    # after this thread actually starts as every later one - well clear of
+    # Fusion's own startup window - rather than a special, more eager,
+    # unintentional first run.
+    _last_folder_sync = time.monotonic()
     while not stop_event.is_set():
         try:
             time.sleep(5)
