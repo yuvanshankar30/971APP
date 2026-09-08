@@ -2,6 +2,7 @@ import adsk.core, adsk.fusion, adsk.cam, traceback
 
 import json
 import os
+import re
 import shutil
 import time
 
@@ -218,15 +219,19 @@ def start(data, session):
         except Exception:
             app.log("Failed to compute machining time:\n{}".format(traceback.format_exc()))
 
-        doc_name = f"Tube{box_tube_id}Job{job_id}"
+        # The shared Send to Fusion AutoCAM dialog provides the same saved
+        # document controls for plates and tube stock. Honor them here too;
+        # older queued jobs retain the readable-but-unique default.
+        custom_name = _get(payload, "fusion_file_name")
+        doc_name = re.sub(r"\s+", "", str(custom_name)) if custom_name else f"Tube{box_tube_id}Job{job_id}"
+        folder_path = _get(payload, "fusion_folder_path") or FUSION_DROP_FOLDER_PATH
 
-        # Save the document to the configured AutoCAM drop folder
+        # Save the document to the requested AutoCAM folder when provided.
         try:
             data_project, autocam_drop_folder = resolve_drop_folder(
-                app, FUSION_DATA_PROJECT_NAME, FUSION_DROP_FOLDER_PATH
+                app, FUSION_DATA_PROJECT_NAME, folder_path
             )
 
-            # Save the document with Tube<tube_id>Job<job_id> format
             # Check if file already exists and delete it
             try:
                 existing_file = autocam_drop_folder.dataFiles.itemByName(doc_name)
@@ -237,11 +242,11 @@ def start(data, session):
 
             # Save the document
             doc.saveAs(doc_name, autocam_drop_folder, "", "")
-            app.log(f"Saved document '{doc_name}' to '{data_project.name}/{FUSION_DROP_FOLDER_PATH}'")
+            app.log(f"Saved document '{doc_name}' to '{data_project.name}/{folder_path}'")
 
         except Exception as e:
             app.log(
-                f"Failed to save document to '{FUSION_DROP_FOLDER_PATH}' folder:\n{traceback.format_exc()}"
+                f"Failed to save document to '{folder_path}' folder:\n{traceback.format_exc()}"
             )
 
         export_dir = os.path.join(FINAL_PATH, box_tube_id)

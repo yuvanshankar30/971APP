@@ -55,7 +55,16 @@ export async function buildJobPayload(supabase, job) {
   if (params.fusionJobKind === 'box_tube') {
     const { data, error } = await supabase.from('fusion_box_tubes').select('*').eq('id', params.boxTubeId).single();
     if (error || !data) throw new Error('Box tube not found');
-    return { box_tube_id: data.id, machine_id, tool_id, step_file_url: await signedUrl(data.step_file_name, data.id) };
+    return {
+      box_tube_id: data.id,
+      machine_id,
+      tool_id,
+      step_file_url: await signedUrl(data.step_file_name, data.id),
+      // Match plate jobs: the shared queue confirmation controls the saved
+      // Fusion document and must reach the local Runner for tube jobs too.
+      fusion_file_name: typeof params.fusionFileName === 'string' && params.fusionFileName.trim() ? params.fusionFileName.trim() : null,
+      fusion_folder_path: typeof params.fusionFolderPath === 'string' && params.fusionFolderPath.trim() ? params.fusionFolderPath.trim() : null
+    };
   }
   throw new Error('Unsupported Fusion job kind');
 }
