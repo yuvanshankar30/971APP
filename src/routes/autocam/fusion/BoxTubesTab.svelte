@@ -3,8 +3,9 @@
   import { onMount } from 'svelte';
   import { supabase } from '$lib/supabase.js';
   import { toastActions } from '$lib/toast.js';
-  import { fetchBoxTubes, createBoxTube, deleteBoxTube, queueFusionJob } from '$lib/fusionCam.js';
-  import { Plus, Trash2, Box, Send } from 'lucide-svelte';
+  import { fetchBoxTubes, createBoxTube, deleteBoxTube, fetchFusionFolderTree, queueFusionJob } from '$lib/fusionCam.js';
+  import FolderTreeNode from './FolderTreeNode.svelte';
+  import { Plus, Trash2, Box, Send, X } from 'lucide-svelte';
 
   export let user;
   export let canManage;
@@ -33,6 +34,11 @@
   let machineTools = {};
   let queuePickerOpen = false;
   let queuedTubeId = '';
+  let folderTreeRow = null;
+  let queueModalTube = null;
+  let queueFileName = '';
+  let queueFolderPath = '';
+  let queueSubmitting = false;
   $: aluminumMaterials = materials.filter((material) => /alumin(?:um|ium)/i.test(material.name || ''));
 
   async function loadManufacturingParts() {
@@ -77,7 +83,20 @@
     }
   }
 
-  onMount(load);
+  async function loadFolderTree() {
+    try {
+      folderTreeRow = await fetchFusionFolderTree();
+    } catch (error) {
+      // A Runner may not have published its folder index yet. The default
+      // AutoCAM folder remains a valid destination in that case.
+      console.warn('Could not load Fusion folder tree:', error.message);
+    }
+  }
+
+  onMount(() => {
+    load();
+    loadFolderTree();
+  });
 
   function toolsForMachine(machineId) {
     return machineId ? machineTools[machineId] || [] : [];
@@ -116,13 +135,15 @@
     queuedTubeId = '';
   }
 
-  async function queueTubeCam(boxTube, machineId, toolId, materialId) {
+  async function queueTubeCam(boxTube, machineId, toolId, materialId, fusionFileName, fusionFolderPath) {
     await queueFusionJob({
       fusionJobKind: 'box_tube',
       boxTubeId: boxTube.id,
       machineId,
       toolId,
       materialId,
+      fusionFileName: fusionFileName || null,
+      fusionFolderPath: fusionFolderPath || null,
       requestedBy: user?.id,
       name: `Tube Stock CAM: ${boxTube.name}`,
       // This is intentionally a clean 1:1 link. Tube stock is linear,
@@ -193,12 +214,35 @@
       toastActions.show('Choose an aluminum material before queueing tube CAM');
       return;
     }
+    queueModalTube = boxTube;
+    queueFileName = boxTube.name.replace(/\s+/g, '');
+    queueFolderPath = '';
+    closeQueuePicker();
+  }
+
+  function closeQueueModal() {
+    if (queueSubmitting) return;
+    queueModalTube = null;
+    queueFileName = '';
+    queueFolderPath = '';
+  }
+
+  async function confirmQueue() {
+    if (!queueModalTube) return;
+    const machineId = boxTubeMachineSelections[queueModalTube.id];
+    const toolId = boxTubeToolSelections[queueModalTube.id];
+    const materialId = boxTubeMaterialSelections[queueModalTube.id];
+    queueSubmitting = true;
     try {
-      await queueTubeCam(boxTube, machineId, boxTubeToolSelections[boxTube.id], materialId);
+      await queueTubeCam(queueModalTube, machineId, toolId, materialId, queueFileName, queueFolderPath);
       toastActions.show('Queued for the Fusion Runner');
-      closeQueuePicker();
+      queueModalTube = null;
+      queueFileName = '';
+      queueFolderPath = '';
     } catch (e) {
       toastActions.show(e.message || 'Failed to queue job');
+    } finally {
+      queueSubmitting = false;
     }
   }
 </script>
@@ -347,6 +391,51 @@
   </div>
 {/if}
 
+{#if queueModalTube}
+  <div class="modal-overlay" role="presentation" on:click={closeQueueModal}>
+    <div class="modal queue-modal" role="dialog" aria-labelledby="tube-queue-modal-title" on:click|stopPropagation>
+      <div class="modal-header">
+        <h3 id="tube-queue-modal-title">Queue "{queueModalTube.name}"</h3>
+        <button type="button" class="btn btn-ghost btn-sm" title="Close" on:click={closeQueueModal}><X size={16} /></button>
+      </div>
+      <div class="modal-body">
+        <p class="cam-form-hint">This saves a new Fusion document for the tube job. Name it and pick where it goes - both default to something reasonable if you skip them.</p>
+        <div class="form-group">
+          <label class="form-label" for="tube-queue-file-name">Fusion file name</label>
+          <input
+            id="tube-queue-file-name"
+            class="form-input"
+            value={queueFileName}
+            on:input={(event) => (queueFileName = event.currentTarget.value.replace(/\s+/g, ''))}
+            placeholder="e.g. DrivebaseRail"
+          />
+          <p class="cam-form-hint">No spaces - this becomes the saved document's name in Fusion's Data Panel.</p>
+        </div>
+        <div class="form-group">
+          <span class="form-label">Save to folder</span>
+          {#if folderTreeRow?.tree}
+            <div class="folder-tree-box">
+              <FolderTreeNode node={folderTreeRow.tree} selectedPath={queueFolderPath} onSelect={(path) => (queueFolderPath = path)} />
+            </div>
+            <p class="cam-form-hint">
+              {queueFolderPath ? `Selected: ${queueFolderPath}` : "Using the default AutoCAM folder - click a folder above to save somewhere else."}
+              Folder list as of {new Date(folderTreeRow.synced_at).toLocaleString()}.
+            </p>
+          {:else}
+            <p class="cam-form-hint">No folder list yet - a Fusion Runner needs to have run at least once to share it. This will save to the default AutoCAM folder.</p>
+          {/if}
+        </div>
+      </div>
+      <div class="modal-footer-actions">
+        <button class="btn btn-ghost" type="button" on:click={closeQueueModal}>Cancel</button>
+        <button class="btn btn-primary" type="button" disabled={queueSubmitting} on:click={confirmQueue}>
+          <Send size={14} /> {queueSubmitting ? 'Queueing...' : 'Queue Job'}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
 <style>
   .tab-actions { margin-bottom: 1rem; }
   .form-row { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
@@ -358,4 +447,13 @@
   .cam-list-actions { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; flex-wrap: wrap; }
   .empty-state { color: var(--text-muted, #888); padding: 2rem 0; text-align: center; }
   .cam-form-hint { color: var(--text-muted, #888); font-size: 0.85rem; margin: 0.25rem 0 0; }
+  .queue-modal { max-width: 32rem; }
+  .queue-picker-modal { --modal-width: 46rem; }
+  .folder-tree-box {
+    max-height: 16rem;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 6px);
+    padding: 0.35rem;
+  }
 </style>
