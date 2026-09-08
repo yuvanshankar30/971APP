@@ -33,6 +33,7 @@
   let machineTools = {};
   let queuePickerOpen = false;
   let queuedTubeId = '';
+  $: aluminumMaterials = materials.filter((material) => /alumin(?:um|ium)/i.test(material.name || ''));
 
   async function loadManufacturingParts() {
     const { data, error } = await supabase
@@ -95,8 +96,9 @@
       const defaultTool = eligible.find((t) => String(t.id) === String(machine?.default_tool_id));
       boxTubeToolSelections = { ...boxTubeToolSelections, [boxTube.id]: defaultTool?.id || '' };
     }
-    if (!boxTubeMaterialSelections[boxTube.id] && machine?.default_material_id) {
-      boxTubeMaterialSelections = { ...boxTubeMaterialSelections, [boxTube.id]: machine.default_material_id };
+    const defaultMaterial = aluminumMaterials.find((material) => String(material.id) === String(machine?.default_material_id));
+    if (!boxTubeMaterialSelections[boxTube.id] && defaultMaterial) {
+      boxTubeMaterialSelections = { ...boxTubeMaterialSelections, [boxTube.id]: defaultMaterial.id };
     }
   }
 
@@ -186,12 +188,13 @@
       toastActions.show('Choose a tool before queueing');
       return;
     }
-    if (!boxTubeMaterialSelections[boxTube.id]) {
-      toastActions.show('Choose a material before queueing tube CAM');
+    const materialId = boxTubeMaterialSelections[boxTube.id];
+    if (!aluminumMaterials.some((material) => String(material.id) === String(materialId))) {
+      toastActions.show('Choose an aluminum material before queueing tube CAM');
       return;
     }
     try {
-      await queueTubeCam(boxTube, machineId, boxTubeToolSelections[boxTube.id], boxTubeMaterialSelections[boxTube.id]);
+      await queueTubeCam(boxTube, machineId, boxTubeToolSelections[boxTube.id], materialId);
       toastActions.show('Queued for the Fusion Runner');
       closeQueuePicker();
     } catch (e) {
@@ -326,7 +329,7 @@
                 <label class="form-label" for="tube-queue-material">Material</label>
                 <select id="tube-queue-material" class="form-select" bind:value={boxTubeMaterialSelections[tube.id]}>
                   <option value="">Choose a material...</option>
-                  {#each materials as material}<option value={material.id}>{material.name}</option>{/each}
+                  {#each aluminumMaterials as material}<option value={material.id}>{material.name}</option>{/each}
                 </select>
               </div>
             </div>
@@ -337,7 +340,7 @@
         <button class="btn btn-ghost" type="button" on:click={closeQueuePicker}>Cancel</button>
         {#if queuedTubeId}
           {@const tube = boxTubes.find((item) => item.id === queuedTubeId)}
-          <button class="btn btn-primary" type="button" disabled={!tube || !boxTubeMachineSelections[tube.id] || !boxTubeToolSelections[tube.id] || !boxTubeMaterialSelections[tube.id]} on:click={() => handleQueue(tube)}><Send size={14} /> Queue CAM Job</button>
+          <button class="btn btn-primary" type="button" disabled={!tube || !boxTubeMachineSelections[tube.id] || !boxTubeToolSelections[tube.id] || !aluminumMaterials.some((material) => String(material.id) === String(boxTubeMaterialSelections[tube.id]))} on:click={() => handleQueue(tube)}><Send size={14} /> Queue CAM Job</button>
         {/if}
       </div>
     </div>
