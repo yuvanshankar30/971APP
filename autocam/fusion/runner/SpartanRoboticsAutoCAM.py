@@ -283,6 +283,18 @@ def _startup_key_gate(
 
 
 _FOLDER_SYNC_INTERVAL_SEC = 300.0
+# How long after this thread starts the FIRST folder sync is allowed to
+# fire - shorter than the recurring 300s interval on purpose. The
+# original fix for the startup-hang incident (see handleServer below)
+# used the full interval, which works but makes a fresh Fusion launch
+# wait a mandatory 5 minutes before the folder picker shows real data -
+# confirmed live as its own source of confusion (a picker still showing
+# a stale tree well after the actual hang was fixed, because no sync had
+# gotten the chance to run yet). 90s clears the startup window the real
+# incident log showed (first cloud call ~30s post-launch, contention
+# through ~2.5min) with real margin, without making a normal launch wait
+# nearly as long as the full interval for its first real sync.
+_STARTUP_FOLDER_SYNC_DELAY_SEC = 90.0
 _HEARTBEAT_INTERVAL_SEC = 30.0
 # Fusion may drop custom events while it is busy or has a modal open. A
 # claimed job then remains in _job_queue with no main-thread handler ever
@@ -352,12 +364,12 @@ def handleServer(temp_dir: str, stop_event: threading.Event):
     # API calls (confirmed: 219 of them, ~0.5-0.9s each, ~2.5 minutes total
     # in the log), and those calls appear to contend with Fusion's own
     # startup work badly enough to make the whole app look hung, not just
-    # slow. Starting the clock here instead of at module load means the
-    # first eligible sync is the same _FOLDER_SYNC_INTERVAL_SEC (5 minutes)
-    # after this thread actually starts as every later one - well clear of
-    # Fusion's own startup window - rather than a special, more eager,
-    # unintentional first run.
-    _last_folder_sync = time.monotonic()
+    # slow. Backdating the clock here means the first sync becomes eligible
+    # _STARTUP_FOLDER_SYNC_DELAY_SEC after this thread actually starts,
+    # not immediately and not the full recurring interval later either -
+    # every later sync still runs on the normal _FOLDER_SYNC_INTERVAL_SEC
+    # cadence from there, unaffected.
+    _last_folder_sync = time.monotonic() - (_FOLDER_SYNC_INTERVAL_SEC - _STARTUP_FOLDER_SYNC_DELAY_SEC)
     while not stop_event.is_set():
         try:
             time.sleep(5)
@@ -502,6 +514,38 @@ def run(_context):
         _dispatch_retry[0] = 0
         _drain_queue(_job_queue)
         _drain_queue(_log_queue)
+
+        # Direct instruction: a Fusion/Runner restart (crash, forced quit,
+        # a self-update relaunch) must not leave this Runner's own
+        # in-flight job stuck on the server, requiring an operator to
+        # notice and wait out the 15-minute stale-claim sweep. Scoped to
+        # ONLY this RUNNER_ID's own claims (recover-own-jobs on the server
+        # side never touches another machine's or operator's jobs) - a
+        # 'claimed' job never actually started and is requeued immediately,
+        # a 'processing' job may have already changed a document or
+        # exported an artifact and is instead failed for an operator's
+        # review, the same deliberate policy the 15-minute sweep already
+        # applies (see requeueStaleFusionJobs's own comment in
+        # +server.js). Best-effort: an unreachable API here must never
+        # block this Runner from starting and polling for new work.
+        try:
+            response = session.post(
+                f"{BASE_URL}/api/fusion-runner",
+                params={"action": "recover-own-jobs"},
+                json={"runnerId": RUNNER_ID},
+                timeout=30,
+            )
+            response.raise_for_status()
+            recovered = response.json()
+            if recovered.get("requeued") or recovered.get("failed"):
+                fusion_app.log(
+                    f"Recovered from a previous session: requeued "
+                    f"{recovered.get('requeued', 0)} unstarted job(s), "
+                    f"failed {recovered.get('failed', 0)} interrupted "
+                    "in-progress job(s) for review."
+                )
+        except Exception as recover_error:
+            fusion_app.log(f"Could not recover this Runner's own jobs on startup: {recover_error}")
 
         try:
             _app.unregisterCustomEvent(_JOB_QUEUE_EVENT_ID)

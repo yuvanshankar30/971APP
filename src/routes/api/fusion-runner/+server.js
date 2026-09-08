@@ -211,6 +211,54 @@ export async function POST({ request, url }) {
       return json({ machine: created, created: true });
     }
 
+    if (action === 'recover-own-jobs') {
+      // Direct instruction: on a Fusion/Runner restart, this Runner's own
+      // interrupted job(s) should not just sit stuck until the 15-minute
+      // stale-claim sweep (requeueStaleFusionJobs) eventually notices - and
+      // scoped ONLY to this runnerId's own claims, never the shared queue,
+      // so one machine restarting can never touch what another machine or
+      // an operator queued from the web UI.
+      const runnerId = String(body?.runnerId || '').trim();
+      if (!runnerId) return json({ error: 'runnerId is required' }, { status: 400 });
+
+      // A 'claimed' job never actually started (Fusion hadn't begun real
+      // work on it yet) - safe to put straight back in the queue for
+      // anyone to pick up, the same outcome requeueStaleFusionJobs already
+      // produces after 15 minutes of silence, just immediate instead of a
+      // pointless wait once the crash/restart itself already proves this
+      // Runner isn't coming back to it this session.
+      const { data: requeued, error: requeueError } = await supabase.from('cam_jobs')
+        .update({
+          status: 'queued',
+          claimed_by: null,
+          claimed_at: null,
+          progress: 0,
+          progress_message: 'Runner restarted before starting this job; requeued automatically'
+        })
+        .eq('claimed_by', runnerId).eq('status', 'claimed').eq('operation_type', 'milling')
+        .select('id');
+      if (requeueError) throw new Error(requeueError.message);
+
+      // A 'processing' job may already have changed a document or exported
+      // an artifact before the crash - the same reason requeueStaleFusionJobs
+      // deliberately never auto-retries one (see its own comment above).
+      // Failing it here instead of leaving it silently stuck in
+      // 'processing' forever surfaces the need for an operator's review
+      // right away, rather than only ever finding out by noticing the job
+      // never moved.
+      const { data: failed, error: failError } = await supabase.from('cam_jobs')
+        .update({
+          status: 'failed',
+          errors: ['Runner restarted while this job was processing - it may be partially complete; review before retrying'],
+          progress_message: 'Runner restarted mid-job'
+        })
+        .eq('claimed_by', runnerId).eq('status', 'processing').eq('operation_type', 'milling')
+        .select('id');
+      if (failError) throw new Error(failError.message);
+
+      return json({ success: true, requeued: requeued?.length || 0, failed: failed?.length || 0 });
+    }
+
     if (action === 'claim') {
       const runnerId = String(body?.runnerId || '').trim();
       if (!runnerId) return json({ error: 'runnerId is required' }, { status: 400 });
@@ -373,7 +421,7 @@ export async function POST({ request, url }) {
       return json({ success: true });
     }
 
-    return json({ error: `Unknown action: ${action}. Expected one of: claim, processing, heartbeat, complete, fail, sync-folders, register-machine, grow-plate` }, { status: 400 });
+    return json({ error: `Unknown action: ${action}. Expected one of: claim, processing, heartbeat, complete, fail, sync-folders, register-machine, grow-plate, recover-own-jobs` }, { status: 400 });
   } catch (error) {
     return json({ error: error?.message || 'Internal server error' }, { status: 500 });
   }

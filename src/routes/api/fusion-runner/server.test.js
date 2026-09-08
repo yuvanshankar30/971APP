@@ -189,6 +189,32 @@ describe('Fusion Runner grouping lifecycle',()=>{
   expect(mocks.storageUpload).not.toHaveBeenCalled();
  });
 });
+describe('Fusion Runner own-job recovery on restart',()=>{
+ it('requires a runner identifier',async()=>{
+  expect((await call('recover-own-jobs',{})).status).toBe(400);
+  expect(mocks.from).not.toHaveBeenCalled();
+ });
+ it('requeues its own never-started claims and fails its own interrupted processing jobs',async()=>{
+  mocks.from
+   .mockReturnValueOnce(chain({data:[{id:'job-claimed'}],error:null}))
+   .mockReturnValueOnce(chain({data:[{id:'job-processing'}],error:null}));
+  const result=await call('recover-own-jobs',{runnerId:'runner'});
+  expect(result.status).toBe(200);
+  expect(await result.json()).toEqual({success:true,requeued:1,failed:1});
+  expect(queries[0].update).toHaveBeenCalledWith(expect.objectContaining({status:'queued',claimed_by:null,claimed_at:null}));
+  expect(queries[0].eq).toHaveBeenCalledWith('claimed_by','runner');
+  expect(queries[0].eq).toHaveBeenCalledWith('status','claimed');
+  expect(queries[1].update).toHaveBeenCalledWith(expect.objectContaining({status:'failed'}));
+  expect(queries[1].eq).toHaveBeenCalledWith('claimed_by','runner');
+  expect(queries[1].eq).toHaveBeenCalledWith('status','processing');
+ });
+ it('never touches another runner\'s claims',async()=>{
+  mocks.from.mockReturnValue(chain({data:[],error:null}));
+  await call('recover-own-jobs',{runnerId:'runner-a'});
+  expect(queries[0].eq).not.toHaveBeenCalledWith('claimed_by','runner-b');
+  expect(queries[0].eq).toHaveBeenCalledWith('claimed_by','runner-a');
+ });
+});
 describe('Fusion Runner plate growth',()=>{
  it('rejects a malformed plate ID',async()=>{
   const result=await call('grow-plate',{plateId:'not-a-uuid',length:34,width:34});
