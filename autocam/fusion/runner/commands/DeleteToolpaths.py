@@ -1120,12 +1120,20 @@ def waitForGeneration(setup, waitforcontour=False, quiet_checks_required=30):
         # one on screen (minimized, unfocused, or - as observed live during
         # unattended Runner testing - simply not the foreground app at that
         # instant) - confirmed live as a real crash (AttributeError: 'NoneType'
-        # object has no attribute 'refresh'), not a theoretical case. The
-        # refresh here is a best-effort nudge to help Fusion notice toolpath
-        # generation progress, not something the wait loop actually depends
-        # on to function correctly.
+        # object has no attribute 'refresh'), not a theoretical case. A
+        # second, related crash confirmed live: activeViewport can be a real,
+        # non-None object and still have .refresh() raise (RuntimeError 2:
+        # "InternalValidationError") during a Fusion UI transition (e.g. the
+        # window not fully settled as foreground yet). The refresh here is a
+        # best-effort nudge to help Fusion notice toolpath generation
+        # progress, not something the wait loop actually depends on to
+        # function correctly - so a failing refresh must never abort the
+        # whole CAM job over a nudge that didn't need to succeed.
         if app.activeViewport is not None:
-            app.activeViewport.refresh()
+            try:
+                app.activeViewport.refresh()
+            except RuntimeError:
+                pass
         time.sleep(0.1)
         if waitforcontour:
             generating = [
