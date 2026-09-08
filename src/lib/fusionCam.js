@@ -556,7 +556,7 @@ export async function fetchFusionFolderTree(projectName = '2026 Season CAM') {
  * turning/routing's cam-generate, this genuinely needs an external Fusion
  * 360 process).
  */
-export async function queueFusionJob({ fusionJobKind, plateId, boxTubeId, machineId, materialId, toolId, requestedBy, name, partId, groupingMode, selectedPartId, selectedPartIds, fusionFileName, fusionFolderPath, tabCount, singleToolMode = false }) {
+export async function queueFusionJob({ fusionJobKind, plateId, boxTubeId, machineId, materialId, toolId, requestedBy, name, partId, groupingMode, selectedPartId, selectedPartIds, fusionFileName, fusionFolderPath, tabCount, singleToolMode = false, countersinkToolId = null }) {
   if (!FUSION_JOB_KINDS.includes(fusionJobKind)) {
     throw new Error(`Invalid fusionJobKind: ${fusionJobKind}`);
   }
@@ -576,7 +576,10 @@ export async function queueFusionJob({ fusionJobKind, plateId, boxTubeId, machin
       // TabPlacement at all. Re-clamped server-side (buildJobPayload) and
       // again in the Runner itself (camPlate.py) - never trust a single
       // layer for "cannot be too much".
-      tabCount: tabCount === '' || tabCount == null ? null : Number(tabCount)
+      tabCount: tabCount === '' || tabCount == null ? null : Number(tabCount),
+      // A second, explicitly chosen tool for the plate-only countersink
+      // operation. The claim endpoint re-resolves and allowlists it.
+      countersinkToolId: countersinkToolId || null
     } : { boxTubeId }),
     // Where the saved Fusion document goes and what it's named - chosen at
     // queue time (Plates tab). Optional; camPlate.py falls back to its
@@ -584,7 +587,7 @@ export async function queueFusionJob({ fusionJobKind, plateId, boxTubeId, machin
     fusionFileName: fusionFileName || null,
     fusionFolderPath: fusionFolderPath || null,
     // Runner safety contract, not merely a UI preference.
-    singleToolMode: Boolean(singleToolMode)
+    singleToolMode: Boolean(singleToolMode),
   };
   const { data, error } = await supabase
     .from('cam_jobs')

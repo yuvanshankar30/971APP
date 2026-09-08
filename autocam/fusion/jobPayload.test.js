@@ -44,6 +44,23 @@ describe('Fusion plate payloads',()=>{
   const value=job(); value.params.singleToolMode=true; value.cam_tools={tool_type:'endmill'};
   await expect(buildJobPayload(db(),value)).resolves.toMatchObject({single_tool_mode:true});
  });
+ it('only passes a loaded, approved ShopSabre countersink to the Runner',async()=>{
+  const j=job(); j.machine_id='router'; j.params.countersinkToolId='counter';
+  const countersink={id:'counter',tool_type:'countersink',diameter:0.372,tool_number:5,tip_angle:82,tool_library_guid:'61a8645a-9015-4aba-958b-70297d26b19e',source_tool_library_file:'Normal router tools (use this).tools'};
+  const database={
+   storage:db().storage,
+   from:(table)=>table==='cam_machine_tools'?{select:()=>({eq:()=>({eq:()=>({maybeSingle:async()=>({data:{cam_tools:countersink}})})})})}:null
+  };
+  await expect(buildJobPayload(database,j)).resolves.toMatchObject({countersink_tool:{guid:countersink.tool_library_guid,tool_number:5}});
+ });
+ it('rejects an unapproved countersink even if it is loaded',async()=>{
+  const j=job(); j.machine_id='router'; j.params.countersinkToolId='counter';
+  const database={
+   storage:db().storage,
+   from:()=>({select:()=>({eq:()=>({eq:()=>({maybeSingle:async()=>({data:{cam_tools:{tool_type:'countersink',diameter:0.25,tip_angle:82,tool_library_guid:'other',source_tool_library_file:'Normal router tools (use this).tools'}}})})})})})
+  };
+  await expect(buildJobPayload(database,j)).rejects.toThrow(/not an approved/i);
+ });
 });
 
 describe('Fusion plate payload tab_count override',()=>{

@@ -48,6 +48,25 @@ class SingleToolLibraryTests(unittest.TestCase):
                     output_dir,
                 )
 
+    def test_includes_only_the_explicit_countersink_in_the_generated_library(self):
+        countersink_guid = "61a8645a-9015-4aba-958b-70297d26b19e"
+        with tempfile.TemporaryDirectory() as output_dir:
+            _, path = local_cam_assets.load_local_tool_library_json(
+                {
+                    "payload": {"single_tool_mode": True, "countersink_tool": {"guid": countersink_guid}},
+                    "cam_tools": {
+                        "diameter": 0.1575,
+                        "tool_type": "endmill",
+                        "tool_number": 1,
+                        "fusion_tool_library_file": "Normal router tools (use this).tools",
+                    },
+                },
+                output_dir,
+            )
+            entries = json.loads(Path(path).read_text())["data"]
+            countersinks = [entry for entry in entries if "counter sink" in entry["type"].lower()]
+            self.assertEqual([entry["guid"] for entry in countersinks], [countersink_guid])
+
 
 if __name__ == "__main__":
     unittest.main()

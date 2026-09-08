@@ -152,6 +152,7 @@
   // mode/selection per stock category.
   let categoryMachineSelections = {};
   let categoryToolSelections = {};
+  let categoryCountersinkSelections = {};
   let categorySingleToolModes = {};
   let categoryQueueModes = {};
   let categorySinglePartSelections = {};
@@ -457,7 +458,7 @@
       machines = machineRows || [];
       const { data: machineToolRows } = await supabase
         .from('cam_machine_tools')
-        .select('machine_id, cam_tools(id, name, diameter, tool_type)')
+        .select('machine_id, cam_tools(id, name, diameter, tool_type, tool_number, tip_angle, tool_library_guid, source_tool_library_file)')
         .in('machine_id', machines.map((m) => m.id));
       machineTools = {};
       for (const row of machineToolRows || []) {
@@ -492,6 +493,18 @@
     return /end\s*mill/i.test(String(tool?.tool_type || ''));
   }
 
+  const COUNTERSINK_GUIDS = new Set([
+    '61a8645a-9015-4aba-958b-70297d26b19e',
+    '8789b786-8e50-48c5-b4f9-21296fcaf34a'
+  ]);
+
+  function isApprovedCountersink(tool) {
+    return /counter\s*sink/i.test(String(tool?.tool_type || ''))
+      && COUNTERSINK_GUIDS.has(String(tool?.tool_library_guid || ''))
+      && Number(tool?.tip_angle) === 82
+      && [0.372, 0.5].some((diameter) => Math.abs(Number(tool?.diameter) - diameter) < 0.0001);
+  }
+
   // Picking a router pre-selects that machine's default tool (if it's
   // actually installed on it) rather than leaving the tool blank - same
   // "profile picks reasonable defaults, human can still override" pattern
@@ -504,6 +517,7 @@
     const singleToolMode = isNewRouter(machineId);
     const eligibleForMode = singleToolMode ? eligible.filter(isEndmill) : eligible;
     categorySingleToolModes = { ...categorySingleToolModes, [categoryId]: singleToolMode };
+    categoryCountersinkSelections = { ...categoryCountersinkSelections, [categoryId]: '' };
     const stillValid = eligibleForMode.some((t) => String(t.id) === String(categoryToolSelections[categoryId]));
     if (!stillValid) {
       const defaultTool = eligibleForMode.find((t) => String(t.id) === String(machine?.default_tool_id));
@@ -778,6 +792,13 @@
         .find((tool) => String(tool.id) === String(categoryToolSelections[categoryId]));
       if (!isEndmill(selectedTool)) return 'Single-tool CAM requires an endmill';
     }
+    if (categoryCountersinkSelections[categoryId]) {
+      const countersink = toolsForMachine(categoryMachineSelections[categoryId])
+        .find((tool) => String(tool.id) === String(categoryCountersinkSelections[categoryId]));
+      if (!isNewRouter(categoryMachineSelections[categoryId]) || !isApprovedCountersink(countersink)) {
+        return 'Countersinking requires one of the approved loaded 82 degree countersinks';
+      }
+    }
     const mode = categoryQueueModes[categoryId];
     if (!['single', 'grouped'].includes(mode)) return 'Choose single-part or grouped CAM';
     if (mode === 'single') {
@@ -901,7 +922,8 @@
         fusionFileName: queueFileName.trim() || null,
         fusionFolderPath: queueFolderPath || null,
         tabCount: queueTabCount === '' ? null : queueTabCount,
-        singleToolMode: Boolean(categorySingleToolModes[categoryId])
+        singleToolMode: Boolean(categorySingleToolModes[categoryId]),
+        countersinkToolId: categoryCountersinkSelections[categoryId] || null
       });
       toastActions.show('Queued for the Fusion Runner');
       categoryQueueModes = { ...categoryQueueModes, [categoryId]: '' };
@@ -1329,6 +1351,16 @@
                   <button type="button" disabled title="Multi-tool CAM remains disabled until the physical ShopSabre setup is confirmed.">Multi-tool</button>
                 </div>
                 <p class="cam-form-hint">Single-tool mode uses only the selected loaded endmill.</p>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for={`queue-countersink-${group.categoryId}`}>Countersink</label>
+                <select id={`queue-countersink-${group.categoryId}`} class="form-select" bind:value={categoryCountersinkSelections[group.categoryId]}>
+                  <option value="">No countersink</option>
+                  {#each toolsForMachine(categoryMachineSelections[group.categoryId]).filter(isApprovedCountersink) as t}
+                    <option value={t.id}>T{t.tool_number || '?'} - {toolLabel(t)}, 82 degree countersink</option>
+                  {/each}
+                </select>
+                <p class="cam-form-hint">Optional. Only the selected loaded 0.372 in or 0.5 in 82 degree countersink is added.</p>
               </div>
             {/if}
           {/if}
