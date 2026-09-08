@@ -50,6 +50,10 @@
   let editingQuantityId = null;
   let quantityValue = '';
   $: aluminumMaterials = materials.filter((material) => /alumin(?:um|ium)/i.test(material.name || ''));
+  $: recentQueueableTubes = [...boxTubes]
+    .filter((tube) => tube.step_file_name && Number(tube.quantity) > 0)
+    .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
+    .slice(0, 8);
 
   async function loadManufacturingParts() {
     const { data, error } = await supabase
@@ -166,6 +170,10 @@
   function closeQueuePicker() {
     queuePickerOpen = false;
     queuedTubeId = '';
+  }
+
+  function selectRecentTube(tube) {
+    queuedTubeId = tube.id;
   }
 
   async function queueTubeCam(boxTube, machineId, toolId, materialId, fusionFileName, fusionFolderPath) {
@@ -513,6 +521,19 @@
             </select>
           </div>
         </div>
+        {#if recentQueueableTubes.length}
+          <div class="recent-queue-picker">
+            <span class="form-label">Recent tube stock</span>
+            <div class="recent-queue-grid">
+              {#each recentQueueableTubes as tube}
+                <button type="button" class="recent-queue-button" title={tube.name} on:click={() => selectRecentTube(tube)}>
+                  <span class="recent-queue-name">{tube.name}</span>
+                  <span class="recent-queue-detail">Qty {tube.quantity}</span>
+                </button>
+              {/each}
+            </div>
+          </div>
+        {/if}
         {#if queuedTubeId}
           {@const tube = boxTubes.find((item) => item.id === queuedTubeId)}
           {#if tube}
@@ -617,6 +638,26 @@
   .cad-modal { width: min(900px, 94vw); }
   .cad-modal .modal-body { min-height: 60vh; }
   .queue-picker-modal { --modal-width: 46rem; }
+  .recent-queue-picker { margin: 0.75rem 0; }
+  .recent-queue-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.45rem; }
+  .recent-queue-button {
+    display: grid;
+    gap: 0.15rem;
+    min-width: 0;
+    min-height: 3.6rem;
+    padding: 0.5rem 0.6rem;
+    text-align: left;
+    color: var(--text);
+    background: var(--surface-2, #f7f7f5);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 6px);
+    cursor: pointer;
+  }
+  .recent-queue-button:hover, .recent-queue-button:focus-visible { border-color: var(--accent); background: var(--surface); outline: none; }
+  .recent-queue-name, .recent-queue-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .recent-queue-name { font-weight: 600; font-size: 0.8rem; }
+  .recent-queue-detail { color: var(--text-muted); font-size: 0.72rem; }
+  @media (max-width: 640px) { .recent-queue-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   .folder-tree-box {
     max-height: 16rem;
     overflow-y: auto;

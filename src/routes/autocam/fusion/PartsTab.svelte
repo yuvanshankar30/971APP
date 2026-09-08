@@ -998,12 +998,13 @@
           <p class="cam-form-hint">No parts were created on this date - try another date or "Show all dates".</p>
         {/if}
         {#if recentQueueableParts.length}
-          <div class="recent-part-picker">
+          <div class="recent-queue-picker">
             <span class="form-label">Recent parts</span>
-            <div class="cam-list-actions">
+            <div class="recent-queue-grid">
               {#each recentQueueableParts as part}
-                <button type="button" class="btn btn-secondary btn-sm" on:click={() => selectRecentPart(part)}>
-                  {part.name} <span class="recent-part-stock">{categoryLabel(part.fusion_part_categories)}</span>
+                <button type="button" class="recent-queue-button" title={part.name} on:click={() => selectRecentPart(part)}>
+                  <span class="recent-queue-name">{part.name}</span>
+                  <span class="recent-queue-detail">{categoryLabel(part.fusion_part_categories)}</span>
                 </button>
               {/each}
             </div>
@@ -1169,9 +1170,26 @@
   .stock-group:first-of-type { margin-top: 1rem; padding-top: 0; border-top: none; }
   .group-header { flex-wrap: wrap; margin-bottom: 0.75rem; }
   .group-header h3 { margin: 0; }
-  .recent-part-picker { margin: 0.75rem 0; }
-  .recent-part-picker .cam-list-actions { gap: 0.4rem; }
-  .recent-part-stock { color: var(--text-muted); font-size: 0.75rem; }
+  .recent-queue-picker { margin: 0.75rem 0; }
+  .recent-queue-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.45rem; }
+  .recent-queue-button {
+    display: grid;
+    gap: 0.15rem;
+    min-width: 0;
+    min-height: 3.6rem;
+    padding: 0.5rem 0.6rem;
+    text-align: left;
+    color: var(--text);
+    background: var(--surface-2, #f7f7f5);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 6px);
+    cursor: pointer;
+  }
+  .recent-queue-button:hover, .recent-queue-button:focus-visible { border-color: var(--accent); background: var(--surface); outline: none; }
+  .recent-queue-name, .recent-queue-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .recent-queue-name { font-weight: 600; font-size: 0.8rem; }
+  .recent-queue-detail { color: var(--text-muted); font-size: 0.72rem; }
+  @media (max-width: 640px) { .recent-queue-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   .tab-actions { margin-bottom: 1rem; display: flex; gap: 0.5rem; flex-wrap: wrap; }
   .form-row { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
   .form-row .form-group { flex: 1; min-width: 160px; }
