@@ -306,6 +306,12 @@ export async function updateBoxTubeQuantity(id, quantity) {
   if (!Number.isInteger(quantity) || quantity < 0) {
     throw new Error('Quantity must be a whole number, zero or more');
   }
+  const { data: existing, error: existingError } = await supabase
+    .from('fusion_box_tubes')
+    .select('part_id')
+    .eq('id', id)
+    .single();
+  if (existingError) throw existingError;
   const { data, error } = await supabase
     .from('fusion_box_tubes')
     .update({ quantity })
@@ -313,6 +319,13 @@ export async function updateBoxTubeQuantity(id, quantity) {
     .select('*, parts(id, name, project_id, workflow)')
     .single();
   if (error) throw error;
+  if (existing.part_id) {
+    const { error: linkedPartError } = await supabase
+      .from('parts')
+      .update({ quantity, updated_at: new Date().toISOString() })
+      .eq('id', existing.part_id);
+    if (linkedPartError) throw linkedPartError;
+  }
   return data;
 }
 

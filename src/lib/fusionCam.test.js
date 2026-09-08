@@ -82,7 +82,7 @@ describe('Fusion CAM queue query efficiency', () => {
   });
 
   it('persists tube name and quantity edits used by the Tube Stock cards', async () => {
-    mocks.from.mockImplementation(() => chain({ data: { id: 'tube-1', name: 'Renamed Tube', quantity: 3 }, error: null }));
+    mocks.from.mockImplementation(() => chain({ data: { id: 'tube-1', name: 'Renamed Tube', quantity: 3, part_id: null }, error: null }));
 
     await expect(renameBoxTube('tube-1', '  Renamed Tube  ')).resolves.toMatchObject({ name: 'Renamed Tube' });
     expect(mocks.from).toHaveBeenNthCalledWith(1, 'fusion_box_tubes');
@@ -90,7 +90,20 @@ describe('Fusion CAM queue query efficiency', () => {
 
     await expect(updateBoxTubeQuantity('tube-1', 3)).resolves.toMatchObject({ quantity: 3 });
     expect(mocks.from).toHaveBeenNthCalledWith(2, 'fusion_box_tubes');
-    expect(mocks.queries[1].update).toHaveBeenCalledWith({ quantity: 3 });
+    expect(mocks.from).toHaveBeenNthCalledWith(3, 'fusion_box_tubes');
+    expect(mocks.queries[2].update).toHaveBeenCalledWith({ quantity: 3 });
+  });
+
+  it('keeps a linked manufacturing request quantity aligned with tube stock', async () => {
+    mocks.from
+      .mockReturnValueOnce(chain({ data: { part_id: 'manufacturing-part' }, error: null }))
+      .mockReturnValueOnce(chain({ data: { id: 'tube-1', quantity: 4 }, error: null }))
+      .mockReturnValueOnce(chain({ data: null, error: null }));
+
+    await expect(updateBoxTubeQuantity('tube-1', 4)).resolves.toMatchObject({ quantity: 4 });
+    expect(mocks.from).toHaveBeenNthCalledWith(3, 'parts');
+    expect(mocks.queries[2].update).toHaveBeenCalledWith(expect.objectContaining({ quantity: 4 }));
+    expect(mocks.queries[2].eq).toHaveBeenCalledWith('id', 'manufacturing-part');
   });
 
   it('rejects invalid tube card edits before querying Supabase', async () => {

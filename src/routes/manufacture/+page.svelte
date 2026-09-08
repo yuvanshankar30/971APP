@@ -21,7 +21,9 @@
   import { formatPacificDate, formatPacificDateTimeWithZone } from '$lib/timezone.js';
   import PartDueDate from '$lib/components/PartDueDate.svelte';
   import PartNotes from '$lib/components/PartNotes.svelte';
-  import { fetchFusionJobsByManufacturingPartIds, fetchFusionJobNcFiles } from '$lib/fusionCam.js';
+  import FolderTreeNode from '../autocam/fusion/FolderTreeNode.svelte';
+  import { fetchFusionJobsByManufacturingPartIds, fetchFusionJobNcFiles, fetchPartCategories, fetchPlates, createPart, createPlate, assignPartToPlate, createBoxTube, queueFusionJob, fetchFusionFolderTree } from '$lib/fusionCam.js';
+  import { buildStockMaterialIndex, materialIdForStockAssignment, stockCatalogIdForStockAssignment } from '$autocam/stockMaterial.js';
 
   const LAST_SUBSYSTEM_STORAGE_KEY = '971hub:lastSubsystem';
   // Same labels JobQueueTab.svelte's own STATUS_LABELS uses, for the
@@ -33,6 +35,7 @@
   };
   const QUICK_PRINT_STOCK_OPTIONS = stockData['3d-print'] || [];
   const DEFAULT_PETG_STOCK = QUICK_PRINT_STOCK_OPTIONS.find((stock) => stock.material === 'PETG')?.description || 'PETG 3D Printing Filament';
+  const manufacturingStockMaterialIndex = buildStockMaterialIndex(stockData);
   
   let parts = [];
   let filteredParts = [];
@@ -55,6 +58,21 @@
   // covers router-workflow parts today.
   let fusionJobsByPart = {};
   let queuingCamJobForPartId = null;
+  let fusionQueuePart = null;
+  let fusionQueueKind = 'plate';
+  let fusionQueueCategories = [];
+  let fusionQueueMachines = [];
+  let fusionQueueMaterials = [];
+  let fusionQueueMachineTools = {};
+  let fusionQueueFolderTree = null;
+  let fusionQueueCategoryId = '';
+  let fusionQueueMachineId = '';
+  let fusionQueueToolId = '';
+  let fusionQueueMaterialId = '';
+  let fusionQueueQuantity = 1;
+  let fusionQueueFileName = '';
+  let fusionQueueFolderPath = '';
+  let fusionQueueLoading = false;
   let subsystemOptions = [];
   let showQuickPrintModal = false;
   let quickPrintPartName = '';
@@ -1044,11 +1062,115 @@
     return !!getStepFileName(part);
   }
 
-  // Deep link into the Fusion CAM Parts tab, pre-filled from this request -
-  // PartsTab.svelte reads manufacturingPart off the query string, looks the
-  // request up, and pre-fills name/STEP file/depth from it.
-  function fusionCamHref(part) {
-    return `/autocam/fusion?tab=parts&manufacturingPart=${encodeURIComponent(part.id)}`;
+  function fusionQueueTools(machineId) {
+    return machineId ? fusionQueueMachineTools[machineId] || [] : [];
+  }
+
+  function fusionQueueToolLabel(tool) {
+    return `${tool.name}${tool.diameter ? ` (${tool.diameter}\")` : ''}`;
+  }
+
+  function fusionQueueCategoryLabel(category) {
+    return `${category.cam_materials?.name || 'Material'} - ${Number(category.thickness).toFixed(3)}\"`;
+  }
+
+  function selectFusionQueueMachine(machineId) {
+    fusionQueueMachineId = machineId;
+    const machine = fusionQueueMachines.find((candidate) => String(candidate.id) === String(machineId));
+    const eligible = fusionQueueTools(machineId);
+    const defaultTool = eligible.find((tool) => String(tool.id) === String(machine?.default_tool_id));
+    fusionQueueToolId = defaultTool?.id || eligible[0]?.id || '';
+  }
+
+  function selectFusionQueueKind(kind) {
+    fusionQueueKind = kind;
+    const machine = fusionQueueMachines.find((candidate) => kind === 'tube' ? candidate.can_run_box_tubes : candidate.can_run_plates);
+    selectFusionQueueMachine(machine?.id || '');
+    if (kind === 'tube') {
+      const aluminum = fusionQueueMaterials.find((material) => /alumin(?:um|ium)/i.test(material.name || ''));
+      fusionQueueMaterialId = aluminum?.id || '';
+    }
+  }
+
+  async function openFusionCamModal(part) {
+    fusionQueuePart = part;
+    fusionQueueLoading = true;
+    fusionQueueKind = 'plate';
+    fusionQueueQuantity = Number.isInteger(Number(part.quantity)) && Number(part.quantity) > 0 ? Number(part.quantity) : 1;
+    fusionQueueFileName = (part.name || '').replace(/\s+/g, '');
+    fusionQueueFolderPath = '';
+    try {
+      const [categories, machines, materials, folderTree] = await Promise.all([
+        fetchPartCategories(),
+        supabase.from('cam_machines').select('*').eq('enabled', true).order('name'),
+        supabase.from('cam_materials').select('id, name').eq('enabled', true).order('name'),
+        fetchFusionFolderTree()
+      ]);
+      fusionQueueCategories = categories;
+      fusionQueueMachines = machines.data || [];
+      fusionQueueMaterials = materials.data || [];
+      fusionQueueFolderTree = folderTree;
+      const stockMaterialId = materialIdForStockAssignment(manufacturingStockMaterialIndex, fusionQueueMaterials, part.stock_assignment, stockData);
+      const stockCatalogId = stockCatalogIdForStockAssignment(stockData, part.stock_assignment);
+      const stockThickness = (stockData.router || []).find((stock) => stock.id === stockCatalogId)?.thickness;
+      fusionQueueCategoryId = String(fusionQueueCategories.find((category) =>
+        String(category.material_id) === String(stockMaterialId) && Number.isFinite(stockThickness) && Math.abs(Number(category.thickness) - stockThickness) < 0.002
+      )?.id || '');
+      selectFusionQueueKind('plate');
+    } catch (error) {
+      showToastMessage(error.message || 'Could not load Fusion AutoCAM options', 'error');
+      fusionQueuePart = null;
+    } finally {
+      fusionQueueLoading = false;
+    }
+  }
+
+  function closeFusionCamModal() {
+    if (fusionQueueLoading || queuingCamJobForPartId) return;
+    fusionQueuePart = null;
+  }
+
+  async function manufacturingStepFile(part) {
+    const path = getStepFileName(part);
+    if (!path) throw new Error('This manufacturing request needs a STEP file before it can be sent to Fusion');
+    const { data, error } = await supabase.storage.from('manufacturing-files').download(path);
+    if (error || !data) throw error || new Error('Could not download the request STEP file');
+    return new File([data], path.split('/').pop() || `${part.name || 'part'}.step`, { type: data.type || 'application/step' });
+  }
+
+  async function submitFusionCamModal() {
+    const part = fusionQueuePart;
+    if (!part || fusionQueueLoading) return;
+    const quantity = Number(fusionQueueQuantity);
+    if (!Number.isInteger(quantity) || quantity < 1) return showToastMessage('Quantity must be a whole number greater than zero', 'error');
+    const machine = fusionQueueMachines.find((candidate) => String(candidate.id) === String(fusionQueueMachineId));
+    if (!machine || !(fusionQueueKind === 'tube' ? machine.can_run_box_tubes : machine.can_run_plates)) return showToastMessage('Choose a compatible router', 'error');
+    if (!fusionQueueTools(fusionQueueMachineId).some((tool) => String(tool.id) === String(fusionQueueToolId))) return showToastMessage('Choose a tool installed on this router', 'error');
+    if (fusionQueueKind === 'plate' && !fusionQueueCategoryId) return showToastMessage('Choose a material and thickness', 'error');
+    if (fusionQueueKind === 'tube' && !fusionQueueMaterials.some((material) => String(material.id) === String(fusionQueueMaterialId) && /alumin(?:um|ium)/i.test(material.name || ''))) return showToastMessage('Choose an aluminum material for tube stock', 'error');
+    queuingCamJobForPartId = part.id;
+    try {
+      const stepFile = await manufacturingStepFile(part);
+      if (fusionQueueKind === 'tube') {
+        const tube = await createBoxTube({ name: part.name, epic: part.epic, ticket: part.ticket, quantity, stepFile, createdBy: user?.id, partId: part.id });
+        await queueFusionJob({ fusionJobKind: 'box_tube', boxTubeId: tube.id, machineId: fusionQueueMachineId, toolId: fusionQueueToolId, materialId: fusionQueueMaterialId, requestedBy: user?.id, partId: part.id, name: `Tube Stock CAM: ${part.name}`, fusionFileName: fusionQueueFileName.trim() || null, fusionFolderPath: fusionQueueFolderPath || null });
+      } else {
+        const category = fusionQueueCategories.find((candidate) => String(candidate.id) === String(fusionQueueCategoryId));
+        const fusionPart = await createPart({ name: part.name, epic: part.epic, ticket: part.ticket, quantity, categoryId: category.id, stepFile, createdBy: user?.id, partId: part.id, fusionFileName: fusionQueueFileName.trim() || null });
+        const plates = await fetchPlates();
+        let plate = plates.find((candidate) => String(candidate.category_id) === String(category.id));
+        if (!plate) plate = await createPlate({ name: `Auto stock - ${fusionQueueCategoryLabel(category)}`, width: 24, length: 24, trueDepth: Number(category.thickness), categoryId: category.id });
+        await assignPartToPlate({ categoryId: category.id, plateId: plate.id, partId: fusionPart.id, quantity });
+        await queueFusionJob({ fusionJobKind: 'plate:cam', plateId: plate.id, machineId: fusionQueueMachineId, toolId: fusionQueueToolId, materialId: category.material_id, requestedBy: user?.id, name: `Fusion CAM: ${part.name}`, groupingMode: 'single', selectedPartId: fusionPart.id, fusionFileName: fusionQueueFileName.trim() || null, fusionFolderPath: fusionQueueFolderPath || null });
+      }
+      showToastMessage('Queued for the Fusion Runner', 'success');
+      fusionQueuePart = null;
+      await loadFusionJobsForParts();
+    } catch (error) {
+      showToastMessage(error.message || 'Failed to queue Fusion AutoCAM job', 'error');
+    } finally {
+      queuingCamJobForPartId = null;
+    }
   }
 
   // Lathe/turning parts have no working CAM entry point on this page at all
@@ -2030,9 +2152,9 @@
                 <Box size={14} /> View CAD
               </button>
               {#if part.workflow === 'router'}
-                <a class="btn btn-secondary btn-sm" href={fusionCamHref(part)} on:click|stopPropagation title="Open this part in Fusion CAM, pre-filled from this request">
+                <button class="btn btn-secondary btn-sm" on:click|stopPropagation={() => openFusionCamModal(part)} title="Queue this request for Fusion AutoCAM">
                   <Layers size={14} /> AutoCAM
-                </a>
+                </button>
               {/if}
               <button class="btn btn-secondary btn-sm" on:click={() => installCadStepFile(part)} title="Download STEP file">
                 <Download size={14} /> Install CAD
@@ -2051,7 +2173,7 @@
               {:else if fusionJob.status === 'completed'}
                 <span class="fusion-cam-completed part-card-fusion-status"><CircleCheck size={14} /> Fusion CAM completed</span>
               {:else if fusionJob.status === 'failed'}
-                <a class="fusion-cam-failed part-card-fusion-status" href={fusionCamHref(part)} title={fusionJob.errors?.[0] || 'Unknown error'}>Fusion CAM failed - open Fusion CAM to retry</a>
+                <button class="fusion-cam-failed part-card-fusion-status" on:click={() => openFusionCamModal(part)} title={fusionJob.errors?.[0] || 'Unknown error'}>Fusion CAM failed - retry AutoCAM</button>
               {/if}
             {/if}
           {:else if part.workflow === 'router' || part.workflow === 'lathe'}
@@ -2228,9 +2350,9 @@
                       <Box size={13} /> View CAD
                     </button>
                     {#if part.workflow === 'router'}
-                      <a class="btn btn-secondary btn-sm" href={fusionCamHref(part)} on:click|stopPropagation title="Open this part in Fusion CAM, pre-filled from this request">
+                      <button class="btn btn-secondary btn-sm" on:click|stopPropagation={() => openFusionCamModal(part)} title="Queue this request for Fusion AutoCAM">
                         <Layers size={13} /> AutoCAM
-                      </a>
+                      </button>
                     {/if}
                     <button class="btn btn-secondary btn-sm" on:click={() => installCadStepFile(part)} title="Download STEP file">
                       <Download size={13} /> Install CAD
@@ -2269,7 +2391,7 @@
                     {:else if fusionJob.status === 'completed'}
                       <span class="fusion-cam-completed"><CircleCheck size={14} /> Fusion CAM completed</span>
                     {:else if fusionJob.status === 'failed'}
-                      <a class="fusion-cam-failed" href={fusionCamHref(part)} title={fusionJob.errors?.[0] || 'Unknown error'}>Fusion CAM failed - open Fusion CAM to retry</a>
+                      <button class="fusion-cam-failed" on:click={() => openFusionCamModal(part)} title={fusionJob.errors?.[0] || 'Unknown error'}>Fusion CAM failed - retry AutoCAM</button>
                     {/if}
                   {/if}
                 {:else if part.workflow === 'router' || part.workflow === 'lathe'}
@@ -2714,6 +2836,85 @@
         </button>
       </div>
     </div>
+  </div>
+{/if}
+
+{#if fusionQueuePart}
+  <div class="modal-backdrop" role="button" tabindex="0" on:click|self={closeFusionCamModal} on:keydown={(event) => { if (event.key === 'Escape') closeFusionCamModal(); }}>
+    <section class="modal cam-setup-modal" role="dialog" aria-modal="true" aria-labelledby="fusion-queue-title">
+      <div class="modal-header">
+        <h3 id="fusion-queue-title">Send to Fusion AutoCAM - {fusionQueuePart.name}</h3>
+        <button type="button" class="modal-close-button" aria-label="Close dialog" on:click={closeFusionCamModal}><X size={18} /></button>
+      </div>
+      <div class="modal-body">
+        {#if fusionQueueLoading}
+          <p class="text-muted">Loading Fusion CAM options...</p>
+        {:else}
+          <div class="form-group">
+            <span class="form-label">Stock type</span>
+            <div class="cam-target-choice">
+              <button type="button" class:active={fusionQueueKind === 'plate'} on:click={() => selectFusionQueueKind('plate')}>Plate part</button>
+              <button type="button" class:active={fusionQueueKind === 'tube'} on:click={() => selectFusionQueueKind('tube')}>Tube stock</button>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="manufacture-fusion-quantity">Quantity</label>
+              <input id="manufacture-fusion-quantity" class="form-input" type="number" min="1" step="1" bind:value={fusionQueueQuantity} />
+            </div>
+            {#if fusionQueueKind === 'plate'}
+              <div class="form-group">
+                <label class="form-label" for="manufacture-fusion-category">Material / Thickness</label>
+                <select id="manufacture-fusion-category" class="form-select" bind:value={fusionQueueCategoryId}>
+                  <option value="">Choose a stock category...</option>
+                  {#each fusionQueueCategories as category}<option value={category.id}>{fusionQueueCategoryLabel(category)}</option>{/each}
+                </select>
+              </div>
+            {:else}
+              <div class="form-group">
+                <label class="form-label" for="manufacture-fusion-material">Material</label>
+                <select id="manufacture-fusion-material" class="form-select" bind:value={fusionQueueMaterialId}>
+                  <option value="">Choose an aluminum material...</option>
+                  {#each fusionQueueMaterials.filter((material) => /alumin(?:um|ium)/i.test(material.name || '')) as material}<option value={material.id}>{material.name}</option>{/each}
+                </select>
+              </div>
+            {/if}
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="manufacture-fusion-router">Router</label>
+              <select id="manufacture-fusion-router" class="form-select" value={fusionQueueMachineId} on:change={(event) => selectFusionQueueMachine(event.currentTarget.value)}>
+                <option value="">Choose a router...</option>
+                {#each fusionQueueMachines.filter((machine) => fusionQueueKind === 'tube' ? machine.can_run_box_tubes : machine.can_run_plates) as machine}<option value={machine.id}>{machine.name}</option>{/each}
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="manufacture-fusion-tool">Tool</label>
+              <select id="manufacture-fusion-tool" class="form-select" bind:value={fusionQueueToolId} disabled={!fusionQueueMachineId}>
+                <option value="">{fusionQueueTools(fusionQueueMachineId).length ? 'Choose a tool...' : 'No tools installed on this router'}</option>
+                {#each fusionQueueTools(fusionQueueMachineId) as tool}<option value={tool.id}>{fusionQueueToolLabel(tool)}</option>{/each}
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="manufacture-fusion-file-name">Fusion file name</label>
+            <input id="manufacture-fusion-file-name" class="form-input" value={fusionQueueFileName} on:input={(event) => (fusionQueueFileName = event.currentTarget.value.replace(/\s+/g, ''))} />
+          </div>
+          <div class="form-group">
+            <span class="form-label">Save to folder</span>
+            {#if fusionQueueFolderTree?.tree}
+              <div class="folder-tree-box"><FolderTreeNode node={fusionQueueFolderTree.tree} selectedPath={fusionQueueFolderPath} onSelect={(path) => (fusionQueueFolderPath = path)} /></div>
+            {:else}
+              <p class="cam-form-hint">Using the default AutoCAM folder. A Fusion Runner will publish folder choices after its next folder sync.</p>
+            {/if}
+          </div>
+        {/if}
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn" disabled={fusionQueueLoading || !!queuingCamJobForPartId} on:click={closeFusionCamModal}>Cancel</button>
+        <button type="button" class="btn btn-primary" disabled={fusionQueueLoading || !!queuingCamJobForPartId} on:click={submitFusionCamModal}><Layers size={16} /> {queuingCamJobForPartId ? 'Queueing...' : 'Queue CAM Job'}</button>
+      </div>
+    </section>
   </div>
 {/if}
 

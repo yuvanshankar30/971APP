@@ -60,7 +60,11 @@ browser confirmation or prompt popups.
   its views have stable routes at `/autocam/fusion/parts`,
   `/autocam/fusion/tubes`, `/autocam/fusion/turning`, `/autocam/fusion/jobs`, and
   `/autocam/fusion/stock-categories` (the legacy root redirects to Parts);
-  the box-tube path creates four face-scoped Fusion setups and posts separate `Side 12`,
+  Manufacturing's per-request **AutoCAM** action stays in Manufacturing and
+  opens its own queue dialog, where the operator selects plate or tube stock
+  before the request's quantity, STEP file, stock, and identifiers are copied
+  into the linked Fusion CAM record.
+  The box-tube path creates four face-scoped Fusion setups and posts separate `Side 12`,
   `Side 3`, `Side 6`, and `Side 9` files for manual indexing. See the
   **AutoCAM** section below for the code-level detail on all three.
   Every completed Fusion NC artifact is automatically published to the Files
