@@ -145,6 +145,35 @@ export async function POST({ request, url }) {
       return json({ success: true });
     }
 
+    if (action === 'register-machine') {
+      // Lets setup.py get a real RUNNER_MACHINE_ID without a human having to
+      // open /autocam/fusion -> Machines and copy a UUID by hand. Get-or-
+      // create by name (case-insensitive) so re-running setup for the same
+      // physical machine is idempotent instead of creating duplicates.
+      // Newly created rows start disabled: this only gets the machine a
+      // real cam_machines id so job routing (the machine_id filter in the
+      // 'claim' action below) has something real to match against - the
+      // post-processor, controller, and tool library it needs to actually
+      // run a job still require a human to configure via /autocam before
+      // enabling it, same as a manually-created machine profile always has.
+      const name = String(body?.name || '').trim();
+      if (!name) return json({ error: 'name is required' }, { status: 400 });
+      const { data: existing, error: findError } = await supabase
+        .from('cam_machines')
+        .select('id, name')
+        .ilike('name', name)
+        .maybeSingle();
+      if (findError) throw new Error(findError.message);
+      if (existing) return json({ machine: existing, created: false });
+      const { data: created, error: createError } = await supabase
+        .from('cam_machines')
+        .insert({ name, enabled: false })
+        .select('id, name')
+        .single();
+      if (createError) throw new Error(createError.message);
+      return json({ machine: created, created: true });
+    }
+
     if (action === 'claim') {
       const runnerId = String(body?.runnerId || '').trim();
       if (!runnerId) return json({ error: 'runnerId is required' }, { status: 400 });
@@ -269,7 +298,7 @@ export async function POST({ request, url }) {
       return json({ success: true });
     }
 
-    return json({ error: `Unknown action: ${action}. Expected one of: claim, processing, heartbeat, complete, fail, sync-folders` }, { status: 400 });
+    return json({ error: `Unknown action: ${action}. Expected one of: claim, processing, heartbeat, complete, fail, sync-folders, register-machine` }, { status: 400 });
   } catch (error) {
     return json({ error: error?.message || 'Internal server error' }, { status: 500 });
   }

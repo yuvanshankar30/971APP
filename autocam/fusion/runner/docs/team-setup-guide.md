@@ -13,7 +13,7 @@ Two things run this: **Spartans Hub** itself (already deployed - where you queue
    It asks for three things:
    - **Which Hub** - the deployed one (normal) or a local dev server.
    - **`FUSION_RUNNER_TOKEN`** - one shared secret for the whole team. Ask a project administrator; don't generate your own or commit it anywhere.
-   - **This machine's `RUNNER_MACHINE_ID`** - see step 2.
+   - **A name for this machine** - `setup.py` registers it with the Hub automatically (or reuses the existing profile if the name already exists) to get its `RUNNER_MACHINE_ID`; see step 2.
 
    **Known risk, not yet root-caused:** the `pip install` step builds packages for whatever Python your system defaults to, which may not exactly match Fusion's bundled interpreter's ABI. If the add-in fails to load with an error mentioning `charset_normalizer`, that's the likely cause - ask for help rather than assuming your setup is broken.
 
@@ -36,7 +36,7 @@ Two things run this: **Spartans Hub** itself (already deployed - where you queue
    | `FUSION_RUNNER_TOKEN` | The shared secret that lets any Runner talk to the Hub at all | **Yes** - one value for the whole team |
    | `RUNNER_MACHINE_ID` | Which *physical machine* this computer drives | **No** - per device |
 
-   `RUNNER_MACHINE_ID` is the `cam_machines` id of the machine this computer is actually wired to. Find it at **`/autocam/fusion` -> Machines** and copy the id of that machine. It's a UUID, like `517ba89c-7167-4415-b6fd-cfc7be1e59e1`; `setup.py` checks the format before writing it.
+   `RUNNER_MACHINE_ID` is the `cam_machines` id of the machine this computer is actually wired to. `setup.py` asks for a name for this machine and registers it with the Hub itself (get-or-create by name, so re-running setup for the same machine reuses the same profile instead of creating a duplicate) - no manual UUID copy-paste needed. A newly created profile starts **disabled**: it can still claim unassigned jobs, but an admin needs to set its post-processor and tool library and enable it at **`/autocam` -> Machines** before it can be targeted for a specific machine's jobs. If the Hub can't be reached during setup (offline, wrong URL), it falls back to asking for an existing machine's UUID by hand from **`/autocam/fusion` -> Machines**.
 
    It matters because a Runner only claims jobs meant for its own machine (or jobs left unassigned). Give two workstations the same machine id and the router's Runner can pick up a job queued for the mill - which is why it's required rather than optional.
 

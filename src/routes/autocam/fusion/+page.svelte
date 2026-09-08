@@ -1,37 +1,51 @@
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { page } from '$app/stores';
   import { supabase } from '$lib/supabase.js';
   import { userStore, loadUserFromUUID } from '$lib/stores/user.js';
   import { canManageCamProfiles } from '$lib/permissions.js';
-  import { Layers, Package, Box, ListChecks, SlidersHorizontal, BookOpen, HelpCircle } from 'lucide-svelte';
+  import { Layers, Package, Box, ListChecks, SlidersHorizontal, BookOpen, HelpCircle, Send } from 'lucide-svelte';
   import PartsTab from './PartsTab.svelte';
-  import PlatesTab from './PlatesTab.svelte';
   import BoxTubesTab from './BoxTubesTab.svelte';
   import JobQueueTab from './JobQueueTab.svelte';
   import StockCategoriesTab from './StockCategoriesTab.svelte';
 
   // Deep link from Manufacturing's "Open Fusion CAM" button
   // (/manufacture's fusionCamHref) - ?tab=parts&manufacturingPart=<id>
-  // jumps straight to the Parts tab with that request pre-filled.
-  const VALID_TABS = ['plates', 'parts', 'box-tubes', 'queue', 'stock-categories'];
+  // jumps straight to the Parts tab with that request pre-filled. 'plates'
+  // is accepted too and mapped onto 'parts' for old links/bookmarks from
+  // before #448 merged the separate Plates tab into this one - a plate's
+  // stock category now renders directly under that category's parts here.
+  const VALID_TABS = ['parts', 'box-tubes', 'queue', 'stock-categories'];
   const requestedTab = $page.url.searchParams.get('tab');
+  const normalizedRequestedTab = requestedTab === 'plates' ? 'parts' : requestedTab;
   const initialManufacturingPartId = $page.url.searchParams.get('manufacturingPart') || null;
 
   let user = null;
-  let activeTab = VALID_TABS.includes(requestedTab) ? requestedTab : 'plates';
-  let plateCategoryFilter = '';
-
-  function viewMatchingPlates(categoryId) {
-    plateCategoryFilter = categoryId;
-    activeTab = 'plates';
-  }
+  let activeTab = VALID_TABS.includes(normalizedRequestedTab) ? normalizedRequestedTab : 'parts';
+  // Reference to the mounted PartsTab instance, so the page-level "Send to
+  // Fusion CAM" button (see openSendToFusionCam below) can open its queue
+  // picker popup from outside the Parts tab - direct instruction: this
+  // button belongs up here next to Usage Guide/Runner Setup, not buried
+  // per-stock-group inside the parts list.
+  let partsTabRef;
 
   $: canManage = canManageCamProfiles(user);
 
   function setActiveTab(tab) {
-    plateCategoryFilter = '';
     activeTab = tab;
+  }
+
+  // Switches to the Parts tab first if it isn't already active - PartsTab
+  // (and partsTabRef) only exists in the DOM while that tab is showing, so
+  // openQueuePicker() can't be called until after it mounts. tick() waits
+  // for that mount to actually happen before calling it.
+  async function openSendToFusionCam() {
+    if (activeTab !== 'parts') {
+      activeTab = 'parts';
+      await tick();
+    }
+    partsTabRef?.openQueuePicker();
   }
 
   onMount(() => {
@@ -48,6 +62,11 @@
 <div class="page-header">
   <h1><Layers size={28} /> Fusion CAM</h1>
   <div class="header-guide-links">
+    {#if canManage}
+      <button type="button" class="btn btn-primary btn-sm" on:click={openSendToFusionCam}>
+        <Send size={14} /> Send to Fusion CAM
+      </button>
+    {/if}
     <a class="btn btn-secondary btn-sm" href="/autocam/fusion/usage">
       <HelpCircle size={14} /> Usage Guide
     </a>
@@ -58,9 +77,6 @@
 </div>
 
 <nav class="tab-nav" role="tablist" aria-label="Fusion CAM sections">
-  <button type="button" class:active={activeTab === 'plates'} on:click={() => setActiveTab('plates')}>
-    <Layers size={16} /> Plates
-  </button>
   <button type="button" class:active={activeTab === 'parts'} on:click={() => setActiveTab('parts')}>
     <Package size={16} /> Parts
   </button>
@@ -75,10 +91,8 @@
   </button>
 </nav>
 
-{#if activeTab === 'plates'}
-  <PlatesTab {user} {canManage} bind:categoryFilter={plateCategoryFilter} />
-{:else if activeTab === 'parts'}
-  <PartsTab {user} {canManage} onViewPlates={viewMatchingPlates} {initialManufacturingPartId} />
+{#if activeTab === 'parts'}
+  <PartsTab bind:this={partsTabRef} {user} {canManage} {initialManufacturingPartId} />
 {:else if activeTab === 'stock-categories'}
   <StockCategoriesTab {canManage} />
 {:else if activeTab === 'box-tubes'}

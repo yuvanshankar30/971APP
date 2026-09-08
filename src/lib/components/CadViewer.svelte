@@ -12,7 +12,6 @@
   let loading = true;
   let loadingMsg = 'Loading 3D model…';
   let error = null;
-  let depthInches = null;
 
   let renderer, scene, camera, controls, frameId, resizeObserver;
   let disposed = false;
@@ -97,9 +96,6 @@
         // Center the group on the origin.
         const box = new THREE.Box3().setFromObject(group);
         const center = box.getCenter(new THREE.Vector3());
-        const size = box.getSize(new THREE.Vector3());
-        const spans = [size.x, size.y, size.z].filter((span) => Number.isFinite(span) && span > 1e-6);
-        depthInches = spans.length ? Math.min(...spans) : null;
         group.position.sub(center);
         scene.add(group);
 
@@ -163,12 +159,6 @@
 </script>
 
 <div class="cad-viewer" bind:this={container}>
-  {#if depthInches}
-    <div class="cad-depth" title="Smallest bounding-box dimension of the CAD model">
-      <span>Thickness / depth</span>
-      <strong>{depthInches.toFixed(depthInches < 0.1 ? 4 : 3)} in</strong>
-    </div>
-  {/if}
   {#if loading}
     <div class="cad-viewer-overlay">
       <div class="spinner"></div>
@@ -190,30 +180,6 @@
     border-radius: var(--radius-sm, 4px);
     overflow: hidden;
     background: var(--surface-2, #f3f4f6);
-  }
-
-  .cad-depth {
-    position: absolute;
-    left: 0.75rem;
-    bottom: 0.75rem;
-    z-index: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 0.1rem;
-    padding: 0.45rem 0.6rem;
-    border: 1px solid color-mix(in srgb, var(--border, #d1d5db) 85%, transparent);
-    border-radius: var(--radius-sm, 4px);
-    background: color-mix(in srgb, var(--surface, #fff) 92%, transparent);
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14);
-    color: var(--text-muted, #6b7280);
-    font-size: 0.7rem;
-    line-height: 1.15;
-    pointer-events: none;
-  }
-
-  .cad-depth strong {
-    color: var(--text, #111827);
-    font-size: 0.9rem;
   }
 
   .cad-viewer-overlay {

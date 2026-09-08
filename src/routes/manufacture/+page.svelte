@@ -1051,21 +1051,14 @@
     return `/autocam/fusion?tab=parts&manufacturingPart=${encodeURIComponent(part.id)}`;
   }
 
-  // Lathe/turning parts have no Fusion CAM path at all - Fusion CAM only
-  // runs plate and box-tube routing jobs. When the legacy per-part AutoCAM
-  // buttons were removed from this page, router gained "Open Fusion CAM"
-  // and turning was left with no CAM entry point anywhere on this page
-  // (issue #396), even though /autocam itself still works and can still
-  // generate turning G-code through its own New Job flow.
-  //
-  // This is deliberately just a link, not a pre-filled deep link like
-  // router's: /autocam has no part-prefill parameter to target (it only
-  // reads `job` and `group`), and #396 explicitly asks that the bigger
-  // question - extend Fusion CAM to turning, or build a real lathe entry
-  // point - be settled with the team rather than assumed. Sending an
-  // operator to the page that actually works today is the part that needs
-  // no decision.
-  const TURNING_CAM_HREF = '/autocam';
+  // Lathe/turning parts have no working CAM entry point on this page at all
+  // right now - Fusion CAM only runs plate and box-tube routing jobs, and
+  // direct instruction: plain /autocam doesn't actually work for this case
+  // either (contrary to what an earlier version of this comment assumed).
+  // No "Open AutoCAM"/turning CAM button is shown for lathe parts as a
+  // result - only View CAD/Install CAD - until issue #396's bigger question
+  // (extend Fusion CAM to turning, or build a real lathe entry point) is
+  // settled with the team.
 
   // A router request may enter human CAM review only after the real Fusion
   // pipeline has completed its job. This replaces the old manual Start ->
@@ -2037,12 +2030,8 @@
                 <Box size={14} /> View CAD
               </button>
               {#if part.workflow === 'router'}
-                <a class="btn btn-primary btn-sm" href={fusionCamHref(part)} on:click|stopPropagation title="Open this part in Fusion CAM, pre-filled from this request">
-                  <Layers size={14} /> Open Fusion CAM
-                </a>
-              {:else if part.workflow === 'lathe'}
-                <a class="btn btn-secondary btn-sm" href={TURNING_CAM_HREF} on:click|stopPropagation title="Turning G-code is generated in AutoCAM - open it and start a new job with this part's STEP file">
-                  <Layers size={14} /> Open AutoCAM
+                <a class="btn btn-secondary btn-sm" href={fusionCamHref(part)} on:click|stopPropagation title="Open this part in Fusion CAM, pre-filled from this request">
+                  <Layers size={14} /> AutoCAM
                 </a>
               {/if}
               <button class="btn btn-secondary btn-sm" on:click={() => installCadStepFile(part)} title="Download STEP file">
@@ -2077,20 +2066,23 @@
 
           <!-- Status action buttons -->
           {#if part.status === 'pending'}
-            {#if part.workflow === 'router'}
-              {#if canAdvanceRouterToCamReview(part, fusionJob)}
-                <button class="btn btn-primary btn-sm" on:click|stopPropagation={() => advanceRouterToCamReview(part)}>
-                  <CircleCheck size={14} /> Review CAM
-                </button>
-              {/if}
-            {:else}
-              <button
-                class="btn btn-primary btn-sm"
-                on:click|stopPropagation={async () => { await updatePartStatus(part.id, 'in-progress'); setLocalStatus(part.id, 'in-progress'); }}
-              >
-                <Clock size={14} /> Start
+            <!-- Start always shows for a pending part regardless of
+                 workflow - direct instruction, restoring the plain
+                 pending -> in-progress action every workflow used to have.
+                 Router additionally gets Review CAM once real Fusion CAM
+                 output exists, as its own separate action rather than a
+                 replacement for Start. -->
+            {#if part.workflow === 'router' && canAdvanceRouterToCamReview(part, fusionJob)}
+              <button class="btn btn-secondary btn-sm" on:click|stopPropagation={() => advanceRouterToCamReview(part)}>
+                <CircleCheck size={14} /> Review CAM
               </button>
             {/if}
+            <button
+              class="btn btn-secondary btn-sm"
+              on:click|stopPropagation={async () => { await updatePartStatus(part.id, 'in-progress'); setLocalStatus(part.id, 'in-progress'); }}
+            >
+              <Clock size={14} /> Start
+            </button>
           {:else if part.status === 'in-progress'}
             {#if part.workflow === 'router'}
               {#if (!getRouterMeta(part).step || getRouterMeta(part).step === 'cam_ing') && canAdvanceRouterToCamReview(part, fusionJob)}
@@ -2236,12 +2228,8 @@
                       <Box size={13} /> View CAD
                     </button>
                     {#if part.workflow === 'router'}
-                      <a class="btn btn-primary btn-sm" href={fusionCamHref(part)} on:click|stopPropagation title="Open this part in Fusion CAM, pre-filled from this request">
-                        <Layers size={13} /> Open Fusion CAM
-                      </a>
-                    {:else if part.workflow === 'lathe'}
-                      <a class="btn btn-secondary btn-sm" href={TURNING_CAM_HREF} on:click|stopPropagation title="Turning G-code is generated in AutoCAM - open it and start a new job with this part's STEP file">
-                        <Layers size={13} /> Open AutoCAM
+                      <a class="btn btn-secondary btn-sm" href={fusionCamHref(part)} on:click|stopPropagation title="Open this part in Fusion CAM, pre-filled from this request">
+                        <Layers size={13} /> AutoCAM
                       </a>
                     {/if}
                     <button class="btn btn-secondary btn-sm" on:click={() => installCadStepFile(part)} title="Download STEP file">
@@ -2250,6 +2238,26 @@
                     {#if fusionJob?.status === 'completed' && fusionJob.params?.fusionJobKind !== 'plate:arrange'}
                       <button class="btn btn-secondary btn-sm" on:click={() => downloadFusionNcFiles(fusionJob)} title="Download G-code">
                         <Download size={13} /> Install G-code
+                      </button>
+                    {/if}
+                    <!-- Start/Review CAM live inside this grid too (not as
+                         separate siblings below, the old layout) so a
+                         pending part's action buttons form one even 2-column
+                         grid instead of a lopsided stack. See the duplicate
+                         block below .row-actions for the !canViewCad(part)
+                         case, where there's no grid for this to join. -->
+                    {#if part.status === 'pending'}
+                      {#if part.workflow === 'router' && canAdvanceRouterToCamReview(part, fusionJob)}
+                        <button class="btn btn-secondary btn-sm" on:click={() => advanceRouterToCamReview(part)} title="Review completed Fusion CAM output">
+                          <CircleCheck size={13} /> Review CAM
+                        </button>
+                      {/if}
+                      <button
+                        class="btn btn-secondary btn-sm"
+                        on:click={async () => { await updatePartStatus(part.id, 'in-progress'); setLocalStatus(part.id, 'in-progress'); }}
+                        title="Start Work"
+                      >
+                        <Clock size={13} /> Start
                       </button>
                     {/if}
                   </div>
@@ -2274,22 +2282,19 @@
                   </button>
                 {/if}
               </div>
-              {#if part.status === 'pending'}
-                {#if part.workflow === 'router'}
-                  {#if canAdvanceRouterToCamReview(part, fusionJob)}
-                    <button class="btn btn-primary btn-sm" on:click={() => advanceRouterToCamReview(part)} title="Review completed Fusion CAM output">
-                      <CircleCheck size={13} /> Review CAM
-                    </button>
-                  {/if}
-                {:else}
+              {#if part.status === 'pending' && !canViewCad(part)}
+                {#if part.workflow === 'router' && canAdvanceRouterToCamReview(part, fusionJob)}
+                  <button class="btn btn-secondary btn-sm" on:click={() => advanceRouterToCamReview(part)} title="Review completed Fusion CAM output">
+                    <CircleCheck size={13} /> Review CAM
+                  </button>
+                {/if}
                 <button
-                  class="btn btn-primary btn-sm"
+                  class="btn btn-secondary btn-sm"
                   on:click={async () => { await updatePartStatus(part.id, 'in-progress'); setLocalStatus(part.id, 'in-progress'); }}
                   title="Start Work"
                 >
                   <Clock size={13} /> Start
                 </button>
-                {/if}
 
               {:else if part.status === 'in-progress'}
                 {#if part.workflow === 'router'}
@@ -2888,6 +2893,12 @@
        tag and stock beside them sat centred. */
     vertical-align: middle;
     position: relative;
+    /* .metadata-line below centers the badge/date/text inside the cell -
+       the header label needs the same text-align or it sits at the base
+       .table th default (left) while its column's real content sits
+       centered underneath, reading as misaligned. Same fix quantity-col
+       already has for its own centered content. */
+    text-align: center;
   }
   /* One shared first line for Status / Due / Created / Requested By. A
      pill badge, a date input and plain text all have different intrinsic
@@ -3009,9 +3020,10 @@
     min-width: 110px;
   }
 
-  /* The CAD grid and workflow action (for example, Start) are separate
-     flex items in the sticky table cell. When the latter wraps below the
-     grid, the global compact row gap made the buttons appear joined. */
+  /* Start/Review CAM now render as grid items inside .cad-action-grid
+     itself (see the table row markup) instead of as a separate sibling
+     below it, so a pending part's buttons form one even 2x2 grid instead
+     of the CAD grid and a lopsided extra button stacking underneath it. */
   .table .row-actions {
     align-items: flex-start;
     column-gap: var(--gap-2);
