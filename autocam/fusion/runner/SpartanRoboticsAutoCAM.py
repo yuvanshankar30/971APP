@@ -273,47 +273,11 @@ def _startup_key_gate(
         os.environ["API_KEY"] = new_key
         return new_key
 
-    progress = ui.createProgressDialog()
-    progress.isCancelButtonShown = True
-    progress.show(
-        "Starting Add-In",
-        "",
-        0,
-        max(timeout_s, 1),
-        1,
-    )
-
-    start_time = time.monotonic()
-    last_shown_remaining = None
-    while True:
-        elapsed = time.monotonic() - start_time
-        remaining = max(0, int(timeout_s - elapsed))
-        if remaining != last_shown_remaining:
-            progress.message = (
-                f"API key {_mask_api_key(api_key)} loaded.\n"
-                f"Starting in {remaining} seconds...\n\n"
-                "Click Cancel to edit the API key."
-            )
-            progress.progressValue = int(elapsed)
-            last_shown_remaining = remaining
-
-        adsk.doEvents()
-
-        if progress.wasCancelled:
-            progress.hide()
-            new_key = _prompt_for_api_key(ui, existing_key=api_key)
-            if new_key:
-                _write_api_key_to_env_file(_ENV_PATH, new_key)
-                os.environ["API_KEY"] = new_key
-                return new_key
-            return api_key
-
-        if elapsed >= timeout_s:
-            break
-
-        time.sleep(0.1)
-
-    progress.hide()
+    # ``run`` is called while Fusion is still completing its own startup.
+    # Opening a modal progress dialog and pumping ``adsk.doEvents`` here can
+    # re-enter Fusion's initialization event loop and leave the application
+    # permanently on its splash screen. A stored key needs no user action;
+    # return it immediately. The missing-key path above remains interactive.
     os.environ["API_KEY"] = api_key
     return api_key
 
