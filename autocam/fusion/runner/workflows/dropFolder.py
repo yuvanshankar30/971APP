@@ -147,6 +147,112 @@ _PRIORITY_FOLDER_NAMES = {"offseason projects"}
 _FOLDER_WALK_CALL_PACING_SEC = 0.15
 
 
+class FolderTreeWalker:
+    """Resumable breadth-first Data Panel folder walk - the same algorithm
+    list_data_folder_tree documents below, split so a caller running on
+    Fusion's main UI thread can advance it in short chunks instead of
+    blocking that thread for the whole walk in one call.
+
+    Root cause this exists to fix: SpartanRoboticsAutoCAM.py's
+    _JobQueueEventHandler.notify() runs on Fusion's main thread (Fusion
+    custom events are always dispatched there), and used to call
+    list_data_folder_tree synchronously inline - up to 150 real cloud
+    round-trips (each ~0.5-0.9s, plus the deliberate
+    _FOLDER_WALK_CALL_PACING_SEC pacing), meaning the main thread could
+    freeze solid for 97-157 seconds every _FOLDER_SYNC_INTERVAL_SEC (5
+    minutes), automatically, forever, for as long as the add-in runs.
+    Confirmed live: a real crash-report log from 2026-09-08 shows the main
+    thread's stack frozen exactly inside this call chain (notify ->
+    _sync_data_folders -> list_data_folder_tree -> dataFolders.count ->
+    libcurl's _curl_easy_perform), with 5 separate crash reports inside a
+    single hour - consistent with this 5-minute cadence, not a one-off.
+    The previous pacing fix (spacing dataFolders.item() calls out instead
+    of firing them back-to-back) reduced the risk of colliding with
+    Fusion's own startup work, but never addressed that the walk still
+    ran as one unbroken blocking call on the thread that owns Fusion's UI.
+
+    Call run_chunk() repeatedly. Each incomplete call makes at most one
+    cloud API call; the caller schedules the next chunk after returning to
+    Fusion's event loop (see SpartanRoboticsAutoCAM.py's
+    _advance_folder_sync). Once run_chunk returns True, result() has the
+    same {"project", "root"} shape list_data_folder_tree always returned.
+    """
+
+    def __init__(self, app, project_name, base_folder_path, max_depth=3, max_folders=150):
+        self.data_project, base_folder = resolve_drop_folder(app, project_name, base_folder_path)
+        self.max_depth = max_depth
+        self.budget = max_folders
+        self.root_node = {"name": base_folder.name, "path": base_folder_path, "children": []}
+        self._level = [(base_folder, self.root_node, 0)]
+        self._next_level = []
+        self._cur_index = 0
+        self._child_index = None
+        self._child_count = None
+        self.done = False
+
+    def run_chunk(self):
+        """Makes at most one Data Panel cloud call before yielding.
+
+        Returns True once the whole walk is done (result() is then valid),
+        otherwise False so the caller can schedule a later UI event.
+        """
+        while True:
+            if self._cur_index >= len(self._level):
+                if not self._next_level:
+                    self.done = True
+                    return True
+                for _folder, node, _depth in self._level:
+                    node["children"].sort(key=lambda n: n["name"].lower())
+                self._next_level.sort(
+                    key=lambda entry: entry[1]["name"].strip().lower() not in _PRIORITY_FOLDER_NAMES
+                )
+                self._level = self._next_level
+                self._next_level = []
+                self._cur_index = 0
+                continue
+
+            folder, node, depth = self._level[self._cur_index]
+            if depth >= self.max_depth or self.budget <= 0:
+                if self.budget <= 0:
+                    node["truncated"] = True
+                self._cur_index += 1
+                continue
+
+            if self._child_count is None:
+                self._child_count = folder.dataFolders.count
+                self._child_index = 0
+                return False
+
+            while self._child_index < self._child_count:
+                if self.budget <= 0:
+                    node["truncated"] = True
+                    break
+                child = folder.dataFolders.item(self._child_index)
+                self.budget -= 1
+                self._child_index += 1
+                # Live-confirmed: a real sync (148 dataFolders.item() calls,
+                # fired back-to-back with no pause) coincided with Fusion
+                # itself crashing at almost exactly the point the walk
+                # finished. Spacing calls out is a real mitigation for
+                # that even without a fully confirmed root cause - see the
+                # class docstring above for the separate, now-diagnosed
+                # main-thread-blocking issue this class fixes.
+                child_path = f"{node['path']}/{child.name}" if node['path'] else child.name
+                child_node = {"name": child.name, "path": child_path, "children": []}
+                node["children"].append(child_node)
+                self._next_level.append((child, child_node, depth + 1))
+                return False
+
+            self._cur_index += 1
+            self._child_count = None
+            self._child_index = None
+
+    def result(self):
+        if not self.done:
+            raise RuntimeError("FolderTreeWalker.result() called before run_chunk() returned True")
+        return {"project": self.data_project.name, "root": self.root_node}
+
+
 def list_data_folder_tree(app, project_name, base_folder_path, max_depth=3, max_folders=150):
     """Walks the Data Panel folder tree starting at base_folder_path (e.g.
     "" for the project root itself, or "Offseason Projects/AutoCAM" for a

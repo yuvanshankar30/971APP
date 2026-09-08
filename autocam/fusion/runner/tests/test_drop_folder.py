@@ -204,6 +204,21 @@ class FolderTreeBudgetTests(unittest.TestCase):
         for child in result["root"]["children"]:
             self.assertNotIn("truncated", child)
 
+    def test_resumable_walker_makes_one_cloud_call_per_chunk(self):
+        root = _fake_folder("2026 Season CAM", [_fake_folder("One"), _fake_folder("Two")])
+        app = self._app_for(root)
+        walker = dropFolder.FolderTreeWalker(app, "2026 Season CAM", "", max_folders=10)
+
+        self.assertFalse(walker.run_chunk())  # root.dataFolders.count
+        self.assertEqual(root.dataFolders.item.call_count, 0)
+        self.assertFalse(walker.run_chunk())  # first child
+        self.assertEqual(root.dataFolders.item.call_count, 1)
+        self.assertFalse(walker.run_chunk())  # second child
+        self.assertEqual(root.dataFolders.item.call_count, 2)
+        while not walker.run_chunk():
+            pass
+        self.assertEqual([child["name"] for child in walker.result()["root"]["children"]], ["One", "Two"])
+
     def test_stops_early_and_marks_truncation_once_the_budget_runs_out(self):
         # 5 real folders at the root; a budget of 2 must not visit the
         # other 3 (each unvisited .item() call is exactly the cost this

@@ -15,7 +15,7 @@ from .workflows import importPlate as importPlate
 from .workflows import camPlate as camPlate
 from .workflows import camTube as camTube
 from .workflows import setupTemp as setupTemp
-from .workflows.dropFolder import _is_offline_settings_error, list_data_folder_tree
+from .workflows.dropFolder import FolderTreeWalker, _is_offline_settings_error
 from .workflows.job_status import send_job_error
 from .RunnerUpdate import check_and_stage_update
 import requests
@@ -45,6 +45,9 @@ _active_job_id = None  # type: Optional[str]
 # background thread only ever signals "please sync" and fires the existing
 # custom event, it never touches app.data itself.
 _folder_sync_requested = threading.Event()
+_folder_sync_walker = None
+_folder_sync_uploading = threading.Event()
+_FOLDER_SYNC_CHUNK_DELAY_SEC = 0.25
 
 _JOB_QUEUE_EVENT_ID = f"{ADDIN_NAME}_job_queue_event"
 
@@ -172,7 +175,7 @@ class _JobQueueEventHandler(adsk.core.CustomEventHandler):
 
             if _folder_sync_requested.is_set():
                 _folder_sync_requested.clear()
-                _sync_data_folders()
+                _advance_folder_sync()
         except Exception:
             if _app:
                 _app.log(
@@ -308,35 +311,51 @@ _last_heartbeat = 0.0
 _last_folder_tree_json = None  # type: Optional[str]
 
 
-def _sync_data_folders():
-    """Pushes a snapshot of the real Fusion Data Panel folder tree up to
-    Supabase so the web UI's folder picker (queueing a plate job) has
-    something to show - the web app itself has no live connection to
-    Fusion's Data Panel, only a Runner does. Best-effort: failures are
-    logged, not raised, so a sync hiccup never interrupts job claiming.
-    """
-    global _last_folder_tree_json
+def _schedule_folder_sync_chunk():
+    _folder_sync_requested.set()
+    timer = threading.Timer(_FOLDER_SYNC_CHUNK_DELAY_SEC, _fire_job_queue_event)
+    timer.daemon = True
+    timer.start()
+
+
+def _advance_folder_sync():
+    """Advance one Data Panel call, then return to Fusion's UI loop."""
+    global _folder_sync_walker, _last_folder_tree_json
     try:
-        # Browse from the same root job saves default to (the season project
-        # root, when FUSION_DROP_FOLDER_PATH is unset) - not a narrower
-        # subtree. list_data_folder_tree's own max_folders budget already
-        # bounds the real cost driver (dataFolders.item() cloud round-trips)
-        # regardless of where the walk starts, so scoping this to a
-        # subfolder just to dodge Fusion-UI-thread blocking is redundant and
-        # silently hides everything outside that subtree from the picker -
-        # confirmed live as a regression against the season project root.
-        tree = list_data_folder_tree(_app, FUSION_DATA_PROJECT_NAME, FUSION_DROP_FOLDER_PATH or "")
+        if _folder_sync_walker is None:
+            _folder_sync_walker = FolderTreeWalker(
+                _app, FUSION_DATA_PROJECT_NAME, FUSION_DROP_FOLDER_PATH or ""
+            )
+        if not _folder_sync_walker.run_chunk():
+            _schedule_folder_sync_chunk()
+            return
+        tree = _folder_sync_walker.result()
+        _folder_sync_walker = None
         serialized = json.dumps(tree, sort_keys=True, separators=(",", ":"))
         if serialized == _last_folder_tree_json:
             return
-        response = session.post(
-            f"{BASE_URL}/api/fusion-runner",
-            params={"action": "sync-folders"},
-            json={"runnerId": RUNNER_ID, "projectName": tree["project"], "tree": tree["root"]},
-            timeout=30,
-        )
-        response.raise_for_status()
-        _last_folder_tree_json = serialized
+        if _folder_sync_uploading.is_set():
+            return
+        _folder_sync_uploading.set()
+
+        def publish():
+            global _last_folder_tree_json
+            try:
+                response = requests.post(
+                    f"{BASE_URL}/api/fusion-runner",
+                    params={"action": "sync-folders"},
+                    headers={"Authorization": session.headers.get("Authorization", "")},
+                    json={"runnerId": RUNNER_ID, "projectName": tree["project"], "tree": tree["root"]},
+                    timeout=30,
+                )
+                response.raise_for_status()
+                _last_folder_tree_json = serialized
+            except Exception:
+                _queue_log(f"Folder sync upload failed:\n{traceback.format_exc()}")
+            finally:
+                _folder_sync_uploading.clear()
+
+        threading.Thread(target=publish, name="FusionFolderSyncUpload", daemon=True).start()
     except Exception as exc:  # noqa: BLE001 - best-effort by design, see docstring
         # Fusion's cloud connection not being up yet is the normal state for
         # the first several seconds after launch, and this sync runs again
@@ -352,6 +371,7 @@ def _sync_data_folders():
             )
         else:
             _queue_log(f"Folder sync failed:\n{traceback.format_exc()}")
+        _folder_sync_walker = None
 
 
 def handleServer(temp_dir: str, stop_event: threading.Event):
