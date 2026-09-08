@@ -28,7 +28,7 @@
   // Stock" button - see PartsTab.svelte's matching flag for the full
   // reasoning.
   let quickQueueMode = false;
-  let newBoxTube = { name: '', epic: '', ticket: '', quantity: 1, manufacturingPartId: '', projectId: '', stockAssignment: '' };
+  let newBoxTube = { name: '', quantity: 1, manufacturingPartId: '', projectId: '', stockAssignment: '' };
   let stepFile = null;
   let submitting = false;
   // Which router each box tube's "Queue CAM Job" currently targets - keyed
@@ -176,7 +176,7 @@
   }
 
   function cancelAdd() {
-    newBoxTube = { name: '', epic: '', ticket: '', quantity: 1, manufacturingPartId: '', projectId: '', stockAssignment: '' };
+    newBoxTube = { name: '', quantity: 1, manufacturingPartId: '', projectId: '', stockAssignment: '' };
     stepFile = null;
     showAddForm = false;
     quickQueueMode = false;
@@ -232,8 +232,6 @@
     try {
       const createdTube = await createBoxTube({
         name: newBoxTube.name,
-        epic: newBoxTube.epic,
-        ticket: newBoxTube.ticket,
         quantity: Number(newBoxTube.quantity),
         stepFile,
         createdBy: user?.id,
@@ -241,7 +239,7 @@
         projectId: newBoxTube.projectId || null,
         stockAssignment: newBoxTube.stockAssignment || null
       });
-      newBoxTube = { name: '', epic: '', ticket: '', quantity: 1, manufacturingPartId: '', projectId: '', stockAssignment: '' };
+      newBoxTube = { name: '', quantity: 1, manufacturingPartId: '', projectId: '', stockAssignment: '' };
       stepFile = null;
       showAddForm = false;
       quickQueueMode = false;
@@ -410,18 +408,14 @@
           <input id="bt-name" class="form-input" bind:value={newBoxTube.name} placeholder="e.g. Drivebase Rail" />
         </div>
         <div class="form-group">
-          <label class="form-label" for="bt-quantity">Quantity</label>
-          <input id="bt-quantity" type="number" min="1" class="form-input" bind:value={newBoxTube.quantity} />
+          <label class="form-label" for="bt-step">STEP file</label>
+          <input id="bt-step" type="file" accept=".step,.stp" class="form-input" on:change={handleFileChange} />
         </div>
       </div>
       <div class="form-row">
         <div class="form-group">
-          <label class="form-label" for="bt-epic">Epic (optional)</label>
-          <input id="bt-epic" class="form-input" bind:value={newBoxTube.epic} />
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="bt-ticket">Ticket (optional)</label>
-          <input id="bt-ticket" class="form-input" bind:value={newBoxTube.ticket} />
+          <label class="form-label" for="bt-quantity">Quantity</label>
+          <input id="bt-quantity" type="number" min="1" class="form-input" bind:value={newBoxTube.quantity} />
         </div>
         <div class="form-group">
           <label class="form-label" for="bt-manufacturing-link">Manufacturing request (optional)</label>
@@ -440,12 +434,8 @@
           <input id="bt-project-id" class="form-input" list="tube-project-ids" bind:value={newBoxTube.projectId} />
           <datalist id="tube-project-ids">{#each [...new Set(manufacturingParts.map((part) => part.project_id).filter(Boolean))].sort() as projectId}<option value={projectId} />{/each}</datalist>
         </div>
-        <div class="form-group">
-          <label class="form-label" for="bt-step">STEP file</label>
-          <input id="bt-step" type="file" accept=".step,.stp" class="form-input" on:change={handleFileChange} />
-        </div>
       </div>
-      <div class="form-actions">
+      <div class="cam-list-actions">
         <button class="btn btn-primary" disabled={submitting} on:click={handleAdd}>{submitting ? 'Adding...' : (quickQueueMode ? 'Add & Continue to Queue' : 'Add Tube Stock')}</button>
         <button type="button" class="btn btn-secondary" disabled={submitting} on:click={cancelAdd}>Cancel</button>
       </div>
@@ -683,7 +673,6 @@
   .form-row { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
   .form-row-final { padding-top: 0.75rem; border-top: 1px solid var(--border); }
   .form-row .form-group { flex: 1; min-width: 160px; }
-  .form-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
   .cam-list { display: flex; flex-direction: column; gap: 0.75rem; }
   .cam-list-item { padding: 1rem; }
   .cam-list-header { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }

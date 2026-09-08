@@ -107,7 +107,7 @@
   // this part pre-selected instead of just closing the form, so adding a
   // brand new part and sending it to Fusion CAM is one flow instead of two.
   let quickQueueMode = false;
-  let newPart = { name: '', epic: '', ticket: '', quantity: 1, categoryId: '', manufacturingPartId: '', fusionFileName: '', projectId: '', stockAssignment: '' };
+  let newPart = { name: '', quantity: 1, categoryId: '', manufacturingPartId: '', fusionFileName: '', projectId: '', stockAssignment: '' };
   let stepFile = null;
   let submitting = false;
   let renamingPartId = null;
@@ -478,8 +478,6 @@
     try {
       const created = await createPart({
         name: newPart.name,
-        epic: newPart.epic,
-        ticket: newPart.ticket,
         quantity: Number(newPart.quantity),
         categoryId: newPart.categoryId,
         stepFile,
@@ -489,7 +487,7 @@
         projectId: newPart.projectId || null,
         stockAssignment: newPart.stockAssignment || null
       });
-      newPart = { name: '', epic: '', ticket: '', quantity: 1, categoryId: '', manufacturingPartId: '', fusionFileName: '', projectId: '', stockAssignment: '' };
+      newPart = { name: '', quantity: 1, categoryId: '', manufacturingPartId: '', fusionFileName: '', projectId: '', stockAssignment: '' };
       stepFile = null;
       stepCarriedOverFrom = null;
       detectedDepthInches = null;
@@ -521,7 +519,7 @@
   function handleCancelAddPart() {
     showAddPartForm = false;
     quickQueueMode = false;
-    newPart = { name: '', epic: '', ticket: '', quantity: 1, categoryId: '', manufacturingPartId: '', fusionFileName: '', projectId: '', stockAssignment: '' };
+    newPart = { name: '', quantity: 1, categoryId: '', manufacturingPartId: '', fusionFileName: '', projectId: '', stockAssignment: '' };
     stepFile = null;
     stepCarriedOverFrom = null;
     detectedDepthInches = null;
@@ -864,53 +862,6 @@
           <input id="part-name" class="form-input" bind:value={newPart.name} placeholder="e.g. Gearbox Side Plate" />
         </div>
         <div class="form-group">
-          <label class="form-label" for="part-category">Material / Thickness</label>
-          <select id="part-category" class="form-select" bind:value={newPart.categoryId}>
-            <option value="">Select...</option>
-            {#each categories as cat}
-              <option value={cat.id}>{categoryLabel(cat)}</option>
-            {/each}
-          </select>
-          {#if detectingDepth}
-            <p class="cam-form-hint">Estimating depth from the CAD file...</p>
-          {:else if detectedDepthInches != null}
-            <p class="cam-form-hint depth-hint">
-              Detected depth from CAD: <strong>{detectedDepthInches.toFixed(detectedDepthInches < 0.1 ? 4 : 3)}"</strong> - pick the material/thickness that matches.
-            </p>
-          {/if}
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="part-quantity">Quantity</label>
-          <input id="part-quantity" type="number" min="1" class="form-input" bind:value={newPart.quantity} />
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label" for="part-epic">Epic (optional)</label>
-          <input id="part-epic" class="form-input" bind:value={newPart.epic} />
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="part-ticket">Ticket (optional)</label>
-          <input id="part-ticket" class="form-input" bind:value={newPart.ticket} />
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="part-manufacturing-link">Manufacturing request (optional)</label>
-          <select id="part-manufacturing-link" class="form-select" bind:value={newPart.manufacturingPartId} on:change={handleManufacturingLinkChange}>
-            <option value="">Not linked to a request</option>
-            {#each manufacturingParts as mp}
-              <option value={mp.id}>{mp.name}{mp.project_id ? ` (${mp.project_id})` : ''}</option>
-            {/each}
-          </select>
-          <p class="cam-form-hint">Traces this stock back to the real request it's for - leave unlinked for ad-hoc/prototype stock. Linking one carries its STEP file over automatically.</p>
-        </div>
-      </div>
-      <div class="form-row form-row-final">
-        <div class="form-group">
-          <label class="form-label" for="part-project-id">Project ID (optional)</label>
-          <input id="part-project-id" class="form-input" list="part-project-ids" bind:value={newPart.projectId} />
-          <datalist id="part-project-ids">{#each [...new Set(manufacturingParts.map((part) => part.project_id).filter(Boolean))].sort() as projectId}<option value={projectId} />{/each}</datalist>
-        </div>
-        <div class="form-group">
           <label class="form-label" for="part-step">STEP file {manufacturingHasStepFile ? '(from linked request)' : '(optional)'}</label>
           {#if manufacturingHasStepFile}
             <!-- A real <input type="file"> can only ever show a filename the
@@ -936,6 +887,45 @@
               <p class="cam-form-hint">Carried over from "{stepCarriedOverFrom}" - pick a different file above to replace it.</p>
             {/if}
           {/if}
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="part-category">Material / Thickness</label>
+          <select id="part-category" class="form-select" bind:value={newPart.categoryId}>
+            <option value="">Select...</option>
+            {#each categories as cat}
+              <option value={cat.id}>{categoryLabel(cat)}</option>
+            {/each}
+          </select>
+          {#if detectingDepth}
+            <p class="cam-form-hint">Estimating depth from the CAD file...</p>
+          {:else if detectedDepthInches != null}
+            <p class="cam-form-hint depth-hint">
+              Detected depth from CAD: <strong>{detectedDepthInches.toFixed(detectedDepthInches < 0.1 ? 4 : 3)}"</strong> - pick the material/thickness that matches.
+            </p>
+          {/if}
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label" for="part-quantity">Quantity</label>
+          <input id="part-quantity" type="number" min="1" class="form-input" bind:value={newPart.quantity} />
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="part-manufacturing-link">Manufacturing request (optional)</label>
+          <select id="part-manufacturing-link" class="form-select" bind:value={newPart.manufacturingPartId} on:change={handleManufacturingLinkChange}>
+            <option value="">Not linked to a request</option>
+            {#each manufacturingParts as mp}
+              <option value={mp.id}>{mp.name}{mp.project_id ? ` (${mp.project_id})` : ''}</option>
+            {/each}
+          </select>
+          <p class="cam-form-hint">Traces this stock back to the real request it's for - leave unlinked for ad-hoc/prototype stock. Linking one carries its STEP file over automatically.</p>
+        </div>
+      </div>
+      <div class="form-row form-row-final">
+        <div class="form-group">
+          <label class="form-label" for="part-project-id">Project ID (optional)</label>
+          <input id="part-project-id" class="form-input" list="part-project-ids" bind:value={newPart.projectId} />
+          <datalist id="part-project-ids">{#each [...new Set(manufacturingParts.map((part) => part.project_id).filter(Boolean))].sort() as projectId}<option value={projectId} />{/each}</datalist>
         </div>
       </div>
       <div class="cam-list-actions">
@@ -1275,11 +1265,11 @@
               <FolderTreeNode node={folderTreeRow.tree} selectedPath={queueFolderPath} onSelect={(path) => (queueFolderPath = path)} />
             </div>
             <p class="cam-form-hint">
-              {queueFolderPath ? `Selected: ${queueFolderPath}` : "Using the default AutoCAM folder - click a folder above to save somewhere else."}
+              {queueFolderPath ? `Selected: ${queueFolderPath}` : "Using the 2026 Season CAM project root - click a folder above to save somewhere else."}
               Folder list as of {new Date(folderTreeRow.synced_at).toLocaleString()}.
             </p>
           {:else}
-            <p class="cam-form-hint">No folder list yet - a Fusion Runner needs to have run at least once to share it. This will save to the default AutoCAM folder.</p>
+            <p class="cam-form-hint">No folder list yet - a Fusion Runner needs to have run at least once to share it. This will save to the 2026 Season CAM project root.</p>
           {/if}
         </div>
       </div>
