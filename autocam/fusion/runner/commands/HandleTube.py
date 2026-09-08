@@ -186,7 +186,12 @@ def _apply_chains(operation, parameter_name, specs):
         selection = selections.createNewChainSelection()
         selection.isOpen = False
         selection.isReverted = spec["is_reverted"]
-        selection.inputGeometry = spec["edges"]
+        # A single edge is a deliberate chain seed. Fusion closes the
+        # tangent-connected loop itself; passing every edge works for a
+        # circle but makes imported irregular through-shape loops invalid or
+        # ambiguously directed. This matches the proven feature-cut repair
+        # used by plate CAM while remaining tube-local here.
+        selection.inputGeometry = [spec["edges"][0]]
     # Curve-selection APIs are implemented by the parameter value, not the
     # CAMParameter wrapper. Calling the wrapper succeeds nowhere in Fusion
     # and fails only once a live tube has a selectable pocket/shape.
@@ -209,6 +214,17 @@ def _set_expression(operation, parameter_name, expression):
     parameter = operation.parameters.itemByName(parameter_name)
     if parameter is not None:
         parameter.expression = expression
+
+
+def _set_face_stock_heights(operation):
+    """Use the current setup's face-local stock, never template coordinates."""
+    _set_expression(operation, "topHeight_mode", "'from stock top'")
+    _set_expression(operation, "topHeight_offset", "0 in")
+    # Each indexed setup aligns +Z with its exterior wall normal, so this is
+    # specifically the stock below the face being machined, not a global-Z
+    # bottom from a different tube side or a stale template point.
+    _set_expression(operation, "bottomHeight_mode", "'from stock bottom'")
+    _set_expression(operation, "bottomHeight_offset", "0 in")
 
 
 def _configure_face_operations(setup, face):
@@ -252,7 +268,9 @@ def _configure_face_operations(setup, face):
             keep = _apply_chains(operation, "contours", shapes)
         elif "slot" in name and operation.strategy == "contour2d":
             keep = _apply_chains(operation, "contours", slots)
-        if not keep:
+        if keep:
+            _set_face_stock_heights(operation)
+        else:
             operation.deleteMe()
 
 

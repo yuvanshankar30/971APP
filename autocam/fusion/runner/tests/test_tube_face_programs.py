@@ -74,6 +74,15 @@ class TubeFaceProgramTests(unittest.TestCase):
         self.assertIn("if face.isParamReversed:", handler)
         self.assertIn("normal.scaleBy(-1)", handler)
 
+    def test_tube_shape_chains_use_one_topology_seed_edge(self):
+        handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
+        self.assertIn('selection.inputGeometry = [spec["edges"][0]]', handler)
+
+    def test_tube_operations_reference_stock_under_the_active_face(self):
+        handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
+        self.assertIn('"bottomHeight_mode", "\'from stock bottom\'"', handler)
+        self.assertIn("_set_face_stock_heights(operation)", handler)
+
 
 if __name__ == "__main__":
     unittest.main()
