@@ -125,7 +125,29 @@ def resolve_data_project(app, project_name):
     return app.data.activeProject
 
 
-def list_data_folder_tree(app, project_name, base_folder_path, max_depth=3, max_folders=200):
+# Folder names (case-insensitive) that get first claim on the shared
+# max_folders budget at every depth of list_data_folder_tree's walk - see
+# that function's own comment at the sort call for why this exists.
+# "Offseason Projects" is where AutoCAM documents actually live
+# (resolve_drop_folder's own docstring uses "Offseason Projects/AutoCAM"
+# as its real, established example) - the one subtree the picker must
+# never leave empty, even when the rest of a large project can't all fit
+# in the same budget.
+_PRIORITY_FOLDER_NAMES = {"offseason projects"}
+
+# A brief pause between each dataFolders.item() call in the walk below -
+# live-confirmed: a real sync (148 calls, fired back-to-back) coincided
+# with Fusion itself crashing right around when the walk finished. Not a
+# confirmed root cause (a native crash dump isn't something this codebase
+# can fully diagnose), but a reasonable, low-cost mitigation: the same
+# total call count and tree completeness, spread over a bit more
+# wall-clock time instead of hammering the Data Panel client in one
+# unbroken burst. 0.15s adds ~22s to a full 150-call walk - real, but
+# small next to the walk's own ~75-135s of real network time.
+_FOLDER_WALK_CALL_PACING_SEC = 0.15
+
+
+def list_data_folder_tree(app, project_name, base_folder_path, max_depth=3, max_folders=150):
     """Walks the Data Panel folder tree starting at base_folder_path (e.g.
     "" for the project root itself, or "Offseason Projects/AutoCAM" for a
     subfolder) and returns it as nested plain dicts - {"name", "path",
@@ -157,6 +179,25 @@ def list_data_folder_tree(app, project_name, base_folder_path, max_depth=3, max_
     the tree with an honest partial mid/bottom rather than either an
     unbounded blocking call or an artificially narrow default scope.
 
+    Lowered from 200 to 60, then raised to 150, across two more live
+    incidents. 60 fixed the startup-hang symptom (root cause was actually
+    timing, not budget size - see below) but confirmed live to be too
+    tight for this project's real structure: "Offseason Projects" (the
+    actual AutoCAM save destination's parent) came back with zero
+    children and truncated=true, its whole subtree consumed by other
+    top-level folders enumerated earlier in the same breadth-first pass.
+    That's a real usability regression, not a safe trade-off - the
+    picker's whole point is showing what's actually there.
+    The real root cause of the original hang was SpartanRoboticsAutoCAM.py
+    firing the first sync immediately on launch, fixed independently at
+    that call site (handleServer now waits ~90s past startup before its
+    first sync). With that timing collision actually fixed, this budget
+    no longer needs to be nearly this defensive - 150 real sequential
+    calls at ~0.5-0.9s each is still bounded (~75-135s), comfortably
+    covering this project's real folder count (12 top-level folders)
+    without the multi-minute cost the original 200 had, while no longer
+    truncating a subtree that matters.
+
     Breadth-first, deliberately not the more obvious depth-first
     recursion: every folder at a given depth gets its own direct children
     listed before any of them recurses deeper. A depth-first walk would
@@ -185,11 +226,36 @@ def list_data_folder_tree(app, project_name, base_folder_path, max_depth=3, max_
                     break
                 budget[0] -= 1
                 child = folder.dataFolders.item(i)
+                # Live-confirmed: a real sync (148 dataFolders.item() calls,
+                # fired back-to-back with no pause) coincided with Fusion
+                # itself crashing (a real crash dump, not just a slow UI) at
+                # almost exactly the point the walk finished. Spacing calls
+                # out instead of hammering the Data Panel client in one
+                # unbroken burst is a real mitigation for that, even without
+                # a confirmed root cause - the same total call count and
+                # tree completeness, over a bit more wall-clock time.
+                time.sleep(_FOLDER_WALK_CALL_PACING_SEC)
                 child_path = f"{node['path']}/{child.name}" if node['path'] else child.name
                 child_node = {"name": child.name, "path": child_path, "children": []}
                 node["children"].append(child_node)
                 next_level.append((child, child_node, depth + 1))
             node["children"].sort(key=lambda n: n["name"].lower())
+        # Live-measured, not assumed: the real project has 12 top-level
+        # folders, and raising max_folders alone (60 -> 150) still left
+        # "Offseason Projects" - the folder AutoCAM documents actually
+        # live under - with zero children and truncated=true, because 7
+        # of those 12 folders' own child listings happened to exhaust the
+        # shared depth-2 budget before Offseason Projects' turn came up
+        # in whatever order the Data Panel API happened to return them.
+        # A flat budget can't be both fast and complete for a project
+        # this size - reordering so the one subtree that actually matters
+        # gets first claim on whatever budget remains, every time, fixes
+        # the real complaint directly instead of chasing a bigger number.
+        # Every top-level folder is still listed by name either way (that
+        # part was never the problem - see the module's own root-walk
+        # history); this only decides whose CHILDREN get walked when
+        # budget is tight.
+        next_level.sort(key=lambda entry: entry[1]["name"].strip().lower() not in _PRIORITY_FOLDER_NAMES)
         level = next_level
 
     return {"project": data_project.name, "root": root_node}

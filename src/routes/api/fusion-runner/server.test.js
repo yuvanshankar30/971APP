@@ -11,7 +11,7 @@ const machineId='11111111-1111-4111-8111-111111111111';
 const plateId='22222222-2222-4222-8222-222222222222';
 beforeEach(()=>{queries=[];mocks.from.mockReset();mocks.payload.mockReset();mocks.storageUpload.mockReset();mocks.storageUpload.mockResolvedValue({error:null});});
 function chain(result){
- const q={};for(const method of ['select','insert','update','eq','in','ilike','order','limit','or','lt'])q[method]=vi.fn(()=>q);
+ const q={};for(const method of ['select','insert','update','eq','in','ilike','order','limit','or','lt','is'])q[method]=vi.fn(()=>q);
  q.single=vi.fn(async()=>result);q.maybeSingle=vi.fn(async()=>result);q.then=(resolve)=>resolve(result);queries.push(q);return q;
 }
 describe('Fusion Runner machine self-registration',()=>{
@@ -47,12 +47,12 @@ describe('Fusion Runner managed updates',()=>{
 });
 describe('Fusion Runner grouping lifecycle',()=>{
  it('marks unresolved claimed inputs failed instead of leaving a stranded claim',async()=>{
-  mocks.from.mockReturnValueOnce(chain({error:null})).mockReturnValueOnce(chain({data:[{id:'job'}]})).mockReturnValueOnce(chain({data:{id:'job'}})).mockReturnValueOnce(chain({data:[]}));
+  mocks.from.mockReturnValueOnce(chain({error:null})).mockReturnValueOnce(chain({data:{authorized_runner_id:null}})).mockReturnValueOnce(chain({data:[{id:'job'}]})).mockReturnValueOnce(chain({data:{id:'job'}})).mockReturnValueOnce(chain({data:[]}));
   mocks.payload.mockRejectedValue(new Error('Part b is missing its STEP file'));
   const result=await call('claim',{runnerId:'runner',machineId});
   expect(await result.json()).toEqual({job:null,error:'Part b is missing its STEP file'});
-  expect(queries[3].update).toHaveBeenCalledWith(expect.objectContaining({status:'failed'}));
-  expect(queries[3].eq).toHaveBeenCalledWith('status','claimed');
+  expect(queries[4].update).toHaveBeenCalledWith(expect.objectContaining({status:'failed'}));
+  expect(queries[4].eq).toHaveBeenCalledWith('status','claimed');
  });
  it('does not let a late failure overwrite terminal or non-Fusion jobs',async()=>{
   mocks.from.mockReturnValue(chain({data:[]}));
@@ -85,7 +85,7 @@ describe('Fusion Runner grouping lifecycle',()=>{
   expect(queries[0].in).toHaveBeenCalledWith('status',['claimed','processing']);
  });
  it('requeues only stale unstarted claims before claiming new work',async()=>{
-  mocks.from.mockReturnValueOnce(chain({error:null})).mockReturnValueOnce(chain({data:[]}));
+  mocks.from.mockReturnValueOnce(chain({error:null})).mockReturnValueOnce(chain({data:{authorized_runner_id:null}})).mockReturnValueOnce(chain({data:[]}));
   expect((await call('claim',{runnerId:'runner',machineId})).status).toBe(200);
   expect(queries[0].update).toHaveBeenCalledWith(expect.objectContaining({status:'queued',claimed_by:null,claimed_at:null}));
   expect(queries[0].eq).toHaveBeenCalledWith('status','claimed');
@@ -95,10 +95,28 @@ describe('Fusion Runner grouping lifecycle',()=>{
   mocks.from
    .mockReturnValueOnce(chain({error:{message:'TypeError: fetch failed'}}))
    .mockReturnValueOnce(chain({error:null}))
+   .mockReturnValueOnce(chain({data:{authorized_runner_id:null}}))
    .mockReturnValueOnce(chain({data:[]}));
   const result=await call('claim',{runnerId:'runner',machineId});
   expect(result.status).toBe(200);
-  expect(queries).toHaveLength(3);
+  expect(queries).toHaveLength(4);
+ });
+ it('only claims unassigned jobs when this runner is not the machine\'s authorized one',async()=>{
+  mocks.from
+   .mockReturnValueOnce(chain({error:null}))
+   .mockReturnValueOnce(chain({data:{authorized_runner_id:'the-real-computer'}}))
+   .mockReturnValueOnce(chain({data:[]}));
+  expect((await call('claim',{runnerId:'a-different-computer',machineId})).status).toBe(200);
+  expect(queries[2].is).toHaveBeenCalledWith('machine_id',null);
+  expect(queries[2].or).not.toHaveBeenCalled();
+ });
+ it('claims machine-specific jobs normally once the runner id matches the authorized one',async()=>{
+  mocks.from
+   .mockReturnValueOnce(chain({error:null}))
+   .mockReturnValueOnce(chain({data:{authorized_runner_id:'the-real-computer'}}))
+   .mockReturnValueOnce(chain({data:[]}));
+  expect((await call('claim',{runnerId:'the-real-computer',machineId})).status).toBe(200);
+  expect(queries[2].or).toHaveBeenCalledWith(`machine_id.is.null,machine_id.eq.${machineId}`);
  });
  it('does not retry a real database error recovering stale claims',async()=>{
   mocks.from.mockReturnValueOnce(chain({error:{message:'permission denied for table cam_jobs'}}));
@@ -187,6 +205,32 @@ describe('Fusion Runner grouping lifecycle',()=>{
   expect((await result.json()).error).toMatch(/filenames/);
   expect(mocks.from).toHaveBeenCalledTimes(1);
   expect(mocks.storageUpload).not.toHaveBeenCalled();
+ });
+});
+describe('Fusion Runner own-job recovery on restart',()=>{
+ it('requires a runner identifier',async()=>{
+  expect((await call('recover-own-jobs',{})).status).toBe(400);
+  expect(mocks.from).not.toHaveBeenCalled();
+ });
+ it('requeues its own never-started claims and fails its own interrupted processing jobs',async()=>{
+  mocks.from
+   .mockReturnValueOnce(chain({data:[{id:'job-claimed'}],error:null}))
+   .mockReturnValueOnce(chain({data:[{id:'job-processing'}],error:null}));
+  const result=await call('recover-own-jobs',{runnerId:'runner'});
+  expect(result.status).toBe(200);
+  expect(await result.json()).toEqual({success:true,requeued:1,failed:1});
+  expect(queries[0].update).toHaveBeenCalledWith(expect.objectContaining({status:'queued',claimed_by:null,claimed_at:null}));
+  expect(queries[0].eq).toHaveBeenCalledWith('claimed_by','runner');
+  expect(queries[0].eq).toHaveBeenCalledWith('status','claimed');
+  expect(queries[1].update).toHaveBeenCalledWith(expect.objectContaining({status:'failed'}));
+  expect(queries[1].eq).toHaveBeenCalledWith('claimed_by','runner');
+  expect(queries[1].eq).toHaveBeenCalledWith('status','processing');
+ });
+ it('never touches another runner\'s claims',async()=>{
+  mocks.from.mockReturnValue(chain({data:[],error:null}));
+  await call('recover-own-jobs',{runnerId:'runner-a'});
+  expect(queries[0].eq).not.toHaveBeenCalledWith('claimed_by','runner-b');
+  expect(queries[0].eq).toHaveBeenCalledWith('claimed_by','runner-a');
  });
 });
 describe('Fusion Runner plate growth',()=>{

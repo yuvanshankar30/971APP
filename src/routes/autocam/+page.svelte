@@ -1095,6 +1095,7 @@
         tool_ids: machineTools.filter((link) => String(link.machine_id) === String(machine.id)).map((link) => link.tool_id),
         gcode_extension: machine.gcode_extension || 'ngc',
         controller: machine.controller || 'linuxcnc',
+        authorized_runner_id: machine.authorized_runner_id || '',
         rapid_rate: machine.rapid_rate ?? '',
         drive_folder_id: machine.drive_folder_id || '',
         drive_output_folder_id: machine.drive_output_folder_id || '',
@@ -1105,7 +1106,7 @@
       };
     } else {
       editingMachineId = null;
-      machineForm = { name: '', description: '', operation_type: 'routing', default_material_id: '', default_tool_id: '', tool_ids: [], gcode_extension: 'ngc', controller: 'linuxcnc', rapid_rate: '', drive_folder_id: '', drive_output_folder_id: '', params: emptyRoutingParams() };
+      machineForm = { name: '', description: '', operation_type: 'routing', default_material_id: '', default_tool_id: '', tool_ids: [], gcode_extension: 'ngc', controller: 'linuxcnc', authorized_runner_id: '', rapid_rate: '', drive_folder_id: '', drive_output_folder_id: '', params: emptyRoutingParams() };
     }
     showMachineModal = true;
   }
@@ -1134,6 +1135,9 @@
         // Tube stock reuses routing.js's linuxcnc/wincnc dialect conventions
         // (see tubestock.js file header) - same controller choice as routing.
         controller: (machineForm.operation_type === 'routing' || machineForm.operation_type === 'tubestock') ? (machineForm.controller || 'linuxcnc') : 'linuxcnc',
+        // Blank stays NULL, not '' - '' would (incorrectly) mean "every
+        // Runner must send an empty string" instead of "no restriction."
+        authorized_runner_id: machineForm.authorized_runner_id?.trim() || null,
         // Blank stays NULL rather than becoming 0 - "not measured yet" is a
         // real state the estimate reports differently from a real figure.
         rapid_rate: machineForm.rapid_rate === '' || machineForm.rapid_rate == null ? null : Number(machineForm.rapid_rate),
@@ -2169,6 +2173,11 @@
             <label class="form-label" for="mp-rapid-rate">Rapid traverse (in/min) <span class="text-muted">(optional)</span></label>
             <input id="mp-rapid-rate" class="form-input" type="number" min="1" step="10" bind:value={machineForm.rapid_rate} placeholder="Not measured" />
             <p class="cam-form-hint">Used only to time G00 moves in the run-time estimate, never to generate G-code. Left blank, the estimate falls back to a conservative 200 in/min and says so on hover.</p>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="mp-authorized-runner">Authorized Runner <span class="text-muted">(optional)</span></label>
+            <input id="mp-authorized-runner" class="form-input" bind:value={machineForm.authorized_runner_id} placeholder="e.g. this computer's hostname" />
+            <p class="cam-form-hint">Locks this machine's jobs to one physical computer's Fusion Runner - a Runner on any other computer will see nothing to claim for it, even if it's misconfigured to think it's this machine. Matches the Runner's own RUNNER_ID (its hostname, unless overridden in .env). Leave blank for no restriction.</p>
           </div>
         </div>
 

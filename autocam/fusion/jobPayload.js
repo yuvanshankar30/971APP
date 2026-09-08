@@ -1,8 +1,27 @@
+// Same range TabPlacement.py's own DEFAULT_MIN_TABS/DEFAULT_MAX_TABS
+// already treat as reasonable for the automatic target - kept in sync by
+// hand (no shared config between the two languages), not derived.
+// Direct instruction: an operator-set tab count "cannot be too much" - a
+// real ceiling, not just a UI hint the Runner is trusted to also enforce
+// (see camPlate.py's own _resolve_tab_count_override, which re-clamps
+// this independently).
+const TAB_COUNT_MIN = 4;
+const TAB_COUNT_MAX = 20;
+
 /** Resolve every queued input or reject the entire job; never CAM a partial plate. */
 export async function buildJobPayload(supabase, job) {
   const params = job.params || {};
   const machine_id = job.machine_id || null;
   const tool_id = job.tool_id || null;
+  // Direct instruction: an operator can force an exact tab count instead
+  // of the perimeter-based automatic target - null (the default) means
+  // "stay automatic," this job's existing behavior. Clamped here so a
+  // malformed or excessive value never reaches the Runner at all, not
+  // just relying on its own re-check.
+  const rawTabCount = Number(params.tabCount);
+  const tab_count = Number.isFinite(rawTabCount)
+    ? Math.max(TAB_COUNT_MIN, Math.min(TAB_COUNT_MAX, Math.round(rawTabCount)))
+    : null;
   async function signedUrl(fileName, partId) {
     if (typeof fileName !== 'string' || !fileName.trim()) throw new Error(`Part ${partId} is missing its STEP file`);
     const { data, error } = await supabase.storage.from('manufacturing-files').createSignedUrl(fileName, 3600);
@@ -50,7 +69,12 @@ export async function buildJobPayload(supabase, job) {
       // (per-part name, then Plate<id>Job<id>; the configured drop folder)
       // when a job was queued before this existed.
       fusion_file_name: typeof params.fusionFileName === 'string' && params.fusionFileName.trim() ? params.fusionFileName.trim() : null,
-      fusion_folder_path: typeof params.fusionFolderPath === 'string' && params.fusionFolderPath.trim() ? params.fusionFolderPath.trim() : null };
+      fusion_folder_path: typeof params.fusionFolderPath === 'string' && params.fusionFolderPath.trim() ? params.fusionFolderPath.trim() : null,
+      // Plate jobs only - box-tube CAM never runs TabPlacement at all
+      // (tube stock has no release-tab step), so this is deliberately
+      // absent from the box_tube payload below rather than sent as an
+      // always-null field the Runner would never read.
+      tab_count };
   }
   if (params.fusionJobKind === 'box_tube') {
     const { data, error } = await supabase.from('fusion_box_tubes').select('*').eq('id', params.boxTubeId).single();

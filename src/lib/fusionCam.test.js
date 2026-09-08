@@ -76,6 +76,26 @@ describe('Fusion CAM queue query efficiency', () => {
     expect(inserted.params).not.toHaveProperty('fusionGroupingMode');
   });
 
+  it('includes a plate job\'s tab count override, converted to a number, and omits it entirely for tube stock', async () => {
+    mocks.from.mockReturnValue(chain({ data: { id: 'plate-job' }, error: null }));
+
+    await queueFusionJob({
+      fusionJobKind: 'plate:cam', plateId: 'plate-1', groupingMode: 'single', tabCount: '8'
+    });
+
+    const inserted = mocks.queries[0].insert.mock.calls[0][0];
+    expect(inserted.params.tabCount).toBe(8);
+  });
+
+  it('leaves a plate job\'s tab count null when not set - stays automatic', async () => {
+    mocks.from.mockReturnValue(chain({ data: { id: 'plate-job' }, error: null }));
+
+    await queueFusionJob({ fusionJobKind: 'plate:cam', plateId: 'plate-1', groupingMode: 'single' });
+
+    const inserted = mocks.queries[0].insert.mock.calls[0][0];
+    expect(inserted.params.tabCount).toBeNull();
+  });
+
   it('refuses a tube-stock job without tube stock', async () => {
     await expect(queueFusionJob({ fusionJobKind: 'box_tube' })).rejects.toThrow(/box tube is required/i);
     expect(mocks.from).not.toHaveBeenCalled();

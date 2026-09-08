@@ -23,7 +23,7 @@ from ..commands.NewNCProgram import export
 from ..commands.DeleteToolpaths import DeleteToolpaths
 from ..commands.AutoArrange import AutoArrange
 from ..commands.Orientation import orient_plate_pocket_side_up
-from ..commands.TabPlacement import ConfigureTabs
+from ..commands.TabPlacement import ConfigureTabs, DEFAULT_MAX_TABS, DEFAULT_MIN_TABS
 from ..config import (
     BASE_URL,
     FINAL_PATH,
@@ -227,6 +227,36 @@ def _get(payload: dict, *keys: str, default=None):
         if key in payload:
             return payload[key]
     return default
+
+
+def _resolve_tab_count_override(payload: dict, log):
+    """An operator can force an exact tab count for this job instead of
+    the perimeter-based automatic target (TabPlacement._tab_count_for_
+    perimeter) - returns None (stay automatic, this job's existing
+    default) when nothing was set.
+
+    Clamped to [DEFAULT_MIN_TABS, DEFAULT_MAX_TABS] - the same range the
+    automatic system already treats as reasonable - server-side too (see
+    jobPayload.js), but re-checked here rather than trusting a single
+    layer: "cannot be too much" is a real constraint (this session's own
+    over-tabbing incident), not just a UI hint. A malformed value falls
+    back to automatic rather than raising - the caller's own try/except
+    around ConfigureTabs would otherwise turn one bad value into zero
+    tabs for the whole job, a much worse outcome than ignoring it.
+
+    The caller passes min_tabs=max_tabs=this value to ConfigureTabs,
+    forcing every body in the job to exactly that count, overriding the
+    per-body perimeter scaling entirely - that is what "set the amount
+    of tabs" means once an operator has taken explicit manual control.
+    """
+    raw_value = _get(payload, "tab_count")
+    if raw_value is None:
+        return None
+    try:
+        return max(DEFAULT_MIN_TABS, min(DEFAULT_MAX_TABS, int(raw_value)))
+    except (TypeError, ValueError):
+        log(f"Ignoring invalid tab_count override '{raw_value}': using the automatic default instead")
+        return None
 
 
 # How little material may be left standing between two separate cuts before
@@ -479,6 +509,11 @@ def start(data, session):
     # handler below, however early a failure happens - job_id is required
     # on every /api/fusion-runner call now (see job_status.py).
     job_id = str(data.get("id", "unknown"))
+    # Declared before the try, alongside job_id, for the same reason: the
+    # cleanup in the finally block below needs these however far the job
+    # actually got before failing (or never even downloading a part).
+    step_paths = []
+    patched_template_path = None
     try:
         payload = data.get("payload")
         if not isinstance(payload, dict):
@@ -530,7 +565,6 @@ def start(data, session):
         if not assignments:
             raise ValueError("Plate job has no nested parts with STEP files")
         require_grouping_mode_matches_assignments(assignments, _get(payload, "grouping_mode"))
-        step_paths = []
         for assignment in assignments:
             part_id = str(assignment["part_id"])
             step_paths.append(
@@ -605,6 +639,7 @@ def start(data, session):
         patched_template = os.path.join(
             TOOLS_PATH, f"Plates_job{job_id}.f3dhsm-template"
         )
+        patched_template_path = patched_template
         patch_info = patch_cam_template_with_tool_libraries(
             template_path,
             patched_template,
@@ -641,7 +676,12 @@ def start(data, session):
             template_path=template_path,
         )
         try:
-            ConfigureTabs()
+            tab_count_override = _resolve_tab_count_override(payload, app.log)
+            if tab_count_override is not None:
+                app.log(f"Using operator-specified tab count: {tab_count_override}")
+                ConfigureTabs(min_tabs=tab_count_override, max_tabs=tab_count_override)
+            else:
+                ConfigureTabs()
         except Exception:
             app.log("TabPlacement failed:\n{}".format(traceback.format_exc()))
         DeleteToolpaths()
@@ -814,3 +854,25 @@ def start(data, session):
         if app:
             app.log("Failed:\n{}".format(traceback.format_exc()))
         send_job_error(session, job_id, traceback.format_exc())
+    finally:
+        # Live-confirmed real leak, not theoretical: neither of these was
+        # ever cleaned up anywhere, on any path (success or failure).
+        # Checked directly against a real Runner install after ~200 real
+        # jobs - 233 patched templates (42MB) in TOOLS_PATH, 113 downloaded
+        # STEP files (20MB) in INITIAL_PATH, every single one from a job
+        # that finished (or failed) long ago. TEMP_PATH's own name already
+        # says these are meant to be transient per-job scratch files, not a
+        # permanent cache - matches how FINAL_PATH's export_dir is already
+        # cleaned up after a job's real output is durably saved elsewhere.
+        # Best-effort: a cleanup failure must never mask the job's own
+        # real outcome, which every branch above has already reported.
+        for path in [*step_paths, patched_template_path]:
+            if not path:
+                continue
+            try:
+                os.remove(path)
+            except FileNotFoundError:
+                pass
+            except Exception as cleanup_error:
+                if app:
+                    app.log(f"Could not remove temporary job file '{path}': {cleanup_error}")

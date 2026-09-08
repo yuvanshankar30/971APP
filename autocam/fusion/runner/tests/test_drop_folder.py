@@ -1,7 +1,7 @@
 import importlib.util
 from pathlib import Path
 import unittest
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock, call, patch
 
 
 spec = importlib.util.spec_from_file_location(
@@ -170,6 +170,17 @@ class FolderTreeBudgetTests(unittest.TestCase):
     instead of relying on scope alone to keep this fast.
     """
 
+    def setUp(self):
+        # The walk now paces real dataFolders.item() calls with a real
+        # sleep (see _FOLDER_WALK_CALL_PACING_SEC) - genuinely useful
+        # against Fusion's live API, pure overhead in a unit test with a
+        # mocked one. Patched to a no-op for every test in this class
+        # rather than per-test, since it's not what any of them are
+        # actually testing.
+        patcher = patch.object(dropFolder.time, "sleep")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def _app_for(self, root):
         app = fake_app()
         project = MagicMock()
@@ -245,6 +256,36 @@ class FolderTreeBudgetTests(unittest.TestCase):
         # a depth cutoff if this weren't checked - depth stopping must not
         # spend budget it didn't need to.
         deep_child.dataFolders.item.assert_not_called()
+
+    def test_offseason_projects_gets_first_claim_on_a_tight_budget(self):
+        # Live-confirmed bug: raising max_folders alone (60 -> 150) still
+        # left "Offseason Projects" - where AutoCAM documents actually
+        # live - with zero children, because it happened to be listed
+        # after two other top-level folders whose own children (5 each)
+        # consumed the whole remaining budget first. Reproduced here with
+        # the same shape, "Offseason Projects" deliberately LAST in the
+        # root's own child order (the worst case) - it must still get its
+        # children listed, at its siblings' expense if the budget is
+        # tight, not the other way around.
+        offseason_children = [_fake_folder(f"OffseasonSub{i}") for i in range(3)]
+        offseason = _fake_folder("Offseason Projects", offseason_children)
+        other_a = _fake_folder("Field Elements", [_fake_folder(f"FieldSub{i}") for i in range(5)])
+        other_b = _fake_folder("Renders", [_fake_folder(f"RenderSub{i}") for i in range(5)])
+        # Deliberately last, not first - the whole point of this test.
+        root = _fake_folder("2026 Season CAM", [other_a, other_b, offseason])
+        app = self._app_for(root)
+
+        # 3 for the root's own 3 children, leaving exactly 3 for depth-2 -
+        # enough for Offseason Projects' own 3 children and nothing else.
+        result = dropFolder.list_data_folder_tree(app, "2026 Season CAM", "", max_folders=6)
+
+        offseason_node = next(c for c in result["root"]["children"] if c["name"] == "Offseason Projects")
+        self.assertEqual(len(offseason_node["children"]), 3)
+        self.assertNotIn("truncated", offseason_node)
+        for name in ("Field Elements", "Renders"):
+            sibling_node = next(c for c in result["root"]["children"] if c["name"] == name)
+            self.assertEqual(sibling_node["children"], [])
+            self.assertTrue(sibling_node["truncated"])
 
 
 if __name__ == "__main__":

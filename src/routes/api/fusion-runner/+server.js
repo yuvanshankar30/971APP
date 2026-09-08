@@ -114,7 +114,28 @@ async function requeueStaleFusionJobs(supabase) {
 // Runner can't accidentally grab a job queued for the mill, and vice versa,
 // once multiple physical machines are polling at once. It is required:
 // claim-anything fallback can put a program on the wrong physical machine.
+//
+// cam_machines.authorized_runner_id closes a real gap in that: nothing
+// stopped two different physical computers from both configuring the SAME
+// machineId (both laptops thinking they're "New Router"), and whichever
+// one polled first would win the claim even if it wasn't the computer
+// actually wired to the real machine - confirmed live (two different
+// hostnames both syncing as the same machine). NULL means "no
+// restriction," unchanged behavior. When set, a mismatched runnerId is
+// silently limited to only unassigned (machine_id IS NULL) jobs for this
+// machineId - not an error, since "nothing to claim right now" is the
+// correct, quiet outcome for a computer that legitimately isn't the
+// authorized one, same as if nothing were queued at all.
 async function claimNextJob(supabase, runnerId, machineId) {
+  const { data: machine, error: machineError } = await supabase
+    .from('cam_machines')
+    .select('authorized_runner_id')
+    .eq('id', machineId)
+    .maybeSingle();
+  if (machineError) throw new Error(`Could not check machine authorization: ${machineError.message}`);
+  const isAuthorizedForThisMachine =
+    !machine?.authorized_runner_id || machine.authorized_runner_id === runnerId;
+
   let query = supabase
     .from('cam_jobs')
     .select('id')
@@ -122,7 +143,9 @@ async function claimNextJob(supabase, runnerId, machineId) {
     .eq('operation_type', 'milling')
     .order('created_at', { ascending: true })
     .limit(5);
-  query = query.or(`machine_id.is.null,machine_id.eq.${machineId}`);
+  query = isAuthorizedForThisMachine
+    ? query.or(`machine_id.is.null,machine_id.eq.${machineId}`)
+    : query.is('machine_id', null);
   const { data: candidates, error: findError } = await query;
   if (findError) throw new Error(`Could not look up queued milling jobs: ${findError.message}`);
   if (!candidates?.length) return null;
@@ -209,6 +232,54 @@ export async function POST({ request, url }) {
         .single();
       if (createError) throw new Error(createError.message);
       return json({ machine: created, created: true });
+    }
+
+    if (action === 'recover-own-jobs') {
+      // Direct instruction: on a Fusion/Runner restart, this Runner's own
+      // interrupted job(s) should not just sit stuck until the 15-minute
+      // stale-claim sweep (requeueStaleFusionJobs) eventually notices - and
+      // scoped ONLY to this runnerId's own claims, never the shared queue,
+      // so one machine restarting can never touch what another machine or
+      // an operator queued from the web UI.
+      const runnerId = String(body?.runnerId || '').trim();
+      if (!runnerId) return json({ error: 'runnerId is required' }, { status: 400 });
+
+      // A 'claimed' job never actually started (Fusion hadn't begun real
+      // work on it yet) - safe to put straight back in the queue for
+      // anyone to pick up, the same outcome requeueStaleFusionJobs already
+      // produces after 15 minutes of silence, just immediate instead of a
+      // pointless wait once the crash/restart itself already proves this
+      // Runner isn't coming back to it this session.
+      const { data: requeued, error: requeueError } = await supabase.from('cam_jobs')
+        .update({
+          status: 'queued',
+          claimed_by: null,
+          claimed_at: null,
+          progress: 0,
+          progress_message: 'Runner restarted before starting this job; requeued automatically'
+        })
+        .eq('claimed_by', runnerId).eq('status', 'claimed').eq('operation_type', 'milling')
+        .select('id');
+      if (requeueError) throw new Error(requeueError.message);
+
+      // A 'processing' job may already have changed a document or exported
+      // an artifact before the crash - the same reason requeueStaleFusionJobs
+      // deliberately never auto-retries one (see its own comment above).
+      // Failing it here instead of leaving it silently stuck in
+      // 'processing' forever surfaces the need for an operator's review
+      // right away, rather than only ever finding out by noticing the job
+      // never moved.
+      const { data: failed, error: failError } = await supabase.from('cam_jobs')
+        .update({
+          status: 'failed',
+          errors: ['Runner restarted while this job was processing - it may be partially complete; review before retrying'],
+          progress_message: 'Runner restarted mid-job'
+        })
+        .eq('claimed_by', runnerId).eq('status', 'processing').eq('operation_type', 'milling')
+        .select('id');
+      if (failError) throw new Error(failError.message);
+
+      return json({ success: true, requeued: requeued?.length || 0, failed: failed?.length || 0 });
     }
 
     if (action === 'claim') {
@@ -373,7 +444,7 @@ export async function POST({ request, url }) {
       return json({ success: true });
     }
 
-    return json({ error: `Unknown action: ${action}. Expected one of: claim, processing, heartbeat, complete, fail, sync-folders, register-machine, grow-plate` }, { status: 400 });
+    return json({ error: `Unknown action: ${action}. Expected one of: claim, processing, heartbeat, complete, fail, sync-folders, register-machine, grow-plate, recover-own-jobs` }, { status: 400 });
   } catch (error) {
     return json({ error: error?.message || 'Internal server error' }, { status: 500 });
   }
