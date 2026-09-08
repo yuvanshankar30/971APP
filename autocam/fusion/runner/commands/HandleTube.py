@@ -177,7 +177,10 @@ def _apply_chains(operation, parameter_name, specs):
         selection.isOpen = False
         selection.isReverted = spec["is_reverted"]
         selection.inputGeometry = spec["edges"]
-    parameter.applyCurveSelections(selections)
+    # Curve-selection APIs are implemented by the parameter value, not the
+    # CAMParameter wrapper. Calling the wrapper succeeds nowhere in Fusion
+    # and fails only once a live tube has a selectable pocket/shape.
+    parameter.value.applyCurveSelections(selections)
     return bool(specs)
 
 

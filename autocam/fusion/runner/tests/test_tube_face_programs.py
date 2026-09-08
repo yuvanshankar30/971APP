@@ -48,6 +48,11 @@ class TubeFaceProgramTests(unittest.TestCase):
         self.assertIn('workspaces.itemById("CAMEnvironment")', handler)
         self.assertIn("Fusion did not create a CAM product", handler)
 
+    def test_tube_chain_selection_uses_the_parameter_value_api(self):
+        handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
+        self.assertIn("parameter.value.applyCurveSelections(selections)", handler)
+        self.assertNotIn("parameter.applyCurveSelections(selections)", handler)
+
 
 if __name__ == "__main__":
     unittest.main()
