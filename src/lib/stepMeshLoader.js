@@ -37,7 +37,16 @@ export async function fetchStepMeshes(stepFileName) {
 
   const fileRes = await fetch(signedUrl);
   if (!fileRes.ok) throw new Error(`Failed to download STEP file (HTTP ${fileRes.status})`);
-  const bytes = new Uint8Array(await fileRes.arrayBuffer());
+  return readStepMeshes(new Uint8Array(await fileRes.arrayBuffer()));
+}
+
+/**
+ * Parses STEP bytes already held by the browser.  Kept separate from the
+ * storage download above so an Add Part form can inspect a freshly picked
+ * local file before it is uploaded and its stock category is chosen.
+ */
+export async function readStepMeshes(bytes) {
+  if (!bytes?.length) throw new Error('Could not read solid geometry from this STEP file.');
 
   const occtimportjs = (await import('occt-import-js')).default;
   const wasmUrl = (await import('occt-import-js/dist/occt-import-js.wasm?url')).default;

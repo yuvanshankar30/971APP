@@ -29,6 +29,7 @@
   // button belongs up here next to Usage Guide/Runner Setup, not buried
   // per-stock-group inside the parts list.
   let partsTabRef;
+  let boxTubesTabRef;
 
   $: canManage = canManageCamProfiles(user);
 
@@ -41,6 +42,10 @@
   // openQueuePicker() can't be called until after it mounts. tick() waits
   // for that mount to actually happen before calling it.
   async function openSendToFusionCam() {
+    if (activeTab === 'box-tubes') {
+      boxTubesTabRef?.openQueuePicker();
+      return;
+    }
     if (activeTab !== 'parts') {
       activeTab = 'parts';
       await tick();
@@ -96,7 +101,7 @@
 {:else if activeTab === 'stock-categories'}
   <StockCategoriesTab {canManage} />
 {:else if activeTab === 'box-tubes'}
-  <BoxTubesTab {user} {canManage} />
+  <BoxTubesTab bind:this={boxTubesTabRef} {user} {canManage} />
 {:else if activeTab === 'queue'}
   <JobQueueTab />
 {/if}

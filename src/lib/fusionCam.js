@@ -157,7 +157,7 @@ export async function renamePart(id, name) {
 export async function updatePartQuantity(id, newOriginalQuantity) {
   const { data: part, error: fetchError } = await supabase
     .from('fusion_parts')
-    .select('quantity, original_quantity')
+    .select('quantity, original_quantity, part_id')
     .eq('id', id)
     .single();
   if (fetchError) throw fetchError;
@@ -174,6 +174,17 @@ export async function updatePartQuantity(id, newOriginalQuantity) {
     .select('*, fusion_part_categories(thickness, cam_materials(name, category)), parts(id, name, project_id, workflow)')
     .single();
   if (error) throw error;
+
+  // A linked Fusion row is the CAM representation of this manufacturing
+  // request, not an independent demand count.  Keep the request's quantity
+  // aligned whenever an operator changes the total from Fusion CAM.
+  if (part.part_id) {
+    const { error: linkedPartError } = await supabase
+      .from('parts')
+      .update({ quantity: newOriginalQuantity, updated_at: new Date().toISOString() })
+      .eq('id', part.part_id);
+    if (linkedPartError) throw linkedPartError;
+  }
   return data;
 }
 

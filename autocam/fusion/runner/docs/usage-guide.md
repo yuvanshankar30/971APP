@@ -72,10 +72,11 @@ as a ballpark for comparing jobs, not a promise.
 
 ## Tube Stock and Stock Categories
 
-**Tube Stock** is direct-to-CAM: upload one STEP file, choose the router,
-tool, and material, then queue it. It is not mounted to a plate and it is not
-grouped with other tubes. The material is required so the Runner can select
-the reviewed feeds, speeds, and template for that stock.
+**Tube Stock** is direct-to-CAM: add one STEP-backed tube, then use the
+page-level **Send to Fusion CAM** action while the Tube Stock tab is open to
+choose the tube, router, tool, and material. It is not mounted to a plate and
+it is not grouped with other tubes. The material is required so the Runner can
+select the reviewed feeds, speeds, and template for that stock.
 
 For rectangular box tube, one queued tube job creates four manually indexed
 Fusion setups: Side 12, Side 3, Side 6, and Side 9. Fusion posts one NC file
