@@ -36,6 +36,10 @@ ARG PUBLIC_SITE_URL
 ARG PUBLIC_ROUTES
 ARG PUBLIC_TBA_API_KEY
 ARG PUBLIC_AUTO_VENDOR
+# Cloud Build injects its commit SHA through this non-secret build argument.
+# The Runner zip embeds it as its self-update release version.
+ARG FUSION_RUNNER_RELEASE_VERSION
+ENV FUSION_RUNNER_RELEASE_VERSION=$FUSION_RUNNER_RELEASE_VERSION
 
 RUN npm run build && npm prune --omit=dev
 

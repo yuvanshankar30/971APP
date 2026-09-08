@@ -29,6 +29,7 @@ const outFile = join(outDir, 'SpartanRoboticsAutoCAM-FusionAddIn.zip');
 const manifestFile = join(outDir, 'SpartanRoboticsAutoCAM-FusionAddIn.manifest.json');
 
 function releaseVersion() {
+  if (process.env.FUSION_RUNNER_RELEASE_VERSION) return process.env.FUSION_RUNNER_RELEASE_VERSION;
   if (process.env.K_REVISION) return process.env.K_REVISION;
   try {
     return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' }).trim();
