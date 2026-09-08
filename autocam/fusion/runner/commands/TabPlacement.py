@@ -363,17 +363,11 @@ def _body_center(body):
 
 
 def _all_straight_edges(body):
-    """Every straight, long-enough edge on body's own outer boundary -
-    deliberately NOT filtered by stock backing. Direct instruction: every
-    distinct straight side of a part gets at least one tab even when it
-    has no real stock behind it (a part positioned close to the plate's
-    own edge, or a corner placement, can leave a whole side without real
-    backing) - a tab there may not have real material to bite into, but
-    the part still needs to be physically held at every side, not just
-    the sides that happen to back onto stock. Stock backing is used only
-    to PREFER which edge to pick within a side when more than one
-    candidate segment exists (see select_tab_edges) - never to drop a
-    whole side to zero tabs.
+    """Every straight, long-enough edge on a body's own outer boundary.
+
+    This deliberately does not inspect backing itself because that depends
+    on this setup's arranged stock bounds. ``select_tab_edges`` performs the
+    backing check before an edge can become a tab location.
     """
     tab_face = _find_tab_face(body)
     if tab_face is None:
@@ -406,10 +400,7 @@ def _group_into_lines(edges):
 def _distinct_straight_line_count(body) -> int:
     """How many genuinely different straight sides body's outer boundary
     has - used only to decide the target tab count (see
-    _min_tabs_for_body), not to place tabs directly. Counts every real
-    straight side, stock-backed or not - a side with no stock behind it
-    still needs its own tab (see _all_straight_edges), so it still counts
-    as a real side here too.
+    _min_tabs_for_body), not to place tabs directly.
     """
     return len(_group_into_lines(_all_straight_edges(body)))
 
@@ -443,14 +434,12 @@ def select_tab_edges(
     edge is an explicit, safe release-tab location; Fusion's automatic
     placement is disabled rather than allowed to place more tabs elsewhere.
 
-    One tab per distinct side, longest side first, capped at max_tabs
-    (which _tab_count_for_perimeter has already scaled to the part's own
-    size). A side is never skipped just because it has no real stock
-    behind it - within a side a stock-backed segment is preferred, falling
-    back to its longest segment otherwise, so a part sitting close to the
-    plate's edge still gets held. Only if the part has fewer distinct
-    sides than tabs asked for do additional segments of those sides get
-    used, stock-backed ones first.
+    One tab per distinct, stock-backed side, longest side first, capped at
+    max_tabs (which _tab_count_for_perimeter has already scaled to the
+    part's own size). A tab has to bridge the released part to actual stock;
+    placing one on an edge that faces void is not holding material and is
+    therefore forbidden. Only if the part has fewer backed sides than tabs
+    asked for do additional backed segments get used.
     """
     stock_check_cm = STOCK_BACKING_CHECK_IN * 2.54
     body_center = _body_center(body)
@@ -464,8 +453,7 @@ def select_tab_edges(
 
     def best_edge_for_line(line):
         backed = [e for e in line if is_backed(e)]
-        pool = backed if backed else line
-        return max(pool, key=_edge_length)
+        return max(backed, key=_edge_length) if backed else None
 
     # One tab per distinct side, longest side first, capped at max_tabs.
     #
@@ -488,13 +476,16 @@ def select_tab_edges(
     # tab, not the side's summed length: a side split into several short
     # collinear pieces still has to fit the tab within ONE of them.
     min_side_cm = tab_width_in * 2 * 2.54
-    usable = [line for line in lines if _edge_length(best_edge_for_line(line)) >= min_side_cm]
+    usable = [
+        line for line in lines
+        if best_edge_for_line(line) is not None
+        and _edge_length(best_edge_for_line(line)) >= min_side_cm
+    ]
 
-    # Never return nothing. On a part so small that no side clears the
-    # threshold, a tab that is tight is still better than a part that comes
-    # loose mid-cut, so fall back to its longest sides.
+    # A genuinely tiny part still needs a hold-down, but only if that tab
+    # reaches stock. Never reintroduce an unbacked edge as a fallback.
     if not usable:
-        usable = lines
+        usable = [line for line in lines if best_edge_for_line(line) is not None]
 
     selected = [best_edge_for_line(line) for line in usable[:max_tabs]]
 
@@ -508,7 +499,9 @@ def select_tab_edges(
         selected_ids = {id(e) for e in selected}
         remaining = [
             e for e in all_edges
-            if id(e) not in selected_ids and _edge_length(e) >= min_side_cm
+            if id(e) not in selected_ids
+            and is_backed(e)
+            and _edge_length(e) >= min_side_cm
         ]
         remaining.sort(key=lambda e: (not is_backed(e), -_edge_length(e)))
         for edge in remaining:

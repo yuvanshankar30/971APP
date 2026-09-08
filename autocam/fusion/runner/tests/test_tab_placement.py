@@ -174,11 +174,7 @@ TabPlacement.adsk.core.Line3D = _Line3D
 
 
 class TabDistributionTests(unittest.TestCase):
-    """Direct instruction: every distinct straight side of a part gets at
-    least one tab, even a side with no real stock behind it - stock
-    backing should only decide WHICH edge to prefer within a side, never
-    whether a whole side gets zero tabs.
-    """
+    """A tab is valid only when it reaches actual surrounding stock."""
 
     def _rectangle_body_and_edges(self):
         edges = {
@@ -192,7 +188,7 @@ class TabDistributionTests(unittest.TestCase):
         body = _body([face], (0, 0), (10, 5))
         return body, edges
 
-    def test_a_side_with_no_stock_behind_it_still_gets_a_tab(self):
+    def test_a_side_with_no_stock_behind_it_never_gets_a_tab(self):
         body, edges = self._rectangle_body_and_edges()
         # Stock stops at x=9 - the right side (x=10) has nothing real
         # behind it, the other three sides do.
@@ -200,8 +196,8 @@ class TabDistributionTests(unittest.TestCase):
 
         selected = TabPlacement.select_tab_edges(body, max_tabs=4, stock_bounds=stock_bounds)
 
-        self.assertEqual(len(selected), 4)
-        self.assertIn(edges["right"], selected)
+        self.assertEqual(len(selected), 3)
+        self.assertNotIn(edges["right"], selected)
 
     def test_a_many_sided_part_is_capped_and_keeps_its_longest_sides(self):
         """A real teardrop bracket a few inches across picked up a tab on
@@ -234,13 +230,10 @@ class TabDistributionTests(unittest.TestCase):
         for facet in facets:
             self.assertNotIn(id(facet), selected_ids)
 
-    def test_a_side_without_stock_still_wins_a_tab_when_it_is_long_enough(self):
-        # The no-stock-backing improvement must survive the cap: backing
-        # decides WHICH segment of a side, never whether a long side is
-        # eligible at all.
+    def test_a_long_side_without_stock_is_still_ineligible(self):
         body, edges = self._rectangle_body_and_edges()
         selected = TabPlacement.select_tab_edges(body, max_tabs=4, stock_bounds=(-1, 9, -1, 6))
-        self.assertIn(edges["right"], selected)
+        self.assertNotIn(edges["right"], selected)
 
     def test_stock_backed_edges_are_preferred_when_backing_is_missing_is_not_forced(self):
         body, edges = self._rectangle_body_and_edges()
