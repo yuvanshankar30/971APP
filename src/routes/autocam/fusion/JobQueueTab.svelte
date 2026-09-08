@@ -54,8 +54,8 @@
   // the same "manufacturing-drive" bucket /manufacture/files browses. A copy
   // goes to each folder: "gcode" is where operators actually pull programs
   // from, "AutoCAM" is the generated-output folder, so neither audience has
-  // to know about the other's. This is intentionally a manual action; the
-  // runner never posts completed jobs automatically.
+  // to know about the other's. Runner completion always publishes the exact
+  // artifacts to AutoCAM; this action also creates operator-named gcode copies.
   const FILES_BUCKET = 'manufacturing-drive';
   const FILES_TARGET_FOLDERS = ['gcode', 'AutoCAM'];
 
