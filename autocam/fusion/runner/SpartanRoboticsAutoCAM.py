@@ -381,7 +381,26 @@ def handleServer(temp_dir: str, stop_event: threading.Event):
                         json={"jobId": _active_job_id, "runnerId": RUNNER_ID},
                         timeout=30,
                     )
-                    response.raise_for_status()
+                    if response.status_code == 409:
+                        # The job already left claimed/processing (completed,
+                        # failed, or reassigned) between this heartbeat being
+                        # scheduled and it actually landing - the main thread's
+                        # _JobQueueEventHandler.notify() already reported that
+                        # outcome and clears _active_job_id right after
+                        # _process_job returns. A stale heartbeat racing that
+                        # is an expected, harmless timing gap, not a runner
+                        # fault - log it calmly instead of a scary traceback
+                        # under the generic handler below, which was
+                        # confusing operators reading the log right after a
+                        # real job failure that had already been reported
+                        # correctly.
+                        _queue_log(
+                            f"Heartbeat for job {_active_job_id} skipped: job is no "
+                            "longer active (already completed, failed, or "
+                            "reassigned)."
+                        )
+                    else:
+                        response.raise_for_status()
                 stop_event.wait(0.2)
                 continue
             if not _job_queue.empty():
