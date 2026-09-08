@@ -305,7 +305,12 @@ def _sync_data_folders():
     """
     global _last_folder_tree_json
     try:
-        tree = list_data_folder_tree(_app, FUSION_DATA_PROJECT_NAME, FUSION_DROP_FOLDER_PATH)
+        # Saving at the season-project root must not make the startup sync
+        # enumerate that whole cloud-backed tree on Fusion's UI thread.
+        # Keep the browse snapshot scoped unless an explicit destination
+        # already supplies a narrower path.
+        tree_sync_path = FUSION_DROP_FOLDER_PATH or "Offseason Projects/AutoCAM"
+        tree = list_data_folder_tree(_app, FUSION_DATA_PROJECT_NAME, tree_sync_path)
         serialized = json.dumps(tree, sort_keys=True, separators=(",", ":"))
         if serialized == _last_folder_tree_json:
             return

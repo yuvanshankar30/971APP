@@ -32,10 +32,15 @@ class DependencyBootstrapTests(unittest.TestCase):
 
         self.assertTrue(manifest["runOnStartup"])
 
-    def test_folder_picker_defaults_to_the_scoped_autocam_subtree(self):
+    def test_documents_default_to_the_season_project_root(self):
         config = (RUNNER_DIR / "config.py").read_text()
 
-        self.assertIn('FUSION_DROP_FOLDER_PATH = _read_env_value("FUSION_DROP_FOLDER_PATH") or "Offseason Projects/AutoCAM"', config)
+        self.assertIn('FUSION_DROP_FOLDER_PATH = _read_env_value("FUSION_DROP_FOLDER_PATH")', config)
+
+    def test_root_save_default_keeps_folder_sync_scoped(self):
+        entrypoint = (RUNNER_DIR / "SpartanRoboticsAutoCAM.py").read_text()
+
+        self.assertIn('tree_sync_path = FUSION_DROP_FOLDER_PATH or "Offseason Projects/AutoCAM"', entrypoint)
 
 
 if __name__ == "__main__":

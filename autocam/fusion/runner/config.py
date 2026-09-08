@@ -97,11 +97,11 @@ FUSION_DATA_PROJECT_NAME = _read_env_value("FUSION_DATA_PROJECT_NAME") or "2026 
 
 # Nested Data Panel folder path (within the resolved project above) that
 # AutoCAM-generated Fusion documents get saved into - "/"-separated, each
-# segment created automatically if it doesn't already exist. Restrict the
-# default folder-picker scan to the established AutoCAM subtree: walking the
-# whole season project performs hundreds of synchronous cloud requests on
-# Fusion's UI thread and can prevent the application from becoming usable.
-FUSION_DROP_FOLDER_PATH = _read_env_value("FUSION_DROP_FOLDER_PATH") or "Offseason Projects/AutoCAM"
+# segment created automatically if it doesn't already exist. Empty means the
+# project's own root folder, which is the intended default for 2026 Season
+# CAM. The background folder-picker scan has its own safe scope in the add-in
+# entrypoint, so this save destination never triggers a root-tree walk.
+FUSION_DROP_FOLDER_PATH = _read_env_value("FUSION_DROP_FOLDER_PATH")
 
 TEMP_PATH = os.path.join(os.path.dirname(__file__), "temp")
 INITIAL_PATH = os.path.join(TEMP_PATH, "initial")
