@@ -21,12 +21,12 @@
   let submitting = false;
   // Which router each box tube's "Queue CAM Job" currently targets - keyed
   // by box tube id. No default - see the matching comment in
-  // PlatesTab.svelte for why silently picking machines[0] is wrong once
+  // PartsTab.svelte for why silently picking machines[0] is wrong once
   // more than one real router is eligible.
   let boxTubeMachineSelections = {};
   let boxTubeToolSelections = {};
   // machine_id -> cam_tools rows actually installed on that machine - see
-  // PlatesTab.svelte's matching comment for why (this app's own existing
+  // PartsTab.svelte's matching comment for why (this app's own existing
   // "job creation only offers the tools installed on its machine" rule).
   let machineTools = {};
 
@@ -128,7 +128,7 @@
     try {
       await deleteBoxTube(boxTube.id);
       // Splice locally instead of re-fetching everything just to drop one
-      // row - see PlatesTab.svelte's matching comment.
+      // row - see PartsTab.svelte's matching comment.
       boxTubes = boxTubes.filter((b) => b.id !== boxTube.id);
     } catch (e) {
       toastActions.show(e.message || 'Failed to delete box tube');
@@ -145,7 +145,7 @@
       toastActions.show('Choose a router before queueing');
       return;
     }
-    // See PlatesTab.svelte's matching comment - the Runner has no working
+    // See PartsTab.svelte's matching comment - the Runner has no working
     // fallback for an unspecified tool (its auto-select calls an API
     // endpoint that doesn't exist here), so this is required.
     if (!boxTubeToolSelections[boxTube.id]) {

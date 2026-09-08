@@ -10,9 +10,32 @@ let queries;
 const machineId='11111111-1111-4111-8111-111111111111';
 beforeEach(()=>{queries=[];mocks.from.mockReset();mocks.payload.mockReset();mocks.storageUpload.mockReset();mocks.storageUpload.mockResolvedValue({error:null});});
 function chain(result){
- const q={};for(const method of ['select','update','eq','in','order','limit','or','lt'])q[method]=vi.fn(()=>q);
- q.single=vi.fn(async()=>result);q.then=(resolve)=>resolve(result);queries.push(q);return q;
+ const q={};for(const method of ['select','insert','update','eq','in','ilike','order','limit','or','lt'])q[method]=vi.fn(()=>q);
+ q.single=vi.fn(async()=>result);q.maybeSingle=vi.fn(async()=>result);q.then=(resolve)=>resolve(result);queries.push(q);return q;
 }
+describe('Fusion Runner machine self-registration',()=>{
+ it('creates a disabled machine profile for a name that does not exist yet',async()=>{
+  mocks.from
+   .mockReturnValueOnce(chain({data:null,error:null}))
+   .mockReturnValueOnce(chain({data:{id:'new-machine',name:'ShopSabre Router 1'},error:null}));
+  const result=await call('register-machine',{name:'ShopSabre Router 1'});
+  expect(result.status).toBe(200);
+  expect(await result.json()).toEqual({machine:{id:'new-machine',name:'ShopSabre Router 1'},created:true});
+  expect(queries[0].ilike).toHaveBeenCalledWith('name','ShopSabre Router 1');
+  expect(queries[1].insert).toHaveBeenCalledWith({name:'ShopSabre Router 1',enabled:false});
+ });
+ it('reuses the existing machine instead of creating a duplicate on re-run',async()=>{
+  mocks.from.mockReturnValueOnce(chain({data:{id:'existing-machine',name:'ShopSabre Router 1'},error:null}));
+  const result=await call('register-machine',{name:'ShopSabre Router 1'});
+  expect(await result.json()).toEqual({machine:{id:'existing-machine',name:'ShopSabre Router 1'},created:false});
+  expect(mocks.from).toHaveBeenCalledTimes(1);
+ });
+ it('requires a name',async()=>{
+  const result=await call('register-machine',{});
+  expect(result.status).toBe(400);
+  expect(mocks.from).not.toHaveBeenCalled();
+ });
+});
 describe('Fusion Runner grouping lifecycle',()=>{
  it('marks unresolved claimed inputs failed instead of leaving a stranded claim',async()=>{
   mocks.from.mockReturnValueOnce(chain({error:null})).mockReturnValueOnce(chain({data:[{id:'job'}]})).mockReturnValueOnce(chain({data:{id:'job'}})).mockReturnValueOnce(chain({data:[]}));

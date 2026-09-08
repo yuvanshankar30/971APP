@@ -22,12 +22,15 @@ not found" report this replaces. Nothing here needs the reader to know a path.
 Deliberately does NOT touch adsk.core/adsk.fusion, so it runs in a normal
 terminal rather than Fusion's own interpreter.
 """
+import json
 import os
 import platform
 import shutil
 import socket
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 import uuid
 
 SOURCE_DIR = os.path.dirname(os.path.realpath(__file__))
@@ -107,6 +110,43 @@ def prompt(label, default=""):
     return input(f"{label}{suffix}: ").strip() or default
 
 
+def register_machine(base_url, token, name):
+    """Get-or-create this machine's real cam_machines row by name.
+
+    Returns (machine_id, created) on success, or None if the Hub couldn't be
+    reached (offline, wrong URL, bad token, etc.) - the caller falls back to
+    asking for a UUID by hand rather than blocking setup on this call.
+    """
+    request = urllib.request.Request(
+        f"{base_url}/api/fusion-runner?action=register-machine",
+        data=json.dumps({"name": name}).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {token}",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            body = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        try:
+            detail = json.loads(exc.read().decode("utf-8")).get("error", str(exc))
+        except (ValueError, UnicodeDecodeError):
+            detail = str(exc)
+        print(f"  Hub rejected the machine registration request: {detail}")
+        return None
+    except (urllib.error.URLError, TimeoutError, ValueError) as exc:
+        print(f"  Could not reach the Hub to register this machine: {exc}")
+        return None
+    machine = body.get("machine") or {}
+    machine_id = machine.get("id")
+    if not machine_id:
+        print(f"  Hub did not return a machine id: {body}")
+        return None
+    return machine_id, bool(body.get("created"))
+
+
 def write_env(addin_dir: str) -> None:
     env_file = os.path.join(addin_dir, ".env")
     print()
@@ -128,17 +168,31 @@ def write_env(addin_dir: str) -> None:
     print("it says which physical machine this computer drives, so this Runner")
     print("only claims jobs meant for that machine. Two workstations share the")
     print("token but must each have their own machine id.")
-    print(f"Find it at {base_url}/autocam/fusion -> Machines - copy the id of the")
-    print("machine this computer is wired to.")
 
     runner_id = prompt("Name for this machine", socket.gethostname() or "fusion-runner")
-    machine_id = ""
-    while not machine_id:
-        candidate = prompt("cam_machines UUID for this physical machine")
-        try:
-            machine_id = str(uuid.UUID(candidate))
-        except ValueError:
-            print("  That isn't a UUID - it should look like 517ba89c-7167-4415-b6fd-cfc7be1e59e1")
+
+    print(f"Registering '{runner_id}' with the Hub...")
+    registered = register_machine(base_url, token, runner_id)
+    if registered:
+        machine_id, created = registered
+        if created:
+            print(f"  Created a new machine profile '{runner_id}' ({machine_id}).")
+            print(f"  It's disabled until an admin sets its post-processor and tool")
+            print(f"  library and enables it at {base_url}/autocam -> Machines - this")
+            print("  Runner can still claim unassigned jobs meant for it in the meantime.")
+        else:
+            print(f"  Found the existing machine profile '{runner_id}' ({machine_id}).")
+    else:
+        print("Falling back to manual entry.")
+        print(f"Find it at {base_url}/autocam/fusion -> Machines - copy the id of the")
+        print("machine this computer is wired to.")
+        machine_id = ""
+        while not machine_id:
+            candidate = prompt("cam_machines UUID for this physical machine")
+            try:
+                machine_id = str(uuid.UUID(candidate))
+            except ValueError:
+                print("  That isn't a UUID - it should look like 517ba89c-7167-4415-b6fd-cfc7be1e59e1")
 
     with open(env_file, "w") as f:
         f.write(f'API_KEY="{token}"\n')
