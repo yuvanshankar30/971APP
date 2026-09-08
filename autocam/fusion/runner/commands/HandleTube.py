@@ -343,7 +343,15 @@ def _configure_face_operations(setup, selection_face, wall_thickness_in):
     # incorrectly on tube walls.
     shapes = [loop for loop in loops if not loop["circular"]]
     have_shape_roughing = False
-    circular_faces = [face for loop in loops if loop["circular"] for face in loop["circular_faces"]]
+    circular_loops = [loop for loop in loops if loop["circular"] and loop["circular_faces"]]
+    # Bore's face selector defines a hole feature, not every repeated hole
+    # instance. Passing all 141 tube holes made Fusion create an enormous
+    # explicit selection and destabilized geometry binding. Select exactly
+    # one whole hole: its loop may own more than one cylindrical BRep face
+    # after STEP import, so keep every face belonging to the FIRST loop and
+    # never mix faces from a second hole. The diameter limits still let the
+    # template recognize matching repeated holes on this indexed side.
+    representative_hole_faces = circular_loops[0]["circular_faces"] if circular_loops else []
 
     # Delete the deliberately unsupported cutoff before applying any feature
     # selection. If a later shape/slot binding fails, Fusion retains the
@@ -367,7 +375,10 @@ def _configure_face_operations(setup, selection_face, wall_thickness_in):
             # circular through holes on this indexed face.
             _set_expression(operation, "holeDiameterMinimum", "0 in")
             _set_expression(operation, "holeDiameterMaximum", "100 in")
-            keep = bool(circular_faces) and _apply_circular_faces(operation, circular_faces)
+            keep = (
+                bool(representative_hole_faces)
+                and _apply_circular_faces(operation, representative_hole_faces)
+            )
         elif "circular" in name and "hole" in name:
             # 2D Pocket rejects the circular through-hole chains on an
             # imported tube wall. Its geometry is handled by the Bore above,

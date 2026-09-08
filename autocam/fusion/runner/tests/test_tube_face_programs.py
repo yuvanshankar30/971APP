@@ -67,7 +67,9 @@ class TubeFaceProgramTests(unittest.TestCase):
     def test_tube_routes_all_circular_holes_through_bore_faces(self):
         handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
         self.assertIn('"holeDiameterMaximum", "100 in"', handler)
-        self.assertIn("_apply_circular_faces(operation, circular_faces)", handler)
+        self.assertIn('circular_loops = [loop for loop in loops if loop["circular"] and loop["circular_faces"]]', handler)
+        self.assertIn('representative_hole_faces = circular_loops[0]["circular_faces"] if circular_loops else []', handler)
+        self.assertIn("_apply_circular_faces(operation, representative_hole_faces)", handler)
 
     def test_tube_wcs_uses_the_topological_face_normal(self):
         handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
