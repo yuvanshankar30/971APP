@@ -57,7 +57,24 @@ import adsk.cam
 
 
 DEFAULT_MIN_TABS = 4
-DEFAULT_MAX_TABS = 10
+# Raised from 10, live-confirmed too low for a large or complex part: a
+# real plate with a 16.317in straight side got only ONE tab on it, because
+# select_tab_edges spends its budget covering every distinct straight side
+# once (breadth) BEFORE a second tab can ever land on a side that's simply
+# much longer than the others - with enough short sides (a complex outline
+# has plenty), breadth alone can consume the whole budget, leaving no
+# "remaining_budget" for the redistribution pass that would otherwise give
+# that long side the extra tab its own length clearly warrants. This does
+# not touch how any single tab is placed (select_tab_edges' spacing/
+# redistribution logic here is unchanged and already tested) - only how
+# much total headroom a body gets. Deliberately moderate, not the 40 an
+# earlier version of this constant jumped to (see git history) - that
+# change was reverted together with an unrelated, separately-introduced
+# zero-margin edge exclusion after the two together caused a real job to
+# lose its release contour silently; this constant is raised alone, and
+# camPlate.py's _require_release_contour now fails a job loudly instead of
+# silently if a change like that ever recurs.
+DEFAULT_MAX_TABS = 20
 # How far outward (beyond the candidate edge) to check for real stock -
 # just enough to tell "is there material here at all", not "is there a lot
 # of it". Matches the same order of magnitude as MIN_TAB_EDGE_LENGTH_IN

@@ -290,6 +290,49 @@ def _operation_warnings(app, cam) -> list:
     return warnings
 
 
+def _require_release_contour(cam) -> None:
+    """Raise if the one operation that actually releases the part(s) from
+    stock did not survive DeleteToolpaths.
+
+    group_tabs=true marks exactly one contour2d operation per setup - the
+    outer release cut TabPlacement.py configures manual tabs on (see that
+    module's own docstring). DeleteToolpaths prunes any operation whose
+    toolpath came out invalid, this one included if tab placement left it
+    with no valid geometry - confirmed live as a real incident: a job
+    posted G-code with every hole machined and the release cut silently
+    missing, reported "completed" with zero warnings, because nothing
+    anywhere checked that this specific operation survived. A part that
+    is never actually cut free of its stock is not a completed job - fail
+    here, immediately after DeleteToolpaths runs, instead of only ever
+    finding out at the machine.
+
+    cam may be None (the CAM product failed to resolve) - nothing to
+    check in that case, and camPlate.py's own machining-time computation
+    already treats a missing cam the same way.
+    """
+    if cam is None:
+        return
+    for setup in cam.setups:
+        for op in setup.operations:
+            if op.strategy != "contour2d":
+                continue
+            group_tabs_param = op.parameters.itemByName("group_tabs")
+            if group_tabs_param is None:
+                continue
+            try:
+                is_release = str(group_tabs_param.expression).strip().lower() == "true"
+            except Exception:
+                is_release = False
+            if is_release:
+                return
+    raise RuntimeError(
+        "No release-contour operation (group_tabs=true) survived toolpath "
+        "generation - the part(s) would never actually separate from "
+        "stock. Check the Runner's log for TabPlacement/DeleteToolpaths "
+        "output explaining why this operation's toolpath came out invalid."
+    )
+
+
 def _coverage_warnings(app, cam, nc_files) -> list:
     """Compares the posted program against the part's own CAD geometry and
     returns a warning per real problem found - an internal feature with no
@@ -603,14 +646,27 @@ def start(data, session):
             app.log("TabPlacement failed:\n{}".format(traceback.format_exc()))
         DeleteToolpaths()
 
-        total_machining_time = None
+        # Bound before the try below runs, not just assigned inside it -
+        # _coverage_warnings/_operation_warnings further down read `cam`
+        # unconditionally, outside this try. If resolving the CAM product
+        # itself raised, `cam` was never assigned and those later calls
+        # crashed with a bare NameError on an otherwise-successful job
+        # (G-code already posted, export_dir already cleaned up).
+        cam = None
         try:
             cam_product = app.activeDocument.products.itemByProductType("CAMProductType")
             cam = adsk.cam.CAM.cast(cam_product) if cam_product else None
-            if cam:
-                total_machining_time = _total_machining_time(cam)
         except Exception:
-            app.log("Failed to compute machining time:\n{}".format(traceback.format_exc()))
+            app.log("Failed to resolve the CAM product after DeleteToolpaths:\n{}".format(traceback.format_exc()))
+
+        _require_release_contour(cam)
+
+        total_machining_time = None
+        if cam:
+            try:
+                total_machining_time = _total_machining_time(cam)
+            except Exception:
+                app.log("Failed to compute machining time:\n{}".format(traceback.format_exc()))
 
         plate_id = str(_get(payload, "plate_id", "plateId", default="cam_plate"))
 

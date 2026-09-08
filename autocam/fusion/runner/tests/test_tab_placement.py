@@ -1,4 +1,5 @@
 import importlib.util
+import math
 from pathlib import Path
 import sys
 import types
@@ -301,6 +302,50 @@ class TabDistributionTests(unittest.TestCase):
         self.assertEqual(TabPlacement._tab_count_for_perimeter(16.0, 4, 10), 4)
         self.assertEqual(TabPlacement._tab_count_for_perimeter(16.01, 4, 10), 4)
         self.assertEqual(TabPlacement._tab_count_for_perimeter(36.01, 4, 10), 9)
+
+    def test_a_side_much_longer_than_its_competitors_gets_more_than_one_tab(self):
+        # Live-confirmed bug, reported against a real plate: one straight
+        # side measured 16.317in and still received only ONE tab. Root
+        # cause - select_tab_edges spends its whole max_tabs budget giving
+        # every distinct usable side exactly one tab (breadth) before a
+        # second tab can ever land anywhere; once a complex part has at
+        # least as many distinct sides as max_tabs, that breadth pass alone
+        # exhausts the budget, so the redistribution pass that would give a
+        # long side extra tabs never runs at all - however much longer that
+        # side is than the ones it's competing with.
+        #
+        # Reproduced directly: 14 short, mutually non-collinear sides (a
+        # spoke pattern - same direction-based collinearity check
+        # _edges_collinear uses, just picked to guarantee every spoke is a
+        # distinct line) standing in for a complex outline's many short
+        # notches, plus one 41.445cm (16.317in) side matching the real
+        # report.
+        long_side = _edge(0, 0, 0, 41.445)
+        short_sides = [
+            _edge(0, 0, 2.5 * math.cos(i * 0.4 + 0.1), 2.5 * math.sin(i * 0.4 + 0.1))
+            for i in range(14)
+        ]
+        edges = [long_side, *short_sides]
+        loop = _loop(True, edges)
+        body = _body([_face(1.0, 1.0, [loop])], (0, 0), (10, 42))
+
+        # With the OLD, too-low budget (10), breadth alone (15 distinct
+        # sides, capped to the 10 longest) already consumes it - the long
+        # side is guaranteed a slot (it's the longest), but gets only one.
+        old_budget_selected = TabPlacement.select_tab_edges(body, max_tabs=10, stock_bounds=None)
+        old_budget_long_side_tabs = sum(1 for edge, _fraction in old_budget_selected if edge is long_side)
+        self.assertEqual(
+            old_budget_long_side_tabs, 1,
+            "sanity check that this scenario reproduces the reported bug under the old max_tabs=10",
+        )
+
+        # With the real (current) default, the same side must get more than one.
+        selected = TabPlacement.select_tab_edges(body, max_tabs=TabPlacement.DEFAULT_MAX_TABS, stock_bounds=None)
+        long_side_tabs = sum(1 for edge, _fraction in selected if edge is long_side)
+        self.assertGreaterEqual(
+            long_side_tabs, 2,
+            "a side this much longer than its competitors must get more than one tab",
+        )
 
 
 class MinimumSideLengthTests(unittest.TestCase):
