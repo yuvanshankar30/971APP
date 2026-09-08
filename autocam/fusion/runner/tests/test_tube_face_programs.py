@@ -58,7 +58,7 @@ class TubeFaceProgramTests(unittest.TestCase):
         handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
         template_index = handler.index("setup.createFromCAMTemplate2(template)")
         bind_index = handler.index("_bind_setup_to_face(setup, body, face, tube_axis, horizontal)", template_index)
-        configure_index = handler.index("_configure_face_operations(setup, face)", template_index)
+        configure_index = handler.index("_configure_face_operations(setup, face, wall_thickness_in)", template_index)
         self.assertLess(template_index, configure_index)
         self.assertLess(template_index, bind_index)
         self.assertLess(bind_index, configure_index)
@@ -88,8 +88,20 @@ class TubeFaceProgramTests(unittest.TestCase):
 
     def test_tube_operations_reference_stock_under_the_active_face(self):
         handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
-        self.assertIn('"bottomHeight_mode", "\'from stock bottom\'"', handler)
-        self.assertIn("_set_face_stock_heights(operation)", handler)
+        self.assertIn('"topHeight_mode", "\'from stock top\'"', handler)
+        self.assertIn("_set_face_stock_heights(operation, wall_thickness_in)", handler)
+
+    def test_tube_bottom_depth_never_reaches_the_far_wall_of_a_hollow_tube(self):
+        # Direct bug report: a hole/shape cutout was cutting all the way
+        # through the hollow tube into the far wall instead of stopping at
+        # the near wall's own inner surface. "from stock bottom" on a
+        # RelativeBoxStock (the tube's whole bounding box, hollow middle
+        # included) IS the far wall - it must never be hardcoded as every
+        # operation's blanket bottom depth again.
+        handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
+        self.assertNotIn('"bottomHeight_mode", "\'from stock bottom\'"', handler)
+        self.assertIn("from .TubeHeightMath import bottom_height_expression", handler)
+        self.assertIn("bottom_mode, bottom_offset = bottom_height_expression(wall_thickness_in)", handler)
 
     def test_tube_cutoff_is_deleted_before_other_geometry_binding(self):
         handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
