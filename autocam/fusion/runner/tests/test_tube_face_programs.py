@@ -29,6 +29,22 @@ class TubeFaceProgramTests(unittest.TestCase):
             ["Tube42-side-12", "Tube42-side-3", "Tube42-side-6", "Tube42-side-9"],
         )
 
+    def test_long_job_names_keep_a_unique_face_suffix_inside_fusions_limit(self):
+        long_name = "Tube" + "a" * 36 + "Job" + "b" * 36
+        names = [tube_face_program_name(long_name, clock) for clock in TUBE_FACE_CLOCKS]
+
+        self.assertEqual(
+            names,
+            [
+                long_name[:32] + "-side-12",
+                long_name[:33] + "-side-3",
+                long_name[:33] + "-side-6",
+                long_name[:33] + "-side-9",
+            ],
+        )
+        self.assertEqual(len(set(names)), 4)
+        self.assertTrue(all(len(name) <= 40 for name in names))
+
     def test_unknown_face_is_rejected(self):
         with self.assertRaises(ValueError):
             tube_face_label(1)
