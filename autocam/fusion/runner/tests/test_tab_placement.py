@@ -409,11 +409,12 @@ class ManualTabTests(unittest.TestCase):
             name: _Parameter()
             for name in ("group_tabs", "tabsPerContour", "tabPositions")
         }
+        parameters["group_tabs"].value.value = True
         operation = types.SimpleNamespace(parameters=_Parameters(parameters))
         app = types.SimpleNamespace(log=lambda _message: None)
 
         self.assertTrue(TabPlacement._disable_tabs(app, operation))
-        self.assertFalse(parameters["group_tabs"].value.value)
+        self.assertTrue(parameters["group_tabs"].value.value)
         self.assertEqual(parameters["tabsPerContour"].value.value, 0)
         self.assertEqual(parameters["tabPositions"].value.value, [])
 
