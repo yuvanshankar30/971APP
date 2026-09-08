@@ -8,6 +8,7 @@ import { POST } from './+server.js';
 const call=(action,body={})=>POST({url:new URL(`http://localhost/api/fusion-runner?action=${action}`),request:new Request('http://localhost',{method:'POST',body:JSON.stringify(body)})});
 let queries;
 const machineId='11111111-1111-4111-8111-111111111111';
+const plateId='22222222-2222-4222-8222-222222222222';
 beforeEach(()=>{queries=[];mocks.from.mockReset();mocks.payload.mockReset();mocks.storageUpload.mockReset();mocks.storageUpload.mockResolvedValue({error:null});});
 function chain(result){
  const q={};for(const method of ['select','insert','update','eq','in','ilike','order','limit','or','lt'])q[method]=vi.fn(()=>q);
@@ -186,5 +187,47 @@ describe('Fusion Runner grouping lifecycle',()=>{
   expect((await result.json()).error).toMatch(/filenames/);
   expect(mocks.from).toHaveBeenCalledTimes(1);
   expect(mocks.storageUpload).not.toHaveBeenCalled();
+ });
+});
+describe('Fusion Runner plate growth',()=>{
+ it('rejects a malformed plate ID',async()=>{
+  const result=await call('grow-plate',{plateId:'not-a-uuid',length:34,width:34});
+  expect(result.status).toBe(400);
+  expect(mocks.from).not.toHaveBeenCalled();
+ });
+ it('rejects a non-positive or missing length/width',async()=>{
+  expect((await call('grow-plate',{plateId,length:0,width:34})).status).toBe(400);
+  expect((await call('grow-plate',{plateId,length:34})).status).toBe(400);
+  expect(mocks.from).not.toHaveBeenCalled();
+ });
+ it('reports 404 for a plate that no longer exists',async()=>{
+  mocks.from.mockReturnValueOnce(chain({data:null,error:null}));
+  const result=await call('grow-plate',{plateId,length:34,width:34});
+  expect(result.status).toBe(404);
+ });
+ it('grows a plate to the requested size when it is bigger than the current one',async()=>{
+  mocks.from
+   .mockReturnValueOnce(chain({data:{id:plateId,width:24,length:24},error:null}))
+   .mockReturnValueOnce(chain({error:null}));
+  const result=await call('grow-plate',{plateId,length:34,width:34});
+  expect(result.status).toBe(200);
+  expect(await result.json()).toEqual({success:true,grown:true,length:34,width:34});
+  expect(queries[1].update).toHaveBeenCalledWith({length:34,width:34});
+  expect(queries[1].eq).toHaveBeenCalledWith('id',plateId);
+ });
+ it('never shrinks a plate that is already at least as big as requested',async()=>{
+  mocks.from.mockReturnValueOnce(chain({data:{id:plateId,width:100,length:100},error:null}));
+  const result=await call('grow-plate',{plateId,length:34,width:34});
+  expect(result.status).toBe(200);
+  expect(await result.json()).toEqual({success:true,grown:false});
+  expect(mocks.from).toHaveBeenCalledTimes(1);
+ });
+ it('grows only the dimension that actually needs it, keeping the other at its current (possibly larger) size',async()=>{
+  mocks.from
+   .mockReturnValueOnce(chain({data:{id:plateId,width:100,length:24},error:null}))
+   .mockReturnValueOnce(chain({error:null}));
+  const result=await call('grow-plate',{plateId,length:34,width:34});
+  expect(await result.json()).toEqual({success:true,grown:true,length:34,width:100});
+  expect(queries[1].update).toHaveBeenCalledWith({length:34,width:100});
  });
 });

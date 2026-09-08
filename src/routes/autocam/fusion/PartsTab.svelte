@@ -702,15 +702,20 @@
   }
 
   // The one plate a stock category ever has, created transparently on
-  // first use with the same sizing convention the placeholder-stock
-  // migration seeded for every category that existed before this change -
-  // a human never names or sizes it.
+  // first use - a human never names or sizes it. 100x100in default: a
+  // plate's declared size only bounds how much room the Runner's Arrange
+  // solver has to nest parts in, not the real CAM stock (that's sized to
+  // the actual imported geometry regardless - see SetupGenerator.py), so a
+  // generous default costs nothing real. The Runner also grows a category's
+  // plate further on its own the first time a part doesn't fit even this
+  // (see AutoArrange.py's required_plate_dimensions), so this is a
+  // starting point, not a hard ceiling.
   async function resolveCategoryPlateId(group) {
     if (group.plates[0]) return group.plates[0].id;
     const created = await createPlate({
       name: `Auto stock - ${categoryLabel(group.category)}`,
-      width: 24,
-      length: 24,
+      width: 100,
+      length: 100,
       trueDepth: Number(group.category?.thickness) || 0.25,
       categoryId: group.categoryId
     });
@@ -1147,9 +1152,11 @@
                         aria-pressed={checked}
                         on:click={() => toggleGroupedPart(group, part)}
                       >
-                        <span class="group-part-check"><Check size={12} /></span>
-                        <span class="group-part-name">{part.name}</span>
-                        <span class="group-part-available">qty {part.original_quantity}</span>
+                        <span class="group-part-check"><Check size={13} /></span>
+                        <span class="group-part-info">
+                          <span class="group-part-name">{part.name}</span>
+                          <span class="group-part-available">qty {part.original_quantity}</span>
+                        </span>
                       </button>
                       {#if checked}
                         <label class="group-part-qty">
@@ -1312,20 +1319,64 @@
   .quantity-control { display: inline-flex; }
   .quantity-input { min-width: 4rem; width: 4rem; }
   .cam-list-actions { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; flex-wrap: wrap; }
-  .group-part-picker { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.6rem 0.75rem; margin: 0 0 0.75rem; }
-  .group-part-picker legend { color: var(--text-muted); font-size: 0.75rem; padding: 0 0.25rem; }
-  .group-part-summary { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.5rem; }
-  .group-part-search { height: 2rem; padding: 0.25rem 0.5rem; font-size: 0.8rem; margin-bottom: 0.5rem; }
-  .group-part-summary-actions { display: flex; gap: 0.4rem; }
-  .group-part-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 0.5rem; }
-  .group-part-card { border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--primary); transition: border-color 0.15s, background 0.15s; }
-  .group-part-card.selected { border-color: var(--accent); background: var(--surface); }
-  .group-part-toggle { display: flex; flex-direction: column; align-items: flex-start; gap: 0.15rem; width: 100%; padding: 0.5rem 0.6rem; background: none; border: none; cursor: pointer; text-align: left; font: inherit; color: inherit; }
-  .group-part-check { display: inline-flex; align-items: center; justify-content: center; width: 1rem; height: 1rem; border: 1px solid var(--border); border-radius: 3px; color: transparent; }
+  .group-part-picker { border: 1px solid var(--border); border-radius: var(--radius-md, 10px); padding: 0.85rem 0.9rem; margin: 0 0 0.75rem; background: var(--surface-2, #f7f7f5); }
+  .group-part-picker legend { color: var(--text-muted); font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; padding: 0 0.35rem; }
+  .group-part-summary { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap; font-size: 0.8rem; font-weight: 500; color: var(--text-muted); margin-bottom: 0.6rem; }
+  .group-part-search { height: 2.1rem; padding: 0.3rem 0.6rem; font-size: 0.8rem; margin-bottom: 0.6rem; }
+  .group-part-summary-actions { display: flex; gap: 0.3rem; }
+  .group-part-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 0.55rem; }
+  .group-part-card {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 8px);
+    background: var(--primary);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+    transition: border-color 0.15s, background 0.15s, box-shadow 0.15s, transform 0.1s;
+  }
+  .group-part-card:hover { border-color: var(--accent); box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06); }
+  .group-part-card.selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--primary)); box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06); }
+  .group-part-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    width: 100%;
+    padding: 0.6rem 0.7rem;
+    background: none;
+    border: none;
+    cursor: pointer;
+    text-align: left;
+    font: inherit;
+    color: inherit;
+  }
+  .group-part-check {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.15rem;
+    height: 1.15rem;
+    border: 1.5px solid var(--border);
+    border-radius: 5px;
+    color: transparent;
+    background: var(--primary);
+    transition: background 0.15s, border-color 0.15s;
+  }
   .group-part-card.selected .group-part-check { color: var(--accent-contrast, #fff); background: var(--accent); border-color: var(--accent); }
-  .group-part-name { font-weight: 600; font-size: 0.82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
-  .group-part-available { font-size: 0.72rem; color: var(--text-muted); }
-  .group-part-qty { display: flex; align-items: center; justify-content: space-between; gap: 0.4rem; font-size: 0.75rem; color: var(--text-muted); padding: 0 0.6rem 0.5rem; }
+  .group-part-info { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
+  .group-part-name { font-weight: 600; font-size: 0.83rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+  .group-part-available { font-size: 0.71rem; color: var(--text-muted); }
+  .group-part-qty {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.4rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    padding: 0 0.7rem 0.6rem;
+    border-top: 1px solid var(--border);
+    padding-top: 0.5rem;
+    margin-top: 0.1rem;
+  }
   .grouped-qty-input { min-width: 4rem; width: 4rem; height: var(--control-height, 2.25rem); }
   .empty-state { color: var(--text-muted, #888); padding: 2rem 0; text-align: center; }
   .cam-form-hint { color: var(--text-muted, #888); font-size: 0.85rem; margin: 0.25rem 0 0; }

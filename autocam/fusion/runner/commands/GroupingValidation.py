@@ -19,35 +19,51 @@ def plate_spacing(tool_diameter):
     return max(0.26, diameter + 0.01)
 
 
-def require_individual_footprints_fit(footprints, length_in, width_in, frame_width_in=0.5):
-    """Reject an individually oversized part before Fusion's Arrange solver.
+def required_plate_dimensions(footprints, length_in, width_in, frame_width_in=0.5):
+    """The plate size actually needed to fit every individual footprint.
 
-    Arrange reports the same generic ``NO_ROOM`` result for an oversized
-    single part and for a genuinely crowded group.  Checking the imported
-    planar bounds first gives the operator the actual part and usable-stock
-    dimensions instead of a Fusion stack trace.
+    Direct instruction: a plate's declared size only bounds how much room
+    Arrange has to nest parts in - the real CAM stock is a RelativeBoxStock
+    sized to the imported geometry's own bounding box (see
+    SetupGenerator.py), not the plate's dimensions, so growing the plate
+    costs nothing real. Given that, there's no reason to reject an
+    individually oversized part the way this used to (Arrange reports the
+    same generic ``NO_ROOM`` for an oversized single part as for a
+    genuinely crowded group) - grow to fit it instead.
+
+    Sized as a square big enough for the largest footprint's longer side in
+    either orientation, plus the same edge margin AutoArrange itself
+    reserves on every side - simpler and always safe, at the cost of some
+    unused margin versus a tighter rectangle. Only accounts for each part's
+    own size in isolation, not a substitute for Arrange's real 2D nesting
+    solver when multiple parts are involved, which can still legitimately
+    run out of room fitting several parts together even on a plate sized
+    for its biggest single one - that remaining case is still caught by
+    Arrange's own ARRANGE_ERROR_NO_ROOM result.
+
+    Returns (length_in, width_in), unchanged if the given size already fits
+    everything (a rectangular plate can fit a part via rotation without
+    needing to grow at all), grown to a sufficient square otherwise.
     """
     length_in = float(length_in)
     width_in = float(width_in)
     frame_width_in = float(frame_width_in)
     usable_length = length_in - 2 * frame_width_in
     usable_width = width_in - 2 * frame_width_in
-    if usable_length <= 0 or usable_width <= 0:
-        raise PlateFitError('Plate dimensions must exceed the required edge margin')
+    spans = [(float(x_span), float(y_span)) for _, x_span, y_span in footprints]
 
-    for name, x_span, y_span in footprints:
-        x_span = float(x_span)
-        y_span = float(y_span)
-        fits = (
+    def fits(x_span, y_span):
+        return usable_length > 0 and usable_width > 0 and (
             (x_span <= usable_length and y_span <= usable_width)
             or (y_span <= usable_length and x_span <= usable_width)
         )
-        if not fits:
-            raise PlateFitError(
-                f'{name} is {x_span:.2f} x {y_span:.2f}in and cannot fit the '
-                f'{usable_length:.2f} x {usable_width:.2f}in usable area of the '
-                f'{length_in:.2f} x {width_in:.2f}in plate. Select larger stock.'
-            )
+
+    if all(fits(x_span, y_span) for x_span, y_span in spans):
+        return length_in, width_in
+
+    longest_side = max((max(x_span, y_span) for x_span, y_span in spans), default=0.0)
+    required_side = longest_side + 2 * frame_width_in
+    return max(length_in, required_side), max(width_in, required_side)
 
 
 def require_grouping_mode_matches_assignments(assignments, grouping_mode):

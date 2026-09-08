@@ -109,6 +109,27 @@ def _total_machining_time(cam: adsk.cam.CAM) -> Optional[float]:
     return total_machining_time(cam, adsk.core.ObjectCollection.create)
 
 
+def _report_grown_plate(app, session: requests.Session, plate_id: str, length: float, width: float) -> None:
+    """Persists a plate size AutoArrange had to grow to fit a part, so the
+    next job queued against this same plate starts from the larger size
+    instead of growing again from scratch every time. Best-effort: a plate
+    that already generated valid G-code this run must not be failed over a
+    bookkeeping request that didn't need to succeed for the job itself.
+    """
+    try:
+        response = session.post(
+            f"{BASE_URL}/api/fusion-runner",
+            params={"action": "grow-plate"},
+            json={"plateId": plate_id, "runnerId": RUNNER_ID, "length": length, "width": width},
+            timeout=30,
+        )
+        if not response.ok and app:
+            app.log(f"Failed to persist grown plate size: HTTP {response.status_code} {response.text}")
+    except Exception as exc:  # noqa: BLE001 - best-effort by design, see docstring
+        if app:
+            app.log(f"Failed to persist grown plate size: {exc}")
+
+
 def _normalize_assignments(payload: dict) -> list[dict]:
     def normalize_quantity(value) -> int:
         if value is None:
@@ -500,8 +521,9 @@ def start(data, session):
         occurrences = list(design.rootComponent.allOccurrences)
         _apply_snapshot_part_names(data, assignments, occurrences)
         spacing = plate_spacing((data.get('cam_tools') or {}).get('diameter'))
+        requested_length, requested_width = length, width
         try:
-            arrange = AutoArrange(length, width, object_spacing=spacing)
+            arrange, length, width = AutoArrange(length, width, object_spacing=spacing)
         except RuntimeError as error:
             if 'ARRANGE_ERROR_NO_ROOM' not in str(error):
                 raise
@@ -510,6 +532,8 @@ def start(data, session):
                 f'{width:.2f}in plate. Select larger stock or reduce the group.'
             ) from error
         require_complete_arrangement(arrange, occurrences)
+        if length > requested_length or width > requested_width:
+            _report_grown_plate(app, session, _get(payload, "plate_id", "plateId", default="cam_plate"), length, width)
 
         # Extract tool_items (specific tool GUIDs from within libraries)
         tool_items_raw = _get(payload, "tool_items")

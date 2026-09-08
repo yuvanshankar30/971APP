@@ -236,6 +236,39 @@ export async function POST({ request, url }) {
       }
     }
 
+    if (action === 'grow-plate') {
+      // Not tied to a specific job - AutoArrange grows a plate to fit an
+      // individually oversized part rather than rejecting it (a plate's
+      // declared size only bounds Arrange's nesting room; the real CAM
+      // stock is sized to the actual imported geometry regardless - see
+      // AutoArrange.py), and reports the size it actually used back here so
+      // the next job queued against this same plate starts from the larger
+      // size instead of growing again from scratch every time.
+      const rawPlateId = body?.plateId;
+      if (typeof rawPlateId !== 'string' || !UUID_RE.test(rawPlateId)) return json({ error: 'plateId is required and must be a UUID' }, { status: 400 });
+      const length = Number(body?.length);
+      const width = Number(body?.width);
+      if (!Number.isFinite(length) || length <= 0 || !Number.isFinite(width) || width <= 0) {
+        return json({ error: 'length and width are required and must be positive numbers' }, { status: 400 });
+      }
+      const { data: currentPlate, error: currentError } = await supabase
+        .from('fusion_plates').select('id, width, length').eq('id', rawPlateId).maybeSingle();
+      if (currentError) throw new Error(currentError.message);
+      if (!currentPlate) return json({ error: 'Plate not found' }, { status: 404 });
+      // Never shrink - a concurrent job on the same category could have
+      // already grown this plate further since this Runner last read it.
+      const nextLength = Math.max(Number(currentPlate.length), length);
+      const nextWidth = Math.max(Number(currentPlate.width), width);
+      if (nextLength === Number(currentPlate.length) && nextWidth === Number(currentPlate.width)) {
+        return json({ success: true, grown: false });
+      }
+      const { error: updateError } = await supabase.from('fusion_plates')
+        .update({ length: nextLength, width: nextWidth })
+        .eq('id', rawPlateId);
+      if (updateError) throw new Error(updateError.message);
+      return json({ success: true, grown: true, length: nextLength, width: nextWidth });
+    }
+
     const jobId = body?.jobId;
     const runnerId = String(body?.runnerId || '').trim();
     if (!jobId) return json({ error: 'jobId is required' }, { status: 400 });
@@ -340,7 +373,7 @@ export async function POST({ request, url }) {
       return json({ success: true });
     }
 
-    return json({ error: `Unknown action: ${action}. Expected one of: claim, processing, heartbeat, complete, fail, sync-folders, register-machine` }, { status: 400 });
+    return json({ error: `Unknown action: ${action}. Expected one of: claim, processing, heartbeat, complete, fail, sync-folders, register-machine, grow-plate` }, { status: 400 });
   } catch (error) {
     return json({ error: error?.message || 'Internal server error' }, { status: 500 });
   }

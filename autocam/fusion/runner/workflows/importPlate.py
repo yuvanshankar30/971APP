@@ -122,7 +122,7 @@ def start(data, session):
         arrange_failed_completely = False
 
         try:
-            arrange = AutoArrange(length, width)
+            arrange, length, width = AutoArrange(length, width, auto_grow=False)
         except RuntimeError as e:
             error_msg = str(e)
             app.log(f"AutoArrange failed completely: {error_msg}")

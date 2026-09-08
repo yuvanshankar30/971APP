@@ -1159,7 +1159,7 @@
         const fusionPart = await createPart({ name: part.name, epic: part.epic, ticket: part.ticket, quantity, categoryId: category.id, stepFile, createdBy: user?.id, partId: part.id, fusionFileName: fusionQueueFileName.trim() || null, projectId: part.project_id, stockAssignment: part.stock_assignment });
         const plates = await fetchPlates();
         let plate = plates.find((candidate) => String(candidate.category_id) === String(category.id));
-        if (!plate) plate = await createPlate({ name: `Auto stock - ${fusionQueueCategoryLabel(category)}`, width: 24, length: 24, trueDepth: Number(category.thickness), categoryId: category.id });
+        if (!plate) plate = await createPlate({ name: `Auto stock - ${fusionQueueCategoryLabel(category)}`, width: 100, length: 100, trueDepth: Number(category.thickness), categoryId: category.id });
         await assignPartToPlate({ categoryId: category.id, plateId: plate.id, partId: fusionPart.id, quantity });
         await queueFusionJob({ fusionJobKind: 'plate:cam', plateId: plate.id, machineId: fusionQueueMachineId, toolId: fusionQueueToolId, materialId: category.material_id, requestedBy: user?.id, name: `Fusion CAM: ${part.name}`, groupingMode: 'single', selectedPartId: fusionPart.id, fusionFileName: fusionQueueFileName.trim() || null, fusionFolderPath: fusionQueueFolderPath || null });
       }

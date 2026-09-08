@@ -42,19 +42,29 @@ class GroupingValidationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 grouping.plate_spacing(value)
 
-    def test_rejects_a_single_part_that_cannot_fit_the_plate(self):
-        with self.assertRaisesRegex(
-            ValueError,
-            r'BellyPan is 33.00 x 21.00in.*23.00 x 23.00in usable area.*24.00 x 24.00in plate',
-        ):
-            grouping.require_individual_footprints_fit(
-                [('BellyPan', 33, 21)], 24, 24
-            )
+    def test_grows_the_plate_to_fit_an_oversized_single_part(self):
+        # BellyPan (33.00 x 21.00in) doesn't fit a 24 x 24in plate - grow to
+        # a square big enough for its longer side plus the same 0.5in edge
+        # margin AutoArrange itself reserves: 33 + 1 = 34.
+        length, width = grouping.required_plate_dimensions(
+            [('BellyPan', 33, 21)], 24, 24
+        )
+        self.assertAlmostEqual(length, 34)
+        self.assertAlmostEqual(width, 34)
 
-    def test_accepts_a_part_that_fits_after_rotation(self):
-        grouping.require_individual_footprints_fit(
+    def test_does_not_shrink_a_plate_already_big_enough(self):
+        length, width = grouping.required_plate_dimensions(
             [('RotatedPart', 20, 23)], 24, 22
         )
+        self.assertAlmostEqual(length, 24)
+        self.assertAlmostEqual(width, 22)
+
+    def test_grows_to_fit_the_largest_of_several_footprints(self):
+        length, width = grouping.required_plate_dimensions(
+            [('Small', 5, 5), ('Big', 40, 10), ('Medium', 15, 15)], 24, 24
+        )
+        self.assertAlmostEqual(length, 41)
+        self.assertAlmostEqual(width, 41)
 
     def test_quantities_cannot_be_truncated_or_defaulted(self):
         self.assertEqual(grouping.require_positive_quantity(3), 3)

@@ -1,7 +1,8 @@
 import traceback
 import adsk.core
 import adsk.fusion
-from .GroupingValidation import require_individual_footprints_fit
+from typing import Tuple
+from .GroupingValidation import required_plate_dimensions
 
 
 FRAME_WIDTH_IN = 0.5
@@ -17,7 +18,7 @@ def _occurrence_footprint_in(occurrence):
     return name, x_span, y_span
 
 
-def AutoArrange(length, width, object_spacing=0.26) -> adsk.fusion.ArrangeFeature:
+def AutoArrange(length, width, object_spacing=0.26, auto_grow=True) -> Tuple[adsk.fusion.ArrangeFeature, float, float]:
     app = adsk.core.Application.get()
     ui = app.userInterface
     des: adsk.fusion.Design = app.activeProduct
@@ -48,12 +49,23 @@ def AutoArrange(length, width, object_spacing=0.26) -> adsk.fusion.ArrangeFeatur
 
     # Get the occurrences to arrange.
     occ1 = list(comp.allOccurrences)
-    require_individual_footprints_fit(
-        [_occurrence_footprint_in(occurrence) for occurrence in occ1],
-        length,
-        width,
-        FRAME_WIDTH_IN,
-    )
+    # auto_grow=False for importPlate.py's nesting-preview flow, which
+    # deliberately reports parts too big for the chosen plate as "oversized"
+    # instead of fitting them - growing the plate out from under that check
+    # would silently remove the exact information that flow exists to show.
+    if auto_grow:
+        grown_length, grown_width = required_plate_dimensions(
+            [_occurrence_footprint_in(occurrence) for occurrence in occ1],
+            length,
+            width,
+            FRAME_WIDTH_IN,
+        )
+        if grown_length > length or grown_width > width:
+            app.log(
+                f"Growing plate from {length}x{width}in to "
+                f"{grown_length:.2f}x{grown_width:.2f}in to fit the largest selected part."
+            )
+            length, width = grown_length, grown_width
     for occ in occ1:
         occ.isGrounded = False
         occ.isGroundToParent = False
@@ -113,4 +125,4 @@ def AutoArrange(length, width, object_spacing=0.26) -> adsk.fusion.ArrangeFeatur
         arrange.deleteMe()
         planeEnv.isFlipped = True
         arrange = arrangeFeats.add(arrangeInput)
-    return arrange
+    return arrange, length, width
