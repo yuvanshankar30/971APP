@@ -320,6 +320,13 @@ def _startup_key_gate(
 
 _FOLDER_SYNC_INTERVAL_SEC = 300.0
 _HEARTBEAT_INTERVAL_SEC = 30.0
+# Fusion may drop custom events while it is busy or has a modal open. A
+# claimed job then remains in _job_queue with no main-thread handler ever
+# starting it, which used to deadlock this Runner until the stale-claim sweep.
+# Re-firing the event is idempotent: the handler returns while a job is active
+# and drains a queued job exactly once when it is not.
+_DISPATCH_RETRY_POLLS = 3
+_dispatch_retry = [0]
 _last_folder_sync = 0.0
 _last_heartbeat = 0.0
 _last_folder_tree_json = None  # type: Optional[str]
@@ -370,7 +377,11 @@ def handleServer(temp_dir: str, stop_event: threading.Event):
             time.sleep(5)
             if _job_processing.is_set():
                 now = time.monotonic()
-                if _active_job_id and now - _last_heartbeat >= _HEARTBEAT_INTERVAL_SEC:
+                # The main-thread handler may clear _active_job_id while this
+                # poll thread is preparing a heartbeat. Snapshot it once so a
+                # valid check cannot turn into an API request with jobId=null.
+                active_job_id = _active_job_id
+                if active_job_id and now - _last_heartbeat >= _HEARTBEAT_INTERVAL_SEC:
                     _last_heartbeat = now
                     # Use a one-shot request rather than sharing the Session
                     # object concurrently with Fusion's main UI thread.
@@ -378,7 +389,7 @@ def handleServer(temp_dir: str, stop_event: threading.Event):
                         f"{BASE_URL}/api/fusion-runner",
                         params={"action": "heartbeat"},
                         headers={"Authorization": session.headers.get("Authorization", "")},
-                        json={"jobId": _active_job_id, "runnerId": RUNNER_ID},
+                        json={"jobId": active_job_id, "runnerId": RUNNER_ID},
                         timeout=30,
                     )
                     if response.status_code == 409:
@@ -395,7 +406,7 @@ def handleServer(temp_dir: str, stop_event: threading.Event):
                         # real job failure that had already been reported
                         # correctly.
                         _queue_log(
-                            f"Heartbeat for job {_active_job_id} skipped: job is no "
+                            f"Heartbeat for job {active_job_id} skipped: job is no "
                             "longer active (already completed, failed, or "
                             "reassigned)."
                         )
@@ -404,8 +415,16 @@ def handleServer(temp_dir: str, stop_event: threading.Event):
                 stop_event.wait(0.2)
                 continue
             if not _job_queue.empty():
+                _dispatch_retry[0] += 1
+                if _dispatch_retry[0] >= _DISPATCH_RETRY_POLLS:
+                    _dispatch_retry[0] = 0
+                    _queue_log(
+                        "Queued job has not started; re-firing Fusion's dispatch event "
+                        "in case the original was dropped."
+                    )
                 stop_event.wait(0.2)
                 continue
+            _dispatch_retry[0] = 0
             if session is None:
                 raise RuntimeError("HTTP session not initialized.")
             now = time.monotonic()
@@ -494,6 +513,7 @@ def run(_context):
                 return
 
         _job_processing.clear()
+        _dispatch_retry[0] = 0
         _drain_queue(_job_queue)
         _drain_queue(_log_queue)
 
@@ -543,6 +563,7 @@ def stop(context):
                 pass
         session = None
         _job_processing.clear()
+        _dispatch_retry[0] = 0
         _drain_queue(_job_queue)
         _drain_queue(_log_queue)
         _stop_event = None
