@@ -80,6 +80,12 @@ class TubeFaceProgramTests(unittest.TestCase):
         self.assertIn("apply_with_winding(False)", handler)
         self.assertIn("apply_with_winding(True)", handler)
 
+    def test_tube_closed_non_circular_features_use_shape_through_not_slot_cut(self):
+        handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
+        self.assertIn('shapes = [loop for loop in loops if not loop["circular"]]', handler)
+        self.assertIn('elif "slot" in name and operation.strategy == "contour2d":\n            keep = False', handler)
+        self.assertNotIn("_SLOT_ASPECT_RATIO", handler)
+
     def test_tube_operations_reference_stock_under_the_active_face(self):
         handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
         self.assertIn('"bottomHeight_mode", "\'from stock bottom\'"', handler)

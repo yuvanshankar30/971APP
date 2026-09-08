@@ -16,7 +16,6 @@ from .TubeFacePrograms import TUBE_FACE_CLOCKS, tube_face_program_name, tube_fac
 
 
 _PARALLEL_TOLERANCE = 0.985
-_SLOT_ASPECT_RATIO = 2.5
 
 
 def _normalized(vector):
@@ -146,12 +145,6 @@ def _loop_specs(face):
             continue
         circular = len(edges) == 1 and isinstance(edges[0].geometry, adsk.core.Circle3D)
         boxes = [edge.boundingBox for edge in edges]
-        spans = [
-            max(box.maxPoint.asArray()[axis] for box in boxes) - min(box.minPoint.asArray()[axis] for box in boxes)
-            for axis in range(3)
-        ]
-        planar_spans = sorted((span for span in spans if span > 1e-6), reverse=True)
-        aspect = planar_spans[0] / planar_spans[1] if len(planar_spans) >= 2 else 0.0
         circular_faces = []
         if circular:
             # Bore's ``circularFaces`` parameter does not mean the planar
@@ -171,7 +164,6 @@ def _loop_specs(face):
             "is_reverted": is_reverted_for_loop_seed(coedges[0].isOpposedToEdge),
             "circular": circular,
             "circular_faces": circular_faces,
-            "slot": not circular and aspect >= _SLOT_ASPECT_RATIO,
         })
     return specs
 
@@ -253,8 +245,11 @@ def _set_face_stock_heights(operation):
 def _configure_face_operations(setup, face):
     """Rebind every kept template operation to loops on this wall only."""
     loops = _loop_specs(face)
-    slots = [loop for loop in loops if loop["slot"]]
-    shapes = [loop for loop in loops if not loop["circular"] and not loop["slot"]]
+    # Every non-circular tube loop is a closed through feature. Even a long,
+    # narrow cutout needs the Shape Through clearing strategy; 2D Slot Cut
+    # follows a centerline-style path and machines those closed profiles
+    # incorrectly on tube walls.
+    shapes = [loop for loop in loops if not loop["circular"]]
     have_shape_roughing = False
     circular_faces = [face for loop in loops if loop["circular"] for face in loop["circular_faces"]]
 
@@ -295,7 +290,7 @@ def _configure_face_operations(setup, face):
         elif "shape" in name and operation.strategy == "contour2d":
             keep = _apply_chains(operation, "contours", shapes)
         elif "slot" in name and operation.strategy == "contour2d":
-            keep = _apply_chains(operation, "contours", slots)
+            keep = False
         if keep:
             _set_face_stock_heights(operation)
         else:
