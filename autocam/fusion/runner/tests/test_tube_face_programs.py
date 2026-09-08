@@ -57,8 +57,11 @@ class TubeFaceProgramTests(unittest.TestCase):
     def test_tube_waits_for_template_operations_before_rebinding_geometry(self):
         handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
         template_index = handler.index("setup.createFromCAMTemplate2(template)")
+        bind_index = handler.index("_bind_setup_to_face(setup, body, face, tube_axis, horizontal)", template_index)
         configure_index = handler.index("_configure_face_operations(setup, face)", template_index)
         self.assertLess(template_index, configure_index)
+        self.assertLess(template_index, bind_index)
+        self.assertLess(bind_index, configure_index)
         self.assertIn("adsk.doEvents()", handler[template_index:configure_index])
 
     def test_tube_routes_all_circular_holes_through_bore_faces(self):

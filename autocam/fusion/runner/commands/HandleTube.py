@@ -247,10 +247,8 @@ def _configure_face_operations(setup, face):
             operation.deleteMe()
 
 
-def _make_setup(cam, body, face, clock, tube_axis, horizontal, template):
-    setup_input = cam.setups.createInput(0)
-    setup_input.name = tube_face_setup_name(clock)
-    setup = cam.setups.add(setup_input)
+def _bind_setup_to_face(setup, body, face, tube_axis, horizontal):
+    """Bind the real tube body and face-local WCS after template changes."""
     setup.stockMode = adsk.cam.SetupStockModes.RelativeBoxStock
     setup.parameters.itemByName("job_stockOffsetMode").expression = "'all'"
     setup.parameters.itemByName("job_stockOffsetSides").expression = "0 mm"
@@ -265,6 +263,13 @@ def _make_setup(cam, body, face, clock, tube_axis, horizontal, template):
     setup.parameters.itemByName("wcs_orientation_flipX").value.value = derived_normal.dotProduct(_face_normal(face)) < 0
     setup.parameters.itemByName("wcs_orientation_flipY").value.value = False
     setup.parameters.itemByName("wcs_origin_boxPoint").value.value = "top 1"
+
+
+def _make_setup(cam, body, face, clock, tube_axis, horizontal, template):
+    setup_input = cam.setups.createInput(0)
+    setup_input.name = tube_face_setup_name(clock)
+    setup = cam.setups.add(setup_input)
+    _bind_setup_to_face(setup, body, face, tube_axis, horizontal)
     setup.createFromCAMTemplate2(template)
     # createFromCAMTemplate2 returns before Fusion has fully attached the
     # copied operations to this setup's CAM model tree.  A selection applied
@@ -273,6 +278,11 @@ def _make_setup(cam, body, face, clock, tube_axis, horizontal, template):
     # resolving the imported template before rebinding it to this wall.
     adsk.doEvents()
     time.sleep(0.1)
+    # A template can carry its own setup context. Reapply our occurrence body
+    # and face-local WCS after the import so every selection below resolves in
+    # this setup's actual CAM model tree, never in the template's old model.
+    _bind_setup_to_face(setup, body, face, tube_axis, horizontal)
+    adsk.doEvents()
     _configure_face_operations(setup, face)
 
 
