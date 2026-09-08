@@ -1217,7 +1217,25 @@ def _has_real_pocket_floor(bodies, tolerance=1e-4) -> bool:
     return False
 
 
-def waitForGeneration(setup, waitforcontour=False, quiet_checks_required=30):
+# Generous, not a speed optimization - Fusion's own CAM kernel computes
+# toolpaths, nothing in this file controls how fast that is. This only
+# bounds how long a single generateAllToolpaths() call is allowed to hang
+# with no feedback before failing loudly with a clear, diagnosable error
+# instead of running indefinitely. Direct instruction after a real report:
+# a genuinely huge/complex part (a fine internal lattice, dozens of
+# features) can legitimately take a long time to generate and make the
+# workstation heat up - previously this loop had NO deadline at all,
+# unlike camTube.py's own _generate_tube_toolpaths (180s for a face-scoped
+# tube setup, typically much smaller/simpler than a full plate). Sized up
+# from that for a full plate setup's potentially much larger geometry.
+# DeleteToolpaths() calls this up to four times per job (full cleanup,
+# tab-mutation invalidation, post-repair, final cleanup) - each gets this
+# same fresh budget, not a shared one, since a slow earlier pass says
+# nothing about whether a later one is also genuinely stuck.
+_GENERATION_TIMEOUT_SEC = 600.0
+
+
+def waitForGeneration(setup, waitforcontour=False, quiet_checks_required=30, timeout_sec=_GENERATION_TIMEOUT_SEC):
     app = adsk.core.Application.get()
     # Settling before the check (below) closes the *first*-check race
     # (calling this immediately after cam.generateAllToolpaths() used to see
@@ -1249,7 +1267,15 @@ def waitForGeneration(setup, waitforcontour=False, quiet_checks_required=30):
     # what was observed necessary rather than re-tuning to the exact edge.
     quiet_streak = 0
     iteration = 0
+    deadline = time.time() + timeout_sec if timeout_sec else None
     while quiet_streak < quiet_checks_required:
+        if deadline is not None and time.time() >= deadline:
+            still_generating = [op.name for op in setup.operations if op.isGenerating]
+            raise TimeoutError(
+                f"Fusion did not finish generating toolpaths for setup "
+                f"'{setup.name}' within {timeout_sec:.0f}s"
+                + (f" - still generating: {', '.join(still_generating)}" if still_generating else " - nothing was actively generating; Fusion's own state may be stuck")
+            )
         adsk.doEvents()
         # activeViewport is None whenever Fusion's window isn't the active
         # one on screen (minimized, unfocused, or - as observed live during
