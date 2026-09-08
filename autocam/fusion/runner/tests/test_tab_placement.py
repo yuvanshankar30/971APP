@@ -305,14 +305,14 @@ class TabDistributionTests(unittest.TestCase):
 
 class MinimumSideLengthTests(unittest.TestCase):
     """A side too short to physically contain a tab must not get one.
-    MIN_TAB_SIDE_LENGTH_IN reserves a tab-width of lead-in and lead-out.
+    MIN_TAB_SIDE_LENGTH_IN reserves a modest lead-in and lead-out allowance.
     """
 
     def test_threshold_is_derived_from_the_tab_width(self):
         # A tab needs room to enter and leave the release edge, so the
-        # threshold remains tied to one and a half configured tab widths.
+        # threshold remains tied to one and a quarter configured tab widths.
         self.assertEqual(
-            TabPlacement.MIN_TAB_SIDE_LENGTH_IN, TabPlacement.TAB_WIDTH_IN * 1.5
+            TabPlacement.MIN_TAB_SIDE_LENGTH_IN, TabPlacement.TAB_WIDTH_IN * 1.25
         )
 
     def _body_with(self, edges):
@@ -321,8 +321,8 @@ class MinimumSideLengthTests(unittest.TestCase):
 
     def test_a_side_shorter_than_a_tab_gets_none(self):
         cm = TabPlacement.MIN_TAB_SIDE_LENGTH_IN * 2.54
-        long_a = _edge(0, 0, 0, cm * 3)
-        long_b = _edge(cm * 3, 0, cm * 3, cm * 3)
+        long_a = _edge(0, 0, 0, cm * 4)
+        long_b = _edge(cm * 4, 0, cm * 4, cm * 4)
         stub = _edge(0, 0, cm * 0.5, 0)   # half the required length
         body = self._body_with([long_a, long_b, stub])
 
@@ -344,7 +344,7 @@ class MinimumSideLengthTests(unittest.TestCase):
         # than tabs asked for; it must never fall back to a side too short
         # to hold one, even to make up the count.
         cm = TabPlacement.MIN_TAB_SIDE_LENGTH_IN * 2.54
-        long_a = _edge(0, 0, 0, cm * 3)
+        long_a = _edge(0, 0, 0, cm * 4)
         stubs = [_edge(0, 0, cm * 0.4, 0), _edge(cm, cm, cm * 1.4, cm)]
         body = self._body_with([long_a, *stubs])
 
@@ -364,9 +364,9 @@ class MinimumSideLengthTests(unittest.TestCase):
         # part explicit release points rather than silently returning none.
         cm = TabPlacement.MIN_TAB_SIDE_LENGTH_IN * 2.54
         shorts = [
-            _edge(0, 0, cm * 0.6, 0),
-            _edge(cm * 0.6, 0, cm * 0.6, cm * 0.6),
-            _edge(cm * 0.6, cm * 0.6, 0, cm * 0.6),
+            _edge(0, 0, cm * 0.7, 0),
+            _edge(cm * 0.7, 0, cm * 0.7, cm * 0.7),
+            _edge(cm * 0.7, cm * 0.7, 0, cm * 0.7),
         ]
         body = self._body_with(shorts)
 

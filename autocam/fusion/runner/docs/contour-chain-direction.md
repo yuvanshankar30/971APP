@@ -285,7 +285,7 @@ their chain. Three placement rules apply, in order:
    - an earlier version was, and on a real teardrop bracket it put a tab on
    every one of its short bottom facets. Longest-first is what makes the cap
    land on the long structural sides instead.
-3. **Minimum side length.** The normal threshold remains tied to `1.5` tab
+3. **Minimum side length.** The normal threshold remains tied to `1.25` tab
    widths, preserving lead-in and lead-out room. If no edge reaches that
    threshold, the legacy fallback still supplies outer-edge candidates
    instead of silently producing an unheld release contour.

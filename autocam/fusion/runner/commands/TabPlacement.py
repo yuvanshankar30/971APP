@@ -98,7 +98,7 @@ MAX_TAB_HEIGHT_FRACTION = 0.70
 # validity gate, not a preference: selecting an undersized edge causes Fusion
 # to create malformed manual-tab geometry.  Keep this tied to the configured
 # tab width so the threshold stays correct if the tab is retuned.
-MIN_TAB_SIDE_LENGTH_IN = TAB_WIDTH_IN * 1.5
+MIN_TAB_SIDE_LENGTH_IN = TAB_WIDTH_IN * 1.25
 
 # Kept as the coarse "is this edge even worth considering" filter. The real
 # gate is MIN_TAB_SIDE_LENGTH_IN above, applied per side after collinear
@@ -510,7 +510,7 @@ def select_tab_edges(
     # Drop sides too short to actually hold a tab. Measured on the segment that would carry the
     # tab, not the side's summed length: a side split into several short
     # collinear pieces still has to fit the tab within ONE of them.
-    min_side_cm = tab_width_in * 1.5 * 2.54
+    min_side_cm = tab_width_in * 1.25 * 2.54
     usable = [line for line in lines if _edge_length(best_edge_for_line(line)) >= min_side_cm]
     if not usable:
         usable = lines
