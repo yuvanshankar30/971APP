@@ -10,7 +10,8 @@
   import { formatPacificDateTime } from '$lib/timezone.js';
   import CadViewer from '$lib/components/CadViewer.svelte';
   import FolderTreeNode from './FolderTreeNode.svelte';
-  import { Plus, Trash2, Box, Send, X, Pencil, Check, Download } from 'lucide-svelte';
+  import { searchFolderTree } from '$lib/fusionFolderSearch.js';
+  import { Plus, Trash2, Box, Send, X, Pencil, Check, Download, Folder } from 'lucide-svelte';
 
   export let user;
   export let canManage;
@@ -48,6 +49,14 @@
   let queueModalTube = null;
   let queueFileName = '';
   let queueFolderPath = '';
+  // Free-text search over the synced Data Panel tree - see PartsTab.svelte's
+  // matching state for the full reasoning (the picker walks from the "2026
+  // Season CAM" project root, too many nested folders to browse by hand).
+  let folderSearch = '';
+  $: folderSearchTerm = folderSearch.trim();
+  $: folderSearchResults = folderSearchTerm
+    ? searchFolderTree(folderTreeRow?.tree, folderSearchTerm)
+    : [];
   let queueSubmitting = false;
   let cadModalTube = null;
   let renamingTubeId = null;
@@ -362,6 +371,7 @@
     queueModalTube = boxTube;
     queueFileName = boxTube.name.replace(/\s+/g, '');
     queueFolderPath = '';
+    folderSearch = '';
     closeQueuePicker();
   }
 
@@ -370,6 +380,7 @@
     queueModalTube = null;
     queueFileName = '';
     queueFolderPath = '';
+    folderSearch = '';
   }
 
   async function confirmQueue() {
@@ -384,6 +395,7 @@
       queueModalTube = null;
       queueFileName = '';
       queueFolderPath = '';
+      folderSearch = '';
     } catch (e) {
       toastActions.show(e.message || 'Failed to queue job');
     } finally {
@@ -596,8 +608,18 @@
             {#if recentQueueableTubes.length}
               <div class="recent-queue-grid">
                 {#each recentQueueableTubes as tube}
-                  <button type="button" class="recent-queue-button" title={tube.name} on:click={() => selectRecentTube(tube)}>
-                    <span class="recent-queue-name">{tube.name}</span>
+                  {@const isSelected = String(queuedTubeId) === String(tube.id)}
+                  <button
+                    type="button"
+                    class="recent-queue-button"
+                    class:selected={isSelected}
+                    aria-pressed={isSelected}
+                    title={tube.name}
+                    on:click={() => selectRecentTube(tube)}
+                  >
+                    <span class="recent-queue-name">
+                      {#if isSelected}<Check size={12} />{/if}{tube.name}
+                    </span>
                     <span class="recent-queue-detail">Qty {tube.quantity}</span>
                   </button>
                 {/each}
@@ -668,10 +690,41 @@
           <p class="cam-form-hint">No spaces - this becomes the saved document's name in Fusion's Data Panel.</p>
         </div>
         <div class="form-group">
-          <span class="form-label">Save to folder</span>
+          <div class="folder-picker-header">
+            <span class="form-label">Save to folder</span>
+            {#if folderTreeRow?.tree}
+              <input
+                type="search"
+                class="form-input folder-search"
+                placeholder="Search folders..."
+                bind:value={folderSearch}
+                aria-label="Search folders by name"
+              />
+            {/if}
+          </div>
           {#if folderTreeRow?.tree}
             <div class="folder-tree-box">
-              <FolderTreeNode node={folderTreeRow.tree} selectedPath={queueFolderPath} onSelect={(path) => (queueFolderPath = path)} />
+              {#if folderSearchTerm}
+                {#if folderSearchResults.length}
+                  {#each folderSearchResults as result (result.path)}
+                    <button
+                      type="button"
+                      class="folder-search-result"
+                      class:selected={result.path === queueFolderPath}
+                      title={result.path}
+                      on:click={() => (queueFolderPath = result.path)}
+                    >
+                      <Folder size={15} />
+                      <span class="folder-search-name">{result.name}</span>
+                      <span class="folder-search-path">{result.path}</span>
+                    </button>
+                  {/each}
+                {:else}
+                  <p class="cam-form-hint">No folders match "{folderSearch}".</p>
+                {/if}
+              {:else}
+                <FolderTreeNode node={folderTreeRow.tree} selectedPath={queueFolderPath} onSelect={(path) => (queueFolderPath = path)} />
+              {/if}
             </div>
             <p class="cam-form-hint">
               {queueFolderPath ? `Selected: ${queueFolderPath}` : "Using the 2026 Season CAM project root - click a folder above to save somewhere else."}
@@ -729,9 +782,15 @@
     border-radius: var(--radius-sm, 6px);
     cursor: pointer;
   }
+  .recent-queue-button { transition: border-color 0.15s, background 0.15s, box-shadow 0.15s; }
   .recent-queue-button:hover, .recent-queue-button:focus-visible { border-color: var(--accent); background: var(--surface); outline: none; }
+  .recent-queue-button.selected {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 12%, var(--primary));
+    box-shadow: inset 0 0 0 1px var(--accent);
+  }
   .recent-queue-name, .recent-queue-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .recent-queue-name { font-weight: 600; font-size: 0.8rem; }
+  .recent-queue-name { font-weight: 600; font-size: 0.8rem; display: flex; align-items: center; gap: 0.25rem; }
   .recent-queue-detail { color: var(--text-muted); font-size: 0.72rem; }
   @media (max-width: 640px) { .recent-queue-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   .folder-tree-box {
@@ -741,4 +800,24 @@
     border-radius: var(--radius-sm, 6px);
     padding: 0.35rem;
   }
+  .folder-picker-header { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.4rem; }
+  .folder-search { max-width: 220px; height: 2rem; padding: 0.25rem 0.5rem; font-size: 0.8rem; }
+  .folder-search-result {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    padding: 0.4rem 0.6rem;
+    border-radius: var(--radius-sm, 6px);
+    cursor: pointer;
+    color: var(--text);
+    font-size: 0.9rem;
+  }
+  .folder-search-result:hover { background: var(--surface-2); }
+  .folder-search-result.selected { background: var(--accent-soft, rgba(47, 129, 247, 0.14)); color: var(--accent); font-weight: 600; }
+  .folder-search-name { flex-shrink: 0; }
+  .folder-search-path { color: var(--text-muted); font-size: 0.75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

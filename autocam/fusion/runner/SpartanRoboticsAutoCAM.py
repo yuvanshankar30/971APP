@@ -305,12 +305,15 @@ def _sync_data_folders():
     """
     global _last_folder_tree_json
     try:
-        # Saving at the season-project root must not make the startup sync
-        # enumerate that whole cloud-backed tree on Fusion's UI thread.
-        # Keep the browse snapshot scoped unless an explicit destination
-        # already supplies a narrower path.
-        tree_sync_path = FUSION_DROP_FOLDER_PATH or "Offseason Projects/AutoCAM"
-        tree = list_data_folder_tree(_app, FUSION_DATA_PROJECT_NAME, tree_sync_path)
+        # Browse from the same root job saves default to (the season project
+        # root, when FUSION_DROP_FOLDER_PATH is unset) - not a narrower
+        # subtree. list_data_folder_tree's own max_folders budget already
+        # bounds the real cost driver (dataFolders.item() cloud round-trips)
+        # regardless of where the walk starts, so scoping this to a
+        # subfolder just to dodge Fusion-UI-thread blocking is redundant and
+        # silently hides everything outside that subtree from the picker -
+        # confirmed live as a regression against the season project root.
+        tree = list_data_folder_tree(_app, FUSION_DATA_PROJECT_NAME, FUSION_DROP_FOLDER_PATH or "")
         serialized = json.dumps(tree, sort_keys=True, separators=(",", ":"))
         if serialized == _last_folder_tree_json:
             return

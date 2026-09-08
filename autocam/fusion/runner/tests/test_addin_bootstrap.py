@@ -37,10 +37,20 @@ class DependencyBootstrapTests(unittest.TestCase):
 
         self.assertIn('FUSION_DROP_FOLDER_PATH = _read_env_value("FUSION_DROP_FOLDER_PATH")', config)
 
-    def test_root_save_default_keeps_folder_sync_scoped(self):
+    def test_folder_picker_browses_from_the_same_root_saves_default_to(self):
+        # The picker's tree walk must start at FUSION_DROP_FOLDER_PATH (the
+        # project root when unset), not a hardcoded subtree - the walk's
+        # own max_folders budget (see list_data_folder_tree) already bounds
+        # the real cost, so narrowing the start point here isn't needed and
+        # previously hid everything outside "Offseason Projects/AutoCAM"
+        # from the picker.
         entrypoint = (RUNNER_DIR / "SpartanRoboticsAutoCAM.py").read_text()
 
-        self.assertIn('tree_sync_path = FUSION_DROP_FOLDER_PATH or "Offseason Projects/AutoCAM"', entrypoint)
+        self.assertIn(
+            'list_data_folder_tree(_app, FUSION_DATA_PROJECT_NAME, FUSION_DROP_FOLDER_PATH or "")',
+            entrypoint,
+        )
+        self.assertNotIn("Offseason Projects/AutoCAM", entrypoint)
 
 
 if __name__ == "__main__":

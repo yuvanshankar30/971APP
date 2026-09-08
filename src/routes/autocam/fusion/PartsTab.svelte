@@ -14,7 +14,8 @@
   import { extractRoutingContoursFromMeshes } from '$autocam/stepProfile.js';
   import CadViewer from '$lib/components/CadViewer.svelte';
   import FolderTreeNode from './FolderTreeNode.svelte';
-  import { Plus, Trash2, Package, Pencil, Check, X, Sparkles, Box, Download, Send } from 'lucide-svelte';
+  import { searchFolderTree } from '$lib/fusionFolderSearch.js';
+  import { Plus, Trash2, Package, Pencil, Check, X, Sparkles, Box, Download, Send, Folder } from 'lucide-svelte';
 
   export let user;
   export let canManage;
@@ -74,6 +75,21 @@
   $: selectedQueuePickerCategory = queuePickerCategoryId
     ? stockGroups.find((g) => g.categoryId === queuePickerCategoryId)?.category
     : null;
+  // Which "Recent parts" cards are part of the pending job, so a click
+  // actually shows something happened - previously nothing on the card
+  // itself changed, so it read as a button that did nothing. Derived from
+  // the same selection state the form below binds to (a single Set covers
+  // grouped mode's several simultaneously-selected parts the same way
+  // single mode's one is covered) so it can never drift from what's
+  // actually selected.
+  $: selectedRecentPartIds = (() => {
+    if (!queuePickerCategoryId) return new Set();
+    if (categoryQueueModes[queuePickerCategoryId] === 'grouped') {
+      return new Set((categoryGroupedPartSelections[queuePickerCategoryId] || []).map(String));
+    }
+    const single = categorySinglePartSelections[queuePickerCategoryId];
+    return single ? new Set([String(single)]) : new Set();
+  })();
 
   function buildStockGroups(currentParts, currentPlates, currentCategories) {
     const knownCategories = new Map(currentCategories.map((category) => [String(category.id), category]));
@@ -211,6 +227,15 @@
   let queueModalLabel = '';
   let queueFileName = '';
   let queueFolderPath = '';
+  // Free-text search over the synced Data Panel tree. The picker walks from
+  // the "2026 Season CAM" project root, which has far too many nested
+  // subsystem folders to browse by scrolling - typing filters to a flat
+  // list of matches instead of expanding the tree by hand.
+  let folderSearch = '';
+  $: folderSearchTerm = folderSearch.trim();
+  $: folderSearchResults = folderSearchTerm
+    ? searchFolderTree(folderTreeRow?.tree, folderSearchTerm)
+    : [];
   let queueSubmitting = false;
 
   // State for the "Open Fusion CAM" deep-link prefill - see
@@ -786,6 +811,7 @@
         : categoryLabel(group.category);
       queueFileName = queueModalLabel.replace(/\s+/g, '');
       queueFolderPath = '';
+      folderSearch = '';
       closeQueuePicker();
     } catch (e) {
       toastActions.show(e.message || 'Failed to prepare this job for queueing');
@@ -797,6 +823,9 @@
   function closeQueueModal() {
     queueModalPlate = null;
     queueModalCategoryId = null;
+    // Otherwise a stale search term hides the whole tree the next time this
+    // modal opens, which reads as "the folder list disappeared."
+    folderSearch = '';
   }
 
   async function confirmQueue() {
@@ -1098,8 +1127,18 @@
             {#if recentQueueableParts.length}
               <div class="recent-queue-grid">
                 {#each recentQueueableParts as part}
-                  <button type="button" class="recent-queue-button" title={part.name} on:click={() => selectRecentPart(part)}>
-                    <span class="recent-queue-name">{part.name}</span>
+                  {@const isSelected = selectedRecentPartIds.has(String(part.id))}
+                  <button
+                    type="button"
+                    class="recent-queue-button"
+                    class:selected={isSelected}
+                    aria-pressed={isSelected}
+                    title={part.name}
+                    on:click={() => selectRecentPart(part)}
+                  >
+                    <span class="recent-queue-name">
+                      {#if isSelected}<Check size={12} />{/if}{part.name}
+                    </span>
                     <span class="recent-queue-detail">{categoryLabel(part.fusion_part_categories)} &middot; qty {part.original_quantity}</span>
                   </button>
                 {/each}
@@ -1286,10 +1325,41 @@
           <p class="cam-form-hint">No spaces - this becomes the saved document's name in Fusion's Data Panel.</p>
         </div>
         <div class="form-group">
-          <span class="form-label">Save to folder</span>
+          <div class="folder-picker-header">
+            <span class="form-label">Save to folder</span>
+            {#if folderTreeRow?.tree}
+              <input
+                type="search"
+                class="form-input folder-search"
+                placeholder="Search folders..."
+                bind:value={folderSearch}
+                aria-label="Search folders by name"
+              />
+            {/if}
+          </div>
           {#if folderTreeRow?.tree}
             <div class="folder-tree-box">
-              <FolderTreeNode node={folderTreeRow.tree} selectedPath={queueFolderPath} onSelect={(path) => (queueFolderPath = path)} />
+              {#if folderSearchTerm}
+                {#if folderSearchResults.length}
+                  {#each folderSearchResults as result (result.path)}
+                    <button
+                      type="button"
+                      class="folder-search-result"
+                      class:selected={result.path === queueFolderPath}
+                      title={result.path}
+                      on:click={() => (queueFolderPath = result.path)}
+                    >
+                      <Folder size={15} />
+                      <span class="folder-search-name">{result.name}</span>
+                      <span class="folder-search-path">{result.path}</span>
+                    </button>
+                  {/each}
+                {:else}
+                  <p class="cam-form-hint">No folders match "{folderSearch}".</p>
+                {/if}
+              {:else}
+                <FolderTreeNode node={folderTreeRow.tree} selectedPath={queueFolderPath} onSelect={(path) => (queueFolderPath = path)} />
+              {/if}
             </div>
             <p class="cam-form-hint">
               {queueFolderPath ? `Selected: ${queueFolderPath}` : "Using the 2026 Season CAM project root - click a folder above to save somewhere else."}
@@ -1334,9 +1404,18 @@
     border-radius: var(--radius-sm, 6px);
     cursor: pointer;
   }
+  .recent-queue-button { transition: border-color 0.15s, background 0.15s, box-shadow 0.15s; }
   .recent-queue-button:hover, .recent-queue-button:focus-visible { border-color: var(--accent); background: var(--surface); outline: none; }
+  .recent-queue-button.selected {
+    border-color: var(--accent);
+    /* A tint of the theme's own accent rather than a hardcoded color, so
+       this reads as "picked" in every Spartans Hub theme instead of just
+       the one it was designed against. */
+    background: color-mix(in srgb, var(--accent) 12%, var(--primary));
+    box-shadow: inset 0 0 0 1px var(--accent);
+  }
   .recent-queue-name, .recent-queue-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .recent-queue-name { font-weight: 600; font-size: 0.8rem; }
+  .recent-queue-name { font-weight: 600; font-size: 0.8rem; display: flex; align-items: center; gap: 0.25rem; }
   .recent-queue-detail { color: var(--text-muted); font-size: 0.72rem; }
   @media (max-width: 640px) { .recent-queue-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   .tab-actions { margin-bottom: 1rem; display: flex; gap: 0.5rem; flex-wrap: wrap; }
@@ -1443,4 +1522,26 @@
     border-radius: var(--radius-sm, 6px);
     padding: 0.35rem;
   }
+  .folder-picker-header { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.4rem; }
+  .folder-search { max-width: 220px; height: 2rem; padding: 0.25rem 0.5rem; font-size: 0.8rem; }
+  .folder-search-result {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    padding: 0.4rem 0.6rem;
+    border-radius: var(--radius-sm, 6px);
+    cursor: pointer;
+    color: var(--text);
+    font-size: 0.9rem;
+  }
+  .folder-search-result:hover { background: var(--surface-2); }
+  .folder-search-result.selected { background: var(--accent-soft, rgba(47, 129, 247, 0.14)); color: var(--accent); font-weight: 600; }
+  .folder-search-name { flex-shrink: 0; }
+  /* The full path is what disambiguates two folders with the same leaf
+     name, so it stays visible - but it yields the horizontal space first. */
+  .folder-search-path { color: var(--text-muted); font-size: 0.75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>
