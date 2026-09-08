@@ -206,10 +206,24 @@ def write_env(addin_dir: str) -> None:
     print(f"Wrote {env_file}")
 
 
+def needs_configuration(addin_dir: str) -> bool:
+    """Whether this is a first install without Runner credentials.
+
+    ``install_addin`` deliberately excludes ``.env`` while copying an
+    update.  Do not follow that safe copy with a second interactive setup
+    that overwrites the same machine identity and token; an update only
+    needs refreshed code and dependencies.
+    """
+    return not os.path.isfile(os.path.join(addin_dir, ".env"))
+
+
 def main():
     addin_dir = install_addin()
     install_requests(addin_dir)
-    write_env(addin_dir)
+    if needs_configuration(addin_dir):
+        write_env(addin_dir)
+    else:
+        print("Preserved existing Runner configuration (.env); no setup prompts needed.")
     print()
     print("Done. In Fusion: Utilities tab -> Scripts and Add-Ins -> Add-Ins ->")
     print(f"{ADDIN_FOLDER_NAME} -> Run.")
