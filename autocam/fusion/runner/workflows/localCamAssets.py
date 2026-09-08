@@ -119,6 +119,11 @@ def load_local_tool_library_json(data: dict, dest_dir: str) -> tuple[dict, str]:
     selected_diameter = _selected_diameter(tool)
     payload = data.get("payload")
     single_tool_mode = isinstance(payload, dict) and payload.get("single_tool_mode") is True
+    multi_tool_mode = isinstance(payload, dict) and payload.get("multi_tool_mode") is True
+    candidate_guids = {
+        str(item.get("tool_guid")) for item in (payload.get("tool_items") or [])
+        if isinstance(item, dict) and item.get("tool_guid")
+    } if multi_tool_mode else set()
     countersink = payload.get("countersink_tool") if isinstance(payload, dict) else None
     countersink_guid = countersink.get("guid") if isinstance(countersink, dict) else None
     if single_tool_mode and not _is_endmill_entry({"type": tool.get("tool_type")}):
@@ -141,6 +146,10 @@ def load_local_tool_library_json(data: dict, dest_dir: str) -> tuple[dict, str]:
                     if entry_diameter is not None and abs(entry_diameter - selected_diameter) < 0.0001:
                         matching_entries.append(entry)
                 if countersink_guid and entry.get("guid") == countersink_guid and _is_countersink_entry(entry):
+                    matching_entries.append(entry)
+                continue
+            if candidate_guids:
+                if entry.get("guid") in candidate_guids:
                     matching_entries.append(entry)
                 continue
             # Keep every drill regardless of diameter - a drill isn't "a

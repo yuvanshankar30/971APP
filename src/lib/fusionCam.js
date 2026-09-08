@@ -556,7 +556,7 @@ export async function fetchFusionFolderTree(projectName = '2026 Season CAM') {
  * turning/routing's cam-generate, this genuinely needs an external Fusion
  * 360 process).
  */
-export async function queueFusionJob({ fusionJobKind, plateId, boxTubeId, machineId, materialId, toolId, requestedBy, name, partId, groupingMode, selectedPartId, selectedPartIds, fusionFileName, fusionFolderPath, tabCount, singleToolMode = false, countersinkToolId = null }) {
+export async function queueFusionJob({ fusionJobKind, plateId, boxTubeId, machineId, materialId, toolId, requestedBy, name, partId, groupingMode, selectedPartId, selectedPartIds, fusionFileName, fusionFolderPath, tabCount, singleToolMode = false, multiToolMode = false, countersinkToolId = null }) {
   if (!FUSION_JOB_KINDS.includes(fusionJobKind)) {
     throw new Error(`Invalid fusionJobKind: ${fusionJobKind}`);
   }
@@ -579,7 +579,10 @@ export async function queueFusionJob({ fusionJobKind, plateId, boxTubeId, machin
       tabCount: tabCount === '' || tabCount == null ? null : Number(tabCount),
       // A second, explicitly chosen tool for the plate-only countersink
       // operation. The claim endpoint re-resolves and allowlists it.
-      countersinkToolId: countersinkToolId || null
+      countersinkToolId: countersinkToolId || null,
+      // Plate CAM only. Tube jobs have their own operation planner and must
+      // retain their stable, minimal queue payload.
+      multiToolMode: Boolean(multiToolMode)
     } : { boxTubeId }),
     // Where the saved Fusion document goes and what it's named - chosen at
     // queue time (Plates tab). Optional; camPlate.py falls back to its

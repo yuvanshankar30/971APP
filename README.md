@@ -482,6 +482,11 @@ own docs are all together in one place instead of scattered across
   and 0.5in 82-degree T5 countersinks; no countersink operation is generated
   unless one is selected, and the Runner independently verifies that exact
   loaded-tool record before adding its feature-recognized hole operation.
+  Operators can instead select Auto multi-tool mode: loaded endmills and
+  drills are candidates, not mandatory operations. The Runner selects the
+  highest-throughput roughing cutter plus a genuinely smaller detail cutter
+  only when it can reach tighter geometry; dominated and geometry-inapplicable
+  tools are omitted before post-processing, avoiding unnecessary ATC cycles.
   Every New Router Fusion job is post-processed with the bundled ShopSabre
   WinCNC `shopsabre.cps` post and emits native `.tap` output; a contradictory
   machine-profile post setting fails the job before post-processing.

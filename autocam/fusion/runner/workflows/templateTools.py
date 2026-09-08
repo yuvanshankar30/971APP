@@ -1,9 +1,20 @@
 import copy
+import importlib.util
 import json
 import os
 import re
 import xml.etree.ElementTree as ET
 from typing import Any, Callable, Iterable, Optional, Tuple
+try:
+    from .toolPlanning import plan_endmills
+except ImportError:
+    # Unit tests load this file directly rather than as the workflows package.
+    _planner_spec = importlib.util.spec_from_file_location(
+        "toolPlanning", os.path.join(os.path.dirname(__file__), "toolPlanning.py")
+    )
+    _planner = importlib.util.module_from_spec(_planner_spec)
+    _planner_spec.loader.exec_module(_planner)
+    plan_endmills = _planner.plan_endmills
 
 
 _TEMPLATE_NS = "http://www.hsmworks.com/namespace/hsmworks/document/template"
@@ -940,6 +951,7 @@ def patch_cam_template_with_tool_libraries(
     material_name: Optional[str] = None,
     filter_guids: Optional[set[str]] = None,
     countersink_guid: Optional[str] = None,
+    multi_tool_mode: bool = False,
 ) -> dict:
     if not tool_library_paths:
         raise ValueError("tool_library_paths must not be empty")
@@ -965,7 +977,10 @@ def patch_cam_template_with_tool_libraries(
 
     drill_candidates = _select_tools(indexes, _is_drill_tool)
     endmill_candidates = _select_tools(indexes, _is_endmill_tool)
-    largest_endmill = _find_largest_endmill(indexes)
+    endmill_plan = plan_endmills([entry[0] for entry in endmill_candidates], multi_tool_mode=multi_tool_mode)
+    planned_guids = {tool.get("guid") for tool in endmill_plan["tools"]}
+    endmill_candidates = [entry for entry in endmill_candidates if entry[0].get("guid") in planned_guids]
+    largest_endmill = _find_largest_endmill([{"tools": [entry[0] for entry in endmill_candidates]}])
 
     drill_template = _find_template(root, strategy="drill")
     pocket_template = _find_template(root, strategy="pocket_new")
@@ -1198,6 +1213,7 @@ def patch_cam_template_with_tool_libraries(
         "replaced": replaced,
         "missing": missing,
         "bore_fallback": bore_fallback,
+        "tool_plan": {"reason": endmill_plan["reason"], "endmill_guids": list(planned_guids), "skipped_guids": endmill_plan.get("skipped_guids", [])},
         "countersink": countersink,
         "output_path": output_path,
     }

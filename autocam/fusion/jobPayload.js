@@ -37,6 +37,24 @@ async function resolveCountersinkTool(supabase, machineId, countersinkToolId) {
   return { guid: tool.tool_library_guid, diameter: expectedDiameter, tool_number: tool.tool_number };
 }
 
+async function resolveLoadedToolItems(supabase, machineId, toolId) {
+  if (!machineId) return [];
+  const { data, error } = await supabase.from('cam_machine_tools')
+    .select('tool_id, cam_tools(tool_library_guid, tool_type)')
+    .eq('machine_id', machineId);
+  if (error) throw new Error(`Could not resolve loaded machine tools: ${error.message}`);
+  const items = (data || []).map((row) => ({
+    tool_id: row.tool_id,
+    tool_guid: row.cam_tools?.tool_library_guid,
+    tool_type: row.cam_tools?.tool_type
+  })).filter((item) => item.tool_guid && /(end\s*mill|drill)/i.test(String(item.tool_type || '')))
+    .map(({ tool_id, tool_guid }) => ({ tool_id, tool_guid }));
+  if (toolId && !items.some((item) => String(item.tool_id) === String(toolId))) {
+    throw new Error('Selected tool is not loaded on this machine');
+  }
+  return items;
+}
+
 /** Resolve every queued input or reject the entire job; never CAM a partial plate. */
 export async function buildJobPayload(supabase, job) {
   const params = job.params || {};
@@ -52,10 +70,12 @@ export async function buildJobPayload(supabase, job) {
     ? Math.max(TAB_COUNT_MIN, Math.min(TAB_COUNT_MAX, Math.round(rawTabCount)))
     : null;
   const single_tool_mode = params.singleToolMode === true;
+  const multi_tool_mode = params.multiToolMode === true;
   if (single_tool_mode && !/end\s*mill/i.test(String(job.cam_tools?.tool_type || ''))) {
     throw new Error('Single-tool Fusion CAM requires an endmill selected on the job');
   }
   const countersink_tool = await resolveCountersinkTool(supabase, machine_id, params.countersinkToolId);
+  const tool_items = multi_tool_mode ? await resolveLoadedToolItems(supabase, machine_id, tool_id) : [];
   async function signedUrl(fileName, partId) {
     if (typeof fileName !== 'string' || !fileName.trim()) throw new Error(`Part ${partId} is missing its STEP file`);
     const { data, error } = await supabase.storage.from('manufacturing-files').createSignedUrl(fileName, 3600);
@@ -94,7 +114,7 @@ export async function buildJobPayload(supabase, job) {
       step_file_url: await signedUrl(part.step_file_name, part.part_id),
       fusion_file_name: part.fusion_file_name || null
     })));
-    return { plate_id: snapshot.plate_id, grouping_mode: snapshot.grouping_mode || null, machine_id, tool_id, single_tool_mode, countersink_tool, length: Number(snapshot.length),
+    return { plate_id: snapshot.plate_id, grouping_mode: snapshot.grouping_mode || null, machine_id, tool_id, single_tool_mode, multi_tool_mode, tool_items, countersink_tool, length: Number(snapshot.length),
       width: Number(snapshot.width), true_depth: Number(snapshot.true_depth), thickness: Number(snapshot.thickness),
       material: snapshot.material, assignments,
       // Set at queue time on the Plates tab (folder-tree picker + filename

@@ -625,6 +625,7 @@ def start(data, session):
             if not filter_guids:
                 filter_guids = None
         countersink_guid = (payload.get("countersink_tool") or {}).get("guid") if isinstance(payload, dict) else None
+        multi_tool_mode = isinstance(payload, dict) and payload.get("multi_tool_mode") is True
         if countersink_guid:
             filter_guids = (filter_guids or set()) | {str(countersink_guid)}
 
@@ -650,7 +651,10 @@ def start(data, session):
             material_name=material_name,
             filter_guids=filter_guids,
             countersink_guid=countersink_guid,
+            multi_tool_mode=multi_tool_mode,
         )
+        if patch_info.get("tool_plan"):
+            app.log(f"Tool plan: {patch_info['tool_plan']}")
         if patch_info.get("missing"):
             app.log(f"Template tool matches missing: {patch_info.get('missing')}")
         if patch_info.get("bore_fallback"):
