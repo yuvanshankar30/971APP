@@ -375,7 +375,9 @@ Before any generated ShopSabre multi-tool program is considered safe to run:
 This is large enough to split before implementation:
 
 1. **Import and validate ShopSabre tool metadata**
-   - Migration, seed/update script, loaded-tool trigger, and tests.
+   - Migration, dry-run-first seed/update script, and loaded-tool slot
+     validation trigger landed. The importer never adds `cam_machine_tools`
+     rows; physical loaded-tool confirmation remains required.
 
 2. **Add Fusion CAM loaded-tools management UI**
    - Machine loaded-tool table, warnings, manager-only mutation path.
