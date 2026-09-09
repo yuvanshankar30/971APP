@@ -429,6 +429,26 @@ def _set_drill_diameter_range(template_elem: ET.Element, diameter: float) -> Non
 # reaching into sizes that should actually be a deliberate pocket.
 _MAX_BORE_HOLE_DIAMETER_IN = 0.75
 
+# Mirrors DeleteToolpaths.py's own "<.3"/"&gt;.3" naming convention (see
+# that file's _MIN_HOLE_DIAMETER_NAME_THRESHOLDS_IN) for the opposite
+# direction: the New Router template's own dedicated small-hole Bore
+# operation is literally named "<.3 Circluar Through Hole" (sic - matches
+# the real template file's own typo), so its own upper recognition bound
+# should read from its own name rather than defaulting to the generic
+# _MAX_BORE_HOLE_DIAMETER_IN meant for a template with no such op at all.
+_SMALL_HOLE_MAX_DIAMETER_NAME_MARKERS_IN = (
+    ("<.3", 0.3),
+    ("&lt;.3", 0.3),  # XML-escaped '<' - a description can come through either way
+)
+
+
+def _small_hole_max_diameter_in(description: Optional[str]) -> Optional[float]:
+    lower = (description or "").lower()
+    for marker, threshold_in in _SMALL_HOLE_MAX_DIAMETER_NAME_MARKERS_IN:
+        if marker in lower:
+            return threshold_in
+    return None
+
 
 def _set_hole_diameter_range(template_elem: ET.Element, min_diameter: float, max_diameter: float) -> None:
     """Like _set_drill_diameter_range, but an explicit range independent of
@@ -1016,6 +1036,7 @@ def patch_cam_template_with_tool_libraries(
     largest_endmill = _find_largest_endmill([{"tools": [entry[0] for entry in endmill_candidates]}])
 
     drill_template = _find_template(root, strategy="drill")
+    bore_template_native = _find_template(root, strategy="bore")
     pocket_template = _find_template(root, strategy="pocket_new")
     suppress_template = _find_template(root, description="Suppress")
     contour_templates = [
@@ -1044,6 +1065,47 @@ def patch_cam_template_with_tool_libraries(
         for template_elem in root.findall(f".//{_q('template')}")
         if template_elem.get("strategy") in ("adaptive2d", "pocket2d")
     ]
+
+    if bore_template_native is not None and endmill_candidates:
+        # Real, confirmed live bug: the New Router's own template already
+        # ships its dedicated small-hole operation as strategy="bore"
+        # ("<.3 Circluar Through Hole") rather than strategy="drill" - so
+        # none of the drill_template branches below (all gated on finding
+        # a "drill"-strategy op) ever ran for it, and it fell through to
+        # the generic exact-tool-signature match against whatever tool the
+        # ORIGINAL captured template used. In multi-tool mode that original
+        # tool is often not even loaded, and the match picked a genuinely
+        # too-large substitute - Fusion's own real error, not a guess:
+        # "3 : Tool doesn't fit" on a Bore-strategy toolpath (a helical-
+        # interpolation cut that must fit INSIDE the recognized hole).
+        #
+        # A Bore operation mills a hole with an end mill via helical
+        # interpolation (confirmed by templates/Bore.f3dhsm-template's own
+        # history, a real Setup > 2D > Bore export - not a drill bit), so
+        # the SMALLEST loaded endmill - the one most able to actually
+        # reach into this op's own smallest real holes - is the correct
+        # tool here, not whichever one happens to name-match the template's
+        # original captured tool.
+        tool, idx, diameter = min(
+            endmill_candidates, key=lambda entry: (entry[2] if entry[2] is not None else float("inf"))
+        )
+        tool_elem = bore_template_native.find(_q("tool"))
+        if tool_elem is not None:
+            _apply_tool_to_elem(
+                bore_template_native,
+                tool_elem,
+                tool,
+                tool_library_version=idx.get("version"),
+                material_name=material_name,
+            )
+            if diameter is not None:
+                max_diameter_in = (
+                    _small_hole_max_diameter_in(bore_template_native.get("description"))
+                    or _MAX_BORE_HOLE_DIAMETER_IN
+                )
+                _set_hole_diameter_range(bore_template_native, diameter, max_diameter_in)
+            handled_templates.add(id(bore_template_native))
+            replaced += 1
 
     if drill_template and drill_candidates:
         sorted_drills = sorted(

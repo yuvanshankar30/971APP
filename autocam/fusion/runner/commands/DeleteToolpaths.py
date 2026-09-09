@@ -341,8 +341,8 @@ _ROUGHING_FIT_CLEARANCE_FACTOR = 1.5
 
 def _split_through_roughing_ops(roughing_ops, shape_only):
     """Routes each (edge, is_reverted, min_dimension_cm) chain in
-    shape_only to whichever of roughing_ops can actually clear it,
-    returning {operationId: [(edge, is_reverted), ...]}.
+    shape_only to whichever of roughing_ops can actually clear it MOST
+    EFFICIENTLY, returning {operationId: [(edge, is_reverted), ...]}.
 
     Direct instruction after live confirmation: a real template's "Shape
     Through Hole" and "Small Shape Through Hole" (both adaptive2d
@@ -350,48 +350,62 @@ def _split_through_roughing_ops(roughing_ops, shape_only):
     Fusion computing a full adaptive-clearing roughing pass twice over
     identical geometry on every job, real, measurable wasted computation
     on exactly the large/complex parts that already take the longest.
-    "Small Shape Through Hole" is meant to be a genuinely smaller-scoped
-    pass (mirroring the same big/small split this file already does for
-    circular holes, see _MIN_HOLE_DIAMETER_NAME_THRESHOLDS_IN), not a
-    second full-part pass. Only ever called with adaptive2d/pocket2d
-    roughing operations - a contour2d finishing pass (e.g. "Shape Through
-    Finishing Pass") is never one of these; it gets every chain regardless
-    of size (see the caller), since a finishing pass just follows the
-    boundary line and has no tool-clearance problem a roughing pass does.
+    The original fix here only split by name ("small" vs everything
+    else), which happened to work for a 2-tool template but broke the
+    exact same way one level up: the New Router's real template ships
+    THREE roughing tiers ("Small Shape Through Hole", "Shape Through
+    Hole", "Shape Through Hole big endmill"), and the two non-"small"
+    ones - both landing in one "big" bucket - kept getting assigned the
+    identical full chain list between THEM, confirmed live on a real
+    job. Only ever called with adaptive2d/pocket2d roughing operations -
+    a contour2d finishing pass (e.g. "Shape Through Finishing Pass") is
+    never one of these; it gets every chain regardless of size (see the
+    caller), since a finishing pass just follows the boundary line and
+    has no tool-clearance problem a roughing pass does.
+
+    Fixed generally instead of patching in a third name-based tier:
+    every chain goes to the LARGEST-diameter op that can still actually
+    fit and maneuver inside it (fastest material removal - the same
+    "use the biggest tool that does the job" principle already applied
+    to endmill/detail selection elsewhere), falling back to the
+    SMALLEST-diameter op only when no op's own clearance threshold is
+    met at all (the tightest fit available, same as before). This is
+    purely diameter-driven, no longer name-dependent, so it generalizes
+    to however many roughing tiers a template ships without ever
+    duplicating work between two of them.
 
     Falls back to giving every roughing op every chain (the original
     behavior before this split existed) whenever the split can't be
-    trusted: fewer than two distinctly-named ops, or a real tool diameter
-    couldn't be read for one of the "big" ones. Guessing a split without a
-    real number to split on risks silently starving an operation of
-    geometry it should have had - the exact class of bug this file exists
-    to prevent, not reproduce.
+    trusted: fewer than two roughing ops, or a real tool diameter
+    couldn't be read for one of them. Guessing a split without a real
+    number to split on risks silently starving an operation of geometry
+    it should have had - the exact class of bug this file exists to
+    prevent, not reproduce.
     """
     stripped_all = [(edge, is_reverted) for edge, is_reverted, _min_dim in shape_only]
-    small_ops = [op for op in roughing_ops if "small" in op.name.lower()]
-    small_ids = {op.operationId for op in small_ops}
-    big_ops = [op for op in roughing_ops if op.operationId not in small_ids]
-    if not small_ops or not big_ops:
+    diameters_cm = {op.operationId: _operation_tool_diameter_cm(op) for op in roughing_ops}
+    if len(roughing_ops) < 2 or any(diameters_cm[op.operationId] is None for op in roughing_ops):
         return {op.operationId: stripped_all for op in roughing_ops}
 
-    big_diameters_cm = [d for d in (_operation_tool_diameter_cm(op) for op in big_ops) if d]
-    if len(big_diameters_cm) != len(big_ops):
-        return {op.operationId: stripped_all for op in roughing_ops}
+    # Largest first: the first op (scanning from the top) whose own
+    # clearance threshold this chain clears is the biggest tool still
+    # able to fit it - the most efficient choice. ordered[-1] (smallest
+    # diameter) is the fallback when nothing clears its own threshold.
+    ordered = sorted(roughing_ops, key=lambda op: diameters_cm[op.operationId], reverse=True)
+    thresholds = [diameters_cm[op.operationId] * _ROUGHING_FIT_CLEARANCE_FACTOR for op in ordered]
 
-    # The thinnest of the "big" tools sets the bar - every op in that
-    # group must be able to actually clear whatever chain it's given.
-    threshold_cm = min(big_diameters_cm) * _ROUGHING_FIT_CLEARANCE_FACTOR
-    small_entries = [(edge, is_reverted) for edge, is_reverted, min_dim in shape_only if min_dim < threshold_cm]
-    big_entries = [(edge, is_reverted) for edge, is_reverted, min_dim in shape_only if min_dim >= threshold_cm]
-    assignments = {}
-    for op in small_ops:
-        # Empty on a part with nothing genuinely narrow is correct, not a
-        # bug - the same as any other operation this file finds
-        # inapplicable to a given part: its toolpath comes out empty and
-        # the existing cleanup below removes it.
-        assignments[op.operationId] = small_entries
-    for op in big_ops:
-        assignments[op.operationId] = big_entries
+    assignments = {op.operationId: [] for op in roughing_ops}
+    for edge, is_reverted, min_dim in shape_only:
+        target = ordered[-1]
+        for op, threshold in zip(ordered, thresholds):
+            if min_dim >= threshold:
+                target = op
+                break
+        # Empty on an op that has nothing sized for it on this part is
+        # correct, not a bug - the same as any other operation this file
+        # finds inapplicable to a given part: its toolpath comes out
+        # empty and the existing cleanup below removes it.
+        assignments[target.operationId].append((edge, is_reverted))
     return assignments
 
 

@@ -86,20 +86,32 @@ class SplitThroughRoughingOpsTests(unittest.TestCase):
         self.assertEqual(assignments["small"], [("narrow-slot", False)])
         self.assertEqual(assignments["big"], [("wide-pocket", False)])
 
-    def test_falls_back_to_giving_every_op_every_chain_when_there_is_no_small_op(self):
-        # Only "big"-named roughing ops - nothing to split against, so the
-        # original (pre-fix) behavior applies: everyone gets everything.
+    def test_splits_purely_by_diameter_even_without_a_small_named_op(self):
+        # The split no longer depends on a "small"-named op existing at
+        # all - two non-"small"-named ops with genuinely different tool
+        # diameters must still split (the bigger one taking whatever it
+        # can reach, the smaller one the rest), not silently duplicate.
         op_a = _op("Shape Through Hole", "a", tool_diameter_cm=0.635)
         op_b = _op("Shape Through Hole big endmill", "b", tool_diameter_cm=0.95)
+        narrow = _entry("f1", 0.3)
+        wide = _entry("f2", 2.0)
+
+        assignments = split_through_roughing_ops([op_a, op_b], [narrow, wide])
+
+        self.assertEqual(assignments["a"], [("f1", False)])
+        self.assertEqual(assignments["b"], [("f2", False)])
+
+    def test_falls_back_to_giving_every_op_every_chain_with_a_single_roughing_op(self):
+        # Nothing to split against with only one roughing op at all - it
+        # must get every chain, the same as before this split existed.
+        only_op = _op("Shape Through Hole", "only")
         entries = [_entry("f1", 0.3), _entry("f2", 2.0)]
 
-        assignments = split_through_roughing_ops([op_a, op_b], entries)
+        assignments = split_through_roughing_ops([only_op], entries)
 
-        expected = [("f1", False), ("f2", False)]
-        self.assertEqual(assignments["a"], expected)
-        self.assertEqual(assignments["b"], expected)
+        self.assertEqual(assignments["only"], [("f1", False), ("f2", False)])
 
-    def test_falls_back_when_a_big_ops_tool_diameter_cannot_be_read(self):
+    def test_falls_back_when_a_roughing_ops_tool_diameter_cannot_be_read(self):
         # Splitting without a real number to split on risks silently
         # starving an operation of geometry it should have had - fall
         # back to the safe, original behavior instead of guessing.
@@ -123,11 +135,16 @@ class SplitThroughRoughingOpsTests(unittest.TestCase):
         self.assertEqual(assignments["big"], [("wide-only", False)])
 
     def test_three_roughing_ops_the_new_router_template_ships_all_get_routed(self):
-        # The New Router's real template has THREE "through"-named
-        # roughing ops: "Shape Through Hole big endmill", "Shape Through
-        # Hole", and "Small Shape Through Hole" - both non-"small"-named
-        # ops are held to the same (thinner) tool's threshold, so neither
-        # ever receives a chain narrower than it can actually clear.
+        # Real, confirmed live bug: the New Router's real template has
+        # THREE "through"-named roughing ops - "Shape Through Hole big
+        # endmill", "Shape Through Hole", and "Small Shape Through Hole" -
+        # and the old 2-way (small vs. everything-else) split lumped the
+        # two non-"small" ones into one bucket, so BOTH got the exact same
+        # full "wide" chain, computing the identical adaptive-clearing
+        # roughing pass twice with two different tools. Each chain must go
+        # to exactly one op: the LARGEST one that can still fit it, so
+        # "wide" belongs to big_endmill alone and "main" is legitimately
+        # left with nothing to do on this part.
         big_endmill = _op("Shape Through Hole big endmill", "big_endmill", tool_diameter_cm=0.95)
         main = _op("Shape Through Hole", "main", tool_diameter_cm=0.635)
         small = _op("Small Shape Through Hole", "small", tool_diameter_cm=0.15)
@@ -137,8 +154,26 @@ class SplitThroughRoughingOpsTests(unittest.TestCase):
         assignments = split_through_roughing_ops([big_endmill, main, small], [narrow, wide])
 
         self.assertEqual(assignments["small"], [("narrow", False)])
-        self.assertEqual(assignments["main"], [("wide", False)])
+        self.assertEqual(assignments["main"], [])
         self.assertEqual(assignments["big_endmill"], [("wide", False)])
+
+    def test_a_mid_sized_feature_goes_to_the_middle_tier_not_the_biggest(self):
+        # A feature too tight for the biggest tool but roomy enough for
+        # the middle one must land on the middle tier specifically - not
+        # fall through to the biggest (which can't fit) or the smallest
+        # (wasteful when a bigger, still-fitting tool is available).
+        big_endmill = _op("Shape Through Hole big endmill", "big_endmill", tool_diameter_cm=0.95)
+        main = _op("Shape Through Hole", "main", tool_diameter_cm=0.635)
+        small = _op("Small Shape Through Hole", "small", tool_diameter_cm=0.15)
+        # Clears main's threshold (0.635 * 1.5 = 0.9525) but not
+        # big_endmill's (0.95 * 1.5 = 1.425).
+        mid = _entry("mid", 1.0)
+
+        assignments = split_through_roughing_ops([big_endmill, main, small], [mid])
+
+        self.assertEqual(assignments["main"], [("mid", False)])
+        self.assertEqual(assignments["big_endmill"], [])
+        self.assertEqual(assignments["small"], [])
 
 
 class LoopMinDimensionTests(unittest.TestCase):
