@@ -866,6 +866,39 @@ def _set_template_level_feed_params(template_elem: ET.Element, preset: dict) -> 
                 value = fallback_n
         values[param_name] = value
 
+    # finishFeedrate (present on pocket/adaptive-style strategies with a
+    # dedicated finishing pass, e.g. ">.3 Circular Through Hole (sized)")
+    # isn't in _TEMPLATE_LEVEL_FEED_PARAMS above because there's no matching
+    # preset field to copy it from - the real ShopSabre tool library has no
+    # separate "finish feed" value at all. Left at its original exported
+    # literal (this template's own real export: 30 in/min finish against a
+    # 60 in/min cutting feed), a tool swap that lowers the new cutting feed
+    # below that stale literal makes finishFeedrate exceed it - confirmed
+    # live: Fusion's own "Finish Feedrate: The finish feedrate is higher
+    # than the cutting feedrate" warning on this exact operation once New
+    # Router's tool substitution dropped cutting feed under 30. Rather than
+    # just clamping (which would erase whatever real finish-quality
+    # slowdown the template was originally authored with), preserve that
+    # template's own finish/cutting RATIO and scale it to the new tool's
+    # cutting feed - a true no-op for a template/tool pairing that was
+    # already internally consistent (every UNC Router job today), a real
+    # fix for one that no longer is.
+    new_cutting_feed = values.get("tool_feedCutting")
+    if new_cutting_feed:
+        original_cutting_feed = None
+        finish_param = None
+        for parameter in template_elem.findall(_q("parameter")):
+            name = parameter.get("name")
+            if name == "tool_feedCutting":
+                original_cutting_feed = _parse_number(parameter.get("expression"))
+            elif name == "finishFeedrate":
+                finish_param = parameter
+        if finish_param is not None and original_cutting_feed:
+            original_finish_feed = _parse_number(finish_param.get("expression"))
+            if original_finish_feed is not None:
+                ratio = original_finish_feed / original_cutting_feed
+                finish_param.set("expression", f"{_fmt_num(new_cutting_feed * ratio)}in/min")
+
     for parameter in template_elem.findall(_q("parameter")):
         name = parameter.get("name")
         if name not in values or values[name] is None:

@@ -1,4 +1,5 @@
 import importlib.util
+import xml.etree.ElementTree as ET
 from pathlib import Path
 import unittest
 
@@ -124,6 +125,84 @@ class EntryFeedSafetyTests(unittest.TestCase):
             with self.subTest(tool=description, preset=preset.get("name")):
                 template_tools.assert_safe_entry_feeds(preset, str(preset.get("name")))
                 template_tools._conservative_router_preset(preset)
+
+
+def _template_param(template_elem, name, expression):
+    param = ET.SubElement(template_elem, template_tools._q("parameter"))
+    param.set("name", name)
+    param.set("expression", expression)
+    return param
+
+
+def _find_param(template_elem, name):
+    for parameter in template_elem.findall(template_tools._q("parameter")):
+        if parameter.get("name") == name:
+            return parameter
+    return None
+
+
+class TemplateLevelFeedParamTests(unittest.TestCase):
+    """_set_template_level_feed_params keeps a real Fusion-exported
+    template's own top-level <template><parameter name="tool_feedCutting">
+    siblings (a snapshot of whatever tool was bound when it was exported)
+    in sync with whichever tool actually gets patched in - confirmed live
+    as a real bug once for tool_spindleSpeed/tool_feedCutting themselves
+    (see this function's own module-level comment), and again for
+    finishFeedrate specifically (real Fusion warning: "the finish feedrate
+    is higher than the cutting feedrate" on New Router once a slower tool
+    got patched into an operation whose finishFeedrate had been left at
+    its original, now-too-high literal).
+    """
+
+    def _template_with(self, cutting_feed_literal, finish_feed_literal=None):
+        template_elem = ET.Element(template_tools._q("template"))
+        _template_param(template_elem, "tool_feedCutting", cutting_feed_literal)
+        if finish_feed_literal is not None:
+            _template_param(template_elem, "finishFeedrate", finish_feed_literal)
+        return template_elem
+
+    def test_scales_finish_feedrate_by_the_templates_own_original_ratio(self):
+        # Real, confirmed case: this template's own export authored finish
+        # at exactly half of cutting (30 vs 60) - a deliberate finish-quality
+        # slowdown, not an arbitrary number. A tool with a lower cutting feed
+        # (25) should get a proportionally lower finish feed (12.5), not a
+        # finish feed simply capped to match cutting exactly (which would
+        # silently erase that deliberate slowdown).
+        template_elem = self._template_with("60.in/min", "30.00 in/min")
+
+        template_tools._set_template_level_feed_params(template_elem, {"v_f": 25})
+
+        self.assertEqual(_find_param(template_elem, "finishFeedrate").get("expression"), "12.5in/min")
+        self.assertEqual(_find_param(template_elem, "tool_feedCutting").get("expression"), "25in/min")
+
+    def test_is_a_no_op_when_the_new_tool_matches_the_templates_original_feed(self):
+        # UNC Router's real, working case: every job today reuses the same
+        # tool the template was exported with, so this must reproduce the
+        # exact original finishFeedrate, not merely something close to it.
+        template_elem = self._template_with("60.in/min", "30.00 in/min")
+
+        template_tools._set_template_level_feed_params(template_elem, {"v_f": 60})
+
+        self.assertEqual(_find_param(template_elem, "finishFeedrate").get("expression"), "30in/min")
+
+    def test_leaves_finishfeedrate_alone_when_the_template_has_none(self):
+        # Most strategies (bore, drill, adaptive without a finishing pass)
+        # have no finishFeedrate parameter at all - nothing to scale, and
+        # nothing should be created where there was nothing before.
+        template_elem = self._template_with("60.in/min")
+
+        template_tools._set_template_level_feed_params(template_elem, {"v_f": 25})
+
+        self.assertIsNone(_find_param(template_elem, "finishFeedrate"))
+
+    def test_does_not_divide_by_a_zero_or_missing_original_cutting_feed(self):
+        template_elem = self._template_with("0in/min", "30.00 in/min")
+
+        template_tools._set_template_level_feed_params(template_elem, {"v_f": 25})
+
+        # Nothing sane to scale by - leave the original literal in place
+        # rather than raising or emitting a garbage value.
+        self.assertEqual(_find_param(template_elem, "finishFeedrate").get("expression"), "30.00 in/min")
 
 
 if __name__ == "__main__":
