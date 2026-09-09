@@ -1066,7 +1066,7 @@ def patch_cam_template_with_tool_libraries(
         if template_elem.get("strategy") in ("adaptive2d", "pocket2d")
     ]
 
-    if bore_template_native is not None and endmill_candidates:
+    if multi_tool_mode and bore_template_native is not None and endmill_candidates:
         # Real, confirmed live bug: the New Router's own template already
         # ships its dedicated small-hole operation as strategy="bore"
         # ("<.3 Circluar Through Hole") rather than strategy="drill" - so
@@ -1078,6 +1078,18 @@ def patch_cam_template_with_tool_libraries(
         # too-large substitute - Fusion's own real error, not a guess:
         # "3 : Tool doesn't fit" on a Bore-strategy toolpath (a helical-
         # interpolation cut that must fit INSIDE the recognized hole).
+        #
+        # Scoped to multi_tool_mode ONLY - real, confirmed regression risk
+        # otherwise: UNC Router's own (DEPRECATED)971 Metal Sheet template
+        # ships this exact same strategy="bore" op, and single-tool-mode
+        # jobs (UNC Router's only mode, and New Router's when not using
+        # Auto multi-tool) already resolve this correctly via the generic
+        # exact-tool-signature match below - which additionally verifies
+        # the substituted tool actually matches what this op's own
+        # template expects, a check this multi-tool-only fix does not
+        # perform. Overriding that path unconditionally would have
+        # silently changed UNC Router's own long-proven-in-production tool
+        # assignment AND hole-diameter recognition range for no reason.
         #
         # A Bore operation mills a hole with an end mill via helical
         # interpolation (confirmed by templates/Bore.f3dhsm-template's own

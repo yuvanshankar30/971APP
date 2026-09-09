@@ -33,7 +33,7 @@ _LARGE_ENDMILL_GUID = "29331875-1efc-47c5-9742-f39efcb697ed"  # 6mm, 0.2362in
 
 
 class NativeBoreToolAssignmentTests(unittest.TestCase):
-    def _patch(self, filter_guids):
+    def _patch(self, filter_guids, multi_tool_mode=True):
         with zipfile.ZipFile(_LIBRARY_PATH) as archive:
             parsed = json.loads(archive.read("tools.json"))
         with tempfile.TemporaryDirectory() as directory:
@@ -46,7 +46,7 @@ class NativeBoreToolAssignmentTests(unittest.TestCase):
                 [str(tool_json)],
                 material_name="Aluminum 6061",
                 filter_guids=filter_guids,
-                multi_tool_mode=True,
+                multi_tool_mode=multi_tool_mode,
             )
             return ET.parse(output).getroot()
 
@@ -72,6 +72,64 @@ class NativeBoreToolAssignmentTests(unittest.TestCase):
         bore_op = next(t for t in templates if t.get("strategy") == "bore")
 
         self.assertEqual(bore_op.find("x:tool", _NS).get("guid"), _LARGE_ENDMILL_GUID)
+
+    def test_single_tool_mode_never_touches_the_native_bore_op(self):
+        # Real, confirmed regression risk: UNC Router's own
+        # (DEPRECATED)971 Metal Sheet template ships this exact same
+        # strategy="bore" op ("<.3 Circluar Through Hole"), and UNC
+        # Router only ever runs single-tool-mode jobs. This fix is scoped
+        # to multi_tool_mode - a single-tool job with a tool that does not
+        # match this op's own original captured signature (by exact
+        # description; its <tool> element carries no tool_diameter
+        # expression to fall back on) must be left exactly as the generic
+        # exact-signature match already leaves it (unresolved, reported
+        # via `missing`) rather than silently substituted with "the
+        # smallest loaded endmill" regardless of fit.
+        root = self._patch({_LARGE_ENDMILL_GUID}, multi_tool_mode=False)
+        templates = root.findall("x:template", _NS)
+        bore_op = next(t for t in templates if t.get("strategy") == "bore")
+
+        self.assertNotEqual(bore_op.find("x:tool", _NS).get("guid"), _LARGE_ENDMILL_GUID)
+
+    def test_single_tool_mode_still_resolves_the_native_bore_op_via_the_generic_match(self):
+        # This op's own original captured tool has description "971 Main
+        # Bit" and no tool_diameter expression on its <tool> element at
+        # all (confirmed by direct inspection of the real template file),
+        # so the generic exact-signature match can only ever resolve it
+        # by an EXACT description match, never by diameter - a real tool
+        # library entry named exactly "971 Main Bit" (UNC Router's real,
+        # long-standing physical main bit) already handles this correctly
+        # on its own; this fix must not need to, and must not interfere.
+        desc_match_guid = "desc-match-971-main-bit"
+        with zipfile.ZipFile(_LIBRARY_PATH) as archive:
+            parsed = json.loads(archive.read("tools.json"))
+        # Cloned from the real 4mm entry (same real preset/geometry data a
+        # reviewed tool needs) rather than fabricated bare, so this only
+        # exercises the description-match path itself, not an unrelated
+        # missing-preset error.
+        source = next(t for t in parsed["data"] if t.get("guid") == _SMALL_ENDMILL_GUID)
+        clone = dict(source)
+        clone["guid"] = desc_match_guid
+        clone["description"] = "971 Main Bit"
+        parsed["data"].append(clone)
+        with tempfile.TemporaryDirectory() as directory:
+            tool_json = Path(directory) / "tools.json"
+            tool_json.write_text(json.dumps(parsed))
+            output = Path(directory) / "patched.f3dhsm-template"
+            template_tools.patch_cam_template_with_tool_libraries(
+                str(_TEMPLATE_PATH),
+                str(output),
+                [str(tool_json)],
+                material_name="Aluminum 6061",
+                filter_guids={desc_match_guid},
+                multi_tool_mode=False,
+            )
+            root = ET.parse(output).getroot()
+
+        templates = root.findall("x:template", _NS)
+        bore_op = next(t for t in templates if t.get("strategy") == "bore")
+
+        self.assertEqual(bore_op.find("x:tool", _NS).get("guid"), desc_match_guid)
 
 
 if __name__ == "__main__":
