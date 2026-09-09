@@ -59,6 +59,37 @@ class TemplateToolPlanningTests(unittest.TestCase):
                     multi_tool_mode=True,
                 )
 
+    def test_non_6061_material_limits_reviewed_multi_tool_selection_to_one_cutter(self):
+        library = ROOT / "tools/Normal router tools (use this).tools"
+        small_guid = "e7813c26-af06-4d6c-9aba-324fa1b402c1"
+        large_guid = "29331875-1efc-47c5-9742-f39efcb697ed"
+        with tempfile.TemporaryDirectory() as directory:
+            tool_json = Path(directory) / "tools.json"
+            with zipfile.ZipFile(library) as archive:
+                parsed = json.loads(archive.read("tools.json"))
+            for tool in parsed["data"]:
+                if tool.get("guid") in {small_guid, large_guid}:
+                    tool["start-values"]["presets"][0]["name"] = "SRPP"
+            tool_json.write_text(json.dumps(parsed))
+
+            original_preset_guard = template_tools._conservative_router_preset
+            template_tools._conservative_router_preset = lambda preset: preset
+            try:
+                result = template_tools.patch_cam_template_with_tool_libraries(
+                    str(ROOT / "templates/971-real/new router metal sheet (shopsabre only!!).f3dhsm-template"),
+                    str(Path(directory) / "patched.f3dhsm-template"),
+                    [str(tool_json)],
+                    material_name="SRPP",
+                    filter_guids={small_guid, large_guid},
+                    multi_tool_mode=True,
+                )
+            finally:
+                template_tools._conservative_router_preset = original_preset_guard
+
+        self.assertEqual(result["tool_plan"]["endmill_guids"], [small_guid])
+        self.assertIn(large_guid, result["tool_plan"]["skipped_guids"])
+        self.assertIn("limited to Aluminum 6061", result["tool_plan"]["reason"])
+
     def test_multi_tool_mode_keeps_one_drill_operation(self):
         library = ROOT / "tools/Normal router tools (use this).tools"
         with tempfile.TemporaryDirectory() as directory:

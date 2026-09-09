@@ -241,6 +241,15 @@ def _material_aliases(material_name: str) -> list[str]:
     return out
 
 
+def _is_aluminum_6061(material_name: Optional[str]) -> bool:
+    return _normalize_desc(material_name or "") in {
+        "aluminum 6061",
+        "aluminium 6061",
+        "6061 aluminum",
+        "6061 aluminium",
+    }
+
+
 def _choose_preset(tool: dict, material_name: Optional[str]) -> Optional[dict]:
     presets = tool.get("start-values", {}).get("presets", [])
     if not isinstance(presets, list) or not presets:
@@ -267,7 +276,7 @@ def _choose_preset(tool: dict, material_name: Optional[str]) -> Optional[dict]:
     # preset. This exception is deliberately narrow; a generic default is
     # never permission to cut an unreviewed material.
     normalized_material = _normalize_desc(material_name or "")
-    if normalized_material in {"aluminum", "aluminium", "aluminum 6061", "aluminium 6061", "6061 aluminum", "6061 aluminium"}:
+    if normalized_material in {"aluminum", "aluminium"} or _is_aluminum_6061(material_name):
         for preset in presets:
             if _normalize_desc(str(preset.get("name") or "")) == "default preset":
                 return preset
@@ -349,6 +358,28 @@ def _indexes_with_reviewed_presets(
         reviewed_idx["tools"] = reviewed_tools
         reviewed_indexes.append(reviewed_idx)
     return reviewed_indexes, skipped_guids
+
+
+def _indexes_with_tool_guids(indexes: list[dict], tool_guids: set[str]) -> list[dict]:
+    """Restrict generic matching to the one cutter permitted for this job."""
+    restricted_indexes: list[dict] = []
+    for idx in indexes:
+        tools = [
+            tool for tool in idx.get("tools") or []
+            if isinstance(tool, dict) and tool.get("guid") in tool_guids
+        ]
+        restricted_idx = dict(idx)
+        restricted_idx["tools"] = tools
+        restricted_idx["by_desc"] = {
+            _normalize_desc(str(tool.get("description") or "")): tool
+            for tool in tools
+            if _normalize_desc(str(tool.get("description") or ""))
+        }
+        restricted_idx["by_type"] = {}
+        for tool in tools:
+            restricted_idx["by_type"].setdefault(str(tool.get("type") or ""), []).append(tool)
+        restricted_indexes.append(restricted_idx)
+    return restricted_indexes
 
 
 def _is_drill_tool(tool: dict) -> bool:
@@ -1029,11 +1060,29 @@ def patch_cam_template_with_tool_libraries(
     # planner and generic template matching so an unreviewed detail tool
     # cannot slip back in through a later operation and force an ATC swap.
     unreviewed_tool_guids: list[str] = []
+    swap_restricted_guids: list[str] = []
+    multi_tool_swaps_enabled = multi_tool_mode and _is_aluminum_6061(material_name)
     source_endmill_candidates = _select_tools(indexes, _is_endmill_tool)
     if multi_tool_mode:
         indexes, unreviewed_tool_guids = _indexes_with_reviewed_presets(
             indexes, material_name
         )
+        reviewed_endmill_candidates = _select_tools(indexes, _is_endmill_tool)
+        if source_endmill_candidates and not reviewed_endmill_candidates:
+            raise ValueError(
+                f"No loaded multi-tool endmill has a reviewed feed/speed preset for "
+                f"{material_name!r}; add a named preset before queueing this material"
+            )
+        if not multi_tool_swaps_enabled and reviewed_endmill_candidates:
+            primary_tool = plan_endmills(
+                [entry[0] for entry in reviewed_endmill_candidates], multi_tool_mode=False
+            )["tools"][0]
+            primary_guid = primary_tool.get("guid")
+            swap_restricted_guids = [
+                entry[0].get("guid") for entry in reviewed_endmill_candidates
+                if entry[0].get("guid") != primary_guid
+            ]
+            indexes = _indexes_with_tool_guids(indexes, {primary_guid})
 
     ET.register_namespace("", _TEMPLATE_NS)
     tree = ET.parse(template_path)
@@ -1056,7 +1105,11 @@ def patch_cam_template_with_tool_libraries(
             f"No loaded multi-tool endmill has a reviewed feed/speed preset for "
             f"{material_name!r}; add a named preset before queueing this material"
         )
-    endmill_plan = plan_endmills([entry[0] for entry in endmill_candidates], multi_tool_mode=multi_tool_mode)
+    endmill_plan = plan_endmills(
+        [entry[0] for entry in endmill_candidates], multi_tool_mode=multi_tool_swaps_enabled
+    )
+    if multi_tool_mode and not multi_tool_swaps_enabled and endmill_plan["tools"]:
+        endmill_plan["reason"] = "single cutter; ATC swaps are limited to Aluminum 6061"
     planned_guids = {tool.get("guid") for tool in endmill_plan["tools"]}
     endmill_candidates = [entry for entry in endmill_candidates if entry[0].get("guid") in planned_guids]
     largest_endmill = _find_largest_endmill([{"tools": [entry[0] for entry in endmill_candidates]}])
@@ -1092,7 +1145,7 @@ def patch_cam_template_with_tool_libraries(
         if template_elem.get("strategy") in ("adaptive2d", "pocket2d")
     ]
 
-    if multi_tool_mode and bore_template_native is not None and endmill_candidates:
+    if multi_tool_swaps_enabled and bore_template_native is not None and endmill_candidates:
         # Real, confirmed live bug: the New Router's own template already
         # ships its dedicated small-hole operation as strategy="bore"
         # ("<.3 Circluar Through Hole") rather than strategy="drill" - so
@@ -1155,7 +1208,7 @@ def patch_cam_template_with_tool_libraries(
         # an avoidable series of ATC swaps. One drill preserves the template's
         # drilling strategy; remaining holes still fall through to the bore
         # and contour operations when this drill does not apply.
-        if multi_tool_mode:
+        if multi_tool_swaps_enabled:
             sorted_drills = sorted_drills[:1]
         clones: list[ET.Element] = []
         for tool, idx, diameter in sorted_drills:
@@ -1325,7 +1378,7 @@ def patch_cam_template_with_tool_libraries(
         "tool_plan": {
             "reason": endmill_plan["reason"],
             "endmill_guids": list(planned_guids),
-            "skipped_guids": endmill_plan.get("skipped_guids", []) + unreviewed_tool_guids,
+            "skipped_guids": endmill_plan.get("skipped_guids", []) + unreviewed_tool_guids + swap_restricted_guids,
         },
         "output_path": output_path,
     }
