@@ -23,6 +23,7 @@
   import PartNotes from '$lib/components/PartNotes.svelte';
   import FolderTreeNode from '../autocam/fusion/FolderTreeNode.svelte';
   import { fetchFusionJobsByManufacturingPartIds, fetchFusionJobNcFiles, fetchPartCategories, fetchPlates, createPart, createPlate, assignPartToPlate, createBoxTube, queueFusionJob, fetchFusionFolderTree } from '$lib/fusionCam.js';
+  import AtcSlotConfig from '$autocam/components/AtcSlotConfig.svelte';
   import { buildStockMaterialIndex, materialIdForStockAssignment, stockCatalogIdForStockAssignment } from '$autocam/stockMaterial.js';
 
   const LAST_SUBSYSTEM_STORAGE_KEY = '971hub:lastSubsystem';
@@ -73,6 +74,16 @@
   let fusionQueueFileName = '';
   let fusionQueueFolderPath = '';
   let fusionQueueLoading = false;
+  // New Router tool-swap support - ported from the Fusion AutoCAM Parts tab
+  // queue picker (src/routes/autocam/fusion/PartsTab.svelte) so this older,
+  // separate "queue straight from a manufacturing request" flow has the
+  // same real capability, not a stale single-tool-only form.
+  let fusionQueueSingleToolMode = true;
+  let fusionQueueCountersinkToolId = '';
+  let atcTools = []; // full cam_tools catalog, for the ATC Slots modal
+  let showAtcModal = false;
+  let atcModalMachineId = null;
+  let atcModalMachineName = '';
   let subsystemOptions = [];
   let showQuickPrintModal = false;
   let quickPrintPartName = '';
@@ -1074,12 +1085,65 @@
     return `${category.cam_materials?.name || 'Material'} - ${Number(category.thickness).toFixed(3)}\"`;
   }
 
+  function isNewRouter(machineId) {
+    return fusionQueueMachines.find((machine) => String(machine.id) === String(machineId))?.name?.trim().toLowerCase() === 'new router';
+  }
+
+  function isEndmill(tool) {
+    return /end\s*mill/i.test(String(tool?.tool_type || ''));
+  }
+
+  const COUNTERSINK_GUIDS = new Set([
+    '61a8645a-9015-4aba-958b-70297d26b19e',
+    '8789b786-8e50-48c5-b4f9-21296fcaf34a'
+  ]);
+
+  function isApprovedCountersink(tool) {
+    return /counter\s*sink/i.test(String(tool?.tool_type || ''))
+      && COUNTERSINK_GUIDS.has(String(tool?.tool_library_guid || ''))
+      && Number(tool?.tip_angle) === 82
+      && [0.372, 0.5].some((diameter) => Math.abs(Number(tool?.diameter) - diameter) < 0.0001);
+  }
+
+  function openAtcModal(machineId) {
+    const machine = fusionQueueMachines.find((m) => String(m.id) === String(machineId));
+    if (!machine) return;
+    atcModalMachineId = machine.id;
+    atcModalMachineName = machine.name;
+    showAtcModal = true;
+  }
+
+  async function refreshFusionQueueMachineTools() {
+    const { data: machineToolRows } = await supabase
+      .from('cam_machine_tools')
+      .select('machine_id, cam_tools(id, name, diameter, tool_type, tool_number, tip_angle, tool_library_guid, source_tool_library_file)')
+      .in('machine_id', fusionQueueMachines.map((m) => m.id));
+    fusionQueueMachineTools = {};
+    for (const row of machineToolRows || []) {
+      if (!row.cam_tools) continue;
+      (fusionQueueMachineTools[row.machine_id] ||= []).push(row.cam_tools);
+    }
+    const { data: toolRows } = await supabase.from('cam_tools').select('*');
+    atcTools = toolRows || [];
+  }
+
   function selectFusionQueueMachine(machineId) {
     fusionQueueMachineId = machineId;
+    fusionQueueSingleToolMode = true;
+    fusionQueueCountersinkToolId = '';
     const machine = fusionQueueMachines.find((candidate) => String(candidate.id) === String(machineId));
     const eligible = fusionQueueTools(machineId);
-    const defaultTool = eligible.find((tool) => String(tool.id) === String(machine?.default_tool_id));
-    fusionQueueToolId = defaultTool?.id || eligible[0]?.id || '';
+    const eligibleForMode = isNewRouter(machineId) ? eligible.filter(isEndmill) : eligible;
+    // New Router always requires an explicit tool choice - it has multiple
+    // real, distinct candidate endmills (the ShopSabre library import), and
+    // silently defaulting risks queueing a job with a tool nobody actually
+    // looked at. Auto-selecting a default tool stays UNC-Router-only.
+    if (isNewRouter(machineId)) {
+      fusionQueueToolId = '';
+    } else {
+      const defaultTool = eligibleForMode.find((tool) => String(tool.id) === String(machine?.default_tool_id));
+      fusionQueueToolId = defaultTool?.id || eligibleForMode[0]?.id || '';
+    }
   }
 
   function selectFusionQueueKind(kind) {
@@ -1099,6 +1163,8 @@
     fusionQueueQuantity = Number.isInteger(Number(part.quantity)) && Number(part.quantity) > 0 ? Number(part.quantity) : 1;
     fusionQueueFileName = (part.name || '').replace(/\s+/g, '');
     fusionQueueFolderPath = '';
+    fusionQueueSingleToolMode = true;
+    fusionQueueCountersinkToolId = '';
     try {
       const [categories, machines, materials, folderTree] = await Promise.all([
         fetchPartCategories(),
@@ -1110,6 +1176,20 @@
       fusionQueueMachines = machines.data || [];
       fusionQueueMaterials = materials.data || [];
       fusionQueueFolderTree = folderTree;
+      // fusionQueueMachineTools was declared but never populated - the Tool
+      // dropdown always showed "No tools installed" no matter what was
+      // actually loaded on the machine.
+      const { data: machineToolRows } = await supabase
+        .from('cam_machine_tools')
+        .select('machine_id, cam_tools(id, name, diameter, tool_type, tool_number, tip_angle, tool_library_guid, source_tool_library_file)')
+        .in('machine_id', fusionQueueMachines.map((m) => m.id));
+      fusionQueueMachineTools = {};
+      for (const row of machineToolRows || []) {
+        if (!row.cam_tools) continue;
+        (fusionQueueMachineTools[row.machine_id] ||= []).push(row.cam_tools);
+      }
+      const { data: toolRows } = await supabase.from('cam_tools').select('*');
+      atcTools = toolRows || [];
       const stockMaterialId = materialIdForStockAssignment(manufacturingStockMaterialIndex, fusionQueueMaterials, part.stock_assignment, stockData);
       const stockCatalogId = stockCatalogIdForStockAssignment(stockData, part.stock_assignment);
       const stockThickness = (stockData.router || []).find((stock) => stock.id === stockCatalogId)?.thickness;
@@ -1145,7 +1225,8 @@
     if (!Number.isInteger(quantity) || quantity < 1) return showToastMessage('Quantity must be a whole number greater than zero', 'error');
     const machine = fusionQueueMachines.find((candidate) => String(candidate.id) === String(fusionQueueMachineId));
     if (!machine || !(fusionQueueKind === 'tube' ? machine.can_run_box_tubes : machine.can_run_plates)) return showToastMessage('Choose a compatible router', 'error');
-    if (!fusionQueueTools(fusionQueueMachineId).some((tool) => String(tool.id) === String(fusionQueueToolId))) return showToastMessage('Choose a tool installed on this router', 'error');
+    const isAutoMultiTool = fusionQueueKind === 'plate' && isNewRouter(fusionQueueMachineId) && !fusionQueueSingleToolMode;
+    if (!isAutoMultiTool && !fusionQueueTools(fusionQueueMachineId).some((tool) => String(tool.id) === String(fusionQueueToolId))) return showToastMessage('Choose a tool installed on this router', 'error');
     if (fusionQueueKind === 'plate' && !fusionQueueCategoryId) return showToastMessage('Choose a material and thickness', 'error');
     if (fusionQueueKind === 'tube' && !fusionQueueMaterials.some((material) => String(material.id) === String(fusionQueueMaterialId) && /alumin(?:um|ium)/i.test(material.name || ''))) return showToastMessage('Choose an aluminum material for tube stock', 'error');
     queuingCamJobForPartId = part.id;
@@ -1161,7 +1242,12 @@
         let plate = plates.find((candidate) => String(candidate.category_id) === String(category.id));
         if (!plate) plate = await createPlate({ name: `Auto stock - ${fusionQueueCategoryLabel(category)}`, width: 100, length: 100, trueDepth: Number(category.thickness), categoryId: category.id });
         await assignPartToPlate({ categoryId: category.id, plateId: plate.id, partId: fusionPart.id, quantity });
-        await queueFusionJob({ fusionJobKind: 'plate:cam', plateId: plate.id, machineId: fusionQueueMachineId, toolId: fusionQueueToolId, materialId: category.material_id, requestedBy: user?.id, name: `Fusion CAM: ${part.name}`, groupingMode: 'single', selectedPartId: fusionPart.id, fusionFileName: fusionQueueFileName.trim() || null, fusionFolderPath: fusionQueueFolderPath || null });
+        await queueFusionJob({
+          fusionJobKind: 'plate:cam', plateId: plate.id, machineId: fusionQueueMachineId, toolId: isAutoMultiTool ? null : fusionQueueToolId, materialId: category.material_id, requestedBy: user?.id, name: `Fusion CAM: ${part.name}`, groupingMode: 'single', selectedPartId: fusionPart.id, fusionFileName: fusionQueueFileName.trim() || null, fusionFolderPath: fusionQueueFolderPath || null,
+          singleToolMode: isNewRouter(fusionQueueMachineId) && fusionQueueSingleToolMode,
+          multiToolMode: isAutoMultiTool,
+          countersinkToolId: isNewRouter(fusionQueueMachineId) ? (fusionQueueCountersinkToolId || null) : null
+        });
       }
       showToastMessage('Queued for the Fusion Runner', 'success');
       fusionQueuePart = null;
@@ -2841,7 +2927,7 @@
 
 {#if fusionQueuePart}
   <div class="modal-backdrop" role="button" tabindex="0" on:click|self={closeFusionCamModal} on:keydown={(event) => { if (event.key === 'Escape') closeFusionCamModal(); }}>
-    <section class="modal cam-setup-modal" role="dialog" aria-modal="true" aria-labelledby="fusion-queue-title">
+    <section class="modal modal-large cam-setup-modal" role="dialog" aria-modal="true" aria-labelledby="fusion-queue-title">
       <div class="modal-header">
         <h3 id="fusion-queue-title">Send to Fusion AutoCAM - {fusionQueuePart.name}</h3>
         <button type="button" class="modal-close-button" aria-label="Close dialog" on:click={closeFusionCamModal}><X size={18} /></button>
@@ -2850,63 +2936,99 @@
         {#if fusionQueueLoading}
           <p class="text-muted">Loading Fusion CAM options...</p>
         {:else}
-          <div class="form-group">
-            <span class="form-label">Stock type</span>
-            <div class="cam-target-choice">
-              <button type="button" class:active={fusionQueueKind === 'plate'} on:click={() => selectFusionQueueKind('plate')}>Plate part</button>
-              <button type="button" class:active={fusionQueueKind === 'tube'} on:click={() => selectFusionQueueKind('tube')}>Tube stock</button>
-            </div>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label class="form-label" for="manufacture-fusion-quantity">Quantity</label>
-              <input id="manufacture-fusion-quantity" class="form-input" type="number" min="1" step="1" bind:value={fusionQueueQuantity} />
-            </div>
-            {#if fusionQueueKind === 'plate'}
+          <div class="cam-setup-columns">
+            <div class="cam-setup-main">
               <div class="form-group">
-                <label class="form-label" for="manufacture-fusion-category">Material / Thickness</label>
-                <select id="manufacture-fusion-category" class="form-select" bind:value={fusionQueueCategoryId}>
-                  <option value="">Choose a stock category...</option>
-                  {#each fusionQueueCategories as category}<option value={category.id}>{fusionQueueCategoryLabel(category)}</option>{/each}
-                </select>
+                <span class="form-label">Stock type</span>
+                <div class="segmented-control" aria-label="Stock type">
+                  <button type="button" class:active={fusionQueueKind === 'plate'} on:click={() => selectFusionQueueKind('plate')}>Plate part</button>
+                  <button type="button" class:active={fusionQueueKind === 'tube'} on:click={() => selectFusionQueueKind('tube')}>Tube stock</button>
+                </div>
               </div>
-            {:else}
+              <div class="form-row">
+                <div class="form-group">
+                  <label class="form-label" for="manufacture-fusion-quantity">Quantity</label>
+                  <input id="manufacture-fusion-quantity" class="form-input" type="number" min="1" step="1" bind:value={fusionQueueQuantity} />
+                </div>
+                {#if fusionQueueKind === 'plate'}
+                  <div class="form-group">
+                    <label class="form-label" for="manufacture-fusion-category">Material / Thickness</label>
+                    <select id="manufacture-fusion-category" class="form-select" bind:value={fusionQueueCategoryId}>
+                      <option value="">Choose a stock category...</option>
+                      {#each fusionQueueCategories as category}<option value={category.id}>{fusionQueueCategoryLabel(category)}</option>{/each}
+                    </select>
+                  </div>
+                {:else}
+                  <div class="form-group">
+                    <label class="form-label" for="manufacture-fusion-material">Material</label>
+                    <select id="manufacture-fusion-material" class="form-select" bind:value={fusionQueueMaterialId}>
+                      <option value="">Choose an aluminum material...</option>
+                      {#each fusionQueueMaterials.filter((material) => /alumin(?:um|ium)/i.test(material.name || '')) as material}<option value={material.id}>{material.name}</option>{/each}
+                    </select>
+                  </div>
+                {/if}
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label class="form-label" for="manufacture-fusion-router">Router</label>
+                  <select id="manufacture-fusion-router" class="form-select" value={fusionQueueMachineId} on:change={(event) => selectFusionQueueMachine(event.currentTarget.value)}>
+                    <option value="">Choose a router...</option>
+                    {#each fusionQueueMachines.filter((machine) => fusionQueueKind === 'tube' ? machine.can_run_box_tubes : machine.can_run_plates) as machine}<option value={machine.id}>{machine.name}</option>{/each}
+                  </select>
+                </div>
+                {#if fusionQueueKind === 'plate' && isNewRouter(fusionQueueMachineId) && !fusionQueueSingleToolMode}
+                  <div class="form-group">
+                    <span class="form-label">Tool</span>
+                    <p class="cam-form-hint queue-tool-auto-note">Chosen automatically - see Auto multi-tool below.</p>
+                  </div>
+                {:else}
+                  <div class="form-group">
+                    <label class="form-label" for="manufacture-fusion-tool">Tool</label>
+                    <select id="manufacture-fusion-tool" class="form-select" bind:value={fusionQueueToolId} disabled={!fusionQueueMachineId}>
+                      <option value="">{fusionQueueTools(fusionQueueMachineId).length ? 'Choose a tool...' : 'No tools installed'}</option>
+                      {#each fusionQueueTools(fusionQueueMachineId).filter((tool) => fusionQueueKind !== 'plate' || !isNewRouter(fusionQueueMachineId) || isEndmill(tool)) as tool}<option value={tool.id}>{fusionQueueToolLabel(tool)}</option>{/each}
+                    </select>
+                  </div>
+                {/if}
+              </div>
+              {#if fusionQueueKind === 'plate' && isNewRouter(fusionQueueMachineId)}
+                <div class="form-group queue-tool-mode">
+                  <div class="queue-tool-mode-header">
+                    <span class="form-label">Tool mode</span>
+                    <button type="button" class="btn btn-ghost btn-sm" on:click={() => openAtcModal(fusionQueueMachineId)}>
+                      <Wrench size={14} /> ATC Slots
+                    </button>
+                  </div>
+                  <div class="segmented-control" aria-label="Tool mode for New Router">
+                    <button type="button" class:active={fusionQueueSingleToolMode} on:click={() => (fusionQueueSingleToolMode = true)}>Single tool</button>
+                    <button type="button" class:active={!fusionQueueSingleToolMode} on:click={() => { fusionQueueSingleToolMode = false; fusionQueueToolId = ''; }}>Auto multi-tool</button>
+                  </div>
+                  <p class="cam-form-hint">Auto multi-tool considers every loaded cutter, then uses only the high-throughput cutter and any smaller cutter required for detail. Unused candidates do not create a tool swap.</p>
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="manufacture-fusion-countersink">Countersink</label>
+                  <select id="manufacture-fusion-countersink" class="form-select" bind:value={fusionQueueCountersinkToolId}>
+                    <option value="">No countersink</option>
+                    {#each fusionQueueTools(fusionQueueMachineId).filter(isApprovedCountersink) as tool}
+                      <option value={tool.id}>T{tool.tool_number || '?'} - {fusionQueueToolLabel(tool)}, 82 degree countersink</option>
+                    {/each}
+                  </select>
+                  <p class="cam-form-hint">Optional. Only the selected loaded 0.372 in or 0.5 in 82 degree countersink is added.</p>
+                </div>
+              {/if}
               <div class="form-group">
-                <label class="form-label" for="manufacture-fusion-material">Material</label>
-                <select id="manufacture-fusion-material" class="form-select" bind:value={fusionQueueMaterialId}>
-                  <option value="">Choose an aluminum material...</option>
-                  {#each fusionQueueMaterials.filter((material) => /alumin(?:um|ium)/i.test(material.name || '')) as material}<option value={material.id}>{material.name}</option>{/each}
-                </select>
+                <label class="form-label" for="manufacture-fusion-file-name">Fusion file name</label>
+                <input id="manufacture-fusion-file-name" class="form-input" value={fusionQueueFileName} on:input={(event) => (fusionQueueFileName = event.currentTarget.value.replace(/\s+/g, ''))} />
               </div>
-            {/if}
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label class="form-label" for="manufacture-fusion-router">Router</label>
-              <select id="manufacture-fusion-router" class="form-select" value={fusionQueueMachineId} on:change={(event) => selectFusionQueueMachine(event.currentTarget.value)}>
-                <option value="">Choose a router...</option>
-                {#each fusionQueueMachines.filter((machine) => fusionQueueKind === 'tube' ? machine.can_run_box_tubes : machine.can_run_plates) as machine}<option value={machine.id}>{machine.name}</option>{/each}
-              </select>
             </div>
-            <div class="form-group">
-              <label class="form-label" for="manufacture-fusion-tool">Tool</label>
-              <select id="manufacture-fusion-tool" class="form-select" bind:value={fusionQueueToolId} disabled={!fusionQueueMachineId}>
-                <option value="">{fusionQueueTools(fusionQueueMachineId).length ? 'Choose a tool...' : 'No tools installed'}</option>
-                {#each fusionQueueTools(fusionQueueMachineId) as tool}<option value={tool.id}>{fusionQueueToolLabel(tool)}</option>{/each}
-              </select>
+            <div class="cam-setup-folder">
+              <span class="form-label">Save to folder</span>
+              {#if fusionQueueFolderTree?.tree}
+                <div class="folder-tree-box"><FolderTreeNode node={fusionQueueFolderTree.tree} selectedPath={fusionQueueFolderPath} onSelect={(path) => (fusionQueueFolderPath = path)} /></div>
+              {:else}
+                <p class="cam-form-hint">Using the default AutoCAM folder. A Fusion Runner will publish folder choices after its next folder sync.</p>
+              {/if}
             </div>
-          </div>
-          <div class="form-group">
-            <label class="form-label" for="manufacture-fusion-file-name">Fusion file name</label>
-            <input id="manufacture-fusion-file-name" class="form-input" value={fusionQueueFileName} on:input={(event) => (fusionQueueFileName = event.currentTarget.value.replace(/\s+/g, ''))} />
-          </div>
-          <div class="form-group">
-            <span class="form-label">Save to folder</span>
-            {#if fusionQueueFolderTree?.tree}
-              <div class="folder-tree-box"><FolderTreeNode node={fusionQueueFolderTree.tree} selectedPath={fusionQueueFolderPath} onSelect={(path) => (fusionQueueFolderPath = path)} /></div>
-            {:else}
-              <p class="cam-form-hint">Using the default AutoCAM folder. A Fusion Runner will publish folder choices after its next folder sync.</p>
-            {/if}
           </div>
         {/if}
       </div>
@@ -2917,6 +3039,16 @@
     </section>
   </div>
 {/if}
+
+<AtcSlotConfig
+  bind:open={showAtcModal}
+  machineId={atcModalMachineId}
+  machineName={atcModalMachineName}
+  tools={atcTools}
+  userId={user?.id || null}
+  on:applied={refreshFusionQueueMachineTools}
+  on:toolsChanged={refreshFusionQueueMachineTools}
+/>
 
 <!-- Toast Notification -->
 {#if showToast}
@@ -2932,6 +3064,23 @@
   .btn:hover { box-shadow: none; }
   .table tr { background: var(--surface-1); }
   .table tbody tr:hover { background: var(--surface-1); }
+
+  /* Wider "Send to Fusion AutoCAM" layout: form fields on the left, the
+     folder tree (which needs real width to be usable) on the right,
+     instead of both squeezed into a 560px default modal. */
+  .cam-setup-columns { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr); gap: 1.5rem; align-items: start; }
+  @media (max-width: 760px) { .cam-setup-columns { grid-template-columns: 1fr; } }
+  .cam-setup-folder .folder-tree-box { max-height: 480px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius-sm, 6px); padding: 0.5rem; }
+
+  .segmented-control { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-sm, 6px); overflow: hidden; }
+  .segmented-control button { min-height: 2rem; padding: 0.35rem 0.65rem; border: 0; border-right: 1px solid var(--border); background: var(--surface-2, #f7f7f5); color: var(--text); font: inherit; cursor: pointer; }
+  .segmented-control button:last-child { border-right: 0; }
+  .segmented-control button.active { background: var(--accent); color: var(--accent-contrast, #fff); }
+
+  .queue-tool-mode { margin-bottom: 0.75rem; }
+  .queue-tool-mode-header { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.35rem; }
+  .queue-tool-mode-header .form-label { margin: 0; }
+  .queue-tool-auto-note { margin-top: 0.4rem; }
 
   .fusion-cam-running {
     background: var(--purple-soft);

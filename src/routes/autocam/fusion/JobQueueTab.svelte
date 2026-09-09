@@ -6,7 +6,7 @@
   import { fetchFusionJobs, fetchFusionJobUpdates, fetchFusionJobNcFiles, fetchFusionPartStepFiles, installFusionPartCad, cancelFusionJob, deleteFusionJob, deleteAllFailedFusionJobs } from '$lib/fusionCam.js';
   import CadViewer from '$lib/components/CadViewer.svelte';
   import { formatPacificDateTimeWithZone } from '$lib/timezone.js';
-  import { ListChecks, X, Download, Trash2, Upload, AlertTriangle, ChevronDown, Box } from 'lucide-svelte';
+  import { ListChecks, X, Download, Trash2, Upload, AlertTriangle, ChevronDown, Box, Folder } from 'lucide-svelte';
 
   let jobs = [];
   let loading = true;
@@ -369,6 +369,11 @@
             Parts: {job.params.fusionPlateSnapshot.assignments.map((part) => `${part.quantity}x ${part.name || part.part_id}`).join(', ')}
           </p>
         {/if}
+        <p class="cam-form-hint">
+          <Folder size={12} />
+          {#if job.params?.fusionFileName}{job.params.fusionFileName} - {/if}
+          {job.params?.fusionFolderPath || 'default AutoCAM folder (2026 Season CAM project root)'}
+        </p>
         {#if job.status === 'completed' && machiningTimeLabel(job)}
           <p class="cam-form-hint" title="Estimated time to cut this on the machine, not counting load/unload">
             Machining time: {machiningTimeLabel(job)}
