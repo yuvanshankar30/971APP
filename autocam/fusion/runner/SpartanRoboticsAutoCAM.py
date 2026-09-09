@@ -424,6 +424,28 @@ def handleServer(temp_dir: str, stop_event: threading.Event):
     while not stop_event.is_set():
         try:
             time.sleep(5)
+            # Checked unconditionally, before the job-processing/job-queue
+            # early-continues below - confirmed live as a real, permanent
+            # starvation bug, not a transient stall: with those checks
+            # ahead of this one, sustained job traffic (jobs queued and
+            # processed back-to-back, exactly this shop's actual usage
+            # pattern) meant this line was never reached at all, so
+            # _folder_sync_requested never got set, ever, for as long as
+            # jobs kept coming - not "delayed," genuinely never requested.
+            # The folder tree in fusion_data_folders sat on one stale,
+            # incorrectly-subfolder-rooted value for the Runner's entire
+            # uptime as a direct result. Setting the request flag here is
+            # cheap (no Fusion API calls, no main-thread work) - the actual
+            # walk step still only ever runs once Fusion reports idle, via
+            # _can_advance_folder_sync() inside _advance_folder_sync()
+            # itself, so decoupling this check from job state costs nothing
+            # in safety, only removes a starvation path that cost everything
+            # in correctness.
+            now = time.monotonic()
+            if now - _last_folder_sync >= _FOLDER_SYNC_INTERVAL_SEC:
+                _last_folder_sync = now
+                _folder_sync_requested.set()
+                _fire_job_queue_event()
             if _job_processing.is_set():
                 now = time.monotonic()
                 # The main-thread handler may clear _active_job_id while this
@@ -476,11 +498,6 @@ def handleServer(temp_dir: str, stop_event: threading.Event):
             _dispatch_retry[0] = 0
             if session is None:
                 raise RuntimeError("HTTP session not initialized.")
-            now = time.monotonic()
-            if now - _last_folder_sync >= _FOLDER_SYNC_INTERVAL_SEC:
-                _last_folder_sync = now
-                _folder_sync_requested.set()
-                _fire_job_queue_event()
             # Claim endpoint (src/routes/api/fusion-runner/+server.js,
             # action=claim) - a compare-and-swap on cam_jobs.status, not the
             # original /api/jobs/request. Returns HTTP 200 with

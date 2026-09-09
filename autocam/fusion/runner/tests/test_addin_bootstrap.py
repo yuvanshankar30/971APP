@@ -65,6 +65,31 @@ class DependencyBootstrapTests(unittest.TestCase):
         self.assertLess(advance.index("if not _can_advance_folder_sync()"), advance.index("FolderTreeWalker("))
         self.assertIn("_schedule_folder_sync_chunk()", advance)
 
+    def test_folder_sync_request_is_never_starved_by_sustained_job_traffic(self):
+        # Real, confirmed live bug: the periodic folder-sync-interval check
+        # used to sit AFTER the _job_processing.is_set()/_job_queue.empty()
+        # early-continues in handleServer's loop - with jobs queued and
+        # processed back-to-back (this shop's actual usage pattern), that
+        # line was never reached at all, so _folder_sync_requested never
+        # got set, ever, for as long as jobs kept coming. The synced tree
+        # sat on one stale, incorrectly-subfolder-rooted value for the
+        # Runner's entire uptime as a direct result - not a slow refresh,
+        # a permanently stuck one. Setting the request flag is cheap (no
+        # Fusion API calls); it must be checked unconditionally, ahead of
+        # both job-state early-continues.
+        entrypoint = (RUNNER_DIR / "SpartanRoboticsAutoCAM.py").read_text()
+        server = entrypoint[entrypoint.index("def handleServer"):]
+        server = server[:server.index("\ndef ", 1)]
+
+        self.assertLess(
+            server.index("_folder_sync_requested.set()"),
+            server.index("if _job_processing.is_set()"),
+        )
+        self.assertLess(
+            server.index("_folder_sync_requested.set()"),
+            server.index("if not _job_queue.empty()"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
