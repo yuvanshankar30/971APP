@@ -89,6 +89,79 @@ def _through_shape_op(name="Small Shape Through Hole", strategy="adaptive2d", op
     return op, deleted, apply_calls
 
 
+class _StaleAfterDeleteOp:
+    """A fake operation whose ``.strategy`` raises like a real deleted
+    Fusion operation's would - simulating a stale "iron object" handle
+    after deleteMe(), unlike types.SimpleNamespace's plain attributes
+    (which stay readable forever, unable to catch a bug where code reads
+    an operation after it was deleted).
+    """
+
+    def __init__(self, name, strategy, operation_id, selections, param_name):
+        self.name = name
+        self._strategy = strategy
+        self.operationId = operation_id
+        self._deleted = False
+        param = types.SimpleNamespace(
+            value=types.SimpleNamespace(
+                getCurveSelections=lambda: selections,
+                applyCurveSelections=lambda sel: None,
+            )
+        )
+
+        def itemByName(n):
+            return param if n == param_name else None
+
+        self.parameters = types.SimpleNamespace(itemByName=itemByName)
+
+    @property
+    def strategy(self):
+        if self._deleted:
+            raise RuntimeError('2 : InternalValidationError : ironObject.isValid()')
+        return self._strategy
+
+    def deleteMe(self):
+        self._deleted = True
+
+
+class RepairMissingSelectionsDeletionOrderingTests(unittest.TestCase):
+    def test_an_empty_selection_op_stays_valid_until_every_op_has_been_processed(self):
+        # Real, confirmed live crash: deleting an empty-selection op INSIDE
+        # the main loop (instead of deferring, like inactive_finishing_ops
+        # already does) left it stale by the time a LATER op's own
+        # generic-pocket branch re-scanned all of ops_snapshot (see
+        # claimed_diameters_cm) - reading .strategy off that now-deleted
+        # handle raised "2 : InternalValidationError : ironObject.isValid()"
+        # and crashed the whole job.
+        namespace = _load_repair_missing_selections()
+        repair_missing_selections = namespace["_repair_missing_selections"]
+        namespace["_internal_feature_loop_chains_all_bodies"] = (
+            lambda design: ([(types.SimpleNamespace(), False, 0.1)], [])
+        )
+        namespace["_blind_pocket_loops_all_bodies"] = lambda design: ([], [])
+
+        through_op_id = "small-through"
+        empty_selections = FakeCurveSelections()
+        through_op = _StaleAfterDeleteOp(
+            "Small Shape Through Hole", "adaptive2d", through_op_id, empty_selections, "pockets"
+        )
+        namespace["_split_through_roughing_ops"] = (
+            lambda roughing_ops, shape_only: {through_op_id: []}
+        )
+
+        pocket_op = _StaleAfterDeleteOp(
+            "Shape Pocket", "pocket_new", "shape-pocket", FakeCurveSelections(), "pockets"
+        )
+
+        setup = types.SimpleNamespace(operations=[through_op, pocket_op])
+
+        repaired = repair_missing_selections(setup)  # must not raise
+
+        self.assertTrue(through_op._deleted)
+        self.assertFalse(pocket_op._deleted)
+        self.assertTrue(any("removed" in entry for entry in repaired))
+
+
 class RepairMissingSelectionsEmptyThroughBucketTests(unittest.TestCase):
     def test_a_through_shape_op_with_an_empty_split_bucket_is_deleted_not_crashed(self):
         namespace = _load_repair_missing_selections()

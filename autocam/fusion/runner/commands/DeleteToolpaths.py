@@ -836,6 +836,7 @@ def _repair_missing_selections(setup) -> list[str]:
         op for op in finishing_pass_ops if op.operationId not in active_through_ids
     ]
     inactive_finishing_ids = {op.operationId for op in inactive_finishing_ops}
+    empty_selection_ops = []
 
     for op in ops_snapshot:
         if op.operationId in inactive_finishing_ids:
@@ -1134,20 +1135,34 @@ def _repair_missing_selections(setup) -> list[str]:
             # that - it throws "3 : Do not have valid curve selections."
             # outright rather than accepting it and producing the soft
             # empty/invalid toolpath this function's docstring assumed.
-            # This operation genuinely doesn't apply to this part; remove it
-            # directly instead of crashing the whole job to reach the exact
-            # outcome (op deleted) that the isToolpathValid==False cleanup
-            # further down would have given it anyway.
-            try:
-                removed_name = op.name
-                op.deleteMe()
-                repaired.append(f"removed unused (no matching geometry): {removed_name}")
-            except Exception:
-                pass
+            # This operation genuinely doesn't apply to this part; queue it
+            # for removal (see empty_selection_ops below) instead of
+            # crashing the whole job to reach the exact outcome (op
+            # deleted) that the isToolpathValid==False cleanup further
+            # down would have given it anyway.
+            empty_selection_ops.append(op)
             continue
         value.applyCurveSelections(selections)
         repaired.append(op.name)
 
+    # Deleted only now, after the main loop above has finished reading
+    # ops_snapshot in full - a real, confirmed live crash from deleting
+    # inline instead: this loop's own generic-pocket branch (see
+    # claimed_diameters_cm above) re-scans ALL of ops_snapshot for every
+    # later operation, including ones an earlier iteration already
+    # deleteMe()'d, and Fusion raises "2 : InternalValidationError :
+    # ironObject.isValid()" the instant a later iteration reads a
+    # property off that now-stale handle. inactive_finishing_ops already
+    # followed this same defer-until-after-the-loop rule; empty_selection_ops
+    # (introduced with the same-turn fix above) originally deleted inline
+    # instead and broke it.
+    for op in empty_selection_ops:
+        try:
+            removed_name = op.name
+            op.deleteMe()
+            repaired.append(f"removed unused (no matching geometry): {removed_name}")
+        except Exception:
+            pass
     for op in inactive_finishing_ops:
         try:
             removed_name = op.name
