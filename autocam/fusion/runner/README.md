@@ -34,8 +34,10 @@ Spartans Hub /api/fusion-runner  →  Job Polling  →  Job Queue  →  Router
 
 The add-in runs a background polling thread that claims queued `cam_jobs` rows (`operation_type='milling'`) via a compare-and-swap on `status`, dispatches each job's `params.fusionJobKind` to its workflow, and reports status back to Spartans Hub. STEP files and tooling are downloaded per job, toolpaths are generated in Fusion, and each whole Fusion Setup is posted once. The resulting files are read as bytes and uploaded separately with their original relative names, sizes, and SHA-256 checksums; the Hub does not decode, annotate, concatenate, or rename Fusion's output. On completion, every NC artifact is automatically copied to Files `AutoCAM`; a tube job gets a job-ID subfolder with exactly four per-setup programs (Sides 12, 3, 6, and 9).
 
-The Data Panel folder tree is inspected periodically for the web folder picker,
-but an unchanged snapshot is not posted or written to the database again.
+The Data Panel folder tree is inspected periodically from the configured
+`2026 Season CAM` project root for the web folder picker, including while CAM
+jobs are running. An unchanged snapshot is not posted or written to the
+database again.
 
 ## Features
 
