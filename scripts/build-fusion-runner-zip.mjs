@@ -28,6 +28,21 @@ const outDir = join(repoRoot, 'static', 'downloads');
 const outFile = join(outDir, 'SpartanRoboticsAutoCAM-FusionAddIn.zip');
 const manifestFile = join(outDir, 'SpartanRoboticsAutoCAM-FusionAddIn.manifest.json');
 
+// Match setup.py's copy exclusions. These are workstation runtime state, not
+// release source: credentials, Fusion-installed dependencies, and temporary
+// CAM files must never enter a downloadable package.
+function isRuntimeFile(relativePath) {
+  return relativePath === '.env'
+    || relativePath === '.overridepath'
+    || relativePath === 'deps'
+    || relativePath.startsWith('deps/')
+    || relativePath === 'temp'
+    || relativePath.startsWith('temp/')
+    || relativePath.split('/').includes('__pycache__')
+    || relativePath.endsWith('.pyc')
+    || relativePath === '.DS_Store';
+}
+
 function releaseVersion() {
   if (process.env.FUSION_RUNNER_RELEASE_VERSION) return process.env.FUSION_RUNNER_RELEASE_VERSION;
   if (process.env.K_REVISION) return process.env.K_REVISION;
@@ -50,7 +65,12 @@ try {
   // __pycache__ is local build noise and does not belong in a real install.
   cpSync(runnerSrc, stagingDir, {
     recursive: true,
-    filter: (src) => !/(^|\/)__pycache__(\/|$)/.test(src.slice(runnerSrc.length))
+    filter: (src) => {
+      const relativePath = src.slice(runnerSrc.length)
+        .replaceAll('\\', '/')
+        .replace(/^\//, '');
+      return !isRuntimeFile(relativePath);
+    }
   });
 
   // The add-in itself (SpartanRoboticsAutoCAM.py's _ENV_PATH) only ever

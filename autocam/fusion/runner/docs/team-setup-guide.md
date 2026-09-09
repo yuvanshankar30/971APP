@@ -20,7 +20,7 @@ Two things run this: **Spartans Hub** itself (already deployed - where you queue
 
    **Known risk, not yet root-caused:** the `pip install` step builds packages for whatever Python your system defaults to, which may not exactly match Fusion's bundled interpreter's ABI. If the add-in fails to load with an error mentioning `charset_normalizer`, that's the likely cause - ask for help rather than assuming your setup is broken.
 
-   No repo clone? Download the ready-made zip from the [Fusion AutoCAM Setup page](/autocam/fusion/setup), unzip it anywhere, and run `python3 setup.py` from inside it - it installs itself to the right place from there too.
+   No repo clone? Download the ready-made zip from the [Fusion AutoCAM Setup page](/autocam/fusion/setup), unzip it anywhere, and run `python3 setup.py` from inside the extracted `SpartanRoboticsAutoCAM` folder. The package already has the exact add-in name, all templates, post-processors, tool libraries, Runner code, and this documentation - do not rename or selectively copy files.
 
    **Updating an existing install?** Re-run the exact same command. It copies over the existing folder, preserves `.env` and `.overridepath`, and detects that this is an update so it does not ask setup questions or replace your token and machine id. Fully quit and relaunch Fusion after an update; stopping and starting an add-in does not reliably reload its Python modules or `.env`.
 
@@ -57,6 +57,17 @@ Running more than one machine at once is safe: claiming is a compare-and-swap,
 so two Runners cannot grab the same job.
 
 **Changed `.env` again later?** Fully quit and relaunch Fusion - Stop/Run alone doesn't reliably reload it.
+
+### Fusion Data Project
+
+The Runner's project root is **`2026 Season CAM`**. Leave
+`FUSION_DATA_PROJECT_NAME` unset to use that default, or set it to exactly
+`2026 Season CAM`; do not set it to `AutoCAM`. `AutoCAM` is a folder/project
+name that may be active in Fusion, but it is not the Runner's destination.
+If Fusion cannot resolve `2026 Season CAM` during startup, the Runner waits
+and retries rather than saving or publishing a folder tree from whichever
+project happens to be active. The web folder picker may briefly show no
+folders until the next verified sync; that is safer than choosing a wrong root.
 
 ## How it works
 
