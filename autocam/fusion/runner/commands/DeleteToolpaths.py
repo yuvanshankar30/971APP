@@ -1109,6 +1109,28 @@ def _repair_missing_selections(setup) -> list[str]:
                 recognition.isSetupModelSelected = True
                 recognition.areHolesIncluded = "circular" in name_lower and "hole" in name_lower
                 _set_min_hole_diameter_from_name(recognition, name_lower)
+        if selections.count == 0:
+            # is_outer and is_through_shape_op (unlike every other branch
+            # above) have no PocketRecognitionSelection fallback - a real,
+            # confirmed live crash: a through-shape roughing op whose own
+            # split bucket comes up empty (_split_through_roughing_ops's own
+            # docstring: "empty on a part with nothing genuinely narrow is
+            # correct, not a bug") leaves `selections` with zero entries,
+            # and Fusion's real applyCurveSelections() does not tolerate
+            # that - it throws "3 : Do not have valid curve selections."
+            # outright rather than accepting it and producing the soft
+            # empty/invalid toolpath this function's docstring assumed.
+            # This operation genuinely doesn't apply to this part; remove it
+            # directly instead of crashing the whole job to reach the exact
+            # outcome (op deleted) that the isToolpathValid==False cleanup
+            # further down would have given it anyway.
+            try:
+                removed_name = op.name
+                op.deleteMe()
+                repaired.append(f"removed unused (no matching geometry): {removed_name}")
+            except Exception:
+                pass
+            continue
         value.applyCurveSelections(selections)
         repaired.append(op.name)
 
