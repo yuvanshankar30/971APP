@@ -147,6 +147,18 @@ def load_local_tool_library_json(data: dict, dest_dir: str) -> tuple[dict, str]:
     } if multi_tool_mode else set()
     countersink = payload.get("countersink_tool") if isinstance(payload, dict) else None
     countersink_guid = countersink.get("guid") if isinstance(countersink, dict) else None
+    if multi_tool_mode and countersink_guid:
+        # jobPayload.js's resolveLoadedToolItems deliberately excludes
+        # countersinks from tool_items (it only keeps end mill/drill
+        # candidates) - the countersink match below never runs for
+        # multi-tool mode's own branch (it "continue"s unconditionally
+        # right after this set membership check), so without this the
+        # countersink was silently dropped from the library file written
+        # to disk here, then rejected downstream in
+        # patch_cam_template_with_tool_libraries with "Requested
+        # countersink is not available in the selected tool library" -
+        # confirmed live on a real countersink + multi-tool job.
+        candidate_guids = candidate_guids | {str(countersink_guid)}
     if single_tool_mode and not _is_endmill_entry({"type": tool.get("tool_type")}):
         raise ValueError("Single-tool Fusion CAM requires an endmill selected on the job")
     selected_tool_number = tool.get("tool_number") if single_tool_mode else None
