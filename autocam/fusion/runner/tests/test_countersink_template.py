@@ -14,6 +14,51 @@ spec.loader.exec_module(template_tools)
 
 
 class TemplateToolPlanningTests(unittest.TestCase):
+    def test_multi_tool_mode_excludes_detail_cutter_without_a_material_preset(self):
+        library = ROOT / "tools/Normal router tools (use this).tools"
+        with tempfile.TemporaryDirectory() as directory:
+            tool_json = Path(directory) / "tools.json"
+            with zipfile.ZipFile(library) as archive:
+                parsed = json.loads(archive.read("tools.json"))
+            large = next(tool for tool in parsed["data"] if tool.get("guid") == "29331875-1efc-47c5-9742-f39efcb697ed")
+            large["start-values"]["presets"][0]["name"] = "SRPP"
+            tool_json.write_text(json.dumps(parsed))
+            output = Path(directory) / "patched.f3dhsm-template"
+
+            original_preset_guard = template_tools._conservative_router_preset
+            template_tools._conservative_router_preset = lambda preset: preset
+            try:
+                result = template_tools.patch_cam_template_with_tool_libraries(
+                    str(ROOT / "templates/971-real/new router metal sheet (shopsabre only!!).f3dhsm-template"),
+                    str(output),
+                    [str(tool_json)],
+                    material_name="SRPP",
+                    filter_guids={"e7813c26-af06-4d6c-9aba-324fa1b402c1", large["guid"]},
+                    multi_tool_mode=True,
+                )
+            finally:
+                template_tools._conservative_router_preset = original_preset_guard
+
+        self.assertEqual(result["tool_plan"]["endmill_guids"], [large["guid"]])
+        self.assertIn("e7813c26-af06-4d6c-9aba-324fa1b402c1", result["tool_plan"]["skipped_guids"])
+
+    def test_multi_tool_mode_fails_clearly_when_no_endmill_has_a_material_preset(self):
+        library = ROOT / "tools/Normal router tools (use this).tools"
+        with tempfile.TemporaryDirectory() as directory:
+            tool_json = Path(directory) / "tools.json"
+            with zipfile.ZipFile(library) as archive:
+                tool_json.write_bytes(archive.read("tools.json"))
+
+            with self.assertRaisesRegex(ValueError, "No loaded multi-tool endmill has a reviewed"):
+                template_tools.patch_cam_template_with_tool_libraries(
+                    str(ROOT / "templates/971-real/new router metal sheet (shopsabre only!!).f3dhsm-template"),
+                    str(Path(directory) / "patched.f3dhsm-template"),
+                    [str(tool_json)],
+                    material_name="SRPP",
+                    filter_guids={"e7813c26-af06-4d6c-9aba-324fa1b402c1", "29331875-1efc-47c5-9742-f39efcb697ed"},
+                    multi_tool_mode=True,
+                )
+
     def test_multi_tool_mode_keeps_one_drill_operation(self):
         library = ROOT / "tools/Normal router tools (use this).tools"
         with tempfile.TemporaryDirectory() as directory:
