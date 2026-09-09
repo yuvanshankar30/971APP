@@ -220,6 +220,14 @@
 
   function handleFileChange(event) {
     stepFile = event.target.files?.[0] || null;
+    // A STEP file picked before the name is typed suggests a real filename
+    // like "DrivebaseRail.step" the operator would otherwise just retype by
+    // hand into Name - only when Name is still empty, so this never
+    // overwrites a name someone already typed in.
+    if (stepFile && !newBoxTube.name.trim()) {
+      const derivedName = stepFile.name.replace(/\.(step|stp)$/i, '').trim();
+      if (derivedName) newBoxTube = { ...newBoxTube, name: derivedName };
+    }
   }
 
   async function handleManufacturingLinkChange() {

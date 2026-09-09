@@ -668,6 +668,14 @@
     if (manufacturingHasStepFile) return;
     stepFile = event.target.files?.[0] || null;
     stepCarriedOverFrom = null; // user picked their own file - the carry-over hint no longer applies
+    // A STEP file picked before the name is typed suggests a real filename
+    // like "BellyPan.step" the operator would otherwise just retype by
+    // hand into Name - only when Name is still empty, so this never
+    // overwrites a name someone already typed in.
+    if (stepFile && !newPart.name.trim()) {
+      const derivedName = stepFile.name.replace(/\.(step|stp)$/i, '').trim();
+      if (derivedName) newPart = { ...newPart, name: derivedName };
+    }
     if (stepFile) await detectStepThickness(new Uint8Array(await stepFile.arrayBuffer()));
     else detectedDepthInches = null;
   }
