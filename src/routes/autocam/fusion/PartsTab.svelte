@@ -15,7 +15,7 @@
   import CadViewer from '$lib/components/CadViewer.svelte';
   import FolderTreeNode from './FolderTreeNode.svelte';
   import { searchFolderTree } from '$lib/fusionFolderSearch.js';
-  import { Plus, Trash2, Package, Pencil, Check, X, Sparkles, Box, Download, Send, Folder, Wrench } from 'lucide-svelte';
+  import { Plus, Trash2, Package, Pencil, Check, X, Sparkles, Box, Download, Send, Folder, Wrench, FilterX } from 'lucide-svelte';
   import AtcSlotConfig from '$autocam/components/AtcSlotConfig.svelte';
 
   export let user;
@@ -218,6 +218,17 @@
     recentPartsSearch = '';
     groupedPartsSearch = '';
   }
+
+  function clearQueuePickerFilters() {
+    queuePickerDate = '';
+    queuePickerCategoryId = '';
+    recentPartsSearch = '';
+    groupedPartsSearch = '';
+  }
+
+  $: hasQueuePickerFilters = Boolean(
+    queuePickerDate || queuePickerCategoryId || recentPartsSearch || groupedPartsSearch
+  );
 
   // First Escape clears whichever search box has text (matching the
   // "search box, then close" convention of most filterable pickers) -
@@ -1185,7 +1196,12 @@
     <div class="modal queue-picker-modal" role="dialog" aria-labelledby="queue-picker-title" on:click|stopPropagation>
       <div class="modal-header">
         <h3 id="queue-picker-title">Send to Fusion CAM</h3>
-        <button type="button" class="btn btn-ghost btn-sm" title="Close" on:click={closeQueuePicker}><X size={16} /></button>
+        <div class="modal-header-actions">
+          <button type="button" class="btn btn-ghost btn-sm" disabled={!hasQueuePickerFilters} on:click={clearQueuePickerFilters}>
+            <FilterX size={15} /> Clear filters
+          </button>
+          <button type="button" class="btn btn-ghost btn-sm" title="Close" on:click={closeQueuePicker}><X size={16} /></button>
+        </div>
       </div>
       <div class="modal-body">
         <div class="form-row">
@@ -1690,6 +1706,7 @@
   .queue-subheader { display: flex; align-items: center; gap: 0.4rem; margin: 0 0 0.5rem; font-size: 0.95rem; }
   .queue-modal { max-width: 32rem; }
   .queue-picker-modal { --modal-width: 46rem; }
+  .modal-header-actions { display: inline-flex; align-items: center; gap: 0.25rem; }
   .date-with-clear { display: flex; align-items: center; gap: 0.5rem; }
   .date-with-clear .form-input { flex: 1; min-width: 0; }
   .folder-tree-box {
