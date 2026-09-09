@@ -467,6 +467,31 @@ def _distinct_straight_line_count(body) -> int:
     return len(_group_into_lines(_all_straight_edges(body)))
 
 
+def _is_a_bare_triangle(body) -> bool:
+    """Whether body's outer boundary is genuinely just a 3-sided shape,
+    not a more complex outline that happens to reduce to 3 tab-eligible
+    sides after _all_straight_edges' own length filter drops the rest.
+
+    Real, confirmed gap: _distinct_straight_line_count only counts edges
+    that already survived that length filter, so a heavily-notched or
+    lattice-cut outline (many short straight jogs alongside a handful of
+    genuinely long structural sides) could ALSO reduce to exactly 3
+    groups - tripping the same "triangular part" floor below and
+    silently overriding an operator's own explicit tab-count override
+    (e.g. requesting 4+ tabs) down to 3, even though the part is not
+    remotely triangular and the instruction this floor exists for
+    ("a triangular part only has 3 real sides to begin with") does not
+    apply to it at all. Requires every straight edge on the boundary to
+    have survived the filter - if any were dropped for being too short,
+    this a genuinely more complex outline, not a bare triangle.
+    """
+    tab_face = _find_tab_face(body)
+    if tab_face is None:
+        return False
+    all_straight = [e for e in _outer_boundary_edges(tab_face) if _is_straight_edge(e)]
+    return len(all_straight) == 3 and _distinct_straight_line_count(body) == 3
+
+
 def _min_tabs_for_body(body, min_tabs: int) -> int:
     """A triangular part only has 3 real sides to begin with - padding a
     4th tab onto one already-tabbed side doesn't add real holding power,
@@ -475,7 +500,7 @@ def _min_tabs_for_body(body, min_tabs: int) -> int:
     distinct sides still uses the normal min_tabs floor (parametric -
     ConfigureTabs's own min_tabs/max_tabs arguments, not hardcoded here).
     """
-    if _distinct_straight_line_count(body) == 3:
+    if _is_a_bare_triangle(body):
         return 3
     return min_tabs
 

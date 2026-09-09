@@ -378,6 +378,44 @@ class TabDistributionTests(unittest.TestCase):
         )
 
 
+class MinTabsForBodyTests(unittest.TestCase):
+    """_min_tabs_for_body's "exactly 3 for a triangular part" floor must
+    only ever apply to a genuinely 3-sided outline, not any shape whose
+    _distinct_straight_line_count happens to compute to 3 - see
+    _is_a_bare_triangle's own docstring for the real, confirmed gap this
+    covers (a heavily-notched or lattice-cut part reducing to 3 tab-
+    eligible sides after the length filter is not a triangle, and must
+    not silently override an operator's own explicit tab-count request).
+    """
+
+    def test_a_genuine_triangle_is_floored_to_three(self):
+        edges = [
+            _edge(0, 0, 10, 0),
+            _edge(10, 0, 5, 8),
+            _edge(5, 8, 0, 0),
+        ]
+        body = _body([_face(1.0, 1.0, [_loop(True, edges)])], (0, 0), (10, 8))
+
+        self.assertEqual(TabPlacement._min_tabs_for_body(body, 4), 3)
+
+    def test_a_notched_part_reducing_to_three_long_sides_keeps_the_requested_floor(self):
+        # Real, confirmed gap: three genuinely long structural sides plus
+        # a fourth side broken into many short jogs (a lattice/gusset
+        # cutout pattern, not a triangle) used to also compute
+        # _distinct_straight_line_count == 3 and get floored to 3 tabs,
+        # silently overriding an operator's own explicit tab-count
+        # override (e.g. 4) for a part that is not remotely triangular.
+        long_bottom = _edge(0, 0, 10, 0)
+        long_right = _edge(10, 0, 10, 10)
+        long_top = _edge(10, 10, 0, 10)
+        short_left_segments = [_edge(0, 10 - i, 0, 10 - i - 1) for i in range(10)]
+        edges = [long_bottom, long_right, long_top, *short_left_segments]
+        body = _body([_face(1.0, 1.0, [_loop(True, edges)])], (0, 0), (10, 10))
+
+        self.assertEqual(TabPlacement._distinct_straight_line_count(body), 3)
+        self.assertEqual(TabPlacement._min_tabs_for_body(body, 4), 4)
+
+
 class MinimumSideLengthTests(unittest.TestCase):
     """A side too short to physically contain a tab must not get one.
     MIN_TAB_SIDE_LENGTH_IN reserves a modest lead-in and lead-out allowance.
