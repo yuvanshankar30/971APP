@@ -238,6 +238,40 @@ def _has_blind_pocket_below_face(body, face) -> bool:
     return False
 
 
+def _face_has_countersink_chamfer(face) -> bool:
+    """Whether any of ``face``'s own inner-loop openings is a real modeled
+    countersink: a conical wall face bordering the loop directly, its wide
+    end at this face's own surface.
+
+    Real, confirmed live case: a countersink CAM operation targets holes
+    that already carry a genuinely modeled chamfer in the imported STEP
+    file, not a plain cylindrical hole - and that chamfer only exists,
+    topologically, on the one side it was actually drawn from. Checked via
+    _loop_wall_faces (already used by the blind-pocket check above) rather
+    than scanning every face on the body, so this only ever matches a
+    chamfer that borders THIS face's own loop, not an unrelated cone
+    elsewhere on the part (e.g. a countersunk hole modeled from the other
+    side, whose cone borders that other face's loop instead).
+
+    Fusion's real conical-surface class is ``adsk.core.Cone`` - confirmed
+    live against an actual countersunk hole (createCountersinkInput) via
+    Fusion's own MCP bridge; there is no ``Cone3D`` (a wrong guess here
+    would have made this check permanently, silently False forever, the
+    same class of bug this file's own history (see _pocket_floor_face,
+    _has_blind_pocket_below_face) already warns never to ship unverified).
+    """
+    for loop in face.loops:
+        if loop.isOuter:
+            continue
+        for wall in _loop_wall_faces(face, loop):
+            try:
+                if isinstance(wall.geometry, adsk.core.Cone):
+                    return True
+            except Exception:
+                continue
+    return False
+
+
 def _pocket_side_face(body):
     candidates = []
     for face in body.faces:
@@ -253,6 +287,7 @@ def _pocket_side_face(body):
                     "inner_loop_count": len(inner_loops),
                     "inner_edge_count": sum(loop.coEdges.count for loop in inner_loops),
                     "has_blind_pocket": _has_blind_pocket_below_face(body, face),
+                    "has_countersink_chamfer": _face_has_countersink_chamfer(face),
                 }
             )
         except Exception:
