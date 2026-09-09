@@ -5,7 +5,7 @@
   import { toastActions } from '$lib/toast.js';
   import {
     fetchBoxTubes, createBoxTube, deleteBoxTube, deleteBoxTubes, renameBoxTube, updateBoxTubeQuantity,
-    fetchFusionFolderTree, installFusionPartCad, queueFusionJob
+    fetchFusionFolderTree, installFusionPartCad, queueFusionJob, fetchCompletedFusionStockIds
   } from '$lib/fusionCam.js';
   import { formatPacificDateTime } from '$lib/timezone.js';
   import CadViewer from '$lib/components/CadViewer.svelte';
@@ -17,6 +17,9 @@
   export let canManage;
 
   let boxTubes = [];
+  // fusion_box_tubes.id set with a completed CAM output job -
+  // see fetchCompletedFusionStockIds.
+  let completedTubeIds = new Set();
   let machines = [];
   let materials = [];
   // Real manufacturing requests this box tube can optionally be linked to -
@@ -159,6 +162,8 @@
     if (showLoading) loading = true;
     try {
       boxTubes = await fetchBoxTubes();
+      const { boxTubeIds: completedBoxTubeIds } = await fetchCompletedFusionStockIds();
+      completedTubeIds = completedBoxTubeIds;
       const { data: machineRows } = await supabase.from('cam_machines').select('*').eq('can_run_box_tubes', true).eq('enabled', true).order('name');
       machines = machineRows || [];
       const { data: materialRows } = await supabase.from('cam_materials').select('id, name, enabled').eq('enabled', true).order('name');
@@ -604,6 +609,9 @@
               {/if}
             </span>
             <span class="tag">ALUMINUM TUBE</span>
+            {#if completedTubeIds.has(boxTube.id)}
+              <span class="tag tag-completed"><Check size={13} /> Completed</span>
+            {/if}
           </div>
           <p class="cam-form-hint">
             {#if editingQuantityId === boxTube.id}

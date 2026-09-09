@@ -1306,6 +1306,15 @@ textarea:focus,
   border-color: var(--green-soft);
 }
 
+.tag-completed {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: var(--green-soft);
+  color: var(--green-strong);
+  border-color: var(--green-soft);
+}
+
 .tag-mentor {
   background: var(--brand-gold-soft);
   color: var(--brand-gold-strong);
