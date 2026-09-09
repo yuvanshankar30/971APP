@@ -85,6 +85,11 @@ choose a Data Panel destination. Those values are saved on the queued job and
 used by the Runner for the new Fusion document. Tube stock currently exposes
 aluminum choices only so the Runner uses a reviewed tube feed/speed preset.
 
+The folder picker is always rooted at **`2026 Season CAM`**. `AutoCAM` may
+appear as a folder inside that project, but it is never the project root. If
+the picker says no folders are available, wait for a running Fusion Runner to
+finish its verified folder sync rather than choosing a different project.
+
 Tube cards use the same catalog controls as parts: rename the tube, edit its
 total quantity, preview its attached STEP with **View CAD**, or download it
 with **Install CAD**. A tube's quantity is its inventory total; it is not
