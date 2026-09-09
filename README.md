@@ -492,7 +492,8 @@ own docs are all together in one place instead of scattered across
   machine-profile post setting fails the job before post-processing.
   The Parts and Tube Stock send dialogs each include up to eight recent,
   queueable records in a compact quick-selection grid alongside their full
-  selectors.
+  selectors. The Parts picker provides one Clear filters action for its date,
+  stock-category, and name filters.
   The Jobs tab loads the newest 200 lightweight rows once, then polls only mutable
   fields for active job IDs; base64 NC artifacts load on demand only when someone
   downloads or posts them. Manufacturing status lookups query only the relevant plate/tube
