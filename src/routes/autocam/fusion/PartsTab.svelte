@@ -931,6 +931,13 @@
       if (!Number.isInteger(quantity) || quantity <= 0) return 'Quantity must be a whole number greater than zero';
       const part = group.parts.find((p) => p.id === partId);
       if (part && quantity > maximumQueueQuantity(group, part)) return `Only ${maximumQueueQuantity(group, part)} of ${part.name} is available`;
+      // Real, confirmed gap: nothing here checked for a STEP file at all -
+      // the UI let a part with none through, only for buildJobPayload.js's
+      // own signedUrl() to reject the whole job server-side minutes later
+      // with "Part X is missing its STEP file." Caught here instead, same
+      // as every other queueing prerequisite this function already fails
+      // fast on.
+      if (part && !part.step_file_name) return `${part.name} has no STEP file uploaded yet`;
     }
     if (mode === 'grouped') {
       const selected = categoryGroupedPartSelections[categoryId] || [];
@@ -940,6 +947,7 @@
         if (!Number.isInteger(quantity) || quantity <= 0) return 'Every selected part needs a whole-number quantity greater than zero';
         const part = group.parts.find((p) => p.id === partId);
         if (part && quantity > maximumQueueQuantity(group, part)) return `Only ${maximumQueueQuantity(group, part)} of ${part.name} is available`;
+        if (part && !part.step_file_name) return `${part.name} has no STEP file uploaded yet`;
       }
     }
     return null;

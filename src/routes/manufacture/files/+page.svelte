@@ -25,6 +25,11 @@
   // renamed, or '' when nothing is - only one row can be renamed at a time.
   let renamingPath = '';
   let renameValue = '';
+  // Bulk-select-and-delete, keyed by entry name within the CURRENT folder
+  // only - cleared on every navigation (see load()) since a name is only
+  // meaningful relative to whatever folder it was selected in.
+  let selectedNames = new Set();
+  let bulkDeleting = false;
 
   $: breadcrumbs = currentPath ? currentPath.split('/') : [];
 
@@ -34,6 +39,7 @@
 
   async function load() {
     loading = true;
+    selectedNames = new Set();
     try {
       const { data, error } = await supabase.storage.from(BUCKET).list(currentPath, {
         sortBy: { column: 'name', order: 'asc' }
@@ -184,6 +190,50 @@
     }
   }
 
+  function toggleEntrySelected(entry) {
+    const next = new Set(selectedNames);
+    if (next.has(entry.name)) next.delete(entry.name); else next.add(entry.name);
+    selectedNames = next;
+  }
+
+  function toggleSelectAll() {
+    selectedNames = selectedNames.size === entries.length ? new Set() : new Set(entries.map((e) => e.name));
+  }
+
+  async function handleBulkDelete() {
+    const selected = entries.filter((e) => selectedNames.has(e.name));
+    if (!selected.length) return;
+    if (!await requestConfirmation({
+      title: 'Delete selected',
+      message: `Delete ${selected.length} selected item${selected.length === 1 ? '' : 's'}? Any selected folder is deleted along with everything inside it. This can't be undone.`,
+      confirmLabel: 'Delete',
+      danger: true
+    })) return;
+    bulkDeleting = true;
+    try {
+      const paths = [];
+      for (const entry of selected) {
+        const entryPath = joinPath(currentPath, entry.name);
+        if (isFolder(entry)) {
+          paths.push(...await listAllPaths(entryPath));
+        } else {
+          paths.push(entryPath);
+        }
+      }
+      if (paths.length) {
+        const { error } = await supabase.storage.from(BUCKET).remove(paths);
+        if (error) throw error;
+      }
+      selectedNames = new Set();
+      await load();
+      toastActions.show(`Deleted ${selected.length} item${selected.length === 1 ? '' : 's'}`);
+    } catch (e) {
+      toastActions.show(e.message || 'Failed to delete selected items');
+    } finally {
+      bulkDeleting = false;
+    }
+  }
+
   function startRename(entry) {
     renamingPath = joinPath(currentPath, entry.name);
     renameValue = entry.name;
@@ -320,11 +370,36 @@
 {:else if entries.length === 0}
   <p class="empty-state">This folder is empty. Upload a file or create a folder to get started.</p>
 {:else}
+  <div class="bulk-select-bar">
+    <label class="bulk-select-all">
+      <input
+        type="checkbox"
+        checked={selectedNames.size > 0 && selectedNames.size === entries.length}
+        indeterminate={selectedNames.size > 0 && selectedNames.size < entries.length}
+        on:change={toggleSelectAll}
+      />
+      {selectedNames.size > 0 ? `${selectedNames.size} selected` : 'Select all'}
+    </label>
+    {#if selectedNames.size > 0}
+      <button type="button" class="btn btn-ghost btn-sm" disabled={bulkDeleting} on:click={handleBulkDelete}>
+        <Trash2 size={14} /> {bulkDeleting ? 'Deleting...' : `Delete ${selectedNames.size} selected`}
+      </button>
+    {/if}
+  </div>
   <div class="card">
     <div class="file-list">
       {#each entries as entry}
         {@const isRenaming = renamingPath === joinPath(currentPath, entry.name)}
         <div class="file-row">
+          {#if !isRenaming}
+            <input
+              type="checkbox"
+              class="bulk-select-checkbox"
+              checked={selectedNames.has(entry.name)}
+              on:change={() => toggleEntrySelected(entry)}
+              aria-label={`Select ${entry.name}`}
+            />
+          {/if}
           {#if isFolder(entry)}
             {#if isRenaming}
               <div class="file-row-main file-row-rename">
@@ -391,6 +466,10 @@
   .crumb-sep { color: var(--text-muted, #888); }
   .file-list { display: flex; flex-direction: column; }
   .file-row { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.6rem 0.25rem; border-bottom: 1px solid var(--border, #333); }
+  .bulk-select-checkbox { width: 1rem; height: 1rem; flex-shrink: 0; cursor: pointer; }
+  .bulk-select-bar { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.5rem 0.75rem; margin-bottom: 0.75rem; border: 1px solid var(--border, #333); border-radius: 10px; background: var(--surface-2, rgba(255,255,255,0.04)); flex-wrap: wrap; }
+  .bulk-select-all { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; font-weight: 500; color: var(--text-muted, #888); cursor: pointer; }
+  .bulk-select-all input { width: 1rem; height: 1rem; cursor: pointer; }
   .file-row:last-child { border-bottom: none; }
   .file-row-main { display: flex; align-items: center; gap: 0.6rem; background: none; border: none; color: var(--text); cursor: pointer; padding: 0.25rem; flex: 1; min-width: 0; text-align: left; font-size: 0.95rem; }
   .file-row-static { cursor: default; }
