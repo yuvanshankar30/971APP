@@ -32,6 +32,7 @@ beforeAll(async () => {
  await db.exec(migration('20260820_fusion_cam.sql'));
  await db.exec('ALTER TABLE fusion_parts ADD COLUMN fusion_file_name text');
  await db.exec(migration('20260906_fusion_grouping_integrity.sql'));
+ await db.exec(migration('20260909_fusion_multi_tool_snapshot_check.sql'));
  await db.exec('GRANT USAGE ON SCHEMA public, auth TO authenticated; GRANT ALL ON ALL TABLES IN SCHEMA public TO authenticated');
 }, 30000);
 afterAll(async () => { await db?.close(); });
@@ -92,6 +93,26 @@ describe('Fusion grouping PostgreSQL migration', () => {
    await run('UPDATE fusion_parts SET step_file_name=$1',['a.step']);
    await run('UPDATE cam_machines SET enabled=false');
    await expect(queue()).rejects.toThrow(/enabled plate machine/);
+ });
+ it('allows a null tool_id only when multiToolMode is set, but still requires a real enabled machine', async () => {
+   // Real, confirmed live case: New Router's Auto multi-tool mode
+   // deliberately sends tool_id=null (the planner resolves from every
+   // loaded cutter server-side, not one manual selection) - this trigger's
+   // machine/tool check predates that mode and required a real tool_id
+   // match unconditionally, rejecting every multi-tool job at insert time
+   // regardless of any application-layer fix.
+   await assign(2);
+   await expect(run(`INSERT INTO cam_jobs (operation_type,params,machine_id,tool_id,status) VALUES
+     ('milling',$1,$2,NULL,'queued') RETURNING *`, [{
+       fusionJobKind: 'plate:cam', plateId: id(10), fusionGroupingMode: 'single', selectedPartId: id(20), multiToolMode: true
+     }, id(30)])).resolves.toBeTruthy();
+   // Still requires the machine itself to be real and enabled - only the
+   // specific tool_id match is skipped in multi-tool mode.
+   await run('UPDATE cam_machines SET enabled=false');
+   await expect(run(`INSERT INTO cam_jobs (operation_type,params,machine_id,tool_id,status) VALUES
+     ('milling',$1,$2,NULL,'queued') RETURNING *`, [{
+       fusionJobKind: 'plate:cam', plateId: id(10), fusionGroupingMode: 'single', selectedPartId: id(20), multiToolMode: true
+     }, id(30)])).rejects.toThrow(/enabled plate machine/);
  });
  it('captures every assignment and protects queued inputs from later edits', async () => {
    await assign(2); await assign(3,10,21);
