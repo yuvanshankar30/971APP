@@ -57,6 +57,23 @@ describe('Fusion plate payloads',()=>{
    single_tool_mode:true, tool_items:[{tool_id:'main-bit',tool_guid:'main-guid'}]
   });
  });
+ it('accepts a loaded single tool that has no tool_library_guid, like UNC Router\'s own bit',async()=>{
+  // Real, confirmed live regression: UNC Router's single tool ("UNC
+  // Router 0.1575 in Flat End Mill") has never had a tool_library_guid
+  // and is still genuinely loaded (present in cam_machine_tools) - a job
+  // queued against it must succeed, with an empty tool_items (nothing to
+  // hand Fusion a guid for), not fail "not loaded on this machine".
+  const value=job(); value.machine_id='unc-router'; value.tool_id='unc-bit'; value.params.singleToolMode=true; value.cam_tools={tool_type:'flat end mill'};
+  const database={
+   storage:db().storage,
+   from:(table)=>table==='cam_machine_tools'?{select:()=>({eq:async()=>({data:[
+    {tool_id:'unc-bit',cam_tools:{tool_library_guid:null,tool_type:'flat end mill'}}
+   ]})})}:null
+  };
+  await expect(buildJobPayload(database,value)).resolves.toMatchObject({
+   single_tool_mode:true, tool_items:[]
+  });
+ });
  it('sends loaded endmill and drill candidates, not every installed tool, for auto multi-tool CAM',async()=>{
   const value=job(); value.machine_id='router'; value.tool_id='endmill'; value.params.multiToolMode=true;
   const database={
@@ -137,5 +154,23 @@ describe('Fusion box-tube payloads',()=>{
  it('never includes tab_count - TabPlacement never runs for tube stock',async()=>{
   const payload=await buildJobPayload(tubeDb(),tubeJob());
   expect(payload).not.toHaveProperty('tab_count');
+ });
+ it('queues successfully with UNC Router\'s real fixed tool, which has no tool_library_guid',async()=>{
+  // Real, confirmed shape: every UNC Router box-tube job uses the exact
+  // same fixed tool ("UNC Router 0.1575 in Flat End Mill") which has
+  // never had a tool_library_guid - tubes never swap tools, but
+  // buildJobPayload's tool_items resolution runs for ANY job carrying a
+  // tool_id, tube or plate, single-tool or not. Must stay unaffected by
+  // the guid requirement that only matters for tool_items' own contents.
+  const value=tubeJob(); value.machine_id='unc-router'; value.tool_id='unc-bit'; value.params.singleToolMode=true; value.cam_tools={tool_type:'flat end mill'};
+  const database={
+   storage:tubeDb().storage,
+   from:(table)=>table==='cam_machine_tools'
+    ?{select:()=>({eq:async()=>({data:[{tool_id:'unc-bit',cam_tools:{tool_library_guid:null,tool_type:'flat end mill'}}]})})}
+    :{select:()=>({eq:()=>({single:async()=>({data:{id:'tube-1',step_file_name:'tube.step'}})})})}
+  };
+  await expect(buildJobPayload(database,value)).resolves.toMatchObject({
+   box_tube_id:'tube-1', tool_id:'unc-bit'
+  });
  });
 });

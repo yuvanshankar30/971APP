@@ -515,8 +515,37 @@
     return isNewRouter(machineId) && isAluminum6061(group);
   }
 
+  // The real, physical 971 Main Bit's own stable tool-library GUID
+  // (tools/971-outside-plate.tools and tools/Normal router tools (use
+  // this).tools both use this same GUID for it) - matched on this rather
+  // than the tool's own name, which real, confirmed history has already
+  // shown can drift ("971 Main Bit 0.1575 in Flat End Mill" vs. "ShopSabre
+  // 1 971 Main Bit (0.1575in)" turned out to be two separate duplicate
+  // cam_tools rows for this exact physical bit) and previously made an
+  // exact-name match here silently never find it at all.
+  const MAIN_BIT_GUID = '10a2caeb-dec0-49b2-8701-96fdb212bad9';
+
+  function _looksLikeMainBit(tool) {
+    if (tool?.tool_library_guid === MAIN_BIT_GUID) return true;
+    return String(tool?.name || '').trim().toLowerCase().includes('971 main bit');
+  }
+
   function mainBitForMachine(machineId) {
-    return toolsForMachine(machineId).find((tool) => String(tool.name || '').trim().toLowerCase() === '971 main bit');
+    return toolsForMachine(machineId).find(_looksLikeMainBit);
+  }
+
+  // Only 971 Main Bit ships a real, reviewed feed/speed preset for every
+  // material this shop actually cuts (see tools/971-outside-plate.tools) -
+  // every other loaded New Router cutter only has a bare "Default preset",
+  // which templateTools.py's own _choose_preset() only accepts for
+  // Aluminum 6061 (a deliberately narrow exception, not a general
+  // fallback). Selecting one of those other tools for any other material
+  // queues a job that is guaranteed to fail once Fusion actually tries to
+  // apply feeds/speeds - disabled here instead of failing minutes later,
+  // deep into a real machine run.
+  function toolHasReviewedPresetForGroup(tool, group) {
+    if (isAluminum6061(group)) return true;
+    return _looksLikeMainBit(tool);
   }
 
   // ATC Slots, reachable right from the queue picker (not only the /autocam
@@ -837,6 +866,9 @@
       const selectedTool = toolsForMachine(categoryMachineSelections[categoryId])
         .find((tool) => String(tool.id) === String(categoryToolSelections[categoryId]));
       if (!isEndmill(selectedTool)) return 'Single-tool CAM requires an endmill';
+      if (isNewRouter(categoryMachineSelections[categoryId]) && !toolHasReviewedPresetForGroup(selectedTool, group)) {
+        return 'Selected tool has no reviewed feed/speed preset for this material';
+      }
     }
     const mode = categoryQueueModes[categoryId];
     if (!['single', 'grouped'].includes(mode)) return 'Choose single-part or grouped CAM';
@@ -1390,7 +1422,12 @@
                   <select id={`queue-tool-${group.categoryId}`} class="form-select" bind:value={categoryToolSelections[group.categoryId]} disabled={!categoryMachineSelections[group.categoryId]}>
                     <option value="">{toolsForMachine(categoryMachineSelections[group.categoryId]).length ? 'Choose a tool...' : 'No tools installed'}</option>
                     {#each toolsForMachine(categoryMachineSelections[group.categoryId]).filter((tool) => !isNewRouter(categoryMachineSelections[group.categoryId]) || isEndmill(tool)) as t}
-                      <option value={t.id}>{toolLabel(t)}</option>
+                      <option
+                        value={t.id}
+                        disabled={isNewRouter(categoryMachineSelections[group.categoryId]) && !toolHasReviewedPresetForGroup(t, group)}
+                      >
+                        {toolLabel(t)}{isNewRouter(categoryMachineSelections[group.categoryId]) && !toolHasReviewedPresetForGroup(t, group) ? ' (no preset for this material)' : ''}
+                      </option>
                     {/each}
                   </select>
                 </div>

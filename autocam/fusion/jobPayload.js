@@ -13,15 +13,27 @@ async function resolveLoadedToolItems(supabase, machineId, toolId) {
     .select('tool_id, cam_tools(tool_library_guid, tool_type)')
     .eq('machine_id', machineId);
   if (error) throw new Error(`Could not resolve loaded machine tools: ${error.message}`);
-  const items = (data || []).map((row) => ({
+  const rows = data || [];
+  // "Is this tool actually loaded" is a plain machine/tool membership
+  // fact, independent of whether its cam_tools row happens to carry a
+  // tool_library_guid - real, confirmed live regression: UNC Router's own
+  // single tool ("UNC Router 0.1575 in Flat End Mill") has never needed
+  // one and has always had tool_library_guid = null, and requiring one
+  // here failed every UNC Router job outright with "Selected tool is not
+  // loaded on this machine" even though it plainly was. The guid is only
+  // needed to hand Fusion real library data for tool_items below - a
+  // loaded tool that lacks one still passes this check, it just can't
+  // contribute an entry to tool_items (same as before single-tool mode
+  // started calling this function at all).
+  if (toolId && !rows.some((row) => String(row.tool_id) === String(toolId))) {
+    throw new Error('Selected tool is not loaded on this machine');
+  }
+  const items = rows.map((row) => ({
     tool_id: row.tool_id,
     tool_guid: row.cam_tools?.tool_library_guid,
     tool_type: row.cam_tools?.tool_type
   })).filter((item) => item.tool_guid && /(end\s*mill|drill)/i.test(String(item.tool_type || '')))
     .map(({ tool_id, tool_guid }) => ({ tool_id, tool_guid }));
-  if (toolId && !items.some((item) => String(item.tool_id) === String(toolId))) {
-    throw new Error('Selected tool is not loaded on this machine');
-  }
   return toolId ? items.filter((item) => String(item.tool_id) === String(toolId)) : items;
 }
 
