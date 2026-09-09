@@ -79,7 +79,6 @@
   // separate "queue straight from a manufacturing request" flow has the
   // same real capability, not a stale single-tool-only form.
   let fusionQueueSingleToolMode = true;
-  let fusionQueueCountersinkToolId = '';
   let atcTools = []; // full cam_tools catalog, for the ATC Slots modal
   let showAtcModal = false;
   let atcModalMachineId = null;
@@ -1093,18 +1092,6 @@
     return /end\s*mill/i.test(String(tool?.tool_type || ''));
   }
 
-  const COUNTERSINK_GUIDS = new Set([
-    '61a8645a-9015-4aba-958b-70297d26b19e',
-    '8789b786-8e50-48c5-b4f9-21296fcaf34a'
-  ]);
-
-  function isApprovedCountersink(tool) {
-    return /counter\s*sink/i.test(String(tool?.tool_type || ''))
-      && COUNTERSINK_GUIDS.has(String(tool?.tool_library_guid || ''))
-      && Number(tool?.tip_angle) === 82
-      && [0.372, 0.5].some((diameter) => Math.abs(Number(tool?.diameter) - diameter) < 0.0001);
-  }
-
   function openAtcModal(machineId) {
     const machine = fusionQueueMachines.find((m) => String(m.id) === String(machineId));
     if (!machine) return;
@@ -1130,7 +1117,6 @@
   function selectFusionQueueMachine(machineId) {
     fusionQueueMachineId = machineId;
     fusionQueueSingleToolMode = true;
-    fusionQueueCountersinkToolId = '';
     const machine = fusionQueueMachines.find((candidate) => String(candidate.id) === String(machineId));
     const eligible = fusionQueueTools(machineId);
     const eligibleForMode = isNewRouter(machineId) ? eligible.filter(isEndmill) : eligible;
@@ -1164,7 +1150,6 @@
     fusionQueueFileName = (part.name || '').replace(/\s+/g, '');
     fusionQueueFolderPath = '';
     fusionQueueSingleToolMode = true;
-    fusionQueueCountersinkToolId = '';
     try {
       const [categories, machines, materials, folderTree] = await Promise.all([
         fetchPartCategories(),
@@ -1246,7 +1231,6 @@
           fusionJobKind: 'plate:cam', plateId: plate.id, machineId: fusionQueueMachineId, toolId: isAutoMultiTool ? null : fusionQueueToolId, materialId: category.material_id, requestedBy: user?.id, name: `Fusion CAM: ${part.name}`, groupingMode: 'single', selectedPartId: fusionPart.id, fusionFileName: fusionQueueFileName.trim() || null, fusionFolderPath: fusionQueueFolderPath || null,
           singleToolMode: isNewRouter(fusionQueueMachineId) && fusionQueueSingleToolMode,
           multiToolMode: isAutoMultiTool,
-          countersinkToolId: isNewRouter(fusionQueueMachineId) ? (fusionQueueCountersinkToolId || null) : null
         });
       }
       showToastMessage('Queued for the Fusion Runner', 'success');
@@ -3004,16 +2988,6 @@
                     <button type="button" class:active={!fusionQueueSingleToolMode} on:click={() => { fusionQueueSingleToolMode = false; fusionQueueToolId = ''; }}>Auto multi-tool</button>
                   </div>
                   <p class="cam-form-hint">Auto multi-tool considers every loaded cutter, then uses only the high-throughput cutter and any smaller cutter required for detail. Unused candidates do not create a tool swap.</p>
-                </div>
-                <div class="form-group">
-                  <label class="form-label" for="manufacture-fusion-countersink">Countersink</label>
-                  <select id="manufacture-fusion-countersink" class="form-select" bind:value={fusionQueueCountersinkToolId}>
-                    <option value="">No countersink</option>
-                    {#each fusionQueueTools(fusionQueueMachineId).filter(isApprovedCountersink) as tool}
-                      <option value={tool.id}>T{tool.tool_number || '?'} - {fusionQueueToolLabel(tool)}, 82 degree countersink</option>
-                    {/each}
-                  </select>
-                  <p class="cam-form-hint">Optional. Only the selected loaded 0.372 in or 0.5 in 82 degree countersink is added.</p>
                 </div>
               {/if}
               <div class="form-group">

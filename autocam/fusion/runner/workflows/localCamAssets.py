@@ -74,10 +74,6 @@ def _is_endmill_entry(entry: dict) -> bool:
     return "end mill" in tool_type or "endmill" in tool_type
 
 
-def _is_countersink_entry(entry: dict) -> bool:
-    return "counter sink" in str(entry.get("type") or "").lower()
-
-
 def _tool_number(entry: dict):
     post = entry.get("post-process")
     if not isinstance(post, dict):
@@ -105,11 +101,8 @@ def load_local_tool_library_json(data: dict, dest_dir: str) -> tuple[dict, str]:
         # fusion_tool_library_file to read here the way single-tool mode
         # has one. Every UI entry point gates multi-tool mode to New
         # Router only, and every one of its real loaded tools comes from
-        # this one bundled library (matches jobPayload.js's own
-        # SHOP_SABRE_TOOL_LIBRARY constant, which every approved
-        # countersink is already validated against) - safe to assume
-        # directly for a single-library shop rather than plumbing the
-        # filename through tool_items.
+        # this one bundled library. Use it directly for this single-library
+        # shop rather than plumbing the filename through tool_items.
         configured_file = _MULTI_TOOL_LIBRARY_FILE
     if not isinstance(configured_file, str) or not configured_file.strip():
         raise ValueError(
@@ -145,20 +138,6 @@ def load_local_tool_library_json(data: dict, dest_dir: str) -> tuple[dict, str]:
         str(item.get("tool_guid")) for item in (payload.get("tool_items") or [])
         if isinstance(item, dict) and item.get("tool_guid")
     } if multi_tool_mode else set()
-    countersink = payload.get("countersink_tool") if isinstance(payload, dict) else None
-    countersink_guid = countersink.get("guid") if isinstance(countersink, dict) else None
-    if multi_tool_mode and countersink_guid:
-        # jobPayload.js's resolveLoadedToolItems deliberately excludes
-        # countersinks from tool_items (it only keeps end mill/drill
-        # candidates) - the countersink match below never runs for
-        # multi-tool mode's own branch (it "continue"s unconditionally
-        # right after this set membership check), so without this the
-        # countersink was silently dropped from the library file written
-        # to disk here, then rejected downstream in
-        # patch_cam_template_with_tool_libraries with "Requested
-        # countersink is not available in the selected tool library" -
-        # confirmed live on a real countersink + multi-tool job.
-        candidate_guids = candidate_guids | {str(countersink_guid)}
     if single_tool_mode and not _is_endmill_entry({"type": tool.get("tool_type")}):
         raise ValueError("Single-tool Fusion CAM requires an endmill selected on the job")
     selected_tool_number = tool.get("tool_number") if single_tool_mode else None
@@ -178,8 +157,6 @@ def load_local_tool_library_json(data: dict, dest_dir: str) -> tuple[dict, str]:
                     entry_diameter = _tool_diameter(entry)
                     if entry_diameter is not None and abs(entry_diameter - selected_diameter) < 0.0001:
                         matching_entries.append(entry)
-                if countersink_guid and entry.get("guid") == countersink_guid and _is_countersink_entry(entry):
-                    matching_entries.append(entry)
                 continue
             if candidate_guids:
                 if entry.get("guid") in candidate_guids:
@@ -198,9 +175,6 @@ def load_local_tool_library_json(data: dict, dest_dir: str) -> tuple[dict, str]:
             # this filter had already discarded any drill entry that
             # didn't happen to match the endmill's own diameter.
             if _is_drill_entry(entry):
-                matching_entries.append(entry)
-                continue
-            if countersink_guid and entry.get("guid") == countersink_guid and _is_countersink_entry(entry):
                 matching_entries.append(entry)
                 continue
             entry_diameter = _tool_diameter(entry)

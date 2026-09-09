@@ -556,7 +556,7 @@ export async function fetchFusionFolderTree(projectName = '2026 Season CAM') {
  * turning/routing's cam-generate, this genuinely needs an external Fusion
  * 360 process).
  */
-export async function queueFusionJob({ fusionJobKind, plateId, boxTubeId, machineId, materialId, toolId, requestedBy, name, partId, groupingMode, selectedPartId, selectedPartIds, fusionFileName, fusionFolderPath, tabCount, singleToolMode = false, multiToolMode = false, countersinkToolId = null }) {
+export async function queueFusionJob({ fusionJobKind, plateId, boxTubeId, machineId, materialId, toolId, requestedBy, name, partId, groupingMode, selectedPartId, selectedPartIds, fusionFileName, fusionFolderPath, tabCount, singleToolMode = false, multiToolMode = false }) {
   if (!FUSION_JOB_KINDS.includes(fusionJobKind)) {
     throw new Error(`Invalid fusionJobKind: ${fusionJobKind}`);
   }
@@ -572,7 +572,7 @@ export async function queueFusionJob({ fusionJobKind, plateId, boxTubeId, machin
   // and only failed later, once a Runner tried to claim it - direct
   // instruction: this must fail at queue time instead, before a bad job
   // ever reaches cam_jobs at all.
-  if (machineId && (toolId || countersinkToolId)) {
+  if (machineId && toolId) {
     const { data: loadedRows, error: loadedError } = await supabase
       .from('cam_machine_tools')
       .select('tool_id')
@@ -581,9 +581,6 @@ export async function queueFusionJob({ fusionJobKind, plateId, boxTubeId, machin
     const loadedToolIds = new Set((loadedRows || []).map((row) => String(row.tool_id)));
     if (toolId && !loadedToolIds.has(String(toolId))) {
       throw new Error('Selected tool is no longer loaded on this machine - pick another or update ATC Slots.');
-    }
-    if (countersinkToolId && !loadedToolIds.has(String(countersinkToolId))) {
-      throw new Error('Selected countersink is no longer loaded on this machine - pick another or update ATC Slots.');
     }
   }
   const params = {
@@ -600,9 +597,6 @@ export async function queueFusionJob({ fusionJobKind, plateId, boxTubeId, machin
       // again in the Runner itself (camPlate.py) - never trust a single
       // layer for "cannot be too much".
       tabCount: tabCount === '' || tabCount == null ? null : Number(tabCount),
-      // A second, explicitly chosen tool for the plate-only countersink
-      // operation. The claim endpoint re-resolves and allowlists it.
-      countersinkToolId: countersinkToolId || null,
       // Plate CAM only. Tube jobs have their own operation planner and must
       // retain their stable, minimal queue payload.
       multiToolMode: Boolean(multiToolMode)

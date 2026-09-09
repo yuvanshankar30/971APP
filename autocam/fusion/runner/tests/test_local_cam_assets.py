@@ -69,33 +69,6 @@ class SingleToolLibraryTests(unittest.TestCase):
             entries = json.loads(Path(path).read_text())["data"]
             self.assertIn(endmill_guid, [entry.get("guid") for entry in entries])
 
-    def test_multi_tool_mode_includes_the_countersink_even_though_its_never_in_tool_items(self):
-        # Real, confirmed live case: jobPayload.js's resolveLoadedToolItems
-        # deliberately excludes countersinks from tool_items (only end
-        # mill/drill candidates go there), so the countersink guid is never
-        # in candidate_guids on its own - without folding it in separately,
-        # it was silently dropped from the library file written here, then
-        # rejected downstream with "Requested countersink is not available
-        # in the selected tool library".
-        endmill_guid = "29331875-1efc-47c5-9742-f39efcb697ed"
-        countersink_guid = "61a8645a-9015-4aba-958b-70297d26b19e"
-        with tempfile.TemporaryDirectory() as output_dir:
-            _tool, path = local_cam_assets.load_local_tool_library_json(
-                {
-                    "payload": {
-                        "multi_tool_mode": True,
-                        "tool_items": [{"tool_guid": endmill_guid}],
-                        "countersink_tool": {"guid": countersink_guid},
-                    },
-                    "cam_tools": None,
-                },
-                output_dir,
-            )
-            entries = json.loads(Path(path).read_text())["data"]
-            guids = [entry.get("guid") for entry in entries]
-            self.assertIn(countersink_guid, guids)
-            self.assertIn(endmill_guid, guids)
-
     def test_multi_tool_mode_only_includes_a_drill_that_is_actually_a_loaded_candidate(self):
         # A drill NOT in candidate_guids (jobPayload.js only puts genuinely
         # loaded endmill/drill tools there) must stay excluded - unlike
@@ -127,25 +100,6 @@ class SingleToolLibraryTests(unittest.TestCase):
             )
             entries2 = json.loads(Path(path2).read_text())["data"]
             self.assertIn(drill_guid, [entry.get("guid") for entry in entries2])
-
-    def test_includes_only_the_explicit_countersink_in_the_generated_library(self):
-        countersink_guid = "61a8645a-9015-4aba-958b-70297d26b19e"
-        with tempfile.TemporaryDirectory() as output_dir:
-            _, path = local_cam_assets.load_local_tool_library_json(
-                {
-                    "payload": {"single_tool_mode": True, "countersink_tool": {"guid": countersink_guid}},
-                    "cam_tools": {
-                        "diameter": 0.1575,
-                        "tool_type": "endmill",
-                        "tool_number": 1,
-                        "fusion_tool_library_file": "Normal router tools (use this).tools",
-                    },
-                },
-                output_dir,
-            )
-            entries = json.loads(Path(path).read_text())["data"]
-            countersinks = [entry for entry in entries if "counter sink" in entry["type"].lower()]
-            self.assertEqual([entry["guid"] for entry in countersinks], [countersink_guid])
 
 
 class PostProcessorSelectionTests(unittest.TestCase):

@@ -117,19 +117,6 @@ describe('Fusion CAM queue query efficiency', () => {
     expect(mocks.from).not.toHaveBeenCalledWith('cam_jobs');
   });
 
-  it('refuses to queue when the selected countersink is no longer loaded on the machine', async () => {
-    mocks.from.mockImplementation((table) =>
-      table === 'cam_machine_tools'
-        ? chain({ data: [{ tool_id: 'endmill-1' }], error: null })
-        : chain({ data: { id: 'plate-job' }, error: null })
-    );
-
-    await expect(queueFusionJob({
-      fusionJobKind: 'plate:cam', plateId: 'plate-1', groupingMode: 'single',
-      machineId: 'router-1', toolId: 'endmill-1', countersinkToolId: 'gone-countersink'
-    })).rejects.toThrow(/countersink.*no longer loaded/i);
-    expect(mocks.from).not.toHaveBeenCalledWith('cam_jobs');
-  });
 
   it('does not check loaded tools at all when no machine is selected yet', async () => {
     mocks.from.mockReturnValue(chain({ data: { id: 'plate-job' }, error: null }));
