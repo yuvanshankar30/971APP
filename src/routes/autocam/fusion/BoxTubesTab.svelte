@@ -4,7 +4,7 @@
   import { supabase } from '$lib/supabase.js';
   import { toastActions } from '$lib/toast.js';
   import {
-    fetchBoxTubes, createBoxTube, deleteBoxTube, renameBoxTube, updateBoxTubeQuantity,
+    fetchBoxTubes, createBoxTube, deleteBoxTube, deleteBoxTubes, renameBoxTube, updateBoxTubeQuantity,
     fetchFusionFolderTree, installFusionPartCad, queueFusionJob
   } from '$lib/fusionCam.js';
   import { formatPacificDateTime } from '$lib/timezone.js';
@@ -87,6 +87,49 @@
         || tube.project_id?.toLowerCase().includes(boxTubesListSearchTerm)
       )
     : boxTubesByCreatedAt;
+
+  // Bulk-select-and-delete for the tube stock list - same pattern as
+  // PartsTab.svelte's own part selection, kept independent of any
+  // single-row rename/quantity-edit/queue state on the same card.
+  let selectedTubeIds = new Set();
+  let bulkDeletingTubes = false;
+  $: visibleSelectedTubeCount = filteredBoxTubesByCreatedAt.filter((t) => selectedTubeIds.has(t.id)).length;
+  function toggleTubeSelected(tubeId) {
+    const next = new Set(selectedTubeIds);
+    if (next.has(tubeId)) next.delete(tubeId); else next.add(tubeId);
+    selectedTubeIds = next;
+  }
+  function toggleSelectAllTubes() {
+    if (visibleSelectedTubeCount === filteredBoxTubesByCreatedAt.length && filteredBoxTubesByCreatedAt.length > 0) {
+      const visibleIds = new Set(filteredBoxTubesByCreatedAt.map((t) => t.id));
+      selectedTubeIds = new Set([...selectedTubeIds].filter((id) => !visibleIds.has(id)));
+    } else {
+      selectedTubeIds = new Set([...selectedTubeIds, ...filteredBoxTubesByCreatedAt.map((t) => t.id)]);
+    }
+  }
+  async function handleBulkDeleteTubes() {
+    const ids = [...selectedTubeIds];
+    if (!ids.length) return;
+    if (!await requestConfirmation({
+      title: 'Delete tube stock',
+      message: `Delete ${ids.length} selected tube${ids.length === 1 ? '' : 's'}? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      danger: true
+    })) return;
+    bulkDeletingTubes = true;
+    try {
+      const removed = await deleteBoxTubes(ids);
+      const removedSet = new Set(ids);
+      boxTubes = boxTubes.filter((t) => !removedSet.has(t.id));
+      selectedTubeIds = new Set();
+      toastActions.show(`Deleted ${removed} tube${removed === 1 ? '' : 's'}`);
+    } catch (e) {
+      toastActions.show(e.message || 'Failed to delete selected tubes');
+    } finally {
+      bulkDeletingTubes = false;
+    }
+  }
+
   $: queueableTubesByCreatedAt = [...boxTubes]
     .filter((tube) => tube.step_file_name && Number(tube.quantity) > 0)
     .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
@@ -299,6 +342,11 @@
       // Splice locally instead of re-fetching everything just to drop one
       // row - see PartsTab.svelte's matching comment.
       boxTubes = boxTubes.filter((b) => b.id !== boxTube.id);
+      if (selectedTubeIds.has(boxTube.id)) {
+        const next = new Set(selectedTubeIds);
+        next.delete(boxTube.id);
+        selectedTubeIds = next;
+      }
     } catch (e) {
       toastActions.show(e.message || 'Failed to delete box tube');
     }
@@ -495,29 +543,58 @@
     {#if filteredBoxTubesByCreatedAt.length === 0}
       <p class="empty-state">No tube stock matches "{boxTubesListSearch}".</p>
     {/if}
+    {#if canManage && filteredBoxTubesByCreatedAt.length > 0}
+      <div class="bulk-select-bar">
+        <label class="bulk-select-all">
+          <input
+            type="checkbox"
+            checked={visibleSelectedTubeCount > 0 && visibleSelectedTubeCount === filteredBoxTubesByCreatedAt.length}
+            indeterminate={visibleSelectedTubeCount > 0 && visibleSelectedTubeCount < filteredBoxTubesByCreatedAt.length}
+            on:change={toggleSelectAllTubes}
+          />
+          {visibleSelectedTubeCount > 0 ? `${visibleSelectedTubeCount} selected` : 'Select all'}
+        </label>
+        {#if visibleSelectedTubeCount > 0}
+          <button type="button" class="btn btn-ghost btn-sm" disabled={bulkDeletingTubes} on:click={handleBulkDeleteTubes}>
+            <Trash2 size={14} /> {bulkDeletingTubes ? 'Deleting...' : `Delete ${visibleSelectedTubeCount} selected`}
+          </button>
+        {/if}
+      </div>
+    {/if}
     <div class="cam-list">
       {#each filteredBoxTubesByCreatedAt as boxTube (boxTube.id)}
         <div class="card cam-list-item">
           <div class="cam-list-header">
-            {#if renamingTubeId === boxTube.id}
-              <span class="rename-control">
-                <Box size={16} />
+            <span class="cam-list-header-left">
+              {#if canManage}
                 <input
-                  class="form-input rename-input"
-                  bind:value={renameTubeValue}
-                  on:keydown={(event) => { if (event.key === 'Enter') saveRenameTube(boxTube); if (event.key === 'Escape') cancelRenameTube(); }}
+                  type="checkbox"
+                  class="bulk-select-checkbox"
+                  checked={selectedTubeIds.has(boxTube.id)}
+                  on:change={() => toggleTubeSelected(boxTube.id)}
+                  aria-label={`Select ${boxTube.name}`}
                 />
-                <button type="button" class="btn btn-ghost btn-sm" title="Save" on:click={() => saveRenameTube(boxTube)}><Check size={14} /></button>
-                <button type="button" class="btn btn-ghost btn-sm" title="Cancel" on:click={cancelRenameTube}><X size={14} /></button>
-              </span>
-            {:else}
-              <span class="rename-control">
-                <strong><Box size={16} /> {boxTube.name}</strong>
-                {#if canManage}
-                  <button type="button" class="btn btn-ghost btn-sm" title="Rename" on:click={() => startRenameTube(boxTube)}><Pencil size={13} /></button>
-                {/if}
-              </span>
-            {/if}
+              {/if}
+              {#if renamingTubeId === boxTube.id}
+                <span class="rename-control">
+                  <Box size={16} />
+                  <input
+                    class="form-input rename-input"
+                    bind:value={renameTubeValue}
+                    on:keydown={(event) => { if (event.key === 'Enter') saveRenameTube(boxTube); if (event.key === 'Escape') cancelRenameTube(); }}
+                  />
+                  <button type="button" class="btn btn-ghost btn-sm" title="Save" on:click={() => saveRenameTube(boxTube)}><Check size={14} /></button>
+                  <button type="button" class="btn btn-ghost btn-sm" title="Cancel" on:click={cancelRenameTube}><X size={14} /></button>
+                </span>
+              {:else}
+                <span class="rename-control">
+                  <strong><Box size={16} /> {boxTube.name}</strong>
+                  {#if canManage}
+                    <button type="button" class="btn btn-ghost btn-sm" title="Rename" on:click={() => startRenameTube(boxTube)}><Pencil size={13} /></button>
+                  {/if}
+                </span>
+              {/if}
+            </span>
             <span class="tag">ALUMINUM TUBE</span>
           </div>
           <p class="cam-form-hint">
@@ -770,6 +847,11 @@
   .cam-list-header { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
   .rename-control { display: flex; align-items: center; gap: 0.35rem; min-width: 0; }
   .rename-input { padding: 0.2rem 0.4rem; height: auto; width: auto; min-width: 10rem; }
+  .cam-list-header-left { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+  .bulk-select-checkbox { width: 1rem; height: 1rem; flex-shrink: 0; cursor: pointer; }
+  .bulk-select-bar { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.5rem 0.75rem; margin-bottom: 0.6rem; border: 1px solid var(--border); border-radius: var(--radius-md, 10px); background: var(--surface-2, #f7f7f5); flex-wrap: wrap; }
+  .bulk-select-all { display: flex; align-items: center; gap: 0.5rem; font-size: 0.82rem; font-weight: 500; color: var(--text-muted); cursor: pointer; }
+  .bulk-select-all input { width: 1rem; height: 1rem; cursor: pointer; }
   .quantity-control { display: inline-flex; }
   .quantity-input { min-width: 4rem; width: 4rem; }
   .cam-list-actions { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; flex-wrap: wrap; }

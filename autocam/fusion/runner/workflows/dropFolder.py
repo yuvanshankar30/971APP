@@ -102,26 +102,69 @@ def _retry_on_offline(app, attempts=6, initial_delay_seconds=1.0):
     return run
 
 
+_RESOLVE_PROJECT_ATTEMPTS = 3
+_RESOLVE_PROJECT_RETRY_DELAY_SEC = 0.5
+
+
 def resolve_data_project(app, project_name):
     """Finds a Data Panel project by exact name.
 
     Falls back to app.data.activeProject (whatever's selected in the Data
-    Panel right now) if project_name is falsy or not found - a safety net
-    for if this project is ever renamed or deleted, not the primary way
-    this is expected to resolve day to day (FUSION_DATA_PROJECT_NAME
-    defaults to the team's real project name in config.py).
+    Panel right now) if project_name is falsy or genuinely not found - a
+    safety net for if this project is ever renamed or deleted, not the
+    primary way this is expected to resolve day to day
+    (FUSION_DATA_PROJECT_NAME defaults to the team's real project name in
+    config.py).
+
+    Real, confirmed live bug this retry exists to fix: the periodic
+    folder-sync walker (SpartanRoboticsAutoCAM.py's _advance_folder_sync)
+    calls this on a background timer while jobs are actively processing -
+    each opening and closing its own temp document - and the scan over
+    app.data.dataProjects had no error handling at all, unlike every
+    other Data Panel call in this file. A single transient RuntimeError
+    reading .count/.item()/.name (the same class of stale-handle glitch
+    FolderTreeWalker.run_chunk already tolerates) used to propagate
+    straight out of the scan, read as "not found," and silently fall back
+    to app.data.activeProject - whatever document a job happened to have
+    open at that exact moment, not the shop's real, stable project. The
+    synced folder tree (fusion_data_folders) then republished rooted at
+    that unrelated, unstable project instead of the real one, with no
+    error surfaced anywhere - confirmed live: the tree's own root
+    silently reverted to "AutoCAM" (a job's own save subfolder) days
+    after this was believed fixed, purely from sync timing, the
+    configured FUSION_DATA_PROJECT_NAME/FUSION_DROP_FOLDER_PATH never
+    having changed.
+
+    A transient scan failure is now retried a few times before falling
+    back - the fallback still exists for a genuine "renamed or deleted"
+    case, it just no longer fires on a momentary glitch.
     """
     if project_name:
-        projects = app.data.dataProjects
-        for i in range(projects.count):
-            candidate = projects.item(i)
-            if candidate.name == project_name:
-                return candidate
-        app.log(
-            f"FUSION_DATA_PROJECT_NAME '{project_name}' not found among "
-            "this account's Fusion projects - falling back to the active "
-            "project."
-        )
+        scanned_cleanly_without_a_match = False
+        for attempt in range(1, _RESOLVE_PROJECT_ATTEMPTS + 1):
+            try:
+                projects = app.data.dataProjects
+                for i in range(projects.count):
+                    candidate = projects.item(i)
+                    if candidate.name == project_name:
+                        return candidate
+                scanned_cleanly_without_a_match = True
+                break
+            except RuntimeError as exc:
+                if attempt == _RESOLVE_PROJECT_ATTEMPTS:
+                    app.log(
+                        f"Listing Fusion Data Panel projects failed {attempt} times "
+                        f"while looking for '{project_name}' ({exc}) - falling back "
+                        "to the active project."
+                    )
+                else:
+                    time.sleep(_RESOLVE_PROJECT_RETRY_DELAY_SEC)
+        if scanned_cleanly_without_a_match:
+            app.log(
+                f"FUSION_DATA_PROJECT_NAME '{project_name}' not found among "
+                "this account's Fusion projects - falling back to the active "
+                "project."
+            )
     return app.data.activeProject
 
 
