@@ -11,7 +11,8 @@
   import SeasonFilter from '$lib/components/SeasonFilter.svelte';
   import { goto } from '$app/navigation';
   import { PUBLIC_ONSHAPE_BASE_URL } from '$env/static/public';
-  import { Search, Filter, Clock, Truck, Package, Download, Zap, Wrench, FileText, Upload, ExternalLink, Pencil, Trash2, X, Users, Box, Route, CircleCheck, Layers } from 'lucide-svelte';
+  import { Search, Filter, Clock, Truck, Package, Download, Zap, Wrench, FileText, Upload, ExternalLink, Pencil, Trash2, X, Users, Box, Route, CircleCheck, Layers, Folder } from 'lucide-svelte';
+  import { searchFolderTree } from '$lib/fusionFolderSearch.js';
   import ROUTER_FLOW from '$lib/router_flow.json';
   import { getDisplayStatus, BUTTONS, getBadgeClass, getWorkflowStatuses } from '$lib/statuses.js';
   import { summarizeRouterStages, isFullyKitted, buildRouterProgressUpdate, canAdvanceRouterToCamReview } from '$lib/router_progress.js';
@@ -73,6 +74,11 @@
   let fusionQueueQuantity = 1;
   let fusionQueueFileName = '';
   let fusionQueueFolderPath = '';
+  let fusionQueueFolderSearch = '';
+  $: fusionQueueFolderSearchTerm = fusionQueueFolderSearch.trim();
+  $: fusionQueueFolderSearchResults = fusionQueueFolderSearchTerm
+    ? searchFolderTree(fusionQueueFolderTree?.tree, fusionQueueFolderSearchTerm)
+    : [];
   let fusionQueueLoading = false;
   // New Router tool-swap support - ported from the Fusion AutoCAM Parts tab
   // queue picker (src/routes/autocam/fusion/PartsTab.svelte) so this older,
@@ -1134,8 +1140,13 @@
 
   function selectFusionQueueKind(kind) {
     fusionQueueKind = kind;
-    const machine = fusionQueueMachines.find((candidate) => kind === 'tube' ? candidate.can_run_box_tubes : candidate.can_run_plates);
-    selectFusionQueueMachine(machine?.id || '');
+    // Deliberately requires an explicit choice instead of guessing one -
+    // real bug: picking the alphabetically-first plate-capable machine
+    // ("New Router" before "UNC Router") silently defaulted every plate
+    // job to New Router, whose multi-tool/single-tool rules don't apply to
+    // most jobs. Matches the Fusion CAM Parts tab, which never auto-picks
+    // a router either (see its own "Choose a router before queueing").
+    selectFusionQueueMachine('');
     if (kind === 'tube') {
       const aluminum = fusionQueueMaterials.find((material) => /alumin(?:um|ium)/i.test(material.name || ''));
       fusionQueueMaterialId = aluminum?.id || '';
@@ -1149,6 +1160,7 @@
     fusionQueueQuantity = Number.isInteger(Number(part.quantity)) && Number(part.quantity) > 0 ? Number(part.quantity) : 1;
     fusionQueueFileName = (part.name || '').replace(/\s+/g, '');
     fusionQueueFolderPath = '';
+    fusionQueueFolderSearch = '';
     fusionQueueSingleToolMode = true;
     try {
       const [categories, machines, materials, folderTree] = await Promise.all([
@@ -2996,9 +3008,42 @@
               </div>
             </div>
             <div class="cam-setup-folder">
-              <span class="form-label">Save to folder</span>
+              <div class="folder-picker-header">
+                <span class="form-label">Save to folder</span>
+                {#if fusionQueueFolderTree?.tree}
+                  <input
+                    type="search"
+                    class="form-input folder-search"
+                    placeholder="Search folders..."
+                    bind:value={fusionQueueFolderSearch}
+                    aria-label="Search folders by name"
+                  />
+                {/if}
+              </div>
               {#if fusionQueueFolderTree?.tree}
-                <div class="folder-tree-box"><FolderTreeNode node={fusionQueueFolderTree.tree} selectedPath={fusionQueueFolderPath} onSelect={(path) => (fusionQueueFolderPath = path)} /></div>
+                <div class="folder-tree-box">
+                  {#if fusionQueueFolderSearchTerm}
+                    {#if fusionQueueFolderSearchResults.length}
+                      {#each fusionQueueFolderSearchResults as result (result.path)}
+                        <button
+                          type="button"
+                          class="folder-search-result"
+                          class:selected={result.path === fusionQueueFolderPath}
+                          title={result.path}
+                          on:click={() => (fusionQueueFolderPath = result.path)}
+                        >
+                          <Folder size={15} />
+                          <span class="folder-search-name">{result.name}</span>
+                          <span class="folder-search-path">{result.path}</span>
+                        </button>
+                      {/each}
+                    {:else}
+                      <p class="cam-form-hint">No folders match "{fusionQueueFolderSearch}".</p>
+                    {/if}
+                  {:else}
+                    <FolderTreeNode node={fusionQueueFolderTree.tree} selectedPath={fusionQueueFolderPath} onSelect={(path) => (fusionQueueFolderPath = path)} />
+                  {/if}
+                </div>
               {:else}
                 <p class="cam-form-hint">Using the default AutoCAM folder. A Fusion Runner will publish folder choices after its next folder sync.</p>
               {/if}
@@ -3045,6 +3090,26 @@
   .cam-setup-columns { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr); gap: 1.5rem; align-items: start; }
   @media (max-width: 760px) { .cam-setup-columns { grid-template-columns: 1fr; } }
   .cam-setup-folder .folder-tree-box { max-height: 480px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius-sm, 6px); padding: 0.5rem; }
+  .folder-picker-header { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.4rem; }
+  .folder-search { max-width: 220px; height: 2rem; padding: 0.25rem 0.5rem; font-size: 0.8rem; }
+  .folder-search-result {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    padding: 0.4rem 0.6rem;
+    border-radius: var(--radius-sm, 6px);
+    cursor: pointer;
+    color: var(--text);
+    font-size: 0.9rem;
+  }
+  .folder-search-result:hover { background: var(--surface-2); }
+  .folder-search-result.selected { background: var(--accent-soft, rgba(47, 129, 247, 0.14)); color: var(--accent); font-weight: 600; }
+  .folder-search-name { flex-shrink: 0; }
+  .folder-search-path { color: var(--text-muted); font-size: 0.75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   .segmented-control { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-sm, 6px); overflow: hidden; }
   .segmented-control button { min-height: 2rem; padding: 0.35rem 0.65rem; border: 0; border-right: 1px solid var(--border); background: var(--surface-2, #f7f7f5); color: var(--text); font: inherit; cursor: pointer; }
