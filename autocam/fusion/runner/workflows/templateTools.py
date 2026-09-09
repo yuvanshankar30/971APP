@@ -278,6 +278,15 @@ def _choose_preset(tool: dict, material_name: Optional[str]) -> Optional[dict]:
     )
 
 
+def _has_reviewed_preset(tool: dict, material_name: Optional[str]) -> bool:
+    """Whether a loaded tool can safely be used for this material."""
+    try:
+        _choose_preset(tool, material_name)
+    except ValueError:
+        return False
+    return True
+
+
 def _tool_type_lower(tool: dict) -> str:
     return str(tool.get("type") or "").lower()
 
@@ -319,6 +328,27 @@ def _select_tools(
             diameter = _tool_diameter(tool)
             selected.append((tool, idx, diameter))
     return selected
+
+
+def _indexes_with_reviewed_presets(
+    indexes: list[dict], material_name: Optional[str]
+) -> tuple[list[dict], list[str]]:
+    """Keep only tools with reviewed data before multi-tool planning/matching."""
+    reviewed_indexes: list[dict] = []
+    skipped_guids: list[str] = []
+    for idx in indexes:
+        reviewed_tools = []
+        for tool in idx.get("tools") or []:
+            if not isinstance(tool, dict):
+                continue
+            if _has_reviewed_preset(tool, material_name):
+                reviewed_tools.append(tool)
+            elif tool.get("guid"):
+                skipped_guids.append(tool["guid"])
+        reviewed_idx = dict(idx)
+        reviewed_idx["tools"] = reviewed_tools
+        reviewed_indexes.append(reviewed_idx)
+    return reviewed_indexes, skipped_guids
 
 
 def _is_drill_tool(tool: dict) -> bool:
@@ -994,6 +1024,17 @@ def patch_cam_template_with_tool_libraries(
         lib = load_tool_library_json(path)
         indexes.append(_index_tools(lib, filter_guids=filter_guids))
 
+    # Multi-tool mode is an optimization, never permission to use a cutter
+    # without reviewed material-specific feeds/speeds. Filter before both the
+    # planner and generic template matching so an unreviewed detail tool
+    # cannot slip back in through a later operation and force an ATC swap.
+    unreviewed_tool_guids: list[str] = []
+    source_endmill_candidates = _select_tools(indexes, _is_endmill_tool)
+    if multi_tool_mode:
+        indexes, unreviewed_tool_guids = _indexes_with_reviewed_presets(
+            indexes, material_name
+        )
+
     ET.register_namespace("", _TEMPLATE_NS)
     tree = ET.parse(template_path)
     root = tree.getroot()
@@ -1010,6 +1051,11 @@ def patch_cam_template_with_tool_libraries(
 
     drill_candidates = _select_tools(indexes, _is_drill_tool)
     endmill_candidates = _select_tools(indexes, _is_endmill_tool)
+    if multi_tool_mode and source_endmill_candidates and not endmill_candidates:
+        raise ValueError(
+            f"No loaded multi-tool endmill has a reviewed feed/speed preset for "
+            f"{material_name!r}; add a named preset before queueing this material"
+        )
     endmill_plan = plan_endmills([entry[0] for entry in endmill_candidates], multi_tool_mode=multi_tool_mode)
     planned_guids = {tool.get("guid") for tool in endmill_plan["tools"]}
     endmill_candidates = [entry for entry in endmill_candidates if entry[0].get("guid") in planned_guids]
@@ -1276,6 +1322,10 @@ def patch_cam_template_with_tool_libraries(
         "replaced": replaced,
         "missing": missing,
         "bore_fallback": bore_fallback,
-        "tool_plan": {"reason": endmill_plan["reason"], "endmill_guids": list(planned_guids), "skipped_guids": endmill_plan.get("skipped_guids", [])},
+        "tool_plan": {
+            "reason": endmill_plan["reason"],
+            "endmill_guids": list(planned_guids),
+            "skipped_guids": endmill_plan.get("skipped_guids", []) + unreviewed_tool_guids,
+        },
         "output_path": output_path,
     }

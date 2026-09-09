@@ -372,7 +372,10 @@ own docs are all together in one place instead of scattered across
   polygonal exteriors, tubes, and formed parts are rejected rather than
   approximated as a round turning envelope.
   Router jobs use material-specific feed, plunge, and spindle presets, with
-  conservative dry-routing defaults when stock has not been selected.
+  conservative dry-routing defaults when stock has not been selected. In
+  New Router multi-tool jobs, a loaded cutter without a reviewed preset for
+  the selected material is excluded before planning, so it cannot cause an
+  ATC swap; a job with no reviewed endmill fails before CAM generation.
   `routing.js`/`tubestock.js` support two controller dialects
   (`params.controller`: `'linuxcnc'` default, `'wincnc'`) - see
   `autocam/postprocessors/README.md` for the shop's real post-processor
