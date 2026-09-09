@@ -454,6 +454,9 @@ own docs are all together in one place instead of scattered across
   `cam_tools`/`cam_materials` tables and a claim/complete/fail endpoint at
   `src/routes/api/fusion-runner/+server.js`. `autocam/fusion/runner/` is the
   Fusion 360 add-in that actually runs CAM. Its active workflows
+  use the configured `2026 Season CAM` Data Panel project as a strict root:
+  if Fusion cannot resolve that project, it stops folder sync/save work rather
+  than falling back to the active project and exposing a mislabeled tree.
   compare completed plate G-code against the part's internal CAD loops and
   stock depth before reporting completion, surfacing missing-feature,
   incomplete-through-cut, and unsafe thin-wall findings as job warnings.

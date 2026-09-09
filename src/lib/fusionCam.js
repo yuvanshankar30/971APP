@@ -195,6 +195,14 @@ export async function deletePart(id) {
   if (error) throw error;
 }
 
+/** Delete every selected part in one request, not one row at a time. */
+export async function deleteParts(ids) {
+  if (!ids?.length) return 0;
+  const { data, error } = await supabase.from('fusion_parts').delete().in('id', ids).select('id');
+  if (error) throw error;
+  return data?.length || 0;
+}
+
 /* ── Plates (stock parts get nested onto) ─────────────────────────────── */
 
 export async function fetchPlates() {
@@ -291,6 +299,14 @@ export async function createBoxTube({ name, epic, ticket, quantity, stepFile, cr
 export async function deleteBoxTube(id) {
   const { error } = await supabase.from('fusion_box_tubes').delete().eq('id', id);
   if (error) throw error;
+}
+
+/** Delete every selected tube-stock entry in one request, not one row at a time. */
+export async function deleteBoxTubes(ids) {
+  if (!ids?.length) return 0;
+  const { data, error } = await supabase.from('fusion_box_tubes').delete().in('id', ids).select('id');
+  if (error) throw error;
+  return data?.length || 0;
 }
 
 export async function renameBoxTube(id, name) {
@@ -542,6 +558,10 @@ export async function fetchFusionFolderTree(projectName = '2026 Season CAM') {
     .eq('project_name', projectName)
     .maybeSingle();
   if (error) throw error;
+  // A stale Runner once uploaded the active "AutoCAM" project tree while
+  // labeling it "2026 Season CAM". Never show a cache row whose actual root
+  // disagrees with the project the picker requested.
+  if (data && String(data.tree?.name || '').trim() !== projectName) return null;
   return data || null;
 }
 
@@ -675,6 +695,25 @@ export async function deleteAllFailedFusionJobs() {
     .delete()
     .eq('operation_type', 'milling')
     .eq('status', 'failed')
+    .select('id');
+  if (error) throw error;
+  return data?.length || 0;
+}
+
+/**
+ * Delete every selected Fusion job in one request - same safety scope as
+ * deleteFusionJob: only queued/completed/failed/rejected rows can go, a
+ * claimed/processing job the Runner might still be working never matches
+ * this filter regardless of which ids were selected.
+ */
+export async function deleteFusionJobs(ids) {
+  if (!ids?.length) return 0;
+  const { data, error } = await supabase
+    .from('cam_jobs')
+    .delete()
+    .in('id', ids)
+    .eq('operation_type', 'milling')
+    .in('status', ['queued', 'completed', 'failed', 'rejected'])
     .select('id');
   if (error) throw error;
   return data?.length || 0;

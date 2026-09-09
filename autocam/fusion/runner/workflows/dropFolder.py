@@ -102,25 +102,92 @@ def _retry_on_offline(app, attempts=6, initial_delay_seconds=1.0):
     return run
 
 
+_RESOLVE_PROJECT_ATTEMPTS = 6
+_RESOLVE_PROJECT_RETRY_DELAY_SEC = 1.0
+
+
+class ConfiguredDataProjectUnavailableError(RuntimeError):
+    """The configured project is unavailable; never substitute another one."""
+
+
 def resolve_data_project(app, project_name):
     """Finds a Data Panel project by exact name.
 
-    Falls back to app.data.activeProject (whatever's selected in the Data
-    Panel right now) if project_name is falsy or not found - a safety net
-    for if this project is ever renamed or deleted, not the primary way
-    this is expected to resolve day to day (FUSION_DATA_PROJECT_NAME
-    defaults to the team's real project name in config.py).
+    An empty project name uses app.data.activeProject. A configured project
+    name is an invariant: if it is unavailable, this raises rather than
+    silently substituting the active Data Panel project. Otherwise a startup
+    race or an unrelated open document can publish/save under the wrong root.
+
+    Real, confirmed live bug this retry exists to fix: the periodic
+    folder-sync walker (SpartanRoboticsAutoCAM.py's _advance_folder_sync)
+    calls this on a background timer, including early in a fresh Fusion
+    session, and the scan over app.data.dataProjects had no error
+    handling at all, unlike every other Data Panel call in this file.
+
+    A first attempt at this retried only on a raised RuntimeError (the
+    same class of stale-handle glitch FolderTreeWalker.run_chunk already
+    tolerates) - and still wasn't enough: confirmed live, the tree's own
+    root reverted to "AutoCAM" again on a fresh relaunch, with a live,
+    direct call to this exact function moments later (well past startup)
+    resolving correctly on the very first try. That timing points at
+    Fusion's own Data Panel project list not having finished loading yet
+    right after launch - the same real, reproducible startup window
+    _retry_on_offline's own docstring documents for offline cloud calls -
+    except here it surfaces as projects.count silently reporting 0 (or an
+    incomplete list), not a raised exception, so the old exception-only
+    retry never triggered at all. A real shop account always has several
+    projects; a clean scan that finds none is treated as this same
+    cold-start gap and retried with the same longer, exponential backoff
+    _retry_on_offline itself uses, not the short, fixed-delay retry a
+    stale-handle glitch alone would have warranted.
+
+    A scan that finds at least one project but genuinely never matches is a
+    configuration error, not permission to use a different project.
     """
     if project_name:
-        projects = app.data.dataProjects
-        for i in range(projects.count):
-            candidate = projects.item(i)
-            if candidate.name == project_name:
-                return candidate
-        app.log(
-            f"FUSION_DATA_PROJECT_NAME '{project_name}' not found among "
-            "this account's Fusion projects - falling back to the active "
-            "project."
+        delay_seconds = _RESOLVE_PROJECT_RETRY_DELAY_SEC
+        scanned_a_nonempty_list_without_a_match = False
+        for attempt in range(1, _RESOLVE_PROJECT_ATTEMPTS + 1):
+            try:
+                projects = app.data.dataProjects
+                count = projects.count
+                for i in range(count):
+                    candidate = projects.item(i)
+                    if candidate.name == project_name:
+                        return candidate
+                if count > 0:
+                    scanned_a_nonempty_list_without_a_match = True
+                    break
+            except RuntimeError as exc:
+                if attempt == _RESOLVE_PROJECT_ATTEMPTS:
+                    app.log(
+                        f"Listing Fusion Data Panel projects failed {attempt} times "
+                        f"while looking for '{project_name}' ({exc}) - folder "
+                        "sync/save is disabled until the configured project is available."
+                    )
+                    break
+                time.sleep(delay_seconds)
+                delay_seconds *= 2
+                continue
+            # count == 0 on a clean scan (no exception) - the real
+            # cold-start gap this retry exists for. Keep retrying with
+            # the same backoff as a caught RuntimeError would use.
+            if attempt == _RESOLVE_PROJECT_ATTEMPTS:
+                app.log(
+                    f"Fusion reported zero Data Panel projects on every attempt "
+                    f"while looking for '{project_name}' - folder sync/save is "
+                    "disabled until it is available."
+                )
+                break
+            time.sleep(delay_seconds)
+            delay_seconds *= 2
+        if scanned_a_nonempty_list_without_a_match:
+            app.log(
+                f"FUSION_DATA_PROJECT_NAME '{project_name}' not found among "
+                "this account's Fusion projects - folder sync/save is disabled."
+            )
+        raise ConfiguredDataProjectUnavailableError(
+            f"Configured Fusion Data Panel project '{project_name}' is unavailable"
         )
     return app.data.activeProject
 

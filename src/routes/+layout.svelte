@@ -789,6 +789,14 @@
        centre line, not just midway between two unequal neighbours. */
     flex: 1 1 0;
     min-width: 0;
+    /* min-width:0 lets this side shrink below its content's natural width,
+       but the brand/right-side children themselves (flex-shrink:0,
+       white-space:nowrap) refuse to shrink to match - without clipping
+       here, that overflow renders past this side's own box and visually
+       bleeds into the desktop nav links next to it at a narrow window
+       width, garbling both into overlapping text instead of one side
+       just running out of room cleanly. */
+    overflow: hidden;
   }
 
   .nav-side-right {
@@ -802,7 +810,11 @@
     gap: 0.6rem;
     color: var(--secondary);
     text-decoration: none;
-    flex-shrink: 0;
+    /* Shrinkable (not flex-shrink:0) so a narrow window truncates the
+       brand name with an ellipsis instead of clipping it off sharply mid-
+       letter at the parent's own overflow:hidden boundary. */
+    flex-shrink: 1;
+    min-width: 0;
     margin-right: var(--space-3);
     padding: 0.4rem 0.6rem;
     border-radius: var(--radius-sm);
@@ -819,6 +831,9 @@
     font-weight: 700;
     letter-spacing: -0.02em;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
   }
 
   /* ========== DESKTOP NAV ========== */

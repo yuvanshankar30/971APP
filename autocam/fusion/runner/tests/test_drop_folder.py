@@ -85,6 +85,140 @@ class OfflineSettingsRetryTests(unittest.TestCase):
         self.assertEqual(app.log.call_count, 2)
 
 
+def fake_project(name):
+    project = MagicMock()
+    project.name = name
+    return project
+
+
+def fake_data_projects(projects, raise_on_scan=None, empty_scans=0):
+    """A fake app.data.dataProjects - .count/.item(i) either enumerate
+    ``projects`` normally, raise ``raise_on_scan`` (once per configured
+    number of scans, via a mutable counter) to simulate the stale-handle
+    glitch resolve_data_project's retry exists for, or report count==0
+    for the first ``empty_scans`` calls with no exception at all - the
+    real Fusion cold-start gap (the project list hasn't finished loading
+    yet, confirmed live as the actual root cause a pure exception-based
+    retry did not cover).
+    """
+    calls = {"count": 0}
+
+    class FakeProjects:
+        @property
+        def count(self):
+            calls["count"] += 1
+            if raise_on_scan and calls["count"] <= raise_on_scan:
+                raise RuntimeError("2 : InternalValidationError : status.isOk() && projects")
+            if calls["count"] <= empty_scans:
+                return 0
+            return len(projects)
+
+        def item(self, i):
+            return projects[i]
+
+    return FakeProjects(), calls
+
+
+class ResolveDataProjectTests(unittest.TestCase):
+    """Real, confirmed live bug: a transient RuntimeError scanning
+    app.data.dataProjects (the same class of stale-handle glitch
+    FolderTreeWalker.run_chunk already tolerates) used to propagate
+    straight out of resolve_data_project's unguarded loop, read as "not
+    found," and silently fall back to app.data.activeProject - whatever
+    document a background job happened to have open at that exact moment.
+    The periodic folder-sync walker then republished the shared
+    fusion_data_folders tree rooted at that unrelated, unstable project
+    instead of the shop's real, configured one - with no error surfaced
+    anywhere, and the misconfiguration this was originally written to
+    guard against (a genuinely renamed/deleted project) never having
+    actually happened.
+    """
+
+    def test_finds_the_named_project_on_a_clean_scan(self):
+        app = fake_app()
+        target = fake_project("2026 Season CAM")
+        app.data.dataProjects, _calls = fake_data_projects(
+            [fake_project("2020 Robot CAM"), target]
+        )
+
+        self.assertIs(dropFolder.resolve_data_project(app, "2026 Season CAM"), target)
+
+    def test_survives_a_single_transient_error_without_falling_back(self):
+        app = fake_app()
+        target = fake_project("2026 Season CAM")
+        app.data.dataProjects, calls = fake_data_projects([target], raise_on_scan=1)
+        app.data.activeProject = fake_project("AutoCAM")
+
+        with patch.object(dropFolder.time, "sleep"):
+            result = dropFolder.resolve_data_project(app, "2026 Season CAM")
+
+        self.assertIs(result, target)
+        self.assertGreater(calls["count"], 1)
+
+    def test_refuses_to_substitute_the_active_project_after_every_retry_fails(self):
+        app = fake_app()
+        app.data.dataProjects, _calls = fake_data_projects([], raise_on_scan=99)
+        active = fake_project("AutoCAM")
+        app.data.activeProject = active
+
+        with patch.object(dropFolder.time, "sleep"), self.assertRaises(
+            dropFolder.ConfiguredDataProjectUnavailableError
+        ):
+            dropFolder.resolve_data_project(app, "2026 Season CAM")
+
+        self.assertTrue(app.log.called)
+
+    def test_refuses_to_substitute_the_active_project_on_a_genuine_clean_not_found(self):
+        app = fake_app()
+        app.data.dataProjects, calls = fake_data_projects([fake_project("Some Other Project")])
+        active = fake_project("AutoCAM")
+        app.data.activeProject = active
+
+        with self.assertRaises(dropFolder.ConfiguredDataProjectUnavailableError):
+            dropFolder.resolve_data_project(app, "2026 Season CAM")
+
+        self.assertEqual(calls["count"], 1)
+
+    def test_survives_a_cold_start_empty_project_list_without_falling_back(self):
+        # Real, confirmed live bug this test exists to catch: the first
+        # fix here only retried a RAISED RuntimeError - but Fusion's own
+        # Data Panel project list not having finished loading yet right
+        # after launch surfaces as projects.count silently reporting 0,
+        # not an exception, so that retry never triggered at all and this
+        # cold-start gap fell straight through to app.data.activeProject
+        # on the very first (empty) scan.
+        app = fake_app()
+        target = fake_project("2026 Season CAM")
+        app.data.dataProjects, calls = fake_data_projects([target], empty_scans=3)
+        app.data.activeProject = fake_project("AutoCAM")
+
+        with patch.object(dropFolder.time, "sleep"):
+            result = dropFolder.resolve_data_project(app, "2026 Season CAM")
+
+        self.assertIs(result, target)
+        self.assertGreater(calls["count"], 3)
+
+    def test_refuses_to_substitute_the_active_project_when_the_project_list_stays_empty(self):
+        app = fake_app()
+        app.data.dataProjects, _calls = fake_data_projects([], empty_scans=99)
+        active = fake_project("AutoCAM")
+        app.data.activeProject = active
+
+        with patch.object(dropFolder.time, "sleep"), self.assertRaises(
+            dropFolder.ConfiguredDataProjectUnavailableError
+        ):
+            dropFolder.resolve_data_project(app, "2026 Season CAM")
+
+        self.assertTrue(app.log.called)
+
+    def test_empty_project_name_goes_straight_to_active_project(self):
+        app = fake_app()
+        active = fake_project("Whatever Is Open")
+        app.data.activeProject = active
+
+        self.assertIs(dropFolder.resolve_data_project(app, ""), active)
+
+
 class OfflineMustNotCreateFoldersTests(unittest.TestCase):
     """An offline lookup failure means we do not KNOW whether a folder
     exists. Treating it as "not found" made resolve_drop_folder go on to

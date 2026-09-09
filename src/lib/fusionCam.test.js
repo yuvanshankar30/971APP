@@ -15,8 +15,12 @@ import {
   fetchFusionJobNcFiles,
   fetchFusionPartStepFiles,
   fetchFusionJobsByManufacturingPartIds,
+  fetchFusionFolderTree,
   installFusionPartCad,
   deleteAllFailedFusionJobs,
+  deleteParts,
+  deleteBoxTubes,
+  deleteFusionJobs,
   isFusionOutputJob,
   queueFusionJob,
   updatePartQuantity,
@@ -28,6 +32,7 @@ function chain(result) {
   const query = {};
   for (const method of ['select', 'eq', 'in', 'not', 'order', 'limit', 'range', 'delete', 'insert', 'update']) query[method] = vi.fn(() => query);
   query.single = vi.fn(async () => result);
+  query.maybeSingle = vi.fn(async () => result);
   query.then = (resolve) => resolve(result);
   mocks.queries.push(query);
   return query;
@@ -40,6 +45,15 @@ beforeEach(() => {
 });
 
 describe('Fusion CAM queue query efficiency', () => {
+  it('rejects a stale folder cache whose root does not match the requested project', async () => {
+    mocks.from.mockReturnValue(chain({
+      data: { project_name: '2026 Season CAM', tree: { name: 'AutoCAM' } },
+      error: null
+    }));
+
+    await expect(fetchFusionFolderTree()).resolves.toBeNull();
+  });
+
   it('keeps a linked manufacturing request quantity aligned with Fusion CAM', async () => {
     mocks.from.mockImplementation((table) => {
       if (table === 'fusion_parts' && mocks.queries.length === 0) {
@@ -281,5 +295,53 @@ describe('Fusion CAM queue query efficiency', () => {
   it('reports zero rather than throwing when there is nothing failed to delete', async () => {
     mocks.from.mockReturnValue(chain({ data: [], error: null }));
     await expect(deleteAllFailedFusionJobs()).resolves.toBe(0);
+  });
+
+  it('deletes every selected part in one request and reports the real count', async () => {
+    mocks.from.mockReturnValue(chain({ data: [{ id: 'a' }, { id: 'b' }], error: null }));
+
+    await expect(deleteParts(['a', 'b'])).resolves.toBe(2);
+
+    expect(mocks.from).toHaveBeenCalledTimes(1);
+    expect(mocks.from).toHaveBeenCalledWith('fusion_parts');
+    expect(mocks.queries[0].delete).toHaveBeenCalled();
+    expect(mocks.queries[0].in).toHaveBeenCalledWith('id', ['a', 'b']);
+  });
+
+  it('never calls the database for an empty part selection', async () => {
+    await expect(deleteParts([])).resolves.toBe(0);
+    expect(mocks.from).not.toHaveBeenCalled();
+  });
+
+  it('deletes every selected tube-stock entry in one request and reports the real count', async () => {
+    mocks.from.mockReturnValue(chain({ data: [{ id: 'x' }], error: null }));
+
+    await expect(deleteBoxTubes(['x'])).resolves.toBe(1);
+
+    expect(mocks.from).toHaveBeenCalledWith('fusion_box_tubes');
+    expect(mocks.queries[0].delete).toHaveBeenCalled();
+    expect(mocks.queries[0].in).toHaveBeenCalledWith('id', ['x']);
+  });
+
+  it('never calls the database for an empty tube selection', async () => {
+    await expect(deleteBoxTubes([])).resolves.toBe(0);
+    expect(mocks.from).not.toHaveBeenCalled();
+  });
+
+  it('deletes every selected job in one request, scoped to the same safe statuses as a single delete', async () => {
+    mocks.from.mockReturnValue(chain({ data: [{ id: '1' }, { id: '2' }], error: null }));
+
+    await expect(deleteFusionJobs(['1', '2'])).resolves.toBe(2);
+
+    expect(mocks.from).toHaveBeenCalledWith('cam_jobs');
+    expect(mocks.queries[0].delete).toHaveBeenCalled();
+    expect(mocks.queries[0].in).toHaveBeenCalledWith('id', ['1', '2']);
+    expect(mocks.queries[0].eq).toHaveBeenCalledWith('operation_type', 'milling');
+    expect(mocks.queries[0].in).toHaveBeenCalledWith('status', ['queued', 'completed', 'failed', 'rejected']);
+  });
+
+  it('never calls the database for an empty job selection', async () => {
+    await expect(deleteFusionJobs([])).resolves.toBe(0);
+    expect(mocks.from).not.toHaveBeenCalled();
   });
 });

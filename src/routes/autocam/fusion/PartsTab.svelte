@@ -4,7 +4,7 @@
   import { toastActions } from '$lib/toast.js';
   import { supabase } from '$lib/supabase.js';
   import {
-    fetchParts, createPart, deletePart, renamePart, updatePartQuantity, fetchPartCategories, installFusionPartCad,
+    fetchParts, createPart, deletePart, deleteParts, renamePart, updatePartQuantity, fetchPartCategories, installFusionPartCad,
     fetchPlates, createPlate, assignPartToPlate, queueFusionJob, fetchFusionFolderTree
   } from '$lib/fusionCam.js';
   import { PACIFIC_TIME_ZONE, formatPacificDateTime } from '$lib/timezone.js';
@@ -61,6 +61,53 @@
         || categoryLabel(part.fusion_part_categories).toLowerCase().includes(partsListSearchTerm)
       )
     : partsByCreatedAt;
+
+  // Bulk-select-and-delete for the parts list - a plain Set of part ids,
+  // separate from any single-row action so selecting for bulk delete never
+  // interferes with rename/quantity-edit/queue state on the same card.
+  let selectedPartIds = new Set();
+  let bulkDeletingParts = false;
+  // Read-only derivation, not a pruning reassignment - a part filtered out
+  // of view by search stays selected (so switching the search term back
+  // doesn't silently lose the selection), this just keeps the "select
+  // all" checkbox's own indicator honest about what's visible right now.
+  $: visibleSelectedCount = filteredPartsByCreatedAt.filter((p) => selectedPartIds.has(p.id)).length;
+  function togglePartSelected(partId) {
+    const next = new Set(selectedPartIds);
+    if (next.has(partId)) next.delete(partId); else next.add(partId);
+    selectedPartIds = next;
+  }
+  function toggleSelectAllParts() {
+    if (visibleSelectedCount === filteredPartsByCreatedAt.length && filteredPartsByCreatedAt.length > 0) {
+      const visibleIds = new Set(filteredPartsByCreatedAt.map((p) => p.id));
+      selectedPartIds = new Set([...selectedPartIds].filter((id) => !visibleIds.has(id)));
+    } else {
+      selectedPartIds = new Set([...selectedPartIds, ...filteredPartsByCreatedAt.map((p) => p.id)]);
+    }
+  }
+  async function handleBulkDeleteParts() {
+    const ids = [...selectedPartIds];
+    if (!ids.length) return;
+    if (!await requestConfirmation({
+      title: 'Delete parts',
+      message: `Delete ${ids.length} selected part${ids.length === 1 ? '' : 's'}? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      danger: true
+    })) return;
+    bulkDeletingParts = true;
+    try {
+      const removed = await deleteParts(ids);
+      const removedSet = new Set(ids);
+      parts = parts.filter((p) => !removedSet.has(p.id));
+      selectedPartIds = new Set();
+      toastActions.show(`Deleted ${removed} part${removed === 1 ? '' : 's'}`);
+    } catch (e) {
+      toastActions.show(e.message || 'Failed to delete selected parts');
+    } finally {
+      bulkDeletingParts = false;
+    }
+  }
+
   // Once a stock category is chosen (picked directly, or implied by a
   // just-selected recent part), narrow "Recent parts" to that category
   // instead of mixing every category together - a category already in
@@ -515,8 +562,37 @@
     return isNewRouter(machineId) && isAluminum6061(group);
   }
 
+  // The real, physical 971 Main Bit's own stable tool-library GUID
+  // (tools/971-outside-plate.tools and tools/Normal router tools (use
+  // this).tools both use this same GUID for it) - matched on this rather
+  // than the tool's own name, which real, confirmed history has already
+  // shown can drift ("971 Main Bit 0.1575 in Flat End Mill" vs. "ShopSabre
+  // 1 971 Main Bit (0.1575in)" turned out to be two separate duplicate
+  // cam_tools rows for this exact physical bit) and previously made an
+  // exact-name match here silently never find it at all.
+  const MAIN_BIT_GUID = '10a2caeb-dec0-49b2-8701-96fdb212bad9';
+
+  function _looksLikeMainBit(tool) {
+    if (tool?.tool_library_guid === MAIN_BIT_GUID) return true;
+    return String(tool?.name || '').trim().toLowerCase().includes('971 main bit');
+  }
+
   function mainBitForMachine(machineId) {
-    return toolsForMachine(machineId).find((tool) => String(tool.name || '').trim().toLowerCase() === '971 main bit');
+    return toolsForMachine(machineId).find(_looksLikeMainBit);
+  }
+
+  // Only 971 Main Bit ships a real, reviewed feed/speed preset for every
+  // material this shop actually cuts (see tools/971-outside-plate.tools) -
+  // every other loaded New Router cutter only has a bare "Default preset",
+  // which templateTools.py's own _choose_preset() only accepts for
+  // Aluminum 6061 (a deliberately narrow exception, not a general
+  // fallback). Selecting one of those other tools for any other material
+  // queues a job that is guaranteed to fail once Fusion actually tries to
+  // apply feeds/speeds - disabled here instead of failing minutes later,
+  // deep into a real machine run.
+  function toolHasReviewedPresetForGroup(tool, group) {
+    if (isAluminum6061(group)) return true;
+    return _looksLikeMainBit(tool);
   }
 
   // ATC Slots, reachable right from the queue picker (not only the /autocam
@@ -592,6 +668,14 @@
     if (manufacturingHasStepFile) return;
     stepFile = event.target.files?.[0] || null;
     stepCarriedOverFrom = null; // user picked their own file - the carry-over hint no longer applies
+    // A STEP file picked before the name is typed suggests a real filename
+    // like "BellyPan.step" the operator would otherwise just retype by
+    // hand into Name - only when Name is still empty, so this never
+    // overwrites a name someone already typed in.
+    if (stepFile && !newPart.name.trim()) {
+      const derivedName = stepFile.name.replace(/\.(step|stp)$/i, '').trim();
+      if (derivedName) newPart = { ...newPart, name: derivedName };
+    }
     if (stepFile) await detectStepThickness(new Uint8Array(await stepFile.arrayBuffer()));
     else detectedDepthInches = null;
   }
@@ -665,6 +749,11 @@
       // row - a real report: even with load()'s loading-flash fix, a full
       // re-fetch still visibly "reloaded" the list on every delete.
       parts = parts.filter((p) => p.id !== part.id);
+      if (selectedPartIds.has(part.id)) {
+        const next = new Set(selectedPartIds);
+        next.delete(part.id);
+        selectedPartIds = next;
+      }
     } catch (e) {
       toastActions.show(e.message || 'Failed to delete part');
     }
@@ -837,6 +926,9 @@
       const selectedTool = toolsForMachine(categoryMachineSelections[categoryId])
         .find((tool) => String(tool.id) === String(categoryToolSelections[categoryId]));
       if (!isEndmill(selectedTool)) return 'Single-tool CAM requires an endmill';
+      if (isNewRouter(categoryMachineSelections[categoryId]) && !toolHasReviewedPresetForGroup(selectedTool, group)) {
+        return 'Selected tool has no reviewed feed/speed preset for this material';
+      }
     }
     const mode = categoryQueueModes[categoryId];
     if (!['single', 'grouped'].includes(mode)) return 'Choose single-part or grouped CAM';
@@ -847,6 +939,13 @@
       if (!Number.isInteger(quantity) || quantity <= 0) return 'Quantity must be a whole number greater than zero';
       const part = group.parts.find((p) => p.id === partId);
       if (part && quantity > maximumQueueQuantity(group, part)) return `Only ${maximumQueueQuantity(group, part)} of ${part.name} is available`;
+      // Real, confirmed gap: nothing here checked for a STEP file at all -
+      // the UI let a part with none through, only for buildJobPayload.js's
+      // own signedUrl() to reject the whole job server-side minutes later
+      // with "Part X is missing its STEP file." Caught here instead, same
+      // as every other queueing prerequisite this function already fails
+      // fast on.
+      if (part && !part.step_file_name) return `${part.name} has no STEP file uploaded yet`;
     }
     if (mode === 'grouped') {
       const selected = categoryGroupedPartSelections[categoryId] || [];
@@ -856,6 +955,7 @@
         if (!Number.isInteger(quantity) || quantity <= 0) return 'Every selected part needs a whole-number quantity greater than zero';
         const part = group.parts.find((p) => p.id === partId);
         if (part && quantity > maximumQueueQuantity(group, part)) return `Only ${maximumQueueQuantity(group, part)} of ${part.name} is available`;
+        if (part && !part.step_file_name) return `${part.name} has no STEP file uploaded yet`;
       }
     }
     return null;
@@ -1107,31 +1207,60 @@
     {#if filteredPartsByCreatedAt.length === 0}
       <p class="empty-state">No parts match "{partsListSearch}".</p>
     {/if}
+    {#if canManage && filteredPartsByCreatedAt.length > 0}
+      <div class="bulk-select-bar">
+        <label class="bulk-select-all">
+          <input
+            type="checkbox"
+            checked={visibleSelectedCount > 0 && visibleSelectedCount === filteredPartsByCreatedAt.length}
+            indeterminate={visibleSelectedCount > 0 && visibleSelectedCount < filteredPartsByCreatedAt.length}
+            on:change={toggleSelectAllParts}
+          />
+          {visibleSelectedCount > 0 ? `${visibleSelectedCount} selected` : 'Select all'}
+        </label>
+        {#if visibleSelectedCount > 0}
+          <button type="button" class="btn btn-ghost btn-sm" disabled={bulkDeletingParts} on:click={handleBulkDeleteParts}>
+            <Trash2 size={14} /> {bulkDeletingParts ? 'Deleting...' : `Delete ${visibleSelectedCount} selected`}
+          </button>
+        {/if}
+      </div>
+    {/if}
     {#each [{ key: 'all-parts', parts: filteredPartsByCreatedAt }] as group (group.key)}
       <section class="stock-group">
           <div class="cam-list">
             {#each group.parts as part (part.id)}
               <div class="card cam-list-item">
                 <div class="cam-list-header">
-                  {#if renamingPartId === part.id}
-                    <span class="rename-control">
-                      <Package size={16} />
+                  <span class="cam-list-header-left">
+                    {#if canManage}
                       <input
-                        class="form-input rename-input"
-                        bind:value={renamePartValue}
-                        on:keydown={(e) => { if (e.key === 'Enter') saveRenamePart(part); if (e.key === 'Escape') cancelRenamePart(); }}
+                        type="checkbox"
+                        class="bulk-select-checkbox"
+                        checked={selectedPartIds.has(part.id)}
+                        on:change={() => togglePartSelected(part.id)}
+                        aria-label={`Select ${part.name}`}
                       />
-                      <button type="button" class="btn btn-ghost btn-sm" title="Save" on:click={() => saveRenamePart(part)}><Check size={14} /></button>
-                      <button type="button" class="btn btn-ghost btn-sm" title="Cancel" on:click={cancelRenamePart}><X size={14} /></button>
-                    </span>
-                  {:else}
-                    <span class="rename-control">
-                      <strong><Package size={16} /> {part.name}</strong>
-                      {#if canManage}
-                        <button type="button" class="btn btn-ghost btn-sm" title="Rename" on:click={() => startRenamePart(part)}><Pencil size={13} /></button>
-                      {/if}
-                    </span>
-                  {/if}
+                    {/if}
+                    {#if renamingPartId === part.id}
+                      <span class="rename-control">
+                        <Package size={16} />
+                        <input
+                          class="form-input rename-input"
+                          bind:value={renamePartValue}
+                          on:keydown={(e) => { if (e.key === 'Enter') saveRenamePart(part); if (e.key === 'Escape') cancelRenamePart(); }}
+                        />
+                        <button type="button" class="btn btn-ghost btn-sm" title="Save" on:click={() => saveRenamePart(part)}><Check size={14} /></button>
+                        <button type="button" class="btn btn-ghost btn-sm" title="Cancel" on:click={cancelRenamePart}><X size={14} /></button>
+                      </span>
+                    {:else}
+                      <span class="rename-control">
+                        <strong><Package size={16} /> {part.name}</strong>
+                        {#if canManage}
+                          <button type="button" class="btn btn-ghost btn-sm" title="Rename" on:click={() => startRenamePart(part)}><Pencil size={13} /></button>
+                        {/if}
+                      </span>
+                    {/if}
+                  </span>
                   <span class="tag">{categoryLabel(part.fusion_part_categories)}</span>
                 </div>
                 <p class="cam-form-hint">
@@ -1390,7 +1519,12 @@
                   <select id={`queue-tool-${group.categoryId}`} class="form-select" bind:value={categoryToolSelections[group.categoryId]} disabled={!categoryMachineSelections[group.categoryId]}>
                     <option value="">{toolsForMachine(categoryMachineSelections[group.categoryId]).length ? 'Choose a tool...' : 'No tools installed'}</option>
                     {#each toolsForMachine(categoryMachineSelections[group.categoryId]).filter((tool) => !isNewRouter(categoryMachineSelections[group.categoryId]) || isEndmill(tool)) as t}
-                      <option value={t.id}>{toolLabel(t)}</option>
+                      <option
+                        value={t.id}
+                        disabled={isNewRouter(categoryMachineSelections[group.categoryId]) && !toolHasReviewedPresetForGroup(t, group)}
+                      >
+                        {toolLabel(t)}{isNewRouter(categoryMachineSelections[group.categoryId]) && !toolHasReviewedPresetForGroup(t, group) ? ' (no preset for this material)' : ''}
+                      </option>
                     {/each}
                   </select>
                 </div>
@@ -1603,6 +1737,11 @@
   .cam-list-header { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
   .rename-control { display: flex; align-items: center; gap: 0.35rem; min-width: 0; }
   .rename-input { padding: 0.2rem 0.4rem; height: auto; width: auto; min-width: 10rem; }
+  .cam-list-header-left { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+  .bulk-select-checkbox { width: 1rem; height: 1rem; flex-shrink: 0; cursor: pointer; }
+  .bulk-select-bar { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.5rem 0.75rem; margin-bottom: 0.6rem; border: 1px solid var(--border); border-radius: var(--radius-md, 10px); background: var(--surface-2, #f7f7f5); flex-wrap: wrap; }
+  .bulk-select-all { display: flex; align-items: center; gap: 0.5rem; font-size: 0.82rem; font-weight: 500; color: var(--text-muted); cursor: pointer; }
+  .bulk-select-all input { width: 1rem; height: 1rem; cursor: pointer; }
   .quantity-control { display: inline-flex; }
   .quantity-input { min-width: 4rem; width: 4rem; }
   .cam-list-actions { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; flex-wrap: wrap; }
