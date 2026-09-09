@@ -102,8 +102,8 @@ def _retry_on_offline(app, attempts=6, initial_delay_seconds=1.0):
     return run
 
 
-_RESOLVE_PROJECT_ATTEMPTS = 3
-_RESOLVE_PROJECT_RETRY_DELAY_SEC = 0.5
+_RESOLVE_PROJECT_ATTEMPTS = 6
+_RESOLVE_PROJECT_RETRY_DELAY_SEC = 1.0
 
 
 def resolve_data_project(app, project_name):
@@ -118,38 +118,46 @@ def resolve_data_project(app, project_name):
 
     Real, confirmed live bug this retry exists to fix: the periodic
     folder-sync walker (SpartanRoboticsAutoCAM.py's _advance_folder_sync)
-    calls this on a background timer while jobs are actively processing -
-    each opening and closing its own temp document - and the scan over
-    app.data.dataProjects had no error handling at all, unlike every
-    other Data Panel call in this file. A single transient RuntimeError
-    reading .count/.item()/.name (the same class of stale-handle glitch
-    FolderTreeWalker.run_chunk already tolerates) used to propagate
-    straight out of the scan, read as "not found," and silently fall back
-    to app.data.activeProject - whatever document a job happened to have
-    open at that exact moment, not the shop's real, stable project. The
-    synced folder tree (fusion_data_folders) then republished rooted at
-    that unrelated, unstable project instead of the real one, with no
-    error surfaced anywhere - confirmed live: the tree's own root
-    silently reverted to "AutoCAM" (a job's own save subfolder) days
-    after this was believed fixed, purely from sync timing, the
-    configured FUSION_DATA_PROJECT_NAME/FUSION_DROP_FOLDER_PATH never
-    having changed.
+    calls this on a background timer, including early in a fresh Fusion
+    session, and the scan over app.data.dataProjects had no error
+    handling at all, unlike every other Data Panel call in this file.
 
-    A transient scan failure is now retried a few times before falling
-    back - the fallback still exists for a genuine "renamed or deleted"
-    case, it just no longer fires on a momentary glitch.
+    A first attempt at this retried only on a raised RuntimeError (the
+    same class of stale-handle glitch FolderTreeWalker.run_chunk already
+    tolerates) - and still wasn't enough: confirmed live, the tree's own
+    root reverted to "AutoCAM" again on a fresh relaunch, with a live,
+    direct call to this exact function moments later (well past startup)
+    resolving correctly on the very first try. That timing points at
+    Fusion's own Data Panel project list not having finished loading yet
+    right after launch - the same real, reproducible startup window
+    _retry_on_offline's own docstring documents for offline cloud calls -
+    except here it surfaces as projects.count silently reporting 0 (or an
+    incomplete list), not a raised exception, so the old exception-only
+    retry never triggered at all. A real shop account always has several
+    projects; a clean scan that finds none is treated as this same
+    cold-start gap and retried with the same longer, exponential backoff
+    _retry_on_offline itself uses, not the short, fixed-delay retry a
+    stale-handle glitch alone would have warranted.
+
+    A scan that finds at least one project but genuinely never matches
+    project_name is a different case - a real rename/deletion, not a
+    timing gap - and falls back immediately without wasting retries on
+    it.
     """
     if project_name:
-        scanned_cleanly_without_a_match = False
+        delay_seconds = _RESOLVE_PROJECT_RETRY_DELAY_SEC
+        scanned_a_nonempty_list_without_a_match = False
         for attempt in range(1, _RESOLVE_PROJECT_ATTEMPTS + 1):
             try:
                 projects = app.data.dataProjects
-                for i in range(projects.count):
+                count = projects.count
+                for i in range(count):
                     candidate = projects.item(i)
                     if candidate.name == project_name:
                         return candidate
-                scanned_cleanly_without_a_match = True
-                break
+                if count > 0:
+                    scanned_a_nonempty_list_without_a_match = True
+                    break
             except RuntimeError as exc:
                 if attempt == _RESOLVE_PROJECT_ATTEMPTS:
                     app.log(
@@ -157,9 +165,23 @@ def resolve_data_project(app, project_name):
                         f"while looking for '{project_name}' ({exc}) - falling back "
                         "to the active project."
                     )
-                else:
-                    time.sleep(_RESOLVE_PROJECT_RETRY_DELAY_SEC)
-        if scanned_cleanly_without_a_match:
+                    break
+                time.sleep(delay_seconds)
+                delay_seconds *= 2
+                continue
+            # count == 0 on a clean scan (no exception) - the real
+            # cold-start gap this retry exists for. Keep retrying with
+            # the same backoff as a caught RuntimeError would use.
+            if attempt == _RESOLVE_PROJECT_ATTEMPTS:
+                app.log(
+                    f"Fusion reported zero Data Panel projects on every attempt "
+                    f"while looking for '{project_name}' - falling back to the "
+                    "active project."
+                )
+                break
+            time.sleep(delay_seconds)
+            delay_seconds *= 2
+        if scanned_a_nonempty_list_without_a_match:
             app.log(
                 f"FUSION_DATA_PROJECT_NAME '{project_name}' not found among "
                 "this account's Fusion projects - falling back to the active "

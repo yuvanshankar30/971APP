@@ -91,11 +91,15 @@ def fake_project(name):
     return project
 
 
-def fake_data_projects(projects, raise_on_scan=None):
+def fake_data_projects(projects, raise_on_scan=None, empty_scans=0):
     """A fake app.data.dataProjects - .count/.item(i) either enumerate
-    ``projects`` normally, or raise ``raise_on_scan`` (once per configured
-    number of scans, via a mutable counter) to simulate the exact
-    transient stale-handle glitch resolve_data_project's retry exists for.
+    ``projects`` normally, raise ``raise_on_scan`` (once per configured
+    number of scans, via a mutable counter) to simulate the stale-handle
+    glitch resolve_data_project's retry exists for, or report count==0
+    for the first ``empty_scans`` calls with no exception at all - the
+    real Fusion cold-start gap (the project list hasn't finished loading
+    yet, confirmed live as the actual root cause a pure exception-based
+    retry did not cover).
     """
     calls = {"count": 0}
 
@@ -105,6 +109,8 @@ def fake_data_projects(projects, raise_on_scan=None):
             calls["count"] += 1
             if raise_on_scan and calls["count"] <= raise_on_scan:
                 raise RuntimeError("2 : InternalValidationError : status.isOk() && projects")
+            if calls["count"] <= empty_scans:
+                return 0
             return len(projects)
 
         def item(self, i):
@@ -174,6 +180,37 @@ class ResolveDataProjectTests(unittest.TestCase):
 
         self.assertIs(result, active)
         self.assertEqual(calls["count"], 1)
+
+    def test_survives_a_cold_start_empty_project_list_without_falling_back(self):
+        # Real, confirmed live bug this test exists to catch: the first
+        # fix here only retried a RAISED RuntimeError - but Fusion's own
+        # Data Panel project list not having finished loading yet right
+        # after launch surfaces as projects.count silently reporting 0,
+        # not an exception, so that retry never triggered at all and this
+        # cold-start gap fell straight through to app.data.activeProject
+        # on the very first (empty) scan.
+        app = fake_app()
+        target = fake_project("2026 Season CAM")
+        app.data.dataProjects, calls = fake_data_projects([target], empty_scans=3)
+        app.data.activeProject = fake_project("AutoCAM")
+
+        with patch.object(dropFolder.time, "sleep"):
+            result = dropFolder.resolve_data_project(app, "2026 Season CAM")
+
+        self.assertIs(result, target)
+        self.assertGreater(calls["count"], 3)
+
+    def test_falls_back_to_active_project_when_the_project_list_stays_empty(self):
+        app = fake_app()
+        app.data.dataProjects, _calls = fake_data_projects([], empty_scans=99)
+        active = fake_project("AutoCAM")
+        app.data.activeProject = active
+
+        with patch.object(dropFolder.time, "sleep"):
+            result = dropFolder.resolve_data_project(app, "2026 Season CAM")
+
+        self.assertIs(result, active)
+        self.assertTrue(app.log.called)
 
     def test_empty_project_name_goes_straight_to_active_project(self):
         app = fake_app()
