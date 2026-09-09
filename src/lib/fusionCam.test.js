@@ -63,14 +63,18 @@ describe('Fusion CAM queue query efficiency', () => {
   });
 
   it('queues tube stock directly without a plate or grouping contract', async () => {
-    mocks.from.mockReturnValue(chain({ data: { id: 'tube-job' }, error: null }));
+    mocks.from.mockImplementation((table) =>
+      table === 'cam_machine_tools'
+        ? chain({ data: [{ tool_id: 'tool-1' }], error: null })
+        : chain({ data: { id: 'tube-job' }, error: null })
+    );
 
     await expect(queueFusionJob({
       fusionJobKind: 'box_tube', boxTubeId: 'tube-1', machineId: 'router-1', toolId: 'tool-1'
     })).resolves.toEqual({ id: 'tube-job' });
 
     expect(mocks.from).toHaveBeenCalledWith('cam_jobs');
-    const inserted = mocks.queries[0].insert.mock.calls[0][0];
+    const inserted = mocks.queries[1].insert.mock.calls[0][0];
     expect(inserted.params).toEqual({ fusionJobKind: 'box_tube', boxTubeId: 'tube-1', fusionFileName: null, fusionFolderPath: null, singleToolMode: false });
     expect(inserted.params).not.toHaveProperty('plateId');
     expect(inserted.params).not.toHaveProperty('fusionGroupingMode');
@@ -94,6 +98,46 @@ describe('Fusion CAM queue query efficiency', () => {
 
     const inserted = mocks.queries[0].insert.mock.calls[0][0];
     expect(inserted.params.tabCount).toBeNull();
+  });
+
+  it('refuses to queue when the selected tool is no longer loaded on the machine', async () => {
+    // Real, confirmed live case: a job queued with a tool that wasn't
+    // actually loaded (the queue picker's own cached list had gone stale)
+    // succeeded and only failed later when a Runner tried to claim it.
+    // This must be caught here, before cam_jobs ever gets a row at all.
+    mocks.from.mockImplementation((table) =>
+      table === 'cam_machine_tools'
+        ? chain({ data: [{ tool_id: 'other-tool' }], error: null })
+        : chain({ data: { id: 'plate-job' }, error: null })
+    );
+
+    await expect(queueFusionJob({
+      fusionJobKind: 'plate:cam', plateId: 'plate-1', groupingMode: 'single', machineId: 'router-1', toolId: 'gone-tool'
+    })).rejects.toThrow(/tool.*no longer loaded/i);
+    expect(mocks.from).not.toHaveBeenCalledWith('cam_jobs');
+  });
+
+  it('refuses to queue when the selected countersink is no longer loaded on the machine', async () => {
+    mocks.from.mockImplementation((table) =>
+      table === 'cam_machine_tools'
+        ? chain({ data: [{ tool_id: 'endmill-1' }], error: null })
+        : chain({ data: { id: 'plate-job' }, error: null })
+    );
+
+    await expect(queueFusionJob({
+      fusionJobKind: 'plate:cam', plateId: 'plate-1', groupingMode: 'single',
+      machineId: 'router-1', toolId: 'endmill-1', countersinkToolId: 'gone-countersink'
+    })).rejects.toThrow(/countersink.*no longer loaded/i);
+    expect(mocks.from).not.toHaveBeenCalledWith('cam_jobs');
+  });
+
+  it('does not check loaded tools at all when no machine is selected yet', async () => {
+    mocks.from.mockReturnValue(chain({ data: { id: 'plate-job' }, error: null }));
+
+    await expect(queueFusionJob({
+      fusionJobKind: 'plate:cam', plateId: 'plate-1', groupingMode: 'single', toolId: 'tool-1'
+    })).resolves.toEqual({ id: 'plate-job' });
+    expect(mocks.from).not.toHaveBeenCalledWith('cam_machine_tools');
   });
 
   it('refuses a tube-stock job without tube stock', async () => {

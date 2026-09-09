@@ -563,6 +563,29 @@ export async function queueFusionJob({ fusionJobKind, plateId, boxTubeId, machin
   if (fusionJobKind === 'box_tube' && !boxTubeId) {
     throw new Error('A box tube is required for a tube-stock CAM job');
   }
+  // A fresh, real-time check, not a re-check of whatever the queue picker's
+  // own cached tool list already showed - that list is only as current as
+  // its last load(), and picking a tool it once offered doesn't guarantee
+  // it's still loaded on the machine right now (someone could have changed
+  // the ATC slots in another tab, or since the page was opened). Confirmed
+  // live: a job with a tool no longer actually loaded queued successfully
+  // and only failed later, once a Runner tried to claim it - direct
+  // instruction: this must fail at queue time instead, before a bad job
+  // ever reaches cam_jobs at all.
+  if (machineId && (toolId || countersinkToolId)) {
+    const { data: loadedRows, error: loadedError } = await supabase
+      .from('cam_machine_tools')
+      .select('tool_id')
+      .eq('machine_id', machineId);
+    if (loadedError) throw loadedError;
+    const loadedToolIds = new Set((loadedRows || []).map((row) => String(row.tool_id)));
+    if (toolId && !loadedToolIds.has(String(toolId))) {
+      throw new Error('Selected tool is no longer loaded on this machine - pick another or update ATC Slots.');
+    }
+    if (countersinkToolId && !loadedToolIds.has(String(countersinkToolId))) {
+      throw new Error('Selected countersink is no longer loaded on this machine - pick another or update ATC Slots.');
+    }
+  }
   const params = {
     fusionJobKind,
     ...(fusionJobKind.startsWith('plate:') ? {
