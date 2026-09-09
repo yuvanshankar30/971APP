@@ -15,6 +15,7 @@ import {
   fetchFusionJobNcFiles,
   fetchFusionPartStepFiles,
   fetchFusionJobsByManufacturingPartIds,
+  fetchFusionFolderTree,
   installFusionPartCad,
   deleteAllFailedFusionJobs,
   deleteParts,
@@ -31,6 +32,7 @@ function chain(result) {
   const query = {};
   for (const method of ['select', 'eq', 'in', 'not', 'order', 'limit', 'range', 'delete', 'insert', 'update']) query[method] = vi.fn(() => query);
   query.single = vi.fn(async () => result);
+  query.maybeSingle = vi.fn(async () => result);
   query.then = (resolve) => resolve(result);
   mocks.queries.push(query);
   return query;
@@ -43,6 +45,15 @@ beforeEach(() => {
 });
 
 describe('Fusion CAM queue query efficiency', () => {
+  it('rejects a stale folder cache whose root does not match the requested project', async () => {
+    mocks.from.mockReturnValue(chain({
+      data: { project_name: '2026 Season CAM', tree: { name: 'AutoCAM' } },
+      error: null
+    }));
+
+    await expect(fetchFusionFolderTree()).resolves.toBeNull();
+  });
+
   it('keeps a linked manufacturing request quantity aligned with Fusion CAM', async () => {
     mocks.from.mockImplementation((table) => {
       if (table === 'fusion_parts' && mocks.queries.length === 0) {

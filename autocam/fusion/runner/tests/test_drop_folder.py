@@ -155,30 +155,28 @@ class ResolveDataProjectTests(unittest.TestCase):
         self.assertIs(result, target)
         self.assertGreater(calls["count"], 1)
 
-    def test_falls_back_to_active_project_only_after_every_retry_fails(self):
+    def test_refuses_to_substitute_the_active_project_after_every_retry_fails(self):
         app = fake_app()
         app.data.dataProjects, _calls = fake_data_projects([], raise_on_scan=99)
         active = fake_project("AutoCAM")
         app.data.activeProject = active
 
-        with patch.object(dropFolder.time, "sleep"):
-            result = dropFolder.resolve_data_project(app, "2026 Season CAM")
+        with patch.object(dropFolder.time, "sleep"), self.assertRaises(
+            dropFolder.ConfiguredDataProjectUnavailableError
+        ):
+            dropFolder.resolve_data_project(app, "2026 Season CAM")
 
-        self.assertIs(result, active)
         self.assertTrue(app.log.called)
 
-    def test_falls_back_to_active_project_on_a_genuine_clean_not_found(self):
-        # A real "renamed or deleted" case - a clean scan that legitimately
-        # never matches must still fall back, on the first attempt, no
-        # retries wasted on a real (non-transient) not-found.
+    def test_refuses_to_substitute_the_active_project_on_a_genuine_clean_not_found(self):
         app = fake_app()
         app.data.dataProjects, calls = fake_data_projects([fake_project("Some Other Project")])
         active = fake_project("AutoCAM")
         app.data.activeProject = active
 
-        result = dropFolder.resolve_data_project(app, "2026 Season CAM")
+        with self.assertRaises(dropFolder.ConfiguredDataProjectUnavailableError):
+            dropFolder.resolve_data_project(app, "2026 Season CAM")
 
-        self.assertIs(result, active)
         self.assertEqual(calls["count"], 1)
 
     def test_survives_a_cold_start_empty_project_list_without_falling_back(self):
@@ -200,16 +198,17 @@ class ResolveDataProjectTests(unittest.TestCase):
         self.assertIs(result, target)
         self.assertGreater(calls["count"], 3)
 
-    def test_falls_back_to_active_project_when_the_project_list_stays_empty(self):
+    def test_refuses_to_substitute_the_active_project_when_the_project_list_stays_empty(self):
         app = fake_app()
         app.data.dataProjects, _calls = fake_data_projects([], empty_scans=99)
         active = fake_project("AutoCAM")
         app.data.activeProject = active
 
-        with patch.object(dropFolder.time, "sleep"):
-            result = dropFolder.resolve_data_project(app, "2026 Season CAM")
+        with patch.object(dropFolder.time, "sleep"), self.assertRaises(
+            dropFolder.ConfiguredDataProjectUnavailableError
+        ):
+            dropFolder.resolve_data_project(app, "2026 Season CAM")
 
-        self.assertIs(result, active)
         self.assertTrue(app.log.called)
 
     def test_empty_project_name_goes_straight_to_active_project(self):

@@ -558,6 +558,10 @@ export async function fetchFusionFolderTree(projectName = '2026 Season CAM') {
     .eq('project_name', projectName)
     .maybeSingle();
   if (error) throw error;
+  // A stale Runner once uploaded the active "AutoCAM" project tree while
+  // labeling it "2026 Season CAM". Never show a cache row whose actual root
+  // disagrees with the project the picker requested.
+  if (data && String(data.tree?.name || '').trim() !== projectName) return null;
   return data || null;
 }
 

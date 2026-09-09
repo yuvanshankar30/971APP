@@ -11,9 +11,22 @@ const machineId='11111111-1111-4111-8111-111111111111';
 const plateId='22222222-2222-4222-8222-222222222222';
 beforeEach(()=>{queries=[];mocks.from.mockReset();mocks.payload.mockReset();mocks.storageUpload.mockReset();mocks.storageUpload.mockResolvedValue({error:null});});
 function chain(result){
- const q={};for(const method of ['select','insert','update','eq','in','ilike','order','limit','or','lt','is'])q[method]=vi.fn(()=>q);
+ const q={};for(const method of ['select','insert','update','upsert','eq','in','ilike','order','limit','or','lt','is'])q[method]=vi.fn(()=>q);
  q.single=vi.fn(async()=>result);q.maybeSingle=vi.fn(async()=>result);q.then=(resolve)=>resolve(result);queries.push(q);return q;
 }
+describe('Fusion Data Panel folder sync',()=>{
+ it('rejects a tree that claims one project while rooted in another',async()=>{
+  const result=await call('sync-folders',{projectName:'2026 Season CAM',tree:{name:'AutoCAM'}});
+  expect(result.status).toBe(422);
+  expect(mocks.from).not.toHaveBeenCalled();
+ });
+ it('accepts only a tree rooted at its named project',async()=>{
+  mocks.from.mockReturnValue(chain({error:null}));
+  const result=await call('sync-folders',{projectName:'2026 Season CAM',tree:{name:'2026 Season CAM',children:[]}});
+  expect(result.status).toBe(200);
+  expect(queries[0].upsert).toHaveBeenCalledWith(expect.objectContaining({project_name:'2026 Season CAM'}));
+ });
+});
 describe('Fusion Runner machine self-registration',()=>{
  it('creates a disabled machine profile for a name that does not exist yet',async()=>{
   mocks.from

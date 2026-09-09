@@ -202,6 +202,9 @@ export async function POST({ request, url }) {
       const tree = body?.tree;
       if (!projectName) return json({ error: 'projectName is required' }, { status: 400 });
       if (!tree || typeof tree !== 'object') return json({ error: 'tree is required' }, { status: 400 });
+      if (String(tree.name || '').trim() !== projectName) {
+        return json({ error: 'Folder tree root must match projectName' }, { status: 422 });
+      }
       const { error } = await supabase.from('fusion_data_folders').upsert({
         project_name: projectName,
         tree,
