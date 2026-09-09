@@ -554,7 +554,10 @@ def select_tab_edges(
     min_side_cm = tab_width_in * 1.25 * 2.54
     usable = [line for line in lines if _edge_length(best_edge_for_line(line)) >= min_side_cm]
     if not usable:
-        usable = lines
+        # A tab cannot be made safe by silently relaxing its own minimum
+        # geometry. The caller fails the job before postprocessing instead
+        # of letting Fusion create malformed tabs on a short/curved outline.
+        return []
 
     backed_usable = [line for line in usable if line_is_backed(line)]
     pool = backed_usable if backed_usable else usable
@@ -906,9 +909,13 @@ def ConfigureTabs(min_tabs: int = DEFAULT_MIN_TABS, max_tabs: int = DEFAULT_MAX_
                 all_tab_points.extend(tab_points)
 
             if not all_tab_points:
-                app.log(f"TabPlacement: '{op.name}' - no usable explicit tab points found on any body, skipping.")
-                continue
+                raise RuntimeError(
+                    f"TabPlacement: '{op.name}' has no safe explicit tab points; "
+                    "refusing to post an unsecured release contour."
+                )
 
             applied = _apply_manual_tabs(app, op, all_tab_points, tab_width_in, tab_height_in)
             if not applied:
-                app.log(f"TabPlacement: '{op.name}' could not configure Manual Tabs.")
+                raise RuntimeError(
+                    f"TabPlacement: '{op.name}' could not configure verified Manual Tabs."
+                )

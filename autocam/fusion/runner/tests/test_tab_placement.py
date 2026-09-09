@@ -434,9 +434,10 @@ class MinimumSideLengthTests(unittest.TestCase):
         self.assertLess(len(selected), 8, "must not crowd more tabs onto a side than it has room for")
         self.assertEqual(sorted(f for _e, f in selected), TabPlacement._tab_fractions(len(selected)))
 
-    def test_a_part_with_no_qualifying_side_uses_the_legacy_fallback(self):
-        # Preserve the established fallback: the runner still gives a small
-        # part explicit release points rather than silently returning none.
+    def test_a_part_with_no_qualifying_side_refuses_unsafe_tabs(self):
+        # A tab wider than every straight run is malformed geometry, not a
+        # reason to silently relax the minimum. ConfigureTabs fails the job
+        # before it can post an unsecured release contour.
         cm = TabPlacement.MIN_TAB_SIDE_LENGTH_IN * 2.54
         shorts = [
             _edge(0, 0, cm * 0.7, 0),
@@ -447,7 +448,7 @@ class MinimumSideLengthTests(unittest.TestCase):
 
         selected = TabPlacement.select_tab_edges(body, max_tabs=4, stock_bounds=None)
 
-        self.assertEqual(len(selected), len(shorts))
+        self.assertEqual(selected, [])
 
     def test_a_side_just_under_point_six_inches_never_gets_a_tab(self):
         cm = 2.54

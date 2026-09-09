@@ -1123,6 +1123,14 @@ def patch_cam_template_with_tool_libraries(
         sorted_drills = sorted(
             drill_candidates, key=lambda entry: (entry[2] or 0.0), reverse=True
         )
+        # Loaded tools are candidates, including drills. Cloning the same
+        # recognition operation for every installed drill makes Fusion apply
+        # every one to the same holes, which is both duplicate machining and
+        # an avoidable series of ATC swaps. One drill preserves the template's
+        # drilling strategy; remaining holes still fall through to the bore
+        # and contour operations when this drill does not apply.
+        if multi_tool_mode:
+            sorted_drills = sorted_drills[:1]
         clones: list[ET.Element] = []
         for tool, idx, diameter in sorted_drills:
             clone = _clone_template(drill_template)

@@ -48,3 +48,8 @@ def preferred_pocket_side_index(sides):
     if not sides:
         return None
     return max(range(len(sides)), key=lambda index: pocket_side_sort_key(sides[index]))
+
+
+def should_generate_countersink(countersink_requested: bool, setup_face_has_chamfer: bool) -> bool:
+    """A one-sided setup may countersink only its modeled, upward face."""
+    return bool(countersink_requested and setup_face_has_chamfer)

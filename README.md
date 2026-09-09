@@ -481,12 +481,16 @@ own docs are all together in one place instead of scattered across
   explicit countersink selector. It exposes only the loaded ShopSabre 0.372in
   and 0.5in 82-degree T5 countersinks; no countersink operation is generated
   unless one is selected, and the Runner independently verifies that exact
-  loaded-tool record before adding its feature-recognized hole operation.
+  loaded-tool record before adding its feature-recognized hole operation. A
+  selected bit is still skipped unless a modeled countersink chamfer is on
+  the setup's upward face, preventing flat-back holes from being machined.
   Operators can instead select Auto multi-tool mode: loaded endmills and
   drills are candidates, not mandatory operations. The Runner selects the
   highest-throughput roughing cutter plus a genuinely smaller detail cutter
   only when it can reach tighter geometry; dominated and geometry-inapplicable
   tools are omitted before post-processing, avoiding unnecessary ATC cycles.
+  A release contour must retain verified manual tabs on usable, stock-backed
+  straight edges; otherwise the job fails instead of posting an unsecured part.
   Every New Router Fusion job is post-processed with the bundled ShopSabre
   WinCNC `shopsabre.cps` post and emits native `.tap` output; a contradictory
   machine-profile post setting fails the job before post-processing.
