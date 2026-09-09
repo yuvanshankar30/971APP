@@ -56,6 +56,15 @@ class DependencyBootstrapTests(unittest.TestCase):
         self.assertIn("_schedule_folder_sync_chunk()", entrypoint)
         self.assertIn("FusionFolderSyncUpload", entrypoint)
 
+    def test_active_cam_jobs_do_not_starve_folder_refreshes(self):
+        entrypoint = (RUNNER_DIR / "SpartanRoboticsAutoCAM.py").read_text()
+        loop = entrypoint[entrypoint.index("def handleServer"):]
+
+        self.assertLess(
+            loop.index("if now - _last_folder_sync >= _FOLDER_SYNC_INTERVAL_SEC:"),
+            loop.index("if _job_processing.is_set():"),
+        )
+
     def test_folder_sync_never_touches_data_panel_while_a_modal_command_is_active(self):
         entrypoint = (RUNNER_DIR / "SpartanRoboticsAutoCAM.py").read_text()
         advance = entrypoint[entrypoint.index("def _advance_folder_sync"):entrypoint.index("def handleServer")]
