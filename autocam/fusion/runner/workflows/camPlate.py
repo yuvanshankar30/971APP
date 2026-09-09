@@ -873,12 +873,13 @@ def start(data, session):
         )
         if resp is not None and resp.ok:
             app.log("Job Completed")
-        # Everything durable is now finished: the Fusion document is saved,
-        # NC files are uploaded, and the queue accepted completion. Keeping
-        # documents open between jobs accumulates stale designs and can make
-        # a later job operate on the wrong active document.
-        doc.close(False)
-        app.log(f"Closed document '{doc_name}'")
+        # Deliberately does not close the document once the job completes -
+        # every job already creates and activates its own brand-new
+        # document at the top of start() (see new_doc.activate() above), so
+        # a document left open from a prior job is never mistaken for "the"
+        # active document by a later one. Matches camTube.py's own tube
+        # jobs, which stopped closing for the same reason plus a real,
+        # confirmed live upload-timing bug closing raced.
 
         try:
             ui.workspaces.itemById("FusionSolidEnvironment").activate()

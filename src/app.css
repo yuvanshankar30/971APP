@@ -1315,6 +1315,12 @@ textarea:focus,
   border-color: var(--green-soft);
 }
 
+.tag-pending {
+  background: var(--muted-bg);
+  color: var(--text-muted);
+  border-color: transparent;
+}
+
 .tag-mentor {
   background: var(--brand-gold-soft);
   color: var(--brand-gold-strong);

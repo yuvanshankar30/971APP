@@ -313,10 +313,8 @@ def start(data, session):
         # cloud sync is still finishing well after saveAs() (and even this
         # completion POST) returns - closing right away raced that sync and
         # left the file missing/stale in the Data Panel folder for a while.
-        # Plate documents don't have this problem (their own close call in
-        # camPlate.py's start() uploads fast enough to close safely) so only
-        # tube jobs leave the document open for Fusion to finish syncing in
-        # the background.
+        # camPlate.py's own plate jobs stopped closing too, for the same
+        # not-mistaken-for-the-active-document reason - see its start().
         try:
             ui.workspaces.itemById("FusionSolidEnvironment").activate()
         except Exception:
