@@ -44,14 +44,21 @@
       ]);
       if (loadedError) throw loadedError;
       if (presetError) throw presetError;
-      const next = {};
+      const loadedAssignments = {};
       for (const row of loadedRows || []) {
         const slot = row.cam_tools?.tool_number;
-        if (slot != null) next[slot] = row.cam_tools.id;
+        if (slot != null) loadedAssignments[slot] = row.cam_tools.id;
       }
-      assignments = next;
       presets = presetRows || [];
       hubDefault = presets.find((p) => p.is_hub_default) || null;
+      // Show the INTENDED configuration (the hub default) rather than
+      // whatever happens to actually be loaded right now - saving a hub
+      // default only records the selection, it doesn't apply it to
+      // cam_machine_tools on its own. Without this, picking a hub default
+      // and closing the modal without a separate "Apply to Machine" left
+      // every slot silently reverting to "Empty" the next time it opened,
+      // with no visible sign the hub default had ever been set.
+      assignments = hubDefault ? { ...(hubDefault.slot_assignments || {}) } : loadedAssignments;
     } catch (e) {
       toastActions.show(e.message || 'Failed to load ATC slot configuration');
     } finally {

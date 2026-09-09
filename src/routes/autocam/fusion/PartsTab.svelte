@@ -15,7 +15,8 @@
   import CadViewer from '$lib/components/CadViewer.svelte';
   import FolderTreeNode from './FolderTreeNode.svelte';
   import { searchFolderTree } from '$lib/fusionFolderSearch.js';
-  import { Plus, Trash2, Package, Pencil, Check, X, Sparkles, Box, Download, Send, Folder } from 'lucide-svelte';
+  import { Plus, Trash2, Package, Pencil, Check, X, Sparkles, Box, Download, Send, Folder, Wrench } from 'lucide-svelte';
+  import AtcSlotConfig from '$autocam/components/AtcSlotConfig.svelte';
 
   export let user;
   export let canManage;
@@ -127,6 +128,7 @@
   // its machine" is this app's own existing convention (see the main
   // /autocam page's tool picker), not a new rule invented here.
   let machineTools = {};
+  let atcTools = []; // full cam_tools catalog, for the ATC Slots modal
   let loading = true;
 
   // Search box above the main parts list itself, not the queue picker's.
@@ -465,6 +467,11 @@
         if (!row.cam_tools) continue;
         (machineTools[row.machine_id] ||= []).push(row.cam_tools);
       }
+      // Full catalog (not just what's already loaded) - the ATC Slots
+      // modal needs every candidate tool per slot, not only the ones
+      // currently in cam_machine_tools.
+      const { data: toolRows } = await supabase.from('cam_tools').select('*');
+      atcTools = toolRows || [];
     } catch (e) {
       toastActions.show(e.message || 'Failed to load parts');
     } finally {
@@ -487,6 +494,20 @@
 
   function isNewRouter(machineId) {
     return machines.find((machine) => String(machine.id) === String(machineId))?.name?.trim().toLowerCase() === 'new router';
+  }
+
+  // ATC Slots, reachable right from the queue picker (not only the /autocam
+  // admin page) - an operator who notices a missing tool here shouldn't
+  // have to leave this modal to go fix it.
+  let showAtcModal = false;
+  let atcModalMachineId = null;
+  let atcModalMachineName = '';
+  function openAtcModal(machineId) {
+    const machine = machines.find((m) => String(m.id) === String(machineId));
+    if (!machine) return;
+    atcModalMachineId = machine.id;
+    atcModalMachineName = machine.name;
+    showAtcModal = true;
   }
 
   function isEndmill(tool) {
@@ -785,8 +806,13 @@
     // calls an API endpoint that doesn't exist in this app yet - without
     // an explicit tool, a queued job has no real way to resolve one, so
     // this is required here rather than left optional like machineId
-    // originally was before routers were made explicit too.
-    if (!categoryToolSelections[categoryId]) return 'Choose a tool before queueing';
+    // originally was before routers were made explicit too. New Router's
+    // Auto multi-tool mode is the one real exception: the tool selection is
+    // deliberately cleared for it (a single manual choice doesn't apply -
+    // resolveLoadedToolItems/plan_endmills pick from every loaded tool
+    // server-side), so nothing to require here in that case.
+    const isAutoMultiTool = isNewRouter(categoryMachineSelections[categoryId]) && !categorySingleToolModes[categoryId];
+    if (!isAutoMultiTool && !categoryToolSelections[categoryId]) return 'Choose a tool before queueing';
     if (categorySingleToolModes[categoryId]) {
       const selectedTool = toolsForMachine(categoryMachineSelections[categoryId])
         .find((tool) => String(tool.id) === String(categoryToolSelections[categoryId]));
@@ -1334,22 +1360,37 @@
                   {/each}
                 </select>
               </div>
-              <div class="form-group">
-                <label class="form-label" for={`queue-tool-${group.categoryId}`}>Tool</label>
-                <select id={`queue-tool-${group.categoryId}`} class="form-select" bind:value={categoryToolSelections[group.categoryId]} disabled={!categoryMachineSelections[group.categoryId]}>
-                  <option value="">{toolsForMachine(categoryMachineSelections[group.categoryId]).length ? 'Choose a tool...' : 'No tools installed'}</option>
-                  {#each toolsForMachine(categoryMachineSelections[group.categoryId]).filter((tool) => !isNewRouter(categoryMachineSelections[group.categoryId]) || isEndmill(tool)) as t}
-                    <option value={t.id}>{toolLabel(t)}</option>
-                  {/each}
-                </select>
-              </div>
+              {#if !isNewRouter(categoryMachineSelections[group.categoryId]) || categorySingleToolModes[group.categoryId]}
+                <div class="form-group">
+                  <label class="form-label" for={`queue-tool-${group.categoryId}`}>Tool</label>
+                  <select id={`queue-tool-${group.categoryId}`} class="form-select" bind:value={categoryToolSelections[group.categoryId]} disabled={!categoryMachineSelections[group.categoryId]}>
+                    <option value="">{toolsForMachine(categoryMachineSelections[group.categoryId]).length ? 'Choose a tool...' : 'No tools installed'}</option>
+                    {#each toolsForMachine(categoryMachineSelections[group.categoryId]).filter((tool) => !isNewRouter(categoryMachineSelections[group.categoryId]) || isEndmill(tool)) as t}
+                      <option value={t.id}>{toolLabel(t)}</option>
+                    {/each}
+                  </select>
+                </div>
+              {:else}
+                <div class="form-group">
+                  <span class="form-label">Tool</span>
+                  <p class="cam-form-hint queue-tool-auto-note">Chosen automatically - see Auto multi-tool below.</p>
+                </div>
+              {/if}
             </div>
             {#if isNewRouter(categoryMachineSelections[group.categoryId])}
               <div class="form-group queue-tool-mode">
-                <span class="form-label">Tool mode</span>
+                <div class="queue-tool-mode-header">
+                  <span class="form-label">Tool mode</span>
+                  <button type="button" class="btn btn-ghost btn-sm" on:click={() => openAtcModal(categoryMachineSelections[group.categoryId])}>
+                    <Wrench size={14} /> ATC Slots
+                  </button>
+                </div>
                 <div class="segmented-control" aria-label="Tool mode for New Router">
                   <button type="button" class:active={categorySingleToolModes[group.categoryId]} on:click={() => (categorySingleToolModes = { ...categorySingleToolModes, [group.categoryId]: true })}>Single tool</button>
-                  <button type="button" class:active={!categorySingleToolModes[group.categoryId]} on:click={() => (categorySingleToolModes = { ...categorySingleToolModes, [group.categoryId]: false })}>Auto multi-tool</button>
+                  <button type="button" class:active={!categorySingleToolModes[group.categoryId]} on:click={() => {
+                    categorySingleToolModes = { ...categorySingleToolModes, [group.categoryId]: false };
+                    categoryToolSelections = { ...categoryToolSelections, [group.categoryId]: '' };
+                  }}>Auto multi-tool</button>
                 </div>
                 <p class="cam-form-hint">Auto multi-tool considers every loaded cutter, then uses only the high-throughput cutter and any smaller cutter required for detail. Unused candidates do not create a tool swap.</p>
               </div>
@@ -1379,6 +1420,16 @@
     </div>
   </div>
 {/if}
+
+<AtcSlotConfig
+  bind:open={showAtcModal}
+  machineId={atcModalMachineId}
+  machineName={atcModalMachineName}
+  tools={atcTools}
+  userId={user?.id || null}
+  on:applied={() => load(false)}
+  on:toolsChanged={() => load(false)}
+/>
 
 {#if cadModalPart}
   <div class="modal-backdrop" on:click|self={() => (cadModalPart = null)} role="button" tabindex="0"
@@ -1494,8 +1545,8 @@
   .group-header { flex-wrap: wrap; margin-bottom: 0.75rem; }
   .group-header h3 { margin: 0; }
   .recent-queue-picker { margin: 0.75rem 0; }
-  .recent-queue-header { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.4rem; }
-  .recent-queue-search { max-width: 220px; height: 2rem; padding: 0.25rem 0.5rem; font-size: 0.8rem; }
+  .recent-queue-header { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
+  .recent-queue-search { max-width: 240px; width: 100%; }
   .recent-queue-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.45rem; }
   .recent-queue-button {
     display: grid;
@@ -1617,6 +1668,9 @@
   }
   .queue-subsection { margin-top: 1rem; padding-left: 0.75rem; border-left: 2px solid var(--border); }
   .queue-tool-mode { margin-bottom: 0.75rem; }
+  .queue-tool-mode-header { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.35rem; }
+  .queue-tool-mode-header .form-label { margin: 0; }
+  .queue-tool-auto-note { margin-top: 0.4rem; }
   .segmented-control { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-sm, 6px); overflow: hidden; }
   .segmented-control button { min-height: 2rem; padding: 0.35rem 0.65rem; border: 0; border-right: 1px solid var(--border); background: var(--surface-2, #f7f7f5); color: var(--text); font: inherit; cursor: pointer; }
   .segmented-control button:last-child { border-right: 0; }
