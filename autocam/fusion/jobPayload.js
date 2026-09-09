@@ -7,36 +7,6 @@
 // this independently).
 const TAB_COUNT_MIN = 4;
 const TAB_COUNT_MAX = 20;
-const APPROVED_COUNTERSINKS = new Map([
-  ['61a8645a-9015-4aba-958b-70297d26b19e', 0.372],
-  ['8789b786-8e50-48c5-b4f9-21296fcaf34a', 0.5]
-]);
-const SHOP_SABRE_TOOL_LIBRARY = 'Normal router tools (use this).tools';
-
-async function resolveCountersinkTool(supabase, machineId, countersinkToolId) {
-  if (!countersinkToolId) return null;
-  if (!machineId) throw new Error('Countersinking requires a selected machine');
-  const { data, error } = await supabase
-    .from('cam_machine_tools')
-    .select('cam_tools(id, tool_type, diameter, tool_number, tip_angle, tool_library_guid, source_tool_library_file)')
-    .eq('machine_id', machineId)
-    .eq('tool_id', countersinkToolId)
-    .maybeSingle();
-  const tool = data?.cam_tools;
-  if (error || !tool) throw new Error('Selected countersink is not loaded on this machine');
-  const expectedDiameter = APPROVED_COUNTERSINKS.get(tool.tool_library_guid);
-  if (
-    !/counter\s*sink/i.test(String(tool.tool_type || '')) ||
-    expectedDiameter == null ||
-    Math.abs(Number(tool.diameter) - expectedDiameter) >= 0.0001 ||
-    Number(tool.tip_angle) !== 82 ||
-    tool.source_tool_library_file !== SHOP_SABRE_TOOL_LIBRARY
-  ) {
-    throw new Error('Selected countersink is not an approved 82 degree ShopSabre countersink');
-  }
-  return { guid: tool.tool_library_guid, diameter: expectedDiameter, tool_number: tool.tool_number };
-}
-
 async function resolveLoadedToolItems(supabase, machineId, toolId) {
   if (!machineId) return [];
   const { data, error } = await supabase.from('cam_machine_tools')
@@ -74,7 +44,6 @@ export async function buildJobPayload(supabase, job) {
   if (single_tool_mode && !/end\s*mill/i.test(String(job.cam_tools?.tool_type || ''))) {
     throw new Error('Single-tool Fusion CAM requires an endmill selected on the job');
   }
-  const countersink_tool = await resolveCountersinkTool(supabase, machine_id, params.countersinkToolId);
   // tool_id is vestigial in multi-tool mode - the planner resolves from
   // every loaded candidate, not one manual selection - so it's never
   // passed through for the loaded-tool match check below. Confirmed live:
@@ -125,7 +94,7 @@ export async function buildJobPayload(supabase, job) {
       step_file_url: await signedUrl(part.step_file_name, part.part_id),
       fusion_file_name: part.fusion_file_name || null
     })));
-    return { plate_id: snapshot.plate_id, grouping_mode: snapshot.grouping_mode || null, machine_id, tool_id, single_tool_mode, multi_tool_mode, tool_items, countersink_tool, length: Number(snapshot.length),
+    return { plate_id: snapshot.plate_id, grouping_mode: snapshot.grouping_mode || null, machine_id, tool_id, single_tool_mode, multi_tool_mode, tool_items, length: Number(snapshot.length),
       width: Number(snapshot.width), true_depth: Number(snapshot.true_depth), thickness: Number(snapshot.thickness),
       material: snapshot.material, assignments,
       // Set at queue time on the Plates tab (folder-tree picker + filename

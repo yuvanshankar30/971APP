@@ -23,7 +23,6 @@ from ..commands.NewNCProgram import export
 from ..commands.DeleteToolpaths import DeleteToolpaths
 from ..commands.AutoArrange import AutoArrange
 from ..commands.Orientation import orient_plate_pocket_side_up
-from ..commands.PocketOrientation import should_generate_countersink
 from ..commands.TabPlacement import ConfigureTabs, DEFAULT_MAX_TABS, DEFAULT_MIN_TABS
 from ..config import (
     BASE_URL,
@@ -55,7 +54,7 @@ def _select_plate_template_path(machine_name: Optional[str]) -> str:
     filename says "shopsabre only!!" - see the separate GitHub issue
     flagging that controller value as likely wrong) is the new router -
     jobs there use templates/971-real/new router metal sheet (shopsabre
-    only!!).f3dhsm-template. Some richer templates (e.g. countersink) are
+    only!!).f3dhsm-template. Some richer templates are
     flagged by the user as new-router-only; this function only handles the
     one mapping actually requested (which template a given machine uses),
     not a general per-template machine-compatibility system.
@@ -581,9 +580,8 @@ def start(data, session):
         # then Arrange could preserve that wrong side all the way into CAM.
         # Do this before AutoArrange so its face-up constraint keeps pockets
         # accessible to the setup and PocketRecognitionSelection.
-        countersink_face_up = False
         for occurrence in design.rootComponent.allOccurrences:
-            countersink_face_up = orient_plate_pocket_side_up(occurrence) or countersink_face_up
+            orient_plate_pocket_side_up(occurrence)
 
         # Plate dimensions: /api/fusion-runner's claim response already
         # resolves these server-side from fusion_plates (see
@@ -612,21 +610,7 @@ def start(data, session):
                         filter_guids.add(str(guid))
             if not filter_guids:
                 filter_guids = None
-        countersink_guid = (payload.get("countersink_tool") or {}).get("guid") if isinstance(payload, dict) else None
-        if countersink_guid and not should_generate_countersink(True, countersink_face_up):
-            # The countersink template recognizes holes by diameter. Without
-            # a modeled chamfer on the setup's upward face it would select
-            # unrelated same-diameter through holes from the flat back, then
-            # cut an unwanted countersink there. A selected bit alone must
-            # never authorize that geometry change.
-            app.log(
-                "Skipping requested countersink: no modeled countersink "
-                "chamfer is reachable from the setup face."
-            )
-            countersink_guid = None
         multi_tool_mode = isinstance(payload, dict) and payload.get("multi_tool_mode") is True
-        if countersink_guid:
-            filter_guids = (filter_guids or set()) | {str(countersink_guid)}
 
         # Loaded ahead of plate_spacing below (moved earlier from its
         # original position, right before patch_cam_template_with_tool_libraries)
@@ -693,7 +677,6 @@ def start(data, session):
             [tool_json_path],
             material_name=material_name,
             filter_guids=filter_guids,
-            countersink_guid=countersink_guid,
             multi_tool_mode=multi_tool_mode,
         )
         if patch_info.get("tool_plan"):

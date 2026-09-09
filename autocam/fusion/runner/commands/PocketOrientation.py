@@ -21,21 +21,16 @@ def loop_is_blind_pocket(cavity_reaches_back_face: bool) -> bool:
 
 
 def pocket_side_sort_key(side):
-    """Rank a planar plate side, preferring a modeled countersink chamfer
-    first, then real blind-pocket openings.
+    """Rank a planar plate side, preferring real blind-pocket openings.
 
     A through-hole appears on both broad faces, while a blind pocket appears
     only on the side from which it must be machined - same for a
-    countersink chamfer, ranked first because getting it wrong isn't just
-    wasted time (an unreachable blind pocket at least fails loudly): a
-    countersink chamfer cut from the wrong side machines the flat back
-    face into a hole instead, a real, physically wrong part. Area is
+    Area is
     intentionally the last tie-breaker: the unpocketed back is usually
     larger than the pocket side precisely because it has no material
     removed from it.
     """
     return (
-        bool(side.get("has_countersink_chamfer", False)),
         bool(side.get("has_blind_pocket", False)),
         int(side.get("inner_loop_count", 0)),
         int(side.get("inner_edge_count", 0)),
@@ -48,8 +43,3 @@ def preferred_pocket_side_index(sides):
     if not sides:
         return None
     return max(range(len(sides)), key=lambda index: pocket_side_sort_key(sides[index]))
-
-
-def should_generate_countersink(countersink_requested: bool, setup_face_has_chamfer: bool) -> bool:
-    """A one-sided setup may countersink only its modeled, upward face."""
-    return bool(countersink_requested and setup_face_has_chamfer)
