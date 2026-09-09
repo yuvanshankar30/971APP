@@ -75,7 +75,18 @@ export async function buildJobPayload(supabase, job) {
     throw new Error('Single-tool Fusion CAM requires an endmill selected on the job');
   }
   const countersink_tool = await resolveCountersinkTool(supabase, machine_id, params.countersinkToolId);
-  const tool_items = multi_tool_mode ? await resolveLoadedToolItems(supabase, machine_id, tool_id) : [];
+  // tool_id is vestigial in multi-tool mode - the planner resolves from
+  // every loaded candidate, not one manual selection - so it's never
+  // passed through for the loaded-tool match check below. Confirmed live:
+  // a job queued in multi-tool mode still carried a stale tool_id (the
+  // single Tool dropdown's last value, from before it's cleared on switching
+  // to Auto multi-tool - or an older client that hadn't picked that up yet)
+  // pointing at a tool with no tool_library_guid, which resolveLoadedToolItems
+  // correctly excludes from its candidate set (no way to look up its real
+  // cutting data from the physical .tools file) - failing the entire job
+  // with "Selected tool is not loaded on this machine" over a field the
+  // job's own mode says to ignore.
+  const tool_items = multi_tool_mode ? await resolveLoadedToolItems(supabase, machine_id, null) : [];
   async function signedUrl(fileName, partId) {
     if (typeof fileName !== 'string' || !fileName.trim()) throw new Error(`Part ${partId} is missing its STEP file`);
     const { data, error } = await supabase.storage.from('manufacturing-files').createSignedUrl(fileName, 3600);

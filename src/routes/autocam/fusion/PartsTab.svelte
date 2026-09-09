@@ -541,8 +541,19 @@
     categoryCountersinkSelections = { ...categoryCountersinkSelections, [categoryId]: '' };
     const stillValid = eligibleForMode.some((t) => String(t.id) === String(categoryToolSelections[categoryId]));
     if (!stillValid) {
-      const defaultTool = eligibleForMode.find((t) => String(t.id) === String(machine?.default_tool_id));
-      categoryToolSelections = { ...categoryToolSelections, [categoryId]: defaultTool?.id || eligibleForMode[0]?.id || '' };
+      // New Router now has multiple real, distinct candidate endmills (the
+      // ShopSabre library import) - silently defaulting to whichever one
+      // happens to be machine.default_tool_id risks queueing a job with a
+      // tool the operator never actually looked at or meant to pick.
+      // Direct instruction: New Router always requires an explicit choice;
+      // auto-selecting a default tool stays UNC-Router-only, where it's
+      // long been the single tool anyway.
+      if (isNewRouter(machineId)) {
+        categoryToolSelections = { ...categoryToolSelections, [categoryId]: '' };
+      } else {
+        const defaultTool = eligibleForMode.find((t) => String(t.id) === String(machine?.default_tool_id));
+        categoryToolSelections = { ...categoryToolSelections, [categoryId]: defaultTool?.id || eligibleForMode[0]?.id || '' };
+      }
     }
   }
 

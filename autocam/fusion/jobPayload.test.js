@@ -58,6 +58,23 @@ describe('Fusion plate payloads',()=>{
    multi_tool_mode:true, tool_items:[{tool_guid:'endmill-guid'},{tool_guid:'drill-guid'}]
   });
  });
+ it('ignores a stale tool_id in multi-tool mode instead of failing the whole job',async()=>{
+  // Real, confirmed case: a job queued in multi-tool mode still carried an
+  // old single-tool selection (a tool with no tool_library_guid - e.g. a
+  // legacy pre-import tool row) - multi-tool mode doesn't use that field at
+  // all, so it must not be validated against the loaded candidate set.
+  const value=job(); value.machine_id='router'; value.tool_id='stale-legacy-tool'; value.params.multiToolMode=true;
+  const database={
+   storage:db().storage,
+   from:(table)=>table==='cam_machine_tools'?{select:()=>({eq:async()=>({data:[
+    {tool_id:'endmill',cam_tools:{tool_library_guid:'endmill-guid',tool_type:'flat end mill'}},
+    {tool_id:'stale-legacy-tool',cam_tools:{tool_library_guid:null,tool_type:'flat end mill'}}
+   ]})})}:null
+  };
+  await expect(buildJobPayload(database,value)).resolves.toMatchObject({
+   multi_tool_mode:true, tool_items:[{tool_guid:'endmill-guid'}]
+  });
+ });
  it('only passes a loaded, approved ShopSabre countersink to the Runner',async()=>{
   const j=job(); j.machine_id='router'; j.params.countersinkToolId='counter';
   const countersink={id:'counter',tool_type:'countersink',diameter:0.372,tool_number:5,tip_angle:82,tool_library_guid:'61a8645a-9015-4aba-958b-70297d26b19e',source_tool_library_file:'Normal router tools (use this).tools'};
