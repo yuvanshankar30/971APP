@@ -219,6 +219,53 @@ class FolderTreeBudgetTests(unittest.TestCase):
             pass
         self.assertEqual([child["name"] for child in walker.result()["root"]["children"]], ["One", "Two"])
 
+    def test_a_stale_folder_handle_is_truncated_not_a_fatal_error(self):
+        # Real, confirmed live case: "2 : InternalValidationError :
+        # status.isOk() && folders" from dataFolders.count when a folder
+        # object captured many chunks (real minutes) earlier goes stale
+        # before the walk actually reaches it. Must not propagate - the
+        # caller (_advance_folder_sync) resets the ENTIRE walker on any
+        # uncaught exception here, discarding all progress; a single
+        # unlucky folder should only cost that one node, not the whole sync.
+        class _StaleDataFolders:
+            @property
+            def count(self):
+                raise RuntimeError("2 : InternalValidationError : status.isOk() && folders")
+
+        good = _fake_folder("Good")
+        bad = _fake_folder("Bad")
+        bad.dataFolders = _StaleDataFolders()
+        root = _fake_folder("2026 Season CAM", [bad, good])
+        app = self._app_for(root)
+        walker = dropFolder.FolderTreeWalker(app, "2026 Season CAM", "", max_folders=10)
+
+        while not walker.run_chunk():
+            pass
+
+        result = walker.result()
+        bad_node = next(c for c in result["root"]["children"] if c["name"] == "Bad")
+        good_node = next(c for c in result["root"]["children"] if c["name"] == "Good")
+        self.assertTrue(bad_node["truncated"])
+        self.assertNotIn("truncated", good_node)
+
+    def test_a_stale_child_handle_mid_listing_is_truncated_not_a_fatal_error(self):
+        ok_child = _fake_folder("Ok")
+        parent = _fake_folder("Parent", [ok_child])
+        parent.dataFolders.item = MagicMock(
+            side_effect=RuntimeError("2 : InternalValidationError : status.isOk() && folders")
+        )
+        root = _fake_folder("2026 Season CAM", [parent])
+        app = self._app_for(root)
+        walker = dropFolder.FolderTreeWalker(app, "2026 Season CAM", "", max_folders=10)
+
+        while not walker.run_chunk():
+            pass
+
+        result = walker.result()
+        parent_node = result["root"]["children"][0]
+        self.assertTrue(parent_node["truncated"])
+        self.assertEqual(parent_node["children"], [])
+
     def test_stops_early_and_marks_truncation_once_the_budget_runs_out(self):
         # 5 real folders at the root; a budget of 2 must not visit the
         # other 3 (each unvisited .item() call is exactly the cost this

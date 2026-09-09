@@ -219,7 +219,23 @@ class FolderTreeWalker:
                 continue
 
             if self._child_count is None:
-                self._child_count = folder.dataFolders.count
+                try:
+                    self._child_count = folder.dataFolders.count
+                except RuntimeError:
+                    # Confirmed live: "2 : InternalValidationError :
+                    # status.isOk() && folders" from dataFolders.count/item -
+                    # a folder object captured many chunks (real minutes)
+                    # earlier occasionally goes stale before this walk
+                    # actually reaches it. Letting this propagate resets the
+                    # ENTIRE walker (see _advance_folder_sync's except
+                    # clause), discarding all progress and restarting from
+                    # the root - if this folder is reliably the one that
+                    # fails, the sync could never get past it. Treat it the
+                    # same as a real budget-exhaustion truncation instead:
+                    # skip just this one node, keep everything else.
+                    node["truncated"] = True
+                    self._cur_index += 1
+                    continue
                 self._child_index = 0
                 return False
 
@@ -227,7 +243,11 @@ class FolderTreeWalker:
                 if self.budget <= 0:
                     node["truncated"] = True
                     break
-                child = folder.dataFolders.item(self._child_index)
+                try:
+                    child = folder.dataFolders.item(self._child_index)
+                except RuntimeError:
+                    node["truncated"] = True
+                    break
                 self.budget -= 1
                 self._child_index += 1
                 # Live-confirmed: a real sync (148 dataFolders.item() calls,
