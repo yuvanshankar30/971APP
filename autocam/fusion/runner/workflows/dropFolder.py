@@ -106,15 +106,17 @@ _RESOLVE_PROJECT_ATTEMPTS = 6
 _RESOLVE_PROJECT_RETRY_DELAY_SEC = 1.0
 
 
+class ConfiguredDataProjectUnavailableError(RuntimeError):
+    """The configured project is unavailable; never substitute another one."""
+
+
 def resolve_data_project(app, project_name):
     """Finds a Data Panel project by exact name.
 
-    Falls back to app.data.activeProject (whatever's selected in the Data
-    Panel right now) if project_name is falsy or genuinely not found - a
-    safety net for if this project is ever renamed or deleted, not the
-    primary way this is expected to resolve day to day
-    (FUSION_DATA_PROJECT_NAME defaults to the team's real project name in
-    config.py).
+    An empty project name uses app.data.activeProject. A configured project
+    name is an invariant: if it is unavailable, this raises rather than
+    silently substituting the active Data Panel project. Otherwise a startup
+    race or an unrelated open document can publish/save under the wrong root.
 
     Real, confirmed live bug this retry exists to fix: the periodic
     folder-sync walker (SpartanRoboticsAutoCAM.py's _advance_folder_sync)
@@ -139,10 +141,8 @@ def resolve_data_project(app, project_name):
     _retry_on_offline itself uses, not the short, fixed-delay retry a
     stale-handle glitch alone would have warranted.
 
-    A scan that finds at least one project but genuinely never matches
-    project_name is a different case - a real rename/deletion, not a
-    timing gap - and falls back immediately without wasting retries on
-    it.
+    A scan that finds at least one project but genuinely never matches is a
+    configuration error, not permission to use a different project.
     """
     if project_name:
         delay_seconds = _RESOLVE_PROJECT_RETRY_DELAY_SEC
@@ -162,8 +162,8 @@ def resolve_data_project(app, project_name):
                 if attempt == _RESOLVE_PROJECT_ATTEMPTS:
                     app.log(
                         f"Listing Fusion Data Panel projects failed {attempt} times "
-                        f"while looking for '{project_name}' ({exc}) - falling back "
-                        "to the active project."
+                        f"while looking for '{project_name}' ({exc}) - folder "
+                        "sync/save is disabled until the configured project is available."
                     )
                     break
                 time.sleep(delay_seconds)
@@ -175,8 +175,8 @@ def resolve_data_project(app, project_name):
             if attempt == _RESOLVE_PROJECT_ATTEMPTS:
                 app.log(
                     f"Fusion reported zero Data Panel projects on every attempt "
-                    f"while looking for '{project_name}' - falling back to the "
-                    "active project."
+                    f"while looking for '{project_name}' - folder sync/save is "
+                    "disabled until it is available."
                 )
                 break
             time.sleep(delay_seconds)
@@ -184,9 +184,11 @@ def resolve_data_project(app, project_name):
         if scanned_a_nonempty_list_without_a_match:
             app.log(
                 f"FUSION_DATA_PROJECT_NAME '{project_name}' not found among "
-                "this account's Fusion projects - falling back to the active "
-                "project."
+                "this account's Fusion projects - folder sync/save is disabled."
             )
+        raise ConfiguredDataProjectUnavailableError(
+            f"Configured Fusion Data Panel project '{project_name}' is unavailable"
+        )
     return app.data.activeProject
 
 
