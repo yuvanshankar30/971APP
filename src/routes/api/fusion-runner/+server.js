@@ -107,12 +107,14 @@ async function requeueStaleFusionJobs(supabase) {
 // runners might both pick the SAME candidate id) that the CAS below always
 // resolves correctly (only one caller's conditional UPDATE ever matches).
 //
-// machineId: a Runner declares which cam_machines row it
-// physically is (autocam/fusion/runner/config.py's RUNNER_MACHINE_ID) and only
-// claims jobs that are either unassigned to a specific machine
-// (cam_jobs.machine_id IS NULL) or assigned to its own - so a router's
-// Runner can't accidentally grab a job queued for the mill, and vice versa,
-// once multiple physical machines are polling at once. It is required:
+// machineIds: a Runner declares which cam_machines row(s) it physically is
+// (autocam/fusion/runner/config.py's RUNNER_MACHINE_ID, comma-separated for
+// a computer that drives more than one physical machine - e.g. one control
+// laptop shared between two routers) and only claims jobs that are either
+// unassigned to a specific machine (cam_jobs.machine_id IS NULL) or
+// assigned to one of its own - so a router's Runner can't accidentally
+// grab a job queued for the mill, and vice versa, once multiple physical
+// machines are polling at once. At least one machineId is required:
 // claim-anything fallback can put a program on the wrong physical machine.
 //
 // cam_machines.authorized_runner_id closes a real gap in that: nothing
@@ -122,19 +124,21 @@ async function requeueStaleFusionJobs(supabase) {
 // actually wired to the real machine - confirmed live (two different
 // hostnames both syncing as the same machine). NULL means "no
 // restriction," unchanged behavior. When set, a mismatched runnerId is
-// silently limited to only unassigned (machine_id IS NULL) jobs for this
-// machineId - not an error, since "nothing to claim right now" is the
-// correct, quiet outcome for a computer that legitimately isn't the
-// authorized one, same as if nothing were queued at all.
-async function claimNextJob(supabase, runnerId, machineId) {
-  const { data: machine, error: machineError } = await supabase
+// silently excluded from that one machineId's assigned jobs (it can still
+// claim unassigned jobs, and any of its OTHER authorized machineIds
+// normally) - not an error, since "nothing to claim for that machine right
+// now" is the correct, quiet outcome for a computer that legitimately
+// isn't the authorized one, same as if nothing were queued at all.
+async function claimNextJob(supabase, runnerId, machineIds) {
+  const { data: machines, error: machineError } = await supabase
     .from('cam_machines')
-    .select('authorized_runner_id')
-    .eq('id', machineId)
-    .maybeSingle();
+    .select('id, authorized_runner_id')
+    .in('id', machineIds);
   if (machineError) throw new Error(`Could not check machine authorization: ${machineError.message}`);
-  const isAuthorizedForThisMachine =
-    !machine?.authorized_runner_id || machine.authorized_runner_id === runnerId;
+  const authorizedMachineIds = machineIds.filter((id) => {
+    const machine = machines?.find((m) => m.id === id);
+    return !machine?.authorized_runner_id || machine.authorized_runner_id === runnerId;
+  });
 
   let query = supabase
     .from('cam_jobs')
@@ -143,8 +147,11 @@ async function claimNextJob(supabase, runnerId, machineId) {
     .eq('operation_type', 'milling')
     .order('created_at', { ascending: true })
     .limit(5);
-  query = isAuthorizedForThisMachine
-    ? query.or(`machine_id.is.null,machine_id.eq.${machineId}`)
+  // Every entry in authorizedMachineIds already passed UUID_RE (validated
+  // by the caller) before reaching here - required, since .or() takes a
+  // raw filter string rather than a parameterized value like .eq()/.in() do.
+  query = authorizedMachineIds.length
+    ? query.or(`machine_id.is.null,machine_id.in.(${authorizedMachineIds.join(',')})`)
     : query.is('machine_id', null);
   const { data: candidates, error: findError } = await query;
   if (findError) throw new Error(`Could not look up queued milling jobs: ${findError.message}`);
@@ -285,14 +292,25 @@ export async function POST({ request, url }) {
     if (action === 'claim') {
       const runnerId = String(body?.runnerId || '').trim();
       if (!runnerId) return json({ error: 'runnerId is required' }, { status: 400 });
-      // Only trusted as a raw PostgREST .or() filter fragment once validated
-      // as a real UUID shape - unlike .eq(), .or() takes a raw string, so an
-      // unvalidated value here would be a filter-injection risk.
-      const rawMachineId = body?.machineId;
-      if (typeof rawMachineId !== 'string' || !UUID_RE.test(rawMachineId)) return json({ error: 'machineId is required and must be a UUID' }, { status: 400 });
-      const machineId = rawMachineId;
+      // machineIds (plural) is the current shape - a Runner driving more
+      // than one physical machine sends all of them. machineId (singular)
+      // is accepted too, for any Runner install that hasn't picked up the
+      // multi-machine config.py/SpartanRoboticsAutoCAM.py change yet.
+      // Only trusted as a raw PostgREST .or() filter fragment once every
+      // entry is validated as a real UUID shape - unlike .eq()/.in(), .or()
+      // takes a raw string, so an unvalidated value here would be a
+      // filter-injection risk.
+      const rawMachineIds = Array.isArray(body?.machineIds)
+        ? body.machineIds
+        : typeof body?.machineId === 'string'
+          ? [body.machineId]
+          : null;
+      if (!rawMachineIds?.length || !rawMachineIds.every((id) => typeof id === 'string' && UUID_RE.test(id))) {
+        return json({ error: 'machineIds is required and must be an array of UUIDs' }, { status: 400 });
+      }
+      const machineIds = rawMachineIds;
       await requeueStaleFusionJobs(supabase);
-      const job = await claimNextJob(supabase, runnerId, machineId);
+      const job = await claimNextJob(supabase, runnerId, machineIds);
       if (!job) return json({ job: null });
       try {
         const payload = await buildJobPayload(supabase, job);

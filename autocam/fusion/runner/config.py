@@ -44,14 +44,17 @@ BASE_URL = _read_env_value("BASE_URL") or "http://localhost:3000"
 import socket
 RUNNER_ID = _read_env_value("RUNNER_ID") or socket.gethostname() or "fusion-runner"
 
-# Which cam_machines row this physical install actually is (a UUID - look it
-# up with `select id, name from cam_machines;` in the Supabase SQL editor).
-# Sent as `machineId` on every claim request so /api/fusion-runner only
-# hands this Runner jobs meant for THIS machine (or jobs with no specific
-# machine assigned). It is required even for one Runner so a later second
-# machine cannot silently turn today's permissive setup into a wrong-machine
-# claim.
-RUNNER_MACHINE_ID = _read_env_value("RUNNER_MACHINE_ID") or None
+# Which cam_machines row(s) this physical install actually is (UUIDs - look
+# them up with `select id, name from cam_machines;` in the Supabase SQL
+# editor) - comma-separated for a computer that runs more than one physical
+# machine's Fusion session (e.g. one control laptop shared between two
+# routers); a single UUID still works exactly as before, as a one-element
+# list. Sent as `machineIds` on every claim request so /api/fusion-runner
+# only hands this Runner jobs meant for one of THESE machines (or jobs with
+# no specific machine assigned). At least one is required even for a single
+# machine so a later second machine cannot silently turn today's permissive
+# setup into a wrong-machine claim.
+RUNNER_MACHINE_IDS = [v.strip() for v in (_read_env_value("RUNNER_MACHINE_ID") or "").split(",") if v.strip()]
 
 # .overridepath is how this add-in finds a `pip install --target=...`'d
 # copy of `requests` (Fusion's bundled Python has no third-party packages).

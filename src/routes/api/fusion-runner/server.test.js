@@ -47,7 +47,7 @@ describe('Fusion Runner managed updates',()=>{
 });
 describe('Fusion Runner grouping lifecycle',()=>{
  it('marks unresolved claimed inputs failed instead of leaving a stranded claim',async()=>{
-  mocks.from.mockReturnValueOnce(chain({error:null})).mockReturnValueOnce(chain({data:{authorized_runner_id:null}})).mockReturnValueOnce(chain({data:[{id:'job'}]})).mockReturnValueOnce(chain({data:{id:'job'}})).mockReturnValueOnce(chain({data:[]}));
+  mocks.from.mockReturnValueOnce(chain({error:null})).mockReturnValueOnce(chain({data:[{id:machineId,authorized_runner_id:null}]})).mockReturnValueOnce(chain({data:[{id:'job'}]})).mockReturnValueOnce(chain({data:{id:'job'}})).mockReturnValueOnce(chain({data:[]}));
   mocks.payload.mockRejectedValue(new Error('Part b is missing its STEP file'));
   const result=await call('claim',{runnerId:'runner',machineId});
   expect(await result.json()).toEqual({job:null,error:'Part b is missing its STEP file'});
@@ -85,7 +85,7 @@ describe('Fusion Runner grouping lifecycle',()=>{
   expect(queries[0].in).toHaveBeenCalledWith('status',['claimed','processing']);
  });
  it('requeues only stale unstarted claims before claiming new work',async()=>{
-  mocks.from.mockReturnValueOnce(chain({error:null})).mockReturnValueOnce(chain({data:{authorized_runner_id:null}})).mockReturnValueOnce(chain({data:[]}));
+  mocks.from.mockReturnValueOnce(chain({error:null})).mockReturnValueOnce(chain({data:[{id:machineId,authorized_runner_id:null}]})).mockReturnValueOnce(chain({data:[]}));
   expect((await call('claim',{runnerId:'runner',machineId})).status).toBe(200);
   expect(queries[0].update).toHaveBeenCalledWith(expect.objectContaining({status:'queued',claimed_by:null,claimed_at:null}));
   expect(queries[0].eq).toHaveBeenCalledWith('status','claimed');
@@ -95,7 +95,7 @@ describe('Fusion Runner grouping lifecycle',()=>{
   mocks.from
    .mockReturnValueOnce(chain({error:{message:'TypeError: fetch failed'}}))
    .mockReturnValueOnce(chain({error:null}))
-   .mockReturnValueOnce(chain({data:{authorized_runner_id:null}}))
+   .mockReturnValueOnce(chain({data:[{id:machineId,authorized_runner_id:null}]}))
    .mockReturnValueOnce(chain({data:[]}));
   const result=await call('claim',{runnerId:'runner',machineId});
   expect(result.status).toBe(200);
@@ -104,7 +104,7 @@ describe('Fusion Runner grouping lifecycle',()=>{
  it('only claims unassigned jobs when this runner is not the machine\'s authorized one',async()=>{
   mocks.from
    .mockReturnValueOnce(chain({error:null}))
-   .mockReturnValueOnce(chain({data:{authorized_runner_id:'the-real-computer'}}))
+   .mockReturnValueOnce(chain({data:[{id:machineId,authorized_runner_id:'the-real-computer'}]}))
    .mockReturnValueOnce(chain({data:[]}));
   expect((await call('claim',{runnerId:'a-different-computer',machineId})).status).toBe(200);
   expect(queries[2].is).toHaveBeenCalledWith('machine_id',null);
@@ -113,10 +113,37 @@ describe('Fusion Runner grouping lifecycle',()=>{
  it('claims machine-specific jobs normally once the runner id matches the authorized one',async()=>{
   mocks.from
    .mockReturnValueOnce(chain({error:null}))
-   .mockReturnValueOnce(chain({data:{authorized_runner_id:'the-real-computer'}}))
+   .mockReturnValueOnce(chain({data:[{id:machineId,authorized_runner_id:'the-real-computer'}]}))
    .mockReturnValueOnce(chain({data:[]}));
   expect((await call('claim',{runnerId:'the-real-computer',machineId})).status).toBe(200);
-  expect(queries[2].or).toHaveBeenCalledWith(`machine_id.is.null,machine_id.eq.${machineId}`);
+  expect(queries[2].or).toHaveBeenCalledWith(`machine_id.is.null,machine_id.in.(${machineId})`);
+ });
+ it('accepts the plural machineIds array and claims jobs for any authorized machine in it',async()=>{
+  const otherMachineId='33333333-3333-4333-8333-333333333333';
+  mocks.from
+   .mockReturnValueOnce(chain({error:null}))
+   .mockReturnValueOnce(chain({data:[{id:machineId,authorized_runner_id:null},{id:otherMachineId,authorized_runner_id:'the-real-computer'}]}))
+   .mockReturnValueOnce(chain({data:[]}));
+  expect((await call('claim',{runnerId:'the-real-computer',machineIds:[machineId,otherMachineId]})).status).toBe(200);
+  expect(queries[1].in).toHaveBeenCalledWith('id',[machineId,otherMachineId]);
+  expect(queries[2].or).toHaveBeenCalledWith(`machine_id.is.null,machine_id.in.(${machineId},${otherMachineId})`);
+ });
+ it('excludes only the one machineId this runner is not authorized for, from a multi-machine claim',async()=>{
+  const otherMachineId='33333333-3333-4333-8333-333333333333';
+  mocks.from
+   .mockReturnValueOnce(chain({error:null}))
+   .mockReturnValueOnce(chain({data:[{id:machineId,authorized_runner_id:'a-different-computer'},{id:otherMachineId,authorized_runner_id:null}]}))
+   .mockReturnValueOnce(chain({data:[]}));
+  expect((await call('claim',{runnerId:'the-real-computer',machineIds:[machineId,otherMachineId]})).status).toBe(200);
+  expect(queries[2].or).toHaveBeenCalledWith(`machine_id.is.null,machine_id.in.(${otherMachineId})`);
+ });
+ it('rejects machineIds containing anything that is not a UUID',async()=>{
+  expect((await call('claim',{runnerId:'runner',machineIds:[machineId,'invalid']})).status).toBe(400);
+  expect(mocks.from).not.toHaveBeenCalled();
+ });
+ it('rejects an empty machineIds array the same as a missing one',async()=>{
+  expect((await call('claim',{runnerId:'runner',machineIds:[]})).status).toBe(400);
+  expect(mocks.from).not.toHaveBeenCalled();
  });
  it('does not retry a real database error recovering stale claims',async()=>{
   mocks.from.mockReturnValueOnce(chain({error:{message:'permission denied for table cam_jobs'}}));

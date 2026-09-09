@@ -5,12 +5,13 @@
   import { supabase } from '$lib/supabase.js';
   import { userStore, loadUserFromUUID } from '$lib/stores/user.js';
   import { canManageCamProfiles } from '$lib/permissions.js';
-  import { Layers, Package, Box, ListChecks, SlidersHorizontal, BookOpen, HelpCircle, Send, RotateCcw, Zap, X } from 'lucide-svelte';
+  import { Layers, Package, Box, ListChecks, SlidersHorizontal, BookOpen, HelpCircle, Send, RotateCcw, Zap, X, Wrench } from 'lucide-svelte';
   import PartsTab from './PartsTab.svelte';
   import BoxTubesTab from './BoxTubesTab.svelte';
   import JobQueueTab from './JobQueueTab.svelte';
   import StockCategoriesTab from './StockCategoriesTab.svelte';
   import TurningTab from './TurningTab.svelte';
+  import AtcSlotConfig from '$autocam/components/AtcSlotConfig.svelte';
 
   // Deep link from Manufacturing's "Open Fusion CAM" button
   // (/manufacture's fusionCamHref) - ?tab=parts&manufacturingPart=<id>
@@ -55,6 +56,28 @@
   // popup Send to Fusion CAM already uses) - no new queueing UI here.
   let quickQueueChoiceOpen = false;
 
+  // ATC Slots entry point - lives here (next to Send to Fusion CAM) rather
+  // than only on the /autocam admin page, since that's a Machine Profiles
+  // admin surface an operator queueing jobs day to day never visits, while
+  // this page is exactly where they'd notice a picker missing a tool.
+  let atcTools = [];
+  let atcMachineId = null;
+  let atcMachineName = '';
+  let showAtcModal = false;
+
+  async function loadAtcMachine() {
+    const { data } = await supabase.from('cam_tools').select('*').eq('enabled', true);
+    atcTools = data || [];
+    if (!atcTools.some((t) => t.tool_number != null)) return;
+    const { data: machine } = await supabase.from('cam_machines').select('id, name').eq('name', 'New Router').maybeSingle();
+    if (machine) { atcMachineId = machine.id; atcMachineName = machine.name; }
+  }
+
+  function openAtcModal() {
+    if (!atcMachineId) return;
+    showAtcModal = true;
+  }
+
   $: canManage = canManageCamProfiles(user);
 
   function setActiveTab(tab) {
@@ -96,6 +119,7 @@
 
   onMount(() => {
     const unsub = userStore.subscribe((v) => { user = v; });
+    loadAtcMachine();
     (async () => {
       await loadUserFromUUID(supabase);
       if (openQueueOnMount) {
@@ -126,6 +150,11 @@
       <button type="button" class="btn btn-primary btn-sm" on:click={openSendToFusionCam}>
         <Send size={14} /> Send to Fusion CAM
       </button>
+      {#if atcMachineId}
+        <button type="button" class="btn btn-secondary btn-sm" on:click={openAtcModal}>
+          <Wrench size={14} /> ATC Slots
+        </button>
+      {/if}
     {/if}
     <a class="btn btn-secondary btn-sm" href="/autocam/fusion/usage">
       <HelpCircle size={14} /> Usage Guide
@@ -189,6 +218,16 @@
     </div>
   </div>
 {/if}
+
+<AtcSlotConfig
+  bind:open={showAtcModal}
+  machineId={atcMachineId}
+  machineName={atcMachineName}
+  tools={atcTools}
+  userId={user?.id || null}
+  on:applied={loadAtcMachine}
+  on:toolsChanged={loadAtcMachine}
+/>
 
 <style>
   /* This page used to redefine the site's own --background/--accent/etc.

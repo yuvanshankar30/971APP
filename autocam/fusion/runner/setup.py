@@ -169,9 +169,11 @@ def write_env(addin_dir: str) -> None:
 
     print()
     print("RUNNER_MACHINE_ID is per-device, and NOT the same thing as the token:")
-    print("it says which physical machine this computer drives, so this Runner")
-    print("only claims jobs meant for that machine. Two workstations share the")
-    print("token but must each have their own machine id.")
+    print("it says which physical machine(s) this computer drives, so this Runner")
+    print("only claims jobs meant for those machines. Two workstations share the")
+    print("token but must each have their own machine id(s) - a single computer")
+    print("driving more than one machine (e.g. one control laptop shared between")
+    print("two routers) can list several, comma-separated.")
 
     runner_id = prompt("Name for this machine", socket.gethostname() or "fusion-runner")
 
@@ -188,15 +190,17 @@ def write_env(addin_dir: str) -> None:
             print(f"  Found the existing machine profile '{runner_id}' ({machine_id}).")
     else:
         print("Falling back to manual entry.")
-        print(f"Find it at {base_url}/autocam/fusion -> Machines - copy the id of the")
-        print("machine this computer is wired to.")
+        print(f"Find it at {base_url}/autocam/fusion -> Machines - copy the id(s) of")
+        print("the machine(s) this computer is wired to. Comma-separate more than one.")
         machine_id = ""
         while not machine_id:
-            candidate = prompt("cam_machines UUID for this physical machine")
+            candidate = prompt("cam_machines UUID(s) for this physical machine, comma-separated")
+            parts = [p.strip() for p in candidate.split(",") if p.strip()]
             try:
-                machine_id = str(uuid.UUID(candidate))
+                machine_id = ",".join(str(uuid.UUID(p)) for p in parts) if parts else ""
             except ValueError:
-                print("  That isn't a UUID - it should look like 517ba89c-7167-4415-b6fd-cfc7be1e59e1")
+                machine_id = ""
+                print("  Each entry must be a UUID - it should look like 517ba89c-7167-4415-b6fd-cfc7be1e59e1")
 
     with open(env_file, "w") as f:
         f.write(f'API_KEY="{token}"\n')

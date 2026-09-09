@@ -325,11 +325,20 @@ def _schedule_folder_sync_chunk():
 
 
 def _can_advance_folder_sync() -> bool:
-    """Return whether Fusion is in its normal non-modal command state."""
-    if _app is None:
+    """Return whether Fusion is in its normal non-modal command state.
+
+    activeCommand lives on adsk.core.UserInterface, not Application - the
+    previous version read _app.activeCommand, which doesn't exist on that
+    object at all (AttributeError on every single call, caught by the
+    except below and treated as "never idle"). That silently froze the
+    folder sync forever the moment this landed - confirmed live: the
+    synced tree in fusion_data_folders stopped updating at exactly this
+    commit and stayed stuck at its last (stale, sub-folder-rooted) value.
+    """
+    if _ui is None:
         return False
     try:
-        return str(_app.activeCommand or "") in _IDLE_COMMAND_IDS
+        return str(_ui.activeCommand or "") in _IDLE_COMMAND_IDS
     except Exception:
         # If Fusion cannot report command state, leave cloud work alone. The
         # pending sync will be retried by the normal timer instead of risking
@@ -480,7 +489,7 @@ def handleServer(temp_dir: str, stop_event: threading.Event):
             response = session.post(
                 f"{BASE_URL}/api/fusion-runner",
                 params={"action": "claim"},
-                json={"runnerId": RUNNER_ID, "machineId": RUNNER_MACHINE_ID},
+                json={"runnerId": RUNNER_ID, "machineIds": RUNNER_MACHINE_IDS},
                 timeout=30,
             )
             if stop_event.is_set():
@@ -528,8 +537,8 @@ def run(_context):
             ui.messageBox("Add-in not started (no API key set).")
             return
 
-        if not RUNNER_MACHINE_ID:
-            ui.messageBox("Add-in not started: RUNNER_MACHINE_ID is required. Run setup.py and choose this physical machine's cam_machines UUID.")
+        if not RUNNER_MACHINE_IDS:
+            ui.messageBox("Add-in not started: RUNNER_MACHINE_ID is required. Run setup.py and choose this physical machine's cam_machines UUID(s), comma-separated if this computer runs more than one machine.")
             return
 
         session = requests.Session()
