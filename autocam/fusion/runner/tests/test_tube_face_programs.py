@@ -187,6 +187,20 @@ class TubeFaceProgramTests(unittest.TestCase):
         self.assertIn("while not future.isGenerationCompleted:", workflow)
         self.assertNotIn("cam.isGenerating", workflow)
 
+    def test_tube_jobs_leave_their_document_open_for_the_slow_cloud_upload(self):
+        # Real, confirmed live bug: tube-stock cloud uploads are slow enough
+        # that closing the document right after saveAs()/completion left the
+        # file missing or stale in the Data Panel folder for a while. Unlike
+        # camPlate.py (whose fast uploads are safe to close immediately),
+        # tube jobs deliberately never call doc.close() at all.
+        workflow = (RUNNER_DIR / "workflows" / "camTube.py").read_text()
+        self.assertNotIn("doc.close(", workflow)
+
+    def test_tube_jobs_report_upload_location_and_completion_to_text_commands(self):
+        workflow = (RUNNER_DIR / "workflows" / "camTube.py").read_text()
+        self.assertIn('app.log(f"File uploaded to {data_project.name}/{folder_path}/{doc_name}")', workflow)
+        self.assertIn('app.log("Job Completed")', workflow)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -102,6 +102,11 @@ class PlateTemplateSelectionTests(unittest.TestCase):
 
         self.assertLess(completion_index, close_index)
 
+    def test_plate_jobs_report_upload_location_and_completion_to_text_commands(self):
+        workflow = (Path(__file__).parents[1] / "workflows" / "camPlate.py").read_text()
+        self.assertIn('app.log(f"File uploaded to {data_project.name}/{folder_path}/{doc_name}")', workflow)
+        self.assertIn('app.log("Job Completed")', workflow)
+
 
 if __name__ == "__main__":
     unittest.main()

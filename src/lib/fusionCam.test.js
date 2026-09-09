@@ -15,6 +15,7 @@ import {
   fetchFusionJobNcFiles,
   fetchFusionPartStepFiles,
   fetchFusionJobsByManufacturingPartIds,
+  fetchCompletedFusionStockIds,
   fetchFusionFolderTree,
   installFusionPartCad,
   deleteAllFailedFusionJobs,
@@ -259,6 +260,24 @@ describe('Fusion CAM queue query efficiency', () => {
     const camQuery = mocks.queries.at(-1);
     expect(camQuery.in).toHaveBeenCalledWith('params->>plateId', ['plate-1']);
     expect(camQuery.limit).not.toHaveBeenCalled();
+  });
+
+  it('collects plate and box tube ids with a completed CAM output job, ignoring arrange-only jobs', async () => {
+    mocks.from.mockReturnValue(chain({
+      data: [
+        { params: { plateId: 'plate-1', fusionJobKind: 'plate:cam' } },
+        { params: { plateId: 'plate-2', fusionJobKind: 'plate:arrange' } },
+        { params: { boxTubeId: 'tube-1', fusionJobKind: 'box_tube' } }
+      ],
+      error: null
+    }));
+
+    const { plateIds, boxTubeIds } = await fetchCompletedFusionStockIds();
+    expect(plateIds.has('plate-1')).toBe(true);
+    expect(plateIds.has('plate-2')).toBe(false);
+    expect(boxTubeIds.has('tube-1')).toBe(true);
+    expect(mocks.queries[0].eq).toHaveBeenCalledWith('operation_type', 'milling');
+    expect(mocks.queries[0].eq).toHaveBeenCalledWith('status', 'completed');
   });
 
   it('installs CAD by creating a signed download URL for the real STEP file', async () => {

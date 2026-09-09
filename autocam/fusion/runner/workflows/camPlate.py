@@ -781,7 +781,7 @@ def start(data, session):
 
             # Save the document
             doc.saveAs(doc_name, autocam_drop_folder, "", "")
-            app.log(f"Saved document '{doc_name}' to '{data_project.name}/{folder_path}'")
+            app.log(f"File uploaded to {data_project.name}/{folder_path}/{doc_name}")
 
         except Exception as e:
             # folder_path (the queue-time override, or FUSION_DROP_FOLDER_PATH)
@@ -871,6 +871,8 @@ def start(data, session):
             job_id,
             f"Plate {plate_id} job {job_id} completion upload",
         )
+        if resp is not None and resp.ok:
+            app.log("Job Completed")
         # Everything durable is now finished: the Fusion document is saved,
         # NC files are uploaded, and the queue accepted completion. Keeping
         # documents open between jobs accumulates stale designs and can make

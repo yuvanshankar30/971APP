@@ -5,7 +5,7 @@
   import { supabase } from '$lib/supabase.js';
   import {
     fetchParts, createPart, deletePart, deleteParts, renamePart, updatePartQuantity, fetchPartCategories, installFusionPartCad,
-    fetchPlates, createPlate, assignPartToPlate, queueFusionJob, fetchFusionFolderTree
+    fetchPlates, createPlate, assignPartToPlate, queueFusionJob, fetchFusionFolderTree, fetchCompletedFusionStockIds
   } from '$lib/fusionCam.js';
   import { PACIFIC_TIME_ZONE, formatPacificDateTime } from '$lib/timezone.js';
   import { fetchStepMeshes, readStepMeshes } from '$lib/stepMeshLoader.js';
@@ -46,6 +46,9 @@
   let parts = [];
   let plates = [];
   let categories = [];
+  // fusion_parts.id set with a completed CAM output job on whichever plate
+  // they're currently assigned to - see fetchCompletedFusionStockIds.
+  let completedPartIds = new Set();
   $: stockGroups = buildStockGroups(parts, plates, categories);
   $: partsByCreatedAt = [...parts].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
   // Free-text search over the main parts list (separate from the queue
@@ -512,6 +515,15 @@
     if (showLoading) loading = true;
     try {
       [parts, categories, plates] = await Promise.all([fetchParts(), fetchPartCategories(), fetchPlates()]);
+      const { plateIds: completedPlateIds } = await fetchCompletedFusionStockIds();
+      const nextCompletedPartIds = new Set();
+      for (const plate of plates) {
+        if (!completedPlateIds.has(plate.id)) continue;
+        for (const assignment of plate.fusion_part_category_assignments || []) {
+          if (assignment.fusion_parts?.id) nextCompletedPartIds.add(assignment.fusion_parts.id);
+        }
+      }
+      completedPartIds = nextCompletedPartIds;
       await loadManufacturingParts();
       const { data: machineRows } = await supabase.from('cam_machines').select('*').eq('can_run_plates', true).eq('enabled', true).order('name');
       machines = machineRows || [];
@@ -1262,6 +1274,9 @@
                     {/if}
                   </span>
                   <span class="tag">{categoryLabel(part.fusion_part_categories)}</span>
+                  {#if completedPartIds.has(part.id)}
+                    <span class="tag tag-completed"><Check size={13} /> Completed</span>
+                  {/if}
                 </div>
                 <p class="cam-form-hint">
                   {#if editingQuantityId === part.id}

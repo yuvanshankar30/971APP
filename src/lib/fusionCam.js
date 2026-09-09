@@ -543,6 +543,30 @@ export async function fetchFusionJobsByManufacturingPartIds(partIds) {
 }
 
 /**
+ * Plate ids and box tube ids with at least one completed CAM output job
+ * (plate:cam / box_tube - never plate:arrange, see isFusionOutputJob).
+ * Powers the "Completed" badge on the Parts and Tube Stock tabs - a plate
+ * (and every part currently assigned to it) or a box tube shows Completed
+ * once a real machine-output job for it has finished, not just an arrange.
+ */
+export async function fetchCompletedFusionStockIds() {
+  const { data, error } = await supabase
+    .from('cam_jobs')
+    .select('params')
+    .eq('operation_type', 'milling')
+    .eq('status', 'completed');
+  if (error) throw error;
+  const plateIds = new Set();
+  const boxTubeIds = new Set();
+  for (const job of data || []) {
+    if (!isFusionOutputJob(job)) continue;
+    if (job.params?.plateId) plateIds.add(job.params.plateId);
+    if (job.params?.boxTubeId) boxTubeIds.add(job.params.boxTubeId);
+  }
+  return { plateIds, boxTubeIds };
+}
+
+/**
  * Reads the cached Fusion Data Panel folder tree for the given project
  * (default FUSION_DATA_PROJECT_NAME's real value, "2026 Season CAM") -
  * pushed up by a live Runner (see SpartanRoboticsAutoCAM.py's

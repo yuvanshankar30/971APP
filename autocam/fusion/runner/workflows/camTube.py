@@ -248,7 +248,7 @@ def start(data, session):
 
             # Save the document
             doc.saveAs(doc_name, autocam_drop_folder, "", "")
-            app.log(f"Saved document '{doc_name}' to '{data_project.name}/{folder_path}'")
+            app.log(f"File uploaded to {data_project.name}/{folder_path}/{doc_name}")
 
         except Exception as e:
             app.log(
@@ -305,9 +305,18 @@ def start(data, session):
             job_id,
             f"Tube {box_tube_id} job {job_id} completion upload",
         )
-        doc.close(False)
-        app.log(f"Closed document '{doc_name}'")
+        if resp is not None and resp.ok:
+            app.log("Job Completed")
 
+        # Real, confirmed live bug this deliberately does NOT close the
+        # document for: tube-stock uploads are slow enough that Fusion's own
+        # cloud sync is still finishing well after saveAs() (and even this
+        # completion POST) returns - closing right away raced that sync and
+        # left the file missing/stale in the Data Panel folder for a while.
+        # Plate documents don't have this problem (their own close call in
+        # camPlate.py's start() uploads fast enough to close safely) so only
+        # tube jobs leave the document open for Fusion to finish syncing in
+        # the background.
         try:
             ui.workspaces.itemById("FusionSolidEnvironment").activate()
         except Exception:
