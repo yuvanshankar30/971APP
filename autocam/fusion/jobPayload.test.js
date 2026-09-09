@@ -44,6 +44,19 @@ describe('Fusion plate payloads',()=>{
   const value=job(); value.params.singleToolMode=true; value.cam_tools={tool_type:'endmill'};
   await expect(buildJobPayload(db(),value)).resolves.toMatchObject({single_tool_mode:true});
  });
+ it('sends only the selected cutter to Fusion for a single-tool plate job',async()=>{
+  const value=job(); value.machine_id='router'; value.tool_id='main-bit'; value.params.singleToolMode=true; value.cam_tools={tool_type:'flat end mill'};
+  const database={
+   storage:db().storage,
+   from:(table)=>table==='cam_machine_tools'?{select:()=>({eq:async()=>({data:[
+    {tool_id:'main-bit',cam_tools:{tool_library_guid:'main-guid',tool_type:'flat end mill'}},
+    {tool_id:'detail-bit',cam_tools:{tool_library_guid:'detail-guid',tool_type:'flat end mill'}}
+   ]})})}:null
+  };
+  await expect(buildJobPayload(database,value)).resolves.toMatchObject({
+   single_tool_mode:true, tool_items:[{tool_id:'main-bit',tool_guid:'main-guid'}]
+  });
+ });
  it('sends loaded endmill and drill candidates, not every installed tool, for auto multi-tool CAM',async()=>{
   const value=job(); value.machine_id='router'; value.tool_id='endmill'; value.params.multiToolMode=true;
   const database={

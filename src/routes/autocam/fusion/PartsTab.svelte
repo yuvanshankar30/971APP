@@ -506,6 +506,19 @@
     return machines.find((machine) => String(machine.id) === String(machineId))?.name?.trim().toLowerCase() === 'new router';
   }
 
+  function isAluminum6061(group) {
+    const material = String(group?.category?.cam_materials?.name || '').trim().toLowerCase();
+    return ['aluminum 6061', 'aluminium 6061', '6061 aluminum', '6061 aluminium'].includes(material);
+  }
+
+  function canUseAutoMultiTool(group, machineId) {
+    return isNewRouter(machineId) && isAluminum6061(group);
+  }
+
+  function mainBitForMachine(machineId) {
+    return toolsForMachine(machineId).find((tool) => String(tool.name || '').trim().toLowerCase() === '971 main bit');
+  }
+
   // ATC Slots, reachable right from the queue picker (not only the /autocam
   // admin page) - an operator who notices a missing tool here shouldn't
   // have to leave this modal to go fix it.
@@ -533,20 +546,18 @@
     categoryMachineSelections = { ...categoryMachineSelections, [categoryId]: machineId };
     const eligible = toolsForMachine(machineId);
     const machine = machines.find((m) => String(m.id) === String(machineId));
+    const group = stockGroups.find((candidate) => String(candidate.categoryId) === String(categoryId));
     const singleToolMode = isNewRouter(machineId);
     const eligibleForMode = isNewRouter(machineId) ? eligible.filter(isEndmill) : eligible;
     categorySingleToolModes = { ...categorySingleToolModes, [categoryId]: singleToolMode };
     const stillValid = eligibleForMode.some((t) => String(t.id) === String(categoryToolSelections[categoryId]));
     if (!stillValid) {
-      // New Router now has multiple real, distinct candidate endmills (the
-      // ShopSabre library import) - silently defaulting to whichever one
-      // happens to be machine.default_tool_id risks queueing a job with a
-      // tool the operator never actually looked at or meant to pick.
-      // Direct instruction: New Router always requires an explicit choice;
-      // auto-selecting a default tool stays UNC-Router-only, where it's
-      // long been the single tool anyway.
+      // Aluminum 6061 can choose its own single cutter or use ATC planning.
+      // Every other New Router material is deliberately single-tool and
+      // starts on the physically loaded 971 Main Bit.
       if (isNewRouter(machineId)) {
-        categoryToolSelections = { ...categoryToolSelections, [categoryId]: '' };
+        const mainBit = !canUseAutoMultiTool(group, machineId) ? mainBitForMachine(machineId) : null;
+        categoryToolSelections = { ...categoryToolSelections, [categoryId]: mainBit?.id || '' };
       } else {
         const defaultTool = eligibleForMode.find((t) => String(t.id) === String(machine?.default_tool_id));
         categoryToolSelections = { ...categoryToolSelections, [categoryId]: defaultTool?.id || eligibleForMode[0]?.id || '' };
@@ -819,9 +830,10 @@
     // deliberately cleared for it (a single manual choice doesn't apply -
     // resolveLoadedToolItems/plan_endmills pick from every loaded tool
     // server-side), so nothing to require here in that case.
-    const isAutoMultiTool = isNewRouter(categoryMachineSelections[categoryId]) && !categorySingleToolModes[categoryId];
+    const isAutoMultiTool = canUseAutoMultiTool(group, categoryMachineSelections[categoryId]) && !categorySingleToolModes[categoryId];
     if (!isAutoMultiTool && !categoryToolSelections[categoryId]) return 'Choose a tool before queueing';
-    if (categorySingleToolModes[categoryId]) {
+    const usesSingleTool = !isAutoMultiTool && isNewRouter(categoryMachineSelections[categoryId]);
+    if (usesSingleTool) {
       const selectedTool = toolsForMachine(categoryMachineSelections[categoryId])
         .find((tool) => String(tool.id) === String(categoryToolSelections[categoryId]));
       if (!isEndmill(selectedTool)) return 'Single-tool CAM requires an endmill';
@@ -949,8 +961,15 @@
         fusionFileName: queueFileName.trim() || null,
         fusionFolderPath: queueFolderPath || null,
         tabCount: queueTabCount === '' ? null : queueTabCount,
-        singleToolMode: Boolean(categorySingleToolModes[categoryId]),
-        multiToolMode: isNewRouter(categoryMachineSelections[categoryId]) && !categorySingleToolModes[categoryId],
+        singleToolMode: isNewRouter(categoryMachineSelections[categoryId])
+          && !canUseAutoMultiTool(
+            stockGroups.find((group) => String(group.categoryId) === String(categoryId)),
+            categoryMachineSelections[categoryId]
+          ) || Boolean(categorySingleToolModes[categoryId]),
+        multiToolMode: canUseAutoMultiTool(
+          stockGroups.find((group) => String(group.categoryId) === String(categoryId)),
+          categoryMachineSelections[categoryId]
+        ) && !categorySingleToolModes[categoryId],
       });
       toastActions.show('Queued for the Fusion Runner');
       categoryQueueModes = { ...categoryQueueModes, [categoryId]: '' };
@@ -1365,7 +1384,7 @@
                   {/each}
                 </select>
               </div>
-              {#if !isNewRouter(categoryMachineSelections[group.categoryId]) || categorySingleToolModes[group.categoryId]}
+              {#if !isNewRouter(categoryMachineSelections[group.categoryId]) || categorySingleToolModes[group.categoryId] || !canUseAutoMultiTool(group, categoryMachineSelections[group.categoryId])}
                 <div class="form-group">
                   <label class="form-label" for={`queue-tool-${group.categoryId}`}>Tool</label>
                   <select id={`queue-tool-${group.categoryId}`} class="form-select" bind:value={categoryToolSelections[group.categoryId]} disabled={!categoryMachineSelections[group.categoryId]}>
@@ -1390,14 +1409,18 @@
                     <Wrench size={14} /> ATC Slots
                   </button>
                 </div>
-                <div class="segmented-control" aria-label="Tool mode for New Router">
-                  <button type="button" class:active={categorySingleToolModes[group.categoryId]} on:click={() => (categorySingleToolModes = { ...categorySingleToolModes, [group.categoryId]: true })}>Single tool</button>
-                  <button type="button" class:active={!categorySingleToolModes[group.categoryId]} on:click={() => {
-                    categorySingleToolModes = { ...categorySingleToolModes, [group.categoryId]: false };
-                    categoryToolSelections = { ...categoryToolSelections, [group.categoryId]: '' };
-                  }}>Auto multi-tool</button>
-                </div>
-                <p class="cam-form-hint">Auto multi-tool considers every loaded cutter, then uses only the high-throughput cutter and any smaller cutter required for detail. Unused candidates do not create a tool swap.</p>
+                {#if canUseAutoMultiTool(group, categoryMachineSelections[group.categoryId])}
+                  <div class="segmented-control" aria-label="Tool mode for New Router">
+                    <button type="button" class:active={categorySingleToolModes[group.categoryId]} on:click={() => (categorySingleToolModes = { ...categorySingleToolModes, [group.categoryId]: true })}>Single tool</button>
+                    <button type="button" class:active={!categorySingleToolModes[group.categoryId]} on:click={() => {
+                      categorySingleToolModes = { ...categorySingleToolModes, [group.categoryId]: false };
+                      categoryToolSelections = { ...categoryToolSelections, [group.categoryId]: '' };
+                    }}>Auto multi-tool</button>
+                  </div>
+                  <p class="cam-form-hint">Auto multi-tool considers every loaded cutter, then uses only the high-throughput cutter and any smaller cutter required for detail. Unused candidates do not create a tool swap.</p>
+                {:else}
+                  <p class="cam-form-hint">Single-tool CAM uses the loaded 971 Main Bit. Tool swaps are available only for Aluminum 6061.</p>
+                {/if}
               </div>
             {/if}
           {/if}
