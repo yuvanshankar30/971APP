@@ -375,7 +375,8 @@ own docs are all together in one place instead of scattered across
   conservative dry-routing defaults when stock has not been selected. In
   New Router multi-tool jobs, a loaded cutter without a reviewed preset for
   the selected material is excluded before planning, so it cannot cause an
-  ATC swap; a job with no reviewed endmill fails before CAM generation.
+  ATC swap; ATC swaps are limited to Aluminum 6061, and a job with no
+  reviewed endmill fails before CAM generation.
   `routing.js`/`tubestock.js` support two controller dialects
   (`params.controller`: `'linuxcnc'` default, `'wincnc'`) - see
   `autocam/postprocessors/README.md` for the shop's real post-processor
