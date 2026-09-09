@@ -88,10 +88,29 @@ def _tool_number(entry: dict):
         return None
 
 
+_MULTI_TOOL_LIBRARY_FILE = "Normal router tools (use this).tools"
+
+
 def load_local_tool_library_json(data: dict, dest_dir: str) -> tuple[dict, str]:
     """Extract the selected checked-in Fusion tool library for template patching."""
     tool = _joined_record(data, "cam_tools")
+    payload = data.get("payload")
+    multi_tool_mode = isinstance(payload, dict) and payload.get("multi_tool_mode") is True
     configured_file = tool.get("fusion_tool_library_file")
+    if not configured_file and multi_tool_mode:
+        # Multi-tool mode has no single selected cam_tools row (tool_id is
+        # deliberately null - the planner resolves from every loaded
+        # candidate server-side, not one manual selection; see
+        # jobPayload.js's resolveLoadedToolItems), so there is no
+        # fusion_tool_library_file to read here the way single-tool mode
+        # has one. Every UI entry point gates multi-tool mode to New
+        # Router only, and every one of its real loaded tools comes from
+        # this one bundled library (matches jobPayload.js's own
+        # SHOP_SABRE_TOOL_LIBRARY constant, which every approved
+        # countersink is already validated against) - safe to assume
+        # directly for a single-library shop rather than plumbing the
+        # filename through tool_items.
+        configured_file = _MULTI_TOOL_LIBRARY_FILE
     if not isinstance(configured_file, str) or not configured_file.strip():
         raise ValueError(
             "Selected CAM tool has no local Fusion tool library configured. "
@@ -116,8 +135,10 @@ def load_local_tool_library_json(data: dict, dest_dir: str) -> tuple[dict, str]:
     if not isinstance(parsed, dict):
         raise ValueError(f"Fusion tool library {file_name} does not contain a JSON object")
 
-    selected_diameter = _selected_diameter(tool)
-    payload = data.get("payload")
+    # No single selected tool to size-match against in multi-tool mode -
+    # every entry there is matched by candidate_guids below instead (the
+    # loaded set resolved server-side), never by comparing to this value.
+    selected_diameter = _selected_diameter(tool) if tool.get("diameter") is not None else None
     single_tool_mode = isinstance(payload, dict) and payload.get("single_tool_mode") is True
     multi_tool_mode = isinstance(payload, dict) and payload.get("multi_tool_mode") is True
     candidate_guids = {
@@ -171,12 +192,13 @@ def load_local_tool_library_json(data: dict, dest_dir: str) -> tuple[dict, str]:
                 matching_entries.append(entry)
                 continue
             entry_diameter = _tool_diameter(entry)
-            if entry_diameter is not None and abs(entry_diameter - selected_diameter) < 0.0001:
+            if selected_diameter is not None and entry_diameter is not None and abs(entry_diameter - selected_diameter) < 0.0001:
                 matching_entries.append(entry)
     if not matching_entries:
         raise ValueError(
-            f"Fusion tool library {file_name} has no tool with diameter "
-            f"{selected_diameter:g} in"
+            f"Fusion tool library {file_name} has no tool matching this job's selection"
+            if selected_diameter is None else
+            f"Fusion tool library {file_name} has no tool with diameter {selected_diameter:g} in"
         )
 
     # A library can contain several variants of a similarly named bit. Keep

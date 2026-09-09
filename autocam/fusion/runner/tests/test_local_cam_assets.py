@@ -48,6 +48,59 @@ class SingleToolLibraryTests(unittest.TestCase):
                     output_dir,
                 )
 
+    def test_multi_tool_mode_has_no_joined_tool_at_all_and_must_not_crash(self):
+        # Real, confirmed live case: New Router's Auto multi-tool mode sends
+        # tool_id=null (the planner resolves from every loaded candidate
+        # server-side, not one manual selection), so data["cam_tools"] is
+        # None on the claimed job row - there is no single tool to read a
+        # fusion_tool_library_file or diameter from at all. This used to
+        # crash outright ("Selected CAM tool has no local Fusion tool
+        # library configured").
+        endmill_guid = "e7813c26-af06-4d6c-9aba-324fa1b402c1"  # ShopSabre 6, 4mm
+        with tempfile.TemporaryDirectory() as output_dir:
+            tool, path = local_cam_assets.load_local_tool_library_json(
+                {
+                    "payload": {"multi_tool_mode": True, "tool_items": [{"tool_guid": endmill_guid}]},
+                    "cam_tools": None,
+                },
+                output_dir,
+            )
+            self.assertEqual(tool, {})
+            entries = json.loads(Path(path).read_text())["data"]
+            self.assertIn(endmill_guid, [entry.get("guid") for entry in entries])
+
+    def test_multi_tool_mode_only_includes_a_drill_that_is_actually_a_loaded_candidate(self):
+        # A drill NOT in candidate_guids (jobPayload.js only puts genuinely
+        # loaded endmill/drill tools there) must stay excluded - unlike
+        # single-tool mode, multi-tool mode has no separate "keep every
+        # drill" fallback, since the whole point is only ever using what's
+        # actually loaded on the machine.
+        drill_guid = "24cf5076-1599-42d4-ab65-d7abf5119cfe"
+        with tempfile.TemporaryDirectory() as output_dir:
+            _tool, path = local_cam_assets.load_local_tool_library_json(
+                {
+                    "payload": {"multi_tool_mode": True, "tool_items": [
+                        {"tool_guid": "29331875-1efc-47c5-9742-f39efcb697ed"}  # 6mm endmill only
+                    ]},
+                    "cam_tools": None,
+                },
+                output_dir,
+            )
+            entries = json.loads(Path(path).read_text())["data"]
+            self.assertNotIn(drill_guid, [entry.get("guid") for entry in entries])
+            _tool2, path2 = local_cam_assets.load_local_tool_library_json(
+                {
+                    "payload": {"multi_tool_mode": True, "tool_items": [
+                        {"tool_guid": "29331875-1efc-47c5-9742-f39efcb697ed"},
+                        {"tool_guid": drill_guid},
+                    ]},
+                    "cam_tools": None,
+                },
+                output_dir,
+            )
+            entries2 = json.loads(Path(path2).read_text())["data"]
+            self.assertIn(drill_guid, [entry.get("guid") for entry in entries2])
+
     def test_includes_only_the_explicit_countersink_in_the_generated_library(self):
         countersink_guid = "61a8645a-9015-4aba-958b-70297d26b19e"
         with tempfile.TemporaryDirectory() as output_dir:

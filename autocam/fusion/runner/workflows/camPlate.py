@@ -597,20 +597,6 @@ def start(data, session):
 
         occurrences = list(design.rootComponent.allOccurrences)
         _apply_snapshot_part_names(data, assignments, occurrences)
-        spacing = plate_spacing((data.get('cam_tools') or {}).get('diameter'))
-        requested_length, requested_width = length, width
-        try:
-            arrange, length, width = AutoArrange(length, width, object_spacing=spacing)
-        except RuntimeError as error:
-            if 'ARRANGE_ERROR_NO_ROOM' not in str(error):
-                raise
-            raise PlateFitError(
-                f'Fusion could not fit every selected part on the {length:.2f} x '
-                f'{width:.2f}in plate. Select larger stock or reduce the group.'
-            ) from error
-        require_complete_arrangement(arrange, occurrences)
-        if length > requested_length or width > requested_width:
-            _report_grown_plate(app, session, _get(payload, "plate_id", "plateId", default="cam_plate"), length, width)
 
         # Extract tool_items (specific tool GUIDs from within libraries)
         tool_items_raw = _get(payload, "tool_items")
@@ -629,6 +615,51 @@ def start(data, session):
         if countersink_guid:
             filter_guids = (filter_guids or set()) | {str(countersink_guid)}
 
+        # Loaded ahead of plate_spacing below (moved earlier from its
+        # original position, right before patch_cam_template_with_tool_libraries)
+        # because multi-tool mode has no single cam_tools row to read a
+        # spacing diameter from at all - see that block's own comment.
+        _tool_info, tool_json_path = load_local_tool_library_json(data, TOOLS_PATH)
+
+        # Plate spacing needs a real cutting-tool diameter to keep parts
+        # clear of each other. Single-tool mode has exactly one (the
+        # joined cam_tools row); multi-tool mode deliberately has no
+        # single selection at all (tool_id is null - see jobPayload.js's
+        # resolveLoadedToolItems), so fall back to the largest loaded
+        # endmill in the library file just written above - the same tool
+        # toolPlanning.py's own diameter-first ranking will pick for
+        # roughing, so spacing stays consistent with what actually cuts.
+        # Confirmed live: the original single-tool-only lookup crashed
+        # every multi-tool job outright (TypeError: float() argument must
+        # be a string or a real number, not 'NoneType').
+        spacing_diameter = (data.get('cam_tools') or {}).get('diameter')
+        if spacing_diameter is None:
+            with open(tool_json_path, encoding="utf-8") as tool_json_file:
+                loaded_entries = (json.load(tool_json_file) or {}).get("data") or []
+            endmill_diameters = [
+                diameter for diameter in (
+                    (entry.get("geometry") or {}).get("DC")
+                    for entry in loaded_entries
+                    if isinstance(entry, dict) and "end mill" in str(entry.get("type") or "").lower()
+                )
+                if isinstance(diameter, (int, float))
+            ]
+            spacing_diameter = max(endmill_diameters) if endmill_diameters else None
+        spacing = plate_spacing(spacing_diameter)
+        requested_length, requested_width = length, width
+        try:
+            arrange, length, width = AutoArrange(length, width, object_spacing=spacing)
+        except RuntimeError as error:
+            if 'ARRANGE_ERROR_NO_ROOM' not in str(error):
+                raise
+            raise PlateFitError(
+                f'Fusion could not fit every selected part on the {length:.2f} x '
+                f'{width:.2f}in plate. Select larger stock or reduce the group.'
+            ) from error
+        require_complete_arrangement(arrange, occurrences)
+        if length > requested_length or width > requested_width:
+            _report_grown_plate(app, session, _get(payload, "plate_id", "plateId", default="cam_plate"), length, width)
+
         # The claim response already joins these records. Keep the Runner
         # offline after a claim: the old /api/tools, /api/materials, and
         # /api/machines endpoints were never part of this application.
@@ -639,7 +670,6 @@ def start(data, session):
         machine_post_processor_path = resolve_local_post_processor(data)
         template_path = _select_plate_template_path(machine_name)
 
-        _tool_info, tool_json_path = load_local_tool_library_json(data, TOOLS_PATH)
         patched_template = os.path.join(
             TOOLS_PATH, f"Plates_job{job_id}.f3dhsm-template"
         )
