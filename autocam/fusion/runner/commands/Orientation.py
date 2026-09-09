@@ -297,16 +297,24 @@ def _pocket_side_face(body):
 
 
 def orient_plate_pocket_side_up(occurrence: adsk.fusion.Occurrence):
+    """Orient one imported plate and report whether a countersink is face-up.
+
+    The result is deliberately computed from the exact broad face selected
+    for the setup, before Arrange/SetupGenerator consume the occurrence.
+    A selected countersink bit is permission to add the operation, not proof
+    that the part has a countersink reachable from this one-sided setup.
+    """
     app = adsk.core.Application.get()
     if occurrence.bRepBodies.count == 0:
-        return
+        return False
     face = _pocket_side_face(occurrence.bRepBodies.item(0))
     if face is None:
         app.log("Could not find a planar plate face to orient")
-        return
+        return False
+    countersink_face_up = _face_has_countersink_chamfer(face)
     normal = _planar_face_normal(face)
     if normal is None:
-        return
+        return False
     app.log(
         "Orienting plate from preferred face: "
         f"area={face.area:.5f}, innerLoops={sum(not loop.isOuter for loop in face.loops)}"
@@ -318,7 +326,7 @@ def orient_plate_pocket_side_up(occurrence: adsk.fusion.Occurrence):
     angle = n_world.angleTo(target)
     if angle < 1e-8:
         app.log("No rotation needed")
-        return
+        return countersink_face_up
     axis = n_world.crossProduct(target)
     if axis.length < 1e-8:
         axis = adsk.core.Vector3D.create(1, 0, 0)
@@ -335,3 +343,4 @@ def orient_plate_pocket_side_up(occurrence: adsk.fusion.Occurrence):
 
     mi = moveFeats.createInput(objs, R)  # <-- required transform argument
     moveFeats.add(mi)
+    return countersink_face_up

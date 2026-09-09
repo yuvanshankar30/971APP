@@ -23,6 +23,7 @@ from ..commands.NewNCProgram import export
 from ..commands.DeleteToolpaths import DeleteToolpaths
 from ..commands.AutoArrange import AutoArrange
 from ..commands.Orientation import orient_plate_pocket_side_up
+from ..commands.PocketOrientation import should_generate_countersink
 from ..commands.TabPlacement import ConfigureTabs, DEFAULT_MAX_TABS, DEFAULT_MIN_TABS
 from ..config import (
     BASE_URL,
@@ -580,8 +581,9 @@ def start(data, session):
         # then Arrange could preserve that wrong side all the way into CAM.
         # Do this before AutoArrange so its face-up constraint keeps pockets
         # accessible to the setup and PocketRecognitionSelection.
+        countersink_face_up = False
         for occurrence in design.rootComponent.allOccurrences:
-            orient_plate_pocket_side_up(occurrence)
+            countersink_face_up = orient_plate_pocket_side_up(occurrence) or countersink_face_up
 
         # Plate dimensions: /api/fusion-runner's claim response already
         # resolves these server-side from fusion_plates (see
@@ -611,6 +613,17 @@ def start(data, session):
             if not filter_guids:
                 filter_guids = None
         countersink_guid = (payload.get("countersink_tool") or {}).get("guid") if isinstance(payload, dict) else None
+        if countersink_guid and not should_generate_countersink(True, countersink_face_up):
+            # The countersink template recognizes holes by diameter. Without
+            # a modeled chamfer on the setup's upward face it would select
+            # unrelated same-diameter through holes from the flat back, then
+            # cut an unwanted countersink there. A selected bit alone must
+            # never authorize that geometry change.
+            app.log(
+                "Skipping requested countersink: no modeled countersink "
+                "chamfer is reachable from the setup face."
+            )
+            countersink_guid = None
         multi_tool_mode = isinstance(payload, dict) and payload.get("multi_tool_mode") is True
         if countersink_guid:
             filter_guids = (filter_guids or set()) | {str(countersink_guid)}
@@ -721,7 +734,10 @@ def start(data, session):
             else:
                 ConfigureTabs()
         except Exception:
+            # A release contour without verified tabs can free a part during
+            # machining. Do not log and post it anyway.
             app.log("TabPlacement failed:\n{}".format(traceback.format_exc()))
+            raise RuntimeError("Could not configure safe holding tabs for the release contour")
         DeleteToolpaths()
 
         # Bound before the try below runs, not just assigned inside it -
