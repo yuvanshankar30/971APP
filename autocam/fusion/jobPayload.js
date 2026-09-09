@@ -22,7 +22,7 @@ async function resolveLoadedToolItems(supabase, machineId, toolId) {
   if (toolId && !items.some((item) => String(item.tool_id) === String(toolId))) {
     throw new Error('Selected tool is not loaded on this machine');
   }
-  return items;
+  return toolId ? items.filter((item) => String(item.tool_id) === String(toolId)) : items;
 }
 
 /** Resolve every queued input or reject the entire job; never CAM a partial plate. */
@@ -55,7 +55,12 @@ export async function buildJobPayload(supabase, job) {
   // cutting data from the physical .tools file) - failing the entire job
   // with "Selected tool is not loaded on this machine" over a field the
   // job's own mode says to ignore.
-  const tool_items = multi_tool_mode ? await resolveLoadedToolItems(supabase, machine_id, null) : [];
+  // A single-tool job must carry its specific library GUID too. Otherwise
+  // Fusion receives the full machine library and can silently bind another
+  // installed cutter despite the operator selecting just one in the queue UI.
+  const tool_items = (multi_tool_mode || tool_id)
+    ? await resolveLoadedToolItems(supabase, machine_id, multi_tool_mode ? null : tool_id)
+    : [];
   async function signedUrl(fileName, partId) {
     if (typeof fileName !== 'string' || !fileName.trim()) throw new Error(`Part ${partId} is missing its STEP file`);
     const { data, error } = await supabase.storage.from('manufacturing-files').createSignedUrl(fileName, 3600);
