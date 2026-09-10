@@ -831,30 +831,41 @@ class TabReadBackTests(unittest.TestCase):
 
 
 class _StockParameter:
-    """A real Fusion stockXLow/XHigh/YLow/YHigh ModelParameter: .value is
-    always a plain float in Fusion's internal centimeter unit; .expression
-    is the human-readable string WITH ITS UNIT SUFFIX (e.g. "0.635 in") -
-    never a bare number float() could parse.
+    """A real Fusion CAM setup's stockXLow/XHigh/YLow/YHigh parameter.
+    Two traps this fake exists to catch, both confirmed live on a real
+    job, in order:
+
+    1. .expression is a human-readable STRING WITH ITS UNIT SUFFIX (e.g.
+       "0.635 in") - never a bare number float() could parse.
+    2. .value is NOT a bare float either - it is itself a
+       FloatParameterValue wrapper object, whose OWN .value is the real
+       plain float (the exact same double-wrapped shape this module's
+       own top-of-file comment already documents for every other CAM
+       parameter it touches - tabPositioning.value.value,
+       tabsPerContour.value.value, etc.).
     """
 
     def __init__(self, value_cm, expression):
-        self.value = value_cm
+        self.value = types.SimpleNamespace(value=value_cm)
         self.expression = expression
 
 
 class ReadStockBoundsTests(unittest.TestCase):
-    """Real, confirmed live bug: reading .expression instead of .value
-    made every real call here raise (float() cannot parse a unit suffix),
-    so stock_bounds silently ended up None on every real job - the whole
-    real-stock-backing filter never actually ran, letting a tab get
-    selected on a side with zero real material behind it (e.g. a part
-    edge positioned flush against a coordinate axis).
+    """Real, confirmed live bugs, both now fixed: reading .expression
+    (a unit-suffixed string float() cannot parse) and then, after that
+    fix, reading .value directly (itself a FloatParameterValue wrapper,
+    not a bare float - "TypeError: '<=' not supported between instances
+    of 'FloatParameterValue' and 'float'" the moment a real job compared
+    it). Either bug means stock_bounds silently ends up None or the whole
+    job crashes - either way the real-stock-backing filter never runs,
+    letting a tab get selected on a side with zero real material behind
+    it (e.g. a part edge positioned flush against a coordinate axis).
     """
 
     def _setup(self, values):
         return types.SimpleNamespace(parameters=_Parameters(values))
 
-    def test_reads_value_not_the_unit_suffixed_expression(self):
+    def test_reads_value_value_not_the_wrapper_or_the_unit_suffixed_expression(self):
         setup = self._setup({
             "stockXLow": _StockParameter(0.0, "0 in"),
             "stockXHigh": _StockParameter(25.0, "9.84252 in"),
