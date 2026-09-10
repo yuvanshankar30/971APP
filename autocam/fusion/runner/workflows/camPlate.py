@@ -841,8 +841,32 @@ def start(data, session):
         }
         if job_warnings:
             completion_data["warnings"] = job_warnings
+        stats = {}
         if total_machining_time is not None:
-            completion_data["stats"] = {"total_machining_time": total_machining_time}
+            stats["total_machining_time"] = total_machining_time
+        # Auto multi-tool has no single selected tool to show in the queue -
+        # this is the actual plan patch_cam_template_with_tool_libraries
+        # already computed (which loaded cutters it kept vs. skipped, and
+        # why), just never reported back before. Real gap: the Jobs tab
+        # showed "no tool assigned" for a multi-tool job, indistinguishable
+        # from a job that was queued with nothing selected at all.
+        planned_guids = patch_info.get("tool_plan", {}).get("endmill_guids")
+        if multi_tool_mode and planned_guids:
+            with open(tool_json_path, encoding="utf-8") as tool_json_file:
+                tool_names_by_guid = {
+                    entry.get("guid"): entry.get("description")
+                    for entry in (json.load(tool_json_file) or {}).get("data") or []
+                    if isinstance(entry, dict) and entry.get("guid")
+                }
+            stats["toolPlan"] = {
+                "reason": patch_info["tool_plan"].get("reason"),
+                "tools": [
+                    {"guid": guid, "name": tool_names_by_guid.get(guid) or guid}
+                    for guid in planned_guids
+                ],
+            }
+        if stats:
+            completion_data["stats"] = stats
 
         resp = session.post(
             f"{BASE_URL}/api/fusion-runner",

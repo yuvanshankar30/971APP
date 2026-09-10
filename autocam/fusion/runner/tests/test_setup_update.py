@@ -1,12 +1,10 @@
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from unittest.mock import patch
-import io
 import json
 import os
 import tempfile
 import unittest
-import urllib.error
 
 
 RUNNER_DIR = Path(__file__).parents[1]
@@ -52,38 +50,47 @@ def _fake_response(payload):
         def read(self):
             return json.dumps(payload).encode("utf-8")
 
+        status = 200
+
     return _Response()
 
 
-class RegisterRunnerTokenTests(unittest.TestCase):
-    """Real, confirmed live requirement this replaces: FUSION_RUNNER_TOKEN
-    used to be a shared secret a human had to get from an admin and paste
-    in. register_runner_token mints this machine its own unique key with
-    zero pre-shared secret - see the runner_tokens migration's own comment
-    for why a self-issued token deliberately works immediately."""
+class BrowserPairingTests(unittest.TestCase):
+    def test_opens_pairing_page_and_waits_for_credentials(self):
+        started = {
+            "sessionId": "11111111-1111-4111-8111-111111111111",
+            "pollSecret": "secret",
+            "configureUrl": "https://example.test/install/fusion-runner/setup?session=111",
+        }
+        pending = _fake_response({"status": "pending"})
+        pending.status = 202
+        with patch.object(
+            setup.urllib.request,
+            "urlopen",
+            side_effect=[_fake_response(started), pending, _fake_response({
+                "status": "complete", "token": "frt_machine", "machineId": "machine-id"
+            })],
+        ), patch.object(setup.webbrowser, "open", return_value=True) as browser, patch.object(
+            setup.time, "sleep"
+        ) as sleep:
+            result = setup.pair_runner("https://example.test", "router-host")
 
-    def test_returns_the_minted_token_on_success(self):
-        with patch.object(setup.urllib.request, "urlopen", return_value=_fake_response({"token": "frt_abc123"})):
-            token = setup.register_runner_token("https://example.test", "ShopSabre Router 1")
-        self.assertEqual(token, "frt_abc123")
+        self.assertEqual(result["token"], "frt_machine")
+        browser.assert_called_once_with(started["configureUrl"])
+        sleep.assert_called_once_with(2)
 
-    def test_returns_none_when_the_hub_rejects_the_request(self):
-        error = urllib.error.HTTPError(
-            "https://example.test", 500, "Internal Server Error", {}, io.BytesIO(json.dumps({"error": "boom"}).encode())
-        )
-        with patch.object(setup.urllib.request, "urlopen", side_effect=error):
-            token = setup.register_runner_token("https://example.test", "ShopSabre Router 1")
-        self.assertIsNone(token)
+    def test_write_env_needs_no_terminal_input(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            setup, "pair_runner", return_value={"token": "frt_machine", "machineId": "machine-id"}
+        ) as pair, patch.object(setup.socket, "gethostname", return_value="router-host"), patch(
+            "builtins.input", side_effect=AssertionError("setup must not prompt")
+        ):
+            setup.write_env(directory)
+            contents = Path(directory, ".env").read_text()
 
-    def test_returns_none_when_the_hub_cannot_be_reached(self):
-        with patch.object(setup.urllib.request, "urlopen", side_effect=urllib.error.URLError("offline")):
-            token = setup.register_runner_token("https://example.test", "ShopSabre Router 1")
-        self.assertIsNone(token)
-
-    def test_returns_none_when_the_response_has_no_token(self):
-        with patch.object(setup.urllib.request, "urlopen", return_value=_fake_response({})):
-            token = setup.register_runner_token("https://example.test", "ShopSabre Router 1")
-        self.assertIsNone(token)
+        pair.assert_called_once_with(setup.DEPLOYED_URL, "router-host")
+        self.assertIn('API_KEY="frt_machine"', contents)
+        self.assertIn('RUNNER_MACHINE_ID="machine-id"', contents)
 
 
 if __name__ == "__main__":

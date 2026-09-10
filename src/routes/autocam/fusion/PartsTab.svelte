@@ -4,7 +4,7 @@
   import { toastActions } from '$lib/toast.js';
   import { supabase } from '$lib/supabase.js';
   import {
-    fetchParts, createPart, deletePart, deleteParts, renamePart, updatePartQuantity, fetchPartCategories, installFusionPartCad,
+    fetchParts, createPart, deletePart, deleteParts, renamePart, updatePartStepFile, updatePartQuantity, fetchPartCategories, installFusionPartCad,
     fetchPlates, createPlate, queueFusionPlateJob, fetchFusionFolderTree, fetchCompletedFusionStockIds
   } from '$lib/fusionCam.js';
   import { PACIFIC_TIME_ZONE, formatPacificDateTime } from '$lib/timezone.js';
@@ -14,8 +14,10 @@
   import { extractRoutingContoursFromMeshes } from '$autocam/stepProfile.js';
   import CadViewer from '$lib/components/CadViewer.svelte';
   import FolderTreeNode from './FolderTreeNode.svelte';
+  import SeasonFilter from '$lib/components/SeasonFilter.svelte';
+  import { getAllSeasonBuckets, passesSeasonFilter } from '$lib/frcSeason.js';
   import { searchFolderTree } from '$lib/fusionFolderSearch.js';
-  import { Plus, Trash2, Package, Pencil, Check, X, Sparkles, Box, Download, Send, Folder, Wrench, FilterX } from 'lucide-svelte';
+  import { Plus, Trash2, Package, Pencil, Check, X, Sparkles, Box, Download, Send, Folder, Wrench, FilterX, Upload, Filter, Link as LinkIcon } from 'lucide-svelte';
   import AtcSlotConfig from '$autocam/components/AtcSlotConfig.svelte';
 
   export let user;
@@ -57,13 +59,26 @@
   // the fields shown on each card and the ones a user would actually
   // search by.
   $: partsListSearchTerm = partsListSearch.trim().toLowerCase();
-  $: filteredPartsByCreatedAt = partsListSearchTerm
-    ? partsByCreatedAt.filter((part) =>
-        part.name?.toLowerCase().includes(partsListSearchTerm)
-        || part.project_id?.toLowerCase().includes(partsListSearchTerm)
-        || categoryLabel(part.fusion_part_categories).toLowerCase().includes(partsListSearchTerm)
-      )
-    : partsByCreatedAt;
+  // Dedicated Project/Season filters, same catalog-browsing convention
+  // /manufacture's own filter bar already uses (see getAllSeasonBuckets/
+  // passesSeasonFilter in $lib/frcSeason.js) - defaults to "show
+  // everything" rather than /manufacture's own "current season" default,
+  // since this list is a short-lived working catalog, not a season-long
+  // request backlog, and silently hiding an older-but-still-active part
+  // behind a season filter someone forgot they'd set would be a real
+  // regression from today's "no filtering at all" behavior.
+  let filterProject = '';
+  let filterSeason = '';
+  $: projectIds = Array.from(new Set(parts.map((part) => part.project_id).filter(Boolean))).sort();
+  $: seasonOptions = getAllSeasonBuckets(parts);
+  $: filteredPartsByCreatedAt = partsByCreatedAt.filter((part) =>
+    (!partsListSearchTerm
+      || part.name?.toLowerCase().includes(partsListSearchTerm)
+      || part.project_id?.toLowerCase().includes(partsListSearchTerm)
+      || categoryLabel(part.fusion_part_categories).toLowerCase().includes(partsListSearchTerm))
+    && (!filterProject || part.project_id === filterProject)
+    && passesSeasonFilter(part.created_at, filterSeason)
+  );
 
   // Bulk-select-and-delete for the parts list - a plain Set of part ids,
   // separate from any single-row action so selecting for bulk delete never
@@ -843,6 +858,41 @@
     }
   }
 
+  // Attach/replace STEP - real gap this closes: a part created without CAD
+  // (or needing a corrected STEP) had no fix short of deleting and
+  // recreating the whole record, losing its quantity history and plate
+  // assignment in the process.
+  let attachStepModalPart = null;
+  let attachStepFile = null;
+  let attachingStep = false;
+
+  function openAttachStepModal(part) {
+    attachStepModalPart = part;
+    attachStepFile = null;
+  }
+
+  function closeAttachStepModal() {
+    if (attachingStep) return;
+    attachStepModalPart = null;
+    attachStepFile = null;
+  }
+
+  async function saveAttachStep() {
+    if (!attachStepFile) return toastActions.show('Choose a STEP file first');
+    attachingStep = true;
+    try {
+      const updated = await updatePartStepFile(attachStepModalPart.id, attachStepFile);
+      parts = parts.map((item) => (item.id === updated.id ? updated : item));
+      toastActions.show('STEP file saved');
+      attachStepModalPart = null;
+      attachStepFile = null;
+    } catch (e) {
+      toastActions.show(e.message || 'Failed to save STEP file');
+    } finally {
+      attachingStep = false;
+    }
+  }
+
   // Quantity for queueing purposes is the part's full requested quantity,
   // not a shrinking "remaining unassigned" count - a part can be requeued
   // as many times as needed (reprints, retries), so there's no reason to
@@ -1182,14 +1232,26 @@
   {#if partsByCreatedAt.length === 0}
     <p class="empty-state">No parts yet. {canManage ? 'Add one above to get started.' : 'Ask a manufacturing lead to add one.'}</p>
   {:else}
-    <div class="tab-list-search">
-      <input
-        type="search"
-        class="form-input"
-        placeholder="Search parts by name, project, or material..."
-        bind:value={partsListSearch}
-        aria-label="Search parts"
-      />
+    <div class="filters tab-filters">
+      <div class="form-group">
+        <label class="form-label" for="parts-search">Search</label>
+        <input
+          id="parts-search"
+          type="search"
+          class="form-input"
+          placeholder="Search parts by name, project, or material..."
+          bind:value={partsListSearch}
+          aria-label="Search parts"
+        />
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="parts-project-filter"><Filter size={14} /> Project</label>
+        <select id="parts-project-filter" class="form-select" bind:value={filterProject}>
+          <option value="">All Projects</option>
+          {#each projectIds as pid}<option value={pid}>{pid}</option>{/each}
+        </select>
+      </div>
+      <SeasonFilter options={seasonOptions} bind:value={filterSeason} />
     </div>
     {#if filteredPartsByCreatedAt.length === 0}
       <p class="empty-state">No parts match "{partsListSearch}".</p>
@@ -1289,6 +1351,11 @@
                   {#if part.created_at} - added {formatPacificDateTime(part.created_at)}{/if}
                 </p>
                 <div class="cam-list-actions">
+                  {#if part.parts}
+                    <a class="btn btn-secondary btn-sm" href="/manufacture?part={part.part_id}">
+                      <LinkIcon size={14} /> View manufacturing request
+                    </a>
+                  {/if}
                   {#if part.step_file_name}
                     <button class="btn btn-secondary btn-sm" on:click={() => (cadModalPart = part)}>
                       <Box size={14} /> View CAD
@@ -1298,6 +1365,9 @@
                     </button>
                   {/if}
                   {#if canManage}
+                    <button class="btn btn-secondary btn-sm" on:click={() => openAttachStepModal(part)}>
+                      <Upload size={14} /> {part.step_file_name ? 'Replace STEP' : 'Attach STEP'}
+                    </button>
                     <button class="btn btn-ghost btn-sm" on:click={() => handleDeletePart(part)}>
                       <Trash2 size={14} /> Delete
                     </button>
@@ -1593,6 +1663,38 @@
   </div>
 {/if}
 
+{#if attachStepModalPart}
+  <div class="modal-overlay" role="presentation" on:click={closeAttachStepModal}>
+    <div class="modal" role="dialog" aria-labelledby="attach-step-title" on:click|stopPropagation>
+      <div class="modal-header">
+        <h3 id="attach-step-title">{attachStepModalPart.step_file_name ? 'Replace' : 'Attach'} STEP file - {attachStepModalPart.name}</h3>
+        <button type="button" class="btn btn-ghost btn-sm" title="Close" on:click={closeAttachStepModal}><X size={16} /></button>
+      </div>
+      <div class="modal-body">
+        {#if attachStepModalPart.step_file_name}
+          <p class="cam-form-hint">This part already has a STEP file. Choosing a new one replaces it - the old file is not automatically removed from storage.</p>
+        {/if}
+        <div class="form-group">
+          <label class="form-label" for="attach-step-input">STEP file</label>
+          <input
+            id="attach-step-input"
+            type="file"
+            accept=".step,.stp"
+            class="form-input"
+            on:change={(e) => (attachStepFile = e.currentTarget.files?.[0] || null)}
+          />
+        </div>
+      </div>
+      <div class="modal-footer-actions">
+        <button class="btn btn-ghost" type="button" on:click={closeAttachStepModal}>Cancel</button>
+        <button class="btn btn-primary" type="button" disabled={attachingStep || !attachStepFile} on:click={saveAttachStep}>
+          <Upload size={14} /> {attachingStep ? 'Saving...' : 'Save'}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
 {#if queueModalPlate}
   <div class="modal-overlay" role="presentation" on:click={closeQueueModal}>
     <div class="modal queue-modal" role="dialog" aria-labelledby="queue-modal-title" on:click|stopPropagation>
@@ -1722,7 +1824,7 @@
   .recent-queue-detail { color: var(--text-muted); font-size: 0.72rem; }
   @media (max-width: 640px) { .recent-queue-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   .tab-actions { margin-bottom: 1rem; display: flex; gap: 0.5rem; flex-wrap: wrap; }
-  .tab-list-search { margin-bottom: 1rem; max-width: 24rem; }
+  .tab-filters { margin-bottom: 1rem; --filters-columns: 2fr 1fr 1fr; }
   .form-row { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
   .form-row-final { padding-top: 0.75rem; border-top: 1px solid var(--border); }
   .form-row .form-group { flex: 1; min-width: 160px; }

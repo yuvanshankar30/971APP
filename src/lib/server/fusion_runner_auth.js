@@ -29,9 +29,8 @@ export function getBearerToken(headers) {
   return match ? match[1].trim() : '';
 }
 
-// extraSecrets carries per-Runner tokens minted by
-// api/fusion-runner/+server.js's register-runner action (runner_tokens
-// table) - looked up there, not here, so this stays a synchronous, DB-free
+// extraSecrets carries per-Runner tokens minted during browser setup
+// (runner_tokens table) - looked up by the API route, not here, so this stays a synchronous, DB-free
 // check for the common case (the legacy shared FUSION_RUNNER_TOKEN still
 // matches on its own). Passing the one bearer token actually presented,
 // once confirmed valid, as the sole extra secret keeps this function from

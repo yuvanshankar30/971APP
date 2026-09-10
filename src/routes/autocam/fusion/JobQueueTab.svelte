@@ -3,10 +3,12 @@
   import { onMount } from 'svelte';
   import { supabase } from '$lib/supabase.js';
   import { toastActions } from '$lib/toast.js';
-  import { fetchFusionJobs, fetchFusionJobUpdates, fetchFusionJobNcFiles, fetchFusionPartStepFiles, installFusionPartCad, cancelFusionJob, deleteFusionJob, deleteAllFailedFusionJobs, fusionNcDestinationName } from '$lib/fusionCam.js';
+  import { fetchFusionJobs, fetchFusionJobUpdates, fetchFusionJobNcFiles, fetchFusionPartStepFiles, fetchFusionPartProjectIds, installFusionPartCad, cancelFusionJob, deleteFusionJob, deleteAllFailedFusionJobs, updateFusionJobMaterial, fusionNcDestinationName } from '$lib/fusionCam.js';
   import CadViewer from '$lib/components/CadViewer.svelte';
   import { formatPacificDateTimeWithZone } from '$lib/timezone.js';
-  import { ListChecks, X, Download, Trash2, Upload, AlertTriangle, ChevronDown, Box, Folder } from 'lucide-svelte';
+  import SeasonFilter from '$lib/components/SeasonFilter.svelte';
+  import { getAllSeasonBuckets, passesSeasonFilter } from '$lib/frcSeason.js';
+  import { ListChecks, X, Download, Trash2, Upload, AlertTriangle, ChevronDown, Box, Folder, Pencil, Check, Filter } from 'lucide-svelte';
 
   let jobs = [];
   let loading = true;
@@ -41,6 +43,64 @@
     }
   }
 
+  // partId -> project id, for the Project filter below - a plate job's own
+  // cam_jobs row only ever carries params.selectedPartId, never the part's
+  // own project_id, so this has to be resolved the same way stepFileByPartId
+  // is above.
+  let projectIdByPartId = {};
+  async function resolveProjectIds(rows) {
+    const ids = rows.map(jobPartId).filter((id) => id && !(id in projectIdByPartId));
+    if (!ids.length) return;
+    try {
+      const found = await fetchFusionPartProjectIds(ids);
+      // A part with no project_id (or since deleted) resolves to null, same
+      // reasoning as boxTubeById below - so a later page never re-queries
+      // the same already-checked id forever.
+      projectIdByPartId = { ...projectIdByPartId, ...Object.fromEntries(ids.map((id) => [id, found[id] || null])) };
+    } catch (e) {
+      console.error('Failed to resolve Fusion job project ids', e);
+    }
+  }
+
+  // boxTubeId -> { name, projectId }, resolved separately for the same
+  // reason as stepFileByPartId above: a tube job's cam_jobs row only ever
+  // carries params.boxTubeId (a UUID), not the tube's own readable name or
+  // project id. Real gap this fixes: tube jobs used to render the same
+  // "plate {n/a}" metadata line as plate jobs, since nothing here ever
+  // looked the tube up at all.
+  let boxTubeById = {};
+
+  function jobBoxTubeId(job) {
+    return job?.params?.boxTubeId || null;
+  }
+
+  // The project id shown on a card and matched by the Project filter -
+  // resolved from whichever of the two lookups above actually applies to
+  // this job's kind.
+  function jobProjectId(job) {
+    if (jobKind(job) === 'box_tube') {
+      const tubeId = jobBoxTubeId(job);
+      return tubeId ? boxTubeById[tubeId]?.project_id || null : null;
+    }
+    const partId = jobPartId(job);
+    return partId ? projectIdByPartId[partId] || null : null;
+  }
+
+  async function resolveBoxTubeNames(rows) {
+    const ids = [...new Set(rows.map(jobBoxTubeId).filter((id) => id && !(id in boxTubeById)))];
+    if (!ids.length) return;
+    try {
+      const { data, error } = await supabase.from('fusion_box_tubes').select('id, name, project_id').in('id', ids);
+      if (error) throw error;
+      const found = Object.fromEntries((data || []).map((row) => [row.id, row]));
+      // A tube can be deleted after its job ran - record the miss too, so a
+      // later page of jobs doesn't re-query the same gone id forever.
+      boxTubeById = { ...boxTubeById, ...Object.fromEntries(ids.map((id) => [id, found[id] || null])) };
+    } catch (e) {
+      console.error('Failed to resolve Fusion job tube names', e);
+    }
+  }
+
   async function handleInstallCad(job) {
     try {
       const url = await installFusionPartCad(jobStepFile(job));
@@ -65,6 +125,52 @@
   let errorModalJob = null;
   let openFilesJobId = null;
   let refreshing = false;
+
+  // Materials for the inline material-edit control below - loaded once,
+  // same catalog /manufacture's own queue modal picks from.
+  let materials = [];
+  async function loadMaterials() {
+    try {
+      const { data, error } = await supabase.from('cam_materials').select('id, name').eq('enabled', true).order('name');
+      if (error) throw error;
+      materials = data || [];
+    } catch (e) {
+      console.error('Failed to load materials', e);
+    }
+  }
+
+  // A job's material can only be changed while it's still queued -
+  // updateFusionJobMaterial enforces this server-side too, since a claimed
+  // job's Runner has already read (or is about to read) material_id to
+  // build the CAM setup; changing it after that point would not actually
+  // reach Fusion.
+  let editingMaterialJobId = null;
+  let materialValue = '';
+
+  function startEditMaterial(job) {
+    editingMaterialJobId = job.id;
+    materialValue = job.material_id ? String(job.material_id) : '';
+  }
+
+  function cancelEditMaterial() {
+    editingMaterialJobId = null;
+    materialValue = '';
+  }
+
+  async function saveMaterial(job) {
+    if (!materialValue || materialValue === String(job.material_id || '')) {
+      cancelEditMaterial();
+      return;
+    }
+    try {
+      const updated = await updateFusionJobMaterial(job.id, materialValue);
+      jobs = jobs.map((item) => (item.id === job.id ? { ...item, ...updated } : item));
+      cancelEditMaterial();
+    } catch (e) {
+      toastActions.show(e.message || 'Failed to update material');
+      await load(false);
+    }
+  }
 
   // Python tracebacks are many lines of stack frames ending in the one line
   // that actually says what went wrong (ExceptionType: message) - showing
@@ -96,14 +202,26 @@
   // older matches.
   let jobsSearch = '';
   $: jobsSearchTerm = jobsSearch.trim().toLowerCase();
-  $: filteredJobs = jobsSearchTerm
-    ? jobs.filter((job) =>
-        job.name?.toLowerCase().includes(jobsSearchTerm)
-        || job.cam_machines?.name?.toLowerCase().includes(jobsSearchTerm)
-        || job.cam_tools?.name?.toLowerCase().includes(jobsSearchTerm)
-        || (STATUS_LABELS[job.status] || job.status || '').toLowerCase().includes(jobsSearchTerm)
-      )
-    : jobs;
+  // Dedicated Project/Season filters, same convention as the Parts and Tube
+  // Stock tabs - "show everything" by default, not /manufacture's own
+  // "current season" default; see PartsTab.svelte's matching filter for why.
+  // The project list is built from whatever's already resolved for jobs
+  // currently loaded (this tab is paginated - see load/loadMore), same
+  // "only as complete as what's on screen" limit the search box above
+  // already has.
+  let jobsFilterProject = '';
+  let jobsFilterSeason = '';
+  $: jobsProjectIds = Array.from(new Set(jobs.map(jobProjectId).filter(Boolean))).sort();
+  $: jobsSeasonOptions = getAllSeasonBuckets(jobs);
+  $: filteredJobs = jobs.filter((job) =>
+    (!jobsSearchTerm
+      || job.name?.toLowerCase().includes(jobsSearchTerm)
+      || job.cam_machines?.name?.toLowerCase().includes(jobsSearchTerm)
+      || job.cam_tools?.name?.toLowerCase().includes(jobsSearchTerm)
+      || (STATUS_LABELS[job.status] || job.status || '').toLowerCase().includes(jobsSearchTerm))
+    && (!jobsFilterProject || jobProjectId(job) === jobsFilterProject)
+    && passesSeasonFilter(job.created_at, jobsFilterSeason)
+  );
 
   // showLoading=false for refreshes after an action, and for the polling
   // interval below - flipping loading back to true replaced the whole table
@@ -121,6 +239,8 @@
       jobs = page.jobs;
       hasMore = page.hasMore;
       resolveStepFiles(page.jobs);
+      resolveBoxTubeNames(page.jobs);
+      resolveProjectIds(page.jobs);
     } catch (e) {
       toastActions.show(e.message || 'Failed to load jobs');
     } finally {
@@ -139,6 +259,8 @@
       jobs = [...jobs, ...page.jobs.filter((job) => !seen.has(job.id))];
       hasMore = page.hasMore;
       resolveStepFiles(page.jobs);
+      resolveBoxTubeNames(page.jobs);
+      resolveProjectIds(page.jobs);
     } catch (e) {
       toastActions.show(e.message || 'Failed to load more jobs');
     } finally {
@@ -164,6 +286,7 @@
 
   onMount(() => {
     load();
+    loadMaterials();
     // Active jobs (queued/claimed/processing) can change outside this tab -
     // a Runner claims/completes them independently - so poll while any are active.
     const interval = setInterval(refreshActiveJobs, 10000);
@@ -225,6 +348,24 @@
 
   function jobKind(job) {
     return job.params?.fusionJobKind || 'unknown';
+  }
+
+  // Real gap: a multi-tool job has no single cam_tools row (tool_id is
+  // deliberately null - see jobPayload.js's resolveLoadedToolItems), so
+  // this used to render as "no tool assigned" - indistinguishable from a
+  // job queued with nothing actually selected. cam_jobs.stats.toolPlan
+  // (see camPlate.py's completion_data) is only ever present once
+  // Fusion has actually run the job and decided which loaded cutters it
+  // kept, so an in-progress multi-tool job still just says "Auto
+  // multi-tool" until it does.
+  function jobToolLabel(job) {
+    if (job.cam_tools?.name) return job.cam_tools.name;
+    if (job.params?.multiToolMode) return 'Auto multi-tool';
+    return 'no tool assigned';
+  }
+
+  function jobToolPlan(job) {
+    return job.stats?.toolPlan?.tools?.length ? job.stats.toolPlan : null;
   }
 
   function machiningTimeLabel(job) {
@@ -332,19 +473,33 @@
   <p class="empty-state">No Fusion CAM jobs yet - queue one from the Plates or Box Tubes tab.</p>
 {:else}
   <div class="cam-list-toolbar">
-    <input
-      type="search"
-      class="form-input tab-list-search"
-      placeholder="Search jobs by name, machine, tool, or status..."
-      bind:value={jobsSearch}
-      aria-label="Search jobs"
-    />
+    <div class="filters tab-filters">
+      <div class="form-group">
+        <label class="form-label" for="jobs-search">Search</label>
+        <input
+          id="jobs-search"
+          type="search"
+          class="form-input"
+          placeholder="Search jobs by name, machine, tool, or status..."
+          bind:value={jobsSearch}
+          aria-label="Search jobs"
+        />
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="jobs-project-filter"><Filter size={14} /> Project</label>
+        <select id="jobs-project-filter" class="form-select" bind:value={jobsFilterProject}>
+          <option value="">All Projects</option>
+          {#each jobsProjectIds as pid}<option value={pid}>{pid}</option>{/each}
+        </select>
+      </div>
+      <SeasonFilter options={jobsSeasonOptions} bind:value={jobsFilterSeason} />
+    </div>
     <button type="button" class="btn btn-ghost btn-sm" on:click={handleDeleteAllFailed} disabled={deletingFailed}>
       <Trash2 size={14} /> {deletingFailed ? 'Deleting...' : 'Delete all failed jobs'}
     </button>
   </div>
-  {#if jobsSearchTerm && filteredJobs.length === 0}
-    <p class="empty-state">No jobs match "{jobsSearch}".</p>
+  {#if filteredJobs.length === 0}
+    <p class="empty-state">No jobs match the current search/filters.</p>
   {/if}
   <div class="cam-list">
     {#each filteredJobs as job (job.id)}
@@ -356,16 +511,48 @@
             <span class="tag status-{job.status}">{STATUS_LABELS[job.status] || job.status}</span>
           </span>
         </div>
+        {#if jobKind(job) === 'box_tube'}
+          <p class="cam-form-hint">
+            Box tube - {boxTubeById[jobBoxTubeId(job)]?.name || jobBoxTubeId(job) || 'n/a'}
+            - {job.cam_machines?.name || 'no machine assigned'}
+            - {jobToolLabel(job)}
+            - queued {formatPacificDateTimeWithZone(job.created_at)}
+            {#if job.claimed_by} - claimed by {job.claimed_by}{/if}
+          </p>
+        {:else}
+          <p class="cam-form-hint">
+            {jobKind(job)} - plate {job.params?.fusionPlateSnapshot?.name || job.params?.plateId || 'n/a'}
+            - {job.cam_machines?.name || 'no machine assigned'}
+            - {jobToolLabel(job)}
+            - queued {formatPacificDateTimeWithZone(job.created_at)}
+            {#if job.claimed_by} - claimed by {job.claimed_by}{/if}
+          </p>
+        {/if}
         <p class="cam-form-hint">
-          {jobKind(job)} - plate {job.params?.fusionPlateSnapshot?.name || job.params?.plateId || 'n/a'}
-          - {job.cam_machines?.name || 'no machine assigned'}
-          - {job.cam_tools?.name || 'no tool assigned'}
-          - queued {formatPacificDateTimeWithZone(job.created_at)}
-          {#if job.claimed_by} - claimed by {job.claimed_by}{/if}
+          {#if editingMaterialJobId === job.id}
+            <span class="rename-control">
+              <select class="form-select material-edit-select" bind:value={materialValue}>
+                <option value="" disabled>Choose a material...</option>
+                {#each materials as material}<option value={String(material.id)}>{material.name}</option>{/each}
+              </select>
+              <button type="button" class="btn btn-ghost btn-sm" title="Save" on:click={() => saveMaterial(job)}><Check size={14} /></button>
+              <button type="button" class="btn btn-ghost btn-sm" title="Cancel" on:click={cancelEditMaterial}><X size={14} /></button>
+            </span>
+          {:else}
+            Material: {job.cam_materials?.name || 'none assigned'}
+            {#if job.status === 'queued'}
+              <button type="button" class="btn btn-ghost btn-sm" title="Edit material" on:click={() => startEditMaterial(job)}><Pencil size={13} /></button>
+            {/if}
+          {/if}
         </p>
         {#if job.params?.fusionPlateSnapshot?.assignments?.length}
           <p class="cam-form-hint">
             Parts: {job.params.fusionPlateSnapshot.assignments.map((part) => `${part.quantity}x ${part.name || part.part_id}`).join(', ')}
+          </p>
+        {/if}
+        {#if jobToolPlan(job)}
+          <p class="cam-form-hint" title={jobToolPlan(job).reason || ''}>
+            Tools used, in order: {jobToolPlan(job).tools.map((tool) => tool.name).join(' -> ')}
           </p>
         {/if}
         <p class="cam-form-hint">
@@ -511,8 +698,8 @@
     justify-content: center;
     margin-top: var(--space-3);
   }
-  .cam-list-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; flex-wrap: wrap; }
-  .tab-list-search { max-width: 24rem; flex: 1 1 16rem; margin: 0; }
+  .cam-list-toolbar { display: flex; justify-content: space-between; align-items: flex-end; gap: 0.5rem; margin-bottom: 0.5rem; flex-wrap: wrap; }
+  .tab-filters { flex: 1 1 32rem; --filters-columns: 2fr 1fr 1fr; margin: 0; }
   .cam-list { display: flex; flex-direction: column; gap: 0.75rem; }
   .cam-list-item { padding: 1rem; }
   .cam-list-header { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
@@ -520,6 +707,8 @@
   .empty-state { color: var(--text-muted, #888); padding: 2rem 0; text-align: center; }
   .error-text { color: var(--danger, #e05252); }
   .cam-form-hint { color: var(--text-muted, #888); font-size: 0.85rem; margin: 0.25rem 0 0; }
+  .rename-control { display: inline-flex; align-items: center; gap: 0.35rem; min-width: 0; }
+  .material-edit-select { padding: 0.2rem 0.4rem; height: auto; width: auto; min-width: 10rem; font-size: 0.85rem; }
 
   /* Status tags were previously unstyled (no .status-* rule existed anywhere,
      so every job looked identical regardless of state). Matches Valor's own

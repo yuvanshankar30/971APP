@@ -108,6 +108,17 @@ class PlateTemplateSelectionTests(unittest.TestCase):
         self.assertIn('app.log(f"File uploaded to {data_project.name}/{folder_path}/{doc_name}")', workflow)
         self.assertIn('app.log("Job Completed")', workflow)
 
+    def test_multi_tool_plate_jobs_report_which_tools_were_actually_planned(self):
+        # Real gap: the Jobs tab showed "no tool assigned" for a multi-tool
+        # job - indistinguishable from one queued with nothing selected at
+        # all. patch_cam_template_with_tool_libraries already computes the
+        # real plan (which loaded cutters it kept vs. skipped, and why);
+        # this was only ever logged to Text Commands, never reported back.
+        workflow = (Path(__file__).parents[1] / "workflows" / "camPlate.py").read_text()
+        self.assertIn('stats["toolPlan"] = {', workflow)
+        self.assertIn('"reason": patch_info["tool_plan"].get("reason")', workflow)
+        self.assertIn('if multi_tool_mode and planned_guids:', workflow)
+
 
 if __name__ == "__main__":
     unittest.main()

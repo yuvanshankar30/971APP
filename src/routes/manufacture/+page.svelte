@@ -1260,26 +1260,33 @@
     }
   }
 
-  async function openFusionCamModal(part) {
+  // retryFromJob (optional) - the failed job being retried, from its own
+  // "Fusion CAM failed - retry AutoCAM" button. Real gap this closes: that
+  // button reopened this modal completely blank, forcing whoever's
+  // retrying to remember and rebuild every setting (router, tool, folder,
+  // file name...) from scratch instead of just reviewing what was already
+  // tried and fixing the one thing that actually failed.
+  async function openFusionCamModal(part, retryFromJob = null) {
     fusionQueuePart = part;
     fusionQueueLoading = true;
-    fusionQueueKind = 'plate';
+    fusionQueueKind = retryFromJob?.params?.fusionJobKind === 'box_tube' ? 'tube' : 'plate';
     // Deliberately always starts at 1, not the manufacturing request's own
     // quantity - a CAM job's quantity is "how many to nest on this one
     // saved document," not "how many of the request are still outstanding";
     // defaulting to the latter silently queued more copies than most jobs
-    // actually want.
+    // actually want. A retry is the one exception: reviewing what was
+    // actually queued before is the whole point, so it prefills from that.
     fusionQueueQuantity = 1;
-    fusionQueueFileName = (part.name || '').replace(/\s+/g, '');
-    fusionQueueFolderPath = '';
+    fusionQueueFileName = retryFromJob?.params?.fusionFileName || (part.name || '').replace(/\s+/g, '');
+    fusionQueueFolderPath = retryFromJob?.params?.fusionFolderPath || '';
     fusionQueueFolderSearch = '';
-    fusionQueueSingleToolMode = true;
     try {
-      const [categories, machines, materials, folderTree] = await Promise.all([
+      const [categories, machines, materials, folderTree, plates] = await Promise.all([
         fetchPartCategories(),
         supabase.from('cam_machines').select('*').eq('enabled', true).order('name'),
         supabase.from('cam_materials').select('id, name').eq('enabled', true).order('name'),
-        fetchFusionFolderTree()
+        fetchFusionFolderTree(),
+        retryFromJob?.params?.plateId ? fetchPlates() : Promise.resolve([])
       ]);
       fusionQueueCategories = categories;
       fusionQueueMachines = machines.data || [];
@@ -1299,13 +1306,25 @@
       }
       const { data: toolRows } = await supabase.from('cam_tools').select('*');
       atcTools = toolRows || [];
-      const stockMaterialId = materialIdForStockAssignment(manufacturingStockMaterialIndex, fusionQueueMaterials, part.stock_assignment, stockData);
-      const stockCatalogId = stockCatalogIdForStockAssignment(stockData, part.stock_assignment);
-      const stockThickness = (stockData.router || []).find((stock) => stock.id === stockCatalogId)?.thickness;
-      fusionQueueCategoryId = String(fusionQueueCategories.find((category) =>
-        String(category.material_id) === String(stockMaterialId) && Number.isFinite(stockThickness) && Math.abs(Number(category.thickness) - stockThickness) < 0.002
-      )?.id || '');
-      selectFusionQueueKind('plate');
+      if (retryFromJob) {
+        const retryPlate = (plates || []).find((candidate) => String(candidate.id) === String(retryFromJob.params?.plateId));
+        fusionQueueCategoryId = String(retryPlate?.category_id || '');
+        // selectFusionQueueMachine resets fusionQueueSingleToolMode to true
+        // and picks its own default tool - both deliberately overridden
+        // right after with this job's actual original settings.
+        selectFusionQueueMachine(retryFromJob.machine_id ? String(retryFromJob.machine_id) : '');
+        fusionQueueSingleToolMode = retryFromJob.params?.singleToolMode !== false;
+        fusionQueueMaterialId = retryFromJob.material_id ? String(retryFromJob.material_id) : '';
+        if (retryFromJob.tool_id) fusionQueueToolId = String(retryFromJob.tool_id);
+      } else {
+        const stockMaterialId = materialIdForStockAssignment(manufacturingStockMaterialIndex, fusionQueueMaterials, part.stock_assignment, stockData);
+        const stockCatalogId = stockCatalogIdForStockAssignment(stockData, part.stock_assignment);
+        const stockThickness = (stockData.router || []).find((stock) => stock.id === stockCatalogId)?.thickness;
+        fusionQueueCategoryId = String(fusionQueueCategories.find((category) =>
+          String(category.material_id) === String(stockMaterialId) && Number.isFinite(stockThickness) && Math.abs(Number(category.thickness) - stockThickness) < 0.002
+        )?.id || '');
+        selectFusionQueueKind('plate');
+      }
     } catch (error) {
       showToastMessage(error.message || 'Could not load Fusion AutoCAM options', 'error');
       fusionQueuePart = null;
@@ -2385,7 +2404,7 @@
               {:else if fusionJob.status === 'completed'}
                 <span class="fusion-cam-completed part-card-fusion-status"><CircleCheck size={14} /> Fusion CAM completed</span>
               {:else if fusionJob.status === 'failed'}
-                <button class="fusion-cam-failed part-card-fusion-status" on:click={() => openFusionCamModal(part)} title={fusionJob.errors?.[0] || 'Unknown error'}>Fusion CAM failed - retry AutoCAM</button>
+                <button class="fusion-cam-failed part-card-fusion-status" on:click={() => openFusionCamModal(part, fusionJob)} title={fusionJob.errors?.[0] || 'Unknown error'}>Fusion CAM failed - retry AutoCAM</button>
               {/if}
             {/if}
           {:else if part.workflow === 'router' || part.workflow === 'lathe'}
@@ -2603,7 +2622,7 @@
                     {:else if fusionJob.status === 'completed'}
                       <span class="fusion-cam-completed"><CircleCheck size={14} /> Fusion CAM completed</span>
                     {:else if fusionJob.status === 'failed'}
-                      <button class="fusion-cam-failed" on:click={() => openFusionCamModal(part)} title={fusionJob.errors?.[0] || 'Unknown error'}>Fusion CAM failed - retry AutoCAM</button>
+                      <button class="fusion-cam-failed" on:click={() => openFusionCamModal(part, fusionJob)} title={fusionJob.errors?.[0] || 'Unknown error'}>Fusion CAM failed - retry AutoCAM</button>
                     {/if}
                   {/if}
                 {:else if part.workflow === 'router' || part.workflow === 'lathe'}

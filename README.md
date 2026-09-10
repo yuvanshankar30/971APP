@@ -392,7 +392,11 @@ own docs are all together in one place instead of scattered across
   document-name collisions, and treats a failed cloud save as a failed job.
   `/install/fusion-runner` serves a site-origin-aware, checksum-verifying
   shell bootstrap so a workstation can install the current Runner directly
-  into Fusion from one `curl` command without cloning the repository.
+  into Fusion from one `curl` command without cloning the repository. First
+  install opens `/install/fusion-runner/setup`, a standalone one-field pairing
+  page where the shared team token authorizes a short-lived, one-use setup
+  session; the installer receives a unique machine token and writes all local
+  configuration automatically.
 - **`autocam/gcodeFormatting.js`** / **`autocam/geometry2d.js`** - shared
   numeric G-code formatting, pause/dwell dialect handling, and polygon-area
   primitives used across generators so safety-critical output rules do not
@@ -479,9 +483,9 @@ own docs are all together in one place instead of scattered across
   and post with the claimed machine's checked-in `.cps` file; the filename is
   stored on `cam_tools.fusion_tool_library_file`, so an unknown tool fails
   visibly rather than falling back to Fusion's raw default. No Teams/API-key-per-team
-  layer was ported - single shared-secret bearer token for the Runner,
-  injected as `FUSION_RUNNER_TOKEN` by Cloud Build; its local `API_KEY` must
-  be obtained from the project administrator. Vision Runner uses its separate
+  layer was ported - the shared enrollment secret is injected as
+  `FUSION_RUNNER_TOKEN` by Cloud Build, while browser pairing exchanges it for
+  a revocable per-install `API_KEY`. Vision Runner uses its separate
   `VISION_RUNNER_TOKEN`; both runtime values are injected from their own
   Secret Manager secrets, never shared or built into the image.
   The Fusion UI includes a Stock Categories tab for CAM managers to define
@@ -524,7 +528,9 @@ own docs are all together in one place instead of scattered across
   live in `migrations/20260906_fusion_queue_efficiency.sql`.
   Rollout requires `migrations/20260906_fusion_grouping_integrity.sql`,
   `migrations/20260906_add_tubestock_operation_type.sql`,
-  `migrations/20260906_fusion_queue_efficiency.sql`, and the updated Runner.
+  `migrations/20260906_fusion_queue_efficiency.sql`,
+  `migrations/20260910_fusion_runner_tokens.sql`,
+  `migrations/20260910_fusion_runner_tokens_setup_sessions.sql`, and the updated Runner.
   Every post-claim Runner call is bound to the `RUNNER_ID` that claimed the job,
   so another installation cannot advance it. `RUNNER_MACHINE_ID` is required,
   active jobs heartbeat through `claimed_at`, and unstarted claims older than
@@ -592,6 +598,7 @@ own docs are all together in one place instead of scattered across
   strategy group's shared ordering and notes.
 - **`api/`** - server endpoints backing the above, plus integration
   webhooks/crons: `api/cam-generate` (synchronous G-code generation),
+  `api/fusion-runner-setup` (short-lived Fusion workstation pairing),
   `api/drive-watcher` (Drive input-sweep, cron-gated), `api/planner`
   (notification sweep, cron-gated), `api/onshape`, `api/tba`, `api/971bot`
   (Slack), `api/attendance`, `api/scout-assignments`, `api/scouting-admin`,
@@ -604,7 +611,9 @@ AutoCAM's own code (engine, Drive watcher, `camJobs.js`, its components) is
 
 - **`server/`** - server-only modules (`$lib/server/...`, never bundled to
   the client): `971bot.js` (Slack), `cron_auth.js` (shared auth check for
-  cron-triggered endpoints - see **Known gaps**), `planner_notifications.js`.
+  cron-triggered endpoints - see **Known gaps**), `planner_notifications.js`,
+  and `fusion_runner_setup.js` (expiring browser enrollment sessions and
+  one-time delivery of per-install Runner credentials).
 - **`planner/`** - planner domain logic (scheduling, interaction rules,
   timezone handling - Pacific time throughout, see `PACIFIC_TIME_ZONE` in
   `src/lib/timezone.js`).
