@@ -11,7 +11,7 @@
   import SeasonFilter from '$lib/components/SeasonFilter.svelte';
   import { goto } from '$app/navigation';
   import { PUBLIC_ONSHAPE_BASE_URL } from '$env/static/public';
-  import { Search, Filter, Clock, Truck, Package, Download, Zap, Wrench, FileText, Upload, ExternalLink, Pencil, Trash2, X, Users, Box, Route, CircleCheck, Layers, Folder, ListChecks } from 'lucide-svelte';
+  import { Search, Filter, Clock, Truck, Package, Download, Zap, Wrench, FileText, Upload, ExternalLink, Pencil, Trash2, X, Users, Box, Route, CircleCheck, Layers, Folder, ListChecks, BookOpen } from 'lucide-svelte';
   import { searchFolderTree } from '$lib/fusionFolderSearch.js';
   import ROUTER_FLOW from '$lib/router_flow.json';
   import { getDisplayStatus, BUTTONS, getBadgeClass, getWorkflowStatuses } from '$lib/statuses.js';
@@ -155,7 +155,7 @@
   ];
   
   // Get workflow-specific statuses for edit modal
-  $: editStatusOptions = filterRestrictedStatusOptions(editWorkflow ? getWorkflowStatuses(editWorkflow) : statuses);
+  $: editStatusOptions = filterRestrictedStatusOptions(editWorkflow ? getWorkflowStatuses(editWorkflow) : statuses, editPart?.status);
 
   function isPartFullyCompleted(part) {
     if (part?.workflow === 'router') return isFullyKitted(part);
@@ -175,9 +175,20 @@
     return `tag-workflow-${workflow.toLowerCase().replace(/_/g, '-')}`;
   }
 
-  function filterRestrictedStatusOptions(options = []) {
+  // Real, confirmed bug this currentStatus param fixes: a non-lead opening
+  // the edit/preview modal on an already-CAM-Reviewed part got a status
+  // <select> bound to 'cammed' while the options list had already filtered
+  // 'cammed' out entirely - the browser then shows the select with nothing
+  // matching its bound value, which some browsers resolve by silently
+  // treating the first option as selected without ever telling Svelte's
+  // binding it changed. Changing the dropdown after that could look like it
+  // did nothing at all once saved. 'cammed' stays visible (and, once
+  // selected away from, no longer offered again) whenever it's the part's
+  // own current status, regardless of role - only *setting* a part to
+  // CAM Reviewed fresh stays lead-only (see assertCanCamReview below).
+  function filterRestrictedStatusOptions(options = [], currentStatus = null) {
     if (canCamReview) return options;
-    return options.filter((option) => option?.value !== 'cammed');
+    return options.filter((option) => option?.value !== 'cammed' || option?.value === currentStatus);
   }
 
   function assertCanCamReview() {
@@ -1836,8 +1847,13 @@
         .update(update)
         .eq('id', previewPart.id);
       if (error) throw error;
+      // See saveEdits' matching comment - clearing a stale router_meta.step
+      // is required or getDisplayStatus keeps forcing "CAM Review Pending"
+      // regardless of the real status just written above.
       if (previewStatus === 'cam_review') {
         try { await updateRouterMeta(previewPart, { step: 'cam_review' }); } catch (e) { console.warn('updateRouterMeta failed:', e); }
+      } else if (getRouterMeta(previewPart).step === 'cam_review') {
+        try { await updateRouterMeta(previewPart, { step: null }); } catch (e) { console.warn('updateRouterMeta failed:', e); }
       }
       await loadParts();
       showToastMessage('Part updated');
@@ -1862,7 +1878,7 @@
   }
 
   $: previewStockOptions = previewWorkflow ? (stockData[previewWorkflow] || []).map(s => s.description) : [];
-  $: previewStatusOptions = filterRestrictedStatusOptions(previewWorkflow ? getWorkflowStatuses(previewWorkflow) : statuses);
+  $: previewStatusOptions = filterRestrictedStatusOptions(previewWorkflow ? getWorkflowStatuses(previewWorkflow) : statuses, previewPart?.status);
 
   function closeEditModal() {
     showEditModal = false;
@@ -1893,9 +1909,18 @@
         .update(update)
         .eq('id', editPart.id);
       if (error) throw error;
-      // If the pseudo-status was selected, ensure router_meta step is set
+      // If the pseudo-status was selected, ensure router_meta step is set.
+      // Real, confirmed bug the else branch fixes: getDisplayStatus forces
+      // the "CAM Review Pending" label whenever router_meta.step is still
+      // 'cam_review', regardless of the real status column - so picking any
+      // other status here (including plain Pending) wrote the DB update
+      // correctly but the part kept showing its old "reviewed" label
+      // forever, since nothing ever cleared this stale step. Every
+      // subsequent status change looked like it silently did nothing.
       if (editStatus === 'cam_review') {
         try { await updateRouterMeta(editPart, { step: 'cam_review' }); } catch (e) { console.warn('updateRouterMeta failed:', e); }
+      } else if (getRouterMeta(editPart).step === 'cam_review') {
+        try { await updateRouterMeta(editPart, { step: null }); } catch (e) { console.warn('updateRouterMeta failed:', e); }
       }
       await loadParts();
       showToastMessage('Part updated');
@@ -3031,7 +3056,12 @@
     <section class="modal modal-large cam-setup-modal" role="dialog" aria-modal="true" aria-labelledby="fusion-queue-title">
       <div class="modal-header">
         <h3 id="fusion-queue-title">Send to Fusion AutoCAM - {fusionQueuePart.name}</h3>
-        <button type="button" class="modal-close-button" aria-label="Close dialog" on:click={closeFusionCamModal}><X size={18} /></button>
+        <div class="modal-header-actions">
+          <a href="/autocam/fusion/setup" target="_blank" rel="noopener" class="btn btn-ghost btn-sm" title="Fusion Runner setup guide">
+            <BookOpen size={15} /> Runner setup guide
+          </a>
+          <button type="button" class="modal-close-button" aria-label="Close dialog" on:click={closeFusionCamModal}><X size={18} /></button>
+        </div>
       </div>
       <div class="modal-body">
         {#if fusionQueueLoading}
@@ -3392,6 +3422,7 @@
   }
 
   .cad-modal-header-actions { display: inline-flex; align-items: center; gap: 0.25rem; }
+  .modal-header-actions { display: inline-flex; align-items: center; gap: 0.5rem; }
   .cad-download-btn {
     display: inline-flex;
     align-items: center;
