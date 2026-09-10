@@ -59,8 +59,4 @@ PY
 
 SETUP="$TEMP_ROOT/SpartanRoboticsAutoCAM/setup.py"
 echo "Download verified. Starting Fusion setup ..."
-if [ -r /dev/tty ]; then
-  FUSION_RUNNER_INSTALL_BASE_URL="$HUB_URL" python3 "$SETUP" </dev/tty
-else
-  FUSION_RUNNER_INSTALL_BASE_URL="$HUB_URL" python3 "$SETUP"
-fi
+FUSION_RUNNER_INSTALL_BASE_URL="$HUB_URL" python3 "$SETUP"

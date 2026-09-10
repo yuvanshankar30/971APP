@@ -1,8 +1,7 @@
--- Per-Runner bearer tokens for /api/fusion-runner, minted automatically by
--- setup.py (action=register-runner) so nobody has to ask an admin for the
--- one shared FUSION_RUNNER_TOKEN and paste it in by hand anymore. Direct
--- instruction: a freshly issued token works immediately - no admin
--- approval step, unlike a newly self-registered cam_machines row - so this
+-- Per-Runner bearer tokens for /api/fusion-runner, minted after a user
+-- authorizes a short-lived browser setup session with the shared
+-- FUSION_RUNNER_TOKEN. A freshly issued token works immediately - no admin
+-- approval step, unlike a newly registered cam_machines row - so this
 -- table exists purely to let one machine's key be revoked later
 -- (revoked_at) without invalidating every other Runner, which a single
 -- shared secret could never do. FUSION_RUNNER_TOKEN keeps working

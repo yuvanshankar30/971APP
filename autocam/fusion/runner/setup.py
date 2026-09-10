@@ -14,7 +14,8 @@ this package and invokes this same setup entry point:
 It does everything: finds (and creates, if Fusion has never made it) Fusion's
 AddIns folder for this OS, installs the add-in there under the exact name
 Fusion requires, installs `requests` for Fusion's bundled Python - which ships
-with no third-party packages - and writes `.env` from a few prompts.
+with no third-party packages - then opens Spartans Hub for one-token browser
+pairing and writes `.env` automatically.
 
 This used to be three chained shell commands the reader had to assemble
 themselves (`cp -R ... && cd ... && python3 setup.py`), with a different path
@@ -34,21 +35,15 @@ import shutil
 import socket
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
-import uuid
+import webbrowser
 
 SOURCE_DIR = os.path.dirname(os.path.realpath(__file__))
 ADDIN_FOLDER_NAME = "SpartanRoboticsAutoCAM"
 
 DEPLOYED_URL = "https://spartanshub.spartanrobotics.org"
-# Vite commonly binds its local dev server on IPv6 loopback (::1).  Fusion's
-# bundled requests client treats a literal 127.0.0.1 URL as IPv4-only, which
-# then fails with ConnectionRefusedError even though localhost is healthy.
-# Let the OS resolve localhost to the server's active loopback family.
-LOCAL_URL = "http://localhost:5173"
-
-
 def default_hub_url() -> str:
     """Use the Hub that served the curl installer when one was provided."""
     return os.environ.get("FUSION_RUNNER_INSTALL_BASE_URL", "").strip() or DEPLOYED_URL
@@ -128,147 +123,68 @@ def install_requests(addin_dir: str) -> None:
     print("Wrote .overridepath")
 
 
-def prompt(label, default=""):
-    suffix = f" [{default}]" if default else ""
-    return input(f"{label}{suffix}: ").strip() or default
-
-
-def register_runner_token(base_url, name):
-    """Mints this machine's own unique Runner bearer token.
-
-    Unauthenticated by design - a brand-new Runner has no credential yet,
-    so there is nothing to check it against. Direct instruction: the token
-    works immediately, no admin-approval step (unlike a newly self-
-    registered cam_machines row from register_machine below); see the
-    runner_tokens migration's own comment for the tradeoff this accepts.
-
-    Returns the token string on success, or ``None`` if the Hub couldn't be
-    reached (offline, wrong URL, etc.) - the caller falls back to the old
-    shared FUSION_RUNNER_TOKEN, asked for by hand, in that case.
-    """
+def post_json(url, payload, timeout=15):
     request = urllib.request.Request(
-        f"{base_url}/api/fusion-runner?action=register-runner",
-        data=json.dumps({"name": name}).encode("utf-8"),
+        url,
+        data=json.dumps(payload).encode("utf-8"),
         headers={"Content-Type": "application/json"},
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=15) as response:
-            body = json.loads(response.read().decode("utf-8"))
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return response.status, json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         try:
             detail = json.loads(exc.read().decode("utf-8")).get("error", str(exc))
         except (ValueError, UnicodeDecodeError):
             detail = str(exc)
-        print(f"  Hub rejected the token request: {detail}")
-        return None
+        raise RuntimeError(f"Spartans Hub rejected setup: {detail}") from exc
     except (urllib.error.URLError, TimeoutError, ValueError) as exc:
-        print(f"  Could not reach the Hub to mint a Runner token: {exc}")
-        return None
-    token = body.get("token")
-    if not token:
-        print(f"  Hub did not return a token: {body}")
-        return None
-    return token
+        raise RuntimeError(f"Could not reach Spartans Hub: {exc}") from exc
 
 
-def register_machine(base_url, token, name):
-    """Get-or-create this machine's real cam_machines row by name.
-
-    Returns (machine_id, created) on success, or None if the Hub couldn't be
-    reached (offline, wrong URL, bad token, etc.) - the caller falls back to
-    asking for a UUID by hand rather than blocking setup on this call.
-    """
-    request = urllib.request.Request(
-        f"{base_url}/api/fusion-runner?action=register-machine",
-        data=json.dumps({"name": name}).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {token}",
-        },
-        method="POST",
+def pair_runner(base_url, runner_name):
+    _, started = post_json(
+        f"{base_url}/api/fusion-runner-setup?action=start",
+        {"runnerName": runner_name},
     )
-    try:
-        with urllib.request.urlopen(request, timeout=15) as response:
-            body = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        try:
-            detail = json.loads(exc.read().decode("utf-8")).get("error", str(exc))
-        except (ValueError, UnicodeDecodeError):
-            detail = str(exc)
-        print(f"  Hub rejected the machine registration request: {detail}")
-        return None
-    except (urllib.error.URLError, TimeoutError, ValueError) as exc:
-        print(f"  Could not reach the Hub to register this machine: {exc}")
-        return None
-    machine = body.get("machine") or {}
-    machine_id = machine.get("id")
-    if not machine_id:
-        print(f"  Hub did not return a machine id: {body}")
-        return None
-    return machine_id, bool(body.get("created"))
+    session_id = started.get("sessionId")
+    poll_secret = started.get("pollSecret")
+    configure_url = started.get("configureUrl")
+    if not session_id or not poll_secret or not configure_url:
+        raise RuntimeError("Spartans Hub returned an incomplete setup session")
+
+    print(f"Opening {configure_url}")
+    if not webbrowser.open(configure_url):
+        print("Open the URL above in a browser.")
+    print("Waiting for the Fusion Runner token...")
+
+    for _ in range(300):
+        status, result = post_json(
+            f"{base_url}/api/fusion-runner-setup?action=poll",
+            {"sessionId": session_id, "pollSecret": poll_secret},
+        )
+        if status == 200 and result.get("status") == "complete":
+            if result.get("token") and result.get("machineId"):
+                return result
+            raise RuntimeError("Spartans Hub returned incomplete Runner credentials")
+        if status != 202 or result.get("status") != "pending":
+            raise RuntimeError(f"Unexpected setup response from Spartans Hub: {result}")
+        time.sleep(2)
+    raise RuntimeError("Fusion Runner setup expired. Run the install command again.")
 
 
 def write_env(addin_dir: str) -> None:
     env_file = os.path.join(addin_dir, ".env")
-    deployed_url = default_hub_url()
-    print()
-    print("Which Hub is this Runner talking to?")
-    print(f"  1) This Hub ({deployed_url}) - normal, real use")
-    print(f"  2) Local dev server ({LOCAL_URL}) - only if you know you're testing local changes")
-    base_url = LOCAL_URL if prompt("Choose 1 or 2", "1") == "2" else deployed_url
-
-    print()
-    print("RUNNER_MACHINE_ID is per-device: it says which physical machine(s)")
-    print("this computer drives, so this Runner only claims jobs meant for")
-    print("those machines. A single computer driving more than one machine")
-    print("(e.g. one control laptop shared between two routers) can list")
-    print("several, comma-separated.")
-
-    runner_id = prompt("Name for this machine", socket.gethostname() or "fusion-runner")
-
-    print(f"Requesting a Runner token from the Hub for '{runner_id}'...")
-    token = register_runner_token(base_url, runner_id)
-    if token:
-        print("  Got this machine its own unique Runner token - nothing to ask an admin for.")
-    else:
-        print("Falling back to manual entry.")
-        print("FUSION_RUNNER_TOKEN is one shared secret for the whole team - ask a")
-        print("project administrator for it. Don't generate your own, and don't")
-        print("commit it anywhere.")
-        while not token:
-            token = prompt("FUSION_RUNNER_TOKEN value")
-
-    print(f"Registering '{runner_id}' with the Hub...")
-    registered = register_machine(base_url, token, runner_id)
-    if registered:
-        machine_id, created = registered
-        if created:
-            print(f"  Created a new machine profile '{runner_id}' ({machine_id}).")
-            print(f"  It's disabled until an admin sets its post-processor and tool")
-            print(f"  library and enables it at {base_url}/autocam -> Machines - this")
-            print("  Runner can still claim unassigned jobs meant for it in the meantime.")
-        else:
-            print(f"  Found the existing machine profile '{runner_id}' ({machine_id}).")
-    else:
-        print("Falling back to manual entry.")
-        print(f"Find it at {base_url}/autocam/fusion -> Machines - copy the id(s) of")
-        print("the machine(s) this computer is wired to. Comma-separate more than one.")
-        machine_id = ""
-        while not machine_id:
-            candidate = prompt("cam_machines UUID(s) for this physical machine, comma-separated")
-            parts = [p.strip() for p in candidate.split(",") if p.strip()]
-            try:
-                machine_id = ",".join(str(uuid.UUID(p)) for p in parts) if parts else ""
-            except ValueError:
-                machine_id = ""
-                print("  Each entry must be a UUID - it should look like 517ba89c-7167-4415-b6fd-cfc7be1e59e1")
+    base_url = default_hub_url().rstrip("/")
+    runner_id = socket.gethostname() or "fusion-runner"
+    credentials = pair_runner(base_url, runner_id)
 
     with open(env_file, "w") as f:
-        f.write(f'API_KEY="{token}"\n')
+        f.write(f'API_KEY="{credentials["token"]}"\n')
         f.write(f'BASE_URL="{base_url}"\n')
         f.write(f'RUNNER_ID="{runner_id}"\n')
-        f.write(f'RUNNER_MACHINE_ID="{machine_id}"\n')
+        f.write(f'RUNNER_MACHINE_ID="{credentials["machineId"]}"\n')
     print(f"Wrote {env_file}")
 
 
@@ -289,7 +205,7 @@ def main():
     if needs_configuration(addin_dir):
         write_env(addin_dir)
     else:
-        print("Preserved existing Runner configuration (.env); no setup prompts needed.")
+        print("Preserved existing Runner configuration (.env); no pairing needed.")
     print()
     print("Done. In Fusion: Utilities tab -> Scripts and Add-Ins -> Add-Ins ->")
     print(f"{ADDIN_FOLDER_NAME} -> Run.")

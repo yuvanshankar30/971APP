@@ -15,7 +15,7 @@
 // matching what Fusion requires (see docs/team-setup-guide.md) - a user
 // unzips straight into their AddIns folder with no manual rename step.
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdtempSync, rmSync, mkdirSync, existsSync, copyFileSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, rmSync, mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -72,21 +72,6 @@ try {
       return !isRuntimeFile(relativePath);
     }
   });
-
-  // The add-in itself (SpartanRoboticsAutoCAM.py's _ENV_PATH) only ever
-  // reads a file literally named ".env" - .env.example alone (the repo's
-  // own real-secrets-safe reference copy, gitignored as .env is) leaves a
-  // fresh install with nothing to actually read until a user manually
-  // renames/copies it themselves, undocumented. Shipping a real .env
-  // (still with blank/placeholder values - never real secrets, same
-  // "replace-with-..." pattern .env.example already uses) means a fresh
-  // unzip already has the right file in place; the add-in's own
-  // first-run prompt still fills in the one value (API_KEY) that has no
-  // sensible blank default.
-  const envExamplePath = join(stagingDir, '.env.example');
-  if (existsSync(envExamplePath)) {
-    copyFileSync(envExamplePath, join(stagingDir, '.env'));
-  }
 
   // A deployed build's Git revision is the release version. This means any
   // merged Runner/config/template change naturally produces a new remote
