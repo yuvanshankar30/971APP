@@ -24,18 +24,6 @@ Two things run this: **Spartans Hub** itself (already deployed - where you queue
    `.overridepath`; it detects the existing `.env` and does not touch your
    token or machine id. Then fully quit and relaunch Fusion.
 
-   **Prefer a live git checkout over a copied install?** This is now purely a
-   matter of taste, not a way to get automatic updates - the Runner already
-   self-updates via the API above regardless of which install you use.
-   Pointing Fusion's AddIns folder at a git checkout with a symlink instead
-   trades that off for `git pull`-based, human-timed updates:
-   ```bash
-   git clone https://github.com/frc971/spartanshub.git ~/spartanshub
-   ln -s ~/spartanshub/autocam/fusion/runner "$HOME/Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns/SpartanRoboticsAutoCAM"
-   python3 ~/spartanshub/autocam/fusion/runner/setup.py
-   ```
-   (Windows: `mklink /D` from an admin Command Prompt instead of `ln -s`.) `setup.py` detects the symlink and leaves it in place rather than copying over it - and, deliberately, so does the self-updater: it would otherwise overwrite files inside your git working tree, leaving uncommitted changes a later `git pull` could conflict with. A symlinked install's only update path is `cd ~/spartanshub && git pull`, done by hand; quit and relaunch Fusion afterward to load the new files. `.env`/`.overridepath` live inside `autocam/fusion/runner/` and are gitignored, so `git pull` never touches them.
-
 2. **Know what `RUNNER_MACHINE_ID` actually means.** It's the `cam_machines` id of the machine this computer is actually wired to - not the same thing as the token above, and per-device rather than shared. Browser pairing registers it from the workstation hostname (get-or-create, so reinstalling on the same named workstation reuses the profile) and writes the UUID automatically. A newly created profile starts **disabled**: it can still claim unassigned jobs, but an admin needs to set its post-processor and tool library and enable it at **`/autocam` -> Machines** before it can be targeted for a specific machine's jobs.
 
    It matters because a Runner only claims jobs meant for its own machine (or jobs left unassigned). Give two workstations the same machine id and the router's Runner can pick up a job queued for the mill - which is why it's required rather than optional.
@@ -71,8 +59,6 @@ server; do not restart Fusion just for one transient reset.
 ## Runner updates
 
 **Run `setup.py` once; you should never have to manually update this machine again.** On every add-in start, the Runner asks the authenticated Hub update API for the current release manifest. When the deployed Runner revision differs, it downloads the packaged add-in, verifies its SHA-256 checksum, and replaces the Runner code, templates, and configuration defaults - straight from the deployed app, no `git` involved at all. It always preserves this workstation's `.env`, `.overridepath`, `deps`, and `temp` folders. Fusion must then be fully quit and reopened before the updated Python modules can run - the add-in shows a message box saying so the moment it finishes staging an update. A failed update check is logged but never prevents an otherwise configured Runner from processing jobs.
-
-The one exception is a symlinked install (see "Prefer a live git checkout" above): self-updating there would silently rewrite files inside that git working tree, so it's skipped entirely - `git pull` is that machine's own, human-timed update path instead.
 
 For box tube, the Runner creates four manually indexed setups (Sides 12, 3, 6, and 9). Only sides containing real operations produce NC files; blank sides remain visible in Fusion without a blank file. Verify the setup side, toolpath direction, and near-wall-only breakthrough in Fusion before cutting a new tube/template combination.
 
