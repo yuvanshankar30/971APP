@@ -20,7 +20,10 @@ This is Team 971's Fusion CAM Runner, built to run against **Spartans Hub** (thi
 
 The add-in polls Spartans Hub's `/api/fusion-runner` endpoint for queued milling jobs, pulls down plate and box-tube jobs, builds Fusion CAM setups from templates, generates toolpaths, exports G-code, and reports completion back to `cam_jobs` in Spartans Hub's own database.
 
-There is no multi-tenant "team"/API-key-scopes concept here — this Runner authenticates with a single shared-secret bearer token that matches Spartans Hub's `FUSION_RUNNER_TOKEN` environment variable (see `src/lib/server/fusion_runner_auth.js`), sourced from its own `FUSION_RUNNER_TOKEN` Secret Manager secret (`cloudbuild.yaml`'s `--set-secrets`) — not shared with Vision Scouting's runner token. The deployment-side secret binding is complete; each Fusion workstation still needs the matching value in its local, gitignored `.env`.
+Each install mints its own Runner bearer token during setup and stores it in
+the workstation's gitignored `.env`. The server can revoke those tokens
+individually; the legacy deployment-wide `FUSION_RUNNER_TOKEN` remains only
+as an offline setup fallback and is separate from Vision Scouting auth.
 
 
 ## How It Works
@@ -67,13 +70,24 @@ database again.
 ## Requirements
 
 - **Autodesk Fusion 360** (macOS or Windows)
+- **Python 3** and `curl` for the one-command installer
 - Python runtime provided by Fusion 360 (the `adsk` modules only exist inside Fusion)
 - Network access to a **Spartans Hub** deployment
-- The Fusion CAM runner token (the deployed `FUSION_RUNNER_TOKEN` value; ask whoever manages the deployment)
 
 > **Full walkthrough:** [`docs/team-setup-guide.md`](docs/team-setup-guide.md) covers install + configuration end to end, including a downloadable pre-built zip from the [Fusion AutoCAM Setup page](/autocam/fusion/setup). The sections below are the short version.
 
 ## Installation
+
+Install the current checksum-verified package directly from Spartans Hub:
+
+```bash
+sh -c "$(curl -fsSL https://spartanshub.spartanrobotics.org/install/fusion-runner)"
+```
+
+The installer downloads the release served by that Hub, verifies it before
+extraction, copies it into Fusion's platform-specific AddIns directory, and
+runs the configuration prompts. The manual paths below are retained for
+offline/troubleshooting use.
 
 Copy this folder into Fusion 360's add-in directory, **renamed to `SpartanRoboticsAutoCAM`** (Fusion requires the folder name, the entry `.py` file, and the `.manifest` file to all match exactly - they're named `SpartanRoboticsAutoCAM.py`/`SpartanRoboticsAutoCAM.manifest`, so the folder has to match or Fusion won't list it as an add-in at all):
 
@@ -96,9 +110,10 @@ cd "$HOME/Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns/Sp
 python3 setup.py
 ```
 
-It asks which Hub to talk to (deployed, or a local dev server), for your
-`FUSION_RUNNER_TOKEN` value, and for this physical machine's `cam_machines`
-UUID, then writes `.env` itself - see [`setup.py`](setup.py). Prefer to edit
+It asks which Hub to talk to and for a name for this workstation, then mints
+its own token and registers or reuses the matching `cam_machines` row before
+writing `.env` - see [`setup.py`](setup.py). Manual token and machine-ID entry
+is only a fallback when the Hub cannot be reached during setup. Prefer to edit
 `.env` by hand instead? `cp .env.example .env` and fill in the same values manually:
 
 For local testing, start Spartans Hub with
@@ -108,7 +123,7 @@ also reaches Vite when it is bound on IPv6 loopback.
 
 | Variable | Purpose | Default |
 | --- | --- | --- |
-| `API_KEY` | Bearer token matching Spartans Hub's `FUSION_RUNNER_TOKEN` | _(required)_ |
+| `API_KEY` | Per-install Runner bearer token minted by `setup.py`; the legacy shared token is accepted only as a fallback | _(required)_ |
 | `BASE_URL` | Spartans Hub deployment base URL | `https://spartanshub.spartanrobotics.org` |
 | `RUNNER_ID` | Stable identifier for this Runner install, sent on every claim | machine hostname |
 | `RUNNER_MACHINE_ID` | The `cam_machines` row UUID for this physical machine; `setup.py` registers (or reuses) it automatically by name via `action=register-machine`, falling back to a manual UUID prompt only if the Hub can't be reached | _(required)_ |

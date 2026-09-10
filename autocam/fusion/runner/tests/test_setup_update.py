@@ -3,6 +3,7 @@ from pathlib import Path
 from unittest.mock import patch
 import io
 import json
+import os
 import tempfile
 import unittest
 import urllib.error
@@ -20,6 +21,24 @@ class SetupUpdateTests(unittest.TestCase):
             self.assertTrue(setup.needs_configuration(directory))
             Path(directory, ".env").write_text('API_KEY="existing"\n')
             self.assertFalse(setup.needs_configuration(directory))
+
+    def test_curl_installer_origin_becomes_the_default_hub(self):
+        with patch.dict(os.environ, {"FUSION_RUNNER_INSTALL_BASE_URL": "https://staging.example"}):
+            self.assertEqual(setup.default_hub_url(), "https://staging.example")
+
+    def test_blank_installer_origin_falls_back_to_production(self):
+        with patch.dict(os.environ, {"FUSION_RUNNER_INSTALL_BASE_URL": "  "}):
+            self.assertEqual(setup.default_hub_url(), setup.DEPLOYED_URL)
+
+    def test_dependency_reinstall_upgrades_the_existing_target(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            setup.subprocess, "run"
+        ) as run:
+            setup.install_requests(directory)
+            command = run.call_args.args[0]
+            self.assertIn("--upgrade", command)
+            self.assertEqual(command[-1], "requests")
+            self.assertTrue(Path(directory, ".overridepath").is_file())
 
 
 def _fake_response(payload):

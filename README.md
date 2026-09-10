@@ -390,6 +390,9 @@ own docs are all together in one place instead of scattered across
   later mutable contents. The Runner preserves the configured postprocessor's
   native artifact extension (`.tap` for ShopSabre), refuses destructive Fusion
   document-name collisions, and treats a failed cloud save as a failed job.
+  `/install/fusion-runner` serves a site-origin-aware, checksum-verifying
+  shell bootstrap so a workstation can install the current Runner directly
+  into Fusion from one `curl` command without cloning the repository.
 - **`autocam/gcodeFormatting.js`** / **`autocam/geometry2d.js`** - shared
   numeric G-code formatting, pause/dwell dialect handling, and polygon-area
   primitives used across generators so safety-critical output rules do not
