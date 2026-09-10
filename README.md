@@ -396,7 +396,10 @@ own docs are all together in one place instead of scattered across
   install opens `/install/fusion-runner/setup`, a standalone one-field pairing
   page where the shared team token authorizes a short-lived, one-use setup
   session; the installer receives a unique machine token and writes all local
-  configuration automatically.
+  configuration automatically. The installed add-in checks the authenticated
+  release API at startup and every five idle minutes, checksum-verifies and
+  stages newer packages in Fusion's AddIns directory, preserves machine-local
+  state, and pauses new claims until Fusion restarts onto the new code.
 - **`autocam/gcodeFormatting.js`** / **`autocam/geometry2d.js`** - shared
   numeric G-code formatting, pause/dwell dialect handling, and polygon-area
   primitives used across generators so safety-critical output rules do not

@@ -25,8 +25,7 @@ from urllib3.util.retry import Retry
 _ADDIN_DIR = os.path.dirname(os.path.realpath(__file__))
 # abspath() normalizes without resolving symlinks; realpath() resolves them.
 # A mismatch means some component of this file's own installed path is a
-# symlink - the "never reinstall again" setup (see RunnerUpdate.py's own
-# docstring for why that install must never be auto-updated).
+# legacy symlink (see RunnerUpdate.py for why it must not be auto-updated).
 _ADDIN_IS_SYMLINKED = os.path.realpath(__file__) != os.path.abspath(__file__)
 _ENV_PATH = os.path.join(_ADDIN_DIR, ".env")
 _API_KEY_LINE_RE = re.compile(r"^\s*API_KEY\s*=\s*(?P<value>.*)\s*$")
@@ -43,6 +42,7 @@ _job_queue = queue.Queue()  # type: queue.Queue
 _log_queue = queue.Queue()  # type: queue.Queue
 _job_processing = threading.Event()
 _active_job_id = None  # type: Optional[str]
+_pending_update_version = None  # type: Optional[str]
 # Set from the background poll thread (handleServer), consumed on the main
 # thread (_JobQueueEventHandler.notify) - the actual Fusion Data Panel walk
 # has to run there, same as every other Fusion API call in this add-in.
@@ -141,7 +141,7 @@ class _JobQueueEventHandler(adsk.core.CustomEventHandler):
         self.session = session
 
     def notify(self, args: "adsk.core.CustomEventArgs") -> None:
-        global _active_job_id
+        global _active_job_id, _pending_update_version
         try:
             while True:
                 try:
@@ -153,6 +153,16 @@ class _JobQueueEventHandler(adsk.core.CustomEventHandler):
                         _app.log(str(message))
                 finally:
                     _log_queue.task_done()
+
+            if _pending_update_version:
+                updated_version = _pending_update_version
+                _pending_update_version = None
+                if _ui:
+                    _ui.messageBox(
+                        f"Fusion AutoCAM Runner updated to {updated_version}. "
+                        "Fully quit and reopen Fusion before running jobs."
+                    )
+                return
 
             if _job_processing.is_set():
                 return
@@ -304,6 +314,7 @@ _FOLDER_SYNC_INTERVAL_SEC = 300.0
 # nearly as long as the full interval for its first real sync.
 _STARTUP_FOLDER_SYNC_DELAY_SEC = 90.0
 _HEARTBEAT_INTERVAL_SEC = 30.0
+_UPDATE_CHECK_INTERVAL_SEC = 300.0
 # Fusion may drop custom events while it is busy or has a modal open. A
 # claimed job then remains in _job_queue with no main-thread handler ever
 # starting it, which used to deadlock this Runner until the stale-claim sweep.
@@ -313,6 +324,7 @@ _DISPATCH_RETRY_POLLS = 3
 _dispatch_retry = [0]
 _last_folder_sync = 0.0
 _last_heartbeat = 0.0
+_last_update_check = 0.0
 _last_folder_tree_json = None  # type: Optional[str]
 # Fusion's default idle command is SelectCommand. Data Panel enumeration is a
 # synchronous cloud operation and must not run while a modal Fusion command
@@ -411,7 +423,7 @@ def _advance_folder_sync():
 
 
 def handleServer(temp_dir: str, stop_event: threading.Event):
-    global _last_folder_sync, _last_heartbeat
+    global _last_folder_sync, _last_heartbeat, _last_update_check, _pending_update_version
     # Confirmed live and directly root-caused from a real crash-report log:
     # _last_folder_sync starting at module-load's 0.0 meant the very first
     # folder sync fired on this thread's first loop iteration - seconds
@@ -426,6 +438,8 @@ def handleServer(temp_dir: str, stop_event: threading.Event):
     # every later sync still runs on the normal _FOLDER_SYNC_INTERVAL_SEC
     # cadence from there, unaffected.
     _last_folder_sync = time.monotonic() - (_FOLDER_SYNC_INTERVAL_SEC - _STARTUP_FOLDER_SYNC_DELAY_SEC)
+    # run() already checked for an update before starting this thread.
+    _last_update_check = time.monotonic()
     while not stop_event.is_set():
         try:
             time.sleep(5)
@@ -503,6 +517,33 @@ def handleServer(temp_dir: str, stop_event: threading.Event):
             _dispatch_retry[0] = 0
             if session is None:
                 raise RuntimeError("HTTP session not initialized.")
+            if now - _last_update_check >= _UPDATE_CHECK_INTERVAL_SEC:
+                _last_update_check = now
+                update_session = requests.Session()
+                update_session.headers.update({
+                    "Authorization": session.headers.get("Authorization", "")
+                })
+                _configure_http_retries(update_session)
+                try:
+                    updated_version = check_and_stage_update(
+                        update_session, BASE_URL, _ADDIN_DIR, symlinked=_ADDIN_IS_SYMLINKED
+                    )
+                finally:
+                    update_session.close()
+                if updated_version:
+                    _pending_update_version = updated_version
+                    _queue_log(
+                        f"Runner update {updated_version} downloaded and verified; "
+                        "stopping job claims until Fusion restarts."
+                    )
+                    _fire_job_queue_event()
+                    # Fusion can drop custom events while a modal command is
+                    # open. Keep notifying without claiming work until the
+                    # main-thread handler displays the restart message.
+                    while _pending_update_version and not stop_event.wait(5):
+                        _fire_job_queue_event()
+                    stop_event.set()
+                    continue
             # Claim endpoint (src/routes/api/fusion-runner/+server.js,
             # action=claim) - a compare-and-swap on cam_jobs.status, not the
             # original /api/jobs/request. Returns HTTP 200 with

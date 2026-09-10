@@ -65,13 +65,16 @@ def addins_dir() -> str:
     working setup and a "No such file or directory" that reads like the
     script is broken.
     """
-    if platform.system() == "Windows":
+    system = platform.system()
+    if system == "Windows":
         base = os.environ.get("APPDATA") or os.path.expanduser("~\\AppData\\Roaming")
         path = os.path.join(base, "Autodesk", "Autodesk Fusion 360", "API", "AddIns")
-    else:
+    elif system == "Darwin":
         path = os.path.expanduser(
             "~/Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns"
         )
+    else:
+        raise RuntimeError(f"Fusion Runner setup does not support {system}")
     os.makedirs(path, exist_ok=True)
     return path
 

@@ -33,7 +33,11 @@ def _sha256(path):
 
 
 def _copy_release(source_dir, addin_dir):
-    for entry in os.listdir(source_dir):
+    # The release marker is the commit signal. Copy it only after every code,
+    # template, tool, and postprocessor file succeeds so an interrupted update
+    # is retried on the next Fusion launch instead of looking complete.
+    entries = sorted(os.listdir(source_dir), key=lambda entry: entry == "runner_release.json")
+    for entry in entries:
         if entry in _PROTECTED_PATHS:
             continue
         source = os.path.join(source_dir, entry)
@@ -60,10 +64,8 @@ def check_and_stage_update(session, base_url, addin_dir, timeout=30, symlinked=F
     manifest URL only to an authenticated Runner; the manifest supplies the
     immutable artifact URL and its SHA-256 digest.
 
-    ``symlinked`` - True when the installed add-in is actually a live git
-    checkout reached through a symlink (the team guide's "never reinstall
-    again" setup: install_addin() in setup.py deliberately leaves a
-    symlinked install alone rather than copying over it). Silently
+    ``symlinked`` - True for a legacy install reached through a symlink.
+    Silently
     overwriting files there would leave uncommitted local changes in that
     git working tree, which could conflict with a later ``git pull`` - so
     this is a no-op for a symlinked install; ``git pull`` is already that
@@ -111,8 +113,13 @@ def check_and_stage_update(session, base_url, addin_dir, timeout=30, symlinked=F
             raise RuntimeError("Runner update checksum mismatch; refusing to install it")
         with zipfile.ZipFile(archive) as zf:
             root = "SpartanRoboticsAutoCAM/"
-            if not any(name.startswith(root) for name in zf.namelist()):
-                raise RuntimeError("Runner update archive has no add-in root")
+            required = {
+                root + "SpartanRoboticsAutoCAM.py",
+                root + "SpartanRoboticsAutoCAM.manifest",
+                root + "runner_release.json",
+            }
+            if not required.issubset(set(zf.namelist())):
+                raise RuntimeError("Runner update archive is missing required add-in files")
             _safe_extract(zf, temp_dir)
         _copy_release(os.path.join(temp_dir, "SpartanRoboticsAutoCAM"), addin_dir)
     return remote_version

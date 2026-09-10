@@ -32,6 +32,18 @@ class DependencyBootstrapTests(unittest.TestCase):
 
         self.assertTrue(manifest["runOnStartup"])
 
+    def test_idle_runner_checks_for_updates_before_claiming_more_work(self):
+        entrypoint = (RUNNER_DIR / "SpartanRoboticsAutoCAM.py").read_text()
+        server = entrypoint[entrypoint.index("def handleServer"):]
+
+        self.assertIn("_UPDATE_CHECK_INTERVAL_SEC = 300.0", entrypoint)
+        self.assertLess(
+            server.index("now - _last_update_check >= _UPDATE_CHECK_INTERVAL_SEC"),
+            server.index("action=claim"),
+        )
+        self.assertIn("stopping job claims until Fusion restarts", server)
+        self.assertIn("while _pending_update_version and not stop_event.wait(5)", server)
+
     def test_documents_default_to_the_season_project_root(self):
         config = (RUNNER_DIR / "config.py").read_text()
 
