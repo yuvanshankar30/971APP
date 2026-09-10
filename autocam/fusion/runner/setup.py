@@ -6,6 +6,11 @@ add-in folder itself:
 
     python3 autocam/fusion/runner/setup.py
 
+The deployed Hub also exposes a checksum-verifying bootstrap that downloads
+this package and invokes this same setup entry point:
+
+    sh -c "$(curl -fsSL https://spartanshub.spartanrobotics.org/install/fusion-runner)"
+
 It does everything: finds (and creates, if Fusion has never made it) Fusion's
 AddIns folder for this OS, installs the add-in there under the exact name
 Fusion requires, installs `requests` for Fusion's bundled Python - which ships
@@ -42,6 +47,11 @@ DEPLOYED_URL = "https://spartanshub.spartanrobotics.org"
 # then fails with ConnectionRefusedError even though localhost is healthy.
 # Let the OS resolve localhost to the server's active loopback family.
 LOCAL_URL = "http://localhost:5173"
+
+
+def default_hub_url() -> str:
+    """Use the Hub that served the curl installer when one was provided."""
+    return os.environ.get("FUSION_RUNNER_INSTALL_BASE_URL", "").strip() or DEPLOYED_URL
 
 # Never copied into the install: build output and machine-specific config.
 # .env/.overridepath are gitignored (so never in a checkout anyway), but are
@@ -101,7 +111,16 @@ def install_requests(addin_dir: str) -> None:
     deps_dir = os.path.join(addin_dir, "deps")
     print(f"Installing 'requests' into {deps_dir} ...")
     subprocess.run(
-        [sys.executable, "-m", "pip", "install", "--target", deps_dir, "requests"],
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--upgrade",
+            "--target",
+            deps_dir,
+            "requests",
+        ],
         check=True,
     )
     with open(os.path.join(addin_dir, ".overridepath"), "w") as f:
@@ -192,11 +211,12 @@ def register_machine(base_url, token, name):
 
 def write_env(addin_dir: str) -> None:
     env_file = os.path.join(addin_dir, ".env")
+    deployed_url = default_hub_url()
     print()
     print("Which Hub is this Runner talking to?")
-    print(f"  1) Deployed Hub ({DEPLOYED_URL}) - normal, real use")
+    print(f"  1) This Hub ({deployed_url}) - normal, real use")
     print(f"  2) Local dev server ({LOCAL_URL}) - only if you know you're testing local changes")
-    base_url = LOCAL_URL if prompt("Choose 1 or 2", "1") == "2" else DEPLOYED_URL
+    base_url = LOCAL_URL if prompt("Choose 1 or 2", "1") == "2" else deployed_url
 
     print()
     print("RUNNER_MACHINE_ID is per-device: it says which physical machine(s)")

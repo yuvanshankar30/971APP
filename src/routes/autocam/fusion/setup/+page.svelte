@@ -1,5 +1,6 @@
 <script>
   import { marked } from 'marked';
+  import { page } from '$app/stores';
   import { ArrowLeft, Download, BookOpen } from 'lucide-svelte';
 
   // Same file the generic /docs browser also lists (this page is a second,
@@ -24,11 +25,10 @@
   <div class="install-card-text">
     <h2>Install the Runner add-in</h2>
     <p>
-      A zip of <code>autocam/fusion/runner/</code> - the actual Fusion 360 add-in files. Only needed if you don't
-      have a clone of the repo. Unzip it anywhere, then run <code>python3 setup.py</code> from inside it: that
-      installs it into Fusion's AddIns folder for you and writes your config, so there's no path to find and
-      nothing to rename (see Step 1 below).
+      Run this in a normal terminal. It downloads and verifies the current Runner, installs it directly in
+      Fusion's AddIns folder, and starts configuration:
     </p>
+    <pre><code>sh -c "$(curl -fsSL {$page.url.origin}/install/fusion-runner)"</code></pre>
   </div>
   <a class="btn btn-primary install-download-btn" href="/downloads/SpartanRoboticsAutoCAM-FusionAddIn.zip" download>
     <Download size={16} /> Download Runner (.zip)
@@ -75,6 +75,10 @@
     padding: 0.1em 0.35em;
     border-radius: var(--radius-sm);
     font-size: 0.9em;
+  }
+  .install-card-text pre {
+    margin: var(--space-2) 0 0;
+    overflow-x: auto;
   }
   .docs-markdown {
     padding: var(--space-4);

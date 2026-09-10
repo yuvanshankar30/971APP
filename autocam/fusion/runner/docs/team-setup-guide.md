@@ -4,11 +4,13 @@ Two things run this: **Spartans Hub** itself (already deployed - where you queue
 
 ## Install
 
-1. **Run one command, once, ever.** From a clone of this repo, in a normal terminal (not Fusion):
+1. **Run one command, once, ever.** In a normal terminal (not Fusion):
    ```bash
-   python3 autocam/fusion/runner/setup.py
+   sh -c "$(curl -fsSL https://spartanshub.spartanrobotics.org/install/fusion-runner)"
    ```
-   That's the whole install, and - direct instruction - the only time you should ever need to touch a terminal for this machine again. It finds Fusion's AddIns folder for your OS (creating it if Fusion hasn't yet - a fresh Fusion install doesn't make it until you open Scripts and Add-Ins once), copies the add-in in under the exact name Fusion requires, installs `requests` for Fusion's bundled Python, and writes `.env` from a couple of prompts. Same command on macOS and Windows; you never type or substitute a path. From here on, the Runner keeps itself current automatically every time Fusion starts - see **Runner updates** below; there is no `git pull`, no re-running this command, and no shared secret to go ask someone for.
+   That's the whole install, and the only time you should need to touch a terminal for this machine again. The site serves a small bootstrap that downloads the current Runner ZIP and manifest, verifies its SHA-256 checksum, rejects unsafe archive paths, and then runs `setup.py`. Setup finds Fusion's AddIns folder (creating it if Fusion hasn't yet), copies the add-in under the exact name Fusion requires, installs `requests`, and writes `.env` from a couple of prompts. From here on, the Runner keeps itself current automatically every time Fusion starts - see **Runner updates** below.
+
+   The command form above keeps the terminal attached for setup's prompts; do not shorten it to `curl ... | sh`. To install from another Spartans Hub deployment, use that site's own `/install/fusion-runner` URL. The downloaded setup automatically uses the site that served it as the default Hub.
 
    It asks for two things:
    - **Which Hub** - the deployed one (normal) or a local dev server. Choose
@@ -21,7 +23,7 @@ Two things run this: **Spartans Hub** itself (already deployed - where you queue
 
    **Known risk, not yet root-caused:** the `pip install` step builds packages for whatever Python your system defaults to, which may not exactly match Fusion's bundled interpreter's ABI. If the add-in fails to load with an error mentioning `charset_normalizer`, that's the likely cause - ask for help rather than assuming your setup is broken.
 
-   No repo clone? Download the ready-made zip from the [Fusion AutoCAM Setup page](/autocam/fusion/setup), unzip it anywhere, and run `python3 setup.py` from inside the extracted `SpartanRoboticsAutoCAM` folder. The package already has the exact add-in name, all templates, post-processors, tool libraries, Runner code, and this documentation - do not rename or selectively copy files.
+   The ready-made zip remains available from the [Fusion AutoCAM Setup page](/autocam/fusion/setup) for manual/offline installation. Unzip it anywhere and run `python3 setup.py` from inside the extracted `SpartanRoboticsAutoCAM` folder.
 
    **Missing `.overridepath` or `requests` at startup?** The install was
    copied without its generated dependency folder. From the installed add-in
