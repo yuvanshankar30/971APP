@@ -830,5 +830,51 @@ class TabReadBackTests(unittest.TestCase):
         self.assertEqual([m for m in logged if "WARNING" in m], [])
 
 
+class _StockParameter:
+    """A real Fusion stockXLow/XHigh/YLow/YHigh ModelParameter: .value is
+    always a plain float in Fusion's internal centimeter unit; .expression
+    is the human-readable string WITH ITS UNIT SUFFIX (e.g. "0.635 in") -
+    never a bare number float() could parse.
+    """
+
+    def __init__(self, value_cm, expression):
+        self.value = value_cm
+        self.expression = expression
+
+
+class ReadStockBoundsTests(unittest.TestCase):
+    """Real, confirmed live bug: reading .expression instead of .value
+    made every real call here raise (float() cannot parse a unit suffix),
+    so stock_bounds silently ended up None on every real job - the whole
+    real-stock-backing filter never actually ran, letting a tab get
+    selected on a side with zero real material behind it (e.g. a part
+    edge positioned flush against a coordinate axis).
+    """
+
+    def _setup(self, values):
+        return types.SimpleNamespace(parameters=_Parameters(values))
+
+    def test_reads_value_not_the_unit_suffixed_expression(self):
+        setup = self._setup({
+            "stockXLow": _StockParameter(0.0, "0 in"),
+            "stockXHigh": _StockParameter(25.0, "9.84252 in"),
+            "stockYLow": _StockParameter(-1.27, "-0.5 in"),
+            "stockYHigh": _StockParameter(15.0, "5.90551 in"),
+        })
+        app = types.SimpleNamespace(log=lambda *_a: None)
+
+        self.assertEqual(
+            TabPlacement._read_stock_bounds(setup, app), (0.0, 25.0, -1.27, 15.0)
+        )
+
+    def test_falls_back_to_none_and_logs_when_a_parameter_is_missing(self):
+        setup = self._setup({"stockXLow": _StockParameter(0.0, "0 in")})
+        logged = []
+        app = types.SimpleNamespace(log=logged.append)
+
+        self.assertIsNone(TabPlacement._read_stock_bounds(setup, app))
+        self.assertTrue(logged, "a missing parameter must not fail silently")
+
+
 if __name__ == "__main__":
     unittest.main()

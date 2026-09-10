@@ -1053,6 +1053,39 @@ def _disable_tabs(app, operation) -> bool:
         return False
 
 
+def _read_stock_bounds(setup, app):
+    """The real machining bounds of this setup's plate, straight from
+    Fusion's own computed stock parameters - not a guess, and not the
+    part's own bounding box (a part positioned close to the plate's own
+    edge - AutoArrange's frame margin used up on that side, or a corner
+    placement - can have real sides with little to no stock actually
+    behind them; see _has_real_stock_backing). None (any parameter
+    missing) means "skip this filter, don't place zero tabs from a name
+    lookup failing."
+
+    Real, confirmed live bug this .value fix replaces: .expression
+    returns the parameter as a human-readable STRING WITH ITS UNIT
+    SUFFIX (e.g. "0.635 in"), which float() cannot parse at all - every
+    single call here raised immediately, so stock_bounds silently ended
+    up None on every real job, ever, and this whole filter never
+    actually ran - confirmed live: a part positioned with an edge
+    flush against a coordinate axis (zero real stock beyond it) still
+    got a tab selected there, one Fusion had nothing real to attach to.
+    .value is Fusion's own internal float, already in the same
+    centimeter unit _edge_outward_point's own edge geometry is in - no
+    string parsing, no unit mismatch.
+    """
+    try:
+        x_low = setup.parameters.itemByName("stockXLow").value
+        x_high = setup.parameters.itemByName("stockXHigh").value
+        y_low = setup.parameters.itemByName("stockYLow").value
+        y_high = setup.parameters.itemByName("stockYHigh").value
+        return (x_low, x_high, y_low, y_high)
+    except Exception as e:
+        app.log(f"TabPlacement: could not read stock bounds, skipping the real-stock-backing check: {e}")
+        return None
+
+
 def ConfigureTabs(
     min_tabs: int = DEFAULT_MIN_TABS,
     max_tabs: int = DEFAULT_MAX_TABS,
@@ -1102,23 +1135,7 @@ def ConfigureTabs(
         return
 
     for setup in cam.setups:
-        # The real machining bounds of this setup's plate, straight from
-        # Fusion's own computed stock parameters - not a guess, and not
-        # the part's own bounding box (a part positioned close to the
-        # plate's own edge - AutoArrange's frame margin used up on that
-        # side, or a corner placement - can have real sides with little
-        # to no stock actually behind them; see _has_real_stock_backing).
-        # None (any parameter missing) means "skip this filter, don't
-        # place zero tabs from a name lookup failing."
-        stock_bounds = None
-        try:
-            x_low = float(setup.parameters.itemByName("stockXLow").expression)
-            x_high = float(setup.parameters.itemByName("stockXHigh").expression)
-            y_low = float(setup.parameters.itemByName("stockYLow").expression)
-            y_high = float(setup.parameters.itemByName("stockYHigh").expression)
-            stock_bounds = (x_low, x_high, y_low, y_high)
-        except Exception as e:
-            app.log(f"TabPlacement: could not read stock bounds, skipping the real-stock-backing check: {e}")
+        stock_bounds = _read_stock_bounds(setup, app)
 
         # Only the ONE contour2d operation the template itself designates
         # for tabs (group_tabs already true in the template's own default,
