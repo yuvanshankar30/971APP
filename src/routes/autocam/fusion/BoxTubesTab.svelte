@@ -4,14 +4,16 @@
   import { supabase } from '$lib/supabase.js';
   import { toastActions } from '$lib/toast.js';
   import {
-    fetchBoxTubes, createBoxTube, deleteBoxTube, deleteBoxTubes, renameBoxTube, updateBoxTubeQuantity,
+    fetchBoxTubes, createBoxTube, deleteBoxTube, deleteBoxTubes, renameBoxTube, updateBoxTubeQuantity, updateBoxTubeStepFile,
     fetchFusionFolderTree, installFusionPartCad, queueFusionJob, fetchCompletedFusionStockIds
   } from '$lib/fusionCam.js';
   import { formatPacificDateTime } from '$lib/timezone.js';
   import CadViewer from '$lib/components/CadViewer.svelte';
   import FolderTreeNode from './FolderTreeNode.svelte';
+  import SeasonFilter from '$lib/components/SeasonFilter.svelte';
+  import { getAllSeasonBuckets, passesSeasonFilter } from '$lib/frcSeason.js';
   import { searchFolderTree } from '$lib/fusionFolderSearch.js';
-  import { Plus, Trash2, Box, Send, X, Pencil, Check, Download, Folder } from 'lucide-svelte';
+  import { Plus, Trash2, Box, Send, X, Pencil, Check, Download, Folder, Upload, Filter, Link as LinkIcon } from 'lucide-svelte';
 
   export let user;
   export let canManage;
@@ -84,12 +86,21 @@
   let boxTubesListSearch = '';
   $: boxTubesListSearchTerm = boxTubesListSearch.trim().toLowerCase();
   $: boxTubesByCreatedAt = [...boxTubes].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
-  $: filteredBoxTubesByCreatedAt = boxTubesListSearchTerm
-    ? boxTubesByCreatedAt.filter((tube) =>
-        tube.name?.toLowerCase().includes(boxTubesListSearchTerm)
-        || tube.project_id?.toLowerCase().includes(boxTubesListSearchTerm)
-      )
-    : boxTubesByCreatedAt;
+  // Dedicated Project/Season filters - see PartsTab.svelte's matching
+  // filteredPartsByCreatedAt for the full reasoning, including why these
+  // default to "show everything" rather than /manufacture's own
+  // "current season" default.
+  let filterProject = '';
+  let filterSeason = '';
+  $: projectIds = Array.from(new Set(boxTubes.map((tube) => tube.project_id).filter(Boolean))).sort();
+  $: seasonOptions = getAllSeasonBuckets(boxTubes);
+  $: filteredBoxTubesByCreatedAt = boxTubesByCreatedAt.filter((tube) =>
+    (!boxTubesListSearchTerm
+      || tube.name?.toLowerCase().includes(boxTubesListSearchTerm)
+      || tube.project_id?.toLowerCase().includes(boxTubesListSearchTerm))
+    && (!filterProject || tube.project_id === filterProject)
+    && passesSeasonFilter(tube.created_at, filterSeason)
+  );
 
   // Bulk-select-and-delete for the tube stock list - same pattern as
   // PartsTab.svelte's own part selection, kept independent of any
@@ -421,6 +432,40 @@
     }
   }
 
+  // Attach/replace STEP - see PartsTab.svelte's matching feature for the
+  // real gap this closes: a tube created without CAD (or needing a
+  // corrected STEP) had no fix short of deleting and recreating the record.
+  let attachStepModalTube = null;
+  let attachStepFile = null;
+  let attachingStep = false;
+
+  function openAttachStepModal(boxTube) {
+    attachStepModalTube = boxTube;
+    attachStepFile = null;
+  }
+
+  function closeAttachStepModal() {
+    if (attachingStep) return;
+    attachStepModalTube = null;
+    attachStepFile = null;
+  }
+
+  async function saveAttachStep() {
+    if (!attachStepFile) return toastActions.show('Choose a STEP file first');
+    attachingStep = true;
+    try {
+      const updated = await updateBoxTubeStepFile(attachStepModalTube.id, attachStepFile);
+      boxTubes = boxTubes.map((item) => (item.id === updated.id ? updated : item));
+      toastActions.show('STEP file saved');
+      attachStepModalTube = null;
+      attachStepFile = null;
+    } catch (error) {
+      toastActions.show(error.message || 'Failed to save STEP file');
+    } finally {
+      attachingStep = false;
+    }
+  }
+
   async function handleQueue(boxTube) {
     if (!boxTube.step_file_name) {
       toastActions.show('This box tube has no STEP file attached - add one before queuing');
@@ -546,14 +591,26 @@
   {#if boxTubes.length === 0}
     <p class="empty-state">No box tubes yet. Add one above.</p>
   {:else}
-    <div class="tab-list-search">
-      <input
-        type="search"
-        class="form-input"
-        placeholder="Search tube stock by name or project..."
-        bind:value={boxTubesListSearch}
-        aria-label="Search tube stock"
-      />
+    <div class="filters tab-filters">
+      <div class="form-group">
+        <label class="form-label" for="tubes-search">Search</label>
+        <input
+          id="tubes-search"
+          type="search"
+          class="form-input"
+          placeholder="Search tube stock by name or project..."
+          bind:value={boxTubesListSearch}
+          aria-label="Search tube stock"
+        />
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="tubes-project-filter"><Filter size={14} /> Project</label>
+        <select id="tubes-project-filter" class="form-select" bind:value={filterProject}>
+          <option value="">All Projects</option>
+          {#each projectIds as pid}<option value={pid}>{pid}</option>{/each}
+        </select>
+      </div>
+      <SeasonFilter options={seasonOptions} bind:value={filterSeason} />
     </div>
     {#if filteredBoxTubesByCreatedAt.length === 0}
       <p class="empty-state">No tube stock matches "{boxTubesListSearch}".</p>
@@ -651,6 +708,11 @@
             {#if boxTube.created_at} - added {formatPacificDateTime(boxTube.created_at)}{/if}
           </p>
           <div class="cam-list-actions">
+            {#if boxTube.parts}
+              <a class="btn btn-secondary btn-sm" href="/manufacture?part={boxTube.part_id}">
+                <LinkIcon size={14} /> View manufacturing request
+              </a>
+            {/if}
             {#if boxTube.step_file_name}
               <button class="btn btn-secondary btn-sm" on:click={() => (cadModalTube = boxTube)}>
                 <Box size={14} /> View CAD
@@ -660,6 +722,9 @@
               </button>
             {/if}
             {#if canManage}
+              <button class="btn btn-secondary btn-sm" on:click={() => openAttachStepModal(boxTube)}>
+                <Upload size={14} /> {boxTube.step_file_name ? 'Replace STEP' : 'Attach STEP'}
+              </button>
               <button class="btn btn-ghost btn-sm" on:click={() => handleDelete(boxTube)}>
                 <Trash2 size={14} /> Delete
               </button>
@@ -682,6 +747,38 @@
       <div class="modal-body">
         <CadViewer part={null} stepFileName={cadModalTube.step_file_name} />
         <p class="cam-form-hint">Drag to rotate &middot; scroll to zoom &middot; right-drag to pan</p>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if attachStepModalTube}
+  <div class="modal-overlay" role="presentation" on:click={closeAttachStepModal}>
+    <div class="modal" role="dialog" aria-labelledby="attach-step-title" on:click|stopPropagation>
+      <div class="modal-header">
+        <h3 id="attach-step-title">{attachStepModalTube.step_file_name ? 'Replace' : 'Attach'} STEP file - {attachStepModalTube.name}</h3>
+        <button type="button" class="btn btn-ghost btn-sm" title="Close" on:click={closeAttachStepModal}><X size={16} /></button>
+      </div>
+      <div class="modal-body">
+        {#if attachStepModalTube.step_file_name}
+          <p class="cam-form-hint">This tube already has a STEP file. Choosing a new one replaces it - the old file is not automatically removed from storage.</p>
+        {/if}
+        <div class="form-group">
+          <label class="form-label" for="attach-step-input">STEP file</label>
+          <input
+            id="attach-step-input"
+            type="file"
+            accept=".step,.stp"
+            class="form-input"
+            on:change={(e) => (attachStepFile = e.currentTarget.files?.[0] || null)}
+          />
+        </div>
+      </div>
+      <div class="modal-footer-actions">
+        <button class="btn btn-ghost" type="button" on:click={closeAttachStepModal}>Cancel</button>
+        <button class="btn btn-primary" type="button" disabled={attachingStep || !attachStepFile} on:click={saveAttachStep}>
+          <Upload size={14} /> {attachingStep ? 'Saving...' : 'Save'}
+        </button>
       </div>
     </div>
   </div>
@@ -860,7 +957,7 @@
 
 <style>
   .tab-actions { margin-bottom: 1rem; }
-  .tab-list-search { margin-bottom: 1rem; max-width: 24rem; }
+  .tab-filters { margin-bottom: 1rem; --filters-columns: 2fr 1fr 1fr; }
   .form-row { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
   .form-row-final { padding-top: 0.75rem; border-top: 1px solid var(--border); }
   .form-row .form-group { flex: 1; min-width: 160px; }

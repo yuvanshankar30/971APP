@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ from: vi.fn(), rpc: vi.fn(), queries: [], createSignedUrl: vi.fn() }));
+const mocks = vi.hoisted(() => ({ from: vi.fn(), rpc: vi.fn(), queries: [], createSignedUrl: vi.fn(), storageUpload: vi.fn(async () => ({ error: null })) }));
 vi.mock('$lib/supabase.js', () => ({
   supabase: {
     from: mocks.from,
     rpc: mocks.rpc,
-    storage: { from: vi.fn(() => ({ createSignedUrl: mocks.createSignedUrl })) }
+    storage: { from: vi.fn(() => ({ createSignedUrl: mocks.createSignedUrl, upload: mocks.storageUpload })) }
   }
 }));
 
@@ -15,6 +15,7 @@ import {
   fetchFusionJobUpdates,
   fetchFusionJobNcFiles,
   fetchFusionPartStepFiles,
+  fetchFusionPartProjectIds,
   fetchFusionJobsByManufacturingPartIds,
   fetchCompletedFusionStockIds,
   fetchFusionFolderTree,
@@ -28,8 +29,11 @@ import {
   queueFusionJob,
   queueFusionPlateJob,
   updatePartQuantity,
+  updatePartStepFile,
   renameBoxTube,
-  updateBoxTubeQuantity
+  updateBoxTubeQuantity,
+  updateBoxTubeStepFile,
+  updateFusionJobMaterial
 } from './fusionCam.js';
 
 function chain(result) {
@@ -47,6 +51,8 @@ beforeEach(() => {
   mocks.rpc.mockReset();
   mocks.queries.length = 0;
   mocks.createSignedUrl.mockReset();
+  mocks.storageUpload.mockReset();
+  mocks.storageUpload.mockResolvedValue({ error: null });
 });
 
 describe('Fusion CAM queue query efficiency', () => {
@@ -262,6 +268,21 @@ describe('Fusion CAM queue query efficiency', () => {
     expect(mocks.from).not.toHaveBeenCalled();
   });
 
+  it("resolves each plate job's project id from its part, since cam_jobs only carries params.selectedPartId", async () => {
+    mocks.from.mockReturnValue(chain({ data: [{ id: 'p1', project_id: 'REV-1' }], error: null }));
+    await expect(fetchFusionPartProjectIds(['p1', 'p1', null])).resolves.toEqual({ p1: 'REV-1' });
+    expect(mocks.from).toHaveBeenCalledWith('fusion_parts');
+    expect(mocks.from).toHaveBeenCalledTimes(1);
+    expect(mocks.queries[0].select).toHaveBeenCalledWith('id, project_id');
+    expect(mocks.queries[0].in).toHaveBeenCalledWith('id', ['p1']);
+  });
+
+  it('skips the project id lookup entirely when no job has a part', async () => {
+    expect(await fetchFusionPartProjectIds([])).toEqual({});
+    expect(await fetchFusionPartProjectIds(null)).toEqual({});
+    expect(mocks.from).not.toHaveBeenCalled();
+  });
+
   it('loads heavy NC artifacts only for one completed job on demand', async () => {
     mocks.from.mockReturnValue(chain({ data: { fusion_nc_files: [{ name: 'part.nc' }] }, error: null }));
     await expect(fetchFusionJobNcFiles('job-1')).resolves.toEqual([{ name: 'part.nc' }]);
@@ -311,6 +332,25 @@ describe('Fusion CAM queue query efficiency', () => {
     expect(boxTubeIds.has('tube-1')).toBe(true);
     expect(mocks.queries[0].eq).toHaveBeenCalledWith('operation_type', 'milling');
     expect(mocks.queries[0].eq).toHaveBeenCalledWith('status', 'completed');
+  });
+
+  it('attaches a STEP file to a part that did not have one, without deleting and recreating it', async () => {
+    mocks.from.mockReturnValueOnce(chain({ data: { id: 'part-1', step_file_name: 'new-path.step' }, error: null }));
+    const stepFile = new File(['step data'], 'a.step');
+
+    await expect(updatePartStepFile('part-1', stepFile)).resolves.toMatchObject({ id: 'part-1', step_file_name: 'new-path.step' });
+    expect(mocks.storageUpload).toHaveBeenCalled();
+    expect(mocks.queries[0].update).toHaveBeenCalledWith({ step_file_name: expect.any(String) });
+    expect(mocks.queries[0].eq).toHaveBeenCalledWith('id', 'part-1');
+  });
+
+  it('replaces a box tube STEP file the same way', async () => {
+    mocks.from.mockReturnValueOnce(chain({ data: { id: 'tube-1', step_file_name: 'replaced.step' }, error: null }));
+    const stepFile = new File(['step data'], 'b.step');
+
+    await expect(updateBoxTubeStepFile('tube-1', stepFile)).resolves.toMatchObject({ id: 'tube-1', step_file_name: 'replaced.step' });
+    expect(mocks.queries[0].update).toHaveBeenCalledWith({ step_file_name: expect.any(String) });
+    expect(mocks.queries[0].eq).toHaveBeenCalledWith('id', 'tube-1');
   });
 
   it('preserves each posted artifact extension when naming Files uploads', () => {
@@ -401,5 +441,32 @@ describe('Fusion CAM queue query efficiency', () => {
   it('never calls the database for an empty job selection', async () => {
     await expect(deleteFusionJobs([])).resolves.toBe(0);
     expect(mocks.from).not.toHaveBeenCalled();
+  });
+
+  it("changes a queued job's material, scoped to still-queued rows only", async () => {
+    mocks.from.mockReturnValue(chain({ data: [{ id: 'job-1', material_id: 'mat-2' }], error: null }));
+
+    await expect(updateFusionJobMaterial('job-1', 'mat-2')).resolves.toMatchObject({ id: 'job-1', material_id: 'mat-2' });
+
+    expect(mocks.from).toHaveBeenCalledWith('cam_jobs');
+    expect(mocks.queries[0].update).toHaveBeenCalledWith({ material_id: 'mat-2' });
+    expect(mocks.queries[0].eq).toHaveBeenCalledWith('id', 'job-1');
+    expect(mocks.queries[0].eq).toHaveBeenCalledWith('operation_type', 'milling');
+    expect(mocks.queries[0].eq).toHaveBeenCalledWith('status', 'queued');
+  });
+
+  it('refuses to edit material without a value, before querying Supabase', async () => {
+    await expect(updateFusionJobMaterial('job-1', '')).rejects.toThrow(/choose a material/i);
+    expect(mocks.from).not.toHaveBeenCalled();
+  });
+
+  it('reports a job as no longer editable once a Runner has claimed it, instead of throwing a raw .single() error', async () => {
+    // A Runner can claim a job between this tab loading it and the user
+    // saving an edit. The update then matches zero rows (status is no
+    // longer 'queued') - this must surface as the ordinary "no longer
+    // editable" message, not a PostgREST "no rows returned" exception.
+    mocks.from.mockReturnValue(chain({ data: [], error: null }));
+
+    await expect(updateFusionJobMaterial('job-1', 'mat-2')).rejects.toThrow(/no longer queued/i);
   });
 });

@@ -33,7 +33,7 @@ export const FUSION_JOB_PAGE_SIZE = 25;
 // Deliberately excludes step_file_name, gcode, and fusion_nc_files. The NC
 // artifacts are base64 and can dwarf every other field; fetch them only
 // when someone actually asks to download/post a completed job.
-const FUSION_JOB_SELECT = 'id, name, source_type, part_id, operation_type, params, material_id, tool_id, machine_id, status, claimed_by, claimed_at, errors, warnings, stats, progress, progress_message, requested_by, created_at, updated_at, cam_machines(name, controller), cam_tools(name, diameter)';
+const FUSION_JOB_SELECT = 'id, name, source_type, part_id, operation_type, params, material_id, tool_id, machine_id, status, claimed_by, claimed_at, errors, warnings, stats, progress, progress_message, requested_by, created_at, updated_at, cam_machines(name, controller), cam_tools(name, diameter), cam_materials(name)';
 const FUSION_JOB_UPDATE_SELECT = 'id, status, claimed_by, claimed_at, errors, warnings, stats, progress, progress_message, updated_at';
 
 async function uploadFusionStep({ name, fallback, stepFile }) {
@@ -143,6 +143,27 @@ export async function renamePart(id, name) {
     .select('*, fusion_part_categories(thickness, cam_materials(name, category)), parts(id, name, project_id, workflow)')
     .single();
   if (error) throw error;
+  return data;
+}
+
+/**
+ * Attaches or replaces a part's STEP file after it already exists. Real
+ * gap this closes: a part created without CAD (or with a corrected STEP
+ * needed later) had no way to fix that other than deleting and recreating
+ * the whole record - losing its quantity history, plate assignment, and
+ * any linked manufacturing request in the process. The old file (if any)
+ * is left in storage, same as deletePart already leaves a deleted part's
+ * file behind - this app does not garbage-collect orphaned uploads.
+ */
+export async function updatePartStepFile(id, stepFile) {
+  const stepFileName = await uploadFusionStep({ name: id, fallback: 'part', stepFile });
+  const { data, error } = await supabase
+    .from('fusion_parts')
+    .update({ step_file_name: stepFileName })
+    .eq('id', id)
+    .select('*, fusion_part_categories(thickness, cam_materials(name, category)), parts(id, name, project_id, workflow)')
+    .single();
+  if (error) await removeFailedFusionUpload(stepFileName, error);
   return data;
 }
 
@@ -322,6 +343,19 @@ export async function renameBoxTube(id, name) {
   return data;
 }
 
+/** Attaches or replaces a box tube's STEP file - see updatePartStepFile's own docstring. */
+export async function updateBoxTubeStepFile(id, stepFile) {
+  const stepFileName = await uploadFusionStep({ name: id, fallback: 'boxtube', stepFile });
+  const { data, error } = await supabase
+    .from('fusion_box_tubes')
+    .update({ step_file_name: stepFileName })
+    .eq('id', id)
+    .select('*, parts(id, name, project_id, workflow)')
+    .single();
+  if (error) await removeFailedFusionUpload(stepFileName, error);
+  return data;
+}
+
 export async function updateBoxTubeQuantity(id, quantity) {
   if (!Number.isInteger(quantity) || quantity < 0) {
     throw new Error('Quantity must be a whole number, zero or more');
@@ -396,6 +430,28 @@ export async function fetchFusionPartStepFiles(partIds) {
     .not('step_file_name', 'is', null);
   if (error) throw error;
   return Object.fromEntries((data || []).map((part) => [part.id, part.step_file_name]));
+}
+
+/**
+ * Project ids for a set of fusion_parts ids, as { partId: projectId }. Same
+ * batched-by-page, resolved-client-side pattern as fetchFusionPartStepFiles
+ * right above (and for the same reason: a plate job's own cam_jobs row only
+ * ever carries params.selectedPartId, not the part's project_id, so the Job
+ * Queue tab's Project filter has to look it up separately). Kept as its own
+ * function rather than widening fetchFusionPartStepFiles - that one's
+ * return shape ({ partId: stepFileName }) is a public contract other code
+ * already destructures directly.
+ */
+export async function fetchFusionPartProjectIds(partIds) {
+  const ids = [...new Set((partIds || []).filter(Boolean))];
+  if (!ids.length) return {};
+  const { data, error } = await supabase
+    .from('fusion_parts')
+    .select('id, project_id')
+    .in('id', ids)
+    .not('project_id', 'is', null);
+  if (error) throw error;
+  return Object.fromEntries((data || []).map((part) => [part.id, part.project_id]));
 }
 
 /**
@@ -749,6 +805,35 @@ export async function cancelFusionJob(id) {
     .select('id');
   if (error) throw error;
   if (!data?.length) throw new Error('Fusion job is no longer active');
+}
+
+/**
+ * Changes which material a job runs against. Restricted to status='queued',
+ * same reasoning as cancelFusionJob's own status guard: once a Runner has
+ * claimed a job it has already read (or is about to read) params/material_id
+ * to build the CAM setup, so a change after that point would not actually
+ * reach Fusion - only "queued, waiting for a Runner" is a real edit window.
+ * A material change wrong for the actual stock (wrong thickness) has always
+ * required deleting and requeuing; this is the same "retry with prefilled
+ * settings" gap the STEP-attach/replace fix closed, but for the one field
+ * that's wrong most often before a job has even been picked up.
+ */
+export async function updateFusionJobMaterial(id, materialId) {
+  if (!materialId) throw new Error('Choose a material');
+  // Array select + length check, not .single() - a status that changed out
+  // from under this edit (a Runner claimed it a moment ago) must surface as
+  // the ordinary "no longer editable" error below, not a PostgREST "no rows
+  // returned" exception from .single() on a legitimately empty match.
+  const { data, error } = await supabase
+    .from('cam_jobs')
+    .update({ material_id: materialId })
+    .eq('id', id)
+    .eq('operation_type', 'milling')
+    .eq('status', 'queued')
+    .select(FUSION_JOB_SELECT);
+  if (error) throw error;
+  if (!data?.length) throw new Error('Fusion job is no longer queued - it can no longer be edited');
+  return data[0];
 }
 
 /** Delete a queued or terminal Fusion job. Active Runner work must be cancelled first. */
