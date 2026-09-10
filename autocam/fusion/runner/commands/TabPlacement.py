@@ -750,6 +750,23 @@ def _min_tabs_for_body(body, min_tabs: int) -> int:
     return min_tabs
 
 
+def _max_tabs_for_body(body, max_tabs: int) -> int:
+    """The other half of _min_tabs_for_body's own floor: a triangle only
+    has 3 real sides, so more than 3 tabs adds no real holding power
+    either - it just doubles up on one side a second (or third) time.
+    Direct instruction: exactly 3 for a triangular shape, full stop. Caps
+    the perimeter-based scaling that would otherwise grow tab count on a
+    large triangle the same way it does for a normal 4+-sided part, and -
+    same as the min-tabs floor above - overrides even an explicit
+    operator tab-count request (camPlate.py's tab_count_override sets
+    min_tabs == max_tabs to that value; a triangle still gets exactly 3
+    regardless of what was asked for, since more genuinely is not needed).
+    """
+    if _is_a_bare_triangle(body):
+        return 3
+    return max_tabs
+
+
 def select_tab_edges(
     body,
     max_tabs: int = DEFAULT_MAX_TABS,
@@ -1155,7 +1172,8 @@ def ConfigureTabs(
             for body in bodies:
                 perimeter_in = _outer_perimeter_in(body)
                 body_min_tabs = _min_tabs_for_body(body, min_tabs)
-                target_tabs = _tab_count_for_perimeter(perimeter_in, body_min_tabs, max_tabs)
+                body_max_tabs = _max_tabs_for_body(body, max_tabs)
+                target_tabs = _tab_count_for_perimeter(perimeter_in, body_min_tabs, body_max_tabs)
                 body_candidates = select_tab_edges(
                     body,
                     max_tabs=target_tabs,

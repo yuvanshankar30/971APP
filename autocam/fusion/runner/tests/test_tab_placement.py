@@ -510,6 +510,66 @@ class MinTabsForBodyTests(unittest.TestCase):
         self.assertEqual(TabPlacement._min_tabs_for_body(body, 4), 4)
 
 
+class MaxTabsForBodyTests(unittest.TestCase):
+    """_max_tabs_for_body is the other half of the same floor above: a
+    triangle only has 3 real sides, so more than 3 tabs adds no real
+    holding power - direct instruction, more genuinely is not needed.
+    """
+
+    def test_a_genuine_triangle_is_capped_to_three(self):
+        edges = [
+            _edge(0, 0, 10, 0),
+            _edge(10, 0, 5, 8),
+            _edge(5, 8, 0, 0),
+        ]
+        body = _body([_face(1.0, 1.0, [_loop(True, edges)])], (0, 0), (10, 8))
+
+        self.assertEqual(TabPlacement._max_tabs_for_body(body, 20), 3)
+
+    def test_an_explicit_operator_override_above_three_is_still_capped_on_a_triangle(self):
+        # camPlate.py's tab_count_override sets min_tabs == max_tabs to the
+        # operator's requested value - a triangle must still get exactly 3
+        # even when someone explicitly asked for more.
+        edges = [
+            _edge(0, 0, 10, 0),
+            _edge(10, 0, 5, 8),
+            _edge(5, 8, 0, 0),
+        ]
+        body = _body([_face(1.0, 1.0, [_loop(True, edges)])], (0, 0), (10, 8))
+
+        self.assertEqual(TabPlacement._max_tabs_for_body(body, 8), 3)
+
+    def test_a_notched_part_reducing_to_three_long_sides_keeps_the_requested_ceiling(self):
+        long_bottom = _edge(0, 0, 10, 0)
+        long_right = _edge(10, 0, 10, 10)
+        long_top = _edge(10, 10, 0, 10)
+        short_left_segments = [_edge(0, 10 - i, 0, 10 - i - 1) for i in range(10)]
+        edges = [long_bottom, long_right, long_top, *short_left_segments]
+        body = _body([_face(1.0, 1.0, [_loop(True, edges)])], (0, 0), (10, 10))
+
+        self.assertEqual(TabPlacement._max_tabs_for_body(body, 8), 8)
+
+    def test_a_large_triangle_does_not_scale_past_three_tabs(self):
+        # Real, confirmed bug this closes: _min_tabs_for_body alone only
+        # set a floor of 3 - a large triangle's own perimeter-based target
+        # (_tab_count_for_perimeter) could still scale past 3, since
+        # max_tabs was never adjusted for a triangle's own 3-sided shape.
+        edges = [
+            _edge(0, 0, 100, 0),
+            _edge(100, 0, 50, 80),
+            _edge(50, 80, 0, 0),
+        ]
+        body = _body([_face(1.0, 1.0, [_loop(True, edges)])], (0, 0), (100, 80))
+
+        min_tabs = TabPlacement._min_tabs_for_body(body, 4)
+        max_tabs = TabPlacement._max_tabs_for_body(body, 20)
+        perimeter_in = TabPlacement._outer_perimeter_in(body)
+        self.assertGreater(perimeter_in, TabPlacement.TARGET_TAB_SPACING_IN * 6)
+        self.assertEqual(
+            TabPlacement._tab_count_for_perimeter(perimeter_in, min_tabs, max_tabs), 3
+        )
+
+
 class MinimumSideLengthTests(unittest.TestCase):
     """A side too short to physically contain a tab must not get one.
     MIN_TAB_SIDE_LENGTH_IN reserves a modest lead-in and lead-out allowance.
