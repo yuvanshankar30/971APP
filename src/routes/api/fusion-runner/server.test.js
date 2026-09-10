@@ -1,15 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-const mocks=vi.hoisted(()=>({from:vi.fn(),payload:vi.fn(),storageUpload:vi.fn(async()=>({error:null}))}));
+const mocks=vi.hoisted(()=>({from:vi.fn(),payload:vi.fn(),storageUpload:vi.fn(async()=>({error:null})),isAuthorized:vi.fn(()=>true)}));
 vi.mock('@supabase/supabase-js',()=>({createClient:()=>({from:mocks.from,storage:{from:()=>({upload:mocks.storageUpload})}})}));
 vi.mock('$env/dynamic/private',()=>({env:{SUPABASE_URL:'https://example.supabase.co',SUPABASE_SERVICE_KEY:'service-key'}}));
-vi.mock('$lib/server/fusion_runner_auth.js',()=>({isAuthorizedFusionRunnerRequest:()=>true}));
+vi.mock('$lib/server/fusion_runner_auth.js',()=>({isAuthorizedFusionRunnerRequest:mocks.isAuthorized,getBearerToken:(headers)=>{const auth=String(headers?.get?.('authorization')||'').trim();const m=/^Bearer\s+(.+)$/i.exec(auth);return m?m[1].trim():'';}}));
 vi.mock('$autocam/fusion/jobPayload.js',()=>({buildJobPayload:mocks.payload}));
 import { POST } from './+server.js';
-const call=(action,body={})=>POST({url:new URL(`http://localhost/api/fusion-runner?action=${action}`),request:new Request('http://localhost',{method:'POST',body:JSON.stringify(body)})});
+const call=(action,body={},authorization)=>POST({url:new URL(`http://localhost/api/fusion-runner?action=${action}`),request:new Request('http://localhost',{method:'POST',body:JSON.stringify(body),headers:authorization?{authorization}:undefined})});
 let queries;
 const machineId='11111111-1111-4111-8111-111111111111';
 const plateId='22222222-2222-4222-8222-222222222222';
-beforeEach(()=>{queries=[];mocks.from.mockReset();mocks.payload.mockReset();mocks.storageUpload.mockReset();mocks.storageUpload.mockResolvedValue({error:null});});
+beforeEach(()=>{queries=[];mocks.from.mockReset();mocks.payload.mockReset();mocks.storageUpload.mockReset();mocks.storageUpload.mockResolvedValue({error:null});mocks.isAuthorized.mockReset();mocks.isAuthorized.mockReturnValue(true);});
 function chain(result){
  const q={};for(const method of ['select','insert','update','upsert','eq','in','ilike','order','limit','or','lt','is'])q[method]=vi.fn(()=>q);
  q.single=vi.fn(async()=>result);q.maybeSingle=vi.fn(async()=>result);q.then=(resolve)=>resolve(result);queries.push(q);return q;
@@ -56,6 +56,37 @@ describe('Fusion Runner managed updates',()=>{
   expect(result.status).toBe(200);
   expect(await result.json()).toEqual({manifestUrl:'http://localhost/downloads/SpartanRoboticsAutoCAM-FusionAddIn.manifest.json'});
   expect(mocks.from).not.toHaveBeenCalled();
+ });
+});
+describe('Fusion Runner self-issued tokens',()=>{
+ it('mints a token with no auth check at all - a brand-new Runner has no credential yet',async()=>{
+  mocks.isAuthorized.mockReturnValue(false); // proves register-runner never consults this
+  mocks.from.mockReturnValueOnce(chain({data:{token:'frt_abc123'},error:null}));
+  const result=await call('register-runner',{name:'ShopSabre Router 1'});
+  expect(result.status).toBe(200);
+  expect(await result.json()).toEqual({token:'frt_abc123'});
+  expect(mocks.isAuthorized).not.toHaveBeenCalled();
+  expect(queries[0].insert).toHaveBeenCalledWith(expect.objectContaining({name:'ShopSabre Router 1'}));
+  expect(queries[0].insert.mock.calls[0][0].token).toMatch(/^frt_/);
+ });
+ it('accepts a self-issued token the static shared secret does not recognize',async()=>{
+  mocks.isAuthorized.mockReturnValue(false);
+  mocks.from.mockReturnValueOnce(chain({data:{id:'row-1'},error:null}));
+  const result=await call('update-manifest',{},'Bearer frt_unique-machine-key');
+  expect(result.status).toBe(200);
+  expect(queries[0].eq).toHaveBeenCalledWith('token','frt_unique-machine-key');
+ });
+ it('rejects a token that matches nothing on file',async()=>{
+  mocks.isAuthorized.mockReturnValue(false);
+  mocks.from.mockReturnValueOnce(chain({data:null,error:null}));
+  const result=await call('update-manifest',{},'Bearer nope');
+  expect(result.status).toBe(401);
+ });
+ it('rejects every action but register-runner with no credentials at all',async()=>{
+  mocks.isAuthorized.mockReturnValue(false);
+  const result=await call('update-manifest');
+  expect(result.status).toBe(401);
+  expect(mocks.from).not.toHaveBeenCalled(); // no bearer token presented - never even queries runner_tokens
  });
 });
 describe('Fusion Runner grouping lifecycle',()=>{

@@ -4,48 +4,44 @@ Two things run this: **Spartans Hub** itself (already deployed - where you queue
 
 ## Install
 
-1. **Run one command.** From a clone of this repo, in a normal terminal (not Fusion):
+1. **Run one command, once, ever.** From a clone of this repo, in a normal terminal (not Fusion):
    ```bash
    python3 autocam/fusion/runner/setup.py
    ```
-   That's the whole install. It finds Fusion's AddIns folder for your OS (creating it if Fusion hasn't yet - a fresh Fusion install doesn't make it until you open Scripts and Add-Ins once), copies the add-in in under the exact name Fusion requires, installs `requests` for Fusion's bundled Python, and writes `.env` from a few prompts. Same command on macOS and Windows; you never type or substitute a path.
+   That's the whole install, and - direct instruction - the only time you should ever need to touch a terminal for this machine again. It finds Fusion's AddIns folder for your OS (creating it if Fusion hasn't yet - a fresh Fusion install doesn't make it until you open Scripts and Add-Ins once), copies the add-in in under the exact name Fusion requires, installs `requests` for Fusion's bundled Python, and writes `.env` from a couple of prompts. Same command on macOS and Windows; you never type or substitute a path. From here on, the Runner keeps itself current automatically every time Fusion starts - see **Runner updates** below; there is no `git pull`, no re-running this command, and no shared secret to go ask someone for.
 
-   It asks for three things:
+   It asks for two things:
    - **Which Hub** - the deployed one (normal) or a local dev server. Choose
      local only while testing a checkout running at `http://localhost:5173`;
      `setup.py` deliberately uses `localhost` rather than `127.0.0.1` so the
      Fusion add-in can reach a Vite server that is listening on IPv6 loopback.
-   - **`FUSION_RUNNER_TOKEN`** - one shared secret for the whole team. Ask a project administrator; don't generate your own or commit it anywhere.
-   - **A name for this machine** - `setup.py` registers it with the Hub automatically (or reuses the existing profile if the name already exists) to get its `RUNNER_MACHINE_ID`; see step 2.
+   - **A name for this machine** - `setup.py` uses it for two automatic registrations with the Hub: a unique `FUSION_RUNNER_TOKEN` just for this computer (see below), and its `RUNNER_MACHINE_ID` (see step 2).
+
+   **`FUSION_RUNNER_TOKEN` is generated for you, not something to go ask for.** `setup.py` requests this machine its own unique token from the Hub and writes it straight into `.env` - nobody has to hand you a secret, and there's nothing to copy-paste. Only if the Hub can't be reached during setup does it fall back to asking for the old team-wide shared token by hand.
 
    **Known risk, not yet root-caused:** the `pip install` step builds packages for whatever Python your system defaults to, which may not exactly match Fusion's bundled interpreter's ABI. If the add-in fails to load with an error mentioning `charset_normalizer`, that's the likely cause - ask for help rather than assuming your setup is broken.
 
    No repo clone? Download the ready-made zip from the [Fusion AutoCAM Setup page](/autocam/fusion/setup), unzip it anywhere, and run `python3 setup.py` from inside the extracted `SpartanRoboticsAutoCAM` folder. The package already has the exact add-in name, all templates, post-processors, tool libraries, Runner code, and this documentation - do not rename or selectively copy files.
 
-   **Updating an existing install?** Re-run the exact same command. It copies over the existing folder, preserves `.env` and `.overridepath`, and detects that this is an update so it does not ask setup questions or replace your token and machine id. Fully quit and relaunch Fusion after an update; stopping and starting an add-in does not reliably reload its Python modules or `.env`.
-
    **Missing `.overridepath` or `requests` at startup?** The install was
    copied without its generated dependency folder. From the installed add-in
    directory, run `python3 setup.py` again. It recreates `deps/` and
-   `.overridepath`; use the existing Hub, token, and machine-id values when it
-   prompts. Then fully quit and relaunch Fusion.
+   `.overridepath`; it detects the existing `.env` and does not touch your
+   token or machine id. Then fully quit and relaunch Fusion.
 
-   **Never want to reinstall again?** Point Fusion's AddIns folder at a live git checkout with a symlink, so updates become `git pull` and nothing ever needs copying again:
+   **Prefer a live git checkout over a copied install?** This is now purely a
+   matter of taste, not a way to get automatic updates - the Runner already
+   self-updates via the API above regardless of which install you use.
+   Pointing Fusion's AddIns folder at a git checkout with a symlink instead
+   trades that off for `git pull`-based, human-timed updates:
    ```bash
    git clone https://github.com/frc971/spartanshub.git ~/spartanshub
    ln -s ~/spartanshub/autocam/fusion/runner "$HOME/Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns/SpartanRoboticsAutoCAM"
    python3 ~/spartanshub/autocam/fusion/runner/setup.py
    ```
-   (Windows: `mklink /D` from an admin Command Prompt instead of `ln -s`.) `setup.py` detects the symlink and leaves it in place rather than copying over it. From then on `cd ~/spartanshub && git pull` picks up every change the moment it lands on `main`. Quit and relaunch Fusion afterward to actually load the new files. `.env`/`.overridepath` live inside `autocam/fusion/runner/` and are gitignored, so `git pull` never touches them.
+   (Windows: `mklink /D` from an admin Command Prompt instead of `ln -s`.) `setup.py` detects the symlink and leaves it in place rather than copying over it - and, deliberately, so does the self-updater: it would otherwise overwrite files inside your git working tree, leaving uncommitted changes a later `git pull` could conflict with. A symlinked install's only update path is `cd ~/spartanshub && git pull`, done by hand; quit and relaunch Fusion afterward to load the new files. `.env`/`.overridepath` live inside `autocam/fusion/runner/` and are gitignored, so `git pull` never touches them.
 
-2. **Know the difference between the two values it asks for.** They are not interchangeable, and this is the step people get wrong:
-
-   | | What it is | Same on every computer? |
-   |---|---|---|
-   | `FUSION_RUNNER_TOKEN` | The shared secret that lets any Runner talk to the Hub at all | **Yes** - one value for the whole team |
-   | `RUNNER_MACHINE_ID` | Which *physical machine* this computer drives | **No** - per device |
-
-   `RUNNER_MACHINE_ID` is the `cam_machines` id of the machine this computer is actually wired to. `setup.py` asks for a name for this machine and registers it with the Hub itself (get-or-create by name, so re-running setup for the same machine reuses the same profile instead of creating a duplicate) - no manual UUID copy-paste needed. A newly created profile starts **disabled**: it can still claim unassigned jobs, but an admin needs to set its post-processor and tool library and enable it at **`/autocam` -> Machines** before it can be targeted for a specific machine's jobs. If the Hub can't be reached during setup (offline, wrong URL), it falls back to asking for an existing machine's UUID by hand from **`/autocam/fusion` -> Machines**.
+2. **Know what `RUNNER_MACHINE_ID` actually means.** It's the `cam_machines` id of the machine this computer is actually wired to - not the same thing as the token above, and per-device rather than shared. `setup.py` asks for a name for this machine and registers it with the Hub itself (get-or-create by name, so re-running setup for the same machine reuses the same profile instead of creating a duplicate) - no manual UUID copy-paste needed. A newly created profile starts **disabled**: it can still claim unassigned jobs, but an admin needs to set its post-processor and tool library and enable it at **`/autocam` -> Machines** before it can be targeted for a specific machine's jobs. If the Hub can't be reached during setup (offline, wrong URL), it falls back to asking for an existing machine's UUID by hand from **`/autocam/fusion` -> Machines**.
 
    It matters because a Runner only claims jobs meant for its own machine (or jobs left unassigned). Give two workstations the same machine id and the router's Runner can pick up a job queued for the mill - which is why it's required rather than optional.
 
@@ -79,7 +75,9 @@ server; do not restart Fusion just for one transient reset.
 
 ## Runner updates
 
-On every add-in start, the Runner asks the authenticated Hub update API for the current release manifest. When the deployed Runner revision differs, it downloads the packaged add-in, verifies its SHA-256 checksum, and replaces the Runner code, templates, and configuration defaults. It always preserves this workstation's `.env`, `.overridepath`, `deps`, and `temp` folders. Fusion must then be fully quit and reopened before the updated Python modules can run. A failed update check is logged but never prevents an otherwise configured Runner from processing jobs.
+**Run `setup.py` once; you should never have to manually update this machine again.** On every add-in start, the Runner asks the authenticated Hub update API for the current release manifest. When the deployed Runner revision differs, it downloads the packaged add-in, verifies its SHA-256 checksum, and replaces the Runner code, templates, and configuration defaults - straight from the deployed app, no `git` involved at all. It always preserves this workstation's `.env`, `.overridepath`, `deps`, and `temp` folders. Fusion must then be fully quit and reopened before the updated Python modules can run - the add-in shows a message box saying so the moment it finishes staging an update. A failed update check is logged but never prevents an otherwise configured Runner from processing jobs.
+
+The one exception is a symlinked install (see "Prefer a live git checkout" above): self-updating there would silently rewrite files inside that git working tree, so it's skipped entirely - `git pull` is that machine's own, human-timed update path instead.
 
 For box tube, the Runner creates four manually indexed setups (Sides 12, 3, 6, and 9). Only sides containing real operations produce NC files; blank sides remain visible in Fusion without a blank file. Verify the setup side, toolpath direction, and near-wall-only breakthrough in Fusion before cutting a new tube/template combination.
 

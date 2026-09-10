@@ -23,14 +23,24 @@ function getAuthorizationHeader(headers) {
   return String(headers.authorization || headers.Authorization || '').trim();
 }
 
-function getBearerToken(headers) {
+export function getBearerToken(headers) {
   const authorization = getAuthorizationHeader(headers);
   const match = /^Bearer\s+(.+)$/i.exec(authorization);
   return match ? match[1].trim() : '';
 }
 
-export function isAuthorizedFusionRunnerRequest({ headers, env: envLike = {} }) {
-  const expectedSecrets = getFusionRunnerSecrets(envLike);
+// extraSecrets carries per-Runner tokens minted by
+// api/fusion-runner/+server.js's register-runner action (runner_tokens
+// table) - looked up there, not here, so this stays a synchronous, DB-free
+// check for the common case (the legacy shared FUSION_RUNNER_TOKEN still
+// matches on its own). Passing the one bearer token actually presented,
+// once confirmed valid, as the sole extra secret keeps this function from
+// ever needing to know about the database at all.
+export function isAuthorizedFusionRunnerRequest({ headers, env: envLike = {}, extraSecrets = [] }) {
+  const expectedSecrets = [
+    ...getFusionRunnerSecrets(envLike),
+    ...extraSecrets.map((value) => String(value || '').trim()).filter(Boolean)
+  ];
   if (!expectedSecrets.length) return false;
 
   const bearerToken = getBearerToken(headers);

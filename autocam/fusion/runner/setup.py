@@ -114,6 +114,45 @@ def prompt(label, default=""):
     return input(f"{label}{suffix}: ").strip() or default
 
 
+def register_runner_token(base_url, name):
+    """Mints this machine's own unique Runner bearer token.
+
+    Unauthenticated by design - a brand-new Runner has no credential yet,
+    so there is nothing to check it against. Direct instruction: the token
+    works immediately, no admin-approval step (unlike a newly self-
+    registered cam_machines row from register_machine below); see the
+    runner_tokens migration's own comment for the tradeoff this accepts.
+
+    Returns the token string on success, or ``None`` if the Hub couldn't be
+    reached (offline, wrong URL, etc.) - the caller falls back to the old
+    shared FUSION_RUNNER_TOKEN, asked for by hand, in that case.
+    """
+    request = urllib.request.Request(
+        f"{base_url}/api/fusion-runner?action=register-runner",
+        data=json.dumps({"name": name}).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            body = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        try:
+            detail = json.loads(exc.read().decode("utf-8")).get("error", str(exc))
+        except (ValueError, UnicodeDecodeError):
+            detail = str(exc)
+        print(f"  Hub rejected the token request: {detail}")
+        return None
+    except (urllib.error.URLError, TimeoutError, ValueError) as exc:
+        print(f"  Could not reach the Hub to mint a Runner token: {exc}")
+        return None
+    token = body.get("token")
+    if not token:
+        print(f"  Hub did not return a token: {body}")
+        return None
+    return token
+
+
 def register_machine(base_url, token, name):
     """Get-or-create this machine's real cam_machines row by name.
 
@@ -160,22 +199,25 @@ def write_env(addin_dir: str) -> None:
     base_url = LOCAL_URL if prompt("Choose 1 or 2", "1") == "2" else DEPLOYED_URL
 
     print()
-    print("FUSION_RUNNER_TOKEN is one shared secret for the whole team - ask a")
-    print("project administrator for it. Don't generate your own, and don't")
-    print("commit it anywhere.")
-    token = ""
-    while not token:
-        token = prompt("FUSION_RUNNER_TOKEN value")
-
-    print()
-    print("RUNNER_MACHINE_ID is per-device, and NOT the same thing as the token:")
-    print("it says which physical machine(s) this computer drives, so this Runner")
-    print("only claims jobs meant for those machines. Two workstations share the")
-    print("token but must each have their own machine id(s) - a single computer")
-    print("driving more than one machine (e.g. one control laptop shared between")
-    print("two routers) can list several, comma-separated.")
+    print("RUNNER_MACHINE_ID is per-device: it says which physical machine(s)")
+    print("this computer drives, so this Runner only claims jobs meant for")
+    print("those machines. A single computer driving more than one machine")
+    print("(e.g. one control laptop shared between two routers) can list")
+    print("several, comma-separated.")
 
     runner_id = prompt("Name for this machine", socket.gethostname() or "fusion-runner")
+
+    print(f"Requesting a Runner token from the Hub for '{runner_id}'...")
+    token = register_runner_token(base_url, runner_id)
+    if token:
+        print("  Got this machine its own unique Runner token - nothing to ask an admin for.")
+    else:
+        print("Falling back to manual entry.")
+        print("FUSION_RUNNER_TOKEN is one shared secret for the whole team - ask a")
+        print("project administrator for it. Don't generate your own, and don't")
+        print("commit it anywhere.")
+        while not token:
+            token = prompt("FUSION_RUNNER_TOKEN value")
 
     print(f"Registering '{runner_id}' with the Hub...")
     registered = register_machine(base_url, token, runner_id)

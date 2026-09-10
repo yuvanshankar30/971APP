@@ -95,3 +95,19 @@ class RunnerUpdateTests(unittest.TestCase):
             addin.mkdir()
             with self.assertRaisesRegex(RuntimeError, "incomplete"):
                 check_and_stage_update(_Session("https://hub.example/manifest.json", manifest, b""), "https://hub.example", str(addin))
+
+    def test_never_touches_a_symlinked_install(self):
+        # The "never reinstall again" team-guide setup points Fusion's
+        # AddIns folder at a live git checkout via a symlink; git pull is
+        # that machine's own update path. Self-updating would overwrite
+        # files inside the checkout, leaving uncommitted local changes a
+        # later git pull could conflict with - this must be a pure no-op,
+        # with no network call at all.
+        session = _Session("https://hub.example/manifest.json", {"version": "2"}, b"")
+        with tempfile.TemporaryDirectory() as directory:
+            addin = Path(directory) / "addin"
+            addin.mkdir()
+            (addin / "runner_release.json").write_text('{"version":"1"}')
+            result = check_and_stage_update(session, "https://hub.example", str(addin), symlinked=True)
+        self.assertIsNone(result)
+        self.assertIsNone(session.download_url)

@@ -23,6 +23,11 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 _ADDIN_DIR = os.path.dirname(os.path.realpath(__file__))
+# abspath() normalizes without resolving symlinks; realpath() resolves them.
+# A mismatch means some component of this file's own installed path is a
+# symlink - the "never reinstall again" setup (see RunnerUpdate.py's own
+# docstring for why that install must never be auto-updated).
+_ADDIN_IS_SYMLINKED = os.path.realpath(__file__) != os.path.abspath(__file__)
 _ENV_PATH = os.path.join(_ADDIN_DIR, ".env")
 _API_KEY_LINE_RE = re.compile(r"^\s*API_KEY\s*=\s*(?P<value>.*)\s*$")
 
@@ -563,7 +568,9 @@ def run(_context):
         _configure_http_retries(session)
 
         try:
-            updated_version = check_and_stage_update(session, BASE_URL, _ADDIN_DIR)
+            updated_version = check_and_stage_update(
+                session, BASE_URL, _ADDIN_DIR, symlinked=_ADDIN_IS_SYMLINKED
+            )
         except Exception as update_error:
             # An unavailable update service must never stop a working router
             # from processing queued jobs. Log the diagnostic and continue.

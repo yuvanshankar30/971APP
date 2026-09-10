@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getFusionRunnerSecrets, isAuthorizedFusionRunnerRequest } from './fusion_runner_auth.js';
+import { getBearerToken, getFusionRunnerSecrets, isAuthorizedFusionRunnerRequest } from './fusion_runner_auth.js';
 
 describe('fusion runner auth helpers', () => {
   it('fails closed when no runner secret is configured', () => {
@@ -65,5 +65,29 @@ describe('fusion runner auth helpers', () => {
       headers: new Headers({ authorization: 'Bearer vision-secret' }),
       env: { VISION_RUNNER_TOKEN: 'vision-secret' }
     })).toBe(false);
+  });
+
+  // A per-Runner token (runner_tokens table, looked up by the caller - see
+  // this function's own docstring) is passed in as an extra secret rather
+  // than this module ever touching the database itself.
+  it('accepts a per-Runner token passed in as an extra secret', () => {
+    expect(isAuthorizedFusionRunnerRequest({
+      headers: new Headers({ authorization: 'Bearer frt_unique-machine-key' }),
+      env: {},
+      extraSecrets: ['frt_unique-machine-key']
+    })).toBe(true);
+  });
+
+  it('still rejects a token that matches neither the shared secret nor an extra secret', () => {
+    expect(isAuthorizedFusionRunnerRequest({
+      headers: new Headers({ authorization: 'Bearer wrong-token' }),
+      env: { FUSION_RUNNER_TOKEN: 'shared-secret' },
+      extraSecrets: ['frt_unique-machine-key']
+    })).toBe(false);
+  });
+
+  it('extracts the bearer token for callers that need it directly', () => {
+    expect(getBearerToken(new Headers({ authorization: 'Bearer some-token' }))).toBe('some-token');
+    expect(getBearerToken(new Headers())).toBe('');
   });
 });
