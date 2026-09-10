@@ -75,7 +75,7 @@ class TubeFaceProgramTests(unittest.TestCase):
         handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
         template_index = handler.index("setup.createFromCAMTemplate2(template)")
         bind_index = handler.index("_bind_setup_to_face(setup, body, face, tube_axis, horizontal)", template_index)
-        configure_index = handler.index("_configure_face_operations(setup, selection_face, wall_thickness_in)", template_index)
+        configure_index = handler.index("_configure_face_operations(setup, selection_face, wall_thickness_in, cutoff_chain)", template_index)
         self.assertLess(template_index, configure_index)
         self.assertLess(template_index, bind_index)
         self.assertLess(bind_index, configure_index)
@@ -85,8 +85,17 @@ class TubeFaceProgramTests(unittest.TestCase):
         handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
         self.assertIn('"holeDiameterMaximum", "100 in"', handler)
         self.assertIn('circular_loops = [loop for loop in loops if loop["circular"] and loop["circular_faces"]]', handler)
-        self.assertIn('representative_hole_faces = circular_loops[0]["circular_faces"] if circular_loops else []', handler)
         self.assertIn("_apply_circular_faces(operation, representative_hole_faces)", handler)
+
+    def test_tube_bore_gets_one_representative_hole_per_distinct_diameter(self):
+        # Confirmed live: the reviewed Bore's selectSameDiameter only extends
+        # a selection to holes of the same diameter. One representative for a
+        # 2in wall with 0.196in and 0.375in holes machined 3 of 55 holes.
+        handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
+        self.assertNotIn('circular_loops[0]["circular_faces"]', handler)
+        self.assertIn('"diameter": adsk.core.Circle3D.cast(edges[0].geometry).radius * 2 if circular else None', handler)
+        self.assertIn('if any(abs(loop["diameter"] - seen) <= _HOLE_DIAMETER_TOLERANCE_CM for seen in seen_diameters):', handler)
+        self.assertIn('representative_hole_faces.extend(loop["circular_faces"])', handler)
 
     def test_tube_wcs_uses_the_topological_face_normal(self):
         handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
@@ -103,7 +112,7 @@ class TubeFaceProgramTests(unittest.TestCase):
     def test_tube_shape_chains_use_the_paired_bottom_wall_not_the_exterior_wcs_face(self):
         handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
         self.assertIn("selection_face_by_exterior", handler)
-        self.assertIn("_configure_face_operations(setup, selection_face, wall_thickness_in)", handler)
+        self.assertIn("_configure_face_operations(setup, selection_face, wall_thickness_in, cutoff_chain)", handler)
         self.assertIn("loops = _loop_specs(selection_face)", handler)
 
     def test_tube_adaptive_operations_cap_other_way_feedrate_after_material_scaling(self):
@@ -142,7 +151,7 @@ class TubeFaceProgramTests(unittest.TestCase):
     def test_tube_operations_reference_stock_under_the_active_face(self):
         handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
         self.assertIn('"topHeight_mode", "\'from stock top\'"', handler)
-        self.assertIn("_set_face_stock_heights(operation, wall_thickness_in)", handler)
+        self.assertIn("_set_face_stock_heights(operation, wall_thickness_in, clearance_in)", handler)
 
     def test_tube_bottom_depth_never_reaches_the_far_wall_of_a_hollow_tube(self):
         # Direct bug report: a hole/shape cutout was cutting all the way
@@ -153,14 +162,70 @@ class TubeFaceProgramTests(unittest.TestCase):
         # operation's blanket bottom depth again.
         handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
         self.assertNotIn('"bottomHeight_mode", "\'from stock bottom\'"', handler)
-        self.assertIn("from .TubeHeightMath import bottom_height_expression", handler)
-        self.assertIn("bottom_mode, bottom_offset = bottom_height_expression(wall_thickness_in)", handler)
+        self.assertRegex(handler, r"from \.TubeHeightMath import \([^)]*\bbottom_height_expression\b")
+        self.assertIn("bottom_mode, bottom_offset = bottom_height_expression(wall_thickness_in, clearance_in)", handler)
 
-    def test_tube_cutoff_is_not_inherited_without_explicit_cutoff_data(self):
+    def test_tube_cutoff_is_bound_on_every_side_not_deleted(self):
+        # Direct bug report: every tube template ships a Tube Cutoff, but the
+        # Runner deleted it on every side, so the part never came off its
+        # stock. It is bound to the far end-cap edge instead.
         handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
-        cutoff_index = handler.index('if "tube cutoff" in str(operation.name or "").lower():')
+        self.assertNotIn("operations.append(operation)", handler)
+        self.assertIn("cutoff_chain = _far_end_cutoff_chain(body, face, tube_axis)", handler)
+        self.assertIn('if not _apply_open_chain(operation, "contours", *cutoff_chain):', handler)
+        cutoff_index = handler.index('if "tube cutoff" in name:')
         shape_index = handler.index('elif "shape" in name')
         self.assertLess(cutoff_index, shape_index)
+
+    def test_tube_cutoff_chain_matches_the_reviewed_manual_setup(self):
+        handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
+        # Confirmed live: the seed must be one edge assigned before isOpen, or
+        # Fusion silently closes the chain around the whole face outline.
+        chain = handler[handler.index("def _apply_open_chain"):handler.index("def _configure_face_operations")]
+        self.assertIn("selection.inputGeometry = [edge]", chain)
+        self.assertLess(chain.index("selection.inputGeometry = [edge]"), chain.index("selection.isOpen = True"))
+        # Confirmed live: a fixed isReverted put the tool inside the part on
+        # two of four sides. The reversal must follow the far end cap's
+        # co-edge, never a constant.
+        self.assertIn("selection.isReverted = is_reverted", chain)
+        self.assertNotIn("selection.isReverted = False", handler)
+        self.assertIn("is_reverted_for_loop_seed(_coedge_opposed(cap, edge))", handler)
+        self.assertIn("clearance_in = CUTOFF_BREAKTHROUGH_CLEARANCE_IN", handler)
+
+    def test_tube_cutoff_stops_short_of_both_edge_ends_like_the_reviewed_setup(self):
+        # The reviewed manual setup's cutoff chains all carry a -4.064mm
+        # (0.16in) start and end extension, posting Y-0.16..-0.84 on a 1in
+        # face. Without it the cutoff ran the full edge, corner to corner.
+        handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
+        self.assertIn("_CUTOFF_END_PULLBACK_MM = 0.16 * 25.4", handler)
+        chain = handler[handler.index("def _apply_open_chain"):handler.index("def _configure_face_operations")]
+        self.assertIn("selection.startExtensionLength = -_CUTOFF_END_PULLBACK_MM", chain)
+        self.assertIn("selection.endExtensionLength = -_CUTOFF_END_PULLBACK_MM", chain)
+
+    def test_tube_setups_post_on_g55(self):
+        handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
+        self.assertIn('_TUBE_WORK_OFFSET = "2"', handler)
+        self.assertIn('parameters.itemByName("job_workOffset").expression = _TUBE_WORK_OFFSET', handler)
+
+    def test_tube_wcs_origin_is_resolved_from_fusion_not_a_hardcoded_corner(self):
+        handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
+        self.assertNotIn('value.value = "top 1"', handler)
+        self.assertIn("tube_wcs_axes(_vec(_face_normal(face)), _vec(tube_axis), horizontal)", handler)
+        self.assertIn("box_point.value = pick_origin_corner(origins, want_x, want_y)", handler)
+
+    def test_tube_wcs_rule_never_reaches_plate_setups(self):
+        # Direct instruction: the tube WCS rewrite is for tube stock only.
+        # Only the tube workflow may import HandleTube, and only HandleTube
+        # may import TubeWcsMath.
+        importers = {"HandleTube": {"camTube.py"}, "TubeWcsMath": {"HandleTube.py"}}
+        for folder in ("commands", "workflows"):
+            for path in (RUNNER_DIR / folder).glob("*.py"):
+                text = path.read_text()
+                for module, allowed in importers.items():
+                    if path.name in allowed:
+                        continue
+                    with self.subTest(file=path.name, module=module):
+                        self.assertNotRegex(text, r"(?m)^\s*from \.+(commands\.)?{} import".format(module))
 
     def test_tube_keeps_four_setups_but_posts_only_active_faces(self):
         handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()

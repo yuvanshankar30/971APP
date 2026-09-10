@@ -13,11 +13,30 @@ import time
 
 from .ContourChains import is_reverted_for_loop_seed
 from .TubeFacePrograms import TUBE_FACE_CLOCKS, tube_face_program_name, tube_face_setup_name
-from .TubeHeightMath import bottom_height_expression, cluster_by_projection, PLANE_CLUSTER_TOLERANCE_CM
+from .TubeHeightMath import (
+    BREAKTHROUGH_CLEARANCE_IN,
+    CUTOFF_BREAKTHROUGH_CLEARANCE_IN,
+    bottom_height_expression,
+    cluster_by_projection,
+    PLANE_CLUSTER_TOLERANCE_CM,
+)
+from .TubeWcsMath import pick_origin_corner, tube_wcs_axes
 
 
 _PARALLEL_TOLERANCE = 0.985
 _CM_PER_IN = 2.54
+# Tube stock is zeroed on the fixture's own work offset, G55 - never the
+# plate jobs' G54.
+_TUBE_WORK_OFFSET = "2"
+_TOP_CORNERS = ("top 1", "top 2", "top 3", "top 4")
+# The reviewed manual tube setup pulls the cutoff's open chain back 0.16in
+# from each end of its edge, so the tube corners stay uncut on every side and
+# hold the part like tabs. ChainSelection lengths are millimetres even in an
+# inch document - confirmed live: -4.064 posts as exactly 0.16in.
+_CUTOFF_END_PULLBACK_MM = 0.16 * 25.4
+# Two hole sizes on one wall can differ by only 0.005in (0.196in vs 0.201in on
+# a real tube), so distinct diameters are compared far tighter than that.
+_HOLE_DIAMETER_TOLERANCE_CM = 0.001
 
 
 def _normalized(vector):
@@ -225,6 +244,7 @@ def _loop_specs(face):
             "is_reverted": is_reverted_for_loop_seed(coedges[0].isOpposedToEdge),
             "circular": circular,
             "circular_faces": circular_faces,
+            "diameter": adsk.core.Circle3D.cast(edges[0].geometry).radius * 2 if circular else None,
         })
     return specs
 
@@ -320,7 +340,7 @@ def _set_expression(operation, parameter_name, expression):
         parameter.expression = expression
 
 
-def _set_face_stock_heights(operation, wall_thickness_in):
+def _set_face_stock_heights(operation, wall_thickness_in, clearance_in=BREAKTHROUGH_CLEARANCE_IN):
     """Use the current setup's face-local stock, never template coordinates."""
     _set_expression(operation, "topHeight_mode", "'from stock top'")
     _set_expression(operation, "topHeight_offset", "0 in")
@@ -329,12 +349,91 @@ def _set_face_stock_heights(operation, wall_thickness_in):
     # bottom from a different tube side or a stale template point. See
     # TubeHeightMath.bottom_height_expression for why this can no longer be
     # a blanket 'from stock bottom' - that's the FAR wall on a hollow tube.
-    bottom_mode, bottom_offset = bottom_height_expression(wall_thickness_in)
+    bottom_mode, bottom_offset = bottom_height_expression(wall_thickness_in, clearance_in)
     _set_expression(operation, "bottomHeight_mode", bottom_mode)
     _set_expression(operation, "bottomHeight_offset", bottom_offset)
 
 
-def _configure_face_operations(setup, selection_face, wall_thickness_in):
+def _coedge_opposed(face, edge):
+    for loop in face.loops:
+        for coedge in loop.coEdges:
+            if coedge.edge.tempId == edge.tempId:
+                return coedge.isOpposedToEdge
+    raise ValueError("Tube cutoff edge is not on the far end cap's boundary")
+
+
+def _far_end_cutoff_chain(body, face, tube_axis):
+    """This wall's single edge along the far end cap, and its chain reversal.
+
+    The WCS origin sits at the tube's +tube_axis end (see _bind_setup_to_face),
+    so the cutoff runs along the -tube_axis end: the edge this exterior wall
+    shares with the far end cap - the same edge the reviewed manual tube
+    setup selects on every side. Only a single edge is a verified open
+    chain, so a split end edge fails the job instead of guessing.
+    """
+    origin = adsk.core.Point3D.create()
+    normal = _face_normal(face)
+    wall_level = origin.vectorTo(face.centroid).dotProduct(normal)
+    end_caps = [
+        cap for cap in body.faces
+        if cap.geometry.objectType == adsk.core.Plane.classType()
+        and abs(_face_normal(cap).dotProduct(tube_axis)) >= _PARALLEL_TOLERANCE
+    ]
+    if not end_caps:
+        raise ValueError("Box tube has no planar end cap for the tube cutoff")
+    far_level = min(origin.vectorTo(cap.centroid).dotProduct(tube_axis) for cap in end_caps)
+    edges = {}
+    for cap in end_caps:
+        if origin.vectorTo(cap.centroid).dotProduct(tube_axis) - far_level > PLANE_CLUSTER_TOLERANCE_CM:
+            continue
+        for edge in _linear_edges(cap):
+            line = adsk.core.Line3D.cast(edge.geometry)
+            middle = adsk.core.Point3D.create(
+                (line.startPoint.x + line.endPoint.x) / 2,
+                (line.startPoint.y + line.endPoint.y) / 2,
+                (line.startPoint.z + line.endPoint.z) / 2,
+            )
+            if abs(origin.vectorTo(middle).dotProduct(normal) - wall_level) <= PLANE_CLUSTER_TOLERANCE_CM:
+                edges[edge.tempId] = (edge, is_reverted_for_loop_seed(_coedge_opposed(cap, edge)))
+    if len(edges) != 1:
+        raise ValueError(
+            "Tube cutoff needs exactly one edge where this wall meets the far end cap; found {}".format(len(edges))
+        )
+    return next(iter(edges.values()))
+
+
+def _apply_open_chain(operation, parameter_name, edge, is_reverted):
+    """Bind the tube cutoff's open chain so the tool runs past the far end.
+
+    Confirmed live: through the API an open chain follows its seed edge's
+    own direction, which is arbitrary in a STEP import - with a fixed
+    isReverted, two of the four sides put the 'left'-compensated tool inside
+    the part (X-15.797 instead of past the end at X-15.954). Following the
+    far end cap's co-edge instead (``is_reverted``, see _far_end_cutoff_chain)
+    is topological: the cap's outer loop winds around its outward normal, so
+    every side cuts where the reviewed manual setup does.
+
+    Also confirmed live: the seed must be the single edge, assigned before
+    isOpen. Handing Fusion [edge, edge] or setting isOpen first silently
+    closes the chain around the whole face outline; the single seed reads
+    back as the reviewed setup's own open [edge, edge].
+    """
+    parameter = operation.parameters.itemByName(parameter_name)
+    if parameter is None or not hasattr(parameter.value, "getCurveSelections"):
+        return False
+    selections = parameter.value.getCurveSelections()
+    selections.clear()
+    selection = selections.createNewChainSelection()
+    selection.inputGeometry = [edge]
+    selection.isOpen = True
+    selection.isReverted = is_reverted
+    selection.startExtensionLength = -_CUTOFF_END_PULLBACK_MM
+    selection.endExtensionLength = -_CUTOFF_END_PULLBACK_MM
+    parameter.value.applyCurveSelections(selections)
+    return True
+
+
+def _configure_face_operations(setup, selection_face, wall_thickness_in, cutoff_chain):
     """Rebind operations to the active wall's material-bottom loops only."""
     loops = _loop_specs(selection_face)
     # Every non-circular tube loop is a closed through feature. Even a long,
@@ -346,28 +445,35 @@ def _configure_face_operations(setup, selection_face, wall_thickness_in):
     circular_loops = [loop for loop in loops if loop["circular"] and loop["circular_faces"]]
     # Bore's face selector defines a hole feature, not every repeated hole
     # instance. Passing all 141 tube holes made Fusion create an enormous
-    # explicit selection and destabilized geometry binding. Select exactly
-    # one whole hole: its loop may own more than one cylindrical BRep face
-    # after STEP import, so keep every face belonging to the FIRST loop and
-    # never mix faces from a second hole. The diameter limits still let the
-    # template recognize matching repeated holes on this indexed side.
-    representative_hole_faces = circular_loops[0]["circular_faces"] if circular_loops else []
+    # explicit selection and destabilized geometry binding, so only one whole
+    # representative hole is passed per distinct diameter (a loop may own
+    # more than one cylindrical BRep face after STEP import - keep them all).
+    # The reviewed Bore's selectSameDiameter extends each selection to the
+    # matching repeated holes, but ONLY holes of that same diameter.
+    # Confirmed live: one representative for a whole wall with 0.196in and
+    # 0.375in holes machined just the three 0.375in holes and skipped 52 of
+    # 55; the reviewed manual setup selects one hole of each size.
+    representative_hole_faces = []
+    seen_diameters = []
+    for loop in circular_loops:
+        if any(abs(loop["diameter"] - seen) <= _HOLE_DIAMETER_TOLERANCE_CM for seen in seen_diameters):
+            continue
+        seen_diameters.append(loop["diameter"])
+        representative_hole_faces.extend(loop["circular_faces"])
 
-    # Delete the deliberately unsupported cutoff before applying any feature
-    # selection. If a later shape/slot binding fails, Fusion retains the
-    # partial setup for inspection; it must not misleadingly show the stale
-    # template cutoff as an active errored operation in that partial state.
-    operations = []
     for operation in list(setup.operations):
-        if "tube cutoff" in str(operation.name or "").lower():
-            operation.deleteMe()
-        else:
-            operations.append(operation)
-
-    for operation in operations:
         name = str(operation.name or "").lower()
         keep = False
-        if operation.strategy == "bore" or "drill" in name:
+        clearance_in = BREAKTHROUGH_CLEARANCE_IN
+        if "tube cutoff" in name:
+            # Every tube template ships a cutoff and every side needs one: it
+            # severs this wall along the far end. Never silently dropped - a
+            # missing cutoff leaves the part attached to its stock.
+            if not _apply_open_chain(operation, "contours", *cutoff_chain):
+                raise RuntimeError("Tube cutoff {!r} has no contour selection".format(operation.name))
+            keep = True
+            clearance_in = CUTOFF_BREAKTHROUGH_CLEARANCE_IN
+        elif operation.strategy == "bore" or "drill" in name:
             # Bore's circularFaces accepts the actual cylindrical hole walls,
             # unlike 2D Pocket's curve parameter. The reviewed Bore template
             # uses the same flat end mill as the large-hole pocket sibling,
@@ -395,27 +501,70 @@ def _configure_face_operations(setup, selection_face, wall_thickness_in):
         elif "slot" in name and operation.strategy == "contour2d":
             keep = False
         if keep:
-            _set_face_stock_heights(operation, wall_thickness_in)
+            _set_face_stock_heights(operation, wall_thickness_in, clearance_in)
         else:
             operation.deleteMe()
 
 
-def _bind_setup_to_face(setup, body, face, tube_axis, horizontal):
-    """Bind the real tube body and face-local WCS after template changes."""
-    setup.stockMode = adsk.cam.SetupStockModes.RelativeBoxStock
-    setup.parameters.itemByName("job_stockOffsetMode").expression = "'all'"
-    setup.parameters.itemByName("job_stockOffsetSides").expression = "0 mm"
-    setup.parameters.itemByName("job_stockOffsetTop").expression = "0 mm"
-    setup.parameters.itemByName("job_model").value.value = [body]
+def _vec(vector):
+    return (vector.x, vector.y, vector.z)
 
+
+def _dot(a, b):
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+
+def _wcs_frame(setup):
+    """The WCS Fusion actually computed, as plain (origin, x, y) tuples."""
+    adsk.doEvents()
+    origin, x_axis, y_axis, _z_axis = setup.workCoordinateSystem.getAsCoordinateSystem()
+    return _vec(origin), _vec(x_axis), _vec(y_axis)
+
+
+def _bind_setup_to_face(setup, body, face, tube_axis, horizontal):
+    """Bind the real tube body, face-local WCS, and G55 after template changes.
+
+    Matches the reviewed manual tube setup: origin on the machined face's
+    corner at the tube's +tube_axis end, X and Y both pointing away from the
+    stock (see TubeWcsMath). The axes are checked against the WCS Fusion
+    actually computed instead of trusting which way an edge selection points,
+    and the origin corner is found by trying each top corner rather than
+    assuming Fusion's corner numbering. Tube setups only - plates never
+    reach this function.
+    """
+    parameters = setup.parameters
+    setup.stockMode = adsk.cam.SetupStockModes.RelativeBoxStock
+    parameters.itemByName("job_stockOffsetMode").expression = "'all'"
+    parameters.itemByName("job_stockOffsetSides").expression = "0 mm"
+    parameters.itemByName("job_stockOffsetTop").expression = "0 mm"
+    parameters.itemByName("job_model").value.value = [body]
+    parameters.itemByName("job_workOffset").expression = _TUBE_WORK_OFFSET
+
+    want_x, want_y = tube_wcs_axes(_vec(_face_normal(face)), _vec(tube_axis), horizontal)
     axis_x, axis_y = _axes_for_face(face, tube_axis, horizontal)
-    derived_normal = _edge_vector(axis_x).crossProduct(_edge_vector(axis_y))
-    setup.parameters.itemByName("wcs_orientation_mode").value.value = "axesXY"
-    setup.parameters.itemByName("wcs_orientation_axisX").value.value = [axis_x]
-    setup.parameters.itemByName("wcs_orientation_axisY").value.value = [axis_y]
-    setup.parameters.itemByName("wcs_orientation_flipX").value.value = derived_normal.dotProduct(_face_normal(face)) < 0
-    setup.parameters.itemByName("wcs_orientation_flipY").value.value = False
-    setup.parameters.itemByName("wcs_origin_boxPoint").value.value = "top 1"
+    parameters.itemByName("wcs_orientation_mode").value.value = "axesXY"
+    parameters.itemByName("wcs_orientation_axisX").value.value = [axis_x]
+    parameters.itemByName("wcs_orientation_axisY").value.value = [axis_y]
+    flip_x = parameters.itemByName("wcs_orientation_flipX").value
+    flip_y = parameters.itemByName("wcs_orientation_flipY").value
+    flip_x.value = _dot(_vec(_edge_vector(axis_x)), want_x) < 0
+    flip_y.value = _dot(_vec(_edge_vector(axis_y)), want_y) < 0
+    _, got_x, got_y = _wcs_frame(setup)
+    if _dot(got_x, want_x) < 0:
+        flip_x.value = not flip_x.value
+    if _dot(got_y, want_y) < 0:
+        flip_y.value = not flip_y.value
+    _, got_x, got_y = _wcs_frame(setup)
+    if _dot(got_x, want_x) < _PARALLEL_TOLERANCE or _dot(got_y, want_y) < _PARALLEL_TOLERANCE:
+        raise RuntimeError("Tube WCS did not resolve to X and Y pointing away from the stock")
+
+    parameters.itemByName("wcs_origin_mode").value.value = "modelPoint"
+    box_point = parameters.itemByName("wcs_origin_boxPoint").value
+    origins = {}
+    for label in _TOP_CORNERS:
+        box_point.value = label
+        origins[label] = _wcs_frame(setup)[0]
+    box_point.value = pick_origin_corner(origins, want_x, want_y)
 
 
 def _cap_other_way_feedrate(setup):
@@ -468,7 +617,8 @@ def _make_setup(cam, body, face, selection_face, clock, tube_axis, horizontal, t
     # this setup's actual CAM model tree, never in the template's old model.
     _bind_setup_to_face(setup, body, face, tube_axis, horizontal)
     adsk.doEvents()
-    _configure_face_operations(setup, selection_face, wall_thickness_in)
+    cutoff_chain = _far_end_cutoff_chain(body, face, tube_axis)
+    _configure_face_operations(setup, selection_face, wall_thickness_in, cutoff_chain)
     capped = _cap_other_way_feedrate(setup)
     if capped:
         adsk.core.Application.get().log(

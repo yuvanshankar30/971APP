@@ -15,6 +15,11 @@ process.
 # rather than stopping exactly on it.
 BREAKTHROUGH_CLEARANCE_IN = 0.05
 
+# The tube cutoff's own template-authored breakthrough (its
+# bottomHeight_offset of -0.02in). The reviewed manual tube setup posts the
+# cutoff at Z-0.145 on a 0.125in wall - exactly this value.
+CUTOFF_BREAKTHROUGH_CLEARANCE_IN = 0.02
+
 # Two coplanar STEP-split pieces of the same physical wall measure a hair's
 # breadth apart (confirmed live: effectively 0, well under a thousandth of
 # an inch). A real distinct wall is always far thicker than that for any
@@ -49,7 +54,7 @@ def cluster_by_projection(sorted_projection_items, tolerance):
     return planes
 
 
-def bottom_height_expression(wall_thickness_in):
+def bottom_height_expression(wall_thickness_in, clearance_in=BREAKTHROUGH_CLEARANCE_IN):
     """How deep a hole/cutout on this face may cut, as a bottomHeight_offset.
 
     ``RelativeBoxStock`` wraps the tube's whole bounding box, hollow middle
@@ -72,5 +77,5 @@ def bottom_height_expression(wall_thickness_in):
         return "'from stock bottom'", "0 in"
     if wall_thickness_in <= 0:
         raise ValueError("wall_thickness_in must be positive, got {!r}".format(wall_thickness_in))
-    depth_in = wall_thickness_in + BREAKTHROUGH_CLEARANCE_IN
+    depth_in = wall_thickness_in + clearance_in
     return "'from stock top'", "-{:.6f} in".format(depth_in)

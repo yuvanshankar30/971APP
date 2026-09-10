@@ -8,10 +8,24 @@ sys.path.insert(0, str(RUNNER_DIR))
 
 from commands.TubeHeightMath import (  # noqa: E402
     BREAKTHROUGH_CLEARANCE_IN,
+    CUTOFF_BREAKTHROUGH_CLEARANCE_IN,
     PLANE_CLUSTER_TOLERANCE_CM,
     bottom_height_expression,
     cluster_by_projection,
 )
+
+
+class TubeCutoffHeightTests(unittest.TestCase):
+    def test_cutoff_depth_matches_the_reviewed_manual_tube_setup(self):
+        # The reviewed manual setup posts its cutoff at Z-0.145 on a 0.125in
+        # wall - the template cutoff's own -0.02in breakthrough, not the
+        # 0.05in hole clearance.
+        mode, offset = bottom_height_expression(0.125, CUTOFF_BREAKTHROUGH_CLEARANCE_IN)
+        self.assertEqual(mode, "'from stock top'")
+        self.assertEqual(offset, "-0.145000 in")
+
+    def test_holes_keep_their_own_clearance_by_default(self):
+        self.assertEqual(bottom_height_expression(0.125)[1], "-0.175000 in")
 
 
 class TubeBottomHeightTests(unittest.TestCase):
