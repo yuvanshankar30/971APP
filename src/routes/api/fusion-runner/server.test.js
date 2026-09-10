@@ -58,16 +58,12 @@ describe('Fusion Runner managed updates',()=>{
   expect(mocks.from).not.toHaveBeenCalled();
  });
 });
-describe('Fusion Runner self-issued tokens',()=>{
- it('mints a token with no auth check at all - a brand-new Runner has no credential yet',async()=>{
-  mocks.isAuthorized.mockReturnValue(false); // proves register-runner never consults this
-  mocks.from.mockReturnValueOnce(chain({data:{token:'frt_abc123'},error:null}));
+describe('Fusion Runner per-machine tokens',()=>{
+ it('does not expose the retired unauthenticated token-minting action',async()=>{
+  mocks.isAuthorized.mockReturnValue(false);
   const result=await call('register-runner',{name:'ShopSabre Router 1'});
-  expect(result.status).toBe(200);
-  expect(await result.json()).toEqual({token:'frt_abc123'});
-  expect(mocks.isAuthorized).not.toHaveBeenCalled();
-  expect(queries[0].insert).toHaveBeenCalledWith(expect.objectContaining({name:'ShopSabre Router 1'}));
-  expect(queries[0].insert.mock.calls[0][0].token).toMatch(/^frt_/);
+  expect(result.status).toBe(401);
+  expect(mocks.from).not.toHaveBeenCalled();
  });
  it('accepts a self-issued token the static shared secret does not recognize',async()=>{
   mocks.isAuthorized.mockReturnValue(false);
@@ -82,7 +78,7 @@ describe('Fusion Runner self-issued tokens',()=>{
   const result=await call('update-manifest',{},'Bearer nope');
   expect(result.status).toBe(401);
  });
- it('rejects every action but register-runner with no credentials at all',async()=>{
+ it('rejects every action with no credentials at all',async()=>{
   mocks.isAuthorized.mockReturnValue(false);
   const result=await call('update-manifest');
   expect(result.status).toBe(401);

@@ -86,7 +86,9 @@ sh -c "$(curl -fsSL https://spartanshub.spartanrobotics.org/install/fusion-runne
 
 The installer downloads the release served by that Hub, verifies it before
 extraction, copies it into Fusion's platform-specific AddIns directory, and
-runs the configuration prompts. The manual paths below are retained for
+opens a Spartans Hub page. Enter the team Fusion Runner token in its only
+field; the installer handles the workstation name, machine registration, and
+local `.env` automatically. The manual paths below are retained for
 offline/troubleshooting use.
 
 Copy this folder into Fusion 360's add-in directory, **renamed to `SpartanRoboticsAutoCAM`** (Fusion requires the folder name, the entry `.py` file, and the `.manifest` file to all match exactly - they're named `SpartanRoboticsAutoCAM.py`/`SpartanRoboticsAutoCAM.manifest`, so the folder has to match or Fusion won't list it as an add-in at all):
@@ -110,23 +112,20 @@ cd "$HOME/Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns/Sp
 python3 setup.py
 ```
 
-It asks which Hub to talk to and for a name for this workstation, then mints
-its own token and registers or reuses the matching `cam_machines` row before
-writing `.env` - see [`setup.py`](setup.py). Manual token and machine-ID entry
-is only a fallback when the Hub cannot be reached during setup. Prefer to edit
-`.env` by hand instead? `cp .env.example .env` and fill in the same values manually:
-
-For local testing, start Spartans Hub with
-`npm run dev -- --host localhost --port 5173` and choose the local option. `setup.py` writes
-`http://localhost:5173`, rather than a literal IPv4 loopback address, so it
-also reaches Vite when it is bound on IPv6 loopback.
+It opens that Hub's short-lived pairing page and waits while the token is
+entered there. The Hub mints a per-install credential and registers or reuses
+the hostname's `cam_machines` row before `setup.py` writes `.env` - see
+[`setup.py`](setup.py). For local testing, set
+`FUSION_RUNNER_INSTALL_BASE_URL=http://localhost:5173` when running `setup.py`.
+Prefer to edit `.env` by hand instead? `cp .env.example .env` and fill in the
+same values manually:
 
 | Variable | Purpose | Default |
 | --- | --- | --- |
-| `API_KEY` | Per-install Runner bearer token minted by `setup.py`; the legacy shared token is accepted only as a fallback | _(required)_ |
+| `API_KEY` | Per-install Runner bearer token returned directly to `setup.py` after browser pairing | _(required)_ |
 | `BASE_URL` | Spartans Hub deployment base URL | `https://spartanshub.spartanrobotics.org` |
 | `RUNNER_ID` | Stable identifier for this Runner install, sent on every claim | machine hostname |
-| `RUNNER_MACHINE_ID` | The `cam_machines` row UUID for this physical machine; `setup.py` registers (or reuses) it automatically by name via `action=register-machine`, falling back to a manual UUID prompt only if the Hub can't be reached | _(required)_ |
+| `RUNNER_MACHINE_ID` | The `cam_machines` row UUID registered or reused automatically from the workstation hostname during browser pairing | _(required)_ |
 | `FUSION_DATA_PROJECT_NAME` | Which Fusion Data Panel project generated documents get saved into | `2026 Season CAM` |
 | `FUSION_DROP_FOLDER_PATH` | Nested folder path (within that project, `/`-separated) generated documents get saved into - each segment created if missing | project root |
 

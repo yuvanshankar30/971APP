@@ -56,7 +56,7 @@ const archived = execFileSync('unzip', ['-Z1', archive], { encoding: 'utf8' })
   .filter((entry) => entry.startsWith(archiveRoot) && !entry.endsWith('/'))
   .map((entry) => entry.slice(archiveRoot.length))
   .sort();
-const expected = new Set([...source, '.env']);
+const expected = new Set(source);
 const actual = new Set(archived);
 const missing = [...expected].filter((path) => !actual.has(path));
 const unexpected = [...actual].filter((path) => !expected.has(path));
@@ -71,10 +71,6 @@ for (const filePath of source) {
   const checkedIn = readFileSync(join(runnerDir, filePath));
   if (hash(packaged) !== hash(checkedIn)) fail(`${filePath} differs from Runner source`);
 }
-
-const packagedEnv = execFileSync('unzip', ['-p', archive, `${archiveRoot}.env`]);
-const envExample = readFileSync(join(runnerDir, '.env.example'));
-if (hash(packagedEnv) !== hash(envExample)) fail('packaged .env does not match .env.example');
 
 const release = JSON.parse(execFileSync('unzip', ['-p', archive, `${archiveRoot}runner_release.json`], { encoding: 'utf8' }));
 if (!release.version) fail('packaged runner_release.json has no version');

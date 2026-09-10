@@ -183,25 +183,6 @@ export async function POST({ request, url }) {
   const action = url.searchParams.get('action') || body?.action;
 
   try {
-    // A brand-new Runner has no credential yet by definition, so this is
-    // the one action that runs before the auth gate below - mints a fresh
-    // per-machine token so setup.py never has to ask a human for the
-    // shared FUSION_RUNNER_TOKEN. Direct instruction: works immediately,
-    // no admin-approval step (unlike a newly self-registered cam_machines
-    // row) - see the runner_tokens migration's own comment for the
-    // tradeoff this accepts.
-    if (action === 'register-runner') {
-      const supabase = getServiceSupabase();
-      const token = `frt_${crypto.randomUUID()}`;
-      const { data, error } = await supabase
-        .from('runner_tokens')
-        .insert({ token, name: String(body?.name || '').trim() || null })
-        .select('token')
-        .single();
-      if (error) throw new Error(error.message);
-      return json({ token: data.token });
-    }
-
     const supabase = getServiceSupabase();
     let authorized = isAuthorizedFusionRunnerRequest({ url, headers: request.headers, env });
     if (!authorized) {
@@ -495,7 +476,7 @@ export async function POST({ request, url }) {
       return json({ success: true });
     }
 
-    return json({ error: `Unknown action: ${action}. Expected one of: claim, processing, heartbeat, complete, fail, sync-folders, register-machine, register-runner, update-manifest, grow-plate, recover-own-jobs` }, { status: 400 });
+    return json({ error: `Unknown action: ${action}. Expected one of: claim, processing, heartbeat, complete, fail, sync-folders, register-machine, update-manifest, grow-plate, recover-own-jobs` }, { status: 400 });
   } catch (error) {
     return json({ error: error?.message || 'Internal server error' }, { status: 500 });
   }

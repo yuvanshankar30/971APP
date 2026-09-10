@@ -26,7 +26,7 @@
     <h2>Install the Runner add-in</h2>
     <p>
       Run this in a normal terminal. It downloads and verifies the current Runner, installs it directly in
-      Fusion's AddIns folder, and starts configuration:
+      Fusion's AddIns folder, then opens a one-field browser page for the Fusion Runner token:
     </p>
     <pre><code>sh -c "$(curl -fsSL {$page.url.origin}/install/fusion-runner)"</code></pre>
   </div>
