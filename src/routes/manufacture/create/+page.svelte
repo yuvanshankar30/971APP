@@ -28,7 +28,11 @@
   let isSubmitting = false;
   let user = null;
 
-  $: supportsAutocam = !!WORKFLOW_OPERATION_TYPE[workflow];
+  // Direct instruction: lathe/turning has no working AutoCAM pipeline right
+  // now, despite WORKFLOW_OPERATION_TYPE.lathe already naming an operation
+  // type for it - don't advertise or trigger it here until that's actually
+  // built. Re-include 'lathe' once it is.
+  $: supportsAutocam = workflow !== 'lathe' && !!WORKFLOW_OPERATION_TYPE[workflow];
 
   async function resolveAutocamMachineDefaults() {
     const operationType = WORKFLOW_OPERATION_TYPE[workflow];
@@ -711,7 +715,7 @@
               </div>
             </div>
           {:else if workflow === 'lathe'}
-            <p class="cam-hint">Lathe parts need both a PDF print (for the shop) and a STEP file (so AutoCAM can generate turning G-code).</p>
+            <p class="cam-hint">Lathe parts need both a PDF print (for the shop) and a STEP file (for CAD reference).</p>
             <div class="upload-container">
               <div
                 class="file-drop-zone {uploadedFile ? 'has-file' : ''}"
@@ -773,7 +777,7 @@
                   <div class="upload-prompt">
                     <Upload size={48} />
                     <span class="upload-text">Drop STEP (.step/.stp) here or click to browse</span>
-                    <span class="upload-subtext">Required - modeled with the spindle axis along Z, centered at X=0, Y=0</span>
+                    <span class="upload-subtext">Required</span>
                   </div>
                 {/if}
               </div>

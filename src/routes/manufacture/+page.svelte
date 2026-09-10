@@ -23,7 +23,7 @@
   import PartDueDate from '$lib/components/PartDueDate.svelte';
   import PartNotes from '$lib/components/PartNotes.svelte';
   import FolderTreeNode from '../autocam/fusion/FolderTreeNode.svelte';
-  import { fetchFusionJobsByManufacturingPartIds, fetchFusionJobNcFiles, fetchPartCategories, fetchPlates, createPart, createPlate, assignPartToPlate, createBoxTube, queueFusionJob, fetchFusionFolderTree } from '$lib/fusionCam.js';
+  import { fetchFusionJobsByManufacturingPartIds, fetchFusionJobUpdates, fetchFusionJobNcFiles, fetchPartCategories, fetchPlates, createPart, createPlate, assignPartToPlate, createBoxTube, queueFusionJob, fetchFusionFolderTree } from '$lib/fusionCam.js';
   import AtcSlotConfig from '$autocam/components/AtcSlotConfig.svelte';
   import { buildStockMaterialIndex, materialIdForStockAssignment, stockCatalogIdForStockAssignment } from '$autocam/stockMaterial.js';
 
@@ -298,6 +298,11 @@
     }
   });
 
+  onMount(() => {
+    const interval = setInterval(refreshActiveFusionJobs, 10000);
+    return () => clearInterval(interval);
+  });
+
   $: highlightedPartId = $page.url.searchParams.get('part');
 
   function sanitizeName(value) {
@@ -505,6 +510,37 @@
       fusionJobsByPart = await fetchFusionJobsByManufacturingPartIds(parts.map((p) => p.id));
     } catch (error) {
       console.error('Error loading Fusion CAM job status:', error);
+    }
+  }
+
+  // Real bug: fusionJobsByPart was only ever loaded once (on page load, or
+  // right after queueing a job) - a Runner claims/processes/completes jobs
+  // independently of this tab, so the status badge stayed frozen at
+  // "Queued" until someone reloaded the page, even long after the job
+  // actually finished. Polls the same way JobQueueTab.svelte's own
+  // refreshActiveJobs does: only while a job here is still active, and
+  // skipped while the tab is hidden.
+  let fusionJobsRefreshing = false;
+  async function refreshActiveFusionJobs() {
+    if (fusionJobsRefreshing || document.hidden) return;
+    const activeJobs = Object.values(fusionJobsByPart).filter(
+      (job) => job && ['queued', 'claimed', 'processing'].includes(job.status)
+    );
+    if (!activeJobs.length) return;
+    fusionJobsRefreshing = true;
+    try {
+      const updates = await fetchFusionJobUpdates(activeJobs.map((job) => job.id));
+      const updatesById = new Map(updates.map((update) => [update.id, update]));
+      const next = { ...fusionJobsByPart };
+      for (const key of Object.keys(next)) {
+        const job = next[key];
+        if (job && updatesById.has(job.id)) next[key] = { ...job, ...updatesById.get(job.id) };
+      }
+      fusionJobsByPart = next;
+    } catch (error) {
+      console.error('Failed to refresh active Fusion CAM job status', error);
+    } finally {
+      fusionJobsRefreshing = false;
     }
   }
 
@@ -1157,7 +1193,12 @@
     fusionQueuePart = part;
     fusionQueueLoading = true;
     fusionQueueKind = 'plate';
-    fusionQueueQuantity = Number.isInteger(Number(part.quantity)) && Number(part.quantity) > 0 ? Number(part.quantity) : 1;
+    // Deliberately always starts at 1, not the manufacturing request's own
+    // quantity - a CAM job's quantity is "how many to nest on this one
+    // saved document," not "how many of the request are still outstanding";
+    // defaulting to the latter silently queued more copies than most jobs
+    // actually want.
+    fusionQueueQuantity = 1;
     fusionQueueFileName = (part.name || '').replace(/\s+/g, '');
     fusionQueueFolderPath = '';
     fusionQueueFolderSearch = '';
