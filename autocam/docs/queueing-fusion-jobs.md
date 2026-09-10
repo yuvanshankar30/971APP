@@ -25,25 +25,26 @@ A plate job needs, in this order:
    ```
 2. **`fusion_parts`** row - one physical part, tied to a category, with a
    STEP file uploaded to the `manufacturing-files` storage bucket
-   (`step_file_name` points at it). `quantity`/`original_quantity` track
-   how many are unassigned vs. total - see `fusionCam.js`'s own doc
-   comments if creating parts through code that also needs the nesting
-   quantity math right; for a one-off test job neither matters much.
+   (`step_file_name` points at it). `quantity` is the currently unassigned
+   count and `original_quantity` is the total request. A newly created part
+   starts with both set to the same positive quantity; assignment triggers
+   decrement and restore `quantity` as nests change.
 3. **`fusion_plates`** row - the stock the part gets nested onto. Same
    category as the part. **Must be comfortably larger than the part's
    actual footprint** - `AutoArrange` (the nesting step) throws
    `ARRANGE_ERROR_NO_ROOM` if the plate is too tight, and it needs room
    for the 0.5in stock margin on top of the part's own bounding box, not
    just the part's exact size.
-4. **`fusion_part_category_assignments`** row - nests the part onto the
-   plate (`plate_id`, `part_id`, `category_id`, `quantity`).
-5. **`cam_jobs`** row - the actual queued job:
+4. **`queue_fusion_plate_job` RPC** - atomically replaces the hidden plate's
+   assignments and inserts the actual `cam_jobs` row. Do not separately upsert
+   `fusion_part_category_assignments` and `cam_jobs`: a failure between those
+   writes leaves a partial live nest. The job created by the RPC has this shape:
    ```js
    {
      name: 'Plate CAM: <descriptive name>',
      source_type: 'upload',
      operation_type: 'milling',
-     params: { fusionJobKind: 'plate:cam', plateId, boxTubeId: null, singleToolMode: false },
+     params: { fusionJobKind: 'plate:cam', plateId, fusionGroupingMode: 'single', singleToolMode: false },
      material_id, tool_id, machine_id,
      status: 'queued',
      requested_by: <a real user id - see below>,
@@ -53,7 +54,7 @@ A plate job needs, in this order:
 
 A Runner polling `/api/fusion-runner` claims it, opens the STEP file in a
 fresh Fusion document, applies the CAM template, generates toolpaths, and
-posts G-code back to `cam_jobs.gcode` - poll `cam_jobs.status` until
+posts byte-preserved output to `cam_jobs.fusion_nc_files` - poll `cam_jobs.status` until
 `completed` or `failed` (3s interval is plenty; a plate job usually takes
 10-30s once claimed).
 
@@ -86,7 +87,6 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SER
 
 const STEP_PATH = '/path/to/part.step';
 const CATEGORY_ID = '...';   // fusion_part_categories.id
-const MATERIAL_ID = '...';   // cam_materials.id (same material as the category)
 const TOOL_ID = '...';
 const MACHINE_ID = '...';
 const REQUESTED_BY = '...';  // a real user id
@@ -96,7 +96,7 @@ await supabase.storage.from('manufacturing-files')
   .upload(stepFileName, readFileSync(STEP_PATH), { contentType: 'model/step' });
 
 const { data: part } = await supabase.from('fusion_parts').insert({
-  name: 'test part', quantity: 0, original_quantity: 1,
+  name: 'test part', quantity: 1, original_quantity: 1,
   category_id: CATEGORY_ID, step_file_name: stepFileName, created_by: REQUESTED_BY,
 }).select().single();
 
@@ -104,17 +104,21 @@ const { data: plate } = await supabase.from('fusion_plates').insert({
   name: 'test plate', width: 16, length: 16, true_depth: 0.25, category_id: CATEGORY_ID,
 }).select().single(); // size generously - see AutoArrange note above
 
-await supabase.from('fusion_part_category_assignments').upsert(
-  { category_id: CATEGORY_ID, plate_id: plate.id, part_id: part.id, quantity: 1 },
-  { onConflict: 'plate_id,part_id' }
-);
-
-const { data: job } = await supabase.from('cam_jobs').insert({
-  name: 'Plate CAM: test', source_type: 'upload', operation_type: 'milling',
-  params: { fusionJobKind: 'plate:cam', plateId: plate.id, boxTubeId: null },
-  material_id: MATERIAL_ID, tool_id: TOOL_ID, machine_id: MACHINE_ID,
-  status: 'queued', requested_by: REQUESTED_BY, part_id: null,
-}).select().single();
+const { data: job, error } = await supabase.rpc('queue_fusion_plate_job', {
+  p_plate_id: plate.id,
+  p_assignments: [{ partId: part.id, quantity: 1 }],
+  p_machine_id: MACHINE_ID,
+  p_tool_id: TOOL_ID,
+  p_name: 'Plate CAM: test',
+  p_requested_by: REQUESTED_BY,
+  p_fusion_file_name: 'TestPart',
+  p_fusion_folder_path: null,
+  p_tab_count: null,
+  p_grouping_mode: 'single',
+  p_single_tool_mode: false,
+  p_multi_tool_mode: false,
+});
+if (error) throw error;
 
 console.log(job.id); // poll cam_jobs.status for this id
 ```
@@ -123,18 +127,19 @@ console.log(job.id); // poll cam_jobs.status for this id
 
 ```js
 const { data } = await supabase.from('cam_jobs')
-  .select('status, errors, warnings, gcode, gcode_file_name').eq('id', jobId).single();
+  .select('status, errors, warnings, fusion_nc_files').eq('id', jobId).single();
 ```
 
-`gcode` is the full combined G-code text (all toolpath files concatenated
-with `%\n...\n%\n` wrapping the whole thing - see `camPlate.py`'s own
-comment on why multiple files get concatenated rather than kept
-separate). To put it in the Manufacturing Files tab, upload it straight
-to the `manufacturing-drive` bucket:
+`fusion_nc_files` preserves every postprocessor artifact independently as
+`{ name, contentBase64, size, sha256 }`. Keep each native extension (`.tap`
+for ShopSabre, `.ngc` for LinuxCNC) when writing it elsewhere. To put one in
+the Manufacturing Files tab, upload its decoded bytes to the
+`manufacturing-drive` bucket:
 
 ```js
+const artifact = data.fusion_nc_files[0];
 await supabase.storage.from('manufacturing-drive')
-  .upload(`gcode/<name>.ngc`, new Blob([data.gcode], { type: 'text/plain' }),
+  .upload(`AutoCAM/${artifact.name}`, Buffer.from(artifact.contentBase64, 'base64'),
     { upsert: true, contentType: 'text/plain' });
 ```
 

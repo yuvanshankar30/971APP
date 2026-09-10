@@ -23,7 +23,7 @@
   import PartDueDate from '$lib/components/PartDueDate.svelte';
   import PartNotes from '$lib/components/PartNotes.svelte';
   import FolderTreeNode from '../autocam/fusion/FolderTreeNode.svelte';
-  import { fetchFusionJobsByManufacturingPartIds, fetchFusionJobUpdates, fetchFusionJobNcFiles, fetchPartCategories, fetchPlates, createPart, createPlate, assignPartToPlate, createBoxTube, queueFusionJob, fetchFusionFolderTree } from '$lib/fusionCam.js';
+  import { fetchFusionJobsByManufacturingPartIds, fetchFusionJobUpdates, fetchFusionJobNcFiles, fetchPartCategories, fetchPlates, createPart, createPlate, createBoxTube, queueFusionJob, queueFusionPlateJob, fetchFusionFolderTree } from '$lib/fusionCam.js';
   import AtcSlotConfig from '$autocam/components/AtcSlotConfig.svelte';
   import { buildStockMaterialIndex, materialIdForStockAssignment, stockCatalogIdForStockAssignment } from '$autocam/stockMaterial.js';
 
@@ -1263,7 +1263,12 @@
     if (!Number.isInteger(quantity) || quantity < 1) return showToastMessage('Quantity must be a whole number greater than zero', 'error');
     const machine = fusionQueueMachines.find((candidate) => String(candidate.id) === String(fusionQueueMachineId));
     if (!machine || !(fusionQueueKind === 'tube' ? machine.can_run_box_tubes : machine.can_run_plates)) return showToastMessage('Choose a compatible router', 'error');
-    const isAutoMultiTool = fusionQueueKind === 'plate' && isNewRouter(fusionQueueMachineId) && !fusionQueueSingleToolMode;
+    const selectedCategory = fusionQueueCategories.find((candidate) => String(candidate.id) === String(fusionQueueCategoryId));
+    const selectedMaterialName = String(selectedCategory?.cam_materials?.name || '').trim().toLowerCase();
+    const isAluminum6061 = ['aluminum 6061', 'aluminium 6061', '6061 aluminum', '6061 aluminium'].includes(selectedMaterialName);
+    const requestedAutoMultiTool = fusionQueueKind === 'plate' && isNewRouter(fusionQueueMachineId) && !fusionQueueSingleToolMode;
+    if (requestedAutoMultiTool && !isAluminum6061) return showToastMessage('Automatic tool swaps are available only for Aluminum 6061', 'error');
+    const isAutoMultiTool = fusionQueueKind === 'plate' && isNewRouter(fusionQueueMachineId) && isAluminum6061 && !fusionQueueSingleToolMode;
     if (!isAutoMultiTool && !fusionQueueTools(fusionQueueMachineId).some((tool) => String(tool.id) === String(fusionQueueToolId))) return showToastMessage('Choose a tool installed on this router', 'error');
     if (fusionQueueKind === 'plate' && !fusionQueueCategoryId) return showToastMessage('Choose a material and thickness', 'error');
     if (fusionQueueKind === 'tube' && !fusionQueueMaterials.some((material) => String(material.id) === String(fusionQueueMaterialId) && /alumin(?:um|ium)/i.test(material.name || ''))) return showToastMessage('Choose an aluminum material for tube stock', 'error');
@@ -1272,16 +1277,15 @@
       const stepFile = await manufacturingStepFile(part);
       if (fusionQueueKind === 'tube') {
         const tube = await createBoxTube({ name: part.name, epic: part.epic, ticket: part.ticket, quantity, stepFile, createdBy: user?.id, partId: part.id, projectId: part.project_id, stockAssignment: part.stock_assignment });
-        await queueFusionJob({ fusionJobKind: 'box_tube', boxTubeId: tube.id, machineId: fusionQueueMachineId, toolId: fusionQueueToolId, materialId: fusionQueueMaterialId, requestedBy: user?.id, partId: part.id, name: `Tube Stock CAM: ${part.name}`, fusionFileName: fusionQueueFileName.trim() || null, fusionFolderPath: fusionQueueFolderPath || null });
+        await queueFusionJob({ fusionJobKind: 'box_tube', boxTubeId: tube.id, machineId: fusionQueueMachineId, toolId: fusionQueueToolId, materialId: fusionQueueMaterialId, requestedBy: user?.id, partId: part.id, name: `Tube Stock CAM: ${part.name}`, fusionFileName: fusionQueueFileName.trim() || null, fusionFolderPath: fusionQueueFolderPath || null, orientation: 'vertical', singleToolMode: true });
       } else {
         const category = fusionQueueCategories.find((candidate) => String(candidate.id) === String(fusionQueueCategoryId));
         const fusionPart = await createPart({ name: part.name, epic: part.epic, ticket: part.ticket, quantity, categoryId: category.id, stepFile, createdBy: user?.id, partId: part.id, fusionFileName: fusionQueueFileName.trim() || null, projectId: part.project_id, stockAssignment: part.stock_assignment });
         const plates = await fetchPlates();
         let plate = plates.find((candidate) => String(candidate.category_id) === String(category.id));
         if (!plate) plate = await createPlate({ name: `Auto stock - ${fusionQueueCategoryLabel(category)}`, width: 100, length: 100, trueDepth: Number(category.thickness), categoryId: category.id });
-        await assignPartToPlate({ categoryId: category.id, plateId: plate.id, partId: fusionPart.id, quantity });
-        await queueFusionJob({
-          fusionJobKind: 'plate:cam', plateId: plate.id, machineId: fusionQueueMachineId, toolId: isAutoMultiTool ? null : fusionQueueToolId, materialId: category.material_id, requestedBy: user?.id, name: `Fusion CAM: ${part.name}`, groupingMode: 'single', selectedPartId: fusionPart.id, fusionFileName: fusionQueueFileName.trim() || null, fusionFolderPath: fusionQueueFolderPath || null,
+        await queueFusionPlateJob({
+          plateId: plate.id, assignments: [{ partId: fusionPart.id, quantity }], machineId: fusionQueueMachineId, toolId: isAutoMultiTool ? null : fusionQueueToolId, requestedBy: user?.id, name: `Fusion CAM: ${part.name}`, groupingMode: 'single', fusionFileName: fusionQueueFileName.trim() || null, fusionFolderPath: fusionQueueFolderPath || null,
           singleToolMode: isNewRouter(fusionQueueMachineId) && fusionQueueSingleToolMode,
           multiToolMode: isAutoMultiTool,
         });

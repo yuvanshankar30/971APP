@@ -27,6 +27,7 @@ from .dropFolder import resolve_drop_folder
 from .job_status import ensure_completion_response, send_job_error
 from .localCamAssets import load_local_tool_library_json, resolve_local_post_processor
 from .machiningTime import total_machining_time
+from .saveDocument import save_new_document
 from ..commands.NcArtifacts import collect_nc_artifacts
 from .templateTools import patch_cam_template_with_tool_libraries
 
@@ -232,28 +233,13 @@ def start(data, session):
         doc_name = re.sub(r"\s+", "", str(custom_name)) if custom_name else f"Tube{box_tube_id}Job{job_id}"
         folder_path = _get(payload, "fusion_folder_path") or FUSION_DROP_FOLDER_PATH
 
-        # Save the document to the requested AutoCAM folder when provided.
-        try:
-            data_project, autocam_drop_folder = resolve_drop_folder(
-                app, FUSION_DATA_PROJECT_NAME, folder_path
-            )
-
-            # Check if file already exists and delete it
-            try:
-                existing_file = autocam_drop_folder.dataFiles.itemByName(doc_name)
-                if existing_file:
-                    existing_file.deleteMe()
-            except Exception:
-                pass
-
-            # Save the document
-            doc.saveAs(doc_name, autocam_drop_folder, "", "")
-            app.log(f"File uploaded to {data_project.name}/{folder_path}/{doc_name}")
-
-        except Exception as e:
-            app.log(
-                f"Failed to save document to '{folder_path}' folder:\n{traceback.format_exc()}"
-            )
+        # Save failure is a job failure. Reporting completed CAM while its
+        # requested Fusion document is absent leaves no editable source of truth.
+        data_project, autocam_drop_folder = resolve_drop_folder(
+            app, FUSION_DATA_PROJECT_NAME, folder_path
+        )
+        save_new_document(doc, autocam_drop_folder, doc_name)
+        app.log(f"File uploaded to {data_project.name}/{folder_path}/{doc_name}")
 
         export_dir = os.path.join(FINAL_PATH, box_tube_id)
         try:

@@ -382,6 +382,14 @@ own docs are all together in one place instead of scattered across
   `autocam/postprocessors/README.md` for the shop's real post-processor
   configs and a real Fusion-cammed example file, used as ground truth for
   what each dialect actually needs rather than a generic manual.
+- **`autocam/fusion/`** - the Fusion 360-backed plate and box-tube pipeline.
+  Plate queueing replaces the category's reusable hidden nest and creates its
+  immutable job snapshot in one PostgreSQL transaction, so cancelling a
+  confirmation or losing one grouped write cannot reserve partial stock.
+  Completed-part attribution is read from that snapshot rather than the plate's
+  later mutable contents. The Runner preserves the configured postprocessor's
+  native artifact extension (`.tap` for ShopSabre), refuses destructive Fusion
+  document-name collisions, and treats a failed cloud save as a failed job.
 - **`autocam/gcodeFormatting.js`** / **`autocam/geometry2d.js`** - shared
   numeric G-code formatting, pause/dwell dialect handling, and polygon-area
   primitives used across generators so safety-critical output rules do not

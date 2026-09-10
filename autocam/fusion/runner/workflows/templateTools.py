@@ -1198,7 +1198,7 @@ def patch_cam_template_with_tool_libraries(
             handled_templates.add(id(bore_template_native))
             replaced += 1
 
-    if drill_template and drill_candidates:
+    if drill_template is not None and drill_candidates:
         sorted_drills = sorted(
             drill_candidates, key=lambda entry: (entry[2] or 0.0), reverse=True
         )
@@ -1229,7 +1229,7 @@ def patch_cam_template_with_tool_libraries(
         if clones:
             _replace_template(root, drill_template, clones)
             replaced += len(clones)
-    elif drill_template and largest_endmill:
+    elif drill_template is not None and largest_endmill:
         # No real drill tool in the library - direct instruction from real-
         # world testing: mill these small holes out with the same router
         # bit instead. An earlier attempt at this guessed strategy="circular"
@@ -1275,7 +1275,7 @@ def patch_cam_template_with_tool_libraries(
                     "hole_diameter_range_in": hole_range,
                 })
 
-    if pocket_template and endmill_candidates:
+    if pocket_template is not None and endmill_candidates:
         sorted_endmills = sorted(
             endmill_candidates, key=lambda entry: (entry[2] or 0.0), reverse=True
         )
@@ -1315,7 +1315,7 @@ def patch_cam_template_with_tool_libraries(
             _replace_template(root, pocket_template, clones)
             replaced += len(clones)
 
-    if suppress_template and largest_endmill:
+    if suppress_template is not None and largest_endmill:
         tool, idx = largest_endmill
         tool_elem = suppress_template.find(_q("tool"))
         if tool_elem is not None:
