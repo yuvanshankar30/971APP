@@ -95,12 +95,13 @@ class PlateTemplateSelectionTests(unittest.TestCase):
         self.assertTrue((_TEMPLATES_DIR / "971-real" / _UNC_TEMPLATE).is_file())
         self.assertTrue((_TEMPLATES_DIR / "971-real" / _NEW_ROUTER_TEMPLATE).is_file())
 
-    def test_successful_plate_jobs_close_their_document_after_completion(self):
+    def test_successful_plate_jobs_leave_their_document_open_after_completion(self):
+        # Every job creates and activates its own brand-new document at the
+        # top of start() - see new_doc.activate() - so a document left open
+        # from a prior job is never mistaken for "the" active document by a
+        # later one. Matches camTube.py's tube jobs, which never close either.
         workflow = (Path(__file__).parents[1] / "workflows" / "camPlate.py").read_text()
-        completion_index = workflow.index("ensure_completion_response(")
-        close_index = workflow.index("doc.close(False)", completion_index)
-
-        self.assertLess(completion_index, close_index)
+        self.assertNotIn("doc.close(", workflow)
 
     def test_plate_jobs_report_upload_location_and_completion_to_text_commands(self):
         workflow = (Path(__file__).parents[1] / "workflows" / "camPlate.py").read_text()

@@ -713,9 +713,13 @@ def start(data, session):
             tab_count_override = _resolve_tab_count_override(payload, app.log)
             if tab_count_override is not None:
                 app.log(f"Using operator-specified tab count: {tab_count_override}")
-                ConfigureTabs(min_tabs=tab_count_override, max_tabs=tab_count_override)
+                ConfigureTabs(
+                    min_tabs=tab_count_override,
+                    max_tabs=tab_count_override,
+                    object_spacing_in=spacing,
+                )
             else:
-                ConfigureTabs()
+                ConfigureTabs(object_spacing_in=spacing)
         except Exception:
             # A release contour without verified tabs can free a part during
             # machining. Do not log and post it anyway.
@@ -873,12 +877,13 @@ def start(data, session):
         )
         if resp is not None and resp.ok:
             app.log("Job Completed")
-        # Everything durable is now finished: the Fusion document is saved,
-        # NC files are uploaded, and the queue accepted completion. Keeping
-        # documents open between jobs accumulates stale designs and can make
-        # a later job operate on the wrong active document.
-        doc.close(False)
-        app.log(f"Closed document '{doc_name}'")
+        # Deliberately does not close the document once the job completes -
+        # every job already creates and activates its own brand-new
+        # document at the top of start() (see new_doc.activate() above), so
+        # a document left open from a prior job is never mistaken for "the"
+        # active document by a later one. Matches camTube.py's own tube
+        # jobs, which stopped closing for the same reason plus a real,
+        # confirmed live upload-timing bug closing raced.
 
         try:
             ui.workspaces.itemById("FusionSolidEnvironment").activate()

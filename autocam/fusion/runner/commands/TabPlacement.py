@@ -108,6 +108,15 @@ PER_SIDE_EXTRA_TAB_SPACING_IN = 8.0
 # corner between them.
 TAB_WIDTH_IN = 0.6
 TAB_HEIGHT_IN = 0.15
+# Grouped parts commonly sit one cutter-width apart. Two tabs centered at
+# the same position on their facing edges then become one continuous bridge
+# across that corridor. Keep a visible, machinable run of ordinary stock
+# between their along-edge spans instead.
+GROUPED_TAB_STOCK_GAP_IN = 0.1
+# Fusion's Arrange result can differ from the requested object spacing by a
+# small modeling tolerance. This keeps the facing-edge check tied to the
+# actual requested spacing without relying on exact floating-point equality.
+GROUPED_TAB_CORRIDOR_TOLERANCE_IN = 0.05
 # A smaller nested part may not have a 1.2in straight run available for the
 # default tab plus lead-in/lead-out. Do not make a tab narrower than this
 # unless the geometry genuinely demands it.
@@ -322,6 +331,242 @@ def _edge_point_at_fraction(edge, fraction: float):
 
 def _edge_midpoint(edge):
     return _edge_point_at_fraction(edge, 0.5)
+
+
+def _outward_edge_normal(edge, body_center):
+    """Unit XY normal pointing from a body's candidate edge into stock."""
+    direction, _ = _edge_direction_and_point(edge)
+    midpoint = _edge_midpoint(edge)
+    normal = adsk.core.Vector3D.create(-direction.y, direction.x, 0)
+    toward_edge = adsk.core.Vector3D.create(
+        midpoint.x - body_center.x,
+        midpoint.y - body_center.y,
+        0,
+    )
+    if normal.dotProduct(toward_edge) < 0:
+        normal = adsk.core.Vector3D.create(-normal.x, -normal.y, 0)
+    normal.normalize()
+    return normal
+
+
+def _parallel_tab_span_gap(edge_a, fraction_a, edge_b, fraction_b, tab_width_cm):
+    """Along-edge stock gap between two parallel tab spans, in centimeters."""
+    direction_a, _ = _edge_direction_and_point(edge_a)
+    direction_b, _ = _edge_direction_and_point(edge_b)
+    if abs(direction_a.dotProduct(direction_b)) < 0.98:
+        return None
+    point_a = _edge_point_at_fraction(edge_a, fraction_a)
+    point_b = _edge_point_at_fraction(edge_b, fraction_b)
+    center_separation = abs(
+        (point_b.x - point_a.x) * direction_a.x
+        + (point_b.y - point_a.y) * direction_a.y
+    )
+    return center_separation - tab_width_cm
+
+
+def _grouped_tabs_conflict(
+    body_a,
+    edge_a,
+    fraction_a,
+    body_b,
+    edge_b,
+    fraction_b,
+    tab_width_cm,
+    stock_gap_cm,
+    corridor_max_cm,
+):
+    """Whether tabs on two bodies touch across the same stock corridor."""
+    direction_a, _ = _edge_direction_and_point(edge_a)
+    direction_b, _ = _edge_direction_and_point(edge_b)
+    if abs(direction_a.dotProduct(direction_b)) < 0.98:
+        return False
+
+    midpoint_a = _edge_midpoint(edge_a)
+    midpoint_b = _edge_midpoint(edge_b)
+    between_midpoints = adsk.core.Vector3D.create(
+        midpoint_b.x - midpoint_a.x,
+        midpoint_b.y - midpoint_a.y,
+        0,
+    )
+    normal_a = _outward_edge_normal(edge_a, _body_center(body_a))
+    normal_b = _outward_edge_normal(edge_b, _body_center(body_b))
+    # The edges must face one another. Parallel edges on the outer sides of
+    # two parts do not share stock and must retain their normal midpoints.
+    if normal_a.dotProduct(between_midpoints) <= 0:
+        return False
+    if normal_b.dotProduct(between_midpoints) >= 0:
+        return False
+
+    point_a = _edge_point_at_fraction(edge_a, fraction_a)
+    point_b = _edge_point_at_fraction(edge_b, fraction_b)
+    dx = point_b.x - point_a.x
+    dy = point_b.y - point_a.y
+    perpendicular_distance = abs(dx * direction_a.y - dy * direction_a.x)
+    if perpendicular_distance > corridor_max_cm:
+        return False
+
+    span_gap = _parallel_tab_span_gap(
+        edge_a, fraction_a, edge_b, fraction_b, tab_width_cm
+    )
+    return span_gap is not None and span_gap < stock_gap_cm - 1e-6
+
+
+def _same_line_tabs_conflict(
+    edge_a, fraction_a, edge_b, fraction_b, tab_width_cm, stock_gap_cm
+):
+    """Keep relocated tabs from crowding another tab on the same part side."""
+    if not _edges_collinear(edge_a, edge_b):
+        return False
+    span_gap = _parallel_tab_span_gap(
+        edge_a, fraction_a, edge_b, fraction_b, tab_width_cm
+    )
+    return span_gap is not None and span_gap < stock_gap_cm - 1e-6
+
+
+def _relocation_fraction_options(edge, preferred_fraction, blockers, tab_width_cm, stock_gap_cm):
+    """Nearest valid fractions, including exact boundaries around blockers."""
+    edge_length = _edge_length(edge)
+    if edge_length <= 0 or edge_length < tab_width_cm:
+        return []
+    half_width = tab_width_cm / 2
+    low = half_width
+    high = edge_length - half_width
+    preferred = min(high, max(low, preferred_fraction * edge_length))
+    centers = {preferred, low, high}
+    direction, start = _edge_direction_and_point(edge)
+    required_separation = tab_width_cm + stock_gap_cm
+    for blocker_edge, blocker_fraction in blockers:
+        blocker_point = _edge_point_at_fraction(blocker_edge, blocker_fraction)
+        projected = (
+            (blocker_point.x - start.x) * direction.x
+            + (blocker_point.y - start.y) * direction.y
+        )
+        centers.add(min(high, max(low, projected - required_separation)))
+        centers.add(min(high, max(low, projected + required_separation)))
+    return [
+        center / edge_length
+        for center in sorted(centers, key=lambda value: (abs(value - preferred), value))
+    ]
+
+
+def _relocation_edges(body, selected, stock_bounds, tab_width_in):
+    """Safe edges a conflicting grouped tab may move to, preferred first."""
+    minimum_length_cm = tab_width_in * 1.25 * 2.54
+    body_center = _body_center(body)
+    stock_check_cm = STOCK_BACKING_CHECK_IN * 2.54
+    usable = [
+        edge for edge in _all_straight_edges(body)
+        if _edge_length(edge) >= minimum_length_cm
+    ]
+    backed = [
+        edge for edge in usable
+        if _has_real_stock_backing(edge, body_center, stock_bounds, stock_check_cm)
+    ]
+    pool = backed if backed else usable
+
+    ordered = []
+    for edge in [edge for edge, _fraction in selected] + sorted(
+        pool, key=_edge_length, reverse=True
+    ):
+        if all(edge is not existing for existing in ordered):
+            ordered.append(edge)
+    return ordered
+
+
+def separate_grouped_tab_candidates(
+    grouped_candidates,
+    tab_width_in,
+    object_spacing_in,
+    stock_bounds=None,
+):
+    """Move aligned facing tabs apart while preserving every body's count.
+
+    ``grouped_candidates`` is ``[(body, [(edge, fraction), ...]), ...]``.
+    The first body's choices remain stable; later bodies use the nearest
+    valid position on a safe straight edge. A job fails instead of emitting
+    touching tabs if its geometry cannot satisfy the invariant.
+    """
+    if len(grouped_candidates) < 2:
+        return [list(candidates) for _body, candidates in grouped_candidates], 0
+
+    tab_width_cm = tab_width_in * 2.54
+    stock_gap_cm = GROUPED_TAB_STOCK_GAP_IN * 2.54
+    corridor_max_cm = (
+        object_spacing_in + GROUPED_TAB_CORRIDOR_TOLERANCE_IN
+    ) * 2.54
+    accepted_across_bodies = []
+    adjusted_groups = []
+    moved_count = 0
+
+    for body, candidates in grouped_candidates:
+        adjusted = []
+        relocation_edges = _relocation_edges(
+            body, candidates, stock_bounds, tab_width_in
+        )
+        for index, (preferred_edge, preferred_fraction) in enumerate(candidates):
+            future_same_body = candidates[index + 1:]
+            same_body_blockers = adjusted + future_same_body
+            chosen = None
+
+            edge_options = [preferred_edge] + [
+                edge for edge in relocation_edges if edge is not preferred_edge
+            ]
+            for edge in edge_options:
+                fraction_options = _relocation_fraction_options(
+                    edge,
+                    preferred_fraction if edge is preferred_edge else 0.5,
+                    [
+                        (other_edge, other_fraction)
+                        for _other_body, other_edge, other_fraction in accepted_across_bodies
+                    ] + same_body_blockers,
+                    tab_width_cm,
+                    stock_gap_cm,
+                )
+                for fraction in fraction_options:
+                    if any(
+                        _same_line_tabs_conflict(
+                            edge,
+                            fraction,
+                            other_edge,
+                            other_fraction,
+                            tab_width_cm,
+                            stock_gap_cm,
+                        )
+                        for other_edge, other_fraction in same_body_blockers
+                    ):
+                        continue
+                    if any(
+                        _grouped_tabs_conflict(
+                            body,
+                            edge,
+                            fraction,
+                            other_body,
+                            other_edge,
+                            other_fraction,
+                            tab_width_cm,
+                            stock_gap_cm,
+                            corridor_max_cm,
+                        )
+                        for other_body, other_edge, other_fraction in accepted_across_bodies
+                    ):
+                        continue
+                    chosen = (edge, fraction)
+                    break
+                if chosen is not None:
+                    break
+
+            if chosen is None:
+                raise RuntimeError(
+                    "grouped part geometry has no tab position that leaves stock "
+                    "between neighboring tabs"
+                )
+            if chosen[0] is not preferred_edge or abs(chosen[1] - preferred_fraction) > 1e-6:
+                moved_count += 1
+            adjusted.append(chosen)
+            accepted_across_bodies.append((body, chosen[0], chosen[1]))
+        adjusted_groups.append(adjusted)
+
+    return adjusted_groups, moved_count
 
 
 def _tab_fractions(n: int) -> list[float]:
@@ -791,7 +1036,11 @@ def _disable_tabs(app, operation) -> bool:
         return False
 
 
-def ConfigureTabs(min_tabs: int = DEFAULT_MIN_TABS, max_tabs: int = DEFAULT_MAX_TABS):
+def ConfigureTabs(
+    min_tabs: int = DEFAULT_MIN_TABS,
+    max_tabs: int = DEFAULT_MAX_TABS,
+    object_spacing_in: float = 0.26,
+):
     app = adsk.core.Application.get()
     # Not app.activeProduct - by the time this runs, SetupGenerator() has
     # already switched the active product to CAM (camWS.activate()), so
@@ -902,7 +1151,7 @@ def ConfigureTabs(min_tabs: int = DEFAULT_MIN_TABS, max_tabs: int = DEFAULT_MAX_
             # EVERY body on the plate and combining them, single-part or
             # grouped - for a single-body plate this is exactly the old
             # single_body behavior (the loop below runs once).
-            all_tab_points = []
+            body_tab_candidates = []
             for body in bodies:
                 perimeter_in = _outer_perimeter_in(body)
                 body_min_tabs = _min_tabs_for_body(body, min_tabs)
@@ -922,8 +1171,29 @@ def ConfigureTabs(min_tabs: int = DEFAULT_MIN_TABS, max_tabs: int = DEFAULT_MAX_
                         "- using what's available rather than placing a tab "
                         "on a rounded or too-short edge."
                 )
+                body_tab_candidates.append((body, body_candidates))
+
+            adjusted_candidates, moved_count = separate_grouped_tab_candidates(
+                body_tab_candidates,
+                tab_width_in,
+                object_spacing_in,
+                stock_bounds=stock_bounds,
+            )
+            if moved_count:
+                app.log(
+                    f"TabPlacement: '{op.name}' - moved {moved_count} grouped tab(s) "
+                    f"to leave at least {GROUPED_TAB_STOCK_GAP_IN}in of stock "
+                    "between neighboring tabs."
+                )
+
+            all_tab_points = []
+            for (body, body_candidates), adjusted_body_candidates in zip(
+                body_tab_candidates, adjusted_candidates
+            ):
                 tab_face = _find_tab_face(body)
-                tab_points = _manual_tab_points(app, comp, tab_face, body_candidates)
+                tab_points = _manual_tab_points(
+                    app, comp, tab_face, adjusted_body_candidates
+                )
                 if len(tab_points) != len(body_candidates):
                     app.log(
                         f"TabPlacement: '{op.name}' - could not create all explicit tab points "

@@ -1273,10 +1273,14 @@
                       </span>
                     {/if}
                   </span>
-                  <span class="tag">{categoryLabel(part.fusion_part_categories)}</span>
-                  {#if completedPartIds.has(part.id)}
-                    <span class="tag tag-completed"><Check size={13} /> Completed</span>
-                  {/if}
+                  <span class="cam-list-header-right">
+                    <span class="tag">{categoryLabel(part.fusion_part_categories)}</span>
+                    {#if completedPartIds.has(part.id)}
+                      <span class="tag tag-completed"><Check size={13} /> Completed</span>
+                    {:else}
+                      <span class="tag tag-pending">Pending</span>
+                    {/if}
+                  </span>
                 </div>
                 <p class="cam-form-hint">
                   {#if editingQuantityId === part.id}
@@ -1753,6 +1757,7 @@
   .rename-control { display: flex; align-items: center; gap: 0.35rem; min-width: 0; }
   .rename-input { padding: 0.2rem 0.4rem; height: auto; width: auto; min-width: 10rem; }
   .cam-list-header-left { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+  .cam-list-header-right { display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0; }
   .bulk-select-checkbox { width: 1rem; height: 1rem; flex-shrink: 0; cursor: pointer; }
   .bulk-select-bar { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.5rem 0.75rem; margin-bottom: 0.6rem; border: 1px solid var(--border); border-radius: var(--radius-md, 10px); background: var(--surface-2, #f7f7f5); flex-wrap: wrap; }
   .bulk-select-all { display: flex; align-items: center; gap: 0.5rem; font-size: 0.82rem; font-weight: 500; color: var(--text-muted); cursor: pointer; }
