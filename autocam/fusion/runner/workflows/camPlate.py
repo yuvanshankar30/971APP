@@ -713,9 +713,13 @@ def start(data, session):
             tab_count_override = _resolve_tab_count_override(payload, app.log)
             if tab_count_override is not None:
                 app.log(f"Using operator-specified tab count: {tab_count_override}")
-                ConfigureTabs(min_tabs=tab_count_override, max_tabs=tab_count_override)
+                ConfigureTabs(
+                    min_tabs=tab_count_override,
+                    max_tabs=tab_count_override,
+                    object_spacing_in=spacing,
+                )
             else:
-                ConfigureTabs()
+                ConfigureTabs(object_spacing_in=spacing)
         except Exception:
             # A release contour without verified tabs can free a part during
             # machining. Do not log and post it anyway.

@@ -495,6 +495,9 @@ own docs are all together in one place instead of scattered across
   tools are omitted before post-processing, avoiding unnecessary ATC cycles.
   A release contour must retain verified manual tabs on usable, stock-backed
   straight edges; otherwise the job fails instead of posting an unsecured part.
+  On grouped plates, facing tabs in the same narrow stock corridor are shifted
+  along safe straight edges so their spans retain stock between them instead of
+  joining into one continuous bridge.
   Every New Router Fusion job is post-processed with the bundled ShopSabre
   WinCNC `shopsabre.cps` post and emits native `.tap` output; a contradictory
   machine-profile post setting fails the job before post-processing.

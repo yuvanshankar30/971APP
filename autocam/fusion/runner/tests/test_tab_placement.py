@@ -378,6 +378,100 @@ class TabDistributionTests(unittest.TestCase):
         )
 
 
+class GroupedTabSeparationTests(unittest.TestCase):
+    def _stacked_rectangles(self, corridor_in=0.26):
+        cm = 2.54
+        width = 4 * cm
+        height = 2 * cm
+        corridor = corridor_in * cm
+
+        lower_edges = [
+            _edge(0, 0, width, 0),
+            _edge(width, 0, width, height),
+            _edge(width, height, 0, height),
+            _edge(0, height, 0, 0),
+        ]
+        upper_bottom = height + corridor
+        upper_edges = [
+            _edge(0, upper_bottom, width, upper_bottom),
+            _edge(width, upper_bottom, width, upper_bottom + height),
+            _edge(width, upper_bottom + height, 0, upper_bottom + height),
+            _edge(0, upper_bottom + height, 0, upper_bottom),
+        ]
+        lower = _body(
+            [_face(1.0, 1.0, [_loop(True, lower_edges)])],
+            (0, 0),
+            (width, height),
+        )
+        upper = _body(
+            [_face(1.0, 1.0, [_loop(True, upper_edges)])],
+            (0, upper_bottom),
+            (width, upper_bottom + height),
+        )
+        return lower, lower_edges[2], upper, upper_edges[0]
+
+    def test_aligned_tabs_on_facing_grouped_edges_are_separated(self):
+        lower, lower_top, upper, upper_bottom = self._stacked_rectangles()
+
+        adjusted, moved = TabPlacement.separate_grouped_tab_candidates(
+            [
+                (lower, [(lower_top, 0.5)]),
+                (upper, [(upper_bottom, 0.5)]),
+            ],
+            tab_width_in=0.6,
+            object_spacing_in=0.26,
+        )
+
+        self.assertEqual([len(group) for group in adjusted], [1, 1])
+        self.assertEqual(moved, 1)
+        lower_edge, lower_fraction = adjusted[0][0]
+        upper_edge, upper_fraction = adjusted[1][0]
+        stock_gap_cm = TabPlacement._parallel_tab_span_gap(
+            lower_edge,
+            lower_fraction,
+            upper_edge,
+            upper_fraction,
+            0.6 * 2.54,
+        )
+        self.assertGreaterEqual(
+            stock_gap_cm,
+            TabPlacement.GROUPED_TAB_STOCK_GAP_IN * 2.54 - 1e-6,
+        )
+
+    def test_already_separated_facing_tabs_keep_their_positions(self):
+        lower, lower_top, upper, upper_bottom = self._stacked_rectangles()
+        candidates = [
+            (lower, [(lower_top, 0.2)]),
+            (upper, [(upper_bottom, 0.2)]),
+        ]
+
+        adjusted, moved = TabPlacement.separate_grouped_tab_candidates(
+            candidates,
+            tab_width_in=0.6,
+            object_spacing_in=0.26,
+        )
+
+        self.assertEqual(adjusted, [[(lower_top, 0.2)], [(upper_bottom, 0.2)]])
+        self.assertEqual(moved, 0)
+
+    def test_parallel_tabs_outside_the_shared_corridor_are_not_moved(self):
+        lower, lower_top, upper, upper_bottom = self._stacked_rectangles(
+            corridor_in=2.0
+        )
+
+        adjusted, moved = TabPlacement.separate_grouped_tab_candidates(
+            [
+                (lower, [(lower_top, 0.5)]),
+                (upper, [(upper_bottom, 0.5)]),
+            ],
+            tab_width_in=0.6,
+            object_spacing_in=0.26,
+        )
+
+        self.assertEqual(adjusted, [[(lower_top, 0.5)], [(upper_bottom, 0.5)]])
+        self.assertEqual(moved, 0)
+
+
 class MinTabsForBodyTests(unittest.TestCase):
     """_min_tabs_for_body's "exactly 3 for a triangular part" floor must
     only ever apply to a genuinely 3-sided outline, not any shape whose
