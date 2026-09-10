@@ -7,13 +7,17 @@ artifacts through a Fusion add-in polling Spartans Hub's `cam_jobs` queue.
 
 ## Structure
 
-- **`grouping.js`** - browser-side grouping helpers; database triggers remain
-  authoritative for inventory and immutable job snapshots.
+- **`grouping.js`** - browser-side grouping helpers. The
+  `queue_fusion_plate_job` database function atomically replaces the reusable
+  plate's assignment set and inserts the immutable job snapshot; database
+  triggers remain authoritative for validation and inventory.
 - **`jobPayload.js`** - turns a claimed job snapshot into signed Runner input.
 - **`runner/`** - the active Fusion add-in: claims work from
   `/api/fusion-runner`, imports STEP files, arranges parts, applies templates,
   generates toolpaths and uploads exact NC artifacts. Box-tube jobs create one
-  manually indexed setup and NC artifact for each of the four faces.
+  manually indexed setup and native-post artifact for each of the four faces.
+  Fusion saves are non-destructive: a duplicate document name fails the job
+  without deleting the existing document.
 - **`runner/templates/`** - generic and reviewed team templates. Plate jobs
   select the reviewed machine/material template when a mapping exists and
   fail back to the generic template only for combinations without one.

@@ -750,6 +750,23 @@ def _min_tabs_for_body(body, min_tabs: int) -> int:
     return min_tabs
 
 
+def _max_tabs_for_body(body, max_tabs: int) -> int:
+    """The other half of _min_tabs_for_body's own floor: a triangle only
+    has 3 real sides, so more than 3 tabs adds no real holding power
+    either - it just doubles up on one side a second (or third) time.
+    Direct instruction: exactly 3 for a triangular shape, full stop. Caps
+    the perimeter-based scaling that would otherwise grow tab count on a
+    large triangle the same way it does for a normal 4+-sided part, and -
+    same as the min-tabs floor above - overrides even an explicit
+    operator tab-count request (camPlate.py's tab_count_override sets
+    min_tabs == max_tabs to that value; a triangle still gets exactly 3
+    regardless of what was asked for, since more genuinely is not needed).
+    """
+    if _is_a_bare_triangle(body):
+        return 3
+    return max_tabs
+
+
 def select_tab_edges(
     body,
     max_tabs: int = DEFAULT_MAX_TABS,
@@ -1036,6 +1053,46 @@ def _disable_tabs(app, operation) -> bool:
         return False
 
 
+def _read_stock_bounds(setup, app):
+    """The real machining bounds of this setup's plate, straight from
+    Fusion's own computed stock parameters - not a guess, and not the
+    part's own bounding box (a part positioned close to the plate's own
+    edge - AutoArrange's frame margin used up on that side, or a corner
+    placement - can have real sides with little to no stock actually
+    behind them; see _has_real_stock_backing). None (any parameter
+    missing) means "skip this filter, don't place zero tabs from a name
+    lookup failing."
+
+    Two real, confirmed-live bugs this has gone through, in order:
+
+    1. .expression returns the parameter as a human-readable STRING WITH
+       ITS UNIT SUFFIX (e.g. "0.635 in"), which float() cannot parse at
+       all - every call raised immediately, so stock_bounds silently
+       ended up None on every real job, ever, and this filter never ran.
+    2. The fix for #1 switched to .value - but a CAM setup parameter's
+       own .value is itself a FloatParameterValue wrapper object, not a
+       bare float (confirmed live: "TypeError: '<=' not supported between
+       instances of 'FloatParameterValue' and 'float'" the moment a real
+       job compared it). This module's own top-of-file comment already
+       documented the fix for exactly this - CAM parameters need
+       ``parameter.value.value``, not ``parameter.value`` or
+       ``parameter.expression`` (see tabPositioning/tabsPerContour/
+       positions below, all already written that way) - this just hadn't
+       been applied here yet. .value.value is the actual plain float,
+       already in the same centimeter unit _edge_outward_point's own edge
+       geometry is in - no string parsing, no unit mismatch, no wrapper.
+    """
+    try:
+        x_low = setup.parameters.itemByName("stockXLow").value.value
+        x_high = setup.parameters.itemByName("stockXHigh").value.value
+        y_low = setup.parameters.itemByName("stockYLow").value.value
+        y_high = setup.parameters.itemByName("stockYHigh").value.value
+        return (x_low, x_high, y_low, y_high)
+    except Exception as e:
+        app.log(f"TabPlacement: could not read stock bounds, skipping the real-stock-backing check: {e}")
+        return None
+
+
 def ConfigureTabs(
     min_tabs: int = DEFAULT_MIN_TABS,
     max_tabs: int = DEFAULT_MAX_TABS,
@@ -1085,23 +1142,7 @@ def ConfigureTabs(
         return
 
     for setup in cam.setups:
-        # The real machining bounds of this setup's plate, straight from
-        # Fusion's own computed stock parameters - not a guess, and not
-        # the part's own bounding box (a part positioned close to the
-        # plate's own edge - AutoArrange's frame margin used up on that
-        # side, or a corner placement - can have real sides with little
-        # to no stock actually behind them; see _has_real_stock_backing).
-        # None (any parameter missing) means "skip this filter, don't
-        # place zero tabs from a name lookup failing."
-        stock_bounds = None
-        try:
-            x_low = float(setup.parameters.itemByName("stockXLow").expression)
-            x_high = float(setup.parameters.itemByName("stockXHigh").expression)
-            y_low = float(setup.parameters.itemByName("stockYLow").expression)
-            y_high = float(setup.parameters.itemByName("stockYHigh").expression)
-            stock_bounds = (x_low, x_high, y_low, y_high)
-        except Exception as e:
-            app.log(f"TabPlacement: could not read stock bounds, skipping the real-stock-backing check: {e}")
+        stock_bounds = _read_stock_bounds(setup, app)
 
         # Only the ONE contour2d operation the template itself designates
         # for tabs (group_tabs already true in the template's own default,
@@ -1155,7 +1196,8 @@ def ConfigureTabs(
             for body in bodies:
                 perimeter_in = _outer_perimeter_in(body)
                 body_min_tabs = _min_tabs_for_body(body, min_tabs)
-                target_tabs = _tab_count_for_perimeter(perimeter_in, body_min_tabs, max_tabs)
+                body_max_tabs = _max_tabs_for_body(body, max_tabs)
+                target_tabs = _tab_count_for_perimeter(perimeter_in, body_min_tabs, body_max_tabs)
                 body_candidates = select_tab_edges(
                     body,
                     max_tabs=target_tabs,

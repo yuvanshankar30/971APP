@@ -18,7 +18,7 @@ import { buildJobPayload } from '$autocam/fusion/jobPayload.js';
 import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { createClient } from '@supabase/supabase-js';
-import { isAuthorizedFusionRunnerRequest } from '$lib/server/fusion_runner_auth.js';
+import { isAuthorizedFusionRunnerRequest, getBearerToken } from '$lib/server/fusion_runner_auth.js';
 import { validateFusionNcFiles } from '$lib/server/fusion_nc_artifacts.js';
 import { measureNcFileExtents } from '$lib/server/fusion_program_extents.js';
 
@@ -47,7 +47,7 @@ function autoCamArtifactPath(jobId, artifact, index, kind) {
 }
 
 function validateTubeNcArtifacts(ncFiles) {
-  const sides = ncFiles.map((artifact) => String(artifact.name).match(/-side-(12|3|6|9)\.(?:nc|ngc)$/i)?.[1]);
+  const sides = ncFiles.map((artifact) => String(artifact.name).match(/-side-(12|3|6|9)\.(?:nc|ngc|tap)$/i)?.[1]);
   if (ncFiles.length !== 4 || new Set(sides).size !== 4 || sides.some((side) => !side)) {
     throw new Error('Box-tube CAM must post exactly four per-setup NC files: Side 12, Side 3, Side 6, and Side 9');
   }
@@ -173,10 +173,6 @@ async function claimNextJob(supabase, runnerId, machineIds) {
 }
 
 export async function POST({ request, url }) {
-  if (!isAuthorizedFusionRunnerRequest({ url, headers: request.headers, env })) {
-    return json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
   let body;
   try {
     body = await request.json();
@@ -187,6 +183,41 @@ export async function POST({ request, url }) {
   const action = url.searchParams.get('action') || body?.action;
 
   try {
+    // A brand-new Runner has no credential yet by definition, so this is
+    // the one action that runs before the auth gate below - mints a fresh
+    // per-machine token so setup.py never has to ask a human for the
+    // shared FUSION_RUNNER_TOKEN. Direct instruction: works immediately,
+    // no admin-approval step (unlike a newly self-registered cam_machines
+    // row) - see the runner_tokens migration's own comment for the
+    // tradeoff this accepts.
+    if (action === 'register-runner') {
+      const supabase = getServiceSupabase();
+      const token = `frt_${crypto.randomUUID()}`;
+      const { data, error } = await supabase
+        .from('runner_tokens')
+        .insert({ token, name: String(body?.name || '').trim() || null })
+        .select('token')
+        .single();
+      if (error) throw new Error(error.message);
+      return json({ token: data.token });
+    }
+
+    const supabase = getServiceSupabase();
+    let authorized = isAuthorizedFusionRunnerRequest({ url, headers: request.headers, env });
+    if (!authorized) {
+      const bearerToken = getBearerToken(request.headers);
+      if (bearerToken) {
+        const { data: runnerToken } = await supabase
+          .from('runner_tokens')
+          .select('id')
+          .eq('token', bearerToken)
+          .is('revoked_at', null)
+          .maybeSingle();
+        authorized = !!runnerToken;
+      }
+    }
+    if (!authorized) return json({ error: 'Unauthorized' }, { status: 401 });
+
     if (action === 'update-manifest') {
       // The manifest is generated alongside the downloadable Runner zip at
       // build time and contains its version and checksum. Keep discovery
@@ -196,7 +227,6 @@ export async function POST({ request, url }) {
         manifestUrl: `${url.origin}/downloads/SpartanRoboticsAutoCAM-FusionAddIn.manifest.json`
       });
     }
-    const supabase = getServiceSupabase();
     if (action === 'sync-folders') {
       const projectName = String(body?.projectName || '').trim();
       const tree = body?.tree;
@@ -322,7 +352,7 @@ export async function POST({ request, url }) {
         const message = error.message || 'Could not resolve Fusion job inputs';
         const { error: failError } = await supabase.from('cam_jobs')
           .update({ status: 'failed', errors: [message], progress_message: message })
-          .eq('id', job.id).eq('status', 'claimed');
+          .eq('id', job.id).eq('status', 'claimed').eq('claimed_by', runnerId);
         if (failError) throw failError;
         return json({ job: null, error: message });
       }
@@ -465,7 +495,7 @@ export async function POST({ request, url }) {
       return json({ success: true });
     }
 
-    return json({ error: `Unknown action: ${action}. Expected one of: claim, processing, heartbeat, complete, fail, sync-folders, register-machine, grow-plate, recover-own-jobs` }, { status: 400 });
+    return json({ error: `Unknown action: ${action}. Expected one of: claim, processing, heartbeat, complete, fail, sync-folders, register-machine, register-runner, update-manifest, grow-plate, recover-own-jobs` }, { status: 400 });
   } catch (error) {
     return json({ error: error?.message || 'Internal server error' }, { status: 500 });
   }

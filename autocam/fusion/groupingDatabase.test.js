@@ -25,28 +25,32 @@ beforeAll(async () => {
  CREATE FUNCTION approved_user() RETURNS boolean LANGUAGE sql AS $$ SELECT coalesce(current_setting('test.approved',true),'false')='true' $$;
  CREATE FUNCTION update_cam_studio_updated_at() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN NEW.updated_at=now(); RETURN NEW; END $$;
  CREATE TABLE cam_materials(id uuid PRIMARY KEY, name text);
- CREATE TABLE cam_machines(id uuid PRIMARY KEY, enabled boolean);
+ CREATE TABLE cam_machines(id uuid PRIMARY KEY, enabled boolean, name text);
+ CREATE TABLE cam_tools(id uuid PRIMARY KEY, tool_type text);
  CREATE TABLE cam_machine_tools(machine_id uuid,tool_id uuid);
- CREATE TABLE cam_jobs(id uuid DEFAULT gen_random_uuid() PRIMARY KEY, operation_type text, params jsonb, machine_id uuid, tool_id uuid, material_id uuid, part_id bigint, status text);
+ CREATE TABLE cam_jobs(id uuid DEFAULT gen_random_uuid() PRIMARY KEY, name text, source_type text, operation_type text, params jsonb, machine_id uuid, tool_id uuid, material_id uuid, part_id bigint, status text, requested_by uuid);
  `);
  await db.exec(migration('20260820_fusion_cam.sql'));
  await db.exec('ALTER TABLE fusion_parts ADD COLUMN fusion_file_name text');
  await db.exec(migration('20260906_fusion_grouping_integrity.sql'));
  await db.exec(migration('20260909_fusion_multi_tool_snapshot_check.sql'));
+ await db.exec(migration('20260909_fusion_atomic_plate_queue.sql'));
+ await db.exec(migration('20260909_fusion_atomic_plate_queue.sql'));
  await db.exec('GRANT USAGE ON SCHEMA public, auth TO authenticated; GRANT ALL ON ALL TABLES IN SCHEMA public TO authenticated');
 }, 30000);
 afterAll(async () => { await db?.close(); });
 beforeEach(async () => {
- await db.exec(`RESET ROLE; TRUNCATE cam_jobs, cam_materials, cam_machines, cam_machine_tools, user_profiles CASCADE;
+ await db.exec(`RESET ROLE; TRUNCATE cam_jobs, cam_materials, cam_machines, cam_tools, cam_machine_tools, user_profiles CASCADE;
  SET test.approved='true'; SET test.uid='${id(100)}';
  INSERT INTO user_profiles VALUES ('${id(100)}','admin','lead',NULL,false);
- INSERT INTO cam_materials VALUES ('${id(50)}','Aluminum');
+ INSERT INTO cam_materials VALUES ('${id(50)}','Aluminum 6061');
  INSERT INTO fusion_part_categories(id,material_id,thickness) VALUES ('${id(1)}','${id(50)}',0.125),('${id(2)}','${id(50)}',0.25);
  INSERT INTO fusion_plates(id,name,width,length,true_depth,category_id) VALUES
  ('${id(10)}','Plate A',12,24,0.125,'${id(1)}'),('${id(11)}','Plate B',12,24,0.125,'${id(1)}');
  INSERT INTO fusion_parts(id,name,quantity,original_quantity,category_id,step_file_name) VALUES
  ('${id(20)}','Part A',5,5,'${id(1)}','a.step'),('${id(21)}','Part B',4,4,'${id(1)}','b.step');
- INSERT INTO cam_machines(id,enabled) VALUES ('${id(30)}',true);
+ INSERT INTO cam_machines(id,enabled,name) VALUES ('${id(30)}',true,'New Router');
+ INSERT INTO cam_tools VALUES ('${id(40)}','flat end mill');
  INSERT INTO cam_machine_tools VALUES ('${id(30)}','${id(40)}');`);
 });
 
@@ -113,6 +117,83 @@ describe('Fusion grouping PostgreSQL migration', () => {
      ('milling',$1,$2,NULL,'queued') RETURNING *`, [{
        fusionJobKind: 'plate:cam', plateId: id(10), fusionGroupingMode: 'single', selectedPartId: id(20), multiToolMode: true
      }, id(30)])).rejects.toThrow(/enabled plate machine/);
+ });
+ it('atomically replaces the shared plate assignments and snapshots exactly that queued selection', async () => {
+   await assign(1);
+   const result = await run(`SELECT (public.queue_fusion_plate_job(
+     $1, $2, $3, $4, $5, NULL, NULL, NULL, NULL, 'grouped', false, false
+   )).*`, [id(10), [{ partId: id(20), quantity: 2 }, { partId: id(21), quantity: 3 }], id(30), id(40), 'Grouped job']);
+   expect(result.rows).toHaveLength(1);
+   const assignments = (await run('SELECT part_id,quantity FROM fusion_part_category_assignments WHERE plate_id=$1 ORDER BY part_id',[id(10)])).rows;
+   expect(assignments).toEqual([{ part_id: id(20), quantity: 2 }, { part_id: id(21), quantity: 3 }]);
+   expect(result.rows[0].params.fusionPlateSnapshot.assignments).toEqual([
+     expect.objectContaining({ part_id: id(20), quantity: 2 }),
+     expect.objectContaining({ part_id: id(21), quantity: 3 })
+   ]);
+ });
+ it('attributes browser-queued jobs to the authenticated caller, not a supplied user id', async () => {
+   await db.exec('SET ROLE authenticated');
+   const result = await run(`SELECT (public.queue_fusion_plate_job(
+     $1, $2, $3, $4, $5, $6, NULL, NULL, NULL, 'single', false, false
+   )).*`, [id(10), [{ partId: id(20), quantity: 1 }], id(30), id(40), 'Owned job', id(999)]);
+   expect(result.rows[0].requested_by).toBe(id(100));
+   await db.exec('RESET ROLE');
+ });
+ it('rolls back every assignment change when the atomic job insert fails', async () => {
+   await assign(2);
+   await expect(run(`SELECT public.queue_fusion_plate_job(
+     $1, $2, $3, $4, $5, NULL, NULL, NULL, NULL, 'single', false, false
+   )`, [id(10), [{ partId: id(21), quantity: 3 }], id(31), id(40), 'Invalid machine'])).rejects.toThrow(/enabled plate machine/);
+   expect((await run('SELECT part_id,quantity FROM fusion_part_category_assignments WHERE plate_id=$1',[id(10)])).rows)
+     .toEqual([{ part_id: id(20), quantity: 2 }]);
+   expect((await run('SELECT * FROM cam_jobs')).rows).toHaveLength(0);
+ });
+ it('rejects an atomic queue quantity above the part request without changing the nest', async () => {
+   await assign(2);
+   await expect(run(`SELECT public.queue_fusion_plate_job(
+     $1, $2, $3, $4, $5, NULL, NULL, NULL, NULL, 'single', false, false
+   )`, [id(10), [{ partId: id(20), quantity: 6 }], id(30), id(40), 'Too many'])).rejects.toThrow(/not exceed/);
+   expect((await run('SELECT part_id,quantity FROM fusion_part_category_assignments WHERE plate_id=$1',[id(10)])).rows)
+     .toEqual([{ part_id: id(20), quantity: 2 }]);
+ });
+ it('enforces New Router and Aluminum 6061 for automatic tool swaps in the database', async () => {
+   await assign(2);
+   await run("UPDATE cam_materials SET name='SRPP' WHERE id=$1", [id(50)]);
+   await expect(run(`INSERT INTO cam_jobs (operation_type,params,machine_id,tool_id,status) VALUES
+     ('milling',$1,$2,NULL,'queued')`, [{
+       fusionJobKind:'plate:cam', plateId:id(10), fusionGroupingMode:'single', selectedPartId:id(20), multiToolMode:true
+     }, id(30)])).rejects.toThrow(/only for Aluminum 6061/);
+   await run("UPDATE cam_materials SET name='Aluminum 6061' WHERE id=$1", [id(50)]);
+   await run("UPDATE cam_machines SET name='UNC Router' WHERE id=$1", [id(30)]);
+   await expect(run(`INSERT INTO cam_jobs (operation_type,params,machine_id,tool_id,status) VALUES
+     ('milling',$1,$2,NULL,'queued')`, [{
+       fusionJobKind:'plate:cam', plateId:id(10), fusionGroupingMode:'single', selectedPartId:id(20), multiToolMode:true
+     }, id(30)])).rejects.toThrow(/only on New Router/);
+ });
+ it('rejects invalid tube machines, materials, and cutter types in the database', async () => {
+   await expect(run(`INSERT INTO cam_jobs(operation_type,params,machine_id,tool_id,material_id,status)
+     VALUES ('milling',$1,$2,$3,$4,'queued')`, [
+       { fusionJobKind:'box_tube', boxTubeId:id(60), singleToolMode:true }, id(30), id(40), id(50)
+     ])).rejects.toThrow(/enabled tube machine/);
+   await run('UPDATE cam_machines SET can_run_box_tubes=true WHERE id=$1',[id(30)]);
+   await run("UPDATE cam_materials SET name='SRPP' WHERE id=$1",[id(50)]);
+   await expect(run(`INSERT INTO cam_jobs(operation_type,params,machine_id,tool_id,material_id,status)
+     VALUES ('milling',$1,$2,$3,$4,'queued')`, [
+       { fusionJobKind:'box_tube', boxTubeId:id(60), singleToolMode:true }, id(30), id(40), id(50)
+     ])).rejects.toThrow(/aluminum material/);
+   await run("UPDATE cam_materials SET name='Aluminum 6061' WHERE id=$1",[id(50)]);
+   await run("UPDATE cam_tools SET tool_type='drill' WHERE id=$1",[id(40)]);
+   await expect(run(`INSERT INTO cam_jobs(operation_type,params,machine_id,tool_id,material_id,status)
+     VALUES ('milling',$1,$2,$3,$4,'queued')`, [
+       { fusionJobKind:'box_tube', boxTubeId:id(60), singleToolMode:true }, id(30), id(40), id(50)
+     ])).rejects.toThrow(/requires an endmill/);
+ });
+ it('finds historical plate jobs through immutable snapshots after the live nest changes', async () => {
+   await assign(2);
+   const job = (await queue('single', id(20))).rows[0];
+   await run('DELETE FROM fusion_part_category_assignments WHERE plate_id=$1',[id(10)]);
+   const links = await run('SELECT * FROM public.fusion_plate_job_links($1)', [[id(20)]]);
+   expect(links.rows).toEqual([{ fusion_part_id: id(20), job_id: job.id }]);
  });
  it('captures every assignment and protects queued inputs from later edits', async () => {
    await assign(2); await assign(3,10,21);

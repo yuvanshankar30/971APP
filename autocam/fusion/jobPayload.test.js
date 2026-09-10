@@ -76,6 +76,7 @@ describe('Fusion plate payloads',()=>{
  });
  it('sends loaded endmill and drill candidates, not every installed tool, for auto multi-tool CAM',async()=>{
   const value=job(); value.machine_id='router'; value.tool_id='endmill'; value.params.multiToolMode=true;
+  value.cam_machines={name:'New Router'}; value.params.fusionPlateSnapshot.material='Aluminum 6061';
   const database={
    storage:db().storage,
    from:(table)=>table==='cam_machine_tools'?{select:()=>({eq:async()=>({data:[
@@ -93,6 +94,7 @@ describe('Fusion plate payloads',()=>{
   // legacy pre-import tool row) - multi-tool mode doesn't use that field at
   // all, so it must not be validated against the loaded candidate set.
   const value=job(); value.machine_id='router'; value.tool_id='stale-legacy-tool'; value.params.multiToolMode=true;
+  value.cam_machines={name:'New Router'}; value.params.fusionPlateSnapshot.material='Aluminum 6061';
   const database={
    storage:db().storage,
    from:(table)=>table==='cam_machine_tools'?{select:()=>({eq:async()=>({data:[
@@ -104,6 +106,18 @@ describe('Fusion plate payloads',()=>{
    multi_tool_mode:true, tool_items:[{tool_guid:'endmill-guid'}]
   });
  });
+ it('rejects multi-tool mode away from New Router or Aluminum 6061',async()=>{
+  const wrongMachine=job(); wrongMachine.params.multiToolMode=true; wrongMachine.cam_machines={name:'UNC Router'};
+  wrongMachine.params.fusionPlateSnapshot.material='Aluminum 6061';
+  await expect(buildJobPayload(db(),wrongMachine)).rejects.toThrow(/only on New Router/);
+  const wrongMaterial=job(); wrongMaterial.params.multiToolMode=true; wrongMaterial.cam_machines={name:'New Router'};
+  wrongMaterial.params.fusionPlateSnapshot.material='SRPP';
+  await expect(buildJobPayload(db(),wrongMaterial)).rejects.toThrow(/only for Aluminum 6061/);
+ });
+ it('rejects contradictory single-tool and multi-tool modes',async()=>{
+  const value=job(); value.params.singleToolMode=true; value.params.multiToolMode=true;
+  await expect(buildJobPayload(db(),value)).rejects.toThrow(/cannot both/);
+ });
 });
 
 describe('Fusion plate payload tab_count override',()=>{
@@ -112,6 +126,11 @@ describe('Fusion plate payload tab_count override',()=>{
  // this must clamp rather than pass a value through as-is.
  it('is null when the operator never set one - stays automatic',async()=>{
   const payload=await buildJobPayload(db(),job());
+  expect(payload.tab_count).toBeNull();
+ });
+ it('is null when the queue explicitly stores its unset value as null',async()=>{
+  const j=job(); j.params.tabCount=null;
+  const payload=await buildJobPayload(db(),j);
   expect(payload.tab_count).toBeNull();
  });
  it('passes a normal in-range value through unchanged',async()=>{
@@ -137,15 +156,23 @@ describe('Fusion plate payload tab_count override',()=>{
 });
 
 describe('Fusion box-tube payloads',()=>{
- const tubeJob=()=>({params:{fusionJobKind:'box_tube',boxTubeId:'tube-1',fusionFileName:'BottomTube',fusionFolderPath:'Offseason Projects/AutoCAM/Tubes'}});
+ const tubeJob=()=>({machine_id:'router',tool_id:'main-bit',cam_tools:{tool_type:'flat end mill'},cam_machines:{name:'UNC Router'},params:{fusionJobKind:'box_tube',boxTubeId:'tube-1',fusionFileName:'BottomTube',fusionFolderPath:'Offseason Projects/AutoCAM/Tubes'}});
  const tubeDb=()=>({
   storage:{from:()=>({createSignedUrl:vi.fn(async()=>({data:{signedUrl:'https://example.invalid/tube.step'}}))})},
-  from:()=>({select:()=>({eq:()=>({single:async()=>({data:{id:'tube-1',step_file_name:'tube.step'}})})})})
+  from:(table)=>table==='cam_machine_tools'
+   ?{select:()=>({eq:async()=>({data:[{tool_id:'main-bit',cam_tools:{tool_library_guid:'main-guid',tool_type:'flat end mill'}}]})})}
+   :{select:()=>({eq:()=>({single:async()=>({data:{id:'tube-1',step_file_name:'tube.step'}})})})}
  });
  it('forwards the requested Fusion document name and folder to the runner',async()=>{
   await expect(buildJobPayload(tubeDb(),tubeJob())).resolves.toMatchObject({
-   box_tube_id:'tube-1', fusion_file_name:'BottomTube', fusion_folder_path:'Offseason Projects/AutoCAM/Tubes'
+   box_tube_id:'tube-1', fusion_file_name:'BottomTube', fusion_folder_path:'Offseason Projects/AutoCAM/Tubes', orientation:'vertical'
   });
+ });
+ it('forwards a valid tube orientation and normalizes invalid legacy values',async()=>{
+  const horizontal=tubeJob(); horizontal.params.orientation=' HORIZONTAL ';
+  await expect(buildJobPayload(tubeDb(),horizontal)).resolves.toMatchObject({orientation:'horizontal'});
+  const invalid=tubeJob(); invalid.params.orientation='diagonal';
+  await expect(buildJobPayload(tubeDb(),invalid)).resolves.toMatchObject({orientation:'vertical'});
  });
  it('keeps old tube jobs compatible when no save destination was selected',async()=>{
   const value=tubeJob(); delete value.params.fusionFileName; delete value.params.fusionFolderPath;
@@ -170,7 +197,34 @@ describe('Fusion box-tube payloads',()=>{
     :{select:()=>({eq:()=>({single:async()=>({data:{id:'tube-1',step_file_name:'tube.step'}})})})}
   };
   await expect(buildJobPayload(database,value)).resolves.toMatchObject({
-   box_tube_id:'tube-1', tool_id:'unc-bit'
+   box_tube_id:'tube-1', tool_id:'unc-bit', tool_items:[]
   });
+ });
+ it('sends only the selected tube cutter to Fusion',async()=>{
+  const value=tubeJob(); value.machine_id='new-router'; value.tool_id='main-bit'; value.params.singleToolMode=true;
+  value.cam_tools={tool_type:'flat end mill'}; value.cam_machines={name:'New Router'};
+  const database={
+   storage:tubeDb().storage,
+   from:(table)=>table==='cam_machine_tools'
+    ?{select:()=>({eq:async()=>({data:[
+      {tool_id:'main-bit',cam_tools:{tool_library_guid:'main-guid',tool_type:'flat end mill'}},
+      {tool_id:'other-bit',cam_tools:{tool_library_guid:'other-guid',tool_type:'flat end mill'}}
+    ]})})}
+    :{select:()=>({eq:()=>({single:async()=>({data:{id:'tube-1',step_file_name:'tube.step'}})})})}
+  };
+  await expect(buildJobPayload(database,value)).resolves.toMatchObject({
+   single_tool_mode:true, tool_items:[{tool_id:'main-bit',tool_guid:'main-guid'}]
+  });
+ });
+ it('rejects a New Router single tool with no Fusion library identity',async()=>{
+  const value=tubeJob(); value.machine_id='new-router'; value.tool_id='bad-bit'; value.params.singleToolMode=true;
+  value.cam_tools={tool_type:'flat end mill'}; value.cam_machines={name:'New Router'};
+  const database={
+   storage:tubeDb().storage,
+   from:(table)=>table==='cam_machine_tools'
+    ?{select:()=>({eq:async()=>({data:[{tool_id:'bad-bit',cam_tools:{tool_library_guid:null,tool_type:'flat end mill'}}]})})}
+    :{select:()=>({eq:()=>({single:async()=>({data:{id:'tube-1',step_file_name:'tube.step'}})})})}
+  };
+  await expect(buildJobPayload(database,value)).rejects.toThrow(/no bundled Fusion tool-library identity/i);
  });
 });

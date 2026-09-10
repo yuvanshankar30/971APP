@@ -303,6 +303,8 @@
       materialId,
       fusionFileName: fusionFileName || null,
       fusionFolderPath: fusionFolderPath || null,
+      orientation: 'vertical',
+      singleToolMode: true,
       requestedBy: user?.id,
       name: `Tube Stock CAM: ${boxTube.name}`,
       // This is intentionally a clean 1:1 link. Tube stock is linear,

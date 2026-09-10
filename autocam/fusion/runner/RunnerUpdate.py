@@ -53,13 +53,25 @@ def _safe_extract(archive, destination):
     archive.extractall(destination)
 
 
-def check_and_stage_update(session, base_url, addin_dir, timeout=30):
+def check_and_stage_update(session, base_url, addin_dir, timeout=30, symlinked=False):
     """Install a newer remote release and return its version, else ``None``.
 
     ``session`` already carries the Runner bearer token. The API gives the
     manifest URL only to an authenticated Runner; the manifest supplies the
     immutable artifact URL and its SHA-256 digest.
+
+    ``symlinked`` - True when the installed add-in is actually a live git
+    checkout reached through a symlink (the team guide's "never reinstall
+    again" setup: install_addin() in setup.py deliberately leaves a
+    symlinked install alone rather than copying over it). Silently
+    overwriting files there would leave uncommitted local changes in that
+    git working tree, which could conflict with a later ``git pull`` - so
+    this is a no-op for a symlinked install; ``git pull`` is already that
+    machine's own update path.
     """
+    if symlinked:
+        return None
+
     response = session.post(
         "{}/api/fusion-runner?action=update-manifest".format(base_url.rstrip("/")),
         json={},

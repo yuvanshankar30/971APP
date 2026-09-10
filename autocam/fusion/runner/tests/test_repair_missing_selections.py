@@ -208,5 +208,59 @@ class RepairMissingSelectionsEmptyThroughBucketTests(unittest.TestCase):
         self.assertIn(op.name, repaired)
 
 
+class ThroughShapeOpsExcludesBoreStrategyTests(unittest.TestCase):
+    def test_a_misspelled_circluar_bore_op_never_gets_a_shape_chain(self):
+        # Real, confirmed live crash (via direct Fusion introspection on a
+        # real running document, not guesswork): a real template's own
+        # small-hole bore operation is misspelled "Circluar" (not
+        # "Circular"), so through_shape_ops's purely name-based
+        # "circular" not in name check let it straight through as a
+        # "through shape" op. It then got reclassified as a roughing
+        # candidate (bore != contour2d) in _split_through_roughing_ops and
+        # had an arbitrary internal feature's rectangular ChainSelection
+        # assigned to it instead of its own real circular-hole geometry -
+        # meanwhile that rectangular feature never got a real roughing
+        # pass of its own. DeleteToolpaths.py now also excludes
+        # strategy == "bore" outright, independent of any name spelling.
+        namespace = _load_repair_missing_selections()
+        repair_missing_selections = namespace["_repair_missing_selections"]
+
+        bore_op, bore_deleted, bore_apply_calls = _through_shape_op(
+            name="<.3 Circluar Through Hole", strategy="bore", operation_id="bore1"
+        )
+        # This op's own selection already looks "healthy" (non-empty, no
+        # warnings) so the plain _needs_repair fallback branch (the one a
+        # correctly-excluded bore op should land in) skips it outright -
+        # proving it was never routed into the through-shape/roughing
+        # machinery at all, not just that it happened to get an empty
+        # split bucket.
+        bore_op.parameters.itemByName("pockets").value.getCurveSelections().entries.append(
+            types.SimpleNamespace(hasWarning=False)
+        )
+
+        shape_op, shape_deleted, shape_apply_calls = _through_shape_op(
+            name="Shape Through Hole", strategy="adaptive2d", operation_id="shape1"
+        )
+
+        setup = types.SimpleNamespace(operations=[bore_op, shape_op])
+
+        namespace["_internal_feature_loop_chains_all_bodies"] = (
+            lambda design: ([(types.SimpleNamespace(), False, 2.0)], [])
+        )
+        roughing_calls = []
+
+        def _fake_split(roughing_ops, shape_only):
+            roughing_calls.append([op.operationId for op in roughing_ops])
+            return {op.operationId: [(types.SimpleNamespace(), False)] for op in roughing_ops}
+
+        namespace["_split_through_roughing_ops"] = _fake_split
+
+        repair_missing_selections(setup)
+
+        self.assertEqual(roughing_calls, [["shape1"]])
+        self.assertEqual(bore_apply_calls, [])
+        self.assertEqual(bore_deleted, [])
+
+
 if __name__ == "__main__":
     unittest.main()

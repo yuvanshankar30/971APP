@@ -11,7 +11,7 @@
   import SeasonFilter from '$lib/components/SeasonFilter.svelte';
   import { goto } from '$app/navigation';
   import { PUBLIC_ONSHAPE_BASE_URL } from '$env/static/public';
-  import { Search, Filter, Clock, Truck, Package, Download, Zap, Wrench, FileText, Upload, ExternalLink, Pencil, Trash2, X, Users, Box, Route, CircleCheck, Layers, Folder } from 'lucide-svelte';
+  import { Search, Filter, Clock, Truck, Package, Download, Zap, Wrench, FileText, Upload, ExternalLink, Pencil, Trash2, X, Users, Box, Route, CircleCheck, Layers, Folder, ListChecks, BookOpen } from 'lucide-svelte';
   import { searchFolderTree } from '$lib/fusionFolderSearch.js';
   import ROUTER_FLOW from '$lib/router_flow.json';
   import { getDisplayStatus, BUTTONS, getBadgeClass, getWorkflowStatuses } from '$lib/statuses.js';
@@ -23,7 +23,7 @@
   import PartDueDate from '$lib/components/PartDueDate.svelte';
   import PartNotes from '$lib/components/PartNotes.svelte';
   import FolderTreeNode from '../autocam/fusion/FolderTreeNode.svelte';
-  import { fetchFusionJobsByManufacturingPartIds, fetchFusionJobUpdates, fetchFusionJobNcFiles, fetchPartCategories, fetchPlates, createPart, createPlate, assignPartToPlate, createBoxTube, queueFusionJob, fetchFusionFolderTree } from '$lib/fusionCam.js';
+  import { fetchFusionJobsByManufacturingPartIds, fetchFusionJobUpdates, fetchFusionJobNcFiles, fetchPartCategories, fetchPlates, createPart, createPlate, createBoxTube, queueFusionJob, queueFusionPlateJob, fetchFusionFolderTree } from '$lib/fusionCam.js';
   import AtcSlotConfig from '$autocam/components/AtcSlotConfig.svelte';
   import { buildStockMaterialIndex, materialIdForStockAssignment, stockCatalogIdForStockAssignment } from '$autocam/stockMaterial.js';
 
@@ -33,7 +33,10 @@
   const FUSION_JOB_STATUS_LABELS = {
     queued: 'Queued - waiting for a Runner',
     claimed: 'Claimed by a Runner',
-    processing: 'Processing in Fusion 360'
+    processing: 'Processing in Fusion 360',
+    completed: 'Completed',
+    failed: 'Failed',
+    rejected: 'Rejected'
   };
   const QUICK_PRINT_STOCK_OPTIONS = stockData['3d-print'] || [];
   const DEFAULT_PETG_STOCK = QUICK_PRINT_STOCK_OPTIONS.find((stock) => stock.material === 'PETG')?.description || 'PETG 3D Printing Filament';
@@ -152,7 +155,7 @@
   ];
   
   // Get workflow-specific statuses for edit modal
-  $: editStatusOptions = filterRestrictedStatusOptions(editWorkflow ? getWorkflowStatuses(editWorkflow) : statuses);
+  $: editStatusOptions = filterRestrictedStatusOptions(editWorkflow ? getWorkflowStatuses(editWorkflow) : statuses, editPart?.status);
 
   function isPartFullyCompleted(part) {
     if (part?.workflow === 'router') return isFullyKitted(part);
@@ -172,9 +175,20 @@
     return `tag-workflow-${workflow.toLowerCase().replace(/_/g, '-')}`;
   }
 
-  function filterRestrictedStatusOptions(options = []) {
+  // Real, confirmed bug this currentStatus param fixes: a non-lead opening
+  // the edit/preview modal on an already-CAM-Reviewed part got a status
+  // <select> bound to 'cammed' while the options list had already filtered
+  // 'cammed' out entirely - the browser then shows the select with nothing
+  // matching its bound value, which some browsers resolve by silently
+  // treating the first option as selected without ever telling Svelte's
+  // binding it changed. Changing the dropdown after that could look like it
+  // did nothing at all once saved. 'cammed' stays visible (and, once
+  // selected away from, no longer offered again) whenever it's the part's
+  // own current status, regardless of role - only *setting* a part to
+  // CAM Reviewed fresh stays lead-only (see assertCanCamReview below).
+  function filterRestrictedStatusOptions(options = [], currentStatus = null) {
     if (canCamReview) return options;
-    return options.filter((option) => option?.value !== 'cammed');
+    return options.filter((option) => option?.value !== 'cammed' || option?.value === currentStatus);
   }
 
   function assertCanCamReview() {
@@ -300,7 +314,18 @@
 
   onMount(() => {
     const interval = setInterval(refreshActiveFusionJobs, 10000);
-    return () => clearInterval(interval);
+    // refreshActiveFusionJobs already skips ticks while the tab is hidden
+    // (no point polling what nobody's looking at), but that meant coming
+    // back from another tab/app - the exact moment someone actually wants
+    // to see whether a job finished while they were away - still waited
+    // out the rest of whatever the 10s interval had left. Checks the
+    // instant the tab becomes visible again instead of making them wait.
+    const onVisible = () => { if (!document.hidden) refreshActiveFusionJobs(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   });
 
   $: highlightedPartId = $page.url.searchParams.get('part');
@@ -606,30 +631,76 @@
     return downloadFromStorage(part.file_name, part.id);
   }
 
-  // Downloads every G-code file a completed Fusion CAM job produced - same
-  // base64-decode technique JobQueueTab.svelte's downloadNcFile uses, just
-  // triggered from the Manufacturing page instead of the Fusion CAM Jobs tab.
+  // Loads a job's G-code files once and caches them on the same job object
+  // fusionJobsByPart already holds - shared by the details modal below and
+  // downloadFusionNcFiles, so opening the modal and then downloading never
+  // fetches the (base64, so non-trivial) payload twice.
+  async function ensureNcFiles(job) {
+    if (Array.isArray(job.fusion_nc_files)) return job.fusion_nc_files;
+    const files = await fetchFusionJobNcFiles(job.id);
+    for (const key of Object.keys(fusionJobsByPart)) {
+      if (fusionJobsByPart[key]?.id === job.id) fusionJobsByPart[key] = { ...fusionJobsByPart[key], fusion_nc_files: files };
+    }
+    fusionJobsByPart = { ...fusionJobsByPart };
+    return files;
+  }
+
+  function downloadNcFile(file) {
+    const binary = atob(file.contentBase64);
+    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+    const blob = new Blob([bytes], { type: 'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = file.name.split('/').at(-1) || 'fusion-output.nc';
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // Downloads every G-code file a completed Fusion CAM job produced in one
+  // go - the details modal below lists them individually for a one-at-a-
+  // time install instead.
   async function downloadFusionNcFiles(job) {
     try {
-      const files = Array.isArray(job.fusion_nc_files) ? job.fusion_nc_files : await fetchFusionJobNcFiles(job.id);
-      for (const key of Object.keys(fusionJobsByPart)) {
-        if (fusionJobsByPart[key]?.id === job.id) fusionJobsByPart[key] = { ...fusionJobsByPart[key], fusion_nc_files: files };
-      }
-      fusionJobsByPart = { ...fusionJobsByPart };
-      for (const file of files) {
-        const binary = atob(file.contentBase64);
-        const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-        const blob = new Blob([bytes], { type: 'application/octet-stream' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = file.name.split('/').at(-1) || 'fusion-output.nc';
-        a.click();
-        URL.revokeObjectURL(url);
-      }
+      const files = await ensureNcFiles(job);
+      for (const file of files) downloadNcFile(file);
     } catch (error) {
       showToastMessage(error.message || 'Failed to download Fusion G-code', 'error');
     }
+  }
+
+  // Job details popup - real gap this closes: the only way to see a
+  // queued/completed Fusion CAM job's actual settings (where it saved in
+  // Fusion, which router/tool it used, whether it was grouped with other
+  // parts) was to remember them from when it was queued. Works the same
+  // for a tube job, just without the grouping field - a tube can never be
+  // grouped with anything else (see GroupingValidation.py's own plate-only
+  // scope) and can post more than one G-code file (one per cut side).
+  let jobDetailsModalJob = null;
+  let jobDetailsLoading = false;
+
+  async function openJobDetailsModal(job) {
+    jobDetailsModalJob = job;
+    if (job.status !== 'completed' || Array.isArray(job.fusion_nc_files)) return;
+    jobDetailsLoading = true;
+    try {
+      const files = await ensureNcFiles(job);
+      if (jobDetailsModalJob?.id === job.id) jobDetailsModalJob = { ...job, fusion_nc_files: files };
+    } catch (error) {
+      showToastMessage(error.message || 'Failed to load G-code files', 'error');
+    } finally {
+      jobDetailsLoading = false;
+    }
+  }
+
+  function closeJobDetailsModal() {
+    jobDetailsModalJob = null;
+  }
+
+  function jobDetailsToolLabel(job) {
+    if (job.cam_tools?.name) return job.cam_tools.name;
+    if (job.params?.multiToolMode) return 'Auto multi-tool';
+    return 'No tool assigned';
   }
 
   async function sendNotification(type, payload = {}) {
@@ -1263,7 +1334,12 @@
     if (!Number.isInteger(quantity) || quantity < 1) return showToastMessage('Quantity must be a whole number greater than zero', 'error');
     const machine = fusionQueueMachines.find((candidate) => String(candidate.id) === String(fusionQueueMachineId));
     if (!machine || !(fusionQueueKind === 'tube' ? machine.can_run_box_tubes : machine.can_run_plates)) return showToastMessage('Choose a compatible router', 'error');
-    const isAutoMultiTool = fusionQueueKind === 'plate' && isNewRouter(fusionQueueMachineId) && !fusionQueueSingleToolMode;
+    const selectedCategory = fusionQueueCategories.find((candidate) => String(candidate.id) === String(fusionQueueCategoryId));
+    const selectedMaterialName = String(selectedCategory?.cam_materials?.name || '').trim().toLowerCase();
+    const isAluminum6061 = ['aluminum 6061', 'aluminium 6061', '6061 aluminum', '6061 aluminium'].includes(selectedMaterialName);
+    const requestedAutoMultiTool = fusionQueueKind === 'plate' && isNewRouter(fusionQueueMachineId) && !fusionQueueSingleToolMode;
+    if (requestedAutoMultiTool && !isAluminum6061) return showToastMessage('Automatic tool swaps are available only for Aluminum 6061', 'error');
+    const isAutoMultiTool = fusionQueueKind === 'plate' && isNewRouter(fusionQueueMachineId) && isAluminum6061 && !fusionQueueSingleToolMode;
     if (!isAutoMultiTool && !fusionQueueTools(fusionQueueMachineId).some((tool) => String(tool.id) === String(fusionQueueToolId))) return showToastMessage('Choose a tool installed on this router', 'error');
     if (fusionQueueKind === 'plate' && !fusionQueueCategoryId) return showToastMessage('Choose a material and thickness', 'error');
     if (fusionQueueKind === 'tube' && !fusionQueueMaterials.some((material) => String(material.id) === String(fusionQueueMaterialId) && /alumin(?:um|ium)/i.test(material.name || ''))) return showToastMessage('Choose an aluminum material for tube stock', 'error');
@@ -1272,16 +1348,15 @@
       const stepFile = await manufacturingStepFile(part);
       if (fusionQueueKind === 'tube') {
         const tube = await createBoxTube({ name: part.name, epic: part.epic, ticket: part.ticket, quantity, stepFile, createdBy: user?.id, partId: part.id, projectId: part.project_id, stockAssignment: part.stock_assignment });
-        await queueFusionJob({ fusionJobKind: 'box_tube', boxTubeId: tube.id, machineId: fusionQueueMachineId, toolId: fusionQueueToolId, materialId: fusionQueueMaterialId, requestedBy: user?.id, partId: part.id, name: `Tube Stock CAM: ${part.name}`, fusionFileName: fusionQueueFileName.trim() || null, fusionFolderPath: fusionQueueFolderPath || null });
+        await queueFusionJob({ fusionJobKind: 'box_tube', boxTubeId: tube.id, machineId: fusionQueueMachineId, toolId: fusionQueueToolId, materialId: fusionQueueMaterialId, requestedBy: user?.id, partId: part.id, name: `Tube Stock CAM: ${part.name}`, fusionFileName: fusionQueueFileName.trim() || null, fusionFolderPath: fusionQueueFolderPath || null, orientation: 'vertical', singleToolMode: true });
       } else {
         const category = fusionQueueCategories.find((candidate) => String(candidate.id) === String(fusionQueueCategoryId));
         const fusionPart = await createPart({ name: part.name, epic: part.epic, ticket: part.ticket, quantity, categoryId: category.id, stepFile, createdBy: user?.id, partId: part.id, fusionFileName: fusionQueueFileName.trim() || null, projectId: part.project_id, stockAssignment: part.stock_assignment });
         const plates = await fetchPlates();
         let plate = plates.find((candidate) => String(candidate.category_id) === String(category.id));
         if (!plate) plate = await createPlate({ name: `Auto stock - ${fusionQueueCategoryLabel(category)}`, width: 100, length: 100, trueDepth: Number(category.thickness), categoryId: category.id });
-        await assignPartToPlate({ categoryId: category.id, plateId: plate.id, partId: fusionPart.id, quantity });
-        await queueFusionJob({
-          fusionJobKind: 'plate:cam', plateId: plate.id, machineId: fusionQueueMachineId, toolId: isAutoMultiTool ? null : fusionQueueToolId, materialId: category.material_id, requestedBy: user?.id, name: `Fusion CAM: ${part.name}`, groupingMode: 'single', selectedPartId: fusionPart.id, fusionFileName: fusionQueueFileName.trim() || null, fusionFolderPath: fusionQueueFolderPath || null,
+        await queueFusionPlateJob({
+          plateId: plate.id, assignments: [{ partId: fusionPart.id, quantity }], machineId: fusionQueueMachineId, toolId: isAutoMultiTool ? null : fusionQueueToolId, requestedBy: user?.id, name: `Fusion CAM: ${part.name}`, groupingMode: 'single', fusionFileName: fusionQueueFileName.trim() || null, fusionFolderPath: fusionQueueFolderPath || null,
           singleToolMode: isNewRouter(fusionQueueMachineId) && fusionQueueSingleToolMode,
           multiToolMode: isAutoMultiTool,
         });
@@ -1772,8 +1847,13 @@
         .update(update)
         .eq('id', previewPart.id);
       if (error) throw error;
+      // See saveEdits' matching comment - clearing a stale router_meta.step
+      // is required or getDisplayStatus keeps forcing "CAM Review Pending"
+      // regardless of the real status just written above.
       if (previewStatus === 'cam_review') {
         try { await updateRouterMeta(previewPart, { step: 'cam_review' }); } catch (e) { console.warn('updateRouterMeta failed:', e); }
+      } else if (getRouterMeta(previewPart).step === 'cam_review') {
+        try { await updateRouterMeta(previewPart, { step: null }); } catch (e) { console.warn('updateRouterMeta failed:', e); }
       }
       await loadParts();
       showToastMessage('Part updated');
@@ -1798,7 +1878,7 @@
   }
 
   $: previewStockOptions = previewWorkflow ? (stockData[previewWorkflow] || []).map(s => s.description) : [];
-  $: previewStatusOptions = filterRestrictedStatusOptions(previewWorkflow ? getWorkflowStatuses(previewWorkflow) : statuses);
+  $: previewStatusOptions = filterRestrictedStatusOptions(previewWorkflow ? getWorkflowStatuses(previewWorkflow) : statuses, previewPart?.status);
 
   function closeEditModal() {
     showEditModal = false;
@@ -1829,9 +1909,18 @@
         .update(update)
         .eq('id', editPart.id);
       if (error) throw error;
-      // If the pseudo-status was selected, ensure router_meta step is set
+      // If the pseudo-status was selected, ensure router_meta step is set.
+      // Real, confirmed bug the else branch fixes: getDisplayStatus forces
+      // the "CAM Review Pending" label whenever router_meta.step is still
+      // 'cam_review', regardless of the real status column - so picking any
+      // other status here (including plain Pending) wrote the DB update
+      // correctly but the part kept showing its old "reviewed" label
+      // forever, since nothing ever cleared this stale step. Every
+      // subsequent status change looked like it silently did nothing.
       if (editStatus === 'cam_review') {
         try { await updateRouterMeta(editPart, { step: 'cam_review' }); } catch (e) { console.warn('updateRouterMeta failed:', e); }
+      } else if (getRouterMeta(editPart).step === 'cam_review') {
+        try { await updateRouterMeta(editPart, { step: null }); } catch (e) { console.warn('updateRouterMeta failed:', e); }
       }
       await loadParts();
       showToastMessage('Part updated');
@@ -2282,9 +2371,9 @@
               <button class="btn btn-secondary btn-sm" on:click={() => installCadStepFile(part)} title="Download STEP file">
                 <Download size={14} /> Install CAD
               </button>
-              {#if fusionJob?.status === 'completed' && fusionJob.params?.fusionJobKind !== 'plate:arrange'}
-                <button class="btn btn-secondary btn-sm" on:click={() => downloadFusionNcFiles(fusionJob)} title="Download G-code">
-                  <Download size={14} /> Install G-code
+              {#if fusionJob && fusionJob.params?.fusionJobKind !== 'plate:arrange'}
+                <button class="btn btn-secondary btn-sm" on:click={() => openJobDetailsModal(fusionJob)} title="View Fusion CAM job details">
+                  <ListChecks size={14} /> Job Details
                 </button>
               {/if}
             </div>
@@ -2480,9 +2569,9 @@
                     <button class="btn btn-secondary btn-sm" on:click={() => installCadStepFile(part)} title="Download STEP file">
                       <Download size={13} /> Install CAD
                     </button>
-                    {#if fusionJob?.status === 'completed' && fusionJob.params?.fusionJobKind !== 'plate:arrange'}
-                      <button class="btn btn-secondary btn-sm" on:click={() => downloadFusionNcFiles(fusionJob)} title="Download G-code">
-                        <Download size={13} /> Install G-code
+                    {#if fusionJob && fusionJob.params?.fusionJobKind !== 'plate:arrange'}
+                      <button class="btn btn-secondary btn-sm" on:click={() => openJobDetailsModal(fusionJob)} title="View Fusion CAM job details">
+                        <ListChecks size={13} /> Job Details
                       </button>
                     {/if}
                     <!-- Start/Review CAM live inside this grid too (not as
@@ -2903,9 +2992,9 @@
               <Download size={18} />
             </button>
           {/if}
-          {#if cadViewerPart.workflow === 'router' && fusionJobsByPart[cadViewerPart.id]?.status === 'completed' && fusionJobsByPart[cadViewerPart.id]?.params?.fusionJobKind !== 'plate:arrange'}
-            <button type="button" class="cad-download-btn" aria-label="Download G-code" title="Download G-code" on:click={() => downloadFusionNcFiles(fusionJobsByPart[cadViewerPart.id])}>
-              <Zap size={18} />
+          {#if cadViewerPart.workflow === 'router' && fusionJobsByPart[cadViewerPart.id] && fusionJobsByPart[cadViewerPart.id]?.params?.fusionJobKind !== 'plate:arrange'}
+            <button type="button" class="cad-download-btn" aria-label="View Fusion CAM job details" title="View Fusion CAM job details" on:click={() => openJobDetailsModal(fusionJobsByPart[cadViewerPart.id])}>
+              <ListChecks size={18} />
             </button>
           {/if}
           <button type="button" class="modal-close-button" aria-label="Close dialog" on:click={closeCadViewer}>
@@ -2967,7 +3056,12 @@
     <section class="modal modal-large cam-setup-modal" role="dialog" aria-modal="true" aria-labelledby="fusion-queue-title">
       <div class="modal-header">
         <h3 id="fusion-queue-title">Send to Fusion AutoCAM - {fusionQueuePart.name}</h3>
-        <button type="button" class="modal-close-button" aria-label="Close dialog" on:click={closeFusionCamModal}><X size={18} /></button>
+        <div class="modal-header-actions">
+          <a href="/autocam/fusion/setup" target="_blank" rel="noopener" class="btn btn-ghost btn-sm" title="Fusion Runner setup guide">
+            <BookOpen size={15} /> Runner setup guide
+          </a>
+          <button type="button" class="modal-close-button" aria-label="Close dialog" on:click={closeFusionCamModal}><X size={18} /></button>
+        </div>
       </div>
       <div class="modal-body">
         {#if fusionQueueLoading}
@@ -3097,6 +3191,94 @@
         <button type="button" class="btn btn-primary" disabled={fusionQueueLoading || !!queuingCamJobForPartId} on:click={submitFusionCamModal}><Layers size={16} /> {queuingCamJobForPartId ? 'Queueing...' : 'Queue CAM Job'}</button>
       </div>
     </section>
+  </div>
+{/if}
+
+{#if jobDetailsModalJob}
+  <div class="modal-overlay" role="presentation" on:click={closeJobDetailsModal}>
+    <div class="modal job-details-modal" role="dialog" aria-labelledby="job-details-title" on:click|stopPropagation>
+      <div class="modal-header">
+        <h3 id="job-details-title">{jobDetailsModalJob.name || `Job ${jobDetailsModalJob.id.slice(0, 8)}`}</h3>
+        <button type="button" class="btn btn-ghost btn-sm" title="Close" on:click={closeJobDetailsModal}><X size={16} /></button>
+      </div>
+      <div class="modal-body">
+        <dl class="job-details-list">
+          <dt>Status</dt>
+          <dd>{FUSION_JOB_STATUS_LABELS[jobDetailsModalJob.status] || jobDetailsModalJob.status}</dd>
+
+          <dt>Router</dt>
+          <dd>{jobDetailsModalJob.cam_machines?.name || 'No machine assigned'}</dd>
+
+          <dt>Tool</dt>
+          <dd>{jobDetailsToolLabel(jobDetailsModalJob)}</dd>
+
+          {#if jobDetailsModalJob.params?.fusionJobKind !== 'box_tube'}
+            <dt>Grouping</dt>
+            <dd>{jobDetailsModalJob.params?.fusionGroupingMode === 'grouped' ? 'Yes' : 'No'}</dd>
+
+            <dt>Tab count</dt>
+            <dd>{jobDetailsModalJob.params?.tabCount ?? 'Automatic'}</dd>
+
+            {#if jobDetailsModalJob.params?.fusionPlateSnapshot?.assignments?.length}
+              <dt>Parts on this plate</dt>
+              <dd>{jobDetailsModalJob.params.fusionPlateSnapshot.assignments.map((p) => `${p.quantity}x ${p.name || p.part_id}`).join(', ')}</dd>
+            {/if}
+          {/if}
+
+          <dt>Fusion file name</dt>
+          <dd>{jobDetailsModalJob.params?.fusionFileName || '(default, auto-generated)'}</dd>
+
+          <dt>Fusion save location</dt>
+          <dd>{jobDetailsModalJob.params?.fusionFolderPath || 'Default AutoCAM folder (2026 Season CAM project root)'}</dd>
+
+          <dt>Queued</dt>
+          <dd>{formatPacificDateTimeWithZone(jobDetailsModalJob.created_at)}</dd>
+        </dl>
+
+        {#if jobDetailsModalJob.warnings?.length}
+          <div class="job-details-warnings">
+            <strong>Warnings</strong>
+            <ul>
+              {#each jobDetailsModalJob.warnings as warning}<li>{warning}</li>{/each}
+            </ul>
+          </div>
+        {/if}
+
+        {#if jobDetailsModalJob.status === 'failed' && jobDetailsModalJob.errors?.length}
+          <div class="job-details-warnings job-details-errors">
+            <strong>Error</strong>
+            <pre>{jobDetailsModalJob.errors.join('\n\n')}</pre>
+          </div>
+        {/if}
+
+        {#if jobDetailsModalJob.status === 'completed'}
+          <div class="job-details-gcode">
+            <strong>G-code</strong>
+            {#if jobDetailsLoading}
+              <p class="cam-form-hint">Loading G-code files...</p>
+            {:else if jobDetailsModalJob.fusion_nc_files?.length}
+              <ul class="job-details-file-list">
+                {#each jobDetailsModalJob.fusion_nc_files as file}
+                  <li>
+                    <span class="file-name">{file.name}</span>
+                    <button type="button" class="btn btn-secondary btn-sm" on:click={() => downloadNcFile(file)}>
+                      <Download size={13} /> Install
+                    </button>
+                  </li>
+                {/each}
+              </ul>
+              {#if jobDetailsModalJob.fusion_nc_files.length > 1}
+                <button type="button" class="btn btn-ghost btn-sm" on:click={() => downloadFusionNcFiles(jobDetailsModalJob)}>
+                  <Download size={13} /> Install all {jobDetailsModalJob.fusion_nc_files.length} files
+                </button>
+              {/if}
+            {:else}
+              <p class="cam-form-hint">No G-code files were posted for this job.</p>
+            {/if}
+          </div>
+        {/if}
+      </div>
+    </div>
   </div>
 {/if}
 
@@ -3240,6 +3422,7 @@
   }
 
   .cad-modal-header-actions { display: inline-flex; align-items: center; gap: 0.25rem; }
+  .modal-header-actions { display: inline-flex; align-items: center; gap: 0.5rem; }
   .cad-download-btn {
     display: inline-flex;
     align-items: center;
@@ -4022,4 +4205,43 @@
     font-size: var(--font-xs);
     color: var(--text-muted);
   }
+
+  .job-details-modal { width: min(560px, 94vw); }
+  .job-details-list {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.4rem 1rem;
+    margin: 0;
+  }
+  .job-details-list dt { color: var(--text-muted, #888); font-size: 0.85rem; }
+  .job-details-list dd { margin: 0; }
+  .job-details-warnings, .job-details-gcode {
+    margin-top: 1rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border);
+  }
+  .job-details-warnings ul { margin: 0.35rem 0 0; padding-left: 1.25rem; }
+  .job-details-errors pre {
+    margin: 0.35rem 0 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: var(--font-mono, monospace);
+    font-size: 0.8rem;
+    color: var(--danger, #e05252);
+  }
+  .job-details-file-list {
+    list-style: none;
+    margin: 0.35rem 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+  .job-details-file-list li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+  .job-details-file-list .file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.85rem; }
 </style>

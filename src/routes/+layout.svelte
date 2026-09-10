@@ -43,9 +43,27 @@
     return ALLOWED_UNAPPROVED_ROUTES.some(route => pathname === route || pathname.startsWith(route + '/'));
   }
 
-  // Guard: redirect unapproved users away from protected routes
+  // Guard: redirect unapproved users away from protected routes. goto() is a
+  // client-side SPA navigation - if it silently fails to actually change the
+  // route (a slow/racy initial session check can flip authReady before a
+  // real session finishes loading, briefly misclassifying a logged-in user
+  // as signed out - see initAuth's own INITIAL_SESSION_TIMEOUT_MS comment),
+  // this otherwise leaves someone stuck indefinitely on a "Redirecting to
+  // sign in..." screen with no way out. A real page navigation always
+  // works, so force one if the SPA route hasn't actually changed shortly
+  // after asking it to.
+  let redirectFallbackTimer = null;
   $: if (shouldRedirectToLogin && typeof window !== 'undefined' && currentPath !== '/') {
     goto('/', { replaceState: true });
+    if (!redirectFallbackTimer) {
+      redirectFallbackTimer = setTimeout(() => {
+        redirectFallbackTimer = null;
+        if (window.location.pathname !== '/') window.location.href = '/';
+      }, 2000);
+    }
+  } else if (redirectFallbackTimer) {
+    clearTimeout(redirectFallbackTimer);
+    redirectFallbackTimer = null;
   }
 
   $: if (activeProfile && !isApproved && typeof window !== 'undefined') {
@@ -747,6 +765,10 @@
   <main class="container page-container auth-loading-shell">
     <div class="auth-loading-card">
       <p>Redirecting to sign in...</p>
+      <!-- The reactive redirect above already has its own hard-navigation
+           fallback if it stalls, but this is a manual, zero-dependency way
+           out that can never itself get stuck. -->
+      <a href="/" class="auth-loading-manual-link">Taking too long? Click here.</a>
     </div>
   </main>
 {/if}

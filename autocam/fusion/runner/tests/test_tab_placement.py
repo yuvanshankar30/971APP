@@ -510,6 +510,66 @@ class MinTabsForBodyTests(unittest.TestCase):
         self.assertEqual(TabPlacement._min_tabs_for_body(body, 4), 4)
 
 
+class MaxTabsForBodyTests(unittest.TestCase):
+    """_max_tabs_for_body is the other half of the same floor above: a
+    triangle only has 3 real sides, so more than 3 tabs adds no real
+    holding power - direct instruction, more genuinely is not needed.
+    """
+
+    def test_a_genuine_triangle_is_capped_to_three(self):
+        edges = [
+            _edge(0, 0, 10, 0),
+            _edge(10, 0, 5, 8),
+            _edge(5, 8, 0, 0),
+        ]
+        body = _body([_face(1.0, 1.0, [_loop(True, edges)])], (0, 0), (10, 8))
+
+        self.assertEqual(TabPlacement._max_tabs_for_body(body, 20), 3)
+
+    def test_an_explicit_operator_override_above_three_is_still_capped_on_a_triangle(self):
+        # camPlate.py's tab_count_override sets min_tabs == max_tabs to the
+        # operator's requested value - a triangle must still get exactly 3
+        # even when someone explicitly asked for more.
+        edges = [
+            _edge(0, 0, 10, 0),
+            _edge(10, 0, 5, 8),
+            _edge(5, 8, 0, 0),
+        ]
+        body = _body([_face(1.0, 1.0, [_loop(True, edges)])], (0, 0), (10, 8))
+
+        self.assertEqual(TabPlacement._max_tabs_for_body(body, 8), 3)
+
+    def test_a_notched_part_reducing_to_three_long_sides_keeps_the_requested_ceiling(self):
+        long_bottom = _edge(0, 0, 10, 0)
+        long_right = _edge(10, 0, 10, 10)
+        long_top = _edge(10, 10, 0, 10)
+        short_left_segments = [_edge(0, 10 - i, 0, 10 - i - 1) for i in range(10)]
+        edges = [long_bottom, long_right, long_top, *short_left_segments]
+        body = _body([_face(1.0, 1.0, [_loop(True, edges)])], (0, 0), (10, 10))
+
+        self.assertEqual(TabPlacement._max_tabs_for_body(body, 8), 8)
+
+    def test_a_large_triangle_does_not_scale_past_three_tabs(self):
+        # Real, confirmed bug this closes: _min_tabs_for_body alone only
+        # set a floor of 3 - a large triangle's own perimeter-based target
+        # (_tab_count_for_perimeter) could still scale past 3, since
+        # max_tabs was never adjusted for a triangle's own 3-sided shape.
+        edges = [
+            _edge(0, 0, 100, 0),
+            _edge(100, 0, 50, 80),
+            _edge(50, 80, 0, 0),
+        ]
+        body = _body([_face(1.0, 1.0, [_loop(True, edges)])], (0, 0), (100, 80))
+
+        min_tabs = TabPlacement._min_tabs_for_body(body, 4)
+        max_tabs = TabPlacement._max_tabs_for_body(body, 20)
+        perimeter_in = TabPlacement._outer_perimeter_in(body)
+        self.assertGreater(perimeter_in, TabPlacement.TARGET_TAB_SPACING_IN * 6)
+        self.assertEqual(
+            TabPlacement._tab_count_for_perimeter(perimeter_in, min_tabs, max_tabs), 3
+        )
+
+
 class MinimumSideLengthTests(unittest.TestCase):
     """A side too short to physically contain a tab must not get one.
     MIN_TAB_SIDE_LENGTH_IN reserves a modest lead-in and lead-out allowance.
@@ -768,6 +828,63 @@ class TabReadBackTests(unittest.TestCase):
             app, operation, [object(), object(), object(), object()]))
 
         self.assertEqual([m for m in logged if "WARNING" in m], [])
+
+
+class _StockParameter:
+    """A real Fusion CAM setup's stockXLow/XHigh/YLow/YHigh parameter.
+    Two traps this fake exists to catch, both confirmed live on a real
+    job, in order:
+
+    1. .expression is a human-readable STRING WITH ITS UNIT SUFFIX (e.g.
+       "0.635 in") - never a bare number float() could parse.
+    2. .value is NOT a bare float either - it is itself a
+       FloatParameterValue wrapper object, whose OWN .value is the real
+       plain float (the exact same double-wrapped shape this module's
+       own top-of-file comment already documents for every other CAM
+       parameter it touches - tabPositioning.value.value,
+       tabsPerContour.value.value, etc.).
+    """
+
+    def __init__(self, value_cm, expression):
+        self.value = types.SimpleNamespace(value=value_cm)
+        self.expression = expression
+
+
+class ReadStockBoundsTests(unittest.TestCase):
+    """Real, confirmed live bugs, both now fixed: reading .expression
+    (a unit-suffixed string float() cannot parse) and then, after that
+    fix, reading .value directly (itself a FloatParameterValue wrapper,
+    not a bare float - "TypeError: '<=' not supported between instances
+    of 'FloatParameterValue' and 'float'" the moment a real job compared
+    it). Either bug means stock_bounds silently ends up None or the whole
+    job crashes - either way the real-stock-backing filter never runs,
+    letting a tab get selected on a side with zero real material behind
+    it (e.g. a part edge positioned flush against a coordinate axis).
+    """
+
+    def _setup(self, values):
+        return types.SimpleNamespace(parameters=_Parameters(values))
+
+    def test_reads_value_value_not_the_wrapper_or_the_unit_suffixed_expression(self):
+        setup = self._setup({
+            "stockXLow": _StockParameter(0.0, "0 in"),
+            "stockXHigh": _StockParameter(25.0, "9.84252 in"),
+            "stockYLow": _StockParameter(-1.27, "-0.5 in"),
+            "stockYHigh": _StockParameter(15.0, "5.90551 in"),
+        })
+        app = types.SimpleNamespace(log=lambda *_a: None)
+
+        self.assertEqual(
+            TabPlacement._read_stock_bounds(setup, app), (0.0, 25.0, -1.27, 15.0)
+        )
+
+    def test_falls_back_to_none_and_logs_when_a_parameter_is_missing(self):
+        setup = self._setup({"stockXLow": _StockParameter(0.0, "0 in")})
+        logged = []
+        app = types.SimpleNamespace(log=logged.append)
+
+        self.assertIsNone(TabPlacement._read_stock_bounds(setup, app))
+        self.assertTrue(logged, "a missing parameter must not fail silently")
 
 
 if __name__ == "__main__":
