@@ -777,10 +777,28 @@ def _repair_missing_selections(setup) -> list[str]:
     # circular-hole operation below (">.3 Circular Through Hole" also
     # contains "through" but needs its own circular-loop-specific
     # handling, not this generic one).
+    #
+    # strategy == "bore" is excluded outright too, name match or not -
+    # confirmed live as a real bug: a real template's own small-hole bore
+    # operation is misspelled "Circluar" (not "Circular"), so the name
+    # check above let it straight through as a "through shape" op. It
+    # then got reclassified as a roughing candidate (bore != contour2d)
+    # in _split_through_roughing_ops below and had an arbitrary internal
+    # feature's rectangular ChainSelection assigned to it instead of its
+    # own real circular-hole geometry - meanwhile that feature's own
+    # rectangular chain never got a real roughing pass at all, since this
+    # template has no dedicated one and the bore op that got assigned it
+    # cannot actually clear a rectangular profile. A bore strategy is by
+    # definition a round-hole operation; no template naming convention
+    # (a typo, a translation, a future rename) should ever be able to
+    # smuggle one into the generic through-shape path the way a spelling
+    # mistake just did here.
     through_shape_ops = [
         op
         for op in ops_snapshot
-        if "through" in op.name.lower() and "circular" not in op.name.lower()
+        if "through" in op.name.lower()
+        and "circular" not in op.name.lower()
+        and op.strategy != "bore"
     ]
     # The template's own dedicated feature-slot operation, if it ships one.
     # Confirmed against the two real templates: the New Router's
