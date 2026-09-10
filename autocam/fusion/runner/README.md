@@ -91,6 +91,11 @@ field; the installer handles the workstation name, machine registration, and
 local `.env` automatically. The manual paths below are retained for
 offline/troubleshooting use.
 
+After installation, updates require no download or command: the add-in checks
+the authenticated Hub at Fusion startup and every five idle minutes, verifies
+the release checksum, installs it into the same AddIns folder, and stops new
+job claims until Fusion is restarted to load the new Python modules.
+
 Copy this folder into Fusion 360's add-in directory, **renamed to `SpartanRoboticsAutoCAM`** (Fusion requires the folder name, the entry `.py` file, and the `.manifest` file to all match exactly - they're named `SpartanRoboticsAutoCAM.py`/`SpartanRoboticsAutoCAM.manifest`, so the folder has to match or Fusion won't list it as an add-in at all):
 
 ```text

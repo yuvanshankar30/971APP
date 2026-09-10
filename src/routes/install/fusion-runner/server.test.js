@@ -10,6 +10,7 @@ describe('Fusion Runner curl installer', () => {
     expect(response.headers.get('cache-control')).toBe('no-store');
     expect(script).toMatch(/^#!\/bin\/sh/);
     expect(script).toContain("HUB_URL=${FUSION_RUNNER_HUB_URL:-'https://hub.example'}");
+    expect(script).toContain('manifest.json?install=$(date +%s)');
     expect(script).toContain('checksum mismatch; refusing to install');
     expect(script).toContain('archive contains an unsafe path');
     expect(script).toContain('FUSION_RUNNER_INSTALL_BASE_URL="$HUB_URL"');

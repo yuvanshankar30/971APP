@@ -74,5 +74,9 @@ for (const filePath of source) {
 
 const release = JSON.parse(execFileSync('unzip', ['-p', archive, `${archiveRoot}runner_release.json`], { encoding: 'utf8' }));
 if (!release.version) fail('packaged runner_release.json has no version');
+const manifest = JSON.parse(readFileSync(join(repoRoot, 'static', 'downloads', 'SpartanRoboticsAutoCAM-FusionAddIn.manifest.json'), 'utf8'));
+if (manifest.downloadUrl !== `/downloads/SpartanRoboticsAutoCAM-FusionAddIn.zip?v=${encodeURIComponent(release.version)}`) {
+  fail('manifest download URL is not pinned to its release version');
+}
 
 console.log(`verify-fusion-runner-zip: ${source.length} Runner files match ${archive}`);

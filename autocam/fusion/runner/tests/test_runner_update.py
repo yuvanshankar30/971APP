@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 import zipfile
+from unittest.mock import patch
 
 
 RUNNER_DIR = Path(__file__).parents[1]
@@ -47,6 +48,11 @@ class _Session:
 
 
 def _archive(files):
+    files = {
+        "SpartanRoboticsAutoCAM/SpartanRoboticsAutoCAM.py": "runner",
+        "SpartanRoboticsAutoCAM/SpartanRoboticsAutoCAM.manifest": "{}",
+        **files,
+    }
     output = io.BytesIO()
     with zipfile.ZipFile(output, "w") as archive:
         for name, content in files.items():
@@ -95,6 +101,49 @@ class RunnerUpdateTests(unittest.TestCase):
             addin.mkdir()
             with self.assertRaisesRegex(RuntimeError, "incomplete"):
                 check_and_stage_update(_Session("https://hub.example/manifest.json", manifest, b""), "https://hub.example", str(addin))
+
+    def test_release_marker_is_written_only_after_every_other_file(self):
+        archive = _archive({
+            "SpartanRoboticsAutoCAM/runner_release.json": '{"version":"2"}',
+            "SpartanRoboticsAutoCAM/updated.py": "new code",
+        })
+        manifest = {"version": "2", "downloadUrl": "runner.zip", "sha256": hashlib.sha256(archive).hexdigest()}
+        with tempfile.TemporaryDirectory() as directory:
+            addin = Path(directory) / "addin"
+            addin.mkdir()
+            marker = addin / "runner_release.json"
+            marker.write_text('{"version":"1"}')
+            real_copy2 = __import__("shutil").copy2
+
+            def interrupt_on_updated_file(source, destination):
+                if str(source).endswith("updated.py"):
+                    raise OSError("simulated interrupted update")
+                return real_copy2(source, destination)
+
+            with patch("RunnerUpdate.shutil.copy2", side_effect=interrupt_on_updated_file):
+                with self.assertRaisesRegex(OSError, "interrupted"):
+                    check_and_stage_update(
+                        _Session("https://hub.example/manifest.json", manifest, archive),
+                        "https://hub.example",
+                        str(addin),
+                    )
+            self.assertEqual(json.loads(marker.read_text())["version"], "1")
+
+    def test_rejects_an_archive_missing_fusion_entry_files(self):
+        output = io.BytesIO()
+        with zipfile.ZipFile(output, "w") as archive_file:
+            archive_file.writestr("SpartanRoboticsAutoCAM/runner_release.json", '{"version":"2"}')
+        archive = output.getvalue()
+        manifest = {"version": "2", "downloadUrl": "runner.zip", "sha256": hashlib.sha256(archive).hexdigest()}
+        with tempfile.TemporaryDirectory() as directory:
+            addin = Path(directory) / "addin"
+            addin.mkdir()
+            with self.assertRaisesRegex(RuntimeError, "required add-in files"):
+                check_and_stage_update(
+                    _Session("https://hub.example/manifest.json", manifest, archive),
+                    "https://hub.example",
+                    str(addin),
+                )
 
     def test_never_touches_a_symlinked_install(self):
         # The "never reinstall again" team-guide setup points Fusion's

@@ -86,7 +86,7 @@ try {
   writeFileSync(manifestFile, JSON.stringify({
     version: release.version,
     sha256,
-    downloadUrl: '/downloads/SpartanRoboticsAutoCAM-FusionAddIn.zip'
+    downloadUrl: `/downloads/SpartanRoboticsAutoCAM-FusionAddIn.zip?v=${encodeURIComponent(release.version)}`
   }, null, 2) + '\n');
   console.log(`build-fusion-runner-zip: wrote ${outFile}`);
 } finally {

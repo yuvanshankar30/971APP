@@ -2,7 +2,7 @@
 set -eu
 
 HUB_URL=${FUSION_RUNNER_HUB_URL:-'__FUSION_HUB_ORIGIN__'}
-MANIFEST_URL="$HUB_URL/downloads/SpartanRoboticsAutoCAM-FusionAddIn.manifest.json"
+MANIFEST_URL="$HUB_URL/downloads/SpartanRoboticsAutoCAM-FusionAddIn.manifest.json?install=$(date +%s)"
 TEMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/fusion-runner-install.XXXXXX")
 trap 'rm -rf "$TEMP_ROOT"' EXIT HUP INT TERM
 

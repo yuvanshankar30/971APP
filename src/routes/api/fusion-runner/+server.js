@@ -205,7 +205,7 @@ export async function POST({ request, url }) {
       // authenticated even though the static artifact itself is served by
       // the app, so only configured Runner instances poll for updates.
       return json({
-        manifestUrl: `${url.origin}/downloads/SpartanRoboticsAutoCAM-FusionAddIn.manifest.json`
+        manifestUrl: `${url.origin}/downloads/SpartanRoboticsAutoCAM-FusionAddIn.manifest.json?check=${Date.now()}`
       });
     }
     if (action === 'sync-folders') {

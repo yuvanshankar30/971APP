@@ -14,6 +14,38 @@ spec.loader.exec_module(setup)
 
 
 class SetupUpdateTests(unittest.TestCase):
+    def test_macos_install_path_is_fusions_real_addins_directory(self):
+        expected = "/Users/operator/Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns"
+        with patch.object(setup.platform, "system", return_value="Darwin"), patch.object(
+            setup.os.path, "expanduser", return_value=expected
+        ), patch.object(setup.os, "makedirs") as makedirs:
+            self.assertEqual(setup.addins_dir(), expected)
+        makedirs.assert_called_once_with(expected, exist_ok=True)
+
+    def test_windows_install_path_uses_roaming_appdata(self):
+        appdata = r"C:\Users\operator\AppData\Roaming"
+        expected = os.path.join(appdata, "Autodesk", "Autodesk Fusion 360", "API", "AddIns")
+        with patch.object(setup.platform, "system", return_value="Windows"), patch.dict(
+            os.environ, {"APPDATA": appdata}
+        ), patch.object(setup.os, "makedirs") as makedirs:
+            self.assertEqual(setup.addins_dir(), expected)
+        makedirs.assert_called_once_with(expected, exist_ok=True)
+
+    def test_installer_copies_into_the_required_fusion_addin_name(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory, "download", "SpartanRoboticsAutoCAM")
+            source.mkdir(parents=True)
+            Path(source, "SpartanRoboticsAutoCAM.py").write_text("runner")
+            addins = Path(directory, "Fusion", "API", "AddIns")
+            addins.mkdir(parents=True)
+            with patch.object(setup, "SOURCE_DIR", str(source)), patch.object(
+                setup, "addins_dir", return_value=str(addins)
+            ):
+                installed = setup.install_addin()
+            expected = addins / "SpartanRoboticsAutoCAM"
+            self.assertEqual(Path(installed), expected)
+            self.assertEqual(Path(expected, "SpartanRoboticsAutoCAM.py").read_text(), "runner")
+
     def test_existing_env_marks_an_install_as_an_update(self):
         with tempfile.TemporaryDirectory() as directory:
             self.assertTrue(setup.needs_configuration(directory))
