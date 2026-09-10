@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ from: vi.fn(), queries: [], createSignedUrl: vi.fn() }));
+const mocks = vi.hoisted(() => ({ from: vi.fn(), rpc: vi.fn(), queries: [], createSignedUrl: vi.fn() }));
 vi.mock('$lib/supabase.js', () => ({
   supabase: {
     from: mocks.from,
+    rpc: mocks.rpc,
     storage: { from: vi.fn(() => ({ createSignedUrl: mocks.createSignedUrl })) }
   }
 }));
@@ -23,7 +24,9 @@ import {
   deleteBoxTubes,
   deleteFusionJobs,
   isFusionOutputJob,
+  fusionNcDestinationName,
   queueFusionJob,
+  queueFusionPlateJob,
   updatePartQuantity,
   renameBoxTube,
   updateBoxTubeQuantity
@@ -41,6 +44,7 @@ function chain(result) {
 
 beforeEach(() => {
   mocks.from.mockReset();
+  mocks.rpc.mockReset();
   mocks.queries.length = 0;
   mocks.createSignedUrl.mockReset();
 });
@@ -80,39 +84,64 @@ describe('Fusion CAM queue query efficiency', () => {
   it('queues tube stock directly without a plate or grouping contract', async () => {
     mocks.from.mockImplementation((table) =>
       table === 'cam_machine_tools'
-        ? chain({ data: [{ tool_id: 'tool-1' }], error: null })
+        ? chain({ data: [{ tool_id: 'tool-1', cam_tools: { tool_type: 'flat end mill' } }], error: null })
         : chain({ data: { id: 'tube-job' }, error: null })
     );
 
     await expect(queueFusionJob({
-      fusionJobKind: 'box_tube', boxTubeId: 'tube-1', machineId: 'router-1', toolId: 'tool-1'
+      fusionJobKind: 'box_tube', boxTubeId: 'tube-1', machineId: 'router-1', toolId: 'tool-1', materialId: 'aluminum', singleToolMode: true
     })).resolves.toEqual({ id: 'tube-job' });
 
     expect(mocks.from).toHaveBeenCalledWith('cam_jobs');
     const inserted = mocks.queries[1].insert.mock.calls[0][0];
-    expect(inserted.params).toEqual({ fusionJobKind: 'box_tube', boxTubeId: 'tube-1', fusionFileName: null, fusionFolderPath: null, singleToolMode: false });
+    expect(inserted.params).toEqual({ fusionJobKind: 'box_tube', boxTubeId: 'tube-1', orientation: 'vertical', fusionFileName: null, fusionFolderPath: null, singleToolMode: true });
     expect(inserted.params).not.toHaveProperty('plateId');
     expect(inserted.params).not.toHaveProperty('fusionGroupingMode');
   });
 
-  it('includes a plate job\'s tab count override, converted to a number, and omits it entirely for tube stock', async () => {
-    mocks.from.mockReturnValue(chain({ data: { id: 'plate-job' }, error: null }));
+  it('rejects a non-endmill selected for single-tool tube CAM', async () => {
+    mocks.from.mockImplementation((table) => table === 'cam_machine_tools'
+      ? chain({ data: [{ tool_id: 'drill', cam_tools: { tool_type: 'drill' } }], error: null })
+      : chain({ data: { id: 'tube-job' }, error: null }));
+    await expect(queueFusionJob({
+      fusionJobKind: 'box_tube', boxTubeId: 'tube-1', machineId: 'router-1', toolId: 'drill', materialId: 'aluminum', singleToolMode: true
+    })).rejects.toThrow(/requires an endmill/i);
+    expect(mocks.from).not.toHaveBeenCalledWith('cam_jobs');
+  });
 
-    await queueFusionJob({
-      fusionJobKind: 'plate:cam', plateId: 'plate-1', groupingMode: 'single', tabCount: '8'
+  it('queues an exact plate assignment set through the atomic database function', async () => {
+    mocks.from.mockReturnValue(chain({ data: [{ tool_id: 'tool-1', cam_tools: { tool_type: 'flat end mill' } }], error: null }));
+    mocks.rpc.mockReturnValue(chain({ data: { id: 'plate-job' }, error: null }));
+
+    await expect(queueFusionPlateJob({
+      plateId: 'plate-1', assignments: [{ partId: 'part-1', quantity: 2 }], machineId: 'router-1', toolId: 'tool-1',
+      name: 'Part 1', groupingMode: 'single', tabCount: 500, singleToolMode: true
+    })).resolves.toEqual({ id: 'plate-job' });
+
+    expect(mocks.rpc).toHaveBeenCalledWith('queue_fusion_plate_job', expect.objectContaining({
+      p_plate_id: 'plate-1', p_assignments: [{ partId: 'part-1', quantity: 2 }], p_tab_count: 20,
+      p_grouping_mode: 'single', p_single_tool_mode: true, p_multi_tool_mode: false
+    }));
+  });
+
+  it('includes a plate job\'s tab count override, converted to a number, and omits it entirely for tube stock', async () => {
+    mocks.from.mockReturnValue(chain({ data: [{ tool_id: 'tool-1', cam_tools: { tool_type: 'flat end mill' } }], error: null }));
+    mocks.rpc.mockReturnValue(chain({ data: { id: 'plate-job' }, error: null }));
+
+    await queueFusionPlateJob({
+      plateId: 'plate-1', assignments: [{ partId: 'part-1', quantity: 1 }], machineId: 'router-1', toolId: 'tool-1', groupingMode: 'single', tabCount: '8'
     });
 
-    const inserted = mocks.queries[0].insert.mock.calls[0][0];
-    expect(inserted.params.tabCount).toBe(8);
+    expect(mocks.rpc.mock.calls[0][1].p_tab_count).toBe(8);
   });
 
   it('leaves a plate job\'s tab count null when not set - stays automatic', async () => {
-    mocks.from.mockReturnValue(chain({ data: { id: 'plate-job' }, error: null }));
+    mocks.from.mockReturnValue(chain({ data: [{ tool_id: 'tool-1', cam_tools: { tool_type: 'flat end mill' } }], error: null }));
+    mocks.rpc.mockReturnValue(chain({ data: { id: 'plate-job' }, error: null }));
 
-    await queueFusionJob({ fusionJobKind: 'plate:cam', plateId: 'plate-1', groupingMode: 'single' });
+    await queueFusionPlateJob({ plateId: 'plate-1', assignments: [{ partId: 'part-1', quantity: 1 }], machineId: 'router-1', toolId: 'tool-1', groupingMode: 'single' });
 
-    const inserted = mocks.queries[0].insert.mock.calls[0][0];
-    expect(inserted.params.tabCount).toBeNull();
+    expect(mocks.rpc.mock.calls[0][1].p_tab_count).toBeNull();
   });
 
   it('refuses to queue when the selected tool is no longer loaded on the machine', async () => {
@@ -126,20 +155,23 @@ describe('Fusion CAM queue query efficiency', () => {
         : chain({ data: { id: 'plate-job' }, error: null })
     );
 
-    await expect(queueFusionJob({
-      fusionJobKind: 'plate:cam', plateId: 'plate-1', groupingMode: 'single', machineId: 'router-1', toolId: 'gone-tool'
+    await expect(queueFusionPlateJob({
+      plateId: 'plate-1', assignments: [{ partId: 'part-1', quantity: 1 }], groupingMode: 'single', machineId: 'router-1', toolId: 'gone-tool'
     })).rejects.toThrow(/tool.*no longer loaded/i);
     expect(mocks.from).not.toHaveBeenCalledWith('cam_jobs');
   });
 
 
-  it('does not check loaded tools at all when no machine is selected yet', async () => {
-    mocks.from.mockReturnValue(chain({ data: { id: 'plate-job' }, error: null }));
-
-    await expect(queueFusionJob({
-      fusionJobKind: 'plate:cam', plateId: 'plate-1', groupingMode: 'single', toolId: 'tool-1'
-    })).resolves.toEqual({ id: 'plate-job' });
+  it('rejects a plate job before querying tools when no machine is selected', async () => {
+    await expect(queueFusionPlateJob({
+      plateId: 'plate-1', assignments: [{ partId: 'part-1', quantity: 1 }], groupingMode: 'single', toolId: 'tool-1'
+    })).rejects.toThrow(/choose a machine/i);
     expect(mocks.from).not.toHaveBeenCalledWith('cam_machine_tools');
+  });
+
+  it('refuses the non-atomic plate CAM insertion helper', async () => {
+    await expect(queueFusionJob({ fusionJobKind: 'plate:cam', plateId: 'plate-1' })).rejects.toThrow(/atomically/);
+    expect(mocks.from).not.toHaveBeenCalled();
   });
 
   it('refuses a tube-stock job without tube stock', async () => {
@@ -246,38 +278,45 @@ describe('Fusion CAM queue query efficiency', () => {
     expect(mocks.queries[0].in).toHaveBeenCalledWith('id', ['job-1']);
   });
 
-  it('queries only jobs for relevant plates instead of downloading all Fusion history', async () => {
+  it('queries only immutable snapshot-linked jobs instead of attributing the live plate nest', async () => {
     const results = {
       fusion_parts: [{ data: [{ id: 'fusion-part', part_id: 'manufacturing-part' }], error: null }],
       fusion_box_tubes: [{ data: [], error: null }],
-      fusion_part_category_assignments: [{ data: [{ part_id: 'fusion-part', plate_id: 'plate-1' }], error: null }],
       cam_jobs: [{ data: [{ id: 'job-1', created_at: '2026-09-06T00:00:00Z', params: { plateId: 'plate-1', fusionJobKind: 'plate:cam' } }], error: null }]
     };
     mocks.from.mockImplementation((table) => chain(results[table].shift()));
+    mocks.rpc.mockResolvedValue({ data: [{ fusion_part_id: 'fusion-part', job_id: 'job-1' }], error: null });
 
     const mapped = await fetchFusionJobsByManufacturingPartIds(['manufacturing-part']);
     expect(mapped['manufacturing-part']).toMatchObject({ id: 'job-1' });
     const camQuery = mocks.queries.at(-1);
-    expect(camQuery.in).toHaveBeenCalledWith('params->>plateId', ['plate-1']);
+    expect(camQuery.in).toHaveBeenCalledWith('id', ['job-1']);
     expect(camQuery.limit).not.toHaveBeenCalled();
   });
 
   it('collects plate and box tube ids with a completed CAM output job, ignoring arrange-only jobs', async () => {
     mocks.from.mockReturnValue(chain({
       data: [
-        { params: { plateId: 'plate-1', fusionJobKind: 'plate:cam' } },
+        { params: { plateId: 'plate-1', fusionJobKind: 'plate:cam', fusionPlateSnapshot: { assignments: [{ part_id: 'part-1' }] } } },
         { params: { plateId: 'plate-2', fusionJobKind: 'plate:arrange' } },
         { params: { boxTubeId: 'tube-1', fusionJobKind: 'box_tube' } }
       ],
       error: null
     }));
 
-    const { plateIds, boxTubeIds } = await fetchCompletedFusionStockIds();
+    const { fusionPartIds, plateIds, boxTubeIds } = await fetchCompletedFusionStockIds();
+    expect(fusionPartIds.has('part-1')).toBe(true);
     expect(plateIds.has('plate-1')).toBe(true);
     expect(plateIds.has('plate-2')).toBe(false);
     expect(boxTubeIds.has('tube-1')).toBe(true);
     expect(mocks.queries[0].eq).toHaveBeenCalledWith('operation_type', 'milling');
     expect(mocks.queries[0].eq).toHaveBeenCalledWith('status', 'completed');
+  });
+
+  it('preserves each posted artifact extension when naming Files uploads', () => {
+    expect(fusionNcDestinationName('drivebase', 0, 1, '1001.tap')).toBe('drivebase.tap');
+    expect(fusionNcDestinationName('drivebase', 1, 3, 'side-3.ngc')).toBe('drivebase-2.ngc');
+    expect(fusionNcDestinationName('drivebase', 0, 1, '')).toBe('drivebase.nc');
   });
 
   it('installs CAD by creating a signed download URL for the real STEP file', async () => {

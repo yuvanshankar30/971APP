@@ -3,7 +3,7 @@
   import { onMount } from 'svelte';
   import { supabase } from '$lib/supabase.js';
   import { toastActions } from '$lib/toast.js';
-  import { fetchFusionJobs, fetchFusionJobUpdates, fetchFusionJobNcFiles, fetchFusionPartStepFiles, installFusionPartCad, cancelFusionJob, deleteFusionJob, deleteAllFailedFusionJobs } from '$lib/fusionCam.js';
+  import { fetchFusionJobs, fetchFusionJobUpdates, fetchFusionJobNcFiles, fetchFusionPartStepFiles, installFusionPartCad, cancelFusionJob, deleteFusionJob, deleteAllFailedFusionJobs, fusionNcDestinationName } from '$lib/fusionCam.js';
   import CadViewer from '$lib/components/CadViewer.svelte';
   import { formatPacificDateTimeWithZone } from '$lib/timezone.js';
   import { ListChecks, X, Download, Trash2, Upload, AlertTriangle, ChevronDown, Box, Folder } from 'lucide-svelte';
@@ -294,11 +294,10 @@
     posting = true;
     try {
       for (const [index, file] of files.entries()) {
-        const suffix = files.length === 1 ? '' : `-${index + 1}`;
         const binary = atob(file.contentBase64);
         const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
         for (const folder of FILES_TARGET_FOLDERS) {
-          const path = `${folder}/${baseName}${suffix}.ngc`;
+          const path = `${folder}/${fusionNcDestinationName(baseName, index, files.length, file.name)}`;
           const { error } = await supabase.storage
             .from(FILES_BUCKET)
             .upload(path, new Blob([bytes]), { upsert: true, contentType: 'text/plain' });

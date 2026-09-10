@@ -47,12 +47,19 @@ export async function buildJobPayload(supabase, job) {
   // "stay automatic," this job's existing behavior. Clamped here so a
   // malformed or excessive value never reaches the Runner at all, not
   // just relying on its own re-check.
-  const rawTabCount = Number(params.tabCount);
+  const hasTabCount = params.tabCount !== null && params.tabCount !== undefined
+    && !(typeof params.tabCount === 'string' && params.tabCount.trim() === '');
+  const rawTabCount = hasTabCount ? Number(params.tabCount) : NaN;
   const tab_count = Number.isFinite(rawTabCount)
     ? Math.max(TAB_COUNT_MIN, Math.min(TAB_COUNT_MAX, Math.round(rawTabCount)))
     : null;
-  const single_tool_mode = params.singleToolMode === true;
+  // Tube CAM has no multi-tool planner; normalize older queued rows to the
+  // same one-selected-endmill contract current clients write explicitly.
+  const single_tool_mode = params.fusionJobKind === 'box_tube' || params.singleToolMode === true;
   const multi_tool_mode = params.multiToolMode === true;
+  if (single_tool_mode && multi_tool_mode) {
+    throw new Error('Single-tool and multi-tool mode cannot both be enabled');
+  }
   if (single_tool_mode && !/end\s*mill/i.test(String(job.cam_tools?.tool_type || ''))) {
     throw new Error('Single-tool Fusion CAM requires an endmill selected on the job');
   }
@@ -73,6 +80,9 @@ export async function buildJobPayload(supabase, job) {
   const tool_items = (multi_tool_mode || tool_id)
     ? await resolveLoadedToolItems(supabase, machine_id, multi_tool_mode ? null : tool_id)
     : [];
+  if (single_tool_mode && String(job.cam_machines?.name || '').trim().toLowerCase() === 'new router' && !tool_items.length) {
+    throw new Error('Selected New Router tool has no bundled Fusion tool-library identity');
+  }
   async function signedUrl(fileName, partId) {
     if (typeof fileName !== 'string' || !fileName.trim()) throw new Error(`Part ${partId} is missing its STEP file`);
     const { data, error } = await supabase.storage.from('manufacturing-files').createSignedUrl(fileName, 3600);
@@ -92,6 +102,14 @@ export async function buildJobPayload(supabase, job) {
       if (!['single', 'grouped'].includes(snapshot.grouping_mode)) throw new Error('Plate CAM job has no explicit grouping mode');
       if (snapshot.grouping_mode === 'single' && snapshot.assignments.length !== 1) throw new Error('Single-part CAM must contain exactly one part type');
       if (snapshot.grouping_mode === 'grouped' && snapshot.assignments.length < 2) throw new Error('Grouped CAM must contain at least two part types');
+      const normalizedMachine = String(job.cam_machines?.name || '').trim().toLowerCase();
+      const normalizedMaterial = String(snapshot.material || '').trim().toLowerCase();
+      if (multi_tool_mode && normalizedMachine !== 'new router') {
+        throw new Error('Automatic tool swaps are available only on New Router');
+      }
+      if (multi_tool_mode && !['aluminum 6061', 'aluminium 6061', '6061 aluminum', '6061 aluminium'].includes(normalizedMaterial)) {
+        throw new Error('Automatic tool swaps are available only for Aluminum 6061');
+      }
     }
     const seen = new Set();
     const validatedAssignments = [];
@@ -135,6 +153,10 @@ export async function buildJobPayload(supabase, job) {
       machine_id,
       tool_id,
       single_tool_mode,
+      tool_items,
+      orientation: ['horizontal', 'vertical'].includes(String(params.orientation || '').trim().toLowerCase())
+        ? String(params.orientation).trim().toLowerCase()
+        : 'vertical',
       step_file_url: await signedUrl(data.step_file_name, data.id),
       // Match plate jobs: the shared queue confirmation controls the saved
       // Fusion document and must reach the local Runner for tube jobs too.

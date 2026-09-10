@@ -451,18 +451,17 @@ export async function fetchFusionJobNcFiles(jobId) {
 
 /**
  * Maps manufacturing request ids (public.parts.id) to the most recent Fusion
- * milling job that actually covers them - traced through
- * fusion_parts/fusion_box_tubes (linked via their own part_id) to whichever
- * plate or box tube they were nested/queued onto, then to that plate/tube's
- * most recent milling cam_jobs row. Used by /manufacture to show real Fusion
+ * milling job that actually covers them. Plate history comes from each job's
+ * immutable queue snapshot; tube history follows the tube row's direct part
+ * link. Used by /manufacture to show real Fusion
  * CAM status next to a request instead of the old per-part legacy AutoCAM
  * job (which queued directly against the part - Fusion CAM's nest-many-
  * parts-onto-one-plate model means the job a request cares about is one
  * step removed, so this does that lookup once for a whole list of requests
  * rather than each caller re-deriving it).
  *
- * A request with no linked Fusion part, or a Fusion part never nested onto
- * anything queued yet, simply has no entry in the returned map.
+ * A request with no linked Fusion stock, or no snapshotted/output CAM job,
+ * simply has no entry in the returned map.
  */
 export async function fetchFusionJobsByManufacturingPartIds(partIds) {
   const ids = [...new Set((partIds || []).filter(Boolean))];
@@ -476,37 +475,28 @@ export async function fetchFusionJobsByManufacturingPartIds(partIds) {
   if (fTubesError) throw fTubesError;
 
   const fusionPartIds = (fParts || []).map((fp) => fp.id);
-  let assignments = [];
-  if (fusionPartIds.length) {
-    const { data, error } = await supabase
-      .from('fusion_part_category_assignments')
-      .select('part_id, plate_id')
-      .in('part_id', fusionPartIds);
-    if (error) throw error;
-    assignments = data || [];
-  }
-
-  // plateId -> Set of manufacturing part ids nested onto it
-  const plateToManufacturingParts = new Map();
   const fusionPartToManufacturingPart = new Map((fParts || []).map((fp) => [fp.id, fp.part_id]));
-  for (const a of assignments) {
-    const mpId = fusionPartToManufacturingPart.get(a.part_id);
-    if (!mpId) continue;
-    if (!plateToManufacturingParts.has(a.plate_id)) plateToManufacturingParts.set(a.plate_id, new Set());
-    plateToManufacturingParts.get(a.plate_id).add(mpId);
+  const jobToFusionParts = new Map();
+  if (fusionPartIds.length) {
+    const { data, error } = await supabase.rpc('fusion_plate_job_links', { p_part_ids: fusionPartIds });
+    if (error) throw error;
+    for (const link of data || []) {
+      if (!jobToFusionParts.has(link.job_id)) jobToFusionParts.set(link.job_id, new Set());
+      jobToFusionParts.get(link.job_id).add(link.fusion_part_id);
+    }
   }
 
   // boxTubeId -> manufacturing part id (1:1 - see createBoxTube's own doc comment)
   const boxTubeToManufacturingPart = new Map((fTubes || []).filter((t) => t.part_id).map((t) => [t.id, t.part_id]));
 
-  if (!plateToManufacturingParts.size && !boxTubeToManufacturingPart.size) return {};
+  if (!jobToFusionParts.size && !boxTubeToManufacturingPart.size) return {};
 
   const targetQueries = [];
-  const plateIds = [...plateToManufacturingParts.keys()];
+  const plateJobIds = [...jobToFusionParts.keys()];
   const boxTubeIds = [...boxTubeToManufacturingPart.keys()];
-  if (plateIds.length) {
+  if (plateJobIds.length) {
     targetQueries.push(supabase.from('cam_jobs').select(FUSION_JOB_SELECT)
-      .eq('operation_type', 'milling').in('params->>plateId', plateIds));
+      .eq('operation_type', 'milling').in('id', plateJobIds));
   }
   if (boxTubeIds.length) {
     targetQueries.push(supabase.from('cam_jobs').select(FUSION_JOB_SELECT)
@@ -526,11 +516,13 @@ export async function fetchFusionJobsByManufacturingPartIds(partIds) {
     // a newer completed arrange job masks the plate:cam job and falsely
     // advertises downloadable/reviewable G-code.
     if (!isFusionOutputJob(job)) continue;
-    const plateId = job.params?.plateId;
     const boxTubeId = job.params?.boxTubeId;
     const mpIds = new Set();
-    if (plateId && plateToManufacturingParts.has(plateId)) {
-      for (const id of plateToManufacturingParts.get(plateId)) mpIds.add(id);
+    if (jobToFusionParts.has(job.id)) {
+      for (const fusionPartId of jobToFusionParts.get(job.id)) {
+        const manufacturingPartId = fusionPartToManufacturingPart.get(fusionPartId);
+        if (manufacturingPartId) mpIds.add(manufacturingPartId);
+      }
     }
     if (boxTubeId && boxTubeToManufacturingPart.has(boxTubeId)) {
       mpIds.add(boxTubeToManufacturingPart.get(boxTubeId));
@@ -543,11 +535,11 @@ export async function fetchFusionJobsByManufacturingPartIds(partIds) {
 }
 
 /**
- * Plate ids and box tube ids with at least one completed CAM output job
+ * Snapshotted part ids, plate ids, and box tube ids with at least one completed CAM output job
  * (plate:cam / box_tube - never plate:arrange, see isFusionOutputJob).
- * Powers the "Completed" badge on the Parts and Tube Stock tabs - a plate
- * (and every part currently assigned to it) or a box tube shows Completed
- * once a real machine-output job for it has finished, not just an arrange.
+ * Powers the "Completed" badge on the Parts and Tube Stock tabs. A part is
+ * complete only when it appears in that completed job's immutable snapshot;
+ * later changes to the reusable plate do not rewrite history.
  */
 export async function fetchCompletedFusionStockIds() {
   const { data, error } = await supabase
@@ -557,13 +549,17 @@ export async function fetchCompletedFusionStockIds() {
     .eq('status', 'completed');
   if (error) throw error;
   const plateIds = new Set();
+  const fusionPartIds = new Set();
   const boxTubeIds = new Set();
   for (const job of data || []) {
     if (!isFusionOutputJob(job)) continue;
     if (job.params?.plateId) plateIds.add(job.params.plateId);
+    for (const assignment of job.params?.fusionPlateSnapshot?.assignments || []) {
+      if (assignment?.part_id) fusionPartIds.add(assignment.part_id);
+    }
     if (job.params?.boxTubeId) boxTubeIds.add(job.params.boxTubeId);
   }
-  return { plateIds, boxTubeIds };
+  return { fusionPartIds, plateIds, boxTubeIds };
 }
 
 /**
@@ -600,12 +596,36 @@ export async function fetchFusionFolderTree(projectName = '2026 Season CAM') {
  * turning/routing's cam-generate, this genuinely needs an external Fusion
  * 360 process).
  */
-export async function queueFusionJob({ fusionJobKind, plateId, boxTubeId, machineId, materialId, toolId, requestedBy, name, partId, groupingMode, selectedPartId, selectedPartIds, fusionFileName, fusionFolderPath, tabCount, singleToolMode = false, multiToolMode = false }) {
+async function requireLoadedTool(machineId, toolId, { requireEndmill = false } = {}) {
+  if (!machineId || !toolId) return;
+  const { data: loadedRows, error: loadedError } = await supabase
+    .from('cam_machine_tools')
+    .select('tool_id, cam_tools(tool_type)')
+    .eq('machine_id', machineId);
+  if (loadedError) throw loadedError;
+  const selected = (loadedRows || []).find((row) => String(row.tool_id) === String(toolId));
+  if (!selected) {
+    throw new Error('Selected tool is no longer loaded on this machine - pick another or update ATC Slots.');
+  }
+  if (requireEndmill && !/end\s*mill/i.test(String(selected.cam_tools?.tool_type || ''))) {
+    throw new Error('Single-tool Fusion CAM requires an endmill selected on the job');
+  }
+}
+
+// Direct helper for arrange and tube jobs. Plate CAM must use the atomic
+// assignment-and-queue function below.
+export async function queueFusionJob({ fusionJobKind, plateId, boxTubeId, machineId, materialId, toolId, requestedBy, name, partId, groupingMode, selectedPartId, selectedPartIds, fusionFileName, fusionFolderPath, tabCount, singleToolMode = false, multiToolMode = false, orientation = 'vertical' }) {
   if (!FUSION_JOB_KINDS.includes(fusionJobKind)) {
     throw new Error(`Invalid fusionJobKind: ${fusionJobKind}`);
   }
   if (fusionJobKind === 'box_tube' && !boxTubeId) {
     throw new Error('A box tube is required for a tube-stock CAM job');
+  }
+  if (fusionJobKind === 'plate:cam') {
+    throw new Error('Plate CAM must be queued atomically with queueFusionPlateJob');
+  }
+  if (fusionJobKind === 'box_tube' && (!machineId || !toolId || !materialId)) {
+    throw new Error('Tube CAM requires a machine, an installed endmill, and an aluminum material');
   }
   // A fresh, real-time check, not a re-check of whatever the queue picker's
   // own cached tool list already showed - that list is only as current as
@@ -616,16 +636,10 @@ export async function queueFusionJob({ fusionJobKind, plateId, boxTubeId, machin
   // and only failed later, once a Runner tried to claim it - direct
   // instruction: this must fail at queue time instead, before a bad job
   // ever reaches cam_jobs at all.
-  if (machineId && toolId) {
-    const { data: loadedRows, error: loadedError } = await supabase
-      .from('cam_machine_tools')
-      .select('tool_id')
-      .eq('machine_id', machineId);
-    if (loadedError) throw loadedError;
-    const loadedToolIds = new Set((loadedRows || []).map((row) => String(row.tool_id)));
-    if (toolId && !loadedToolIds.has(String(toolId))) {
-      throw new Error('Selected tool is no longer loaded on this machine - pick another or update ATC Slots.');
-    }
+  await requireLoadedTool(machineId, toolId, { requireEndmill: singleToolMode });
+  const normalizedOrientation = String(orientation || 'vertical').trim().toLowerCase();
+  if (fusionJobKind === 'box_tube' && !['horizontal', 'vertical'].includes(normalizedOrientation)) {
+    throw new Error('Tube orientation must be horizontal or vertical');
   }
   const params = {
     fusionJobKind,
@@ -644,7 +658,7 @@ export async function queueFusionJob({ fusionJobKind, plateId, boxTubeId, machin
       // Plate CAM only. Tube jobs have their own operation planner and must
       // retain their stable, minimal queue payload.
       multiToolMode: Boolean(multiToolMode)
-    } : { boxTubeId }),
+    } : { boxTubeId, orientation: normalizedOrientation }),
     // Where the saved Fusion document goes and what it's named - chosen at
     // queue time (Plates tab). Optional; camPlate.py falls back to its
     // existing defaults when these aren't set.
@@ -674,6 +688,55 @@ export async function queueFusionJob({ fusionJobKind, plateId, boxTubeId, machin
     .single();
   if (error) throw error;
   return data;
+}
+
+/** Replace a hidden plate's nest and queue its immutable CAM snapshot atomically. */
+export async function queueFusionPlateJob({ plateId, assignments, machineId, toolId, requestedBy, name, fusionFileName, fusionFolderPath, tabCount, groupingMode, singleToolMode = false, multiToolMode = false }) {
+  if (!plateId) throw new Error('A plate is required for plate CAM');
+  if (!machineId) throw new Error('Choose a machine before queueing plate CAM');
+  if (!multiToolMode && !toolId) throw new Error('Choose an installed tool before queueing plate CAM');
+  if (!Array.isArray(assignments) || !assignments.length) throw new Error('Choose at least one part to queue');
+  if (!['single', 'grouped'].includes(groupingMode)) throw new Error('Choose single-part or grouped Fusion CAM explicitly');
+  if ((groupingMode === 'single' && assignments.length !== 1) || (groupingMode === 'grouped' && assignments.length < 2)) {
+    throw new Error(groupingMode === 'single' ? 'Single-part CAM requires exactly one part' : 'Grouped CAM requires at least two parts');
+  }
+  if (singleToolMode && multiToolMode) throw new Error('Single-tool and multi-tool mode cannot both be enabled');
+  await requireLoadedTool(machineId, toolId, { requireEndmill: singleToolMode });
+  const rawTabCount = tabCount === '' || tabCount == null ? null : Number(tabCount);
+  if (rawTabCount !== null && !Number.isFinite(rawTabCount)) throw new Error('Tab count must be a number');
+  const normalizedTabCount = rawTabCount === null
+    ? null
+    : Math.max(4, Math.min(20, Math.round(rawTabCount)));
+  const normalizedAssignments = assignments.map((assignment) => ({
+    partId: assignment.partId,
+    quantity: Number(assignment.quantity)
+  }));
+  if (normalizedAssignments.some((assignment) => !assignment.partId || !Number.isInteger(assignment.quantity) || assignment.quantity <= 0)) {
+    throw new Error('Every queued part needs a positive whole-number quantity');
+  }
+
+  const { data, error } = await supabase.rpc('queue_fusion_plate_job', {
+    p_plate_id: plateId,
+    p_assignments: normalizedAssignments,
+    p_machine_id: machineId || null,
+    p_tool_id: multiToolMode ? null : toolId || null,
+    p_name: name || null,
+    p_requested_by: requestedBy || null,
+    p_fusion_file_name: fusionFileName || null,
+    p_fusion_folder_path: fusionFolderPath || null,
+    p_tab_count: normalizedTabCount,
+    p_grouping_mode: groupingMode,
+    p_single_tool_mode: Boolean(singleToolMode),
+    p_multi_tool_mode: Boolean(multiToolMode)
+  }).single();
+  if (error) throw error;
+  return data;
+}
+
+export function fusionNcDestinationName(baseName, index, total, sourceName) {
+  const extension = String(sourceName || '').match(/(\.[a-z0-9]+)$/i)?.[1] || '.nc';
+  const suffix = total > 1 ? `-${index + 1}` : '';
+  return `${baseName}${suffix}${extension}`;
 }
 
 export async function cancelFusionJob(id) {

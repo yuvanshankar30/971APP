@@ -97,6 +97,7 @@ describe('Fusion Runner grouping lifecycle',()=>{
   expect(await result.json()).toEqual({job:null,error:'Part b is missing its STEP file'});
   expect(queries[4].update).toHaveBeenCalledWith(expect.objectContaining({status:'failed'}));
   expect(queries[4].eq).toHaveBeenCalledWith('status','claimed');
+  expect(queries[4].eq).toHaveBeenCalledWith('claimed_by','runner');
  });
  it('does not let a late failure overwrite terminal or non-Fusion jobs',async()=>{
   mocks.from.mockReturnValue(chain({data:[]}));
@@ -223,16 +224,16 @@ describe('Fusion Runner grouping lifecycle',()=>{
    .mockReturnValueOnce(chain({data:{id:'tube-job',params:{fusionJobKind:'box_tube'}}}))
    .mockReturnValueOnce(chain({data:[{id:'tube-job'}]}));
   expect((await call('complete',{jobId:'tube-job',runnerId:'runner',ncFiles:[
-   {name:'Bottom Tube-side-12.nc',contentBase64:side12},
-   {name:'Bottom Tube-side-3.nc',contentBase64:side3},
-   {name:'Bottom Tube-side-6.nc',contentBase64:side6},
-   {name:'Bottom Tube-side-9.nc',contentBase64:side9}
+   {name:'Bottom Tube-side-12.tap',contentBase64:side12},
+   {name:'Bottom Tube-side-3.tap',contentBase64:side3},
+   {name:'Bottom Tube-side-6.tap',contentBase64:side6},
+   {name:'Bottom Tube-side-9.tap',contentBase64:side9}
   ]})).status).toBe(200);
   expect(mocks.storageUpload.mock.calls.map(([path])=>path)).toEqual([
-   'AutoCAM/tube-job/Bottom_Tube-side-12.nc',
-   'AutoCAM/tube-job/Bottom_Tube-side-3.nc',
-   'AutoCAM/tube-job/Bottom_Tube-side-6.nc',
-   'AutoCAM/tube-job/Bottom_Tube-side-9.nc'
+   'AutoCAM/tube-job/Bottom_Tube-side-12.tap',
+   'AutoCAM/tube-job/Bottom_Tube-side-3.tap',
+   'AutoCAM/tube-job/Bottom_Tube-side-6.tap',
+   'AutoCAM/tube-job/Bottom_Tube-side-9.tap'
   ]);
  });
  it('rejects a tube completion that is missing a setup program',async()=>{

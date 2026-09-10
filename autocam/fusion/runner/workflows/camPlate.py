@@ -38,6 +38,7 @@ from .dropFolder import resolve_drop_folder
 from .job_status import ensure_completion_response, send_job_error
 from .localCamAssets import load_local_tool_library_json, resolve_local_post_processor
 from .machiningTime import total_machining_time
+from .saveDocument import save_new_document
 from .templateTools import patch_cam_template_with_tool_libraries, disable_geometry_dependent_leads
 
 
@@ -753,48 +754,29 @@ def start(data, session):
 
         # Save the document to the configured AutoCAM drop folder, or the
         # folder chosen at queue time (Plates tab folder-tree picker).
-        try:
-            folder_path = _get(payload, "fusion_folder_path") or FUSION_DROP_FOLDER_PATH
-            data_project, autocam_drop_folder = resolve_drop_folder(
-                app, FUSION_DATA_PROJECT_NAME, folder_path
-            )
+        folder_path = _get(payload, "fusion_folder_path") or FUSION_DROP_FOLDER_PATH
+        data_project, autocam_drop_folder = resolve_drop_folder(
+            app, FUSION_DATA_PROJECT_NAME, folder_path
+        )
 
-            # Prefer a name typed at queue time (payload.fusion_file_name -
-            # the Plates tab filename field) over a per-part name
-            # (fusion_parts.fusion_file_name, set on the Parts tab) over the
-            # default Plate<plate_id>Job<job_id> - the last is real but
-            # unreadable in Fusion's Data Panel (both plate_id and job_id
-            # are UUIDs). The per-part fallback uses the first assigned
-            # part's name since a plate's saved document is one file
-            # regardless of how many parts are nested onto it.
-            custom_name = _get(payload, "fusion_file_name")
-            if not custom_name:
-                for assignment in assignments:
-                    candidate = assignment.get("fusion_file_name")
-                    if candidate:
-                        custom_name = candidate
-                        break
-            doc_name = re.sub(r"\s+", "", str(custom_name)) if custom_name else f"Plate{plate_id}Job{job_id}"
-            # Check if file already exists and delete it
-            try:
-                existing_file = autocam_drop_folder.dataFiles.itemByName(doc_name)
-                if existing_file:
-                    existing_file.deleteMe()
-            except Exception:
-                pass
-
-            # Save the document
-            doc.saveAs(doc_name, autocam_drop_folder, "", "")
-            app.log(f"File uploaded to {data_project.name}/{folder_path}/{doc_name}")
-
-        except Exception as e:
-            # folder_path (the queue-time override, or FUSION_DROP_FOLDER_PATH)
-            # is what resolve_drop_folder actually tried above - the module
-            # default alone would misreport where a custom-folder job
-            # actually failed to save.
-            app.log(
-                f"Failed to save document to '{folder_path}' folder:\n{traceback.format_exc()}"
-            )
+        # Prefer a name typed at queue time (payload.fusion_file_name -
+        # the Plates tab filename field) over a per-part name
+        # (fusion_parts.fusion_file_name, set on the Parts tab) over the
+        # default Plate<plate_id>Job<job_id> - the last is real but
+        # unreadable in Fusion's Data Panel (both plate_id and job_id
+        # are UUIDs). The per-part fallback uses the first assigned
+        # part's name since a plate's saved document is one file
+        # regardless of how many parts are nested onto it.
+        custom_name = _get(payload, "fusion_file_name")
+        if not custom_name:
+            for assignment in assignments:
+                candidate = assignment.get("fusion_file_name")
+                if candidate:
+                    custom_name = candidate
+                    break
+        doc_name = re.sub(r"\s+", "", str(custom_name)) if custom_name else f"Plate{plate_id}Job{job_id}"
+        save_new_document(doc, autocam_drop_folder, doc_name)
+        app.log(f"File uploaded to {data_project.name}/{folder_path}/{doc_name}")
 
         export_dir = os.path.join(FINAL_PATH, plate_id)
         try:

@@ -47,7 +47,7 @@ function autoCamArtifactPath(jobId, artifact, index, kind) {
 }
 
 function validateTubeNcArtifacts(ncFiles) {
-  const sides = ncFiles.map((artifact) => String(artifact.name).match(/-side-(12|3|6|9)\.(?:nc|ngc)$/i)?.[1]);
+  const sides = ncFiles.map((artifact) => String(artifact.name).match(/-side-(12|3|6|9)\.(?:nc|ngc|tap)$/i)?.[1]);
   if (ncFiles.length !== 4 || new Set(sides).size !== 4 || sides.some((side) => !side)) {
     throw new Error('Box-tube CAM must post exactly four per-setup NC files: Side 12, Side 3, Side 6, and Side 9');
   }
@@ -352,7 +352,7 @@ export async function POST({ request, url }) {
         const message = error.message || 'Could not resolve Fusion job inputs';
         const { error: failError } = await supabase.from('cam_jobs')
           .update({ status: 'failed', errors: [message], progress_message: message })
-          .eq('id', job.id).eq('status', 'claimed');
+          .eq('id', job.id).eq('status', 'claimed').eq('claimed_by', runnerId);
         if (failError) throw failError;
         return json({ job: null, error: message });
       }

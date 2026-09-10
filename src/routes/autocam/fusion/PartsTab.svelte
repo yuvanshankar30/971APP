@@ -5,7 +5,7 @@
   import { supabase } from '$lib/supabase.js';
   import {
     fetchParts, createPart, deletePart, deleteParts, renamePart, updatePartQuantity, fetchPartCategories, installFusionPartCad,
-    fetchPlates, createPlate, assignPartToPlate, queueFusionJob, fetchFusionFolderTree, fetchCompletedFusionStockIds
+    fetchPlates, createPlate, queueFusionPlateJob, fetchFusionFolderTree, fetchCompletedFusionStockIds
   } from '$lib/fusionCam.js';
   import { PACIFIC_TIME_ZONE, formatPacificDateTime } from '$lib/timezone.js';
   import { fetchStepMeshes, readStepMeshes } from '$lib/stepMeshLoader.js';
@@ -46,8 +46,8 @@
   let parts = [];
   let plates = [];
   let categories = [];
-  // fusion_parts.id set with a completed CAM output job on whichever plate
-  // they're currently assigned to - see fetchCompletedFusionStockIds.
+  // fusion_parts.id set captured by a completed CAM output job's immutable
+  // queue snapshot - see fetchCompletedFusionStockIds.
   let completedPartIds = new Set();
   $: stockGroups = buildStockGroups(parts, plates, categories);
   $: partsByCreatedAt = [...parts].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
@@ -515,15 +515,8 @@
     if (showLoading) loading = true;
     try {
       [parts, categories, plates] = await Promise.all([fetchParts(), fetchPartCategories(), fetchPlates()]);
-      const { plateIds: completedPlateIds } = await fetchCompletedFusionStockIds();
-      const nextCompletedPartIds = new Set();
-      for (const plate of plates) {
-        if (!completedPlateIds.has(plate.id)) continue;
-        for (const assignment of plate.fusion_part_category_assignments || []) {
-          if (assignment.fusion_parts?.id) nextCompletedPartIds.add(assignment.fusion_parts.id);
-        }
-      }
-      completedPartIds = nextCompletedPartIds;
+      const { fusionPartIds } = await fetchCompletedFusionStockIds();
+      completedPartIds = fusionPartIds;
       await loadManufacturingParts();
       const { data: machineRows } = await supabase.from('cam_machines').select('*').eq('can_run_plates', true).eq('enabled', true).order('name');
       machines = machineRows || [];
@@ -1006,23 +999,10 @@
     queueing = { ...queueing, [categoryId]: true };
     try {
       const plateId = await resolveCategoryPlateId(group);
-      if (mode === 'single') {
-        const partId = categorySinglePartSelections[categoryId];
-        const quantity = Number(categorySinglePartQuantities[categoryId]);
-        await assignPartToPlate({ categoryId, plateId, partId, quantity });
-      } else {
-        const selected = categoryGroupedPartSelections[categoryId] || [];
-        for (const partId of selected) {
-          const quantity = Number(categoryGroupedPartQuantities[categoryId]?.[partId]);
-          await assignPartToPlate({ categoryId, plateId, partId, quantity });
-        }
-      }
-      await load(false);
-      const refreshedGroup = buildStockGroups(parts, plates, categories).find((g) => g.categoryId === categoryId) || group;
-      queueModalPlate = refreshedGroup.plates.find((p) => p.id === plateId) || { id: plateId };
+      queueModalPlate = group.plates.find((p) => p.id === plateId) || { id: plateId };
       queueModalCategoryId = categoryId;
       queueModalLabel = mode === 'single'
-        ? (refreshedGroup.parts.find((p) => p.id === categorySinglePartSelections[categoryId])?.name || categoryLabel(group.category))
+        ? (group.parts.find((p) => p.id === categorySinglePartSelections[categoryId])?.name || categoryLabel(group.category))
         : categoryLabel(group.category);
       queueFileName = queueModalLabel.replace(/\s+/g, '');
       queueFolderPath = '';
@@ -1052,42 +1032,37 @@
     const mode = categoryQueueModes[categoryId];
     const selectedPartId = mode === 'single' ? categorySinglePartSelections[categoryId] : null;
     const selectedPartIds = mode === 'grouped' ? (categoryGroupedPartSelections[categoryId] || []) : null;
+    const assignments = (mode === 'single' ? [selectedPartId] : selectedPartIds).map((partId) => ({
+      partId,
+      quantity: Number(mode === 'single'
+        ? categorySinglePartQuantities[categoryId]
+        : categoryGroupedPartQuantities[categoryId]?.[partId])
+    }));
+    const group = stockGroups.find((candidate) => String(candidate.categoryId) === String(categoryId));
+    const multiToolMode = canUseAutoMultiTool(group, categoryMachineSelections[categoryId])
+      && !categorySingleToolModes[categoryId];
     queueSubmitting = true;
     try {
-      await queueFusionJob({
-        fusionJobKind: 'plate:cam',
+      await queueFusionPlateJob({
         plateId: plate.id,
+        assignments,
         machineId: categoryMachineSelections[categoryId],
-        // The real cam_materials id, NOT plate.category_id (a
-        // fusion_part_categories id) - cam_jobs.material_id has a foreign
-        // key straight to cam_materials, so passing the category id here
-        // would fail the insert outright with a foreign-key violation any
-        // time the plate actually has a valid category.
-        materialId: plate.fusion_part_categories?.material_id || null,
         toolId: categoryToolSelections[categoryId] || null,
-        groupingMode: mode,
-        selectedPartId,
-        selectedPartIds,
         requestedBy: user?.id,
+        groupingMode: mode,
         name: `${mode === 'grouped' ? 'Grouped Fusion CAM' : 'Fusion CAM'}: ${queueModalLabel}`,
         fusionFileName: queueFileName.trim() || null,
         fusionFolderPath: queueFolderPath || null,
         tabCount: queueTabCount === '' ? null : queueTabCount,
-        singleToolMode: isNewRouter(categoryMachineSelections[categoryId])
-          && !canUseAutoMultiTool(
-            stockGroups.find((group) => String(group.categoryId) === String(categoryId)),
-            categoryMachineSelections[categoryId]
-          ) || Boolean(categorySingleToolModes[categoryId]),
-        multiToolMode: canUseAutoMultiTool(
-          stockGroups.find((group) => String(group.categoryId) === String(categoryId)),
-          categoryMachineSelections[categoryId]
-        ) && !categorySingleToolModes[categoryId],
+        singleToolMode: isNewRouter(categoryMachineSelections[categoryId]) && !multiToolMode,
+        multiToolMode,
       });
       toastActions.show('Queued for the Fusion Runner');
       categoryQueueModes = { ...categoryQueueModes, [categoryId]: '' };
       categorySinglePartSelections = { ...categorySinglePartSelections, [categoryId]: '' };
       categoryGroupedPartSelections = { ...categoryGroupedPartSelections, [categoryId]: [] };
       closeQueueModal();
+      await load(false);
     } catch (e) {
       toastActions.show(e.message || 'Failed to queue job');
     } finally {
