@@ -1151,7 +1151,7 @@
         // Direct bug report: this used to force 'linuxcnc' for every
         // operation_type except routing/tubestock, discarding whatever
         // controller was actually picked for a turning or milling machine.
-        // The 971 Lathe is real, physically Haas-controlled - every save of
+        // HAAS TL-1 (was "971 Lathe") is real, physically Haas-controlled - every save of
         // its profile silently reset it back to 'linuxcnc', which is why
         // Fusion Runner turning jobs kept failing to resolve a post
         // processor (Fusion's own bundled 'linuxcnc' post is milling-only
@@ -2154,7 +2154,7 @@
         <div class="form-row">
           <div class="form-group">
             <label class="form-label" for="mp-name">Name</label>
-            <input id="mp-name" class="form-input" placeholder="e.g. 971 Lathe" bind:value={machineForm.name} />
+            <input id="mp-name" class="form-input" placeholder="e.g. HAAS TL-1" bind:value={machineForm.name} />
           </div>
           <div class="form-group">
             <label class="form-label" for="mp-desc">Description</label>
@@ -2210,7 +2210,7 @@
               {#if machineForm.operation_type === 'routing' || machineForm.operation_type === 'tubestock'}
                 WinCNC uses a genuinely different G-code dialect (comments, units, tool-change pause) - see routing.js. Pick wrong and the file may not run on the real machine.
               {:else}
-                Direct bug report: this used to be hidden and forced to LinuxCNC for every non-routing machine, which is why the 971 Lathe (a real Haas lathe) kept failing to resolve a post processor. Pick the real controller for this machine.
+                Direct bug report: this used to be hidden and forced to LinuxCNC for every non-routing machine, which is why HAAS TL-1 (a real Haas lathe) kept failing to resolve a post processor. Pick the real controller for this machine.
               {/if}
             </p>
           </div>

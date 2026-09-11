@@ -20,12 +20,20 @@ around whichever body is actually imported for a real job.
 
 Confirmed live (real hex shaft geometry, not an assumption): a model with a
 groove at each end needs two setups, not one - the operator chucks extra-
-length raw stock, faces/necks/grooves the first end, PARTS OFF the finished
-blank at its own measured length (severing it from the remaining grip
-stock - a real cutoff cut, not a synthetic simplification), then re-chucks
-the now-finished end to expose and machine the second end. The second
-setup's own stock has no extra grip allowance, since after parting there is
-none left to grip beyond the part itself.
+length raw stock, faces/necks/grooves the first end, then re-chucks the
+now-finished end to expose and machine the second end. The raw excess
+stays attached PERMANENTLY through and after both setups (it is what the
+chuck grips throughout, and what a tailstock/live center can bear against)
+- CAM never faces it off and never parts the finished blank free. An
+earlier version of this module added a final staged-Face-plus-Part
+sequence to do exactly that, but confirmed live on a real job: even with
+an explicit geometry-clearance check in place, it still reached into and
+machined away a real snap-ring groove. Direct instruction after seeing
+that: "remove that facing operation... dont even cut off the part of the
+stock that makes it fall... IT SHOULD DO ANYTHING BUT THAT LAST FACING
+OPERATION BECAUSE THAT REMOVES THE GROOVES." Every setup now ends after
+its own light tip-face, roughing, finishing, and groove - see
+_build_hex_end_setup's own docstring.
 """
 
 import adsk.core
@@ -42,11 +50,32 @@ from .HexShaftMath import (
 )
 _CM_PER_IN = 2.54
 _PARALLEL_TOLERANCE = 0.985
-# How far past the finished shaft's own length the first setup's stock
-# extends, for the chuck to grip - not a measured value, a workholding
-# allowance. The second setup's stock has none: after the first setup parts
-# the blank off at its own measured length, there is no extra material left.
-_CHUCK_GRIP_ALLOWANCE_IN = 1.5
+# How far past the finished shaft's own length the raw stock extends on the
+# back (grip) side, carried through BOTH setups (not a measured value - a
+# workholding/tailstock-support allowance) and only faced+parted off as the
+# last setup's own final operations - see _build_hex_end_setup. Overridden
+# by the operator's own tailstock_length_in when given (handleHexShaft's
+# own "make sure the user input for tailstock works" instruction); this is
+# only the fallback when they don't provide one.
+_DEFAULT_TAILSTOCK_LENGTH_IN = 1.5
+# The real floor on tailstock_length_in - not a preference, a physical
+# requirement: the chuck needs SOME real material to grip through both
+# setups (grip_cm subtracts directly from the stock's own bounds - see
+# handleHexShaft's own _build_hex_stock calls). Confirmed as a real,
+# unvalidated gap: an operator-supplied 0 (or a negative value able to
+# reach the Runner despite the UI's own client-side min="0", which nothing
+# server-side re-checks) would silently build a stock prism with no grip
+# allowance at all, or shorter than the finished part itself, and neither
+# is caught until a human notices in Fusion.
+_MIN_TAILSTOCK_LENGTH_IN = 0.25
+# A small synthetic raw-stock overage built onto each setup's own working
+# tip (see handleHexShaft's own _build_hex_stock calls), so that setup's
+# light tip-facing pass (see _build_hex_end_setup) has real, if tiny,
+# material to true up before turning starts - a real sawn bar is never
+# perfectly flush with the finished model's own length. Direct instruction:
+# "try to make it remove 0.005" - deliberately tiny, nothing like the old
+# single deep facing plunge this replaces.
+_TIP_FACE_ALLOWANCE_IN = 0.005
 
 
 def _vec(v):
@@ -341,17 +370,33 @@ def _tool_by_type(lib, wanted_type):
 
 def _build_hex_end_setup(
     cam, root, body, long_edge, origin_point, axis_unit, across_flats_cm,
-    stock_body, generic_tool, groove_tool, setup_name, sever_length_cm=None,
+    stock_body, generic_tool, groove_tool, setup_name,
 ):
     """One Face -> Profile Roughing -> Profile Finishing -> Single Groove
-    setup for whichever end axis_unit points toward (its own axial maximum),
-    optionally followed by a Part (cutoff) operation.
+    setup for whichever end axis_unit points toward (its own axial
+    maximum). Nothing else, and nothing conditional on which setup this
+    is - every setup this function builds ends here.
 
-    sever_length_cm, when given, positions a turning_part operation at that
-    distance from this setup's own tip - the real cutoff cut that separates
-    a finished-length blank from the remaining chuck-grip stock, run only on
-    the first end machined from raw bar (the second setup re-chucks the
-    already-correct-length blank and has nothing left to part off).
+    Direct instruction, after an earlier version of this function added a
+    further staged Face-plus-Part sequence to face off and sever the
+    carried grip/tailstock excess as the FINAL setup's own last
+    operations, and that sequence machined away a real snap-ring groove on
+    a real job even with an explicit geometry-clearance check in place:
+    "remove that facing operation... dont even cut off the part of the
+    stock that makes it fall... IT SHOULD DO ANYTHING BUT THAT LAST FACING
+    OPERATION BECAUSE THAT REMOVES THE GROOVES." The grip/tailstock excess
+    (see handleHexShaft's own _build_hex_stock calls) now stays attached
+    permanently, on every setup this function builds - CAM's own job ends
+    once this end's neck and groove are cut; nothing here ever faces off
+    or parts the finished shape free of that excess.
+
+    The Face pass at this end's own working tip (WCS Z=0, the model's own
+    real end) is a light cleanup cut only: the stock built for it (see
+    handleHexShaft's own _TIP_FACE_ALLOWANCE_IN overage) carries a small
+    synthetic overage there for exactly that pass to true up. Direct
+    instruction: "face the ending side of the side that is not nearest to
+    the tailstock" - this end's own tip, by construction, is always the
+    side away from wherever the carried excess/tailstock support sits.
     """
     axial_min, axial_max = _axial_bounds_cm(body, origin_point, axis_unit)
 
@@ -389,29 +434,43 @@ def _build_hex_end_setup(
 
     # Explicit ConstructionPoints.add fails live with the same "Environment
     # is not supported" error setByPlane hit above, independent of workspace
-    # or design type. "Stock front"/"stock back" are turning's own native
-    # stock-relative origin concepts - the same family HandleSpacer.py's
-    # reference setup uses (wcs_origin_turning: 'stock front') - this
-    # setup's own stock body was deliberately built with one face at exactly
-    # this end's measured tip, but which literal label ("front" vs "back")
-    # actually lands there depends on this body's own axis/flip resolution,
-    # not something to hardcode: confirmed live, Spacer's own body resolves
-    # "front" to its tip while this hex shaft resolves "back" to its tip
-    # instead, for the identical intent. Try both and keep whichever matches.
-    parameters.itemByName("wcs_origin_turning").value.value = "stock front"
+    # or design type. "Model front"/"model back" resolve against the design
+    # BODY's own fixed geometry, not the synthetic stock prism - unlike an
+    # earlier version of this function (which used "stock front"/"stock
+    # back", confirmed live equivalent back when stock's own tip always
+    # exactly coincided with the model's), this setup's stock now
+    # deliberately extends past the model's own tip on purpose (the tip-
+    # facing overage, and on the final setup the carried grip/tailstock
+    # excess too) - "model front"/"model back" stay correct regardless of
+    # how far the stock itself extends, confirmed live. Which literal label
+    # ("front" vs "back") lands on this end's own tip depends on this
+    # body's own axis/flip resolution, not something to hardcode - confirmed
+    # live, Spacer's own body resolves "front" to its tip while this hex
+    # shaft resolves "back" to its tip instead, for the identical intent.
+    # Try both and keep whichever matches.
+    parameters.itemByName("wcs_origin_turning").value.value = "model front"
     origin, _, _, _ = _wcs_frame(setup)
     offset = _sub_v(origin, tip_point)
     if _dot(offset, offset) > 1e-4:
-        parameters.itemByName("wcs_origin_turning").value.value = "stock back"
+        parameters.itemByName("wcs_origin_turning").value.value = "model back"
         origin, _, _, _ = _wcs_frame(setup)
         offset = _sub_v(origin, tip_point)
     if _dot(offset, offset) > 1e-4:
         raise RuntimeError(
-            "Hex shaft CAM's WCS origin (stock front/back) did not resolve to this end's "
+            "Hex shaft CAM's WCS origin (model front/back) did not resolve to this end's "
             "own measured tip - got {}, expected {}".format(origin, tip_point)
         )
 
+    # Light cleanup pass at this end's own tip (WCS Z=0) - the small
+    # _TIP_FACE_ALLOWANCE_IN overage baked into this setup's own stock is
+    # the only thing it removes. Explicit "from wcs"/0in rather than
+    # Fusion's own "model front" auto-default for frontHeight, which
+    # resolves to the model's FAR surface (this setup's own back, where the
+    # grip/tailstock excess permanently lives - never faced off, see this
+    # function's own docstring).
     face_op = setup.operations.add(_input_with_tool(setup, "turning_face", generic_tool))
+    face_op.parameters.itemByName("frontHeight_mode").value.value = "from wcs"
+    face_op.parameters.itemByName("frontHeight_offset").expression = "0 in"
 
     rough_op = setup.operations.add(_input_with_tool(setup, "turning_profile_roughing", generic_tool))
     finish_op = setup.operations.add(_input_with_tool(setup, "turning_profile_finishing", generic_tool))
@@ -425,19 +484,6 @@ def _build_hex_end_setup(
     groove_op.parameters.itemByName("grooves").value.value = [target["faces"][0].edges.item(0)]
 
     operations = [face_op, rough_op, finish_op, groove_op]
-
-    if sever_length_cm is not None:
-        # Confirmed live: turning_part rejects a plain "turning general"
-        # tool the same way turning_single_groove does ("Tool ... is not
-        # supported for the strategy.") - a parting tool is a grooving-type
-        # insert in Fusion's own tool taxonomy, so the same groove_tool
-        # covers both strategies rather than needing a third tool type.
-        part_op = setup.operations.add(_input_with_tool(setup, "turning_part", groove_tool))
-        part_op.parameters.itemByName("backHeight_mode").value.value = "from wcs"
-        part_op.parameters.itemByName("backHeight_offset").expression = "{:.6f} in".format(
-            sever_length_cm / _CM_PER_IN
-        )
-        operations.append(part_op)
 
     for op in operations:
         _set_minimum_retraction(op)
@@ -456,13 +502,19 @@ def handleHexShaft(tailstock_length_in=None):
 
     A model grooved at only one end gets a single setup. A model grooved at
     both ends (the real, reviewed case) gets two: the first setup machines
-    whichever end is closer to the model's own axial maximum and parts the
-    finished-length blank off the remaining chuck-grip stock; the second
-    re-chucks that already-correct-length blank (no extra grip allowance
-    left to give it) and machines the other end.
+    whichever end is closer to the model's own axial maximum; the second
+    re-chucks the STILL-JOINED raw bar and machines the other end. Neither
+    setup ever faces off or parts off the carried grip/tailstock excess -
+    see _build_hex_end_setup's own docstring on why that final step was
+    removed. The excess stays attached permanently once CAM is done; a
+    human separates the finished part from it afterward, off the machine.
+
+    tailstock_length_in, when given, is the operator's own override for how
+    much raw stock is carried on the back (grip/tailstock-support) side
+    through every setup - see _DEFAULT_TAILSTOCK_LENGTH_IN for the fallback.
 
     Returns a dict with the created setup(s), the measured geometry
-    (inches), and the tailstock/live-center support length used.
+    (inches), and the tailstock/live-center support length actually used.
     """
     app = adsk.core.Application.get()
     doc = app.activeDocument
@@ -486,7 +538,8 @@ def handleHexShaft(tailstock_length_in=None):
     axial_min, axial_max = _axial_bounds_cm(body, origin_point, axis_unit)
     model_length_cm = axial_max - axial_min
 
-    groove_count = len(_groove_instances(body, origin_point, axis_unit, across_flats_cm))
+    groove_instances = _groove_instances(body, origin_point, axis_unit, across_flats_cm)
+    groove_count = len(groove_instances)
     if groove_count == 0:
         raise ValueError("Hex shaft CAM found no snap-ring groove on this model")
     if groove_count > 2:
@@ -494,6 +547,29 @@ def handleHexShaft(tailstock_length_in=None):
             "Hex shaft CAM expects at most one groove per end (2 total); found {}".format(groove_count)
         )
     two_ended = groove_count == 2
+
+    if not two_ended:
+        # axis_unit's own direction comes from _longest_edge's raw STEP
+        # start/end point order - arbitrary, not something this model's
+        # geometry guarantees points toward the grooved end. Harmless for a
+        # two-ended shaft (both directions get their own setup below), but
+        # _build_hex_end_setup always treats THIS axis_unit's own
+        # axial_max as "the tip" and machines whichever groove sits
+        # nearest it - for a one-ended shaft, if the single real groove
+        # happened to sit nearer axial_min instead, neck_length_cm would
+        # silently span almost the model's ENTIRE length, and Profile
+        # Roughing/Finishing would turn the whole hex bar round rather
+        # than a short neck, with no error anywhere. Confirmed as a real,
+        # untested gap - flip axis_unit here (same reversal two_ended
+        # already does unconditionally for its own second setup) whenever
+        # the single groove is actually closer to axial_min.
+        only_groove = groove_instances[0]
+        distance_to_max = axial_max - only_groove["axialHigh"]
+        distance_to_min = only_groove["axialLow"] - axial_min
+        if distance_to_min < distance_to_max:
+            axis_unit = tuple(-c for c in axis_unit)
+            axial_min, axial_max = _axial_bounds_cm(body, origin_point, axis_unit)
+            groove_instances = _groove_instances(body, origin_point, axis_unit, across_flats_cm)
 
     flat_normal = _vec(_hex_flats(body, axis_unit)[0].geometry.normal)
     cam = _active_cam_product(app, doc)
@@ -508,48 +584,56 @@ def handleHexShaft(tailstock_length_in=None):
     generic_tool = _tool_by_type(lib, "turning general") or lib.item(0)
     groove_tool = _tool_by_type(lib, "turning grooving") or generic_tool
 
-    grip_cm = _CHUCK_GRIP_ALLOWANCE_IN * _CM_PER_IN
+    grip_cm = (
+        tailstock_length_in * _CM_PER_IN if tailstock_length_in is not None
+        else _DEFAULT_TAILSTOCK_LENGTH_IN * _CM_PER_IN
+    )
+    if grip_cm < _MIN_TAILSTOCK_LENGTH_IN * _CM_PER_IN:
+        raise ValueError(
+            "Hex shaft CAM's tailstock/grip length must be at least {:.3f}in for the "
+            "chuck to have real material to hold through both setups - got {:.3f}in.".format(
+                _MIN_TAILSTOCK_LENGTH_IN, grip_cm / _CM_PER_IN
+            )
+        )
+    tip_allowance_cm = _TIP_FACE_ALLOWANCE_IN * _CM_PER_IN
+
+    # Every setup carries the SAME grip_cm excess on its own back side -
+    # not a per-setup allowance, and never faced off or parted by either
+    # setup (see _build_hex_end_setup's own docstring). For a two-ended
+    # shaft, both setups reference the identical physical material: the
+    # raw bar is one continuous piece throughout, just seen from each
+    # setup's own re-chucked orientation.
     first_stock = _build_hex_stock(
         root, origin_point, axis_unit, flat_normal, across_flats_cm,
-        axial_min - grip_cm, axial_max,
+        axial_min - grip_cm, axial_max + tip_allowance_cm,
     )
     first_result = _build_hex_end_setup(
         cam, root, body, long_edge, origin_point, axis_unit, across_flats_cm,
         first_stock, generic_tool, groove_tool,
         setup_name="Hex Shaft" if not two_ended else "Hex Shaft - End 1",
-        sever_length_cm=model_length_cm if two_ended else None,
     )
 
     results = [first_result]
     if two_ended:
         axis_unit_rev = tuple(-c for c in axis_unit)
         axial_min_rev, axial_max_rev = _axial_bounds_cm(body, origin_point, axis_unit_rev)
-        # No extra grip allowance here - the first setup's own Part
-        # operation already cut this blank to exactly its measured length,
-        # so there is nothing left beyond the model itself to grip.
         second_stock = _build_hex_stock(
             root, origin_point, axis_unit_rev, flat_normal, across_flats_cm,
-            axial_min_rev, axial_max_rev,
+            axial_min_rev - grip_cm, axial_max_rev + tip_allowance_cm,
         )
         second_result = _build_hex_end_setup(
             cam, root, body, long_edge, origin_point, axis_unit_rev, across_flats_cm,
             second_stock, generic_tool, groove_tool,
             setup_name="Hex Shaft - End 2",
-            sever_length_cm=None,
         )
         results.append(second_result)
-
-    tailstock_length_cm = (
-        tailstock_length_in * _CM_PER_IN if tailstock_length_in is not None
-        else model_length_cm
-    )
 
     return {
         "setups": [r["setup"] for r in results],
         "acrossFlats": across_flats_cm / _CM_PER_IN,
         "shaftLength": model_length_cm / _CM_PER_IN,
         "neckDiameter": neck_radius_cm(across_flats_cm) * 2 / _CM_PER_IN,
-        "tailstockLength": tailstock_length_cm / _CM_PER_IN,
+        "tailstockLength": grip_cm / _CM_PER_IN,
         "ends": [
             {
                 "grooveDistanceFromEnd": r["grooveDistanceFromEnd"],

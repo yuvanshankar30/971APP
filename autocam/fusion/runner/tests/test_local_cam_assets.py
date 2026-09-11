@@ -125,30 +125,31 @@ class PostProcessorSelectionTests(unittest.TestCase):
         }))
         self.assertEqual(path.name, "971_emc.cps")
 
-    def test_971_lathe_uses_the_bundled_haas_turning_post(self):
+    def test_haas_tl1_uses_the_bundled_haas_turning_post(self):
         # Direct bug report: the lathe's controller kept getting silently
         # reset to 'linuxcnc' by a UI bug, and Fusion's own bundled generic
         # 'linuxcnc' post is CAPABILITY_MILLING only - it cannot turn at
         # all. The lathe is a physical-machine invariant now, same as New
         # Router/UNC Router, so a stale profile can't silently post through
-        # the wrong dialect again.
+        # the wrong dialect again. Renamed from "971 Lathe" to "HAAS TL-1"
+        # in cam_machines - same physical machine, same invariant.
         path = Path(local_cam_assets.resolve_local_post_processor({
-            "cam_machines": {"name": "971 Lathe", "post_processor": "haas turning"}
+            "cam_machines": {"name": "HAAS TL-1", "post_processor": "haas turning"}
         }))
         self.assertEqual(path.name, "haas_turning.cps")
         post = path.read_text()
         self.assertIn('description = "HAAS Turning"', post)
         self.assertIn("capabilities = CAPABILITY_TURNING", post)
 
-    def test_971_lathe_rejects_a_conflicting_post_processor(self):
-        with self.assertRaisesRegex(ValueError, r"971 Lathe must use haas_turning\.cps"):
+    def test_haas_tl1_rejects_a_conflicting_post_processor(self):
+        with self.assertRaisesRegex(ValueError, r"HAAS TL-1 must use haas_turning\.cps"):
             local_cam_assets.resolve_local_post_processor({
-                "cam_machines": {"name": "971 Lathe", "post_processor": "linuxcnc"}
+                "cam_machines": {"name": "HAAS TL-1", "post_processor": "linuxcnc"}
             })
 
-    def test_971_lathe_still_resolves_with_no_configured_post_processor(self):
+    def test_haas_tl1_still_resolves_with_no_configured_post_processor(self):
         path = Path(local_cam_assets.resolve_local_post_processor({
-            "cam_machines": {"name": "971 Lathe", "post_processor": None}
+            "cam_machines": {"name": "HAAS TL-1", "post_processor": None}
         }))
         self.assertEqual(path.name, "haas_turning.cps")
 

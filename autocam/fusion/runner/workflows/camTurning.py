@@ -19,6 +19,7 @@ for turning's own two real differences from that pipeline:
 
 import adsk.core, adsk.fusion, adsk.cam, traceback
 
+import hashlib
 import json
 import os
 import re
@@ -58,9 +59,79 @@ _SPACER_TEMPLATE_PATH = os.path.join(
 # provides or manages.
 _TURNING_SAMPLE_LIBRARY_NAME = "Turning Tools (Inch)"
 
+# Fusion's own bundled Haas turning post (haas_turning.cps) requires the
+# program name to be a bare integer from 1-9999 - its own onOpen calls
+# getAsInt(programName) and rejects anything outside that range ("Program
+# number is out of range"), confirmed live: export()'s default naming
+# (the turning part's own UUID, fine for every other post this pipeline
+# uses) failed that check outright on a real posted job. The separate,
+# older non-Fusion turning pipeline (autocam/turning.js) already reserves
+# O1000 on this same physical machine, and autocam/tubestock.js reserves
+# O1002 and up - this range is chosen clear of those. HAAS TL-1 (was "971
+# Lathe") is the only turning-capable machine today, so applying this
+# unconditionally to every turning job (not just ones that happen to
+# resolve to the Haas post) is safe for now; a future non-Haas turning
+# machine would need this revisited.
+_HAAS_PROGRAM_NUMBER_RANGE_START = 4000
+# One less than the post's own true upper bound (9999) - a two-setup job
+# posts base and base+1, so the base itself must leave room for +1 without
+# spilling past 9999.
+_HAAS_PROGRAM_NUMBER_RANGE_END = 9998
+
+
+def _haas_program_number_base(job_id: str) -> int:
+    """A per-job base program number, not a fixed constant. Confirmed live:
+    every turning job posting under the identical O4000 (and O4001 for a
+    two-ended shaft) meant two different queued jobs produced identically-
+    named G-code files - an operator who doesn't explicitly reload/verify
+    before hitting cycle start could silently run a stale, previously-
+    loaded program against completely different stock. Derived
+    deterministically from the job's own id (the SAME job retried gets the
+    SAME number - not meaningful to vary run-to-run - but two DIFFERENT
+    jobs get different numbers with overwhelming probability) via a stable
+    hash reduced into the range this post's own onOpen actually accepts.
+    """
+    span = _HAAS_PROGRAM_NUMBER_RANGE_END - _HAAS_PROGRAM_NUMBER_RANGE_START + 1
+    digest = int(hashlib.sha256(job_id.encode("utf-8")).hexdigest(), 16)
+    return _HAAS_PROGRAM_NUMBER_RANGE_START + (digest % span)
+
 
 def _total_machining_time(cam: adsk.cam.CAM) -> Optional[float]:
     return total_machining_time(cam, adsk.core.ObjectCollection.create)
+
+
+def _active_cam_product(app, doc):
+    """Same reasoning and wait loop as HandleTube.py's/HandleSpacer.py's/
+    HandleHexShaft.py's own _active_cam_product: a brand-new design document
+    has no CAMProductType product at all until the Manufacture workspace is
+    actually activated, and even then Fusion creates it asynchronously - a
+    single immediate itemByProductType call right after creating/importing
+    the design reliably returns None. Needed here (unlike those other
+    modules, which only ever fetch their own cam product internally, after
+    their own template/setup creation) because _load_generic_turning_tools
+    needs a real cam product BEFORE handleHexShaft ever runs, to load tools
+    into the document's tool library ahead of building any operation.
+    """
+    try:
+        workspace = app.userInterface.workspaces.itemById("CAMEnvironment")
+        if workspace:
+            workspace.activate()
+    except Exception:
+        pass
+    for _ in range(20):
+        try:
+            product = doc.products.itemByProductType("CAMProductType")
+        except RuntimeError:
+            product = None
+        cam = adsk.cam.CAM.cast(product) if product else None
+        if cam:
+            return cam
+        adsk.doEvents()
+        time.sleep(0.1)
+    raise RuntimeError(
+        "Fusion did not create a CAM product after activating Manufacture; "
+        "verify the Manufacturing extension is available."
+    )
 
 
 def _tool_by_type(lib, wanted_type):
@@ -215,10 +286,7 @@ def start(data, session):
             float(tailstock_length_in_raw) if tailstock_length_in_raw not in (None, "") else None
         )
 
-        cam_product = app.activeDocument.products.itemByProductType("CAMProductType")
-        cam = adsk.cam.CAM.cast(cam_product) if cam_product else None
-        if not cam:
-            raise RuntimeError("No CAM product available after creating turning setup")
+        cam = _active_cam_product(app, doc)
 
         if cam_type == "spacer":
             result = handleSpacer(_SPACER_TEMPLATE_PATH, tailstock_length_in)
@@ -268,10 +336,17 @@ def start(data, session):
             pass
 
         # One program per Setup (Face->Rough->Finish->Groove[->Part], in
-        # CAM-browser order) - see NewNCProgram.export's own docstring. A
-        # two-ended hex shaft's second setup is auto-suffixed "-2" there;
-        # no per-setup names need to be passed in.
-        posted_program_names = export(turning_part_id, machine_post_processor_path)
+        # CAM-browser order) - see NewNCProgram.export's own docstring.
+        # Explicit numeric names (see _haas_program_number_base) rather than
+        # export()'s own UUID-based default - a two-ended hex shaft's two
+        # setups get consecutive numbers instead of that default's "-2"
+        # suffix, and different JOBS get different numbers from each other
+        # too, not the same fixed base every time.
+        program_number_base = _haas_program_number_base(job_id)
+        setup_program_names = [
+            str(program_number_base + i) for i in range(cam.setups.count)
+        ]
+        posted_program_names = export(turning_part_id, machine_post_processor_path, setup_program_names)
 
         nc_files = collect_nc_artifacts(export_dir)
         if len(nc_files) != len(posted_program_names):

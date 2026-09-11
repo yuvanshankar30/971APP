@@ -33,14 +33,16 @@ _POST_PROCESSOR_FILES = {
 
 # Physical-machine invariants, not operator-tunable preferences. A New Router
 # job is always for the ShopSabre Pro 408; a stale profile must never post
-# LinuxCNC code to it. Same reasoning for the lathe: 971 Lathe is Haas-
-# controlled, and Fusion's own bundled generic "linuxcnc" post is
-# CAPABILITY_MILLING only - it cannot turn at all, so a stale/reverted
-# profile posting through it would be silently wrong, not just rejected.
+# LinuxCNC code to it. Same reasoning for the lathe: HAAS TL-1 (renamed
+# from "971 Lathe" - same physical machine, id 5fda4b0e-694e-49af-ae17-
+# 9b8e5418e1c0) is Haas-controlled, and Fusion's own bundled generic
+# "linuxcnc" post is CAPABILITY_MILLING only - it cannot turn at all, so a
+# stale/reverted profile posting through it would be silently wrong, not
+# just rejected.
 _MACHINE_POST_PROCESSORS = {
     "new router": "shopsabre.cps",
     "unc router": "971_emc.cps",
-    "971 lathe": "haas_turning.cps",
+    "haas tl-1": "haas_turning.cps",
 }
 
 

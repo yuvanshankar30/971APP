@@ -40,28 +40,44 @@ class HandleHexShaftSourceTests(unittest.TestCase):
         # Confirmed live against a real hex shaft: a model grooved at both
         # ends needs two setups, since a lathe can only face/neck/groove the
         # end it's currently exposing - the operator re-chucks for the other.
-        self.assertIn("groove_count = len(_groove_instances(body, origin_point, axis_unit, across_flats_cm))", self.source)
+        self.assertIn("groove_instances = _groove_instances(body, origin_point, axis_unit, across_flats_cm)", self.source)
+        self.assertIn("groove_count = len(groove_instances)", self.source)
         self.assertIn("two_ended = groove_count == 2", self.source)
         self.assertIn("axis_unit_rev = tuple(-c for c in axis_unit)", self.source)
 
-    def test_first_setup_parts_off_the_finished_blank_at_its_own_measured_length(self):
-        # Confirmed live: "the big chunk" of chuck-grip stock left over after
-        # facing/necking/grooving the first end has to be severed by a real
-        # cutoff cut, not just left attached - turning_part positioned at the
-        # model's own measured length from that end's own tip does this.
-        self.assertIn('sever_length_cm=model_length_cm if two_ended else None', self.source)
-        self.assertIn('setup.operations.add(_input_with_tool(setup, "turning_part", groove_tool))', self.source)
-        self.assertIn('part_op.parameters.itemByName("backHeight_offset").expression', self.source)
+    def test_no_setup_ever_parts_off_or_faces_off_the_grip_excess(self):
+        # Direct instruction, after an earlier version's own final
+        # staged-Face-plus-Part sequence machined away a real snap-ring
+        # groove even with a geometry-clearance check in place: "remove
+        # that facing operation... dont even cut off the part of the
+        # stock that makes it fall... IT SHOULD DO ANYTHING BUT THAT LAST
+        # FACING OPERATION BECAUSE THAT REMOVES THE GROOVES." Neither
+        # setup this module builds ever posts a turning_part operation, or
+        # any Face operation beyond the one light cleanup pass at its own
+        # tip - the carried grip/tailstock excess stays attached
+        # permanently once CAM is done.
+        self.assertNotIn("turning_part", self.source)
+        self.assertNotIn("sever_length_cm", self.source)
+        self.assertNotIn("tailstock_excess_cm", self.source)
 
-    def test_second_setup_stock_has_no_extra_grip_allowance(self):
-        # After the first setup's own Part operation severs the blank at
-        # exactly its measured length, there is nothing left beyond the
-        # model itself to grip - unlike the first setup's stock, which
-        # extends past the model by _CHUCK_GRIP_ALLOWANCE_IN for the chuck.
+    def test_second_setup_stock_carries_the_same_grip_allowance_as_the_first(self):
+        # The raw bar is one continuous piece through both setups (see the
+        # module's own docstring) - the second setup's stock carries the
+        # SAME grip_cm excess on its own back side that the first setup's
+        # does, not a fresh/independent allowance and not none at all.
         second_stock_call = self.source.index("second_stock = _build_hex_stock(")
         second_stock_args = self.source[second_stock_call:self.source.index(")", second_stock_call) + 1]
-        self.assertNotIn("grip_cm", second_stock_args)
-        self.assertIn("axial_min_rev, axial_max_rev", second_stock_args)
+        self.assertIn("axial_min_rev - grip_cm, axial_max_rev + tip_allowance_cm", second_stock_args)
+
+    def test_every_setup_gets_a_light_tip_cleanup_face_first(self):
+        # Direct instruction: "both programs should face the side of the
+        # hex shaft to get rid of imperfections" - a light pass at this
+        # end's own tip (WCS Z=0), explicit rather than Fusion's own
+        # "model front" auto-default (which targets the FAR surface, i.e.
+        # the grip/tailstock excess, not this end's own tip).
+        self.assertIn('face_op.parameters.itemByName("frontHeight_mode").value.value = "from wcs"', self.source)
+        self.assertIn('face_op.parameters.itemByName("frontHeight_offset").expression = "0 in"', self.source)
+        self.assertIn("_TIP_FACE_ALLOWANCE_IN", self.source)
 
     def test_stock_is_a_real_hex_prism_not_a_round_envelope(self):
         # Confirmed live: a fresh ConstructionPlanes.add(setByPlane(...))
@@ -91,13 +107,18 @@ class HandleHexShaftSourceTests(unittest.TestCase):
         self.assertIn("origin_cm = tuple(c / 10.0 for c in _vec(origin))", self.source)
 
     def test_origin_choice_is_tried_both_ways_not_hardcoded(self):
-        # Confirmed live: which literal choice ("stock front" vs "stock
+        # Confirmed live: which literal choice ("model front" vs "model
         # back") actually lands on the measured tip depends on this body's
         # own axis/flip resolution - Spacer's own body resolves "front" to
         # its tip while this hex shaft resolves "back" to its tip instead,
         # for the identical intent, so both are tried rather than assumed.
-        front_index = self.source.index('"wcs_origin_turning").value.value = "stock front"')
-        back_index = self.source.index('"wcs_origin_turning").value.value = "stock back"')
+        # "model" (not "stock") front/back specifically: this setup's own
+        # stock now deliberately extends past the model's own tip (the tip-
+        # facing overage, and on the final setup the carried grip/tailstock
+        # excess too), and only "model front"/"model back" stay anchored to
+        # the design body's own fixed geometry regardless of that.
+        front_index = self.source.index('"wcs_origin_turning").value.value = "model front"')
+        back_index = self.source.index('"wcs_origin_turning").value.value = "model back"')
         self.assertLess(front_index, back_index)
 
     def test_groove_operation_requires_a_grooving_type_tool(self):
@@ -111,9 +132,18 @@ class HandleHexShaftSourceTests(unittest.TestCase):
     def test_machines_whichever_groove_is_closest_to_the_tip(self):
         self.assertIn('target = max(groove_instances, key=lambda g: g["axialHigh"])', self.source)
 
-    def test_tailstock_length_defaults_from_measured_geometry_but_is_overridable(self):
-        self.assertIn("tailstock_length_in * _CM_PER_IN if tailstock_length_in is not None", self.source)
-        self.assertIn("else model_length_cm", self.source)
+    def test_tailstock_length_defaults_to_a_fixed_allowance_but_is_overridable(self):
+        # Direct instruction: "make sure the user input for tailstock works
+        # with the autocam" - grip_cm (the excess carried through both
+        # setups, and left permanently attached once CAM is done) is
+        # driven directly by the operator's own tailstock_length_in when
+        # given, not just measured/reported and otherwise ignored.
+        self.assertIn(
+            "tailstock_length_in * _CM_PER_IN if tailstock_length_in is not None\n"
+            "        else _DEFAULT_TAILSTOCK_LENGTH_IN * _CM_PER_IN",
+            self.source,
+        )
+        self.assertIn('"tailstockLength": grip_cm / _CM_PER_IN,', self.source)
 
     def test_retraction_is_forced_to_minimum_not_left_at_fusions_default(self):
         # Confirmed live: turning_face defaults to 'full' retraction, which
@@ -125,6 +155,34 @@ class HandleHexShaftSourceTests(unittest.TestCase):
         self.assertIn('for name in ("retractionPolicy", "profileRoughingRetractionPolicy"):', self.source)
         self.assertIn('param.value.value = "minimum"', self.source)
         self.assertIn("_set_minimum_retraction(op)", self.source)
+
+    def test_a_one_ended_shafts_axis_is_flipped_when_the_groove_sits_near_the_low_end(self):
+        # Audit finding: axis_unit's own direction comes from
+        # _longest_edge's raw STEP start/end point order - arbitrary, not
+        # guaranteed to point toward the grooved end. A two-ended shaft
+        # doesn't care (both directions get their own setup), but a
+        # one-ended shaft's single groove must sit near axis_unit's own
+        # axial_max, since _build_hex_end_setup unconditionally machines
+        # whichever groove is nearest THAT end. Without this flip, a
+        # model whose single real groove happened to sit near axial_min
+        # instead would silently turn the ENTIRE bar round rather than a
+        # short neck, with no error anywhere.
+        self.assertIn("if not two_ended:", self.source)
+        self.assertIn("only_groove = groove_instances[0]", self.source)
+        self.assertIn('distance_to_max = axial_max - only_groove["axialHigh"]', self.source)
+        self.assertIn('distance_to_min = only_groove["axialLow"] - axial_min', self.source)
+        self.assertIn("if distance_to_min < distance_to_max:", self.source)
+        self.assertIn("axis_unit = tuple(-c for c in axis_unit)", self.source)
+
+    def test_tailstock_length_has_a_real_physical_minimum(self):
+        # Audit finding: neither the UI's own client-side min="0" nor
+        # jobPayload.js validate tailstock_length_in - a 0 or negative
+        # value reaching the Runner would silently build a stock prism
+        # with no real grip allowance, or shorter than the finished part
+        # itself. The chuck needs SOME real material to hold through both
+        # setups; this is a physical requirement, not a preference.
+        self.assertIn("_MIN_TAILSTOCK_LENGTH_IN = 0.25", self.source)
+        self.assertIn("if grip_cm < _MIN_TAILSTOCK_LENGTH_IN * _CM_PER_IN:", self.source)
 
 
 if __name__ == "__main__":

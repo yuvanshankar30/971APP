@@ -435,7 +435,7 @@
       <div class="form-row form-row-final">
         <div class="form-group">
           <label class="form-label" for="tp-tailstock">Tailstock length, inches (optional)</label>
-          <input id="tp-tailstock" type="number" min="0" step="0.01" class="form-input" bind:value={newTurningPart.tailstockLengthIn} placeholder="Auto-detected from the part" />
+          <input id="tp-tailstock" type="number" min="0.25" step="0.01" class="form-input" bind:value={newTurningPart.tailstockLengthIn} placeholder="Auto-detected from the part" />
         </div>
         <div class="form-group">
           <label class="form-label" for="tp-project-id">Project ID (optional)</label>
