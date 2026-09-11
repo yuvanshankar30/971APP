@@ -115,6 +115,35 @@ describe('Fusion CAM queue query efficiency', () => {
     expect(mocks.from).not.toHaveBeenCalledWith('cam_jobs');
   });
 
+  it('queues turning stock without a tool, material, or grouping contract', async () => {
+    mocks.from.mockReturnValue(chain({ data: { id: 'turning-job' }, error: null }));
+
+    await expect(queueFusionJob({
+      fusionJobKind: 'turning', turningPartId: 'shaft-1', machineId: 'lathe-1'
+    })).resolves.toEqual({ id: 'turning-job' });
+
+    expect(mocks.from).toHaveBeenCalledWith('cam_jobs');
+    const inserted = mocks.queries[0].insert.mock.calls[0][0];
+    expect(inserted.params).toEqual({ fusionJobKind: 'turning', turningPartId: 'shaft-1', fusionFileName: null, fusionFolderPath: null, singleToolMode: false });
+    expect(inserted.tool_id).toBeNull();
+    expect(inserted.material_id).toBeNull();
+    expect(inserted.operation_type).toBe('milling');
+  });
+
+  it('refuses a turning job without a turning part', async () => {
+    await expect(queueFusionJob({ fusionJobKind: 'turning', machineId: 'lathe-1' })).rejects.toThrow(/turning part is required/i);
+    expect(mocks.from).not.toHaveBeenCalled();
+  });
+
+  it('refuses a turning job without a machine', async () => {
+    await expect(queueFusionJob({ fusionJobKind: 'turning', turningPartId: 'shaft-1' })).rejects.toThrow(/choose a lathe/i);
+    expect(mocks.from).not.toHaveBeenCalled();
+  });
+
+  it('shows turning jobs as machine output on manufacturing cards', () => {
+    expect(isFusionOutputJob({ params: { fusionJobKind: 'turning' } })).toBe(true);
+  });
+
   it('queues an exact plate assignment set through the atomic database function', async () => {
     mocks.from.mockReturnValue(chain({ data: [{ tool_id: 'tool-1', cam_tools: { tool_type: 'flat end mill' } }], error: null }));
     mocks.rpc.mockReturnValue(chain({ data: { id: 'plate-job' }, error: null }));

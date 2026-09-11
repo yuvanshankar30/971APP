@@ -19,8 +19,17 @@
 
 import { supabase } from '$lib/supabase.js';
 
-export const FUSION_JOB_KINDS = ['plate:arrange', 'plate:cam', 'box_tube'];
-export const FUSION_OUTPUT_JOB_KINDS = ['plate:cam', 'box_tube'];
+export const FUSION_JOB_KINDS = ['plate:arrange', 'plate:cam', 'box_tube', 'turning'];
+export const FUSION_OUTPUT_JOB_KINDS = ['plate:cam', 'box_tube', 'turning'];
+
+// The only two lathe programs HandleSpacer.py/HandleHexShaft.py implement -
+// see autocam/fusion/runner/commands/ for both. Kept here (not inferred from
+// the Runner) so the UI's own dropdown/validation never drifts from what the
+// Runner can actually run.
+export const TURNING_CAM_TYPES = [
+  { value: 'spacer', label: 'Spacer' },
+  { value: 'hexShaft', label: 'Hex Shaft' }
+];
 
 export function isFusionOutputJob(job) {
   return FUSION_OUTPUT_JOB_KINDS.includes(job?.params?.fusionJobKind);
@@ -383,6 +392,115 @@ export async function updateBoxTubeQuantity(id, quantity) {
   return data;
 }
 
+/* ── Turning stock (spacers/hex shafts - autocam/fusion/runner's lathe pipeline) ── */
+
+export async function fetchTurningParts() {
+  const { data, error } = await supabase
+    .from('fusion_turning_parts')
+    .select('*, parts(id, name, project_id, workflow)')
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
+// partId (optional) links this turning part to a real manufacturing request -
+// see createPart's own doc comment, same reasoning. tailstockLengthIn is
+// optional - both HandleSpacer.py and HandleHexShaft.py default it to the
+// part's own measured length when not set, so leaving it blank is the normal
+// case, not a missing input.
+export async function createTurningPart({ name, epic, ticket, quantity, camType, tailstockLengthIn, stepFile, createdBy, partId, projectId, stockAssignment }) {
+  if (!TURNING_CAM_TYPES.some((t) => t.value === camType)) {
+    throw new Error(`Invalid turning CAM type: ${camType}`);
+  }
+  const stepFileName = await uploadFusionStep({ name, fallback: 'turning', stepFile });
+
+  const { data, error } = await supabase
+    .from('fusion_turning_parts')
+    .insert({
+      name,
+      epic: epic || null,
+      ticket: ticket || null,
+      quantity: quantity ?? 1,
+      cam_type: camType,
+      tailstock_length_in: tailstockLengthIn === '' || tailstockLengthIn == null ? null : Number(tailstockLengthIn),
+      step_file_name: stepFileName,
+      created_by: createdBy || null,
+      part_id: partId || null,
+      project_id: projectId || null,
+      stock_assignment: stockAssignment || null
+    })
+    .select('*, parts(id, name, project_id, workflow)')
+    .single();
+  if (error) await removeFailedFusionUpload(stepFileName, error);
+  return data;
+}
+
+export async function deleteTurningPart(id) {
+  const { error } = await supabase.from('fusion_turning_parts').delete().eq('id', id);
+  if (error) throw error;
+}
+
+/** Delete every selected turning part in one request, not one row at a time. */
+export async function deleteTurningParts(ids) {
+  if (!ids?.length) return 0;
+  const { data, error } = await supabase.from('fusion_turning_parts').delete().in('id', ids).select('id');
+  if (error) throw error;
+  return data?.length || 0;
+}
+
+export async function renameTurningPart(id, name) {
+  const cleanedName = name?.trim();
+  if (!cleanedName) throw new Error('Turning part name is required');
+  const { data, error } = await supabase
+    .from('fusion_turning_parts')
+    .update({ name: cleanedName })
+    .eq('id', id)
+    .select('*, parts(id, name, project_id, workflow)')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+/** Attaches or replaces a turning part's STEP file - see updatePartStepFile's own docstring. */
+export async function updateTurningPartStepFile(id, stepFile) {
+  const stepFileName = await uploadFusionStep({ name: id, fallback: 'turning', stepFile });
+  const { data, error } = await supabase
+    .from('fusion_turning_parts')
+    .update({ step_file_name: stepFileName })
+    .eq('id', id)
+    .select('*, parts(id, name, project_id, workflow)')
+    .single();
+  if (error) await removeFailedFusionUpload(stepFileName, error);
+  return data;
+}
+
+export async function updateTurningPartQuantity(id, quantity) {
+  if (!Number.isInteger(quantity) || quantity < 0) {
+    throw new Error('Quantity must be a whole number, zero or more');
+  }
+  const { data: existing, error: existingError } = await supabase
+    .from('fusion_turning_parts')
+    .select('part_id')
+    .eq('id', id)
+    .single();
+  if (existingError) throw existingError;
+  const { data, error } = await supabase
+    .from('fusion_turning_parts')
+    .update({ quantity })
+    .eq('id', id)
+    .select('*, parts(id, name, project_id, workflow)')
+    .single();
+  if (error) throw error;
+  if (existing.part_id) {
+    const { error: linkedPartError } = await supabase
+      .from('parts')
+      .update({ quantity, updated_at: new Date().toISOString() })
+      .eq('id', existing.part_id);
+    if (linkedPartError) throw linkedPartError;
+  }
+  return data;
+}
+
 /* ── Job queue (reuses cam_jobs - see file header) ───────────────────── */
 
 /**
@@ -607,6 +725,7 @@ export async function fetchCompletedFusionStockIds() {
   const plateIds = new Set();
   const fusionPartIds = new Set();
   const boxTubeIds = new Set();
+  const turningPartIds = new Set();
   for (const job of data || []) {
     if (!isFusionOutputJob(job)) continue;
     if (job.params?.plateId) plateIds.add(job.params.plateId);
@@ -614,8 +733,9 @@ export async function fetchCompletedFusionStockIds() {
       if (assignment?.part_id) fusionPartIds.add(assignment.part_id);
     }
     if (job.params?.boxTubeId) boxTubeIds.add(job.params.boxTubeId);
+    if (job.params?.turningPartId) turningPartIds.add(job.params.turningPartId);
   }
-  return { fusionPartIds, plateIds, boxTubeIds };
+  return { fusionPartIds, plateIds, boxTubeIds, turningPartIds };
 }
 
 /**
@@ -670,18 +790,31 @@ async function requireLoadedTool(machineId, toolId, { requireEndmill = false } =
 
 // Direct helper for arrange and tube jobs. Plate CAM must use the atomic
 // assignment-and-queue function below.
-export async function queueFusionJob({ fusionJobKind, plateId, boxTubeId, machineId, materialId, toolId, requestedBy, name, partId, groupingMode, selectedPartId, selectedPartIds, fusionFileName, fusionFolderPath, tabCount, singleToolMode = false, multiToolMode = false, orientation = 'vertical' }) {
+export async function queueFusionJob({ fusionJobKind, plateId, boxTubeId, turningPartId, machineId, materialId, toolId, requestedBy, name, partId, groupingMode, selectedPartId, selectedPartIds, fusionFileName, fusionFolderPath, tabCount, singleToolMode = false, multiToolMode = false, orientation = 'vertical' }) {
   if (!FUSION_JOB_KINDS.includes(fusionJobKind)) {
     throw new Error(`Invalid fusionJobKind: ${fusionJobKind}`);
   }
   if (fusionJobKind === 'box_tube' && !boxTubeId) {
     throw new Error('A box tube is required for a tube-stock CAM job');
   }
+  if (fusionJobKind === 'turning' && !turningPartId) {
+    throw new Error('A turning part is required for a lathe CAM job');
+  }
   if (fusionJobKind === 'plate:cam') {
     throw new Error('Plate CAM must be queued atomically with queueFusionPlateJob');
   }
   if (fusionJobKind === 'box_tube' && (!machineId || !toolId || !materialId)) {
     throw new Error('Tube CAM requires a machine, an installed endmill, and an aluminum material');
+  }
+  // Turning has no equivalent of Tube CAM's endmill/material requirement:
+  // HandleSpacer.py/HandleHexShaft.py pick their own generic turning tools
+  // straight from Fusion's own bundled sample library (direct instruction:
+  // "use generic tools for now, then we can configure them later" - the
+  // existing cam_tools catalog describes mill/router bits, not lathe
+  // inserts, so there is nothing meaningful to pick from it yet). A machine
+  // is still required, to route the job to a specific lathe.
+  if (fusionJobKind === 'turning' && !machineId) {
+    throw new Error('Choose a lathe before queueing turning CAM');
   }
   // A fresh, real-time check, not a re-check of whatever the queue picker's
   // own cached tool list already showed - that list is only as current as
@@ -714,7 +847,7 @@ export async function queueFusionJob({ fusionJobKind, plateId, boxTubeId, machin
       // Plate CAM only. Tube jobs have their own operation planner and must
       // retain their stable, minimal queue payload.
       multiToolMode: Boolean(multiToolMode)
-    } : { boxTubeId, orientation: normalizedOrientation }),
+    } : fusionJobKind === 'turning' ? { turningPartId } : { boxTubeId, orientation: normalizedOrientation }),
     // Where the saved Fusion document goes and what it's named - chosen at
     // queue time (Plates tab). Optional; camPlate.py falls back to its
     // existing defaults when these aren't set.
@@ -735,9 +868,9 @@ export async function queueFusionJob({ fusionJobKind, plateId, boxTubeId, machin
       machine_id: machineId || null,
       status: 'queued',
       requested_by: requestedBy || null,
-      // Only ever set for a box-tube job (a clean 1:1) - a plate job leaves
-      // this null, since a plate nests many parts that may be for several
-      // (or no) requests at once; see the migration this shipped with.
+      // Only ever set for a box-tube or turning job (a clean 1:1) - a plate
+      // job leaves this null, since a plate nests many parts that may be for
+      // several (or no) requests at once; see the migration this shipped with.
       part_id: partId || null
     })
     .select()
