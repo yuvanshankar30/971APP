@@ -25,21 +25,35 @@ const savedNav = () => [
 ];
 
 describe('defaultHeaderTabs', () => {
-  it('puts Manufacturing and Competition before Build and Purchasing', () => {
+  it('puts Manufacturing and Competition before CAD and Purchasing', () => {
     const order = defaultHeaderTabs().map((tab) => tab.key || tab.label);
-    expect(order).toEqual(['Manufacturing', 'Competition', 'build', 'purchasing', 'docs']);
+    expect(order).toEqual(['Manufacturing', 'Competition', 'CAD', 'purchasing', 'docs']);
   });
 
   it('matches the shared header order after the separately rendered Home tab', () => {
     const order = ['home', ...defaultHeaderTabs().map((tab) => tab.key || tab.label), 'admin'];
-    expect(order).toEqual(['home', 'Manufacturing', 'Competition', 'build', 'purchasing', 'docs', 'admin']);
+    expect(order).toEqual(['home', 'Manufacturing', 'Competition', 'CAD', 'purchasing', 'docs', 'admin']);
   });
 
-  it('omits the disconnected CAD tab while keeping Build available', () => {
+  it('groups CAD and Build together in the CAD folder', () => {
     const tabs = defaultHeaderTabs();
-    expect(tabs.some((tab) => tab.key === 'cad')).toBe(false);
-    expect(tabs.some((tab) => tab.type === 'folder' && tab.children?.some((child) => child.key === 'cad'))).toBe(false);
-    expect(tabs).toContainEqual({ type: 'tab', key: 'build', label: 'Build' });
+    const cad = tabs.find((tab) => tab.type === 'folder' && tab.label === 'CAD');
+    expect(cad?.children).toEqual([
+      { key: 'cad', label: 'CAD' },
+      { key: 'build', label: 'Build' }
+    ]);
+  });
+
+  it('drops a disabled CAD or Build entry from the folder without hiding the other one', () => {
+    expect(defaultHeaderTabs({ tabs: { cad: false } }).find((tab) => tab.label === 'CAD').children)
+      .toEqual([{ key: 'build', label: 'Build' }]);
+    expect(defaultHeaderTabs({ tabs: { build: false } }).find((tab) => tab.label === 'CAD').children)
+      .toEqual([{ key: 'cad', label: 'CAD' }]);
+  });
+
+  it('omits the CAD folder entirely once both CAD and Build are disabled', () => {
+    const tabs = defaultHeaderTabs({ tabs: { cad: false, build: false } });
+    expect(tabs.some((tab) => tab.label === 'CAD')).toBe(false);
   });
 
   it('includes Power Rankings and Scouting Admin in the Competition folder', () => {
@@ -269,7 +283,10 @@ describe('mergeDefaultHeaderTabs', () => {
     const tabs = mergeDefaultHeaderTabs([{ type: 'folder', label: 'Manufacturing', children: [{ key: 'manufacture', label: 'Manufacture' }] }]);
     const manufacturing = tabs.find((item) => item.label === 'Manufacturing');
     expect(manufacturing.children.some((item) => item.key === 'fusion-autocam')).toBe(true);
-    expect(tabs).toContainEqual({ type: 'tab', key: 'build', label: 'Build' });
-    expect(tabs.some((item) => item.label === 'CAD' || item.key === 'cad')).toBe(false);
+    const cad = tabs.find((item) => item.label === 'CAD');
+    expect(cad?.children).toEqual([
+      { key: 'cad', label: 'CAD' },
+      { key: 'build', label: 'Build' }
+    ]);
   });
 });

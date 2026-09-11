@@ -34,11 +34,11 @@ browser confirmation or prompt popups.
   job status/G-code downloads from actual Fusion generation jobs (not
   arrangement-only runs); a request cannot advance to CAM review until its
   linked Fusion job has completed with NC output.
-  Build tracking remains in the main navigation, but the Onshape-backed CAD
-  tab is hidden while the Onshape integration credentials are disconnected;
-  legacy saved CAD folders are collapsed so Build appears directly instead;
-  the underlying `/cad` routes remain available to existing manufacturing and
-  purchasing links.
+  CAD and Build tracking share one CAD folder in the main navigation
+  (`/cad` and `/cad/build`), independent of the Onshape integration's own
+  connection state - a saved layout from while CAD was briefly hidden still
+  resolves correctly (see `promoteChildrenOfDisabledFolders` in
+  `src/lib/defaultTabs.js`).
 - **AutoCAM**: automatic STEP → G-code generation for lathe turning, router
   routering, and indexed tube-stock drilling jobs run on the router with the
   operator flipping the tube between faces by hand - either manually queued
