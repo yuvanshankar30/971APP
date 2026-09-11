@@ -164,5 +164,22 @@ export async function buildJobPayload(supabase, job) {
       fusion_folder_path: typeof params.fusionFolderPath === 'string' && params.fusionFolderPath.trim() ? params.fusionFolderPath.trim() : null
     };
   }
+  if (params.fusionJobKind === 'turning') {
+    const { data, error } = await supabase.from('fusion_turning_parts').select('*').eq('id', params.turningPartId).single();
+    if (error || !data) throw new Error('Turning part not found');
+    return {
+      turning_part_id: data.id,
+      cam_type: data.cam_type,
+      // null (the default) means "use the part's own measured length" -
+      // both HandleSpacer.py and HandleHexShaft.py already fall back to
+      // that when this is absent, so it is passed through as-is rather
+      // than resolved here.
+      tailstock_length_in: data.tailstock_length_in,
+      machine_id,
+      step_file_url: await signedUrl(data.step_file_name, data.id),
+      fusion_file_name: typeof params.fusionFileName === 'string' && params.fusionFileName.trim() ? params.fusionFileName.trim() : null,
+      fusion_folder_path: typeof params.fusionFolderPath === 'string' && params.fusionFolderPath.trim() ? params.fusionFolderPath.trim() : null
+    };
+  }
   throw new Error('Unsupported Fusion job kind');
 }

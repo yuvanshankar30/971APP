@@ -47,6 +47,7 @@
   // per-stock-group inside the parts list.
   let partsTabRef;
   let boxTubesTabRef;
+  let turningTabRef;
   // "Quick Queue": add a brand new part/tube and queue it in one flow,
   // instead of the normal two separate steps (add stock, then separately
   // find and queue it). This page-level button only needs to ask Plate vs
@@ -93,6 +94,7 @@
     // operator choose it again in an intermediate dialog.
     if (activeTab === 'box-tubes') boxTubesTabRef?.openQueuePicker();
     else if (activeTab === 'parts') partsTabRef?.openQueuePicker();
+    else if (activeTab === 'turning') turningTabRef?.openQueuePicker();
     else await goto('/autocam/fusion/parts?openQueue=1');
   }
 
@@ -190,7 +192,7 @@
 {:else if activeTab === 'box-tubes'}
   <BoxTubesTab bind:this={boxTubesTabRef} {user} {canManage} />
 {:else if activeTab === 'turning'}
-  <TurningTab />
+  <TurningTab bind:this={turningTabRef} {user} {canManage} />
 {:else if activeTab === 'queue'}
   <JobQueueTab />
 {/if}

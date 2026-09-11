@@ -14,6 +14,7 @@ from .config import *
 from .workflows import importPlate as importPlate
 from .workflows import camPlate as camPlate
 from .workflows import camTube as camTube
+from .workflows import camTurning as camTurning
 from .workflows import setupTemp as setupTemp
 from .workflows.dropFolder import FolderTreeWalker, _is_offline_settings_error
 from .workflows.job_status import send_job_error
@@ -109,9 +110,9 @@ def _fire_job_queue_event() -> None:
 def _process_job(job: dict, session: requests.Session) -> None:
     # Fusion CAM's cam_jobs.params holds { fusionJobKind, plateId, boxTubeId }
     # (see src/lib/fusionCam.js's queueFusionJob) - a nested field, not the
-    # original AutoCAM's top-level job.kind. Same three job kinds either way
-    # (plate:cam / box_tube / plate:arrange), so the dispatch table below is
-    # otherwise unchanged from upstream.
+    # original AutoCAM's top-level job.kind. Four job kinds now (plate:cam /
+    # box_tube / plate:arrange / turning), so the dispatch table below has
+    # one more branch than upstream.
     params = job.get("params") or {}
     kind = params.get("fusionJobKind")
     _app.log(str(job))
@@ -129,6 +130,8 @@ def _process_job(job: dict, session: requests.Session) -> None:
         camPlate.start(job, session)
     elif kind == "box_tube":
         camTube.start(job, session)
+    elif kind == "turning":
+        camTurning.start(job, session)
     elif kind == "plate:arrange":
         importPlate.start(job, session)
     else:

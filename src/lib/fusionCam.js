@@ -725,6 +725,7 @@ export async function fetchCompletedFusionStockIds() {
   const plateIds = new Set();
   const fusionPartIds = new Set();
   const boxTubeIds = new Set();
+  const turningPartIds = new Set();
   for (const job of data || []) {
     if (!isFusionOutputJob(job)) continue;
     if (job.params?.plateId) plateIds.add(job.params.plateId);
@@ -732,8 +733,9 @@ export async function fetchCompletedFusionStockIds() {
       if (assignment?.part_id) fusionPartIds.add(assignment.part_id);
     }
     if (job.params?.boxTubeId) boxTubeIds.add(job.params.boxTubeId);
+    if (job.params?.turningPartId) turningPartIds.add(job.params.turningPartId);
   }
-  return { fusionPartIds, plateIds, boxTubeIds };
+  return { fusionPartIds, plateIds, boxTubeIds, turningPartIds };
 }
 
 /**

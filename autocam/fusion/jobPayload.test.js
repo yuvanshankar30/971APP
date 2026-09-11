@@ -228,3 +228,44 @@ describe('Fusion box-tube payloads',()=>{
   await expect(buildJobPayload(database,value)).rejects.toThrow(/no bundled Fusion tool-library identity/i);
  });
 });
+
+describe('Fusion turning payloads',()=>{
+ const turningJob=()=>({machine_id:'lathe-1',params:{fusionJobKind:'turning',turningPartId:'shaft-1',fusionFileName:'Shaft1',fusionFolderPath:'Offseason Projects/AutoCAM/Turning'}});
+ const turningDb=(row)=>({
+  storage:{from:()=>({createSignedUrl:vi.fn(async()=>({data:{signedUrl:'https://example.invalid/shaft.step'}}))})},
+  from:()=>({select:()=>({eq:()=>({single:async()=>({data:row})})})})
+ });
+ it('forwards cam_type and an optional tailstock length override to the runner',async()=>{
+  await expect(buildJobPayload(
+   turningDb({id:'shaft-1',cam_type:'hexShaft',tailstock_length_in:2.5,step_file_name:'shaft.step'}),
+   turningJob()
+  )).resolves.toMatchObject({
+   turning_part_id:'shaft-1', cam_type:'hexShaft', tailstock_length_in:2.5,
+   fusion_file_name:'Shaft1', fusion_folder_path:'Offseason Projects/AutoCAM/Turning'
+  });
+ });
+ it('passes a null tailstock length through - both handlers default it themselves', async () => {
+  await expect(buildJobPayload(
+   turningDb({id:'shaft-1',cam_type:'spacer',tailstock_length_in:null,step_file_name:'shaft.step'}),
+   turningJob()
+  )).resolves.toMatchObject({tailstock_length_in:null});
+ });
+ it('keeps old turning jobs compatible when no save destination was selected',async()=>{
+  const value=turningJob(); delete value.params.fusionFileName; delete value.params.fusionFolderPath;
+  await expect(buildJobPayload(
+   turningDb({id:'shaft-1',cam_type:'spacer',tailstock_length_in:null,step_file_name:'shaft.step'}),
+   value
+  )).resolves.toMatchObject({fusion_file_name:null,fusion_folder_path:null});
+ });
+ it('rejects a turning part that no longer exists',async()=>{
+  await expect(buildJobPayload(turningDb(null),turningJob())).rejects.toThrow(/turning part not found/i);
+ });
+ it('never includes tool_items or single_tool_mode - turning has no mill tool catalog to select from',async()=>{
+  const payload=await buildJobPayload(
+   turningDb({id:'shaft-1',cam_type:'spacer',tailstock_length_in:null,step_file_name:'shaft.step'}),
+   turningJob()
+  );
+  expect(payload).not.toHaveProperty('tool_items');
+  expect(payload).not.toHaveProperty('single_tool_mode');
+ });
+});
