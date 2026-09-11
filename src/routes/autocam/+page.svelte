@@ -1148,9 +1148,16 @@
         default_material_id: machineForm.default_material_id || null,
         default_tool_id: machineForm.default_tool_id || null,
         gcode_extension: machineForm.gcode_extension || 'ngc',
-        // Tube stock reuses routing.js's linuxcnc/wincnc dialect conventions
-        // (see tubestock.js file header) - same controller choice as routing.
-        controller: (machineForm.operation_type === 'routing' || machineForm.operation_type === 'tubestock') ? (machineForm.controller || 'linuxcnc') : 'linuxcnc',
+        // Direct bug report: this used to force 'linuxcnc' for every
+        // operation_type except routing/tubestock, discarding whatever
+        // controller was actually picked for a turning or milling machine.
+        // The 971 Lathe is real, physically Haas-controlled - every save of
+        // its profile silently reset it back to 'linuxcnc', which is why
+        // Fusion Runner turning jobs kept failing to resolve a post
+        // processor (Fusion's own bundled 'linuxcnc' post is milling-only
+        // and cannot turn at all). Every operation type now keeps its own
+        // real controller choice.
+        controller: machineForm.controller || 'linuxcnc',
         // Blank stays NULL, not '' - '' would (incorrectly) mean "every
         // Runner must send an empty string" instead of "no restriction."
         authorized_runner_id: machineForm.authorized_runner_id?.trim() || null,
@@ -2191,15 +2198,22 @@
                 <option value="tap">.tap (Mach3/Mach4)</option>
               </select>
             </div>
-            <div class="form-group">
-              <label class="form-label" for="mp-controller">Controller</label>
-              <select id="mp-controller" class="form-select" bind:value={machineForm.controller}>
-                <option value="linuxcnc">LinuxCNC</option>
-                <option value="wincnc">WinCNC (ShopSabre)</option>
-              </select>
-              <p class="cam-form-hint">WinCNC uses a genuinely different G-code dialect (comments, units, tool-change pause) - see routing.js. Pick wrong and the file may not run on the real machine.</p>
-            </div>
           {/if}
+          <div class="form-group">
+            <label class="form-label" for="mp-controller">Controller</label>
+            <select id="mp-controller" class="form-select" bind:value={machineForm.controller}>
+              <option value="linuxcnc">LinuxCNC</option>
+              <option value="wincnc">WinCNC (ShopSabre)</option>
+              <option value="haas">Haas</option>
+            </select>
+            <p class="cam-form-hint">
+              {#if machineForm.operation_type === 'routing' || machineForm.operation_type === 'tubestock'}
+                WinCNC uses a genuinely different G-code dialect (comments, units, tool-change pause) - see routing.js. Pick wrong and the file may not run on the real machine.
+              {:else}
+                Direct bug report: this used to be hidden and forced to LinuxCNC for every non-routing machine, which is why the 971 Lathe (a real Haas lathe) kept failing to resolve a post processor. Pick the real controller for this machine.
+              {/if}
+            </p>
+          </div>
           <div class="form-group">
             <label class="form-label" for="mp-rapid-rate">Rapid traverse (in/min) <span class="text-muted">(optional)</span></label>
             <input id="mp-rapid-rate" class="form-input" type="number" min="1" step="10" bind:value={machineForm.rapid_rate} placeholder="Not measured" />
