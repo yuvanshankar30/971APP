@@ -1354,24 +1354,25 @@ def _read_wcs_frame(setup, app):
     expressed in (see _to_wcs_uv) - None (any read failure) means "skip
     this filter," the same convention _read_stock_bounds already uses.
 
-    UNVERIFIED for a milling/2D setup: Setup.workCoordinateSystem.
-    getAsCoordinateSystem() was separately confirmed live to report its
-    origin translation in millimeters (not the centimeters every other
-    Fusion geometry API uses) for a TURNING setup specifically - whether
-    that same quirk applies to a milling setup's own WCS has not been
-    checked live. No unit correction is applied here for that reason: a
-    wrong guess at a conversion factor would be worse than skipping the
-    filter outright on a bad read, the same "None means don't filter"
-    reasoning _read_stock_bounds itself already documents. Confirm this
-    against a real milling setup (compare the returned origin to a known
-    real WCS position, the same way the turning-setup quirk itself was
-    confirmed) before trusting the axis-avoidance check on a job whose
-    part sits anywhere near the WCS origin.
+    CONFIRMED live on a real milling/2D setup (not just turning):
+    Setup.workCoordinateSystem.getAsCoordinateSystem() reports its origin
+    translation in MILLIMETERS, the same exact 10x factor already
+    confirmed for a turning setup - every other Fusion geometry API
+    (BRepFace/BRepVertex/BoundingBox, and this setup's own axis vectors)
+    stays in centimeters. Verified directly against this setup's own real
+    body: dividing the raw origin by 10 landed exactly on that body's own
+    root-frame bounding-box corner (matched to 13 decimal places) - not a
+    guess. Without this division, the axis-avoidance check in
+    select_tab_edges compared tab positions against a WCS "origin" sitting
+    roughly 10x farther from the part than the real one, so it never
+    actually recognized the real origin's own neighborhood as unsafe -
+    direct bug report, tabs still landing right on the WCS origin gizmo in
+    a real plate job despite the axis-avoidance check already existing.
     """
     try:
         origin, x_axis, y_axis, _z_axis = setup.workCoordinateSystem.getAsCoordinateSystem()
         return (
-            (origin.x, origin.y, origin.z),
+            (origin.x / 10.0, origin.y / 10.0, origin.z / 10.0),
             (x_axis.x, x_axis.y, x_axis.z),
             (y_axis.x, y_axis.y, y_axis.z),
         )

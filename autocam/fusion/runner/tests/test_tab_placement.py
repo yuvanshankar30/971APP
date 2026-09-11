@@ -889,6 +889,62 @@ class ReadStockBoundsTests(unittest.TestCase):
         self.assertTrue(logged, "a missing parameter must not fail silently")
 
 
+class ReadWcsFrameTests(unittest.TestCase):
+    """Confirmed live, not a guess: Setup.workCoordinateSystem.
+    getAsCoordinateSystem() reports its origin translation in
+    MILLIMETERS on a real milling/2D setup, the same exact 10x factor
+    already confirmed for a turning setup - verified by dividing a real
+    setup's own raw origin by 10 and matching it, to 13 decimal places,
+    against that setup's own real body's root-frame bounding-box corner.
+    Without this division, select_tab_edges' own axis-avoidance check
+    compared tab positions against a WCS "origin" sitting roughly 10x
+    farther from the part than the real one - confirmed as the root
+    cause of a real, direct bug report: tabs still landing right on the
+    WCS origin gizmo in a real plate job despite the axis-avoidance
+    check already existing.
+    """
+
+    class _FakeWcs:
+        def __init__(self, origin, x_axis, y_axis, z_axis):
+            self._origin, self._x, self._y, self._z = origin, x_axis, y_axis, z_axis
+
+        def getAsCoordinateSystem(self):
+            return self._origin, self._x, self._y, self._z
+
+    def _setup(self, origin_mm):
+        wcs = self._FakeWcs(
+            _Point3D(*origin_mm),
+            _Vector3D(1.0, 0.0, 0.0),
+            _Vector3D(0.0, 1.0, 0.0),
+            _Vector3D(0.0, 0.0, 1.0),
+        )
+        return types.SimpleNamespace(workCoordinateSystem=wcs)
+
+    def test_origin_is_divided_by_ten_to_reach_centimeters(self):
+        setup = self._setup((413.83934566416514, 13.174189204907918, 0.0))
+        app = types.SimpleNamespace(log=lambda *_a: None)
+
+        origin, x_axis, y_axis = TabPlacement._read_wcs_frame(setup, app)
+
+        self.assertAlmostEqual(origin[0], 41.383934566416514)
+        self.assertAlmostEqual(origin[1], 1.3174189204907918)
+        self.assertAlmostEqual(origin[2], 0.0)
+        self.assertEqual(x_axis, (1.0, 0.0, 0.0))
+        self.assertEqual(y_axis, (0.0, 1.0, 0.0))
+
+    def test_falls_back_to_none_and_logs_on_a_read_failure(self):
+        class _BrokenWcs:
+            def getAsCoordinateSystem(self):
+                raise RuntimeError("no WCS available")
+
+        setup = types.SimpleNamespace(workCoordinateSystem=_BrokenWcs())
+        logged = []
+        app = types.SimpleNamespace(log=logged.append)
+
+        self.assertIsNone(TabPlacement._read_wcs_frame(setup, app))
+        self.assertTrue(logged, "a WCS read failure must not fail silently")
+
+
 class AxisAvoidanceTests(unittest.TestCase):
     """Direct instruction: "TABS SHOULD NEVER GENERATE DIRECTLY ON THE
     PATH OF THE AXES." The WCS here is deliberately distinct from the raw
