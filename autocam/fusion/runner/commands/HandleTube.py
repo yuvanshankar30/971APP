@@ -194,7 +194,7 @@ def _ordered_wall_faces(body):
     ]
 
 
-def _axes_for_face(face, tube_axis, horizontal):
+def _axes_for_face(face, tube_axis):
     edges = _linear_edges(face)
     long_edges = [edge for edge in edges if abs(_edge_vector(edge).dotProduct(tube_axis)) >= _PARALLEL_TOLERANCE]
     if not long_edges:
@@ -207,7 +207,7 @@ def _axes_for_face(face, tube_axis, horizontal):
     if not transverse_edges:
         raise ValueError("Tube wall has no usable transverse reference edge")
     transverse_edge = max(transverse_edges, key=_edge_length)
-    return (long_edge, transverse_edge) if horizontal else (transverse_edge, long_edge)
+    return long_edge, transverse_edge
 
 
 def _loop_specs(face):
@@ -521,7 +521,7 @@ def _wcs_frame(setup):
     return _vec(origin), _vec(x_axis), _vec(y_axis)
 
 
-def _bind_setup_to_face(setup, body, face, tube_axis, horizontal):
+def _bind_setup_to_face(setup, body, face, tube_axis):
     """Bind the real tube body, face-local WCS, and G55 after template changes.
 
     Matches the reviewed manual tube setup: origin on the machined face's
@@ -540,8 +540,8 @@ def _bind_setup_to_face(setup, body, face, tube_axis, horizontal):
     parameters.itemByName("job_model").value.value = [body]
     parameters.itemByName("job_workOffset").expression = _TUBE_WORK_OFFSET
 
-    want_x, want_y = tube_wcs_axes(_vec(_face_normal(face)), _vec(tube_axis), horizontal)
-    axis_x, axis_y = _axes_for_face(face, tube_axis, horizontal)
+    want_x, want_y = tube_wcs_axes(_vec(_face_normal(face)), _vec(tube_axis))
+    axis_x, axis_y = _axes_for_face(face, tube_axis)
     parameters.itemByName("wcs_orientation_mode").value.value = "axesXY"
     parameters.itemByName("wcs_orientation_axisX").value.value = [axis_x]
     parameters.itemByName("wcs_orientation_axisY").value.value = [axis_y]
@@ -599,11 +599,11 @@ def _cap_other_way_feedrate(setup):
     return capped
 
 
-def _make_setup(cam, body, face, selection_face, clock, tube_axis, horizontal, template, wall_thickness_in):
+def _make_setup(cam, body, face, selection_face, clock, tube_axis, template, wall_thickness_in):
     setup_input = cam.setups.createInput(0)
     setup_input.name = tube_face_setup_name(clock)
     setup = cam.setups.add(setup_input)
-    _bind_setup_to_face(setup, body, face, tube_axis, horizontal)
+    _bind_setup_to_face(setup, body, face, tube_axis)
     setup.createFromCAMTemplate2(template)
     # createFromCAMTemplate2 returns before Fusion has fully attached the
     # copied operations to this setup's CAM model tree.  A selection applied
@@ -615,7 +615,7 @@ def _make_setup(cam, body, face, selection_face, clock, tube_axis, horizontal, t
     # A template can carry its own setup context. Reapply our occurrence body
     # and face-local WCS after the import so every selection below resolves in
     # this setup's actual CAM model tree, never in the template's old model.
-    _bind_setup_to_face(setup, body, face, tube_axis, horizontal)
+    _bind_setup_to_face(setup, body, face, tube_axis)
     adsk.doEvents()
     cutoff_chain = _far_end_cutoff_chain(body, face, tube_axis)
     _configure_face_operations(setup, selection_face, wall_thickness_in, cutoff_chain)
@@ -661,7 +661,7 @@ def _active_cam_product(app, doc):
     )
 
 
-def handleTube(template_filename, orientation=None, program_base_name="tube"):
+def handleTube(template_filename, program_base_name="tube"):
     """Create four indexed setups and return their matching output stems."""
     app = adsk.core.Application.get()
     doc = app.activeDocument
@@ -682,10 +682,9 @@ def handleTube(template_filename, orientation=None, program_base_name="tube"):
     template = adsk.cam.CreateFromCAMTemplateInput.create()
     template.camTemplate = template_file
     tube_axis = _long_axis(body)
-    horizontal = str(orientation or "").strip().lower() == "horizontal"
     names = []
     for clock, face, selection_face, wall_thickness_in in _ordered_wall_faces(body):
-        _make_setup(cam, body, face, selection_face, clock, tube_axis, horizontal, template, wall_thickness_in)
+        _make_setup(cam, body, face, selection_face, clock, tube_axis, template, wall_thickness_in)
         names.append(tube_face_program_name(program_base_name, clock))
     # Defensive invariant, not just a byproduct of the loop above: a tube is
     # always exactly four indexed setups, never fewer. Catches a future

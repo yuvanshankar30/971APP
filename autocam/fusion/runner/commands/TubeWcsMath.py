@@ -3,10 +3,10 @@
 Kept Fusion-independent for the same reason as TubeHeightMath.py: the rule
 has to be unit tested, and HandleTube.py only runs inside Fusion.
 
-The reviewed tube setup puts the WCS origin on a corner of the machined
-exterior face at one end of the tube, with +X and +Y both pointing away from
-the stock - every point of the tube sits at X <= 0, Y <= 0. The tube cutoff
-runs along the opposite (far) end.
+The reviewed tube setup puts the WCS origin on the right-hand corner of the
+machined exterior face at one end of the tube, with X along the tube and both
+X and Y pointing away from the stock - every point of the tube sits at
+X <= 0, Y <= 0. The tube cutoff runs along the opposite (far) end.
 """
 
 
@@ -22,21 +22,19 @@ def _dot(a, b):
     return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 
 
-def tube_wcs_axes(face_normal, toward_origin_end, horizontal):
+def tube_wcs_axes(face_normal, toward_origin_end):
     """Return the (x, y) unit directions for one tube setup's WCS.
 
     ``face_normal`` is the machined exterior face's outward normal (WCS +Z).
     ``toward_origin_end`` is the tube axis pointing at the end the origin
-    sits on. ``horizontal`` puts that along-tube axis on X; otherwise it goes
-    on Y. The remaining axis completes a right-handed frame, which with the
-    origin corner from ``pick_origin_corner`` makes both X and Y point away
-    from the stock.
+    sits on. X always runs along the tube toward that end and Y = Z x X
+    completes a right-handed frame; with the corner from ``pick_origin_corner``
+    both point away from the stock and the origin is the face's right-hand
+    corner. The only other outward-facing frame - the along-tube axis on Y -
+    moves the origin to the left-hand corner, which the operator rejected.
     """
-    if horizontal:
-        x = tuple(toward_origin_end)
-        return x, _cross(face_normal, x)
-    y = tuple(toward_origin_end)
-    return _cross(y, face_normal), y
+    x = tuple(toward_origin_end)
+    return x, _cross(face_normal, x)
 
 
 def pick_origin_corner(origins_by_label, x, y, tolerance=1e-3):

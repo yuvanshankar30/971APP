@@ -28,24 +28,28 @@ class TubeWcsAxesTests(unittest.TestCase):
         "12": ((-1, 0, 0), (0, -1, 0), (0, 0, 1)),
     }
 
-    def test_horizontal_reproduces_every_reference_setup(self):
+    def test_reproduces_every_reference_setup(self):
         for name, (normal, want_x, want_y) in self.REFERENCE.items():
             with self.subTest(setup=name):
-                x, y = tube_wcs_axes(normal, (0, -1, 0), horizontal=True)
+                x, y = tube_wcs_axes(normal, (0, -1, 0))
                 self.assertEqual(tuple(round(v) for v in x), want_x)
                 self.assertEqual(tuple(round(v) for v in y), want_y)
 
-    def test_vertical_puts_the_along_tube_axis_on_y(self):
-        x, y = tube_wcs_axes((0, 0, 1), (0, -1, 0), horizontal=False)
-        self.assertEqual(tuple(round(v) for v in y), (0, -1, 0))
-        self.assertEqual(tuple(round(v) for v in x), (-1, 0, 0))
+    def test_x_always_runs_along_the_tube(self):
+        # Direct operator correction: the origin belongs on the face's
+        # right-hand corner. With both axes pointing away from the stock, only
+        # the X-along-the-tube frame puts it there; the along-tube axis on Y
+        # (the old "vertical" option) moved it to the left-hand corner.
+        for normal, _, _ in self.REFERENCE.values():
+            with self.subTest(normal=normal):
+                x, _ = tube_wcs_axes(normal, (0, -1, 0))
+                self.assertEqual(tuple(round(v) for v in x), (0, -1, 0))
 
     def test_every_frame_is_right_handed_with_z_on_the_face_normal(self):
         for normal, _, _ in self.REFERENCE.values():
-            for horizontal in (True, False):
-                with self.subTest(normal=normal, horizontal=horizontal):
-                    x, y = tube_wcs_axes(normal, (0, -1, 0), horizontal)
-                    self.assertEqual(tuple(round(v) for v in _cross(x, y)), normal)
+            with self.subTest(normal=normal):
+                x, y = tube_wcs_axes(normal, (0, -1, 0))
+                self.assertEqual(tuple(round(v) for v in _cross(x, y)), normal)
 
 
 class PickOriginCornerTests(unittest.TestCase):

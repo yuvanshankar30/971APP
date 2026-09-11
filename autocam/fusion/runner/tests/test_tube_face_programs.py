@@ -74,7 +74,7 @@ class TubeFaceProgramTests(unittest.TestCase):
     def test_tube_waits_for_template_operations_before_rebinding_geometry(self):
         handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
         template_index = handler.index("setup.createFromCAMTemplate2(template)")
-        bind_index = handler.index("_bind_setup_to_face(setup, body, face, tube_axis, horizontal)", template_index)
+        bind_index = handler.index("_bind_setup_to_face(setup, body, face, tube_axis)", template_index)
         configure_index = handler.index("_configure_face_operations(setup, selection_face, wall_thickness_in, cutoff_chain)", template_index)
         self.assertLess(template_index, configure_index)
         self.assertLess(template_index, bind_index)
@@ -210,8 +210,20 @@ class TubeFaceProgramTests(unittest.TestCase):
     def test_tube_wcs_origin_is_resolved_from_fusion_not_a_hardcoded_corner(self):
         handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
         self.assertNotIn('value.value = "top 1"', handler)
-        self.assertIn("tube_wcs_axes(_vec(_face_normal(face)), _vec(tube_axis), horizontal)", handler)
+        self.assertIn("tube_wcs_axes(_vec(_face_normal(face)), _vec(tube_axis))", handler)
         self.assertIn("box_point.value = pick_origin_corner(origins, want_x, want_y)", handler)
+
+    def test_tube_wcs_origin_is_always_the_right_hand_corner(self):
+        # Direct operator correction: a job queued "vertical" put X across the
+        # tube and the origin on the face's left-hand corner. The reviewed
+        # setup is X along the tube, origin on the right-hand corner, so the
+        # queue's orientation choice no longer reaches the tube WCS at all.
+        handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
+        workflow = (RUNNER_DIR / "workflows" / "camTube.py").read_text()
+        self.assertIn('def handleTube(template_filename, program_base_name="tube"):', handler)
+        self.assertNotIn("horizontal", handler)
+        self.assertNotIn('_get(payload, "orientation")', workflow)
+        self.assertIn("return long_edge, transverse_edge", handler)
 
     def test_tube_wcs_rule_never_reaches_plate_setups(self):
         # Direct instruction: the tube WCS rewrite is for tube stock only.

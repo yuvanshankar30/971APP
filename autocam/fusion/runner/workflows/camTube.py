@@ -167,10 +167,6 @@ def start(data, session):
             if not filter_guids:
                 filter_guids = None
 
-        orientation = _get(payload, "orientation")
-        if isinstance(orientation, str):
-            orientation = orientation.strip().lower()
-
         # The claim response already joins these records. Keep the Runner
         # offline after a claim: the old /api/tools, /api/materials, and
         # /api/machines endpoints were never part of this application.
@@ -207,7 +203,6 @@ def start(data, session):
         box_tube_id = str(_get(payload, "box_tube_id", default="cam_tube"))
         face_program_names = handleTube(
             template_path,
-            orientation,
             program_base_name="Tube{}Job{}".format(box_tube_id, job_id),
         )
 
