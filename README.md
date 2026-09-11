@@ -321,6 +321,11 @@ Drive/manufacturing-folder integration) or `implementations/` (everything
 else) - this file stays at the whole-project level and links out rather
 than duplicating that detail.
 
+**[ARCHITECTURE.md](ARCHITECTURE.md)** has the whole-system diagram (client,
+Cloud Run, Supabase, the two AutoCAM execution paths, the Vision Scouting
+GPU worker, external integrations) - same living-reference rule as this
+file: update its diagram alongside this section, not separately from it.
+
 ## Stack
 
 - **Framework**: SvelteKit (Svelte 5), plain JS (no TypeScript) with
