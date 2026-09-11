@@ -123,6 +123,7 @@
   let postFileName = '';
   let posting = false;
   let errorModalJob = null;
+  let warningModalJob = null;
   let openFilesJobId = null;
   let refreshing = false;
 
@@ -182,6 +183,18 @@
     if (!text) return '';
     const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
     return lines.at(-1) || text;
+  }
+
+  // Unlike errors, a job's own warnings are already short, complete
+  // sentences (Fusion's own toolpath-warning text, or a Runner-added
+  // "Fusion reported on '<op>': ..." prefix) - no traceback noise to trim
+  // down to one line, so the row shows a real count plus the first one
+  // verbatim rather than picking out a "last line."
+  function warningSummary(job) {
+    const warnings = job.warnings || [];
+    if (!warnings.length) return '';
+    const first = warnings[0];
+    return warnings.length > 1 ? `${first} (+${warnings.length - 1} more)` : first;
   }
 
   const STATUS_LABELS = {
@@ -570,6 +583,11 @@
             <AlertTriangle size={14} /> {errorSummary(job)}
           </button>
         {/if}
+        {#if job.warnings?.length}
+          <button type="button" class="job-warning-button" title={warningSummary(job)} on:click={() => (warningModalJob = job)}>
+            <AlertTriangle size={14} /> View {job.warnings.length} warning{job.warnings.length === 1 ? '' : 's'}
+          </button>
+        {/if}
         <div class="cam-list-actions">
           {#if jobStepFile(job)}
             <button class="btn btn-secondary btn-sm" title="Preview this job's part in 3D" on:click={() => (cadModalJob = job)}>
@@ -650,6 +668,24 @@
       </div>
       <div class="modal-body">
         <pre class="job-error-detail">{(errorModalJob.errors || []).join('\n\n')}</pre>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if warningModalJob}
+  <div class="modal-overlay" role="presentation" on:click={() => (warningModalJob = null)}>
+    <div class="modal error-modal" role="dialog" aria-labelledby="warning-modal-title" on:click|stopPropagation>
+      <div class="modal-header">
+        <h3 id="warning-modal-title">{warningModalJob.name || `Job ${warningModalJob.id.slice(0, 8)}`} - warnings</h3>
+        <button type="button" class="btn btn-ghost btn-sm" title="Close" on:click={() => (warningModalJob = null)}><X size={16} /></button>
+      </div>
+      <div class="modal-body">
+        <ul class="job-warning-list">
+          {#each warningModalJob.warnings || [] as warning}
+            <li>{warning}</li>
+          {/each}
+        </ul>
       </div>
     </div>
   </div>
@@ -752,6 +788,41 @@
     font-size: 0.8rem;
     margin: 0;
   }
+
+  /* Same shape as .job-error-button, but a job can carry warnings on ANY
+     status (confirmed live: completed jobs routinely report Fusion's own
+     toolpath warnings, like a Turning job's Lead-Out modification, or a
+     Plate job's "Generated toolpath is empty.") - the amber warning color
+     (not danger-red) keeps it visually distinct from a real failure. */
+  .job-warning-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    background: none;
+    border: none;
+    padding: 0;
+    margin-top: 0.35rem;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.85rem;
+    color: #b18f1d;
+    text-align: left;
+    max-width: 100%;
+  }
+  .job-warning-button:hover { text-decoration: underline; }
+  .job-warning-button :global(svg) { flex-shrink: 0; }
+  .job-warning-list {
+    background: var(--surface-2, var(--background));
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 6px);
+    padding: 0.75rem 0.75rem 0.75rem 1.75rem;
+    max-height: 60vh;
+    overflow: auto;
+    font-size: 0.85rem;
+    margin: 0;
+  }
+  .job-warning-list li { margin-bottom: 0.5rem; word-break: break-word; }
+  .job-warning-list li:last-child { margin-bottom: 0; }
 
   .files-dropdown { position: relative; }
   .files-dropdown-menu {
