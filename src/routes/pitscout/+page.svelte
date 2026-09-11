@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import { supabase, getAuthHeader } from '$lib/supabase.js';
-  import { fetchActiveScoutingEventKey, fetchAvailableScoutingEvents } from '$lib/scoutingEvent.js';
+  import { fetchActiveScoutingEventKey, fetchAvailableScoutingEvents, fetchManualScoutingTeams } from '$lib/scoutingEvent.js';
   import SeasonFilter from '$lib/components/SeasonFilter.svelte';
 
   const DRIVEBASE_OPTIONS = ['Mechanum', 'Swerve', 'Tank'];
@@ -515,6 +515,12 @@
     if (!set.size && !eventTeamsData?.success && !eventMatchesData?.success) {
       const error = eventTeamsData?.error || eventMatchesData?.error || 'Failed to load event teams.';
       throw new Error(error);
+    }
+
+    // Manually-added teams only apply to the globally active event, not a
+    // past event an admin is browsing.
+    if (resolvedEventKey === eventKey) {
+      for (const teamKey of await fetchManualScoutingTeams()) set.add(teamKey);
     }
 
     return [...set].sort(teamSort);

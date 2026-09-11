@@ -38,15 +38,31 @@ async function fetchActorProfile(authSupa) {
   };
 }
 
-async function getActiveEventKey(db) {
-  const { data, error } = await db
+async function getActiveEventSettings(db) {
+  const primary = await db
+    .from('scouting_settings')
+    .select('event_key, manual_teams')
+    .eq('id', 1)
+    .maybeSingle();
+
+  if (!primary.error) {
+    return {
+      event_key: String(primary.data?.event_key || '').trim() || fallbackEventKey(),
+      manual_teams: Array.isArray(primary.data?.manual_teams) ? primary.data.manual_teams : []
+    };
+  }
+
+  // Backward compatibility before the manual_teams migration has been applied.
+  const fallback = await db
     .from('scouting_settings')
     .select('event_key')
     .eq('id', 1)
     .maybeSingle();
 
-  if (error) return fallbackEventKey();
-  return String(data?.event_key || '').trim() || fallbackEventKey();
+  return {
+    event_key: fallback.error ? fallbackEventKey() : (String(fallback.data?.event_key || '').trim() || fallbackEventKey()),
+    manual_teams: []
+  };
 }
 
 // TBA event keys never contain underscores, so the text before the first
@@ -125,7 +141,7 @@ async function fetchAvailableEvents(db) {
 export async function GET() {
   try {
     const db = getSupabase();
-    const eventKey = await getActiveEventKey(db);
+    const { event_key: eventKey, manual_teams: manualTeams } = await getActiveEventSettings(db);
 
     let availableEvents = [];
     try {
@@ -134,9 +150,9 @@ export async function GET() {
       availableEvents = [];
     }
 
-    return json({ success: true, data: { event_key: eventKey, available_events: availableEvents } });
+    return json({ success: true, data: { event_key: eventKey, manual_teams: manualTeams, available_events: availableEvents } });
   } catch {
-    return json({ success: true, data: { event_key: fallbackEventKey(), available_events: [] } });
+    return json({ success: true, data: { event_key: fallbackEventKey(), manual_teams: [], available_events: [] } });
   }
 }
 

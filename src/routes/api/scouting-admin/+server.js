@@ -7,6 +7,7 @@ import { FRC_TEAMS } from '$lib/permissions.js';
 import { getSupabase } from '$lib/server/971bot.js';
 import { selectPitScoutEntries } from '$lib/server/pitScoutingSchema.js';
 import { syncScoutingDataToSheet } from '$lib/server/google_sheets_sync.js';
+import { normalizeTeamKey } from '$lib/server/matchScoutingSchema.js';
 
 const ALL_FRC_TEAMS = new Set(Object.values(FRC_TEAMS).map(String));
 const PIT_SCOUT_PHOTO_BUCKET = 'pit-scout-photos';
@@ -91,6 +92,13 @@ function isMatchKeyForEvent(matchKey, eventKey) {
   const ek = String(eventKey || '').trim().toLowerCase();
   if (!mk || !ek) return false;
   return mk.startsWith(`${ek}_`);
+}
+
+function teamKeySort(a, b) {
+  const na = Number(String(a || '').replace(/^frc/i, ''));
+  const nb = Number(String(b || '').replace(/^frc/i, ''));
+  if (Number.isFinite(na) && Number.isFinite(nb) && na !== nb) return na - nb;
+  return String(a || '').localeCompare(String(b || ''));
 }
 
 function slotKey(matchKey, teamKey) {
@@ -639,12 +647,13 @@ async function getScoutingSettings(db) {
     smart_fuel_algorithm_enabled: false,
     google_sheet_id: null,
     google_sheet_last_synced_at: null,
-    google_sheet_last_sync_error: null
+    google_sheet_last_sync_error: null,
+    manual_teams: []
   };
 
   const primary = await db
     .from('scouting_settings')
-    .select('event_key, smart_fuel_algorithm_enabled, google_sheet_id, google_sheet_last_synced_at, google_sheet_last_sync_error')
+    .select('event_key, smart_fuel_algorithm_enabled, google_sheet_id, google_sheet_last_synced_at, google_sheet_last_sync_error, manual_teams')
     .eq('id', 1)
     .maybeSingle();
 
@@ -654,7 +663,8 @@ async function getScoutingSettings(db) {
       smart_fuel_algorithm_enabled: !!primary.data?.smart_fuel_algorithm_enabled,
       google_sheet_id: primary.data?.google_sheet_id || null,
       google_sheet_last_synced_at: primary.data?.google_sheet_last_synced_at || null,
-      google_sheet_last_sync_error: primary.data?.google_sheet_last_sync_error || null
+      google_sheet_last_sync_error: primary.data?.google_sheet_last_sync_error || null,
+      manual_teams: Array.isArray(primary.data?.manual_teams) ? primary.data.manual_teams : []
     };
   }
 
@@ -670,6 +680,7 @@ async function getScoutingSettings(db) {
     event_key: String(fallback.data?.event_key || '').trim() || fallbackEventKey(),
     smart_fuel_algorithm_enabled: false,
     google_sheet_id: null,
+    manual_teams: [],
     google_sheet_last_synced_at: null,
     google_sheet_last_sync_error: null
   };
@@ -1193,6 +1204,10 @@ export async function GET({ request }) {
     // even before any matches are posted to TBA.
     for (const teamKey of (eventTeamsRes.teamKeys || [])) teamSet.add(teamKey);
 
+    // Manually-added teams (prescouting) - lets admins seed teams before an
+    // event even has a roster on TBA.
+    for (const teamKey of (settings.manual_teams || [])) teamSet.add(teamKey);
+
     // Fallback: include any teams that already have pit scout entries so progress shows
     // even if TBA calls fail or the event team list is empty.
     const pitRowsForTeamSeed = pitRes.data || [];
@@ -1361,6 +1376,7 @@ export async function GET({ request }) {
         google_sheet_id: settings.google_sheet_id,
         google_sheet_last_synced_at: settings.google_sheet_last_synced_at,
         google_sheet_last_sync_error: settings.google_sheet_last_sync_error,
+        manual_teams: [...(settings.manual_teams || [])].sort(teamKeySort),
         upcoming_events: upcomingRes.events || [],
         warning,
         competition_role_options: competitionRoleOptions,
@@ -1508,6 +1524,54 @@ export async function POST({ request }) {
     if (action === 'sync-scouting-sheet') {
       const result = await syncScoutingDataToSheet();
       return json({ success: result.ok, data: result });
+    }
+
+    if (action === 'add-manual-team') {
+      const teamKey = normalizeTeamKey(body?.team_key);
+      if (!teamKey) return json({ error: 'A valid team number is required (e.g. 971 or frc971)' }, { status: 400 });
+
+      const { data: existing, error: fetchError } = await db
+        .from('scouting_settings')
+        .select('manual_teams')
+        .eq('id', 1)
+        .maybeSingle();
+      if (fetchError) return json({ error: fetchError.message }, { status: 500 });
+
+      const current = Array.isArray(existing?.manual_teams) ? existing.manual_teams : [];
+      const next = current.includes(teamKey) ? current : [...current, teamKey].sort(teamKeySort);
+
+      const { data, error } = await db
+        .from('scouting_settings')
+        .upsert({ id: 1, manual_teams: next, updated_by: actorId, updated_at: new Date().toISOString() }, { onConflict: 'id' })
+        .select('manual_teams')
+        .single();
+
+      if (error) return json({ error: error.message }, { status: 500 });
+      return json({ success: true, data: { manual_teams: [...(data?.manual_teams || next)].sort(teamKeySort) } });
+    }
+
+    if (action === 'remove-manual-team') {
+      const teamKey = normalizeTeamKey(body?.team_key);
+      if (!teamKey) return json({ error: 'A valid team number is required' }, { status: 400 });
+
+      const { data: existing, error: fetchError } = await db
+        .from('scouting_settings')
+        .select('manual_teams')
+        .eq('id', 1)
+        .maybeSingle();
+      if (fetchError) return json({ error: fetchError.message }, { status: 500 });
+
+      const current = Array.isArray(existing?.manual_teams) ? existing.manual_teams : [];
+      const next = current.filter((t) => t !== teamKey);
+
+      const { data, error } = await db
+        .from('scouting_settings')
+        .upsert({ id: 1, manual_teams: next, updated_by: actorId, updated_at: new Date().toISOString() }, { onConflict: 'id' })
+        .select('manual_teams')
+        .single();
+
+      if (error) return json({ error: error.message }, { status: 500 });
+      return json({ success: true, data: { manual_teams: [...(data?.manual_teams || next)].sort(teamKeySort) } });
     }
 
     if (action === 'delete-all-scouting-data') {

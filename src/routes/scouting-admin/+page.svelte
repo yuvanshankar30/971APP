@@ -39,6 +39,12 @@
   let savingGoogleSheetId = false;
   let syncingSheet = false;
 
+  // Prescouting: teams typed in by hand before an event has a roster on TBA.
+  let manualTeams = [];
+  let manualTeamInput = '';
+  let savingManualTeam = false;
+  let removingManualTeam = null;
+
   let metrics = {
     pit: { percent: 0, scouted_teams: 0, pending_teams: 0, needs_photo_teams: 0, completed_teams: 0, total_teams: 0 },
     data: { assigned_percent: 0, scouted_percent: 0, missed_shift_percent: 0, missed_shifts: 0, assigned_matches: 0, scouted_matches: 0, total_matches: 0 },
@@ -144,6 +150,7 @@
       googleSheetIdInput = googleSheetId;
       googleSheetLastSyncedAt = data.data?.google_sheet_last_synced_at || null;
       googleSheetLastSyncError = data.data?.google_sheet_last_sync_error || '';
+      manualTeams = data.data?.manual_teams || [];
       initDrafts(users);
     } catch (e) {
       errorMsg = e.message || 'Failed to load scouting admin dashboard.';
@@ -325,6 +332,60 @@
     }
   }
 
+  function displayTeam(teamKey) {
+    return teamKey ? String(teamKey).replace(/^frc/i, '') : '';
+  }
+
+  async function addManualTeam() {
+    const raw = manualTeamInput.trim();
+    if (!raw) return;
+
+    savingManualTeam = true;
+    errorMsg = '';
+    successMsg = '';
+    try {
+      const res = await authFetch('/api/scouting-admin', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'add-manual-team', team_key: raw })
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || `Failed to add team (${res.status})`);
+      }
+      manualTeams = data.data?.manual_teams || manualTeams;
+      manualTeamInput = '';
+      successMsg = `Added team ${displayTeam(raw)} for prescouting.`;
+    } catch (e) {
+      errorMsg = e.message || 'Failed to add team.';
+    } finally {
+      savingManualTeam = false;
+    }
+  }
+
+  async function removeManualTeam(teamKey) {
+    removingManualTeam = teamKey;
+    errorMsg = '';
+    successMsg = '';
+    try {
+      const res = await authFetch('/api/scouting-admin', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'remove-manual-team', team_key: teamKey })
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || `Failed to remove team (${res.status})`);
+      }
+      manualTeams = data.data?.manual_teams || manualTeams.filter((t) => t !== teamKey);
+      successMsg = `Removed team ${displayTeam(teamKey)} from prescouting.`;
+    } catch (e) {
+      errorMsg = e.message || 'Failed to remove team.';
+    } finally {
+      removingManualTeam = null;
+    }
+  }
+
   function buildDeleteSummary(deleted = {}) {
     const segments = [
       `${deleted.data_events || 0} data events`,
@@ -495,6 +556,52 @@
       </p>
       {#if googleSheetLastSyncError}
         <div class="status-message status-error">{googleSheetLastSyncError}</div>
+      {/if}
+    </div>
+
+    <div class="card event-card">
+      <div class="event-controls">
+        <div class="form-group event-control">
+          <label class="form-label" for="manualTeamInput">Prescouting: Add Team Manually</label>
+          <input
+            id="manualTeamInput"
+            class="form-input"
+            type="text"
+            placeholder="Team number (e.g. 5199)"
+            bind:value={manualTeamInput}
+            on:keydown={(e) => { if (e.key === 'Enter') addManualTeam(); }}
+          />
+        </div>
+        <button
+          class="btn btn-primary btn-nowrap"
+          disabled={!manualTeamInput.trim() || savingManualTeam}
+          on:click={addManualTeam}
+        >
+          {savingManualTeam ? 'Adding...' : 'Add Team'}
+        </button>
+      </div>
+      <p class="event-hint">
+        Seeds teams into pit scouting and the dashboard's team totals before an event has a
+        roster on The Blue Alliance. Once the real event roster is available, these become
+        redundant with it but are safe to leave in place.
+      </p>
+      {#if manualTeams.length}
+        <div class="badge-row">
+          {#each manualTeams as teamKey}
+            <span class="chip">
+              Team {teamKey.replace(/^frc/i, '')}
+              <button
+                type="button"
+                class="chip-remove"
+                disabled={removingManualTeam === teamKey}
+                on:click={() => removeManualTeam(teamKey)}
+                aria-label={`Remove team ${teamKey.replace(/^frc/i, '')}`}
+              >
+                ×
+              </button>
+            </span>
+          {/each}
+        </div>
       {/if}
     </div>
 
