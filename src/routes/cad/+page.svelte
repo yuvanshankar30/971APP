@@ -8,6 +8,8 @@
   import { isTeam9584 } from '$lib/frcTeams.js';
   import { onShapeAPI } from '$lib/onshape.js';
   import { formatPacificDate, formatPacificDateTimeWithZone } from '$lib/timezone.js';
+  import { getCurrentSeasonBucket, getAllSeasonBuckets, passesSeasonFilter } from '$lib/frcSeason.js';
+  import SeasonFilter from '$lib/components/SeasonFilter.svelte';
   import stockData from '$lib/stock.json';
   import { Users, Plus, Link, Upload, Settings, FileText, ExternalLink, Edit, Download, Trash2 } from 'lucide-svelte';
   import { goto } from '$app/navigation';  let user = null;
@@ -15,6 +17,12 @@
   let loading = true;
   let loadingStep = 'Initializing...';
   let subsystems = [];
+  // Same season/offseason year-bucket convention as Build and Purchasing
+  // (see $lib/frcSeason.js) - defaults to the current bucket so a page full
+  // of past seasons' subsystems doesn't bury this year's active work.
+  let filterSeason = getCurrentSeasonBucket()?.value || '';
+  $: seasonOptions = getAllSeasonBuckets(subsystems);
+  $: visibleSubsystems = subsystems.filter((s) => passesSeasonFilter(s.created_at, filterSeason));
   let showCreateModal = false;
   let showLinkModal = false;
   let showBuildModal = false;
@@ -1039,8 +1047,14 @@
       {/if}
     </section>
 
+    <div class="card">
+      <div class="filters">
+        <SeasonFilter options={seasonOptions} bind:value={filterSeason} />
+      </div>
+    </div>
+
     <div class="subsystems-grid">
-      {#each subsystems as subsystem}
+      {#each visibleSubsystems as subsystem}
         <div 
           class="subsystem-card" 
           class:clickable={subsystem.onshape_url}
@@ -1227,6 +1241,15 @@
           <button class="btn btn-primary btn-sm" on:click={openCreateModal}>
             <Plus size={16} />
             Create First Subsystem
+          </button>
+        </div>
+      {:else if visibleSubsystems.length === 0}
+        <div class="empty-state">
+          <Settings size={48} />
+          <h3>No Subsystems in This Season</h3>
+          <p>No subsystems were created in the selected season. Try another season, or clear the filter to see all of them.</p>
+          <button class="btn btn-outline btn-sm" on:click={() => (filterSeason = '')}>
+            Show All Seasons
           </button>
         </div>      {/if}
     </div>
