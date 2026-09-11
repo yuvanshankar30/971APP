@@ -11,9 +11,8 @@
   import { getCurrentSeasonBucket, getAllSeasonBuckets, passesSeasonFilter } from '$lib/frcSeason.js';
   import SeasonFilter from '$lib/components/SeasonFilter.svelte';
   import stockData from '$lib/stock.json';
-  import { Users, Plus, Link, Upload, Settings, FileText, ExternalLink, Edit, Download, Trash2 } from 'lucide-svelte';
+  import { Users, Plus, Link, Upload, Settings, FileText, ExternalLink, Edit, Download, Trash2, LayoutGrid, List } from 'lucide-svelte';
   import { goto } from '$app/navigation';  let user = null;
-  const GENERAL_TASK_CATEGORIES = ['CAD', 'Mechanical', 'Electrical', 'Software', 'Other'];
   let loading = true;
   let loadingStep = 'Initializing...';
   let subsystems = [];
@@ -38,12 +37,16 @@
   let stockTypes = [];
   let buildBOM = [];
   let loadingBuild = false;
-  let generalTaskLoading = false;
-  let generalTaskSaving = false;
-  let generalTaskSelected = new Set();
-  let generalTaskError = '';
-  let generalTaskNote = '';
   const LAST_SUBSYSTEM_STORAGE_KEY = '971hub:lastSubsystem';
+  const VIEW_MODE_STORAGE_KEY = '971hub:cadSubsystemsView';
+  // Grid (the original card layout) or a compact list, matching the dense
+  // table view Manufacturing/Purchasing already use. Remembered per browser,
+  // same convention as rememberLastSubsystem below.
+  let viewMode = (browser && localStorage.getItem(VIEW_MODE_STORAGE_KEY)) || 'grid';
+  function setViewMode(mode) {
+    viewMode = mode;
+    if (browser) localStorage.setItem(VIEW_MODE_STORAGE_KEY, mode);
+  }
 
   function rememberLastSubsystem(subsystem) {
     if (!browser || !subsystem?.id) return;
@@ -138,13 +141,6 @@
         stockTypes = []; // Set empty array as fallback
       }
       console.timeEnd('Load stock types');
-
-      loadingStep = 'Loading task category signups...';
-      try {
-        await loadGeneralTaskSignup();
-      } catch (taskSignupError) {
-        console.warn('Task category signup load failed:', taskSignupError);
-      }
 
     } catch (error) {
       console.error('Critical error in onMount:', error);
@@ -257,14 +253,17 @@
   async function loadOnshapeDocInfo(subs) {
     const targets = (subs || []).filter((s) => s.onshape_document_id);
     await Promise.all(targets.map(async (subsystem) => {
+      // Every real Onshape call goes through /api/onshape, which signs
+      // requests server-side (see onshape.js's own header comment) - this
+      // client instance never holds an accessKey/secretKey of its own.
+      // Gating on those was always false, so this fetch never actually ran,
+      // key or no key.
       let entry = { docInfo: null, releases: [] };
-      if (onShapeAPI.accessKey && onShapeAPI.secretKey) {
-        try {
-          const docInfo = await onShapeAPI.getDocumentInfo(subsystem.onshape_document_id);
-          entry = { docInfo: docInfo || null, releases: [] };
-        } catch (error) {
-          console.error(`Error loading OnShape data for ${subsystem.name}:`, error);
-        }
+      try {
+        const docInfo = await onShapeAPI.getDocumentInfo(subsystem.onshape_document_id);
+        entry = { docInfo: docInfo || null, releases: [] };
+      } catch (error) {
+        console.error(`Error loading OnShape data for ${subsystem.name}:`, error);
       }
       onshapeData = { ...onshapeData, [subsystem.id]: entry };
     }));
@@ -506,74 +505,6 @@
       console.error('Error loading local stock types:', error);
       stockTypes = [];
     }
-  }
-
-  function normalizeTaskCategoryKey(value) {
-    return String(value || '').trim().toLowerCase();
-  }
-
-  async function loadGeneralTaskSignup() {
-    if (!user?.id) return;
-    generalTaskLoading = true;
-    generalTaskError = '';
-    generalTaskNote = '';
-    generalTaskSelected = new Set();
-
-    try {
-      const { data: profile, error } = await supabase
-        .from('user_profiles')
-        .select('task_general_categories')
-        .eq('id', user.id)
-        .single();
-      if (error) throw error;
-      const selected = Array.isArray(profile?.task_general_categories)
-        ? profile.task_general_categories
-        : [];
-      generalTaskSelected = new Set(
-        selected
-          .map((c) => GENERAL_TASK_CATEGORIES.find((allowed) => normalizeTaskCategoryKey(allowed) === normalizeTaskCategoryKey(c)))
-          .filter(Boolean)
-      );
-    } catch (error) {
-      console.error('Failed to load general task category signup', error);
-      const msg = String(error?.message || '');
-      generalTaskError = msg.toLowerCase().includes('task_general_categories')
-        ? 'Task category signup is not initialized yet. Apply migration 20260311_task_general_categories.sql.'
-        : (msg || 'Failed to load task category signup.');
-    } finally {
-      generalTaskLoading = false;
-    }
-  }
-
-  async function setGeneralTaskCategory(category, enabled) {
-    if (!user?.id || generalTaskSaving) return;
-    generalTaskSaving = true;
-    generalTaskError = '';
-    generalTaskNote = '';
-
-    try {
-      const next = new Set(generalTaskSelected);
-      if (enabled) next.add(category);
-      else next.delete(category);
-      const categories = [...next].filter((c) => GENERAL_TASK_CATEGORIES.includes(c));
-      const { error } = await supabase
-        .from('user_profiles')
-        .update({ task_general_categories: categories })
-        .eq('id', user.id);
-      if (error) throw error;
-      generalTaskSelected = next;
-      generalTaskNote = `Saved ${category}.`;
-    } catch (error) {
-      console.error('Failed to update task category signup', error);
-      generalTaskError = error?.message || 'Failed to update category signup.';
-    } finally {
-      generalTaskSaving = false;
-    }
-  }
-
-  function toggleGeneralTaskCategory(category) {
-    const enabled = !generalTaskSelected.has(category);
-    setGeneralTaskCategory(category, enabled);
   }
 
   async function createBuildFromRelease(subsystemId, release) {
@@ -1019,40 +950,128 @@
   {/if}
     </div>
 
-    <section class="general-task-signup">
-      <h2>General Task Categories</h2>
-      <p class="muted">Sign up here so you show up in the Tasks assignee dropdown for non-subsystem tasks.</p>
-      {#if generalTaskLoading}
-        <p class="muted">Loading category signup...</p>
-      {:else if generalTaskError}
-        <p class="error-message">{generalTaskError}</p>
-      {:else}
-        <div class="category-grid">
-          {#each GENERAL_TASK_CATEGORIES as category}
-            <button
-              type="button"
-              class="category-pill"
-              class:selected={generalTaskSelected.has(category)}
-              disabled={generalTaskSaving}
-              aria-pressed={generalTaskSelected.has(category)}
-              on:click={() => toggleGeneralTaskCategory(category)}
-            >
-              {category}
-            </button>
-          {/each}
-        </div>
-        {#if generalTaskNote}
-          <p class="muted">{generalTaskNote}</p>
-        {/if}
-      {/if}
-    </section>
-
     <div class="card">
       <div class="filters">
         <SeasonFilter options={seasonOptions} bind:value={filterSeason} />
+        <div class="view-toggle" role="group" aria-label="Subsystem view">
+          <button
+            type="button"
+            class="view-toggle-btn"
+            class:active={viewMode === 'grid'}
+            aria-pressed={viewMode === 'grid'}
+            on:click={() => setViewMode('grid')}
+          >
+            <LayoutGrid size={15} /> Grid
+          </button>
+          <button
+            type="button"
+            class="view-toggle-btn"
+            class:active={viewMode === 'list'}
+            aria-pressed={viewMode === 'list'}
+            on:click={() => setViewMode('list')}
+          >
+            <List size={15} /> List
+          </button>
+        </div>
       </div>
     </div>
 
+    {#if viewMode === 'list'}
+    <div class="subsystems-table-wrap">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Lead</th>
+            <th>Members</th>
+            <th>Budget</th>
+            <th>OnShape</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each visibleSubsystems as subsystem}
+            <tr
+              class:clickable={subsystem.onshape_url}
+              on:click={() => subsystem.onshape_url && goto(`/cad/${subsystem.id}`)}
+            >
+              <td>
+                <div class="list-name-cell">
+                  <strong>{subsystem.name}</strong>
+                  {#if isTeam9584(subsystem.frc_team)}
+                    <span class="tag team-tag tag-9584" title="Team 9584">9584</span>
+                  {/if}
+                  {#if isSubsystemLead(subsystem)}
+                    <span class="badge badge-lead">Lead</span>
+                  {:else if isSubsystemMember(subsystem)}
+                    <span class="badge badge-member">Member</span>
+                  {/if}
+                </div>
+              </td>
+              <td>{subsystem.lead_user?.full_name?.split(' ')[0] || subsystem.lead_user?.email || '—'}</td>
+              <td>{subsystem.subsystem_members.length}</td>
+              <td>
+                {#if subsystem.budget}
+                  <span class:over-budget={subsystem.budget.spent > subsystem.budget.amount}>
+                    ${subsystem.budget.spent.toLocaleString()} / ${subsystem.budget.amount.toLocaleString()}
+                  </span>
+                {:else}
+                  —
+                {/if}
+              </td>
+              <td>
+                {#if subsystem.onshape_url}
+                  <a href={subsystem.onshape_url} target="_blank" class="external-link" on:click|stopPropagation>
+                    <ExternalLink size={14} /> Open
+                  </a>
+                {:else}
+                  —
+                {/if}
+              </td>
+              <td>
+                <div class="list-actions" on:click|stopPropagation role="presentation">
+                  {#if isSubsystemLead(subsystem)}
+                    {#if !subsystem.onshape_url}
+                      <button class="btn btn-secondary btn-sm" on:click={() => { selectedSubsystem = subsystem.id; showLinkModal = true; }}>
+                        <Link size={14} /> Link
+                      </button>
+                    {/if}
+                    <button class="btn btn-outline btn-sm" on:click={() => openEditModal(subsystem)} aria-label="Edit subsystem">
+                      <Edit size={14} />
+                    </button>
+                  {:else if !isSubsystemMember(subsystem)}
+                    <button class="btn btn-primary btn-sm" on:click={() => joinSubsystem(subsystem.id)}>
+                      <Edit size={14} /> Join
+                    </button>
+                  {/if}
+                </div>
+              </td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+      {#if subsystems.length === 0}
+        <div class="empty-state">
+          <Settings size={48} />
+          <h3>No Subsystems Yet</h3>
+          <p>Create your first subsystem to get started with CAD management</p>
+          <button class="btn btn-primary btn-sm" on:click={openCreateModal}>
+            <Plus size={16} />
+            Create First Subsystem
+          </button>
+        </div>
+      {:else if visibleSubsystems.length === 0}
+        <div class="empty-state">
+          <Settings size={48} />
+          <h3>No Subsystems in This Season</h3>
+          <p>No subsystems were created in the selected season. Try another season, or clear the filter to see all of them.</p>
+          <button class="btn btn-outline btn-sm" on:click={() => (filterSeason = '')}>
+            Show All Seasons
+          </button>
+        </div>
+      {/if}
+    </div>
+    {:else}
     <div class="subsystems-grid">
       {#each visibleSubsystems as subsystem}
         <div 
@@ -1253,6 +1272,7 @@
           </button>
         </div>      {/if}
     </div>
+    {/if}
 
     <!-- Builds Overview -->
     {#if builds.length > 0}
@@ -1545,69 +1565,32 @@
 {/if}
 
 <style>
-  .cad-container { max-width: 1200px; margin: var(--space-7) auto; padding: 0 var(--space-4); }
+  .cad-container { max-width: 1600px; margin: var(--space-6) auto; padding: 0 var(--space-4); }
   .page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--gap-4); flex-wrap: wrap; margin-bottom: var(--space-7); padding-bottom: var(--space-4); border-bottom: 1px solid var(--border); }
   .header-content { display: flex; align-items: center; gap: var(--gap-3); color: var(--accent-strong); }
   .header-content h1 { font-size: var(--font-2xl); margin: 0; color: var(--text); letter-spacing: -0.01em; }
   .header-content p { margin: var(--space-1) 0 0 0; font-size: var(--font-md); color: var(--text-muted); }
 
-  .general-task-signup {
-    margin-bottom: var(--space-4);
-    background: var(--surface-1);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    padding: var(--space-4);
-    display: grid;
-    gap: var(--gap-3);
-    box-shadow: var(--shadow-sm);
-  }
-  .general-task-signup h2 {
-    margin: 0;
-    font-size: var(--font-md);
-    color: var(--text);
-  }
-  .general-task-signup .muted {
-    color: var(--text-muted);
-    margin: 0;
-  }
-  .category-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--gap-2);
-  }
-  .category-pill {
+  .view-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; margin-left: auto; }
+  .view-toggle-btn {
     display: inline-flex;
     align-items: center;
-    justify-content: center;
-    min-height: var(--control-height-sm);
+    gap: var(--gap-1);
     padding: var(--control-padding-sm);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
+    border: none;
     background: var(--surface-1);
-    color: var(--text);
+    color: var(--text-muted);
+    font-size: var(--font-xs);
     font-weight: 500;
     cursor: pointer;
-    font-size: var(--font-xs);
-    transition: border-color 120ms ease, background 120ms ease, color 120ms ease, box-shadow 120ms ease;
   }
-  .category-pill:hover {
-    border-color: var(--accent);
-    color: var(--accent);
-  }
-  .category-pill.selected {
-    border-color: var(--accent);
-    background: var(--accent-subtle);
-    color: var(--accent-strong);
-    font-weight: 600;
-  }
-  .category-pill:focus-visible {
-    outline: none;
-    box-shadow: 0 0 0 3px var(--btn-focus-ring);
-  }
-  .category-pill:disabled {
-    opacity: 0.7;
-    cursor: not-allowed;
-  }
+  .view-toggle-btn:not(:last-child) { border-right: 1px solid var(--border); }
+  .view-toggle-btn:hover { color: var(--text); background: var(--surface-2); }
+  .view-toggle-btn.active { color: var(--accent-strong); background: var(--accent-subtle); }
+  .subsystems-table-wrap { overflow-x: auto; margin-bottom: var(--space-6); }
+  .subsystems-table-wrap tr.clickable { cursor: pointer; }
+  .list-name-cell { display: flex; align-items: center; gap: var(--gap-2); flex-wrap: wrap; }
+  .list-actions { display: flex; gap: var(--gap-2); flex-wrap: wrap; }
   .subsystems-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: var(--gap-6); }
   .subsystem-card { background: var(--surface-1); border-radius: var(--radius-lg); border: 1px solid var(--border); padding: var(--space-6); margin-bottom: var(--space-4); box-shadow: var(--shadow-sm); transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease; }
   .subsystem-card.clickable { cursor: pointer; }
