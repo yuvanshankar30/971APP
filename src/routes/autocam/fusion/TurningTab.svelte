@@ -6,13 +6,15 @@
   import {
     fetchTurningParts, createTurningPart, deleteTurningPart, deleteTurningParts, renameTurningPart,
     updateTurningPartStepFile, updateTurningPartQuantity, installFusionPartCad, queueFusionJob,
-    fetchCompletedFusionStockIds, TURNING_CAM_TYPES
+    fetchCompletedFusionStockIds, fetchFusionFolderTree, TURNING_CAM_TYPES
   } from '$lib/fusionCam.js';
+  import { searchFolderTree } from '$lib/fusionFolderSearch.js';
   import { formatPacificDateTime } from '$lib/timezone.js';
   import CadViewer from '$lib/components/CadViewer.svelte';
   import SeasonFilter from '$lib/components/SeasonFilter.svelte';
+  import FolderTreeNode from './FolderTreeNode.svelte';
   import { getAllSeasonBuckets, passesSeasonFilter } from '$lib/frcSeason.js';
-  import { RotateCcw, Plus, Trash2, Send, X, Pencil, Check, Download, Upload, Filter } from 'lucide-svelte';
+  import { RotateCcw, Plus, Trash2, Send, X, Pencil, Check, Download, Upload, Filter, Folder } from 'lucide-svelte';
 
   export let user;
   export let canManage;
@@ -43,6 +45,17 @@
   let queueModalPart = null;
   let queueFileName = '';
   let queueFolderPath = '';
+  // Direct bug report: the folder-selection UI never actually rendered here
+  // for turning jobs - queueFolderPath existed and was already threaded
+  // through to queueTurningCam, but there was nothing to set it to anything
+  // but empty. Same picker Plates/Tube already use - see PartsTab.svelte's
+  // matching state and loadFolderTree.
+  let folderTreeRow = null;
+  let folderSearch = '';
+  $: folderSearchTerm = folderSearch.trim();
+  $: folderSearchResults = folderSearchTerm
+    ? searchFolderTree(folderTreeRow?.tree, folderSearchTerm)
+    : [];
   let queueSubmitting = false;
   let cadModalPart = null;
   let renamingPartId = null;
@@ -130,7 +143,15 @@
     }
   }
 
-  onMount(() => { load(); });
+  async function loadFolderTree() {
+    try {
+      folderTreeRow = await fetchFusionFolderTree();
+    } catch (e) {
+      console.warn('Could not load Fusion folder tree:', e.message);
+    }
+  }
+
+  onMount(() => { load(); loadFolderTree(); });
 
   function handleFileChange(event) {
     stepFile = event.target.files?.[0] || null;
@@ -344,6 +365,9 @@
     queueModalPart = null;
     queueFileName = '';
     queueFolderPath = '';
+    // Otherwise a stale search term hides the whole tree the next time this
+    // modal opens, which reads as "the folder list disappeared."
+    folderSearch = '';
   }
 
   async function confirmQueue() {
@@ -654,6 +678,51 @@
           <input id="turning-queue-file-name" class="form-input" value={queueFileName} on:input={(event) => (queueFileName = event.currentTarget.value.replace(/\s+/g, ''))} placeholder="e.g. GearboxSpacer" />
           <p class="cam-form-hint">No spaces - this becomes the saved document's name in Fusion's Data Panel.</p>
         </div>
+        <div class="form-group">
+          <div class="folder-picker-header">
+            <span class="form-label">Save to folder</span>
+            {#if folderTreeRow?.tree}
+              <input
+                type="search"
+                class="form-input folder-search"
+                placeholder="Search folders..."
+                bind:value={folderSearch}
+                aria-label="Search folders by name"
+              />
+            {/if}
+          </div>
+          {#if folderTreeRow?.tree}
+            <div class="folder-tree-box">
+              {#if folderSearchTerm}
+                {#if folderSearchResults.length}
+                  {#each folderSearchResults as result (result.path)}
+                    <button
+                      type="button"
+                      class="folder-search-result"
+                      class:selected={result.path === queueFolderPath}
+                      title={result.path}
+                      on:click={() => (queueFolderPath = result.path)}
+                    >
+                      <Folder size={15} />
+                      <span class="folder-search-name">{result.name}</span>
+                      <span class="folder-search-path">{result.path}</span>
+                    </button>
+                  {/each}
+                {:else}
+                  <p class="cam-form-hint">No folders match "{folderSearch}".</p>
+                {/if}
+              {:else}
+                <FolderTreeNode node={folderTreeRow.tree} selectedPath={queueFolderPath} onSelect={(path) => (queueFolderPath = path)} />
+              {/if}
+            </div>
+            <p class="cam-form-hint">
+              {queueFolderPath ? `Selected: ${queueFolderPath}` : "Using the season CAM project root - click a folder above to save somewhere else."}
+              Folder list as of {new Date(folderTreeRow.synced_at).toLocaleString()}.
+            </p>
+          {:else}
+            <p class="cam-form-hint">No folder list yet - a Fusion Runner needs to have run at least once to share it. This will save to the season CAM project root.</p>
+          {/if}
+        </div>
       </div>
       <div class="modal-footer-actions">
         <button class="btn btn-ghost" type="button" on:click={closeQueueModal}>Cancel</button>
@@ -664,6 +733,33 @@
 {/if}
 
 <style>
+  .folder-tree-box {
+    max-height: 16rem;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 6px);
+    padding: 0.35rem;
+  }
+  .folder-picker-header { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.4rem; }
+  .folder-search { max-width: 220px; height: 2rem; padding: 0.25rem 0.5rem; font-size: 0.8rem; }
+  .folder-search-result {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    padding: 0.4rem 0.6rem;
+    border-radius: var(--radius-sm, 6px);
+    cursor: pointer;
+    color: var(--text);
+    font-size: 0.9rem;
+  }
+  .folder-search-result:hover { background: var(--surface-2); }
+  .folder-search-result.selected { background: var(--accent-soft, rgba(47, 129, 247, 0.14)); color: var(--accent); font-weight: 600; }
+  .folder-search-name { flex-shrink: 0; }
+  .folder-search-path { color: var(--text-muted); font-size: 0.75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tab-actions { margin-bottom: 1rem; }
   .tab-filters { margin-bottom: 1rem; --filters-columns: 2fr 1fr 1fr; }
   .form-row { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
