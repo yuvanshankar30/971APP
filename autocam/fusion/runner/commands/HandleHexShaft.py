@@ -1,4 +1,4 @@
-"""Build a Fusion turning setup for a hex shaft from its own imported body.
+"""Build Fusion turning setups for a hex shaft from its own imported body.
 
 Fusion's turning module has no native hex-stock shape - unlike
 HandleSpacer.py's round bar (Fusion's own Relative Cylinder auto-stock), a
@@ -11,15 +11,21 @@ since a continuous circular groove cannot be cut into an interrupted hex
 cross section.
 
 One shaft type only, as instructed: a plain hex bar, turned round and
-grooved at one end for a snap ring, hex everywhere else. Reference:
+grooved at each end for a snap ring, hex everywhere else. Reference:
 "Hex Shaft CAM", a hand-modeled Model (finished shape) and Stock (raw 0.5in
 hex bar) body pair - Stock's own spatial placement in that document doesn't
 overlap Model's, so it is read only for its across-flats/length convention,
-not reused as a real body; a fresh hex-prism stock body is built here around
-whichever body is actually imported for a real job. Confirmed live: exactly
-one end is machined per setup (the operator chucks the other end and flips
-for the second groove), the same one-end-at-a-time convention HandleTube.py
-uses for a tube's four sides.
+not reused as a real body; fresh hex-prism stock bodies are built here
+around whichever body is actually imported for a real job.
+
+Confirmed live (real hex shaft geometry, not an assumption): a model with a
+groove at each end needs two setups, not one - the operator chucks extra-
+length raw stock, faces/necks/grooves the first end, PARTS OFF the finished
+blank at its own measured length (severing it from the remaining grip
+stock - a real cutoff cut, not a synthetic simplification), then re-chucks
+the now-finished end to expose and machine the second end. The second
+setup's own stock has no extra grip allowance, since after parting there is
+none left to grip beyond the part itself.
 """
 
 import adsk.core
@@ -36,8 +42,10 @@ from .HexShaftMath import (
 )
 _CM_PER_IN = 2.54
 _PARALLEL_TOLERANCE = 0.985
-# How far past the finished shaft's own length the synthetic stock extends,
-# for the chuck to grip - not a measured value, a workholding allowance.
+# How far past the finished shaft's own length the first setup's stock
+# extends, for the chuck to grip - not a measured value, a workholding
+# allowance. The second setup's stock has none: after the first setup parts
+# the blank off at its own measured length, there is no extra material left.
 _CHUCK_GRIP_ALLOWANCE_IN = 1.5
 
 
@@ -83,7 +91,7 @@ def _find_shaft_body(root):
     A real STEP-imported job (matching HandleTube.py/HandleSpacer.py's own
     requirement) creates exactly one occurrence holding exactly one body -
     the finished shaft, with no separate raw-stock body shipped in the job
-    (a synthetic one is built here instead; see _build_hex_stock). A body
+    (synthetic ones are built here instead; see _build_hex_stock). A body
     named "Model" living directly in the root component is also accepted,
     matching the reviewed reference document's own hand-modeled layout.
     """
@@ -226,12 +234,15 @@ def _normalize(a):
     return (a[0] / length, a[1] / length, a[2] / length)
 
 
-def _build_hex_stock(root, origin_point, axis_unit, flat_normal, across_flats_cm, model_min, model_max):
+def _build_hex_stock(root, origin_point, axis_unit, flat_normal, across_flats_cm, start_cm, end_cm):
     """A real hex-prism solid body for stock mode 'solid' to reference.
 
-    Extends past the finished model's own length by _CHUCK_GRIP_ALLOWANCE_IN
-    on the chuck (min) side only - the exposed (max) end stays exactly at the
-    model's own measured tip, since that end is faced to length, not gripped.
+    Spans exactly [start_cm, end_cm] along axis_unit from origin_point - the
+    end_cm face is the exposed/tip end for whichever setup this stock is
+    built for, and start_cm is the gripped end (with or without extra grip
+    allowance baked in by the caller, depending on whether this is the first
+    cut from raw stock or a second setup re-chucking an already-parted,
+    exact-length blank).
 
     A true hex prism, not a round envelope: a fresh
     ConstructionPlanes.add(setByPlane(...)) fails live with "Environment is
@@ -247,8 +258,7 @@ def _build_hex_stock(root, origin_point, axis_unit, flat_normal, across_flats_cm
     not an arbitrary rotation about the axis.
     """
     circumradius_cm = circumscribed_radius_cm(across_flats_cm)
-    grip_cm = _CHUCK_GRIP_ALLOWANCE_IN * _CM_PER_IN
-    length_cm = (model_max - model_min) + grip_cm
+    length_cm = end_cm - start_cm
 
     sketch = root.sketches.add(root.xZConstructionPlane)
     points = []
@@ -271,7 +281,7 @@ def _build_hex_stock(root, origin_point, axis_unit, flat_normal, across_flats_cm
     # The extrude's own local frame has its exposed (undistanced) end at
     # (0, 0, 0) and extends toward -Z by length_cm - confirmed live - so
     # local origin/+Z aligns to the shaft's measured tip/axis_unit directly.
-    tip_point = tuple(origin_point[i] + axis_unit[i] * model_max for i in range(3))
+    tip_point = tuple(origin_point[i] + axis_unit[i] * end_cm for i in range(3))
     target_x = _normalize(_sub_v(flat_normal, tuple(_dot(flat_normal, axis_unit) * c for c in axis_unit)))
     target_y = _cross(axis_unit, target_x)
 
@@ -293,11 +303,166 @@ def _build_hex_stock(root, origin_point, axis_unit, flat_normal, across_flats_cm
     return stock_body
 
 
-def handleHexShaft(tailstock_length_in=None):
-    """Create one turning setup that faces, necks, and grooves one end.
+def _set_minimum_retraction(op):
+    """Confirmed live: turning_face defaults to 'full' retraction - every
+    linking move between its own surfacing passes clears the *entire* stock
+    length, not just the tool's own local working area. For a long bar this
+    means every retract rapids the full length of the part and back - real,
+    measured, wasted machine time, not a cosmetic simulation quirk.
+    'Minimum retraction' only clears what the tool needs to clear locally.
 
-    Returns a dict with the created setup, the measured geometry (inches),
-    and the tailstock/live-center support length used.
+    Each strategy names this parameter differently (confirmed live:
+    turning_face uses "retractionPolicy", turning_profile_roughing uses
+    "profileRoughingRetractionPolicy" and already defaults to 'minimum'),
+    and single-pass strategies (finishing, groove, part) don't expose the
+    choice at all - there's only ever the one retract to place. Every known
+    name is tried; a missing parameter is a no-op, not an error.
+    """
+    for name in ("retractionPolicy", "profileRoughingRetractionPolicy"):
+        param = op.parameters.itemByName(name)
+        if param is not None:
+            param.value.value = "minimum"
+
+
+def _input_with_tool(setup, strategy, tool):
+    op_input = setup.operations.createInput(strategy)
+    op_input.tool = tool
+    return op_input
+
+
+def _tool_by_type(lib, wanted_type):
+    for i in range(lib.count):
+        tool = lib.item(i)
+        type_param = tool.parameters.itemByName("tool_type")
+        if type_param is not None and type_param.value.value == wanted_type:
+            return tool
+    return None
+
+
+def _build_hex_end_setup(
+    cam, root, body, long_edge, origin_point, axis_unit, across_flats_cm,
+    stock_body, generic_tool, groove_tool, setup_name, sever_length_cm=None,
+):
+    """One Face -> Profile Roughing -> Profile Finishing -> Single Groove
+    setup for whichever end axis_unit points toward (its own axial maximum),
+    optionally followed by a Part (cutoff) operation.
+
+    sever_length_cm, when given, positions a turning_part operation at that
+    distance from this setup's own tip - the real cutoff cut that separates
+    a finished-length blank from the remaining chuck-grip stock, run only on
+    the first end machined from raw bar (the second setup re-chucks the
+    already-correct-length blank and has nothing left to part off).
+    """
+    axial_min, axial_max = _axial_bounds_cm(body, origin_point, axis_unit)
+
+    groove_instances = _groove_instances(body, origin_point, axis_unit, across_flats_cm)
+    if not groove_instances:
+        raise ValueError("Hex shaft CAM found no snap-ring groove on this end")
+    # Machine whichever end's groove sits closer to the axial maximum -
+    # arbitrary but consistent given axis_unit already points at this end.
+    target = max(groove_instances, key=lambda g: g["axialHigh"])
+    tip_axial = axial_max
+    groove_distance_from_tip_cm = tip_axial - target["axialHigh"]
+    groove_width_cm = target["axialHigh"] - target["axialLow"]
+    neck_length_cm = tip_axial - target["axialLow"]
+
+    tip_point = tuple(origin_point[i] + axis_unit[i] * axial_max for i in range(3))
+
+    setup_input = cam.setups.createInput(adsk.cam.OperationTypes.TurningOperation)
+    setup_input.name = setup_name
+    setup = cam.setups.add(setup_input)
+    parameters = setup.parameters
+    parameters.itemByName("job_model").value.value = [body]
+    parameters.itemByName("job_stockMode").value.value = "solid"
+    parameters.itemByName("job_stockSolid").value.value = [stock_body]
+
+    parameters.itemByName("wcs_orientation_mode").value.value = "axesZX"
+    parameters.itemByName("wcs_orientation_axisZ").value.value = [long_edge]
+    flip_z = parameters.itemByName("wcs_orientation_flipZ").value
+    _, _got_x, _got_y, got_z = _wcs_frame(setup)
+    # WCS +Z must point from the exposed tip into the chuck (matches every
+    # other turning setup this codebase builds - see HandleSpacer.py's
+    # chuckFront_mode='model back'). The tip is this frame's own axial
+    # maximum, so +Z must point toward decreasing axial position here.
+    if _dot(got_z, axis_unit) > 0:
+        flip_z.value = not flip_z.value
+
+    # Explicit ConstructionPoints.add fails live with the same "Environment
+    # is not supported" error setByPlane hit above, independent of workspace
+    # or design type. "Stock front"/"stock back" are turning's own native
+    # stock-relative origin concepts - the same family HandleSpacer.py's
+    # reference setup uses (wcs_origin_turning: 'stock front') - this
+    # setup's own stock body was deliberately built with one face at exactly
+    # this end's measured tip, but which literal label ("front" vs "back")
+    # actually lands there depends on this body's own axis/flip resolution,
+    # not something to hardcode: confirmed live, Spacer's own body resolves
+    # "front" to its tip while this hex shaft resolves "back" to its tip
+    # instead, for the identical intent. Try both and keep whichever matches.
+    parameters.itemByName("wcs_origin_turning").value.value = "stock front"
+    origin, _, _, _ = _wcs_frame(setup)
+    offset = _sub_v(origin, tip_point)
+    if _dot(offset, offset) > 1e-4:
+        parameters.itemByName("wcs_origin_turning").value.value = "stock back"
+        origin, _, _, _ = _wcs_frame(setup)
+        offset = _sub_v(origin, tip_point)
+    if _dot(offset, offset) > 1e-4:
+        raise RuntimeError(
+            "Hex shaft CAM's WCS origin (stock front/back) did not resolve to this end's "
+            "own measured tip - got {}, expected {}".format(origin, tip_point)
+        )
+
+    face_op = setup.operations.add(_input_with_tool(setup, "turning_face", generic_tool))
+
+    rough_op = setup.operations.add(_input_with_tool(setup, "turning_profile_roughing", generic_tool))
+    finish_op = setup.operations.add(_input_with_tool(setup, "turning_profile_finishing", generic_tool))
+    for op in (rough_op, finish_op):
+        op.parameters.itemByName("frontHeight_mode").value.value = "from wcs"
+        op.parameters.itemByName("frontHeight_offset").expression = "0 in"
+        op.parameters.itemByName("backHeight_mode").value.value = "from wcs"
+        op.parameters.itemByName("backHeight_offset").expression = "{:.6f} in".format(neck_length_cm / _CM_PER_IN)
+
+    groove_op = setup.operations.add(_input_with_tool(setup, "turning_single_groove", groove_tool))
+    groove_op.parameters.itemByName("grooves").value.value = [target["faces"][0].edges.item(0)]
+
+    operations = [face_op, rough_op, finish_op, groove_op]
+
+    if sever_length_cm is not None:
+        # Confirmed live: turning_part rejects a plain "turning general"
+        # tool the same way turning_single_groove does ("Tool ... is not
+        # supported for the strategy.") - a parting tool is a grooving-type
+        # insert in Fusion's own tool taxonomy, so the same groove_tool
+        # covers both strategies rather than needing a third tool type.
+        part_op = setup.operations.add(_input_with_tool(setup, "turning_part", groove_tool))
+        part_op.parameters.itemByName("backHeight_mode").value.value = "from wcs"
+        part_op.parameters.itemByName("backHeight_offset").expression = "{:.6f} in".format(
+            sever_length_cm / _CM_PER_IN
+        )
+        operations.append(part_op)
+
+    for op in operations:
+        _set_minimum_retraction(op)
+
+    return {
+        "setup": setup,
+        "grooveDistanceFromEnd": groove_distance_from_tip_cm / _CM_PER_IN,
+        "grooveWidth": groove_width_cm / _CM_PER_IN,
+        "grooveDiameter": target["radius"] * 2 / _CM_PER_IN,
+        "operations": [op.name for op in operations],
+    }
+
+
+def handleHexShaft(tailstock_length_in=None):
+    """Create the turning setup(s) that face, neck, and groove a hex shaft.
+
+    A model grooved at only one end gets a single setup. A model grooved at
+    both ends (the real, reviewed case) gets two: the first setup machines
+    whichever end is closer to the model's own axial maximum and parts the
+    finished-length blank off the remaining chuck-grip stock; the second
+    re-chucks that already-correct-length blank (no extra grip allowance
+    left to give it) and machines the other end.
+
+    Returns a dict with the created setup(s), the measured geometry
+    (inches), and the tailstock/live-center support length used.
     """
     app = adsk.core.Application.get()
     doc = app.activeDocument
@@ -321,68 +486,17 @@ def handleHexShaft(tailstock_length_in=None):
     axial_min, axial_max = _axial_bounds_cm(body, origin_point, axis_unit)
     model_length_cm = axial_max - axial_min
 
-    groove_instances = _groove_instances(body, origin_point, axis_unit, across_flats_cm)
-    if not groove_instances:
+    groove_count = len(_groove_instances(body, origin_point, axis_unit, across_flats_cm))
+    if groove_count == 0:
         raise ValueError("Hex shaft CAM found no snap-ring groove on this model")
-    # Machine whichever end's groove sits closer to the axial maximum -
-    # arbitrary but consistent; the operator chucks the other end and flips
-    # for the second groove, same as HandleTube.py's one-side-at-a-time setups.
-    target = max(groove_instances, key=lambda g: g["axialHigh"])
-    tip_axial = axial_max
-    groove_distance_from_tip_cm = tip_axial - target["axialHigh"]
-    groove_width_cm = target["axialHigh"] - target["axialLow"]
-    neck_length_cm = tip_axial - target["axialLow"]
+    if groove_count > 2:
+        raise ValueError(
+            "Hex shaft CAM expects at most one groove per end (2 total); found {}".format(groove_count)
+        )
+    two_ended = groove_count == 2
 
     flat_normal = _vec(_hex_flats(body, axis_unit)[0].geometry.normal)
-    stock_body = _build_hex_stock(root, origin_point, axis_unit, flat_normal, across_flats_cm, axial_min, axial_max)
-
-    tip_point = tuple(origin_point[i] + axis_unit[i] * axial_max for i in range(3))
-
     cam = _active_cam_product(app, doc)
-    setup_input = cam.setups.createInput(adsk.cam.OperationTypes.TurningOperation)
-    setup_input.name = "Hex Shaft"
-    setup = cam.setups.add(setup_input)
-    parameters = setup.parameters
-    parameters.itemByName("job_model").value.value = [body]
-    parameters.itemByName("job_stockMode").value.value = "solid"
-    parameters.itemByName("job_stockSolid").value.value = [stock_body]
-
-    parameters.itemByName("wcs_orientation_mode").value.value = "axesZX"
-    parameters.itemByName("wcs_orientation_axisZ").value.value = [long_edge]
-    flip_z = parameters.itemByName("wcs_orientation_flipZ").value
-    _, _got_x, _got_y, got_z = _wcs_frame(setup)
-    # WCS +Z must point from the exposed tip into the chuck (matches every
-    # other turning setup this codebase builds - see HandleSpacer.py's
-    # chuckFront_mode='model back'). The tip is the axial maximum, so +Z must
-    # point toward decreasing axial position, i.e. opposite axis_unit.
-    if _dot(got_z, axis_unit) > 0:
-        flip_z.value = not flip_z.value
-
-    # Explicit ConstructionPoints.add fails live with the same "Environment
-    # is not supported" error setByPlane hit above, independent of workspace
-    # or design type. "Stock front"/"stock back" are turning's own native
-    # stock-relative origin concepts - the same family HandleSpacer.py's
-    # reference setup uses (wcs_origin_turning: 'stock front') -
-    # _build_hex_stock's own stock body was deliberately built with one face
-    # at exactly this shaft's measured tip (axial_max), but which literal
-    # label ("front" vs "back") actually lands there depends on this body's
-    # own axis/flip resolution, not something to hardcode: confirmed live,
-    # Spacer's own body resolves "front" to its tip while this hex shaft
-    # resolves "back" to its tip instead, for the identical intent. Try both
-    # and keep whichever one actually measures at the tip.
-    parameters.itemByName("wcs_origin_turning").value.value = "stock front"
-    origin, _, _, _ = _wcs_frame(setup)
-    offset = _sub_v(origin, tip_point)
-    if _dot(offset, offset) > 1e-4:
-        parameters.itemByName("wcs_origin_turning").value.value = "stock back"
-        origin, _, _, _ = _wcs_frame(setup)
-        offset = _sub_v(origin, tip_point)
-    if _dot(offset, offset) > 1e-4:
-        raise RuntimeError(
-            "Hex shaft CAM's WCS origin (stock front/back) did not resolve to the shaft's "
-            "own measured tip - got {}, expected {}".format(origin, tip_point)
-        )
-
     lib = cam.documentToolLibrary
     if lib.count == 0:
         raise RuntimeError("No tool available in this document's tool library for a generic assignment")
@@ -394,21 +508,36 @@ def handleHexShaft(tailstock_length_in=None):
     generic_tool = _tool_by_type(lib, "turning general") or lib.item(0)
     groove_tool = _tool_by_type(lib, "turning grooving") or generic_tool
 
-    face_op = setup.operations.add(_input_with_tool(setup, "turning_face", generic_tool))
+    grip_cm = _CHUCK_GRIP_ALLOWANCE_IN * _CM_PER_IN
+    first_stock = _build_hex_stock(
+        root, origin_point, axis_unit, flat_normal, across_flats_cm,
+        axial_min - grip_cm, axial_max,
+    )
+    first_result = _build_hex_end_setup(
+        cam, root, body, long_edge, origin_point, axis_unit, across_flats_cm,
+        first_stock, generic_tool, groove_tool,
+        setup_name="Hex Shaft" if not two_ended else "Hex Shaft - End 1",
+        sever_length_cm=model_length_cm if two_ended else None,
+    )
 
-    rough_input = _input_with_tool(setup, "turning_profile_roughing", generic_tool)
-    rough_op = setup.operations.add(rough_input)
-    finish_input = _input_with_tool(setup, "turning_profile_finishing", generic_tool)
-    finish_op = setup.operations.add(finish_input)
-    for op in (rough_op, finish_op):
-        op.parameters.itemByName("frontHeight_mode").value.value = "from wcs"
-        op.parameters.itemByName("frontHeight_offset").expression = "0 in"
-        op.parameters.itemByName("backHeight_mode").value.value = "from wcs"
-        op.parameters.itemByName("backHeight_offset").expression = "{:.6f} in".format(neck_length_cm / _CM_PER_IN)
-
-    groove_input = _input_with_tool(setup, "turning_single_groove", groove_tool)
-    groove_op = setup.operations.add(groove_input)
-    groove_op.parameters.itemByName("grooves").value.value = [target["faces"][0].edges.item(0)]
+    results = [first_result]
+    if two_ended:
+        axis_unit_rev = tuple(-c for c in axis_unit)
+        axial_min_rev, axial_max_rev = _axial_bounds_cm(body, origin_point, axis_unit_rev)
+        # No extra grip allowance here - the first setup's own Part
+        # operation already cut this blank to exactly its measured length,
+        # so there is nothing left beyond the model itself to grip.
+        second_stock = _build_hex_stock(
+            root, origin_point, axis_unit_rev, flat_normal, across_flats_cm,
+            axial_min_rev, axial_max_rev,
+        )
+        second_result = _build_hex_end_setup(
+            cam, root, body, long_edge, origin_point, axis_unit_rev, across_flats_cm,
+            second_stock, generic_tool, groove_tool,
+            setup_name="Hex Shaft - End 2",
+            sever_length_cm=None,
+        )
+        results.append(second_result)
 
     tailstock_length_cm = (
         tailstock_length_in * _CM_PER_IN if tailstock_length_in is not None
@@ -416,28 +545,18 @@ def handleHexShaft(tailstock_length_in=None):
     )
 
     return {
-        "setup": setup,
+        "setups": [r["setup"] for r in results],
         "acrossFlats": across_flats_cm / _CM_PER_IN,
         "shaftLength": model_length_cm / _CM_PER_IN,
-        "grooveDistanceFromEnd": groove_distance_from_tip_cm / _CM_PER_IN,
-        "grooveWidth": groove_width_cm / _CM_PER_IN,
-        "grooveDiameter": target["radius"] * 2 / _CM_PER_IN,
         "neckDiameter": neck_radius_cm(across_flats_cm) * 2 / _CM_PER_IN,
         "tailstockLength": tailstock_length_cm / _CM_PER_IN,
-        "operations": [face_op.name, rough_op.name, finish_op.name, groove_op.name],
+        "ends": [
+            {
+                "grooveDistanceFromEnd": r["grooveDistanceFromEnd"],
+                "grooveWidth": r["grooveWidth"],
+                "grooveDiameter": r["grooveDiameter"],
+                "operations": r["operations"],
+            }
+            for r in results
+        ],
     }
-
-
-def _input_with_tool(setup, strategy, tool):
-    op_input = setup.operations.createInput(strategy)
-    op_input.tool = tool
-    return op_input
-
-
-def _tool_by_type(lib, wanted_type):
-    for i in range(lib.count):
-        tool = lib.item(i)
-        type_param = tool.parameters.itemByName("tool_type")
-        if type_param is not None and type_param.value.value == wanted_type:
-            return tool
-    return None

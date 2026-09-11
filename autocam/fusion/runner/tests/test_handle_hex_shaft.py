@@ -31,10 +31,37 @@ class HandleHexShaftSourceTests(unittest.TestCase):
 
     def test_stock_is_a_synthetic_solid_not_the_documents_own_stock_body(self):
         # Confirmed live: the reference document's own "Stock" body doesn't
-        # spatially overlap "Model" - a fresh stock body is built here
+        # spatially overlap "Model" - fresh stock bodies are built here
         # instead, around whichever body is actually imported for a real job.
-        self.assertIn("stock_body = _build_hex_stock(", self.source)
+        self.assertIn("first_stock = _build_hex_stock(", self.source)
         self.assertIn('parameters.itemByName("job_stockMode").value.value = "solid"', self.source)
+
+    def test_a_groove_at_each_end_makes_two_setups_not_one(self):
+        # Confirmed live against a real hex shaft: a model grooved at both
+        # ends needs two setups, since a lathe can only face/neck/groove the
+        # end it's currently exposing - the operator re-chucks for the other.
+        self.assertIn("groove_count = len(_groove_instances(body, origin_point, axis_unit, across_flats_cm))", self.source)
+        self.assertIn("two_ended = groove_count == 2", self.source)
+        self.assertIn("axis_unit_rev = tuple(-c for c in axis_unit)", self.source)
+
+    def test_first_setup_parts_off_the_finished_blank_at_its_own_measured_length(self):
+        # Confirmed live: "the big chunk" of chuck-grip stock left over after
+        # facing/necking/grooving the first end has to be severed by a real
+        # cutoff cut, not just left attached - turning_part positioned at the
+        # model's own measured length from that end's own tip does this.
+        self.assertIn('sever_length_cm=model_length_cm if two_ended else None', self.source)
+        self.assertIn('setup.operations.add(_input_with_tool(setup, "turning_part", groove_tool))', self.source)
+        self.assertIn('part_op.parameters.itemByName("backHeight_offset").expression', self.source)
+
+    def test_second_setup_stock_has_no_extra_grip_allowance(self):
+        # After the first setup's own Part operation severs the blank at
+        # exactly its measured length, there is nothing left beyond the
+        # model itself to grip - unlike the first setup's stock, which
+        # extends past the model by _CHUCK_GRIP_ALLOWANCE_IN for the chuck.
+        second_stock_call = self.source.index("second_stock = _build_hex_stock(")
+        second_stock_args = self.source[second_stock_call:self.source.index(")", second_stock_call) + 1]
+        self.assertNotIn("grip_cm", second_stock_args)
+        self.assertIn("axial_min_rev, axial_max_rev", second_stock_args)
 
     def test_stock_is_a_real_hex_prism_not_a_round_envelope(self):
         # Confirmed live: a fresh ConstructionPlanes.add(setByPlane(...))
@@ -87,6 +114,17 @@ class HandleHexShaftSourceTests(unittest.TestCase):
     def test_tailstock_length_defaults_from_measured_geometry_but_is_overridable(self):
         self.assertIn("tailstock_length_in * _CM_PER_IN if tailstock_length_in is not None", self.source)
         self.assertIn("else model_length_cm", self.source)
+
+    def test_retraction_is_forced_to_minimum_not_left_at_fusions_default(self):
+        # Confirmed live: turning_face defaults to 'full' retraction, which
+        # clears the *entire* stock length on every linking move between its
+        # own surfacing passes - measured, real wasted machine time on a long
+        # bar, not a simulation-only cosmetic issue. Each strategy names the
+        # parameter differently (turning_profile_roughing already defaults to
+        # 'minimum' under its own name), so both known names are tried.
+        self.assertIn('for name in ("retractionPolicy", "profileRoughingRetractionPolicy"):', self.source)
+        self.assertIn('param.value.value = "minimum"', self.source)
+        self.assertIn("_set_minimum_retraction(op)", self.source)
 
 
 if __name__ == "__main__":
