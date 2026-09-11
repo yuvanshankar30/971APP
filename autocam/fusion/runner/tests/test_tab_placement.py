@@ -509,6 +509,40 @@ class MinTabsForBodyTests(unittest.TestCase):
         self.assertEqual(TabPlacement._distinct_straight_line_count(body), 3)
         self.assertEqual(TabPlacement._min_tabs_for_body(body, 4), 4)
 
+    def test_a_genuine_quadrilateral_is_floored_to_four(self):
+        # Direct instruction: "only make it generate 4 tabs for these
+        # types of parts with 4 sides" - a real bracket with 4 genuine
+        # straight sides picked up a 5th tab (a 2nd on its one long side)
+        # purely because the perimeter-based target rounded past 4, even
+        # though every side already had its fair first tab and nothing
+        # was excluded. Same floor/ceiling shape as the triangle case
+        # above, one side count over.
+        edges = [
+            _edge(0, 0, 20, 0),
+            _edge(20, 0, 20, 5),
+            _edge(20, 5, 0, 5),
+            _edge(0, 5, 0, 0),
+        ]
+        body = _body([_face(1.0, 1.0, [_loop(True, edges)])], (0, 0), (20, 5))
+
+        self.assertEqual(TabPlacement._min_tabs_for_body(body, 4), 4)
+
+    def test_a_notched_part_reducing_to_four_long_sides_keeps_the_requested_floor(self):
+        # Same gap _is_a_bare_triangle's own docstring documents, one side
+        # count over: four genuinely long structural sides plus a fifth
+        # side broken into many short jogs must not be mistaken for a
+        # bare quadrilateral and silently overridden down to 4.
+        long_bottom = _edge(0, 0, 10, 0)
+        long_right = _edge(10, 0, 10, 10)
+        long_top = _edge(10, 10, 5, 10)
+        long_diagonal = _edge(5, 10, 0, 5)
+        short_left_segments = [_edge(0, 5 - i * 0.4, 0, 5 - (i + 1) * 0.4) for i in range(10)]
+        edges = [long_bottom, long_right, long_top, long_diagonal, *short_left_segments]
+        body = _body([_face(1.0, 1.0, [_loop(True, edges)])], (0, 0), (10, 10))
+
+        self.assertEqual(TabPlacement._distinct_straight_line_count(body), 4)
+        self.assertEqual(TabPlacement._min_tabs_for_body(body, 6), 6)
+
 
 class MaxTabsForBodyTests(unittest.TestCase):
     """_max_tabs_for_body is the other half of the same floor above: a
@@ -549,6 +583,124 @@ class MaxTabsForBodyTests(unittest.TestCase):
         body = _body([_face(1.0, 1.0, [_loop(True, edges)])], (0, 0), (10, 10))
 
         self.assertEqual(TabPlacement._max_tabs_for_body(body, 8), 8)
+
+    def test_a_genuine_quadrilateral_is_capped_to_four(self):
+        # Direct instruction, closing a real regression: "only make it
+        # generate 4 tabs for these types of parts with 4 sides." A
+        # bracket with exactly 4 real straight sides must never exceed 4
+        # tabs even with a generous max_tabs budget that would otherwise
+        # have room to give one long side a 2nd tab (see
+        # PER_SIDE_EXTRA_TAB_SPACING_IN - this cap overrides that
+        # mechanism for exactly-4-sided parts, the same way the triangle
+        # cap above already overrides it for exactly-3-sided ones).
+        edges = [
+            _edge(0, 0, 20, 0),
+            _edge(20, 0, 20, 5),
+            _edge(20, 5, 0, 5),
+            _edge(0, 5, 0, 0),
+        ]
+        body = _body([_face(1.0, 1.0, [_loop(True, edges)])], (0, 0), (20, 5))
+
+        self.assertEqual(TabPlacement._max_tabs_for_body(body, 20), 4)
+
+    def test_an_explicit_operator_override_above_four_is_still_capped_on_a_quadrilateral(self):
+        edges = [
+            _edge(0, 0, 20, 0),
+            _edge(20, 0, 20, 5),
+            _edge(20, 5, 0, 5),
+            _edge(0, 5, 0, 0),
+        ]
+        body = _body([_face(1.0, 1.0, [_loop(True, edges)])], (0, 0), (20, 5))
+
+        self.assertEqual(TabPlacement._max_tabs_for_body(body, 8), 4)
+
+    def test_a_notched_part_reducing_to_four_long_sides_keeps_the_requested_ceiling(self):
+        long_bottom = _edge(0, 0, 10, 0)
+        long_right = _edge(10, 0, 10, 10)
+        long_top = _edge(10, 10, 5, 10)
+        long_diagonal = _edge(5, 10, 0, 5)
+        short_left_segments = [_edge(0, 5 - i * 0.4, 0, 5 - (i + 1) * 0.4) for i in range(10)]
+        edges = [long_bottom, long_right, long_top, long_diagonal, *short_left_segments]
+        body = _body([_face(1.0, 1.0, [_loop(True, edges)])], (0, 0), (10, 10))
+
+        self.assertEqual(TabPlacement._max_tabs_for_body(body, 8), 8)
+
+    def test_a_large_quadrilateral_does_not_scale_past_four_tabs(self):
+        # Same real regression as above, exercised through the actual
+        # perimeter-based scaling path rather than calling
+        # _max_tabs_for_body directly: a large quadrilateral's own
+        # perimeter target must not be allowed to scale past 4.
+        edges = [
+            _edge(0, 0, 100, 0),
+            _edge(100, 0, 100, 20),
+            _edge(100, 20, 0, 20),
+            _edge(0, 20, 0, 0),
+        ]
+        body = _body([_face(1.0, 1.0, [_loop(True, edges)])], (0, 0), (100, 20))
+
+        min_tabs = TabPlacement._min_tabs_for_body(body, 4)
+        max_tabs = TabPlacement._max_tabs_for_body(body, 20)
+        perimeter_in = TabPlacement._outer_perimeter_in(body)
+        self.assertGreater(perimeter_in, TabPlacement.TARGET_TAB_SPACING_IN * 6)
+        self.assertEqual(
+            TabPlacement._tab_count_for_perimeter(perimeter_in, min_tabs, max_tabs), 4
+        )
+
+    def test_a_large_quadrilateral_end_to_end_never_doubles_up_a_side(self):
+        # Full pipeline, not just the isolated helpers: the real reported
+        # bug was select_tab_edges itself returning 5 positions (a 2nd on
+        # the one long side) for a 4-sided part, because max_tabs handed
+        # to it was 5 (the perimeter target) instead of 4. Feeding
+        # _max_tabs_for_body's own corrected ceiling through the real
+        # select_tab_edges call must produce exactly 4 positions, one per
+        # side, never two on the same edge.
+        long_side = _edge(0, 0, 41.445, 0)  # 16.317in, matching the live report
+        edges = [
+            long_side,
+            _edge(41.445, 0, 41.445, 5),
+            _edge(41.445, 5, 0, 5),
+            _edge(0, 5, 0, 0),
+        ]
+        body = _body([_face(1.0, 1.0, [_loop(True, edges)])], (0, 0), (41.445, 5))
+
+        max_tabs = TabPlacement._max_tabs_for_body(body, TabPlacement.DEFAULT_MAX_TABS)
+        selected = TabPlacement.select_tab_edges(body, max_tabs=max_tabs, stock_bounds=None)
+
+        self.assertEqual(len(selected), 4)
+        long_side_tabs = sum(1 for edge, _fraction in selected if edge is long_side)
+        self.assertEqual(
+            long_side_tabs, 1,
+            "a 4-sided part's one long side must not double up just because it's long",
+        )
+
+    def test_a_quadrilateral_with_one_excluded_side_still_redistributes_to_four(self):
+        # "Keep the length logic though" - the new exactly-4 ceiling caps
+        # the TOTAL budget, but must not disable the existing
+        # redistribution mechanism that gives an excluded (unbacked) side's
+        # lost tab to a real one instead. A 4-sided part with one side
+        # excluded for lack of stock backing should still reach 4 total
+        # tabs (one of the remaining 3 real sides doubling up), not settle
+        # for 3 just because the body itself is "a bare quadrilateral."
+        unbacked_side = _edge(20, 0, 20, 5)
+        edges = [
+            _edge(0, 0, 20, 0),
+            unbacked_side,
+            _edge(20, 5, 0, 5),
+            _edge(0, 5, 0, 0),
+        ]
+        body = _body([_face(1.0, 1.0, [_loop(True, edges)])], (0, 0), (20, 5))
+        # Stock stops at x=19 - the whole right side (x=20) has nothing
+        # real behind it.
+        stock_bounds = (-1, 19, -1, 6)
+
+        max_tabs = TabPlacement._max_tabs_for_body(body, TabPlacement.DEFAULT_MAX_TABS)
+        self.assertEqual(max_tabs, 4, "the ceiling itself must stay at 4 for this 4-sided body")
+
+        selected = TabPlacement.select_tab_edges(body, max_tabs=max_tabs, stock_bounds=stock_bounds)
+
+        self.assertEqual(len(selected), 4)
+        selected_edges = [edge for edge, _fraction in selected]
+        self.assertNotIn(unbacked_side, selected_edges, "an unbacked side must not receive a tab")
 
     def test_a_large_triangle_does_not_scale_past_two_tabs(self):
         # Real, confirmed bug this closes: _min_tabs_for_body alone only

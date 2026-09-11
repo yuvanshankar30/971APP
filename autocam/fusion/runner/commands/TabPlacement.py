@@ -886,6 +886,21 @@ def _is_a_bare_triangle(body) -> bool:
     return len(all_straight) == 3 and _distinct_straight_line_count(body) == 3
 
 
+def _is_a_bare_quadrilateral(body) -> bool:
+    """Whether body's outer boundary is genuinely just a 4-sided shape -
+    same reasoning and same gap as _is_a_bare_triangle above, just one
+    side count over. Requires every straight edge on the boundary to have
+    survived _all_straight_edges' own length filter (nothing dropped for
+    being too short) - otherwise this is a more complex outline that
+    merely reduced to 4 tab-eligible groups, not a genuinely 4-sided part.
+    """
+    tab_face = _find_tab_face(body)
+    if tab_face is None:
+        return False
+    all_straight = [e for e in _outer_boundary_edges(tab_face) if _is_straight_edge(e)]
+    return len(all_straight) == 4 and _distinct_straight_line_count(body) == 4
+
+
 def _min_tabs_for_body(body, min_tabs: int) -> int:
     """A triangular part only has 3 real sides to begin with, and its
     3rd (shortest) side is very often the one this module's own stock-
@@ -893,12 +908,29 @@ def _min_tabs_for_body(body, min_tabs: int) -> int:
     more tabs normally, but exactly 2 for a triangular shape, placed on
     its two longer sides - a 3rd tab on the shortest side doubled up on
     one of the other two with real holding power, it just doubled up on
-    one side. Anything with 4+ distinct sides still uses the normal
-    min_tabs floor (parametric - ConfigureTabs's own min_tabs/max_tabs
-    arguments, not hardcoded here).
+    one side.
+
+    A genuinely 4-sided part gets exactly 4, one per side - direct
+    instruction, after a real quadrilateral bracket picked up a 5th tab
+    (a 2nd on its one long side) purely because the perimeter-based
+    target rounded past its own real side count, even though every side
+    already had its fair first tab and nothing was excluded: "only make
+    it generate 4 tabs for these types of parts with 4 sides." One tab
+    per side is already full breadth coverage for a simple quadrilateral;
+    a 5th adds cycle time (an extra plunge/retract and lead-in/lead-out)
+    without adding real holding power the other 4 don't already provide.
+
+    Anything with 5+ distinct sides still uses the normal min_tabs floor
+    (parametric - ConfigureTabs's own min_tabs/max_tabs arguments, not
+    hardcoded here) - this cap is deliberately scoped to exactly-3 and
+    exactly-4-sided parts, not a general "never more than one tab per
+    side" rule; see PER_SIDE_EXTRA_TAB_SPACING_IN's own docstring for why
+    a genuinely long side on a more complex part still earns a 2nd tab.
     """
     if _is_a_bare_triangle(body):
         return 2
+    if _is_a_bare_quadrilateral(body):
+        return 4
     return min_tabs
 
 
@@ -914,9 +946,16 @@ def _max_tabs_for_body(body, max_tabs: int) -> int:
     operator tab-count request (camPlate.py's tab_count_override sets
     min_tabs == max_tabs to that value; a triangle still gets exactly 2
     regardless of what was asked for, since more genuinely is not needed).
+
+    Same override for a genuinely 4-sided part - exactly 4, full stop,
+    even when the perimeter-based target or an explicit override would
+    otherwise ask for more (see _min_tabs_for_body's own docstring for
+    the real regression this closes).
     """
     if _is_a_bare_triangle(body):
         return 2
+    if _is_a_bare_quadrilateral(body):
+        return 4
     return max_tabs
 
 
