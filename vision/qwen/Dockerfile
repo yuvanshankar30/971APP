@@ -1,12 +1,12 @@
 # syntax=docker/dockerfile:1
 # Override this tag with a DGX Spark-supported ARM64 NGC PyTorch release when
 # the host image is upgraded. CUDA/PyTorch come from NGC, never pip-installed.
-ARG NVIDIA_PYTORCH_IMAGE=nvcr.io/nvidia/pytorch:26.07-py3
+ARG NVIDIA_PYTORCH_IMAGE=nvcr.io/nvidia/pytorch:25.08-py3
 FROM ${NVIDIA_PYTORCH_IMAGE}
 
 WORKDIR /app
 COPY requirements.txt .
-RUN python -m pip install --no-cache-dir -r requirements.txt
+RUN PIP_CONSTRAINT=/dev/null python -m pip install --no-cache-dir -r requirements.txt
 COPY qwen_contract.py qwen_service.py ./
 
 ENV HF_HOME=/models/huggingface \

@@ -40,6 +40,7 @@ VISION_MODEL_PATH=/models/frc-vision-v1.pt
 VISION_QWEN_URL=http://qwen:8000
 VISION_QWEN_TOKEN=separate-shared-secret
 VISION_QWEN_MODEL=Qwen/Qwen3.8-27B
+VISION_QWEN_DEVICE_MAP=cuda
 ```
 
 Manual install and run (quickest way to test on a machine you already have
@@ -154,7 +155,8 @@ depending on what hardware ends up hosting this:
 
 - **`Dockerfile`** + **`docker-compose.yml`** - the recommended DGX Spark
   deployment. It starts both the BF16 Qwen service and dense runner, persists
-  the model cache, and waits for Qwen health before claiming work. `cp
+  the model cache, pins a Spark-driver-compatible NGC runtime, places Qwen on
+  CUDA explicitly, and waits for Qwen health before claiming work. `cp
   .env.example .env`, fill it in, `mkdir models`, add the tracker `.pt`, then
   run `docker compose up -d --build`.
 - **`vision-runner.service`** + **`../qwen/qwen.service`** - a systemd

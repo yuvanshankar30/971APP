@@ -15,7 +15,7 @@ import torch
 from fastapi import Depends, FastAPI, Header, HTTPException
 from PIL import Image
 from pydantic import BaseModel, Field
-from transformers import AutoModelForMultimodalLM, AutoProcessor
+from transformers import AutoProcessor, Qwen3_5ForConditionalGeneration
 
 from qwen_contract import SYSTEM_PROMPT, TASK_PROMPT, normalize_result, parse_json_response
 
@@ -23,6 +23,7 @@ MODEL_NAME = os.environ.get("VISION_QWEN_MODEL", "Qwen/Qwen3.8-27B")
 MODEL_REVISION = os.environ.get("VISION_QWEN_REVISION", "1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0")
 TOKEN = os.environ.get("VISION_QWEN_TOKEN", "")
 ATTENTION = os.environ.get("VISION_QWEN_ATTENTION", "sdpa")
+DEVICE_MAP = os.environ.get("VISION_QWEN_DEVICE_MAP", "cuda")
 MAX_IMAGES = int(os.environ.get("VISION_QWEN_MAX_IMAGES", "8"))
 MAX_IMAGE_PIXELS = int(os.environ.get("VISION_QWEN_MAX_IMAGE_PIXELS", str(1280 * 720)))
 MAX_JPEG_BYTES = int(os.environ.get("VISION_QWEN_MAX_JPEG_BYTES", str(2 * 1024 * 1024)))
@@ -93,14 +94,14 @@ async def lifespan(_app):
     if not torch.cuda.is_available():
         raise RuntimeError("Qwen service requires CUDA on the DGX Spark")
     options = {
-        "torch_dtype": torch.bfloat16,
-        "device_map": "auto",
+        "dtype": torch.bfloat16,
+        "device_map": DEVICE_MAP,
         "attn_implementation": ATTENTION,
         "low_cpu_mem_usage": True,
     }
     if MODEL_REVISION:
         options["revision"] = MODEL_REVISION
-    state["model"] = AutoModelForMultimodalLM.from_pretrained(MODEL_NAME, **options).eval()
+    state["model"] = Qwen3_5ForConditionalGeneration.from_pretrained(MODEL_NAME, **options).eval()
     state["processor"] = AutoProcessor.from_pretrained(MODEL_NAME, revision=MODEL_REVISION)
     state["loaded_at"] = time.time()
     yield
@@ -139,7 +140,7 @@ async def analyze(payload: AnalyzeRequest):
         try:
             inputs = state["processor"].apply_chat_template(
                 messages, tokenize=True, add_generation_prompt=True,
-                return_dict=True, return_tensors="pt",
+                return_dict=True, return_tensors="pt", enable_thinking=False,
             ).to(state["model"].device)
             with torch.inference_mode():
                 generated = state["model"].generate(

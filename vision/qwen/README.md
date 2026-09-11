@@ -1,4 +1,4 @@
-# Qwen3-VL service for DGX Spark
+# Qwen3.8 vision service for DGX Spark
 
 Long-lived, authenticated inference service for the full BF16
 `Qwen/Qwen3.8-27B` checkpoint. It is separate from
@@ -14,9 +14,12 @@ Every returned event is provisional. The runner stores it with
 data until a human accepts or corrects it.
 
 Recommended deployment is `../runner/docker-compose.yml` on DGX Spark. It
-uses an NVIDIA NGC PyTorch ARM64/CUDA base image, mounts a persistent model
-cache, uses BF16 without quantization, and keeps port 8000 private to the
-Compose network. `/analyze` requires the separate `VISION_QWEN_TOKEN`.
+uses an NVIDIA NGC PyTorch ARM64/CUDA base image compatible with Spark's R580
+driver, mounts a persistent model cache, uses BF16 without quantization, and
+keeps port 8000 private to the Compose network. The model is placed explicitly
+on CUDA because Accelerate's automatic placement treats Spark unified memory as
+unavailable and silently offloads inference to the CPU. `/analyze` requires the
+separate `VISION_QWEN_TOKEN`.
 
 ```bash
 cd vision/runner
@@ -28,5 +31,5 @@ docker compose logs -f qwen vision-runner
 
 The first start downloads the 60+ GB checkpoint into the persistent cache.
 The default `VISION_QWEN_REVISION` is pinned to Hugging Face commit
-`9c4b90e1e4ba969fd3b5378b57d966d725f1b86c`; change it only through a new
+`1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0`; change it only through a new
 acceptance run so an upstream update cannot silently alter match results.

@@ -673,8 +673,10 @@ AutoCAM's own code (engine, Drive watcher, `camJobs.js`, its components) is
   `implementations/vercel-and-supabase-to-google-plan.md` - not yet
   decommissioned as of this writing (see that plan doc's TODOs).
 - **Vision GPU worker**: `vision/runner/docker-compose.yml` deploys the
-  dense YOLO/ByteTrack runner and private full-BF16 Qwen3-VL service together
-  on NVIDIA DGX Spark. It is separate from the web deployment, uses a
+  dense YOLO/ByteTrack runner and private full-BF16 Qwen3.8 vision service together
+  on NVIDIA DGX Spark. The Qwen container pins a Spark-compatible NGC runtime
+  and explicit CUDA placement to avoid accidental CPU offload. It is separate
+  from the web deployment, uses a
   persistent Hugging Face model cache, and calls the app through authenticated
   runner APIs; see `vision/runner/README.md`.
 - **No GitHub Actions CI** - "the GitHub workflow" for this project is the
