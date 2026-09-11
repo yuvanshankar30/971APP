@@ -177,7 +177,10 @@ left for an operator to review so its CAM work cannot be duplicated.
 | `NewNCProgram.py` | G-code export |
 | `NcArtifacts.py` | Exact-byte NC artifact collection and checksums |
 | `Orientation.py` | Auto-orient parts (largest face up) |
-| `HandleTube.py` | Box-tube handling |
+| `HandleTube.py` | Box-tube setups: WCS, G55, hole/shape rebinding, tube cutoff (see [`docs/tubestock-cam.md`](docs/tubestock-cam.md)) |
+| `TubeWcsMath.py` | Pure tube WCS rule: X along the tube, right-hand origin corner |
+| `TubeHeightMath.py` | Pure tube depth math: near-wall depth, cutoff breakthrough |
+| `TubeFacePrograms.py` | Tube setup and program names (Sides 12/3/6/9) |
 | `MultiImport.py` | Multi-part import |
 | `DeleteToolpaths.py` | Clear existing toolpaths |
 | `ContourChains.py` | Preserve face-loop direction when rebuilding contour selections |
@@ -199,6 +202,7 @@ For the contour-chain direction rule and its live-Fusion validation steps, see
 
 - **[`autocam/fusion/README.md`](../README.md)** — the Fusion CAM architecture writeup
 - **[`docs/team-setup-guide.md`](docs/team-setup-guide.md)** — install and configuration instructions
+- **[`docs/tubestock-cam.md`](docs/tubestock-cam.md)** — box-tube CAM: WCS, G55, holes, tube cutoff, running a job, and how it is verified
 
 ## Security
 
