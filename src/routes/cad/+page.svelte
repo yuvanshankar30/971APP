@@ -1635,16 +1635,36 @@
   .subsystem-builds .build-status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
   .subsystem-builds .build-status-dot.status-pending { background: var(--brand-gold-strong); }
   .subsystem-builds .build-status-dot.status-manufacturing { background: var(--blue-base); }
-  .subsystem-builds .build-status-dot.status-ready_to_assemble { background: var(--green-strong); }
+  .subsystem-builds .build-status-dot.status-ready_to_assemble { background: var(--purple-strong); }
   .subsystem-builds .build-status-dot.status-assembled { background: var(--green-strong); }
 
   .builds-section { margin-top: var(--space-7); background: var(--primary); border-radius: var(--radius-lg); border: 1px solid var(--border); padding: var(--space-6); margin-bottom: var(--space-4); }
   .builds-section h2 { margin: 0 0 var(--space-6) 0; color: var(--secondary); font-size: var(--font-xl); }
   .builds-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: var(--gap-6); }
-  .build-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: var(--space-4); }
-  .build-header h3 { margin: 0; color: var(--secondary); font-size: var(--font-md); }
-  .build-status { display: inline-flex; align-items: center; height: var(--control-height); padding: 0 var(--space-3); border-radius: var(--radius-sm); font-size: var(--font-xs); font-weight: 600; text-transform: capitalize; }
-  .build-card-clickable { cursor: pointer; transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease; }
+  .build-header { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--gap-3); margin-bottom: var(--space-4); }
+  .build-header h3 { margin: 0; color: var(--secondary); font-size: var(--font-md); line-height: 1.35; }
+  /* A status word with no color was effectively invisible as a "badge" -
+     just plain text with no distinguishing background, on the one section
+     of this page whose whole point is showing status at a glance. Same
+     status->color mapping as the per-subsystem build-status-dot below,
+     ready_to_assemble split out to its own color so it doesn't read as
+     identical to assembled (done) at a glance. */
+  .build-status {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+    padding: var(--space-1) var(--space-3);
+    border-radius: var(--radius-full, 999px);
+    font-size: var(--font-xs);
+    font-weight: 600;
+    text-transform: capitalize;
+    white-space: nowrap;
+  }
+  .build-status.status-pending { background: var(--brand-gold-soft); color: var(--brand-gold-strong); }
+  .build-status.status-manufacturing { background: var(--blue-soft); color: var(--blue-strong); }
+  .build-status.status-ready_to_assemble { background: var(--purple-soft); color: var(--purple-strong); }
+  .build-status.status-assembled { background: var(--green-soft); color: var(--green-strong); }
+  .build-card-clickable { padding: var(--space-6); cursor: pointer; transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease; }
   .build-card-clickable:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); border-color: var(--accent); }
   .build-info { display: flex; flex-direction: column; gap: var(--gap-2); margin-bottom: var(--space-4); }
   .build-info .info-item { display: flex; justify-content: space-between; align-items: center; font-size: var(--font-xs); }
