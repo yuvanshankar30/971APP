@@ -1353,7 +1353,7 @@
                 <div class="cam-list-actions">
                   {#if part.parts}
                     <a class="btn btn-secondary btn-sm" href="/manufacture?part={part.part_id}">
-                      <LinkIcon size={14} /> View manufacturing request
+                      <LinkIcon size={14} /> View Manufacturing Request
                     </a>
                   {/if}
                   {#if part.step_file_name}
