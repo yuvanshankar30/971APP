@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({ authorize: vi.fn() }));
 vi.mock('$env/dynamic/private', () => ({ env: {
@@ -13,8 +13,13 @@ vi.mock('$lib/server/fusion_runner_setup.js', () => ({
 }));
 
 import { GET, POST } from './+server.js';
+import { FusionRunnerSetupError } from '$lib/server/fusion_runner_setup.js';
 
-beforeEach(() => mocks.authorize.mockReset().mockResolvedValue({}));
+// Each test resets/sets mocks.authorize itself, deliberately without a
+// beforeEach hook: with one present, vitest reports the wrong-token test's
+// mock rejection (thrown inside authorizeFusionRunnerSetup, awaited and
+// caught by the real +server.js try/catch) as an unhandled rejection anyway.
+// Confirmed live - the identical assertions pass with no beforeEach at all.
 
 describe('Fusion Runner pairing page', () => {
   it('is a standalone one-field page', async () => {
@@ -29,6 +34,7 @@ describe('Fusion Runner pairing page', () => {
   });
 
   it('submits the token without putting it in the URL', async () => {
+    mocks.authorize.mockResolvedValue({});
     const form = new FormData();
     form.set('session', '11111111-1111-4111-8111-111111111111');
     form.set('token', 'team-secret');
@@ -36,5 +42,23 @@ describe('Fusion Runner pairing page', () => {
     expect(response.status).toBe(200);
     expect(await response.text()).toContain('Runner configured. You can close this page.');
     expect(mocks.authorize).toHaveBeenCalledWith(expect.anything(), expect.anything(), form.get('session'), 'team-secret');
+  });
+
+  it('says only that the Fusion Runner token is wrong, and lets the operator try again', async () => {
+    mocks.authorize.mockReset();
+    mocks.authorize.mockImplementation(async () => {
+      throw new FusionRunnerSetupError('Invalid Fusion Runner token', 401);
+    });
+    const form = new FormData();
+    form.set('session', '11111111-1111-4111-8111-111111111111');
+    form.set('token', 'not-the-team-token');
+    const response = await POST({ request: new Request('https://hub.example/install/fusion-runner/setup', { method: 'POST', body: form }) });
+    const html = await response.text();
+    expect(response.status).toBe(401);
+    expect(html).toContain('<p>Fusion Runner token is wrong.</p>');
+    expect(html).not.toContain('Invalid');
+    expect(html).not.toContain('not-the-team-token');
+    expect(html.match(/<input name="token" type="password"/g)).toHaveLength(1);
+    expect(html).toContain('value="11111111-1111-4111-8111-111111111111"');
   });
 });

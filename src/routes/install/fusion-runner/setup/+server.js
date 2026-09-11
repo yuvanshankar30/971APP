@@ -69,7 +69,7 @@ export async function POST({ request }) {
   } catch (error) {
     const status = error instanceof FusionRunnerSetupError ? error.status : 500;
     const message = status === 401
-      ? 'Invalid token. Enter the Fusion Runner token.'
+      ? 'Fusion Runner token is wrong.'
       : error?.message || 'Fusion Runner setup failed.';
     return page({ sessionId, message, status });
   }
