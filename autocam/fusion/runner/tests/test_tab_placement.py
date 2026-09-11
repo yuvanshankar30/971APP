@@ -482,7 +482,7 @@ class MinTabsForBodyTests(unittest.TestCase):
     not silently override an operator's own explicit tab-count request).
     """
 
-    def test_a_genuine_triangle_is_floored_to_three(self):
+    def test_a_genuine_triangle_is_floored_to_two(self):
         edges = [
             _edge(0, 0, 10, 0),
             _edge(10, 0, 5, 8),
@@ -490,7 +490,7 @@ class MinTabsForBodyTests(unittest.TestCase):
         ]
         body = _body([_face(1.0, 1.0, [_loop(True, edges)])], (0, 0), (10, 8))
 
-        self.assertEqual(TabPlacement._min_tabs_for_body(body, 4), 3)
+        self.assertEqual(TabPlacement._min_tabs_for_body(body, 4), 2)
 
     def test_a_notched_part_reducing_to_three_long_sides_keeps_the_requested_floor(self):
         # Real, confirmed gap: three genuinely long structural sides plus
@@ -516,7 +516,7 @@ class MaxTabsForBodyTests(unittest.TestCase):
     holding power - direct instruction, more genuinely is not needed.
     """
 
-    def test_a_genuine_triangle_is_capped_to_three(self):
+    def test_a_genuine_triangle_is_capped_to_two(self):
         edges = [
             _edge(0, 0, 10, 0),
             _edge(10, 0, 5, 8),
@@ -524,12 +524,13 @@ class MaxTabsForBodyTests(unittest.TestCase):
         ]
         body = _body([_face(1.0, 1.0, [_loop(True, edges)])], (0, 0), (10, 8))
 
-        self.assertEqual(TabPlacement._max_tabs_for_body(body, 20), 3)
+        self.assertEqual(TabPlacement._max_tabs_for_body(body, 20), 2)
 
-    def test_an_explicit_operator_override_above_three_is_still_capped_on_a_triangle(self):
+    def test_an_explicit_operator_override_above_two_is_still_capped_on_a_triangle(self):
         # camPlate.py's tab_count_override sets min_tabs == max_tabs to the
-        # operator's requested value - a triangle must still get exactly 3
-        # even when someone explicitly asked for more.
+        # operator's requested value - a triangle must still get exactly 2
+        # (on its two longer sides) even when someone explicitly asked for
+        # more.
         edges = [
             _edge(0, 0, 10, 0),
             _edge(10, 0, 5, 8),
@@ -537,7 +538,7 @@ class MaxTabsForBodyTests(unittest.TestCase):
         ]
         body = _body([_face(1.0, 1.0, [_loop(True, edges)])], (0, 0), (10, 8))
 
-        self.assertEqual(TabPlacement._max_tabs_for_body(body, 8), 3)
+        self.assertEqual(TabPlacement._max_tabs_for_body(body, 8), 2)
 
     def test_a_notched_part_reducing_to_three_long_sides_keeps_the_requested_ceiling(self):
         long_bottom = _edge(0, 0, 10, 0)
@@ -549,11 +550,12 @@ class MaxTabsForBodyTests(unittest.TestCase):
 
         self.assertEqual(TabPlacement._max_tabs_for_body(body, 8), 8)
 
-    def test_a_large_triangle_does_not_scale_past_three_tabs(self):
+    def test_a_large_triangle_does_not_scale_past_two_tabs(self):
         # Real, confirmed bug this closes: _min_tabs_for_body alone only
-        # set a floor of 3 - a large triangle's own perimeter-based target
-        # (_tab_count_for_perimeter) could still scale past 3, since
-        # max_tabs was never adjusted for a triangle's own 3-sided shape.
+        # set a floor of 2 - a large triangle's own perimeter-based target
+        # (_tab_count_for_perimeter) could still scale past 2, since
+        # max_tabs was never adjusted for a triangle's own 3-sided shape
+        # (2 real tabs, on its two longer sides).
         edges = [
             _edge(0, 0, 100, 0),
             _edge(100, 0, 50, 80),
@@ -566,7 +568,7 @@ class MaxTabsForBodyTests(unittest.TestCase):
         perimeter_in = TabPlacement._outer_perimeter_in(body)
         self.assertGreater(perimeter_in, TabPlacement.TARGET_TAB_SPACING_IN * 6)
         self.assertEqual(
-            TabPlacement._tab_count_for_perimeter(perimeter_in, min_tabs, max_tabs), 3
+            TabPlacement._tab_count_for_perimeter(perimeter_in, min_tabs, max_tabs), 2
         )
 
 
@@ -885,6 +887,156 @@ class ReadStockBoundsTests(unittest.TestCase):
 
         self.assertIsNone(TabPlacement._read_stock_bounds(setup, app))
         self.assertTrue(logged, "a missing parameter must not fail silently")
+
+
+class AxisAvoidanceTests(unittest.TestCase):
+    """Direct instruction: "TABS SHOULD NEVER GENERATE DIRECTLY ON THE
+    PATH OF THE AXES." The WCS here is deliberately distinct from the raw
+    body-local coordinates the fixtures below happen to use (some at a
+    literal (0, 0) corner, by pure test-fixture convention, same as
+    TabDistributionTests' own _rectangle_body_and_edges) - the real bug
+    this closes was conflating "raw coordinate is zero" with "on the real
+    WCS axis," and a test that used the same origin for both would not
+    catch a regression back to that mistake.
+    """
+
+    def _rectangle_body_and_edges(self):
+        edges = {
+            "bottom": _edge(0, 0, 10, 0),
+            "right": _edge(10, 0, 10, 5),
+            "top": _edge(10, 5, 0, 5),
+            "left": _edge(0, 5, 0, 0),
+        }
+        loop = _loop(True, list(edges.values()))
+        face = _face(1.0, 1.0, [loop])
+        body = _body([face], (0, 0), (10, 5))
+        return body, edges
+
+    def test_an_edge_running_exactly_along_the_wcs_x_axis_is_excluded_outright(self):
+        # WCS origin/axes placed at (0, 0) in this fixture's own coordinate
+        # space - "bottom" (y=0 its whole length) and "left" (x=0 its whole
+        # length) both run exactly along a real coordinate axis; "top" and
+        # "right" do not.
+        body, edges = self._rectangle_body_and_edges()
+        wcs_frame = ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0))
+
+        selected = TabPlacement.select_tab_edges(body, max_tabs=4, wcs_frame=wcs_frame)
+
+        selected_edges = [edge for edge, _fraction in selected]
+        self.assertNotIn(edges["bottom"], selected_edges, "an edge lying on the X axis must never get a tab")
+        self.assertNotIn(edges["left"], selected_edges, "an edge lying on the Y axis must never get a tab")
+
+    def test_the_excluded_sides_budget_spreads_across_both_remaining_sides_not_just_one(self):
+        # The reported bug this directly closes: every tab piling onto a
+        # single side (the left edge, which happened to sit near the WCS
+        # origin) instead of spreading across every side that actually can
+        # hold one. With bottom+left both excluded, "top" (length 10) and
+        # "right" (length 5) should split the 4-tab budget by their own
+        # relative room, not all 4 landing on just one of them.
+        body, edges = self._rectangle_body_and_edges()
+        wcs_frame = ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0))
+
+        selected = TabPlacement.select_tab_edges(body, max_tabs=4, wcs_frame=wcs_frame)
+
+        selected_edges = [edge for edge, _fraction in selected]
+        self.assertGreater(selected_edges.count(edges["top"]), 0)
+        self.assertGreater(selected_edges.count(edges["right"]), 0)
+        self.assertEqual(len(selected), 4)
+
+    def test_no_selected_position_ever_lands_within_the_avoidance_margin_of_either_axis(self):
+        # A broader, direct sweep of the actual hard requirement, not just
+        # the two edges deliberately built to sit exactly on an axis -
+        # every returned (edge, fraction) position, whichever edge it
+        # landed on, must resolve to a real point clear of both axes.
+        body, _edges = self._rectangle_body_and_edges()
+        wcs_frame = ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0))
+        margin_cm = TabPlacement.AXIS_AVOIDANCE_MARGIN_IN * 2.54
+
+        selected = TabPlacement.select_tab_edges(body, max_tabs=4, wcs_frame=wcs_frame)
+
+        self.assertTrue(selected)
+        for edge, fraction in selected:
+            point = TabPlacement._edge_point_at_fraction(edge, fraction)
+            u, v = TabPlacement._to_wcs_uv(point, wcs_frame)
+            self.assertGreater(abs(u), margin_cm, "a selected tab landed on the WCS Y axis")
+            self.assertGreater(abs(v), margin_cm, "a selected tab landed on the WCS X axis")
+
+    def test_a_wcs_far_from_every_edge_behaves_identically_to_no_wcs_at_all(self):
+        # The axis-avoidance check must never reject a perfectly normal
+        # side just because it exists - only an edge actually near the
+        # real axis lines.
+        body, edges = self._rectangle_body_and_edges()
+        far_wcs_frame = ((500.0, 500.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0))
+
+        with_far_wcs = TabPlacement.select_tab_edges(body, max_tabs=4, wcs_frame=far_wcs_frame)
+        without_wcs = TabPlacement.select_tab_edges(body, max_tabs=4, wcs_frame=None)
+
+        self.assertEqual(
+            sorted(id(e) for e, _fraction in with_far_wcs),
+            sorted(id(e) for e, _fraction in without_wcs),
+        )
+
+    def test_an_axis_crossing_through_the_middle_of_a_long_side_relocates_off_it(self):
+        # The common real case is not a side running ALONG an axis for its
+        # whole length, but the axis passing THROUGH one - direct
+        # instruction's own screenshot showed a tab that landed almost
+        # exactly on the WCS origin gizmo mid-side. The tab must move to
+        # whichever half of that side is actually clear, not simply drop
+        # the side outright (it still has plenty of real length either side
+        # of the crossing).
+        #
+        # The rectangle is offset off of y=0 on purpose: a bottom edge
+        # sitting AT y=0 would coincide with the WCS X axis for its entire
+        # length (the full-length-exclusion case another test already
+        # covers), not merely cross the Y axis at one interior point. Only
+        # the vertical WCS Y axis (x=0) should cut through this rectangle,
+        # and only through the horizontal midpoint of "bottom"/"top".
+        edges = {
+            "bottom": _edge(-5, 2, 5, 2),
+            "right": _edge(5, 2, 5, 7),
+            "top": _edge(5, 7, -5, 7),
+            "left": _edge(-5, 7, -5, 2),
+        }
+        loop = _loop(True, list(edges.values()))
+        face = _face(1.0, 1.0, [loop])
+        body = _body([face], (-5, 2), (5, 7))
+        # WCS origin sits directly below the midpoint of "bottom" (x=0
+        # along that edge) - exactly where an unguarded midpoint tab would
+        # land - without the edge itself running along either axis.
+        wcs_frame = ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0))
+        margin_cm = TabPlacement.AXIS_AVOIDANCE_MARGIN_IN * 2.54
+
+        selected = TabPlacement.select_tab_edges(body, max_tabs=4, wcs_frame=wcs_frame)
+
+        bottom_positions = [fraction for edge, fraction in selected if edge is edges["bottom"]]
+        self.assertTrue(bottom_positions, "the long bottom side should still receive a tab, just relocated")
+        for fraction in bottom_positions:
+            point = TabPlacement._edge_point_at_fraction(edges["bottom"], fraction)
+            u, _v = TabPlacement._to_wcs_uv(point, wcs_frame)
+            self.assertGreater(abs(u), margin_cm)
+
+    def test_a_triangle_puts_its_two_tabs_on_the_two_longer_sides(self):
+        # Direct instruction: triangle minimum lowered to 2, and those 2
+        # tabs land on the part's two LONGER sides - select_tab_edges
+        # already sorts lines longest-first, so a max_tabs=2 ceiling
+        # (ConfigureTabs applies this via _max_tabs_for_body) should
+        # naturally select exactly those two without any axis involved.
+        short_side = _edge(0, 0, 3, 0)
+        long_side_a = _edge(3, 0, 0, 8)
+        long_side_b = _edge(0, 8, 0, 0)
+        body = _body([_face(1.0, 1.0, [_loop(True, [short_side, long_side_a, long_side_b])])], (0, 0), (3, 8))
+
+        self.assertTrue(TabPlacement._is_a_bare_triangle(body))
+        max_tabs = TabPlacement._max_tabs_for_body(body, TabPlacement.DEFAULT_MAX_TABS)
+        self.assertEqual(max_tabs, 2)
+
+        selected = TabPlacement.select_tab_edges(body, max_tabs=max_tabs)
+
+        selected_edges = {id(edge) for edge, _fraction in selected}
+        self.assertIn(id(long_side_a), selected_edges)
+        self.assertIn(id(long_side_b), selected_edges)
+        self.assertNotIn(id(short_side), selected_edges)
+        self.assertEqual(len(selected), 2)
 
 
 if __name__ == "__main__":

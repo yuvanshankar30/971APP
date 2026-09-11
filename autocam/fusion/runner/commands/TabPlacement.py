@@ -146,6 +146,20 @@ MIN_TAB_SIDE_LENGTH_IN = TAB_WIDTH_IN * 1.25
 # segments are grouped.
 MIN_TAB_EDGE_LENGTH_IN = 0.5
 
+# Direct instruction: "TABS SHOULD NEVER GENERATE DIRECTLY ON THE PATH OF
+# THE AXES" - a tab whose own position sits on (or crosses) the setup's
+# own X=0 or Y=0 line visually overlaps the WCS origin's own axis gizmo
+# and has produced malformed manual-tab geometry live, not merely an
+# ugly-but-harmless coincidence. Confirmed live: a part nested with one
+# side running near-parallel to and close against a coordinate axis had
+# every one of its tabs pile onto that single side because the OTHER
+# sides were excluded for lacking real stock backing - a separate, already
+# -handled failure mode (see _has_real_stock_backing) that this margin
+# does not replace. This margin is deliberately small: it exists to dodge
+# a literal, degenerate on-the-line coincidence, not to steer tabs away
+# from an edge merely because it happens to run near an axis.
+AXIS_AVOIDANCE_MARGIN_IN = 0.05
+
 
 def _is_straight_edge(edge) -> bool:
     try:
@@ -333,6 +347,126 @@ def _edge_midpoint(edge):
     return _edge_point_at_fraction(edge, 0.5)
 
 
+def _to_wcs_uv(point, wcs_frame):
+    """point (any object with .x/.y/.z, in the same root/arranged frame
+    edge.geometry is already expressed in - see _manual_tab_points' own
+    docstring on why that must already be true) re-expressed as (u, v)
+    coordinates in wcs_frame's own axes. wcs_frame is (origin, x_axis,
+    y_axis), each an (x, y, z) tuple - origin is the WCS's own position in
+    that same root frame, x_axis/y_axis its own (already unit-length)
+    basis vectors. This is the actual coordinate system a real WCS origin
+    gizmo is drawn in, which a body's own raw geometry coordinates are NOT
+    the same thing as (a part's own local/arranged coordinates can place
+    its corner literally at (0, 0, 0) with no relationship at all to
+    where the CAM setup's own WCS origin actually sits) - confirmed live
+    as a real bug in an earlier version of the axis-avoidance check below,
+    which compared raw edge coordinates against literal zero and
+    (correctly, but for the wrong reason) flagged every edge of a test
+    fixture rectangle deliberately built with a corner at the origin.
+    """
+    origin, x_axis, y_axis = wcs_frame
+    dx, dy, dz = point.x - origin[0], point.y - origin[1], point.z - origin[2]
+    u = dx * x_axis[0] + dy * x_axis[1] + dz * x_axis[2]
+    v = dx * y_axis[0] + dy * y_axis[1] + dz * y_axis[2]
+    return u, v
+
+
+def _axis_crossing_fraction_ranges(edge, margin_cm: float, wcs_frame) -> list[tuple[float, float]]:
+    """Fraction ranges (0-1, clamped) along edge whose point falls within
+    margin_cm of the coordinate-axis lines U=0 or V=0 in wcs_frame's own
+    axes - "on the path of the axes," meaning the real WCS origin gizmo
+    visible in Fusion's own viewport, not a coincidental raw-coordinate
+    zero (see _to_wcs_uv). Empty when the edge never comes within
+    margin_cm of either axis anywhere along its own length. A range can be
+    the full (0.0, 1.0) span when the edge runs exactly along an axis for
+    its entire length (a constant u or v within the margin) - that side
+    has no safe position at all, not just a forbidden sub-range of one.
+
+    wcs_frame is None whenever the real WCS is not available to the
+    caller (a unit test with no live Fusion setup, or a caller that
+    genuinely could not read it) - axis-checking is skipped entirely
+    rather than guessing at what "the axes" means without it, the same
+    "None means don't filter" convention stock_bounds already uses
+    elsewhere in this module.
+    """
+    if wcs_frame is None:
+        return []
+    geom = edge.geometry
+    start_u, start_v = _to_wcs_uv(geom.startPoint, wcs_frame)
+    end_u, end_v = _to_wcs_uv(geom.endPoint, wcs_frame)
+    ranges = []
+    for start_coord, end_coord in ((start_u, end_u), (start_v, end_v)):
+        delta = end_coord - start_coord
+        if abs(delta) < 1e-9:
+            # Constant coordinate along the whole edge - forbidden for its
+            # entire length if that constant itself is within the margin.
+            if abs(start_coord) <= margin_cm:
+                ranges.append((0.0, 1.0))
+            continue
+        # coord(f) = start_coord + f * delta; solve |coord(f)| <= margin_cm.
+        f_a = (-margin_cm - start_coord) / delta
+        f_b = (margin_cm - start_coord) / delta
+        lo, hi = (f_a, f_b) if f_a <= f_b else (f_b, f_a)
+        lo = max(0.0, lo)
+        hi = min(1.0, hi)
+        if lo <= hi:
+            ranges.append((lo, hi))
+    return ranges
+
+
+def _is_fraction_axis_safe(edge, fraction: float, margin_cm: float, wcs_frame) -> bool:
+    return not any(lo <= fraction <= hi for lo, hi in _axis_crossing_fraction_ranges(edge, margin_cm, wcs_frame))
+
+
+def _axis_safe_interior_bounds(edge, margin_cm: float, half_width_cm: float, wcs_frame):
+    """The (low, high) fraction span on edge that is BOTH inside its own
+    usable interior (half_width_cm clear of each corner, same margin every
+    tab on this module already needs for lead-in/lead-out) AND off both
+    coordinate axes - None if no such span exists at all, meaning this
+    edge cannot safely hold a tab anywhere along its length (it runs along
+    an axis for its full interior span, or that span is too short for the
+    tab's own half-width to begin with). Always returns the full interior
+    span (no exclusion) when wcs_frame is None - see
+    _axis_crossing_fraction_ranges.
+    """
+    edge_length = _edge_length(edge)
+    if edge_length <= 0 or edge_length < half_width_cm * 2:
+        return None
+    half_width_frac = half_width_cm / edge_length
+    low, high = half_width_frac, 1.0 - half_width_frac
+    if low > high:
+        return None
+    forbidden = _axis_crossing_fraction_ranges(edge, margin_cm, wcs_frame)
+    # Walk the interior span left to right, keeping whichever safe segment
+    # is largest - a side split by a single axis crossing near its middle
+    # (the common real case: the axis passes through, not along, the edge)
+    # still has two real candidate segments, and the larger one should win.
+    boundaries = sorted({low, high, *(b for r in forbidden for b in r if low <= b <= high)})
+    best = None
+    for a, b in zip(boundaries, boundaries[1:]):
+        midpoint = (a + b) / 2
+        if any(lo <= midpoint <= hi for lo, hi in forbidden):
+            continue
+        if best is None or (b - a) > (best[1] - best[0]):
+            best = (a, b)
+    return best
+
+
+def _nearest_axis_safe_fraction(edge, preferred_fraction: float, margin_cm: float, half_width_cm: float, wcs_frame):
+    """The fraction nearest preferred_fraction that keeps the tab both off
+    the coordinate axes and inside edge's own usable interior span - None
+    if _axis_safe_interior_bounds finds no such span exists on this edge
+    at all (the caller must then treat the whole edge as unusable, the
+    same way a too-short or unbacked edge already is - see
+    select_tab_edges' own usable/backed filtering).
+    """
+    bounds = _axis_safe_interior_bounds(edge, margin_cm, half_width_cm, wcs_frame)
+    if bounds is None:
+        return None
+    low, high = bounds
+    return min(high, max(low, preferred_fraction))
+
+
 def _outward_edge_normal(edge, body_center):
     """Unit XY normal pointing from a body's candidate edge into stock."""
     direction, _ = _edge_direction_and_point(edge)
@@ -485,6 +619,21 @@ def separate_grouped_tab_candidates(
     The first body's choices remain stable; later bodies use the nearest
     valid position on a safe straight edge. A job fails instead of emitting
     touching tabs if its geometry cannot satisfy the invariant.
+
+    Known gap, not yet closed: the incoming candidates are already axis-
+    safe (they come from select_tab_edges, which enforces this), but a
+    RELOCATION this function computes to resolve a facing-tab conflict
+    (_relocation_fraction_options) does not itself check the coordinate
+    axes - only stock backing and same-line/facing-tab spacing. A
+    relocated position could in principle land back on an axis on a
+    grouped (2+ body) job where conflict relocation actually triggers.
+    Left for a follow-up pass rather than folded in here, given how much
+    more this function's own conflict-search space already has to satisfy
+    at once (line/edge, spacing from every other accepted tab across every
+    other body, corridor width) - lower risk to add a real axis-avoidance
+    hard requirement to select_tab_edges' own SELECTION first (done) and
+    verify it live before also threading it through this quite different,
+    already-intricate relocation search.
     """
     if len(grouped_candidates) < 2:
         return [list(candidates) for _body, candidates in grouped_candidates], 0
@@ -738,33 +887,75 @@ def _is_a_bare_triangle(body) -> bool:
 
 
 def _min_tabs_for_body(body, min_tabs: int) -> int:
-    """A triangular part only has 3 real sides to begin with - padding a
-    4th tab onto one already-tabbed side doesn't add real holding power,
-    it just doubles up on one side. Direct instruction: 4 or more tabs
-    normally, but exactly 3 for a triangular shape. Anything with 4+
-    distinct sides still uses the normal min_tabs floor (parametric -
-    ConfigureTabs's own min_tabs/max_tabs arguments, not hardcoded here).
+    """A triangular part only has 3 real sides to begin with, and its
+    3rd (shortest) side is very often the one this module's own stock-
+    backing/length gates would reject anyway. Direct instruction: 4 or
+    more tabs normally, but exactly 2 for a triangular shape, placed on
+    its two longer sides - a 3rd tab on the shortest side doubled up on
+    one of the other two with real holding power, it just doubled up on
+    one side. Anything with 4+ distinct sides still uses the normal
+    min_tabs floor (parametric - ConfigureTabs's own min_tabs/max_tabs
+    arguments, not hardcoded here).
     """
     if _is_a_bare_triangle(body):
-        return 3
+        return 2
     return min_tabs
 
 
 def _max_tabs_for_body(body, max_tabs: int) -> int:
-    """The other half of _min_tabs_for_body's own floor: a triangle only
-    has 3 real sides, so more than 3 tabs adds no real holding power
-    either - it just doubles up on one side a second (or third) time.
-    Direct instruction: exactly 3 for a triangular shape, full stop. Caps
-    the perimeter-based scaling that would otherwise grow tab count on a
+    """The other half of _min_tabs_for_body's own floor: a triangle's two
+    longer sides are where real holding power lives - a 3rd tab on the
+    shortest side, or a 2nd tab doubled onto an already-selected side,
+    adds no real holding power either. Direct instruction: exactly 2 for
+    a triangular shape, on its longer sides, full stop. Caps the
+    perimeter-based scaling that would otherwise grow tab count on a
     large triangle the same way it does for a normal 4+-sided part, and -
     same as the min-tabs floor above - overrides even an explicit
     operator tab-count request (camPlate.py's tab_count_override sets
-    min_tabs == max_tabs to that value; a triangle still gets exactly 3
+    min_tabs == max_tabs to that value; a triangle still gets exactly 2
     regardless of what was asked for, since more genuinely is not needed).
     """
     if _is_a_bare_triangle(body):
-        return 3
+        return 2
     return max_tabs
+
+
+def _axis_safe_fractions_for_line(edge, n: int, margin_cm: float, half_width_cm: float, tab_width_in: float, wcs_frame):
+    """Up to n well-spaced fractions on edge's own largest axis-safe
+    interior sub-segment (see _axis_safe_interior_bounds) - fewer than n
+    when that segment is too short to fit all of them at the same
+    2x-tab-width spacing every tab on this module already requires. The
+    caller (select_tab_edges) redistributes any shortfall onto other real
+    sides, the same way an excluded (unbacked, or too-short) side's own
+    budget already gets redistributed.
+    """
+    if n <= 0:
+        return []
+    if wcs_frame is None:
+        # No axis constraint in play at all - _tab_fractions(n) directly on
+        # the whole edge, exactly like every version of this module before
+        # axis-avoidance existed. Skipping the interior-sub-segment
+        # remapping below when there is nothing to route around also
+        # avoids it introducing its own floating-point rounding into the
+        # common, unconstrained case (algebraically the same midpoint for
+        # a single tab, but not bit-for-bit identical after that many more
+        # arithmetic operations - a real regression a strict `== 0.5`
+        # comparison in this module's own test suite caught directly).
+        edge_length = _edge_length(edge)
+        if edge_length <= 0 or edge_length < half_width_cm * 2:
+            return []
+        return list(_tab_fractions(n))
+    bounds = _axis_safe_interior_bounds(edge, margin_cm, half_width_cm, wcs_frame)
+    if bounds is None:
+        return []
+    low, high = bounds
+    span = high - low
+    edge_length = _edge_length(edge)
+    if span <= 0 or edge_length <= 0:
+        return [low]
+    min_gap_frac = (tab_width_in * 2 * 2.54) / edge_length
+    fits = n if min_gap_frac <= 0 else min(n, max(1, int(span / min_gap_frac) + 1))
+    return [low + position * span for position in _tab_fractions(fits)]
 
 
 def select_tab_edges(
@@ -772,6 +963,7 @@ def select_tab_edges(
     max_tabs: int = DEFAULT_MAX_TABS,
     stock_bounds=None,
     tab_width_in: float = TAB_WIDTH_IN,
+    wcs_frame=None,
 ):
     """(edge, fraction) positions on the body's own outer boundary, spread
     across every distinct USABLE straight side. Never returns a
@@ -813,21 +1005,43 @@ def select_tab_edges(
     a large one for more): the long structural sides win over a fan of
     short facets - confirmed live on a real teardrop bracket that had been
     picking up a tab on every one of its short bottom facets.
+
+    wcs_frame (origin, x_axis, y_axis) is the setup's own real WCS, in the
+    same root/arranged frame this body's own edges are already expressed
+    in - direct instruction: a tab must never land on the path of the
+    coordinate axes (the WCS origin gizmo visible in Fusion's own
+    viewport), not a coincidental raw-coordinate zero (see _to_wcs_uv's
+    own docstring for the real bug that distinction fixes). None (the
+    default) disables this check entirely rather than guessing at what
+    "the axes" means without a real WCS to check against.
     """
     stock_check_cm = STOCK_BACKING_CHECK_IN * 2.54
+    axis_margin_cm = AXIS_AVOIDANCE_MARGIN_IN * 2.54
+    half_width_cm = tab_width_in * 2.54 / 2
     body_center = _body_center(body)
 
     def is_backed(edge):
         return _has_real_stock_backing(edge, body_center, stock_bounds, stock_check_cm)
+
+    def is_axis_safe(edge):
+        return _axis_safe_interior_bounds(edge, axis_margin_cm, half_width_cm, wcs_frame) is not None
 
     all_edges = sorted(_all_straight_edges(body), key=_edge_length, reverse=True)
     lines = _group_into_lines(all_edges)
     lines.sort(key=lambda line: _edge_length(line[0]), reverse=True)
 
     def best_edge_for_line(line):
-        backed = [e for e in line if is_backed(e)]
-        pool = backed if backed else line
-        return max(pool, key=_edge_length)
+        # Prefer a segment that is both stock-backed and clear of the
+        # coordinate axes; relax one requirement at a time rather than
+        # dropping the whole line outright - a side represented by several
+        # collinear segments (see _group_into_lines) can have one segment
+        # crossing an axis while another, real, usable segment on that
+        # exact same side does not.
+        for predicate in (lambda e: is_backed(e) and is_axis_safe(e), is_backed, is_axis_safe):
+            candidates = [e for e in line if predicate(e)]
+            if candidates:
+                return max(candidates, key=_edge_length)
+        return max(line, key=_edge_length)
 
     def line_length_in(line) -> float:
         return _edge_length(best_edge_for_line(line)) / 2.54
@@ -835,11 +1049,23 @@ def select_tab_edges(
     def line_is_backed(line) -> bool:
         return any(is_backed(e) for e in line)
 
+    def line_is_axis_safe(line) -> bool:
+        return is_axis_safe(best_edge_for_line(line))
+
     # Drop sides too short to actually hold a tab. Measured on the segment that would carry the
     # tab, not the side's summed length: a side split into several short
-    # collinear pieces still has to fit the tab within ONE of them.
+    # collinear pieces still has to fit the tab within ONE of them. Also
+    # drop a side whose best segment has no axis-safe interior position at
+    # all (it runs along a coordinate axis for its full usable span) -
+    # direct instruction: tabs must never generate on the path of the
+    # axes, and this side genuinely has nowhere safe to put one, the same
+    # "cannot be made safe by relaxing geometry" reasoning the length gate
+    # below already uses.
     min_side_cm = tab_width_in * 1.25 * 2.54
-    usable = [line for line in lines if _edge_length(best_edge_for_line(line)) >= min_side_cm]
+    usable = [
+        line for line in lines
+        if _edge_length(best_edge_for_line(line)) >= min_side_cm and line_is_axis_safe(line)
+    ]
     if not usable:
         # A tab cannot be made safe by silently relaxing its own minimum
         # geometry. The caller fails the job before postprocessing instead
@@ -849,19 +1075,19 @@ def select_tab_edges(
     backed_usable = [line for line in usable if line_is_backed(line)]
     pool = backed_usable if backed_usable else usable
 
-    # True only when some real, sufficiently-long side got dropped for
-    # lacking real stock backing (see _has_real_stock_backing) - the
-    # specific case "just add more tabs to these parts on sides that are
-    # already there" (direct instruction) was written for: an excluded
-    # side's share of the budget has to land somewhere, more than one
-    # extra tab on the same valid side if that's what it takes. When
-    # nothing was excluded, max_tabs is just this body's overall ceiling
-    # (see _tab_count_for_perimeter) - a side earning extra tabs simply
-    # because that ceiling happens to be generous relative to how many
-    # real sides this part has is the reported bug (an 8.211in side on an
-    # already well-tabbed part getting 3 tabs it did not need), not the
-    # behavior that instruction asked for.
-    has_excluded_sides = len(pool) < len(usable)
+    # True when some real, sufficiently-long side got dropped for lacking
+    # real stock backing (see _has_real_stock_backing) OR for having no
+    # axis-safe position at all - the specific case "just add more tabs to
+    # these parts on sides that are already there" (direct instruction)
+    # was written for: an excluded side's share of the budget has to land
+    # somewhere, more than one extra tab on the same valid side if that's
+    # what it takes. When nothing was excluded, max_tabs is just this
+    # body's overall ceiling (see _tab_count_for_perimeter) - a side
+    # earning extra tabs simply because that ceiling happens to be
+    # generous relative to how many real sides this part has is the
+    # reported bug (an 8.211in side on an already well-tabbed part getting
+    # 3 tabs it did not need), not the behavior that instruction asked for.
+    has_excluded_sides = len(pool) < len(usable) or len(usable) < len(lines)
 
     primary = pool[:max_tabs]
     counts = {id(line): 1 for line in primary}
@@ -905,28 +1131,57 @@ def select_tab_edges(
         counts[id(candidate)] += 1
         remaining_budget -= 1
 
+    # Fractions are computed on each line's own largest axis-safe
+    # sub-segment (see _axis_safe_fractions_for_line), never the raw
+    # _tab_fractions(n) spread across the whole edge - a line whose axis-
+    # safe segment is too short to fit every tab its count assigned it
+    # places fewer, and the difference (shortfall) is redistributed below
+    # exactly like an excluded side's own budget already is.
     selected = []
+    shortfall = 0
     for line in primary:
         edge = best_edge_for_line(line)
-        for fraction in _tab_fractions(counts[id(line)]):
+        n = counts[id(line)]
+        placed = _axis_safe_fractions_for_line(edge, n, axis_margin_cm, half_width_cm, tab_width_in, wcs_frame)
+        shortfall += n - len(placed)
+        for fraction in placed:
             selected.append((edge, fraction))
+
+    def _unselected_axis_safe_edges():
+        selected_edge_ids = {id(edge) for edge, _fraction in selected}
+        remaining = [
+            e for e in all_edges
+            if id(e) not in selected_edge_ids and _edge_length(e) >= min_side_cm and is_axis_safe(e)
+        ]
+        remaining.sort(key=lambda e: (not is_backed(e), -_edge_length(e)))
+        return remaining
+
+    # Top up a same-side shortfall first, on a fresh axis-safe edge -
+    # direct instruction: never place the tab on the axis itself rather
+    # than silently under-placing this line's own assigned count.
+    for edge in _unselected_axis_safe_edges():
+        if shortfall <= 0:
+            break
+        fraction = _nearest_axis_safe_fraction(edge, 0.5, axis_margin_cm, half_width_cm, wcs_frame)
+        if fraction is None:
+            continue
+        selected.append((edge, fraction))
+        shortfall -= 1
 
     # Only if the part genuinely has fewer distinct USABLE sides than tabs
     # asked for even after doubling up wherever there was room (a triangle
     # with two very short sides, say) do additional, different edges get
     # pulled in as a last resort - stock-backed ones first, same threshold
-    # as everything above so this can't quietly re-add a short facet.
+    # as everything above so this can't quietly re-add a short facet, and
+    # still never a position on the coordinate axes.
     if len(selected) < max_tabs:
-        selected_edge_ids = {id(edge) for edge, _fraction in selected}
-        remaining = [
-            e for e in all_edges
-            if id(e) not in selected_edge_ids and _edge_length(e) >= min_side_cm
-        ]
-        remaining.sort(key=lambda e: (not is_backed(e), -_edge_length(e)))
-        for edge in remaining:
+        for edge in _unselected_axis_safe_edges():
             if len(selected) >= max_tabs:
                 break
-            selected.append((edge, 0.5))
+            fraction = _nearest_axis_safe_fraction(edge, 0.5, axis_margin_cm, half_width_cm, wcs_frame)
+            if fraction is None:
+                continue
+            selected.append((edge, fraction))
     return selected
 
 
@@ -1093,6 +1348,38 @@ def _read_stock_bounds(setup, app):
         return None
 
 
+def _read_wcs_frame(setup, app):
+    """This setup's real WCS, as (origin, x_axis, y_axis) tuples in the
+    same root/arranged frame this module's own edge geometry is already
+    expressed in (see _to_wcs_uv) - None (any read failure) means "skip
+    this filter," the same convention _read_stock_bounds already uses.
+
+    UNVERIFIED for a milling/2D setup: Setup.workCoordinateSystem.
+    getAsCoordinateSystem() was separately confirmed live to report its
+    origin translation in millimeters (not the centimeters every other
+    Fusion geometry API uses) for a TURNING setup specifically - whether
+    that same quirk applies to a milling setup's own WCS has not been
+    checked live. No unit correction is applied here for that reason: a
+    wrong guess at a conversion factor would be worse than skipping the
+    filter outright on a bad read, the same "None means don't filter"
+    reasoning _read_stock_bounds itself already documents. Confirm this
+    against a real milling setup (compare the returned origin to a known
+    real WCS position, the same way the turning-setup quirk itself was
+    confirmed) before trusting the axis-avoidance check on a job whose
+    part sits anywhere near the WCS origin.
+    """
+    try:
+        origin, x_axis, y_axis, _z_axis = setup.workCoordinateSystem.getAsCoordinateSystem()
+        return (
+            (origin.x, origin.y, origin.z),
+            (x_axis.x, x_axis.y, x_axis.z),
+            (y_axis.x, y_axis.y, y_axis.z),
+        )
+    except Exception as e:
+        app.log(f"TabPlacement: could not read the setup's own WCS, skipping the axis-avoidance check: {e}")
+        return None
+
+
 def ConfigureTabs(
     min_tabs: int = DEFAULT_MIN_TABS,
     max_tabs: int = DEFAULT_MAX_TABS,
@@ -1143,6 +1430,7 @@ def ConfigureTabs(
 
     for setup in cam.setups:
         stock_bounds = _read_stock_bounds(setup, app)
+        wcs_frame = _read_wcs_frame(setup, app)
 
         # Only the ONE contour2d operation the template itself designates
         # for tabs (group_tabs already true in the template's own default,
@@ -1203,6 +1491,7 @@ def ConfigureTabs(
                     max_tabs=target_tabs,
                     stock_bounds=stock_bounds,
                     tab_width_in=tab_width_in,
+                    wcs_frame=wcs_frame,
                 )
                 if len(body_candidates) < body_min_tabs:
                     app.log(
