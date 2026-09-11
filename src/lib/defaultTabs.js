@@ -8,7 +8,7 @@
 // concept, see buildNavItems/toLinkItem in +layout.svelte, not new UI) per
 // direct feedback that a flat list of ~10 top-level tabs read as clutter for
 // anyone not touching most of them day to day. Order (Home, Manufacturing,
-// Competition, Build, Purchasing, Docs, Admin) keeps the team's primary daily
+// Competition, CAD, Purchasing, Docs, Admin) keeps the team's primary daily
 // workflows at the front of the header.
 //   - Manufacturing: the shop-floor tools (manufacture tracking, Fusion
 //     AutoCAM, Kitting, COTS Stocking) - "whatever else we add" here later
@@ -18,8 +18,12 @@
 //     deliberately-hidden-but-not-deleted routes below) - lathe (turning)
 //     parts currently have no CAM generation surface at all as a result;
 //     see the tracking issue for restoring that.
-//   - Build: build tracking remains available at /cad/build. The Onshape-backed
-//     CAD tab is disabled while that integration is disconnected.
+//   - CAD: CAD and Build combined into one group, since Build is really a
+//     CAD sub-concern (already lives at /cad/build). Restored by direct
+//     instruction after a brief removal (the Onshape-backed CAD tab was
+//     hidden for a few days while that integration's credentials were
+//     disconnected) - back in the default nav regardless of that
+//     integration's own connection state, same as before the removal.
 //   - Competition: the active scouting surfaces only. The legacy routes
 //     (Note Scouting and Team View) stay in the
 //     codebase for a future restoration but are deliberately out of the
@@ -89,8 +93,11 @@ export function defaultHeaderTabs(navConfig = navigation) {
     ]
   });
 
-  if (navConfig?.tabs?.build !== false) {
-    tabs.push({ type: 'tab', key: 'build', label: 'Build' });
+  const cadChildren = [];
+  if (navConfig?.tabs?.cad !== false) cadChildren.push({ key: 'cad', label: 'CAD' });
+  if (navConfig?.tabs?.build !== false) cadChildren.push({ key: 'build', label: 'Build' });
+  if (cadChildren.length) {
+    tabs.push({ type: 'folder', label: 'CAD', children: cadChildren });
   }
 
   tabs.push({ type: 'tab', key: 'purchasing', label: 'Purchasing' });
