@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseCsv, matchCsvColumn, parseBomCsvRows } from './bom_csv_import.js';
+import { parseCsv, matchCsvColumn, parseBomCsvRows, classifyManualBomRow, classifyManualBomRows } from './bom_csv_import.js';
 
 describe('parseCsv', () => {
   it('splits a simple comma-separated table into rows of cells', () => {
@@ -91,5 +91,63 @@ describe('parseBomCsvRows', () => {
 
   it('throws when every data row is missing a name', () => {
     expect(() => parseBomCsvRows('Name,QTY\n,5\n,3')).toThrow(/No usable rows/);
+  });
+});
+
+describe('classifyManualBomRow', () => {
+  function row(overrides = {}) {
+    return { part_name: '', part_number: '', quantity: 1, material: '', vendor: '', description: '', ...overrides };
+  }
+
+  it('classifies as COTS when a vendor is present', () => {
+    expect(classifyManualBomRow(row({ part_name: '18t HTD Pulley', vendor: 'WCP' }))).toEqual({ part_type: 'COTS', workflow: 'purchase' });
+  });
+
+  it('classifies a screw or bolt as COTS even with no vendor', () => {
+    expect(classifyManualBomRow(row({ part_name: '#10-32 socket head screw' }))).toEqual({ part_type: 'COTS', workflow: 'purchase' });
+    expect(classifyManualBomRow(row({ part_name: 'M4 bolt' }))).toEqual({ part_type: 'COTS', workflow: 'purchase' });
+  });
+
+  it('classifies a nut as COTS even with no vendor', () => {
+    expect(classifyManualBomRow(row({ part_name: '10-32 nylock nut' }))).toEqual({ part_type: 'COTS', workflow: 'purchase' });
+  });
+
+  it('classifies a plate with no vendor as manufactured/router', () => {
+    expect(classifyManualBomRow(row({ part_name: 'pivot gearbox plate' }))).toEqual({ part_type: 'manufactured', workflow: 'router' });
+  });
+
+  it('classifies a spacer with no vendor as manufactured/3d-print', () => {
+    expect(classifyManualBomRow(row({ part_name: 'maxspline spacer' }))).toEqual({ part_type: 'manufactured', workflow: '3d-print' });
+  });
+
+  it('classifies a shaft or standoff with no vendor as manufactured/lathe', () => {
+    expect(classifyManualBomRow(row({ part_name: '2in hex shaft' }))).toEqual({ part_type: 'manufactured', workflow: 'lathe' });
+    expect(classifyManualBomRow(row({ part_name: 'M3 standoff' }))).toEqual({ part_type: 'manufactured', workflow: 'lathe' });
+  });
+
+  it('classifies nylon/PLA/ABS material as manufactured/3d-print', () => {
+    expect(classifyManualBomRow(row({ part_name: 'Chamfer1', material: 'Nylon' }))).toEqual({ part_type: 'manufactured', workflow: '3d-print' });
+  });
+
+  it('falls back to manufactured/mill for anything else with no vendor', () => {
+    expect(classifyManualBomRow(row({ part_name: 'gearbox side bracket', material: 'Aluminum' }))).toEqual({ part_type: 'manufactured', workflow: 'mill' });
+  });
+
+  it('does not let a plate/spacer/shaft name override a real vendor tag', () => {
+    // Direct instruction ordering: vendor presence is COTS regardless of
+    // what the name would otherwise suggest.
+    expect(classifyManualBomRow(row({ part_name: 'WCP spacer kit', vendor: 'WCP' }))).toEqual({ part_type: 'COTS', workflow: 'purchase' });
+  });
+});
+
+describe('classifyManualBomRows', () => {
+  it('merges classification fields onto each row without losing the original fields', () => {
+    const rows = [
+      { part_name: 'pivot plate', part_number: '-', quantity: 2, material: '', vendor: '', description: '' },
+      { part_name: '18t HTD Pulley', part_number: 'P002', quantity: 4, material: '', vendor: 'WCP', description: '' }
+    ];
+    const result = classifyManualBomRows(rows);
+    expect(result[0]).toEqual({ ...rows[0], part_type: 'manufactured', workflow: 'router' });
+    expect(result[1]).toEqual({ ...rows[1], part_type: 'COTS', workflow: 'purchase' });
   });
 });

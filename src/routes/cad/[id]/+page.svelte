@@ -8,8 +8,7 @@
   import { userStore, loadUserFromUUID, upsertProfileIfMissing, setUserUUID } from '$lib/stores/user.js';
   import { hasPermission, GENERAL_ROLES } from '$lib/permissions.js';
   import { onShapeAPI } from '$lib/onshape.js';  
-  import { partClassificationService } from '$lib/bom_classify.js';
-  import { parseBomCsvRows } from '$lib/bom_csv_import.js';
+  import { parseBomCsvRows, classifyManualBomRows } from '$lib/bom_csv_import.js';
   import { pickStockAndWorkflow } from '$lib/stock_match.js';
   import { detectVendorFromString, buildVendorSearchUrl } from '$lib/vendor_detect.js';
   import { formatPacificDate } from '$lib/timezone.js';
@@ -228,9 +227,47 @@
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      subsystemBuilds = data || [];
+      const builds = data || [];
+
+      // builds.created_by has no FK to user_profiles, so PostgREST can't
+      // auto-embed it - resolve creator names with a separate lookup
+      // (same pattern as loadSubsystemMembers's profile join).
+      const creatorIds = [...new Set(builds.map((b) => b.created_by).filter(Boolean))];
+      let creatorProfiles = {};
+      if (creatorIds.length > 0) {
+        const { data: profiles } = await supabase
+          .from('user_profiles')
+          .select('id, full_name, email')
+          .in('id', creatorIds);
+        (profiles || []).forEach((p) => { creatorProfiles[p.id] = p; });
+      }
+
+      subsystemBuilds = builds.map((b) => ({
+        ...b,
+        creator: b.created_by ? creatorProfiles[b.created_by] || null : null
+      }));
     } catch (error) {
       console.error('Error loading subsystem builds:', error);
+    }
+  }
+
+  async function deleteSubsystemBuild(build) {
+    if (!await requestConfirmation({
+      title: 'Delete build',
+      message: `Delete "${build.release_name || 'this build'}"? This removes its saved BOM too and cannot be undone.`,
+      confirmLabel: 'Delete build',
+      danger: true
+    })) return;
+
+    try {
+      const { error } = await supabase.from('builds').delete().eq('id', build.id);
+      if (error) throw error;
+      if (expandedBuildId === build.id) expandedBuildId = null;
+      await loadSubsystemBuilds();
+      toastActions.show('Build deleted');
+    } catch (error) {
+      console.error('Error deleting build:', error);
+      toastActions.show('Failed to delete build: ' + error.message);
     }
   }
 
@@ -811,22 +848,16 @@
   async function parseManualBomFile(file) {
     const text = await file.text();
     const rawRows = parseBomCsvRows(text);
+    const classifiedRows = classifyManualBomRows(rawRows);
 
-    // Reuse the same manual classification rules OnShape-sourced BOMs go
-    // through, so a manually-imported part gets the same COTS/manufactured
-    // + workflow assignment either way.
-    const classifications = await partClassificationService.classifyParts(rawRows);
-
-    return rawRows.map((row, index) => {
-      const classification = classifications[index] || { classification: 'manufactured', manufacturing_process: 'mill' };
-      const partType = classification.classification === 'COTS' ? 'COTS' : 'manufactured';
+    return classifiedRows.map((row) => {
       return {
         part_name: row.part_name,
         part_number: row.part_number || null,
         quantity: row.quantity,
-        part_type: partType,
+        part_type: row.part_type,
         material: row.material,
-        workflow: partType === 'COTS' ? 'purchase' : (classification.manufacturing_process || 'mill'),
+        workflow: row.workflow,
         vendor: row.vendor,
         description: row.description,
         onshape_document_id: null,
@@ -1199,6 +1230,31 @@
     const { stock, workflow } = pickStockAndWorkflow(stockData, part);
     if (workflow !== part.workflow) part.workflow = workflow;
     if (stock) part.stock_assignment = stock.description;
+  }
+
+  // Adds every not-yet-added item in the BOM (COTS and manufactured alike)
+  // in one click - the single action offered while reviewing/importing a
+  // BOM. addAllCOTSToPurchasing/manufactureIteration/buildDuplicate below
+  // are kept for a later "finalize the build" step (direct instruction:
+  // those more specific bulk actions belong there, not in this initial
+  // review), not wired to a button here for now.
+  async function saveAllBomItems() {
+    const itemsToAdd = buildBOM.filter((item) => {
+      const key = item.part_number || item.part_name;
+      return key && !addedPartsSet.has(key);
+    });
+    if (itemsToAdd.length === 0) {
+      toastActions.show('Everything in this BOM has already been added');
+      return;
+    }
+    for (const item of itemsToAdd) {
+      await addSingleToBuild(item);
+      // A COTS item with no auto-detectable vendor URL opens the purchase
+      // modal and returns early - stop the batch there, same reasoning as
+      // addAllCOTSToPurchasing below.
+      if (showPurchaseModal) return;
+    }
+    toastActions.show(`Saved ${itemsToAdd.length} item${itemsToAdd.length === 1 ? '' : 's'} to the build`);
   }
 
   async function addAllCOTSToPurchasing() {
@@ -1623,6 +1679,27 @@
         file_name = `${item.part_name || item.part_number || "Part"}.step`;
       }
 
+      // A manually attached file (no OnShape part behind this item to fetch
+      // geometry from) takes priority over the OnShape-URL guesses above -
+      // same storage bucket/JSON file_url convention manufacture/+page.svelte
+      // already uses, so getStepFileName()/canViewCad() there pick it up too.
+      if (item.attachedFile) {
+        const ext = (item.attachedFile.name.split('.').pop() || 'step').toLowerCase();
+        const safeName = (item.part_name || 'part').replace(/[^a-zA-Z0-9]/g, '_');
+        const storagePath = `${crypto.randomUUID()}_${safeName}_cad.${ext}`;
+        const { error: uploadError } = await supabase.storage
+          .from('manufacturing-files')
+          .upload(storagePath, item.attachedFile, { cacheControl: '3600', upsert: false });
+        if (uploadError) {
+          toastActions.show('Failed to upload attached file: ' + uploadError.message);
+        } else {
+          file_url = JSON.stringify(
+            ext === 'pdf' ? { pdf_file: storagePath } : { step_file: storagePath, step_valid: true }
+          );
+          file_name = item.attachedFile.name;
+        }
+      }
+
       // Project ID format: {subsystem name} (version-independent for rollup)
       const project_id = subsystem.name;
         // Insert into parts table (main manufacturing queue)
@@ -1936,7 +2013,7 @@
                   </span>
                 </div>
                 <div class="subsystem-build-meta">
-                  <span>Created {formatPacificDate(build.created_at)}</span>
+                  <span>Created {formatPacificDate(build.created_at)}{build.creator ? ` by ${build.creator.full_name || build.creator.email}` : ''}</span>
                   {#if build.assembled_at}
                     <span>Assembled {formatPacificDate(build.assembled_at)}</span>
                   {/if}
@@ -1955,6 +2032,15 @@
                 <a href="/cad/build/{build.id}" class="btn btn-outline btn-sm" on:click|stopPropagation>
                   Open Full Details
                 </a>
+                {#if isSubsystemLead()}
+                  <button
+                    class="btn btn-danger btn-sm"
+                    on:click|stopPropagation={() => deleteSubsystemBuild(build)}
+                    title="Delete this build"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                {/if}
               </div>
 
               {#if expandedBuildId === build.id}
@@ -2118,16 +2204,8 @@
               <p>Loading BOM...</p>
             </div>
           {:else}            <div class="bom-actions">
-              <button class="btn btn-warning" on:click={addAllCOTSToPurchasing}>
-                <ShoppingCart size={16} />
-                Add All COTS to Purchasing
-              </button>
-              <button class="btn btn-primary" on:click={manufactureIteration}>
-                <Zap size={16} />
-                Manufacture Iteration
-              </button>              <button class="btn btn-secondary" on:click={buildDuplicate}>
-                <Copy size={16} />
-                Build Duplicate
+              <button class="btn btn-primary" on:click={saveAllBomItems}>
+                Save
               </button>
             </div><div class="bom-table-container">
               <table class="bom-table">
@@ -2242,6 +2320,22 @@
                                 STEP
                               </button>
                             {/if}
+                          </div>
+                        {:else if item.part_type === 'manufactured' && ['router', '3d-print', 'lathe'].includes(item.workflow)}
+                          <!-- No OnShape part behind this item (manual CSV import) - there's
+                               nothing to fetch geometry from programmatically, so offer an
+                               optional manual attachment instead. Lathe alone also accepts a
+                               PDF drawing (a lathe part is more often communicated as a print
+                               than router/3d-print's watertight solid). -->
+                          <div class="manual-file-attach">
+                            <input
+                              type="file"
+                              accept={item.workflow === 'lathe' ? '.step,.stp,.pdf' : '.step,.stp'}
+                              on:change={(e) => { item.attachedFile = e.target.files?.[0] || null; buildBOM = [...buildBOM]; }}
+                            />
+                            <span class="manual-file-hint">
+                              {item.workflow === 'lathe' ? 'STEP or PDF, optional' : 'STEP, optional'}
+                            </span>
                           </div>
                         {:else}
                           <span class="no-data">No part ID</span>
@@ -2781,14 +2875,20 @@
     border-bottom: 1px solid var(--border);
   }
 
-  .bom-table-container { margin-bottom: 1.5rem; }
+  .bom-table-container { margin-bottom: 1.5rem; overflow-x: auto; }
   .bom-table { table-layout: auto; font-size: 0.85rem; }
-  .bom-table th, .bom-table td { padding: 0.35rem 0.5rem; min-width: 80px; max-width: 350px; white-space: nowrap; vertical-align: middle; }
-  .bom-table th { font-size: 0.95rem; font-weight: 600; }
+  .bom-table th, .bom-table td { padding: 0.35rem 0.5rem; min-width: 80px; max-width: 350px; white-space: normal; overflow-wrap: anywhere; vertical-align: middle; }
+  .bom-table th { font-size: 0.95rem; font-weight: 600; white-space: nowrap; }
   .bom-table td { font-size: 0.85rem; vertical-align: top; padding: 0.75rem 0.5rem; }
+  .bom-table td select, .bom-table td input, .bom-table td .btn { max-width: 100%; }
+  .bom-table .stock-select { display: flex; flex-direction: column; gap: 0.35rem; min-width: 10rem; }
+  .bom-table .download-buttons, .bom-table .part-name { min-width: 0; }
 
   .part-name { font-weight: 500; }
   .part-description { font-size: 0.75rem; color: var(--secondary); margin-top: 0.25rem; }
+  .manual-file-attach { display: flex; flex-direction: column; gap: 0.25rem; min-width: 9rem; }
+  .manual-file-attach input[type="file"] { font-size: 0.75rem; }
+  .manual-file-hint { font-size: 0.7rem; color: var(--secondary); font-style: italic; }
 
   .workflow-mill { background: var(--blue-soft); color: var(--blue-base); border: 1px solid var(--blue-base); }
   .workflow-lasercut { background: var(--brand-gold-soft); color: var(--orange-strong); border: 1px solid var(--brand-gold-base); }

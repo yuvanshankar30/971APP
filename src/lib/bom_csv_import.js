@@ -100,3 +100,47 @@ export function parseBomCsvRows(text) {
 
   return rows;
 }
+
+// Classifies a manually-imported BOM row as COTS vs manufactured (+
+// workflow), by direct instruction. Deliberately independent of
+// bom_classify.js's OnShape-oriented manualClassification(): that one only
+// applies its material/name heuristics when the part number starts with
+// "P" (OnShape's own auto-numbering for modeled parts), and force-classifies
+// everything else as COTS - a manually-typed CSV has no such convention
+// (part numbers are often vendor SKUs like "WCP-0781", or blank), so that
+// gate would wrongly mark every real manufactured part (plates, spacers,
+// etc.) as COTS just because it lacks a "P" part number.
+export function classifyManualBomRow(row) {
+  const name = (row.part_name || '').toLowerCase();
+  const material = (row.material || '').toLowerCase();
+  const vendor = (row.vendor || '').trim();
+
+  const isCOTS =
+    vendor !== '' ||
+    material.includes('belt') || material.includes('acetal') || material.includes('delrin') ||
+    name.includes('wcp') ||
+    name.includes('screw') || name.includes('bolt') || name.includes('nut');
+
+  if (isCOTS) {
+    return { part_type: 'COTS', workflow: 'purchase' };
+  }
+
+  let workflow;
+  if (material.includes('nylon') || material.includes('pla') || material.includes('abs') || material.includes('petg') || material.includes('onyx')) {
+    workflow = '3d-print';
+  } else if (name.includes('spacer')) {
+    workflow = '3d-print';
+  } else if (name.includes('shaft') || name.includes('standoff')) {
+    workflow = 'lathe';
+  } else if (material.includes('birch') || material.includes('polycarbonate') || name.includes('plate') || name.includes('tube')) {
+    workflow = 'router';
+  } else {
+    workflow = 'mill';
+  }
+
+  return { part_type: 'manufactured', workflow };
+}
+
+export function classifyManualBomRows(rows) {
+  return rows.map((row) => ({ ...row, ...classifyManualBomRow(row) }));
+}
