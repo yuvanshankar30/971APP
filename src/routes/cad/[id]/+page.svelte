@@ -10,11 +10,13 @@
   import { onShapeAPI } from '$lib/onshape.js';  
   import { partClassificationService } from '$lib/bom_classify.js';
   import { parseBomCsvRows } from '$lib/bom_csv_import.js';
+  import { pickStockAndWorkflow } from '$lib/stock_match.js';
   import { detectVendorFromString, buildVendorSearchUrl } from '$lib/vendor_detect.js';
   import { formatPacificDate } from '$lib/timezone.js';
   import { goto } from '$app/navigation';
-  import { ArrowLeft, Triangle, Circle, Download, Settings, Plus, ShoppingCart, Zap, Copy, Trash2, Users, AlertTriangle } from 'lucide-svelte';
+  import { ArrowLeft, Triangle, Circle, Download, Settings, Plus, ShoppingCart, Zap, Copy, Trash2, Users, AlertTriangle, Box } from 'lucide-svelte';
   import stockData from '$lib/stock.json';
+  import CadViewer from '$lib/components/CadViewer.svelte';
 
   // Slack bot base URL for purchase notifications (defaults to in-app endpoint)
   const BOT_BASE_URL = import.meta.env?.VITE_BOT_BASE_URL || '/api/971bot';
@@ -107,6 +109,11 @@
   let manualBuildName = '';
   let manualBuildFile = null;
   let loadingManualBom = false;
+
+  // "View CAD" 3D preview for any BOM item with a real OnShape part behind
+  // it - CadViewer.svelte's Onshape path just needs source_type set on top
+  // of the onshape_* fields already present on every buildBOM item.
+  let cadViewerItem = null;
 
   function rememberLastSubsystem(subsystemData) {
     if (!browser || !subsystemData?.id) return;
@@ -1167,70 +1174,10 @@
   function autoAssignStock(index) {
     const part = buildBOM[index];
     if (!part || part.part_type === 'COTS') return;
-    
-    const workflow = part.workflow;
-    const material = (part.material || '').toLowerCase();
-    const dimX = part.bounding_box_x * 39.3701; // Convert to inches
-    const dimY = part.bounding_box_y * 39.3701;
-    const dimZ = part.bounding_box_z * 39.3701;
-    const dimensions = [dimX, dimY, dimZ].sort((a, b) => a - b);
-    const [minDim, midDim, maxDim] = dimensions;
-    
-    const workflowStocks = stockData[workflow] || [];
-    let bestMatch = null;
-    
-    // Find best matching stock
-    for (const stock of workflowStocks) {
-      if (material.includes(stock.material.toLowerCase())) {
-        if (workflow === 'laser-cut') {
-          // Match by thickness for sheet materials
-          if (stock.thickness && Math.abs(minDim - stock.thickness) < 0.1) {
-            bestMatch = stock;
-            break;
-          }
-        } else if (workflow === 'lathe') {
-          // Match by diameter for round stock
-          if (stock.diameter && Math.abs(maxDim - stock.diameter) < 0.1) {
-            bestMatch = stock;
-            break;
-          } else if (stock.diameter_max && maxDim < stock.diameter_max) {
-            bestMatch = stock;
-          } else if (stock.diameter_min && maxDim > stock.diameter_min) {
-            bestMatch = stock;
-          } else if (stock.hex_size) {
-            // ThunderHex matching
-            if (Math.abs(maxDim - stock.hex_size) < 0.1 && midDim < stock.length_max) {
-              bestMatch = stock;
-              break;
-            }
-          }
-        } else if (workflow === 'router') {
-          // Match tube stock
-          if (stock.outer_width && stock.outer_height) {
-            if ((Math.abs(dimX - stock.outer_width) < 0.1 && Math.abs(dimY - stock.outer_height) < 0.1) ||
-                (Math.abs(dimX - stock.outer_height) < 0.1 && Math.abs(dimY - stock.outer_width) < 0.1)) {
-              bestMatch = stock;
-              break;
-            }
-          }
-        } else {
-          // Default material match for mill and 3d-print
-          bestMatch = stock;
-          break;
-        }
-      }
-    }
-    
-    // Fallback to first material match if no exact match
-    if (!bestMatch) {
-      bestMatch = workflowStocks.find(stock => 
-        material.includes(stock.material.toLowerCase())
-      );
-    }
-    
-    if (bestMatch) {
-      part.stock_assignment = bestMatch.description;
-    }
+
+    const { stock, workflow } = pickStockAndWorkflow(stockData, part);
+    if (workflow !== part.workflow) part.workflow = workflow;
+    if (stock) part.stock_assignment = stock.description;
   }
 
   async function addAllCOTSToPurchasing() {
@@ -2006,6 +1953,7 @@
                             <th>Workflow</th>
                             <th>Material</th>
                             <th>Status</th>
+                            <th>CAD</th>
                             {#if isSubsystemMember() && hasPermission(user, 'CREATE_BUILDS')}
                               <th>Manufacturing / Purchasing</th>
                             {/if}
@@ -2020,6 +1968,16 @@
                               <td>{item.workflow || '—'}</td>
                               <td>{item.material || '—'}</td>
                               <td>{item.status}</td>
+                              <td>
+                                {#if item.onshape_part_id}
+                                  <button class="btn btn-outline btn-sm" on:click={() => (cadViewerItem = item)}>
+                                    <Box size={12} />
+                                    View CAD
+                                  </button>
+                                {:else}
+                                  <span class="no-data">—</span>
+                                {/if}
+                              </td>
                               {#if isSubsystemMember() && hasPermission(user, 'CREATE_BUILDS')}
                                 <td>
                                   {#if item.added}
@@ -2243,28 +2201,29 @@
                           Add                        </button>
                       </td>
                       <td>
-                        {#if item.onshape_part_id && item.part_type === 'manufactured'}
+                        {#if item.onshape_part_id}
                           <div class="download-buttons">
                             <button
-                              class="btn btn-sm btn-download"
-                              on:click={() => downloadPartFile(item, 'step')}
-                              title="Download STEP for 3D printing"
+                              class="btn btn-sm btn-secondary"
+                              on:click={() => (cadViewerItem = item)}
+                              title="View 3D model"
                             >
-                              <Download size={12} />
-                              STEP
+                              <Box size={12} />
+                              View CAD
                             </button>
-                            <button
-                              class="btn btn-sm btn-download"                              on:click={() => downloadPartFile(item, 'step')}
-                              title="Download STEP for CAM"
-                            >
-                              <Download size={12} />
-                              X_T
-                            </button>
+                            {#if item.part_type === 'manufactured' && item.workflow === 'router'}
+                              <button
+                                class="btn btn-sm btn-download"
+                                on:click={() => downloadPartFile(item, 'step')}
+                                title="Download STEP for the router CAM workflow"
+                              >
+                                <Download size={12} />
+                                STEP
+                              </button>
+                            {/if}
                           </div>
-                        {:else if !item.onshape_part_id}
-                          <span class="no-data">No part ID</span>
                         {:else}
-                          <span class="no-data">COTS item</span>
+                          <span class="no-data">No part ID</span>
                         {/if}
                       </td>
                     </tr>
@@ -2317,6 +2276,40 @@
             <button class="btn" on:click={() => { showPurchaseModal = false; purchaseModalItem = null; }}>Cancel</button>
             <button class="btn btn-yellow" on:click={confirmAddToPurchasingFromModal}>Add to Purchasing</button>
           </div>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  <!-- CAD 3D Viewer Modal - any BOM row with a real OnShape part behind it -->
+  {#if cadViewerItem}
+    <div
+      class="modal-backdrop"
+      role="button"
+      tabindex="0"
+      aria-label="Close CAD viewer"
+      on:click|self={() => (cadViewerItem = null)}
+      on:keydown={(e) => {
+        const activatesBackdrop = e.key === 'Escape' || ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget);
+        if (activatesBackdrop) { e.preventDefault(); cadViewerItem = null; }
+      }}
+    >
+      <div
+        class="modal"
+        role="dialog"
+        aria-modal="true"
+        tabindex="0"
+        style="--modal-width: 900px;"
+        on:click|stopPropagation
+        on:keydown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); cadViewerItem = null; } }}
+      >
+        <div class="modal-header">
+          <h3>{cadViewerItem.part_name || '3D Model'}</h3>
+          <button type="button" class="modal-close-button" aria-label="Close CAD viewer" on:click={() => (cadViewerItem = null)}>×</button>
+        </div>
+        <div class="modal-body">
+          <CadViewer part={{ ...cadViewerItem, source_type: 'onshape_api' }} stepFileName={null} />
+          <p class="cad-viewer-hint">Drag to rotate - scroll to zoom - right-drag to pan</p>
         </div>
       </div>
     </div>
@@ -2730,6 +2723,7 @@
   }
   .subsystem-bom-table th { color: var(--secondary); font-weight: 600; }
   .bom-added-label { color: var(--green-strong); font-weight: 600; font-size: 0.8rem; }
+  .cad-viewer-hint { text-align: center; color: var(--text-muted); font-size: 0.8rem; margin: 0.5rem 0 0; }
 
   .build-status {
     display: inline-flex;

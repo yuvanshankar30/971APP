@@ -561,25 +561,6 @@ class OnShapeAPI {
             console.error('Error in analyzeBOM:', error);            throw error;
         }
     }
-
-    // Auto-assign stock based on part properties and available stock
-    async autoAssignStock(parts, stockTypes) {
-        for (const part of parts) {
-            if (part.part_type === 'manufactured' && part.material) {
-                // Find matching stock type
-                const matchingStock = stockTypes.find(stock => 
-                    stock.material.toLowerCase().includes(part.material.toLowerCase()) &&
-                    stock.workflow === part.workflow
-                );
-                
-                if (matchingStock) {
-                    part.stock_assignment = `${matchingStock.material} - ${matchingStock.stock_type}`;
-                }
-            }
-        }
-        
-        return parts;
-    }
 }
 
 export const onShapeAPI = new OnShapeAPI();
