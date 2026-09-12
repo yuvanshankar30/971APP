@@ -1,3 +1,5 @@
+import { MATCH_RATING_FIELDS, parseAutoPointsEstimate } from '$lib/matchScouting.js';
+
 // Summarizes a flat list of scout_data_events rows (as returned by
 // GET /datascout?team_key=...&event_key=...) for one team into simple,
 // robust aggregates. Deliberately not a full analytics engine - just what's
@@ -21,6 +23,62 @@ function parseNumeric(raw) {
   if (raw == null || raw === '') return null;
   const v = Number(raw);
   return Number.isFinite(v) ? v : null;
+}
+
+function average(values) {
+  const usable = values.filter(Number.isFinite);
+  return usable.length ? usable.reduce((sum, value) => sum + value, 0) / usable.length : null;
+}
+
+function normalizedEstimate(row, averageKey, bandKey) {
+  const stored = parseNumeric(row?.[averageKey]);
+  if (stored != null) return stored;
+  return parseAutoPointsEstimate(row?.[bandKey])?.average ?? null;
+}
+
+function countListValues(rows, key) {
+  const counts = {};
+  for (const row of rows) {
+    for (const value of Array.isArray(row?.[key]) ? row[key] : []) {
+      const label = String(value || '').trim();
+      if (label) counts[label] = (counts[label] || 0) + 1;
+    }
+  }
+  return counts;
+}
+
+// Match Scouting writes one structured report per scout, match, and robot.
+// Keep this summary separate from the event-tap summary above: it lets every
+// downstream consumer use the richer report without pretending duplicate
+// reports from two scouts are two different matches.
+export function summarizeMatchScoutEntries(entries) {
+  const rows = (entries || []).filter((row) => row?.match_key);
+  const ratingAverages = {};
+  for (const field of MATCH_RATING_FIELDS) {
+    ratingAverages[field] = average(rows.map((row) => parseNumeric(row?.ratings?.[field])));
+  }
+  const knownAutoRuns = rows
+    .map((row) => row?.auto_moved)
+    .filter((value) => value === 'ran' || value === 'did-not-run' || typeof value === 'boolean');
+
+  return {
+    reportCount: rows.length,
+    matchesScouted: new Set(rows.map((row) => row.match_key)).size,
+    avgAutoPoints: average(rows.map((row) => normalizedEstimate(row, 'auto_points_average', 'auto_points_band'))),
+    avgBallsScored: average(rows.map((row) => normalizedEstimate(row, 'balls_scored_average', 'balls_scored_band'))),
+    avgDriverSkill: average(rows.map((row) => parseNumeric(row?.driver_skill))),
+    avgIntakeSpeed: average(rows.map((row) => parseNumeric(row?.intake_speed))),
+    ratingAverages,
+    autoRunRate: knownAutoRuns.length
+      ? knownAutoRuns.filter((value) => value === 'ran' || value === true).length / knownAutoRuns.length
+      : null,
+    collisionRate: rows.length ? rows.filter((row) => row?.auto_collision === true).length / rows.length : null,
+    incidentRate: rows.length
+      ? rows.filter((row) => row?.crash_or_break === true || row?.intake_jammed === true || ['disabled', 'died'].includes(row?.robot_disabled)).length / rows.length
+      : null,
+    roleCounts: countListValues(rows, 'teleop_roles'),
+    ballSourceCounts: countListValues(rows, 'ball_sources')
+  };
 }
 
 export function summarizeTeamEvents(events) {
@@ -390,9 +448,18 @@ export function buildPowerRankings(teams, events, notes = [], pitInputs = {}) {
     eventsByTeam.get(row.team_key).push(row);
   }
 
+  const matchEntriesByTeam = new Map();
+  for (const row of pitInputs.matchEntries || []) {
+    if (!row?.team_key) continue;
+    if (!matchEntriesByTeam.has(row.team_key)) matchEntriesByTeam.set(row.team_key, []);
+    matchEntriesByTeam.get(row.team_key).push(row);
+  }
+
   const rows = (teams || []).map((team) => ({
     ...team,
-    scoutSummary: summarizeTeamPerformance(eventsByTeam.get(team.key) || [])
+    scoutSummary: summarizeTeamPerformance(eventsByTeam.get(team.key) || []),
+    matchScoutSummary: summarizeMatchScoutEntries(matchEntriesByTeam.get(team.key) || []),
+    matchScoutEntries: matchEntriesByTeam.get(team.key) || []
   }));
   const metricValues = (key) => rows.map((row) => row.scoutSummary[key]);
   const notesByTeam = new Map();
@@ -411,12 +478,19 @@ export function buildPowerRankings(teams, events, notes = [], pitInputs = {}) {
   const bpsValues = [...pitByTeam.values()].map((entry) => parseNumeric(entry?.estimated_bps));
   const ranked = rows.map((row) => {
     const summary = row.scoutSummary;
+    const matchSummary = row.matchScoutSummary;
     const performanceScore = weightedScore([
       { value: normalize(summary.avgFuel, metricValues('avgFuel')), weight: 0.4 },
+      { value: normalize(matchSummary.avgBallsScored, rows.map((item) => item.matchScoutSummary.avgBallsScored)), weight: 0.15 },
       { value: normalize(summary.avgDrivingRank, metricValues('avgDrivingRank')), weight: 0.2 },
+      { value: normalize(matchSummary.avgDriverSkill, rows.map((item) => item.matchScoutSummary.avgDriverSkill)), weight: 0.1 },
       { value: normalize(summary.avgAccuracy, metricValues('avgAccuracy')), weight: 0.15 },
+      { value: normalize(matchSummary.ratingAverages['Shot accuracy'], rows.map((item) => item.matchScoutSummary.ratingAverages['Shot accuracy'])), weight: 0.075 },
       { value: normalize(summary.avgSpeed, metricValues('avgSpeed')), weight: 0.1 },
-      { value: normalize(summary.avgClimbLevel, metricValues('avgClimbLevel')), weight: 0.15 }
+      { value: normalize(matchSummary.ratingAverages['Cycle speed'], rows.map((item) => item.matchScoutSummary.ratingAverages['Cycle speed'])), weight: 0.05 },
+      { value: normalize(summary.avgClimbLevel, metricValues('avgClimbLevel')), weight: 0.15 },
+      { value: normalize(matchSummary.avgAutoPoints, rows.map((item) => item.matchScoutSummary.avgAutoPoints)), weight: 0.025 },
+      { value: normalize(matchSummary.ratingAverages.Reliability, rows.map((item) => item.matchScoutSummary.ratingAverages.Reliability)), weight: 0.025 }
     ]);
     const noteSummary = summarizeScoutNotes(notesByTeam.get(row.key) || []);
     const pitEntry = pitByTeam.get(row.key) || null;

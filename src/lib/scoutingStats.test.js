@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   summarizeTeamEvents, summarizeTeamPerformance, buildPowerRankings,
   fuelCountFromEvents, deriveMatchTeamRow, summarizeScoutNotes, summarizePitScouting,
-  applyPairwiseConsensus, summarizePairwisePair
+  applyPairwiseConsensus, summarizePairwisePair, summarizeMatchScoutEntries
 } from './scoutingStats.js';
 
 function event(overrides) {
@@ -164,6 +164,56 @@ describe('deriveMatchTeamRow', () => {
 });
 
 describe('power rankings', () => {
+  it('summarizes every structured match scouting field used by downstream views', () => {
+    const summary = summarizeMatchScoutEntries([
+      {
+        match_key: '2026casf_qm1', auto_points_average: 40, balls_scored_average: 75,
+        driver_skill: 4, intake_speed: 3, auto_moved: 'ran', auto_collision: true,
+        intake_jammed: false, crash_or_break: false, robot_disabled: 'no',
+        ratings: { 'Shot accuracy': 5, 'Cycle speed': 4, Reliability: 3 },
+        teleop_roles: ['Scoring', 'Defense'], ball_sources: ['source']
+      },
+      {
+        match_key: '2026casf_qm2', auto_points_band: '20-30', balls_scored_band: '25-50',
+        driver_skill: 2, intake_speed: 1, auto_moved: 'did-not-run', auto_collision: false,
+        intake_jammed: true, crash_or_break: false, robot_disabled: 'no',
+        ratings: { 'Shot accuracy': 3, 'Cycle speed': 2, Reliability: 1 },
+        teleop_roles: ['Scoring'], ball_sources: ['source', 'floor']
+      }
+    ]);
+
+    expect(summary).toMatchObject({
+      reportCount: 2,
+      matchesScouted: 2,
+      avgAutoPoints: 32.5,
+      avgBallsScored: 56.25,
+      avgDriverSkill: 3,
+      avgIntakeSpeed: 2,
+      autoRunRate: 0.5,
+      collisionRate: 0.5,
+      incidentRate: 0.5,
+      roleCounts: { Scoring: 2, Defense: 1 },
+      ballSourceCounts: { source: 2, floor: 1 }
+    });
+    expect(summary.ratingAverages).toMatchObject({ 'Shot accuracy': 4, 'Cycle speed': 3, Reliability: 2 });
+  });
+
+  it('uses match scouting evidence in rankings when event taps are absent', () => {
+    const teams = [{ key: 'frc1' }, { key: 'frc2' }];
+    const matchEntries = [
+      { team_key: 'frc1', match_key: 'm1', balls_scored_average: 25, driver_skill: 2, ratings: { Reliability: 2 } },
+      { team_key: 'frc2', match_key: 'm1', balls_scored_average: 100, driver_skill: 5, ratings: { Reliability: 5 } }
+    ];
+
+    const ranked = buildPowerRankings(teams, [], [], { matchEntries });
+
+    expect(ranked.find((row) => row.key === 'frc2').powerRank).toBe(1);
+    expect(ranked.find((row) => row.key === 'frc2').matchScoutSummary.reportCount).toBe(1);
+    expect(ranked.find((row) => row.key === 'frc2').scoutPower).toBeGreaterThan(
+      ranked.find((row) => row.key === 'frc1').scoutPower
+    );
+  });
+
   it('aggregates fuel and climb results by match', () => {
     const events = [
       event({ event_type: 'hub_fuel' }),

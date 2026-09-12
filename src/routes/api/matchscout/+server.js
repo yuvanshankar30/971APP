@@ -84,7 +84,19 @@ export async function GET({ request, url }) {
   if (matchKey) query = query.eq('match_key', matchKey);
   const { data, error } = await query.order('match_key').order('team_key');
   if (error) return json({ error: error.message }, { status: 500 });
-  return json({ success: true, data });
+  const entries = data || [];
+  const scoutIds = [...new Set(entries.map((entry) => entry.created_by).filter(Boolean))];
+  const profiles = scoutIds.length
+    ? await db.from('user_profiles').select('id,full_name,email').in('id', scoutIds)
+    : { data: [], error: null };
+  const scoutNames = new Map((profiles.data || []).map((profile) => [
+    profile.id,
+    profile.full_name || profile.email || profile.id
+  ]));
+  return json({
+    success: true,
+    data: entries.map((entry) => ({ ...entry, scout_name: scoutNames.get(entry.created_by) || null }))
+  });
 }
 
 export async function POST({ request }) {

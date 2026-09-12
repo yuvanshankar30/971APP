@@ -1155,7 +1155,7 @@ export async function GET({ request }) {
     const eventKey = settings.event_key;
     const smartFuelEnabled = settings.smart_fuel_algorithm_enabled;
 
-    const [upcomingRes, matchesRes, eventTeamsRes, usersRes, assignmentsRes, pitRes, competitionRoleKeys] = await Promise.all([
+    const [upcomingRes, matchesRes, eventTeamsRes, usersRes, assignmentsRes, pitRes, matchReportsRes, competitionRoleKeys] = await Promise.all([
       fetchUpcomingEvents(),
       fetchEventMatches(eventKey),
       fetchEventTeams(eventKey),
@@ -1170,12 +1170,16 @@ export async function GET({ request }) {
       eventKey
         ? selectPitScoutEntries(db, (query) => query.eq('event_key', eventKey))
         : Promise.resolve({ data: [], error: null, schema: null, warning: null }),
+      eventKey
+        ? db.from('match_scout_entries').select('*').eq('event_key', eventKey).order('updated_at', { ascending: false })
+        : Promise.resolve({ data: [], error: null }),
       ensureCompetitionRoleKeys(db)
     ]);
 
     if (usersRes.error) return json({ error: usersRes.error.message }, { status: 500 });
     if (assignmentsRes.error) return json({ error: assignmentsRes.error.message }, { status: 500 });
     if (pitRes.error) return json({ error: pitRes.error.message }, { status: 500 });
+    if (matchReportsRes.error) return json({ error: matchReportsRes.error.message }, { status: 500 });
 
     const competitionRoleOptions = [...COMPETITION_ROLE_PRIORITY];
     const competitionRoleKeyIds = competitionRoleOptions
@@ -1197,6 +1201,9 @@ export async function GET({ request }) {
     // even if TBA calls fail or the event team list is empty.
     const pitRowsForTeamSeed = pitRes.data || [];
     for (const row of pitRowsForTeamSeed) {
+      if (row?.team_key) teamSet.add(row.team_key);
+    }
+    for (const row of matchReportsRes.data || []) {
       if (row?.team_key) teamSet.add(row.team_key);
     }
 
@@ -1261,6 +1268,7 @@ export async function GET({ request }) {
     for (const row of dataEvidenceRows) addLocalSlot(row?.match_key, row?.team_key);
     for (const row of noteEvidenceRows) addLocalSlot(row?.match_key, row?.team_key);
     for (const row of quickEvidenceRows) addLocalSlot(row?.match_key, row?.team_key);
+    for (const row of matchReportsRes.data || []) addLocalSlot(row?.match_key, row?.team_key);
 
     for (const [localMatchKey, teamKeys] of localSlotsByMatch.entries()) {
       const teams = [...teamKeys];
@@ -1294,6 +1302,12 @@ export async function GET({ request }) {
       }));
 
     const userNameMap = new Map(users.map((u) => [u.id, u.full_name || u.email || u.id]));
+    const matchReports = (matchReportsRes.data || []).map((report) => ({
+      ...report,
+      scout_name: userNameMap.get(report.created_by) || null
+    }));
+    const matchReportMatches = new Set(matchReports.map((report) => report.match_key).filter(Boolean));
+    const matchReportTeams = new Set(matchReports.map((report) => report.team_key).filter(Boolean));
 
     const dataMetrics = computeTypeMetrics({
       type: 'data',
@@ -1401,6 +1415,11 @@ export async function GET({ request }) {
             missed_shifts: quickMetrics.missed_shifts,
             missed_shift_percent: quickMetrics.missed_shift_percent
           },
+          match: {
+            reports: matchReports.length,
+            matches: matchReportMatches.size,
+            teams: matchReportTeams.size
+          },
           overall: {
             assigned_percent: pct(
               dataMetrics.assigned_matches + noteMetrics.assigned_matches,
@@ -1417,6 +1436,7 @@ export async function GET({ request }) {
           }
         },
         missed_matches: missedMatches,
+        match_reports: matchReports,
         smart_fuel_model: smartFuelModel,
         quick_scout_model: quickScoutModel
       }

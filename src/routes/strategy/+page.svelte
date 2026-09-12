@@ -5,6 +5,7 @@
   import { fetchActiveScoutingEventKey, fetchAvailableScoutingEvents } from '$lib/scoutingEvent.js';
   import { buildStrategyRows, strategyTotals } from '$lib/strategyScouting.js';
   import SeasonFilter from '$lib/components/SeasonFilter.svelte';
+  import MatchScoutReport from '$lib/components/MatchScoutReport.svelte';
 
   let eventKey = '';
   let selectedEventKey = null;
@@ -100,13 +101,15 @@
       {:else}
         <div class="board-table-wrap">
           <table class="board-table">
-            <thead><tr><th>Team</th><th>Matches</th><th>Fuel</th><th>Accuracy</th><th>Auto</th><th>Pit</th><th>Notes</th><th>Autos</th><th>Risk</th></tr></thead>
+            <thead><tr><th>Team</th><th>Data matches</th><th>Reports</th><th>Fuel</th><th>Reported balls</th><th>Accuracy</th><th>Auto</th><th>Pit</th><th>Notes</th><th>Autos</th><th>Risk</th></tr></thead>
             <tbody>
               {#each filteredRows as row}
                 <tr class:selected={selectedTeam?.teamKey === row.teamKey} on:click={() => selectedTeamKey = row.teamKey}>
                   <td><strong>{row.teamNumber}</strong>{#if row.pitEntry?.robot_archetype}<small>{row.pitEntry.robot_archetype}</small>{/if}</td>
-                  <td>{row.performance.matchesScouted || row.matchEntries.length || '-'}</td>
+                  <td>{row.performance.matchesScouted || '-'}</td>
+                  <td>{row.matchScoutSummary.reportCount || '-'}</td>
                   <td>{number(row.performance.avgFuel, 0)}</td>
+                  <td>{number(row.matchScoutSummary.avgBallsScored, 0)}</td>
                   <td>{number(row.performance.avgAccuracy)}</td>
                   <td>{number(row.autoAverage, 0)}</td>
                   <td>{row.pitEntry ? 'Yes' : '-'}</td>
@@ -129,6 +132,17 @@
           <div><span>Auto average</span><strong>{number(selectedTeam.autoAverage, 0)}</strong></div>
           <div><span>Auto ran</span><strong>{percent(selectedTeam.autoMobilityRate)}</strong></div>
           <div><span>Climb success</span><strong>{percent(selectedTeam.performance.climbSuccessRate)}</strong></div>
+          <div><span>Reported balls</span><strong>{number(selectedTeam.matchScoutSummary.avgBallsScored, 0)}</strong></div>
+          <div><span>Driver skill</span><strong>{number(selectedTeam.matchScoutSummary.avgDriverSkill)}</strong></div>
+          <div><span>Incidents</span><strong>{percent(selectedTeam.matchScoutSummary.incidentRate)}</strong></div>
+        </div>
+        <div class="brief-section match-reports">
+          <h3>Match scouting reports</h3>
+          {#if selectedTeam.matchEntries.length}
+            {#each selectedTeam.matchEntries as entry (entry.id)}
+              <MatchScoutReport report={entry} />
+            {/each}
+          {:else}<p class="muted">No match report yet.</p>{/if}
         </div>
         <div class="brief-section">
           <h3>Pit capability</h3>
