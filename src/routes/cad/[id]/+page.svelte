@@ -156,10 +156,10 @@
       await loadStockTypes();
       await loadSubsystemBuilds();
       
-      // Load member details if user is subsystem lead
-      if (isSubsystemLead()) {
-        await loadSubsystemMembers();
-      }
+      // Load member details unconditionally - isSubsystemLead() itself now
+      // depends on subsystemMembers (co-lead status lives there), so it
+      // can't be used to decide whether to load it in the first place.
+      await loadSubsystemMembers();
     } catch (error) {
       console.error('Error in onMount:', error);
       goto('/');
@@ -456,7 +456,10 @@
   // Check if current user is the lead of this subsystem
   function isSubsystemLead(subsystemParam = subsystem) {
     if (!user || !subsystemParam) return false;
-    return subsystemParam.lead_user_id === user.id || isGeneralLead();
+    if (subsystemParam.lead_user_id === user.id || isGeneralLead()) return true;
+    // Co-leads: subsystem_members rows with is_lead=true, promoted by the
+    // primary lead (or another co-lead) via the Manage Members modal.
+    return subsystemMembers.some((m) => m.user_id === user.id && m.is_lead);
   }
 
   async function deleteSubsystem() {
@@ -511,7 +514,7 @@
       // Load current members with their profile info
       const { data: members, error: membersError } = await supabase
         .from('subsystem_members')
-        .select('id, user_id, joined_at')
+        .select('id, user_id, joined_at, is_lead')
         .eq('subsystem_id', subsystemId);
 
       if (membersError) throw membersError;
@@ -632,6 +635,24 @@
     } catch (error) {
       console.error('Error removing member:', error);
       toastActions.show('Failed to remove member: ' + error.message);
+    }
+  }
+
+  async function toggleMemberLead(member) {
+    const nextIsLead = !member.is_lead;
+    try {
+      const { error } = await supabase
+        .from('subsystem_members')
+        .update({ is_lead: nextIsLead })
+        .eq('id', member.id);
+
+      if (error) throw error;
+
+      await loadSubsystemMembers();
+      toastActions.show(nextIsLead ? `${member.profile?.full_name || 'Member'} is now a co-lead` : `${member.profile?.full_name || 'Member'} is no longer a co-lead`);
+    } catch (error) {
+      console.error('Error updating co-lead status:', error);
+      toastActions.show('Failed to update co-lead status: ' + error.message);
     }
   }
 
@@ -2432,25 +2453,36 @@
             {:else}
               <div class="member-list">
                 {#each subsystemMembers as member}
-                  <div class="member-item" class:is-lead={member.user_id === subsystem.lead_user_id}>
+                  <div class="member-item" class:is-lead={member.user_id === subsystem.lead_user_id || member.is_lead}>
                     <div class="member-info">
                       <span class="member-name">{member.profile?.full_name || 'Unknown'}</span>
                       <span class="member-email">{member.profile?.email || ''}</span>
                       {#if member.user_id === subsystem.lead_user_id}
                         <span class="lead-badge">Lead</span>
+                      {:else if member.is_lead}
+                        <span class="lead-badge">Co-Lead</span>
                       {/if}
                     </div>
-                    {#if member.user_id !== subsystem.lead_user_id}
-                      <button 
-                        class="btn btn-sm btn-danger" 
-                        on:click={() => removeMemberFromSubsystem(member.id, member.user_id)}
-                        title="Remove member"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    {:else}
-                      <span class="protected-badge" title="Cannot remove the subsystem lead">Protected</span>
-                    {/if}
+                    <div class="member-item-actions">
+                      {#if member.user_id !== subsystem.lead_user_id}
+                        <button
+                          class="btn btn-sm btn-outline"
+                          on:click={() => toggleMemberLead(member)}
+                          title={member.is_lead ? 'Remove co-lead' : 'Make co-lead'}
+                        >
+                          {member.is_lead ? 'Remove Lead' : 'Make Lead'}
+                        </button>
+                        <button
+                          class="btn btn-sm btn-danger"
+                          on:click={() => removeMemberFromSubsystem(member.id, member.user_id)}
+                          title="Remove member"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      {:else}
+                        <span class="protected-badge" title="Cannot remove the subsystem lead">Protected</span>
+                      {/if}
+                    </div>
                   </div>
                 {/each}
               </div>
@@ -3152,6 +3184,13 @@
     align-items: center;
     gap: 0.5rem;
     flex-wrap: wrap;
+  }
+
+  .member-item-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-shrink: 0;
   }
 
   .member-info .member-name {

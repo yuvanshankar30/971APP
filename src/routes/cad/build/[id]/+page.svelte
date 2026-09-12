@@ -169,7 +169,8 @@
             onshape_document_id,
             onshape_workspace_id,
             onshape_element_id,
-            lead_user_id
+            lead_user_id,
+            subsystem_members(user_id, is_lead)
           )
         `)
         .eq('id', buildId)
@@ -1041,8 +1042,10 @@
   // Check if current user is the lead of this build's subsystem
   function isSubsystemLead() {
     if (!build || !user) return false;
-    // Need to fetch the subsystem lead_user_id
-    return build.subsystems?.lead_user_id === user.id || isGeneralLead();
+    if (build.subsystems?.lead_user_id === user.id || isGeneralLead()) return true;
+    // Co-leads: subsystem_members rows with is_lead=true, promoted by the
+    // primary lead (or another co-lead) via cad/[id]'s Manage Members modal.
+    return (build.subsystems?.subsystem_members || []).some((member) => member.user_id === user.id && member.is_lead);
   }
 
   async function deleteBuild() {

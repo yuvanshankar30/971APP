@@ -159,7 +159,7 @@
         .from('subsystems')
         .select(`
           *,
-          subsystem_members(user_id)
+          subsystem_members(user_id, is_lead)
         `);
 
       if (error) throw error;
@@ -762,7 +762,10 @@
 
   function isSubsystemLead(subsystem) {
     if (!subsystem || !user) return false;
-    return subsystem.lead_user_id === user.id || isGeneralLead();
+    if (subsystem.lead_user_id === user.id || isGeneralLead()) return true;
+    // Co-leads: subsystem_members rows with is_lead=true, promoted by the
+    // primary lead (or another co-lead) via the Manage Members modal.
+    return (subsystem.subsystem_members || []).some((member) => member.user_id === user.id && member.is_lead);
   }
 
   // Check if user can delete a build (must be lead of the subsystem the build belongs to)
