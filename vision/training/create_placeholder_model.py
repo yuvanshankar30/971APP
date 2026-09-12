@@ -6,7 +6,7 @@ detection-head shape but has never seen a single real training example - its
 detections are meaningless noise. Never point a real VISION_MODEL_PATH
 deployment at this; it exists purely so someone can prove the runner<->API
 plumbing works end to end before investing in real data collection/labeling/
-training (see ../../scoutingvision-remaining-work.md).
+training (see ../../docs/plans/scoutingvision-remaining-work.md).
 
 Verified during development: this actually runs (built a real 6-class
 checkpoint from yolo11n.pt in a temp dir, confirmed the resulting model

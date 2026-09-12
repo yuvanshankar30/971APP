@@ -599,7 +599,7 @@ export async function notifyRouterLeadsStatusById(partId, newStatus) {
 // Vision alert recipients are an explicit admin-managed opt-in
 // (user_profiles.vision_notify, set from the admin panel's "Vision Alerts"
 // checkbox) rather than derived from a role - this is a small, restricted
-// project (see scoutingvision.md) and the recipient list is meant to stay a
+// project (see docs/guides/scoutingvision.md) and the recipient list is meant to stay a
 // short, deliberately-chosen set, not everyone with a given role.
 async function visionAlertRecipients(supa) {
   const { data, error } = await supa

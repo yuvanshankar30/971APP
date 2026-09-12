@@ -19,7 +19,7 @@ otherwise ship straight to production. All of that work lives on branch
 **[PR #311](https://github.com/frc971/spartanshub/pull/311)**, which stays
 open (by direct instruction) until the pipeline works end to end - don't
 merge it without checking its current comment thread first, per this repo's
-own [CLAUDE.md](../../../../CLAUDE.md)/[CONTRIBUTING.md](../../../../CONTRIBUTING.md)
+own [CLAUDE.md](../../../../CLAUDE.md)/[CONTRIBUTING.md](../../../../docs/CONTRIBUTING.md)
 convention on reading a branch's PR before resuming work on it.
 
 ## Prerequisites (one-time, per machine)

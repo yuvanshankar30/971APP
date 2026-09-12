@@ -19,7 +19,7 @@ export const PERMISSIONS = [
   'DATA_SCOUT_MEMBER', // eligible to be assigned to data scouting
   'VIDEO_SCOUT_MEMBER', // eligible for future video scouting workflows
   'MANAGE_ATTENDANCE',
-  // Vision scouting (see scoutingvision.md) is open to every approved user,
+  // Vision scouting (see docs/guides/scoutingvision.md) is open to every approved user,
   // same as the rest of Competition - only the "push results into real
   // scout_data_events/power rankings" action is gated, since that's a
   // meaningfully higher-stakes action than just using the tool.

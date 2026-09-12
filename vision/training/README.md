@@ -5,7 +5,7 @@
 > are, why splits must be by match, and what has to be true before a model's
 > output is allowed into scouting data. This README is the command reference.
 
-No real trained model exists yet (see `../../scoutingvision-remaining-work.md`).
+No real trained model exists yet (see `../../docs/plans/scoutingvision-remaining-work.md`).
 Before investing in the real labeling/training workflow below, prove the
 runner<->API plumbing works end to end with a placeholder:
 

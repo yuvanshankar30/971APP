@@ -21,7 +21,7 @@ Do this **before** reading code, before planning changes, and before
 assuming a branch's current state reflects what still needs to happen. A
 branch that looks "done" from `git log` alone may have an open review
 comment asking for something completely different (this exact thing
-happened on PR #78 — see `scoutingvision.md`'s history for what it cost).
+happened on PR #78 — see `docs/guides/scoutingvision.md`'s history for what it cost).
 This applies to your **own** past work too: if you're picking up a branch
 you already touched, re-check the PR for comments added since you last
 looked, not just your own memory of the task.
@@ -45,7 +45,7 @@ origin        https://github.com/wjojarth23/971app.git    — legacy/unrelated f
   Someone else's merged PR can change files you're about to touch (schema,
   nav config, shared libs) — starting from a stale `main` is how you
   silently revert someone else's work when your branch merges later (see
-  the `scoutingvision.md` postmortem on PR #78 for a real example of
+  the `docs/guides/scoutingvision.md` postmortem on PR #78 for a real example of
   exactly this happening).
 
 ## GitHub workflow
@@ -194,7 +194,7 @@ checking layout/CSS in isolation, but say that's what you did.
   (`mcp__supabase__execute_sql` against `information_schema.tables`, or
   `mcp__supabase__list_migrations`), or ask. Getting this wrong is exactly
   how "PostgREST can't find a relationship" production errors happen (real
-  incident, `scoutingvision-remaining-work.md`).
+  incident, `docs/plans/scoutingvision-remaining-work.md`).
 - Write migrations idempotently: `CREATE TABLE IF NOT EXISTS`,
   `ADD COLUMN IF NOT EXISTS`, `DROP POLICY IF EXISTS` before
   `CREATE POLICY`. Assume a migration might be re-run.
@@ -292,11 +292,11 @@ or changing any UI:
   (general) or `autocam/docs/` (AutoCAM specifically) — link to it from
   `README.md` rather than duplicating detail there.
 - For a large, actively-evolving feature, a standalone file-by-file
-  implementation reference at the repo root (e.g. `scoutingvision.md`) —
-  "where is the code and what does it actually do," kept in sync commit by
+  implementation reference in `docs/guides/` (e.g. `docs/guides/scoutingvision.md`)
+  — "where is the code and what does it actually do," kept in sync commit by
   commit — is a good pattern to follow for anything of comparable size.
-  Pair it with a living "what's still not done" doc
-  (`scoutingvision-remaining-work.md`) if the feature ships incrementally
+  Pair it with a living "what's still not done" doc in `docs/plans/`
+  (`docs/plans/scoutingvision-remaining-work.md`) if the feature ships incrementally
   across multiple PRs; update both, don't let either go stale.
 - Don't write speculative "future work" as if it were done. If something
   is a placeholder, a stub, or unverified, say so explicitly in the doc

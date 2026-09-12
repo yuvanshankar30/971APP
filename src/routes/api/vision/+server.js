@@ -352,7 +352,7 @@ export async function POST({ request }) {
 
     const db = getSupabase(); // service role: writes to scout_data_events, a
     // table this actor's own RLS identity has no INSERT grant on (see
-    // scoutingvision.md) - the permission check above is the real gate.
+    // docs/guides/scoutingvision.md) - the permission check above is the real gate.
     const { data: run, error: runError } = await db.from('vision_runs').select('*, vision_matches(match_key)').eq('id', body.run_id).single();
     if (runError) return json({ error: runError.message }, { status: 404 });
     if (run.status !== 'complete') return json({ error: 'Only a completed run can be released' }, { status: 400 });

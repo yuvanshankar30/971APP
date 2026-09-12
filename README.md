@@ -149,9 +149,10 @@ browser confirmation or prompt popups.
   discrepancies Slack-DM an admin-managed opt-in list
   (`user_profiles.vision_notify`, toggled from the admin panel). See
   `implementations/vision-scouting-system.md` for the design/contracts,
-  `scoutingvision.md` for the full file-by-file implementation reference, and
-  `scoutingvision-remaining-work.md` for what still has to happen before it is
-  usable (it is not deployed or running against real footage yet).
+  `docs/guides/scoutingvision.md` for the full file-by-file implementation
+  reference, and `docs/plans/scoutingvision-remaining-work.md` for what
+  still has to happen before it is usable (it is not deployed or running
+  against real footage yet).
 - **Planning**: Gantt-based build/task scheduling (`wx-svelte-gantt`),
   Slack-driven prompts and reminders on a 15-minute cron sweep.
 - **Purchasing/Budget**: COTS (commercial off-the-shelf) part stock
@@ -321,7 +322,7 @@ Drive/manufacturing-folder integration) or `implementations/` (everything
 else) - this file stays at the whole-project level and links out rather
 than duplicating that detail.
 
-**[ARCHITECTURE.md](ARCHITECTURE.md)** has the whole-system diagram (client,
+**[ARCHITECTURE.md](docs/design/ARCHITECTURE.md)** has the whole-system diagram (client,
 Cloud Run, Supabase, the two AutoCAM execution paths, the Vision Scouting
 GPU worker, external integrations) - same living-reference rule as this
 file: update its diagram alongside this section, not separately from it.
@@ -332,7 +333,7 @@ file: update its diagram alongside this section, not separately from it.
   `jsconfig.json` for editor type-checking.
 - **Hosting**: dual right now - Google Cloud Run (`adapter-node`, primary
   going forward) and Vercel (`adapter-auto`, being phased out). See
-  `docs/deployment/google-cloud-run.md` and `googledrivesetup.md` (Drive
+  `docs/deployment/google-cloud-run.md` and `docs/guides/googledrivesetup.md` (Drive
   watcher setup) for the Cloud Run side. `cloudbuild.yaml`/`Dockerfile` are
   Cloud-Run-specific config - they may or may not be physically present on
   every remote's `main` depending on sync history, but they're only

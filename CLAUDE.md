@@ -1,7 +1,7 @@
 # Spartans Hub — instructions for Claude Code
 
 Full contributing conventions (branching, PRs, migrations, secrets, code
-style, design system, docs) live in `CONTRIBUTING.md` — read it before
+style, design system, docs) live in `docs/CONTRIBUTING.md` — read it before
 making changes here, and follow it the same way you'd follow a direct
 instruction from the user.
 

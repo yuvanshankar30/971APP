@@ -11,7 +11,7 @@ Hybrid game-piece detection and scoring attribution, and the robot
 occlusion-recovery (ReID) logic, are adapted from community R&D shared on
 Chief Delphi ("Computer Vision Scouting",
 chiefdelphi.com/t/computer-vision-scouting/511642) - see
-scoutingvision.md for the full writeup of what changed and why.
+docs/guides/scoutingvision.md for the full writeup of what changed and why.
 """
 from __future__ import annotations
 

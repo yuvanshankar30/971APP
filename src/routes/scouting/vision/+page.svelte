@@ -178,7 +178,7 @@
       }
       // Field mask / goal zones: normalized (0-1) polygons, same shape the
       // hybrid classical-CV game-piece pipeline reads server-side (see
-      // scoutingvision.md). A plain JSON textarea for now, matching the
+      // docs/guides/scoutingvision.md). A plain JSON textarea for now, matching the
       // existing homography field - a visual polygon-drawing tuner is a
       // natural future enhancement, not built here.
       let fieldMask = null;
@@ -223,7 +223,7 @@
         config: {
           confidence_floor: Number(confidenceFloor),
           // Hybrid classical-CV game-piece detection tuning (see
-          // scoutingvision.md) - HSV threshold range for the game piece
+          // docs/guides/scoutingvision.md) - HSV threshold range for the game piece
           // color, plus contour area/circularity filters. Defaults on the
           // runner side if left blank; per-venue lighting is exactly why
           // this is tunable per run rather than hardcoded.
@@ -485,7 +485,7 @@
           <summary>Calibration (optional)</summary>
           <div class="upload-grid">
             <label>3×3 homography JSON <input class="form-input" placeholder="[[1,0,0],[0,1,0],[0,0,1]]" bind:value={homographyText} /></label>
-            <label>Field mask JSON <input class="form-input" placeholder="[[x,y], ...] normalized 0-1" bind:value={fieldMaskText} title="Region of interest excluding audience/background - see scoutingvision.md" /></label>
+            <label>Field mask JSON <input class="form-input" placeholder="[[x,y], ...] normalized 0-1" bind:value={fieldMaskText} title="Region of interest excluding audience/background - see docs/guides/scoutingvision.md" /></label>
             <label>Goal zones JSON <input class="form-input" placeholder='[{"label","alliance","polygon"}]' bind:value={goalZonesText} title="Where a scored game piece's trajectory ends - required for automatic fuel attribution" /></label>
           </div>
         </details>

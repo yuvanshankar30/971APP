@@ -192,7 +192,7 @@
   }
 
   // Vision Scouting itself is open to every approved user (see
-  // scoutingvision.md) - VISION_RELEASE is the only gated action, for
+  // docs/guides/scoutingvision.md) - VISION_RELEASE is the only gated action, for
   // pushing results into real scout_data_events/power rankings. Granted as
   // a real PERMISSIONS entry (see src/lib/permissions.js), not role-derived,
   // so this writes user.permissions directly via the generic permission-

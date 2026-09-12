@@ -1,5 +1,5 @@
 -- Extends the vision scouting system (see migrations/20260828_vision_system.sql
--- and scoutingvision.md) with three additions:
+-- and docs/guides/scoutingvision.md) with three additions:
 --   1. Slack alerting opt-in (user_profiles.vision_notify) + seeding the two
 --      requested initial recipients.
 --   2. A reviewed-result "release" bridge: marks a run as released and keeps

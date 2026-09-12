@@ -270,7 +270,7 @@ informative than an aggregate score.
 
 Promotion is a **human decision**, deliberately. Nothing in `release-run`
 checks model quality (this is tracked as an open decision — see A8 in
-`scoutingvision-remaining-work.md`).
+`docs/plans/scoutingvision-remaining-work.md`).
 
 Before a model's output should be allowed into `scout_data_events`:
 
@@ -299,7 +299,7 @@ these exact weights.
 | Climb attempt/success indistinguishable | Labelers used different rules; no written definition |
 | Detects robots in the crowd | Field mask not calibrated for that view |
 | Fuel counts wildly wrong | This is *not* the detector — tune HSV/area/circularity per venue |
-| Everything unattributed | `identity_map` empty; name robots in review (see `scoutingvision.md`) |
+| Everything unattributed | `identity_map` empty; name robots in review (see `docs/guides/scoutingvision.md`) |
 
 ---
 

@@ -7,7 +7,7 @@ val: images/val
 test: images/test
 # fuel_scored is NOT a class here - game-piece detection moved to a
 # classical HSV/contour pipeline (vision_runner.py's detect_game_pieces),
-# tuned via vision_runs.config instead of trained. See scoutingvision.md's
+# tuned via vision_runs.config instead of trained. See docs/guides/scoutingvision.md's
 # "Hybrid game-piece detection" section for why. YOLO only ever needs to
 # find robots (for tracking/attribution) and climb state.
 names:

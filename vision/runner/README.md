@@ -7,7 +7,7 @@ authenticated runner API. The web app never receives model weights or the
 runner token.
 
 **Hybrid pipeline** (adapted from community R&D shared on Chief Delphi,
-"Computer Vision Scouting" - see `scoutingvision.md` for the full writeup):
+"Computer Vision Scouting" - see `docs/guides/scoutingvision.md` for the full writeup):
 
 - **Robots**: versioned custom Ultralytics YOLO weights + built-in
   cross-frame tracking, plus a velocity+color-histogram re-identification
@@ -150,7 +150,7 @@ sane reported camera position before its numbers are trusted.
 This has to run continuously on the DGX Spark, not on Cloud Run
 (no GPU support there, and this polls for work rather than serving inbound
 requests). No such host is provisioned yet as of this doc - see
-`../../scoutingvision-remaining-work.md`. Three ready-to-use options,
+`../../docs/plans/scoutingvision-remaining-work.md`. Three ready-to-use options,
 depending on what hardware ends up hosting this:
 
 - **`Dockerfile`** + **`docker-compose.yml`** - the recommended DGX Spark

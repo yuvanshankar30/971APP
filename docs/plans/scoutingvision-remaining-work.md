@@ -1,6 +1,6 @@
 # Vision Scouting — everything left before this is functional
 
-Companion to `scoutingvision.md` (which is the file-by-file "where is the code
+Companion to `../guides/scoutingvision.md` (which is the file-by-file "where is the code
 and what does it do" reference). This doc is the gap between *"the code
 exists"* and *"this produces a scouting number someone would trust."*
 

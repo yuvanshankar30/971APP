@@ -1,5 +1,5 @@
 -- Adds per-view calibration for the hybrid classical-CV game-piece pipeline
--- (see scoutingvision.md's "Hybrid game-piece detection" section). Source:
+-- (see docs/guides/scoutingvision.md's "Hybrid game-piece detection" section). Source:
 -- community R&D shared on Chief Delphi ("Computer Vision Scouting",
 -- chiefdelphi.com/t/computer-vision-scouting/511642) - a field mask/ROI and
 -- goal-zone polygons are how that team excludes audience/background noise

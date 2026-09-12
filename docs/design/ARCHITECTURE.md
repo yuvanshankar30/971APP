@@ -1,7 +1,7 @@
 # Architecture
 
 A whole-app visual overview: how the pieces connect, not what each one does
-in detail - see [README.md](README.md)'s own **Stack**, **AutoCAM**,
+in detail - see [README.md](../../README.md)'s own **Stack**, **AutoCAM**,
 **Module map**, **Data layer**, and **Deployment & CI** sections for that.
 This file is a **living reference**, same rule as README's: update the
 diagram whenever a subsystem, external integration, or deployment target is
