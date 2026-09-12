@@ -13,7 +13,7 @@
   import { detectVendorFromString, buildVendorSearchUrl } from '$lib/vendor_detect.js';
   import { formatPacificDate } from '$lib/timezone.js';
   import { goto } from '$app/navigation';
-  import { ArrowLeft, Triangle, Circle, Download, Settings, Plus, ShoppingCart, Zap, Copy, Trash2, Users } from 'lucide-svelte';
+  import { ArrowLeft, Triangle, Circle, Download, Settings, Plus, ShoppingCart, Zap, Copy, Trash2, Users, AlertTriangle } from 'lucide-svelte';
   import stockData from '$lib/stock.json';
 
   // Slack bot base URL for purchase notifications (defaults to in-app endpoint)
@@ -2500,13 +2500,14 @@
         </div>
         <div class="modal-content">
           <p class="transfer-warning">
-            ⚠️ You are about to transfer leadership of <strong>{subsystem.name}</strong> to another user. 
-            This action cannot be undone. The new lead will have full control over this subsystem.
+            <AlertTriangle size={17} />
+            <span>You are about to transfer leadership of <strong>{subsystem.name}</strong> to another user.
+            This action cannot be undone. The new lead will have full control over this subsystem.</span>
           </p>
 
           {#if transferEligibleMembers.length === 0}
             <p class="no-eligible">
-              There are no other members to transfer leadership to. 
+              There are no other members to transfer leadership to.
               Add members to the subsystem first.
             </p>
           {:else}
@@ -2514,11 +2515,7 @@
               <label for="transfer-target">Select new subsystem lead:</label>
               <select id="transfer-target" class="form-input" bind:value={transferTargetUserId}>
                 <option value={null}>-- Select a member --</option>
-                {#each transferEligibleMembers as member}
-                  <option value={member.user_id}>
-                    {member.profile?.full_name || member.profile?.email || 'Unknown'}
-                  </option>
-                {/each}
+                {#each transferEligibleMembers as member}<option value={member.user_id}>{member.profile?.full_name || member.profile?.email || 'Unknown'}</option>{/each}
               </select>
             </div>
           {/if}
@@ -3153,7 +3150,7 @@
   }
 
   .member-item.is-lead {
-    background: var(--primary-soft, #e3f2fd);
+    background: var(--accent-subtle);
   }
 
   .member-info {
@@ -3187,13 +3184,21 @@
 
   /* Transfer Modal Styles */
   .transfer-warning {
-    background: var(--warning-soft, #fff3e0);
-    border: 1px solid var(--warning, #ff9800);
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+    background: var(--brand-gold-soft);
+    border: 1px solid var(--brand-gold-strong);
     border-radius: 8px;
     padding: 1rem;
     margin-bottom: 1.5rem;
     color: var(--text);
     font-size: 0.9rem;
+  }
+  .transfer-warning :global(svg) {
+    flex-shrink: 0;
+    margin-top: 0.15rem;
+    color: var(--brand-gold-strong);
   }
 
   .no-eligible {
