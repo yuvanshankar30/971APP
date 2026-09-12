@@ -2,6 +2,7 @@ import { PUBLIC_ONSHAPE_ACCESS_KEY, PUBLIC_ONSHAPE_SECRET_KEY, PUBLIC_ONSHAPE_BA
 import { env } from '$env/dynamic/private';
 import { json } from '@sveltejs/kit';
 import { getCached, setCached, CACHE_TTL_MS, buildCacheKey } from '$lib/server/onshape_cache.js';
+import { scheduleOnshapeRequest } from '$lib/server/onshape_rate_limiter.js';
 
 const ONSHAPE_BASE_URL = PUBLIC_ONSHAPE_BASE_URL || 'https://frc971.onshape.com';
 
@@ -901,12 +902,12 @@ export async function GET({ url }) {
 
         console.log('Using authentication type: Basic Auth');
 
-        const response = await fetch(fullUrl, {
+        const response = await scheduleOnshapeRequest(() => fetch(fullUrl, {
             method: 'GET',
             headers: headers,
             signal: controller.signal,
             redirect: 'manual'
-        });
+        }));
 
         clearTimeout(timeoutId);
 

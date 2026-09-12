@@ -13,6 +13,25 @@
   import { GENERAL_ROLES } from '$lib/permissions.js';
   import { formatPacificDate, formatPacificDateTimeWithZone } from '$lib/timezone.js';
 
+  // Same helper/endpoint as cad/[id]'s addSingleToBuild - notifies manufacturing
+  // leads when a BOM row gets promoted to a real parts-table request.
+  async function sendNotification(type, payload = {}) {
+    try {
+      const { data } = await supabase.auth.getSession();
+      const token = data?.session?.access_token;
+      await fetch('/api/notifications', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          ...(token ? { authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({ type, ...payload })
+      });
+    } catch (err) {
+      console.warn('Notification request failed', err);
+    }
+  }
+
   let user = null;
   let loading = true;
   let build = null;
@@ -941,7 +960,12 @@
             parts_id: partRow.id,
             added: true
           }).eq('id', item.id);
-          
+
+          // Notify manufacturing leads - this path used to skip the
+          // notification that cad/[id]'s own add-to-build flow sends,
+          // so a part added from here never reached anyone's queue alert.
+          sendNotification('manufacturing-request', { part_id: partRow.id });
+
           // Fetch and cache preview image in the background (don't block)
           if (partRow.is_onshape_part) {
             fetchAndCachePreviewImage(partRow);

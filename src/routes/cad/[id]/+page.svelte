@@ -85,6 +85,18 @@
   let expandedBuildId = null;
   let buildBomByBuildId = {};
   let loadingBuildBomId = null;
+  let addingBomRowId = null;
+
+  // Separate purchase-modal state for promoting an already-saved build_bom row
+  // (inline BOM section) - kept distinct from purchaseModalItem/showPurchaseModal
+  // above, which insert a brand-new build_bom row as part of the build-creation
+  // review flow. Those two flows need different follow-up writes (update an
+  // existing row here vs insert a new one there), so sharing state would
+  // conflict.
+  let showSavedBomPurchaseModal = false;
+  let savedBomPurchaseModalItem = null;
+  let savedBomPurchaseModalUrl = '';
+  let savedBomPurchaseModalPrice = '';
 
   function rememberLastSubsystem(subsystemData) {
     if (!browser || !subsystemData?.id) return;
@@ -245,6 +257,162 @@
     } catch (error) {
       console.error('Error marking as assembled:', error);
       toastActions.show('Failed to mark as assembled: ' + error.message);
+    }
+  }
+
+  async function refreshBuildBom(buildId) {
+    const { data, error } = await supabase
+      .from('build_bom')
+      .select('*')
+      .eq('build_id', buildId)
+      .order('part_name', { ascending: true });
+    if (error) {
+      console.error('Error refreshing build BOM:', error);
+      return;
+    }
+    buildBomByBuildId = { ...buildBomByBuildId, [buildId]: data || [] };
+  }
+
+  // Promotes an already-saved build_bom row (shown in the inline BOM table
+  // below) into a real parts/purchasing/kitting record - the same three-way
+  // branch as /cad/build/[id]'s addFromFullBOM, mirrored here so a build's BOM
+  // no longer has to be reviewed on a separate page just to submit requests.
+  async function addSavedBomRowToDownstream(item) {
+    if (!item || item.added || addingBomRowId) return;
+    addingBomRowId = item.id;
+    try {
+      const project_id = subsystem?.name || 'Project';
+
+      if (item.part_type === 'COTS' && item.workflow === 'kit') {
+        const { data: kit, error: kitErr } = await supabase
+          .from('kitting')
+          .insert([{
+            name: item.part_name || item.part_number || 'Unnamed Item',
+            requester: user?.full_name || user?.email,
+            project_id,
+            quantity: item.quantity || 1,
+            status: 'pending',
+            workflow: 'kit'
+          }])
+          .select();
+        if (kitErr) throw kitErr;
+        const k = kit?.[0];
+        if (k?.id) {
+          await supabase.from('build_bom').update({ kitting_id: k.id, added: true }).eq('id', item.id);
+        }
+      } else if (item.part_type === 'COTS' || item.workflow === 'purchase') {
+        const detection = detectVendorFromString(item.vendor || item.part_name || item.part_number || '');
+        const vendor = detection?.vendor || item.vendor || null;
+        const rawUrl = buildVendorSearchUrl(detection);
+        const hasValidUrl = rawUrl && rawUrl.trim() !== '' && !rawUrl.endsWith('=');
+
+        if (!hasValidUrl) {
+          savedBomPurchaseModalItem = item;
+          savedBomPurchaseModalUrl = '';
+          savedBomPurchaseModalPrice = '';
+          showSavedBomPurchaseModal = true;
+          return;
+        }
+
+        const { data: pur, error: purErr } = await supabase
+          .from('purchasing')
+          .insert([{
+            name: item.part_name || item.part_number || 'Unnamed Item',
+            requester: user?.full_name || user?.email,
+            project_id,
+            quantity: item.quantity || 1,
+            material: item.material || '',
+            status: 'pending',
+            vendor: vendor || null,
+            url: rawUrl || null,
+            price: null,
+            workflow: 'purchase',
+            frc_team: user?.frc_team || null
+          }])
+          .select();
+        if (purErr) throw purErr;
+        const p = pur?.[0];
+        if (p?.id) {
+          await supabase.from('build_bom').update({ purchasing_id: p.id, added: true }).eq('id', item.id);
+        }
+      } else {
+        const wf = item.workflow || 'mill';
+        const { data: partData, error: partErr } = await supabase
+          .from('parts')
+          .insert([{
+            name: item.part_name || item.part_number || 'Unnamed Part',
+            requester: user?.full_name || user?.email,
+            project_id,
+            workflow: wf,
+            status: 'pending',
+            quantity: item.quantity || 1,
+            material: item.material || '',
+            file_name: '',
+            file_url: '',
+            frc_team: user?.frc_team || null,
+            stock_assignment: item.stock_assignment || null,
+            onshape_document_id: item.onshape_document_id || subsystem?.onshape_document_id || null,
+            onshape_wvm: item.onshape_wvm || null,
+            onshape_wvmid: item.onshape_wvmid || null,
+            onshape_element_id: item.onshape_element_id || subsystem?.onshape_element_id || null,
+            onshape_part_id: item.onshape_part_id || null,
+            file_format: 'step',
+            is_onshape_part: !!(item.onshape_document_id || item.onshape_part_id)
+          }])
+          .select();
+        if (partErr) throw partErr;
+        const createdPart = partData?.[0];
+        if (createdPart?.id) {
+          await supabase.from('build_bom').update({ parts_id: createdPart.id, added: true }).eq('id', item.id);
+          sendNotification('manufacturing-request', { part_id: createdPart.id });
+        }
+      }
+
+      await refreshBuildBom(item.build_id);
+      toastActions.show('Added to manufacturing/purchasing queue');
+    } catch (error) {
+      console.error('Failed to add BOM row to manufacturing/purchasing:', error);
+      toastActions.show('Failed to add item: ' + (error?.message || error));
+    } finally {
+      addingBomRowId = null;
+    }
+  }
+
+  async function confirmSavedBomPurchaseModal() {
+    if (!savedBomPurchaseModalItem) return;
+    const item = savedBomPurchaseModalItem;
+    showSavedBomPurchaseModal = false;
+    try {
+      const { data: pur, error: purErr } = await supabase
+        .from('purchasing')
+        .insert([{
+          name: item.part_name || item.part_number || 'Unnamed Item',
+          requester: user?.full_name || user?.email,
+          project_id: subsystem?.name || 'Project',
+          quantity: item.quantity || 1,
+          material: item.material || '',
+          status: 'pending',
+          vendor: item.vendor || null,
+          url: savedBomPurchaseModalUrl && savedBomPurchaseModalUrl.trim() !== '' ? savedBomPurchaseModalUrl.trim() : null,
+          price: savedBomPurchaseModalPrice && savedBomPurchaseModalPrice !== '' ? Number(savedBomPurchaseModalPrice) : null,
+          workflow: 'purchase',
+          frc_team: user?.frc_team || null
+        }])
+        .select();
+      if (purErr) throw purErr;
+      const p = pur?.[0];
+      if (p?.id) {
+        await supabase.from('build_bom').update({ purchasing_id: p.id, added: true }).eq('id', item.id);
+      }
+      await refreshBuildBom(item.build_id);
+      toastActions.show('Added to purchasing');
+    } catch (error) {
+      console.error('Failed to add from purchase modal:', error);
+      toastActions.show('Failed to add to purchasing: ' + (error?.message || error));
+    } finally {
+      savedBomPurchaseModalItem = null;
+      savedBomPurchaseModalUrl = '';
+      savedBomPurchaseModalPrice = '';
     }
   }
 
@@ -1850,6 +2018,9 @@
                             <th>Workflow</th>
                             <th>Material</th>
                             <th>Status</th>
+                            {#if isSubsystemMember() && hasPermission(user, 'CREATE_BUILDS')}
+                              <th>Manufacturing / Purchasing</th>
+                            {/if}
                           </tr>
                         </thead>
                         <tbody>
@@ -1861,6 +2032,21 @@
                               <td>{item.workflow || '—'}</td>
                               <td>{item.material || '—'}</td>
                               <td>{item.status}</td>
+                              {#if isSubsystemMember() && hasPermission(user, 'CREATE_BUILDS')}
+                                <td>
+                                  {#if item.added}
+                                    <span class="bom-added-label">Added</span>
+                                  {:else}
+                                    <button
+                                      class="btn btn-outline btn-sm"
+                                      disabled={addingBomRowId === item.id}
+                                      on:click={() => addSavedBomRowToDownstream(item)}
+                                    >
+                                      {addingBomRowId === item.id ? 'Adding…' : 'Add'}
+                                    </button>
+                                  {/if}
+                                </td>
+                              {/if}
                             </tr>
                           {/each}
                         </tbody>
@@ -1884,7 +2070,10 @@
       tabindex="0"
       aria-label="Close build BOM dialog"
       on:click|self={() => showBuildModal = false}
-      on:keydown={(e) => { if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); showBuildModal = false; } }}
+      on:keydown={(e) => {
+        const activatesBackdrop = e.key === 'Escape' || ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget);
+        if (activatesBackdrop) { e.preventDefault(); showBuildModal = false; }
+      }}
     >
       <div
         class="modal modal-large"
@@ -2055,7 +2244,10 @@
       tabindex="0"
       aria-label="Close purchase dialog"
       on:click|self={() => { showPurchaseModal = false; purchaseModalItem = null; }}
-      on:keydown={(e) => { if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); showPurchaseModal = false; purchaseModalItem = null; } }}
+      on:keydown={(e) => {
+        const activatesBackdrop = e.key === 'Escape' || ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget);
+        if (activatesBackdrop) { e.preventDefault(); showPurchaseModal = false; purchaseModalItem = null; }
+      }}
     >
       <div
         class="modal"
@@ -2081,6 +2273,49 @@
           <div class="modal-actions">
             <button class="btn" on:click={() => { showPurchaseModal = false; purchaseModalItem = null; }}>Cancel</button>
             <button class="btn btn-yellow" on:click={confirmAddToPurchasingFromModal}>Add to Purchasing</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  <!-- Purchase Link/Price Modal for the inline Builds section's saved BOM rows -->
+  {#if showSavedBomPurchaseModal}
+    <div
+      class="modal-backdrop"
+      role="button"
+      tabindex="0"
+      aria-label="Close purchase dialog"
+      on:click|self={() => { showSavedBomPurchaseModal = false; savedBomPurchaseModalItem = null; }}
+      on:keydown={(e) => {
+        const activatesBackdrop = e.key === 'Escape' || ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget);
+        if (activatesBackdrop) { e.preventDefault(); showSavedBomPurchaseModal = false; savedBomPurchaseModalItem = null; }
+      }}
+    >
+      <div
+        class="modal"
+        role="dialog"
+        aria-modal="true"
+        tabindex="0"
+        style="--modal-width: 560px;"
+        on:click|stopPropagation
+        on:keydown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); showSavedBomPurchaseModal = false; savedBomPurchaseModalItem = null; } }}
+      >
+        <div class="modal-header">
+          <h3>Provide vendor link and unit price</h3>
+          <button type="button" class="modal-close-button" aria-label="Close purchase dialog" on:click={() => { showSavedBomPurchaseModal = false; savedBomPurchaseModalItem = null; }}>×</button>
+        </div>
+        <div class="modal-content">
+          <p>Please supply a vendor URL and unit price for <strong>{savedBomPurchaseModalItem?.part_name || savedBomPurchaseModalItem?.part_number || 'this part'}</strong></p>
+          <div style="display:flex; flex-direction:column; gap:0.5rem;">
+            <label for="saved-bom-purchase-url">Vendor link</label>
+            <input id="saved-bom-purchase-url" class="form-input" type="text" bind:value={savedBomPurchaseModalUrl} placeholder="https://..." />
+            <label for="saved-bom-purchase-price">Unit price</label>
+            <input id="saved-bom-purchase-price" class="form-input" type="number" min="0" step="0.01" bind:value={savedBomPurchaseModalPrice} />
+          </div>
+          <div class="modal-actions">
+            <button class="btn" on:click={() => { showSavedBomPurchaseModal = false; savedBomPurchaseModalItem = null; }}>Cancel</button>
+            <button class="btn btn-yellow" on:click={confirmSavedBomPurchaseModal}>Add to Purchasing</button>
           </div>
         </div>
       </div>
@@ -2453,6 +2688,7 @@
     white-space: nowrap;
   }
   .subsystem-bom-table th { color: var(--secondary); font-weight: 600; }
+  .bom-added-label { color: var(--green-strong); font-weight: 600; font-size: 0.8rem; }
 
   .build-status {
     display: inline-flex;

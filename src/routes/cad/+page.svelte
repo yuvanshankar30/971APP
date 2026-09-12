@@ -1343,7 +1343,10 @@
       tabindex="0"
       aria-label="Close subsystem dialog"
       on:click|self={() => { showCreateModal = false; editingSubsystemId = null; }}
-      on:keydown={(e) => { if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); showCreateModal = false; editingSubsystemId = null; } }}
+      on:keydown={(e) => {
+        const activatesBackdrop = e.key === 'Escape' || ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget);
+        if (activatesBackdrop) { e.preventDefault(); showCreateModal = false; editingSubsystemId = null; }
+      }}
     >
       <div
         class="modal"
@@ -1417,7 +1420,10 @@
       tabindex="0"
       aria-label="Close OnShape dialog"
       on:click|self={() => showLinkModal = false}
-      on:keydown={(e) => { if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); showLinkModal = false; } }}
+      on:keydown={(e) => {
+        const activatesBackdrop = e.key === 'Escape' || ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget);
+        if (activatesBackdrop) { e.preventDefault(); showLinkModal = false; }
+      }}
     >
       <div
         class="modal"
@@ -1471,7 +1477,10 @@
       tabindex="0"
       aria-label="Close build BOM dialog"
       on:click|self={() => showBuildModal = false}
-      on:keydown={(e) => { if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); showBuildModal = false; } }}
+      on:keydown={(e) => {
+        const activatesBackdrop = e.key === 'Escape' || ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget);
+        if (activatesBackdrop) { e.preventDefault(); showBuildModal = false; }
+      }}
     >
       <div
         class="modal modal-large"

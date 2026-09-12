@@ -97,6 +97,9 @@ class OnShapeAPI {
 
     // Get assembly information (replaces releases/versions for now)
     async getAssemblyInfo(documentId, workspaceId, elementId) {
+        if (Date.now() < rateLimitedUntil) {
+            throw new Error('Onshape API rate limited (402) — cooling down');
+        }
         try {
             const params = new URLSearchParams({
                 action: 'assembly-info',
@@ -104,13 +107,17 @@ class OnShapeAPI {
                 workspaceId,
                 elementId
             });
-            
+
             const response = await fetch(`${this.apiRoute}?${params}`);
-            
+
+            if (response.status === 402) {
+                rateLimitedUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS;
+                throw new Error('Onshape API limit exceeded (402)');
+            }
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
-            
+
             return await response.json();
         } catch (error) {
             console.error('Error fetching assembly info:', error);
@@ -124,21 +131,28 @@ class OnShapeAPI {
 
     // Get document versions
     async getDocumentVersions(documentId) {
+        if (Date.now() < rateLimitedUntil) {
+            throw new Error('Onshape API rate limited (402) — cooling down');
+        }
         try {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 25000); // 25 second client timeout
-            
+
             const response = await fetch(`${this.apiRoute}?action=versions&documentId=${documentId}`, {
                 signal: controller.signal
             });
-            
+
             clearTimeout(timeoutId);
-            
+
+            if (response.status === 402) {
+                rateLimitedUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS;
+                throw new Error('Onshape API limit exceeded (402)');
+            }
             if (!response.ok) {
                 const errorText = await response.text();
                 throw new Error(`HTTP error! status: ${response.status} - ${errorText}`);
             }
-            
+
             return await response.json();
         } catch (error) {
             if (error.name === 'AbortError') {
@@ -151,19 +165,26 @@ class OnShapeAPI {
 
     // Get version details to check if it's a release
     async getVersionDetails(documentId, versionId) {
+        if (Date.now() < rateLimitedUntil) {
+            throw new Error('Onshape API rate limited (402) — cooling down');
+        }
         try {
             const params = new URLSearchParams({
                 action: 'version-details',
                 documentId,
                 versionId
             });
-            
+
             const response = await fetch(`${this.apiRoute}?${params}`);
-            
+
+            if (response.status === 402) {
+                rateLimitedUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS;
+                throw new Error('Onshape API limit exceeded (402)');
+            }
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
-            
+
             return await response.json();
         } catch (error) {
             console.error('Error fetching version details:', error);
@@ -171,6 +192,9 @@ class OnShapeAPI {
         }
     }    // Get assembly BOM for a specific version
     async getAssemblyBOM(documentId, workspaceId, elementId, versionId = null) {
+        if (Date.now() < rateLimitedUntil) {
+            throw new Error('Onshape API rate limited (402) — cooling down');
+        }
         try {
             const params = new URLSearchParams({
                 action: 'assembly-bom',
@@ -195,9 +219,13 @@ class OnShapeAPI {
             const response = await fetch(`${this.apiRoute}?${params}`, {
                 signal: controller.signal
             });
-            
+
             clearTimeout(timeoutId);
-            
+
+            if (response.status === 402) {
+                rateLimitedUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS;
+                throw new Error('Onshape API limit exceeded (402)');
+            }
             if (!response.ok) {
                 const errorText = await response.text();
                 throw new Error(`HTTP error! status: ${response.status} - ${errorText}`);
