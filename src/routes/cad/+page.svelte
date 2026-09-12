@@ -295,6 +295,14 @@
         insertData.onshape_document_id = parsed.documentId;
         insertData.onshape_workspace_id = parsed.workspaceId || null;
         insertData.onshape_element_id = parsed.elementId || null;
+      } else if (editingSubsystemId) {
+        // Field was cleared on an existing subsystem - this is an update
+        // (only fields present in insertData get written), so clearing the
+        // URL needs an explicit unlink or it silently keeps the old link.
+        insertData.onshape_url = null;
+        insertData.onshape_document_id = null;
+        insertData.onshape_workspace_id = null;
+        insertData.onshape_element_id = null;
       }
 
       let data = null;

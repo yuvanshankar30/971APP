@@ -809,6 +809,15 @@
     }
   }
 
+  // Items get added to the build one at a time from within the modal
+  // (addSingleToBuild) rather than through a single bulk-confirm step, so
+  // refresh the inline Builds section whenever the modal closes instead of
+  // after every individual add.
+  function closeBuildModal() {
+    showBuildModal = false;
+    loadSubsystemBuilds();
+  }
+
   async function analyzeBOM(bom) {
     console.log('Analyzing BOM with manual classification rules...');
     
@@ -1138,127 +1147,20 @@
     }
   }
 
-  async function confirmBuild() {
-    loadingBuild = true;
-    try {
-      // Use subsystem ID in build hash (not version) so builds can be rolled up across versions.
-      // build_hash has a UNIQUE constraint, so - same as addSingleToBuild/addPartToManufacturing
-      // below - find the existing rolled-up build for this subsystem instead of blindly
-      // inserting a second row with the same hash (that insert fails every time past the
-      // subsystem's first build).
-      const buildHash = `${subsystem.onshape_document_id}_${subsystem.id}`;
-
-      const { data: existingBuild, error: existingBuildError } = await supabase
-        .from('builds')
-        .select('id')
-        .eq('build_hash', buildHash)
-        .single();
-
-      if (existingBuildError && existingBuildError.code !== 'PGRST116') {
-        throw existingBuildError;
-      }
-
-      let build;
-      if (existingBuild) {
-        const { data: updatedBuild, error: updateError } = await supabase
-          .from('builds')
-          .update({
-            release_id: selectedVersion.id,
-            release_name: selectedVersion.name
-          })
-          .eq('id', existingBuild.id)
-          .select()
-          .single();
-
-        if (updateError) throw updateError;
-        build = updatedBuild;
-      } else {
-        const { data: newBuild, error } = await supabase
-          .from('builds')
-          .insert([{
-            subsystem_id: subsystem.id,
-            release_id: selectedVersion.id,
-            release_name: selectedVersion.name,
-            build_hash: buildHash,
-            created_by: user.id,
-            status: 'pending',
-            frc_team: user?.frc_team || null
-          }])
-          .select()
-          .single();
-
-        if (error) throw error;
-        build = newBuild;
-      }
-
-      // Insert BOM items: save entire BOM as 'other' so they don't affect progress sliders yet
-      // First, check if we've already inserted 'other' rows for this build to avoid duplicates
-      const { count: existingOtherCount, error: existingOtherErr } = await supabase
-        .from('build_bom')
-        .select('id', { count: 'exact', head: true })
-        .eq('build_id', build.id)
-        .eq('part_type', 'other');
-
-      if (existingOtherErr) {
-        console.warn('Warning checking existing BOM rows:', existingOtherErr.message);
-      }
-
-      const bomItems = buildBOM.map(item => {
-        // try to preserve useful metadata for later promotion to manufacturing/purchasing
-        const wvm = 'v';
-        const wvmid = selectedVersion.id;
-        const file_format = 'step';
-        return {
-          build_id: build.id,
-          part_name: item.part_name || item.part_number || 'Unknown Part',
-          part_number: item.part_number || null,
-          quantity: item.quantity || 1,
-          part_type: 'other',
-          material: item.material || null,
-          stock_assignment: item.stock_assignment || null,
-          workflow: item.workflow || item.manufacturing_process || null,
-          bounding_box_x: item.bounding_box_x || null,
-          bounding_box_y: item.bounding_box_y || null,
-          bounding_box_z: item.bounding_box_z || null,
-          onshape_part_id: item.onshape_part_id || null,
-          onshape_document_id: item.onshape_document_id || subsystem.onshape_document_id || null,
-          onshape_wvm: item.onshape_wvm || wvm,
-          onshape_wvmid: item.onshape_wvmid || wvmid,
-          onshape_element_id: item.onshape_element_id || item.onshape_part_studio_element_id || subsystem.onshape_element_id || null,
-          file_format,
-          is_onshape_part: !!item.onshape_part_id,
-          status: 'pending',
-          added_to_parts_list: false,
-          added_to_purchasing: false,
-          file_url: null
-        };
-      });
-
-      if (!existingOtherCount || existingOtherCount === 0) {
-        const { error: bomError } = await supabase
-          .from('build_bom')
-          .insert(bomItems);
-
-        if (bomError) throw bomError;
-      } else {
-        console.log(`Skipped inserting initial BOM: ${existingOtherCount} 'other' rows already exist for this build.`);
-      }
-
-      toastActions.show('Build created successfully!');
-      showBuildModal = false;
-      
-    } catch (error) {
-      console.error('Error creating build:', error);
-      toastActions.show('Failed to create build: ' + error.message);
-    } finally {
-      loadingBuild = false;
-    }
-  }
-
   async function addAllCOTSToPurchasing() {
     const cotsItems = buildBOM.filter(item => item.part_type === 'COTS');
-    // Placeholder for now
-    toastActions.show(`Would add ${cotsItems.length} COTS items to purchasing`);
+    if (cotsItems.length === 0) {
+      toastActions.show('No COTS items in this BOM');
+      return;
+    }
+    for (const item of cotsItems) {
+      await addSingleToBuild(item);
+      // A COTS item with no auto-detectable vendor URL opens the purchase
+      // modal and returns early - stop the batch there so its state (and
+      // the user's attention) isn't immediately overwritten by the next item.
+      if (showPurchaseModal) return;
+    }
+    toastActions.show(`Added ${cotsItems.length} COTS item${cotsItems.length === 1 ? '' : 's'} to purchasing`);
   }
 
   async function confirmAddToPurchasingFromModal() {
@@ -1302,7 +1204,8 @@
         material: queued.material || null,
         workflow: 'purchase',
         stock_assignment: null,
-        added_to_purchasing: true,
+        purchasing_id: inserted?.id || null,
+        added: true,
         status: 'pending'
       }]);
       if (bomError) throw bomError;
@@ -1340,12 +1243,20 @@
         });
       });
 
-      const newParts = buildBOM.filter(item => 
+      const newParts = buildBOM.filter(item =>
         item.part_type === 'manufactured' &&
         !existingParts.has(`${item.part_name}_${item.part_number}_${item.material}_${item.workflow}`)
       );
 
-      toastActions.show(`Would add ${newParts.length} new manufactured parts to parts list`);
+      if (newParts.length === 0) {
+        toastActions.show('No new manufactured parts - every part in this BOM already exists in a previous build');
+        return;
+      }
+
+      for (const item of newParts) {
+        await addSingleToBuild(item);
+      }
+      toastActions.show(`Added ${newParts.length} new manufactured part${newParts.length === 1 ? '' : 's'} to the parts list`);
     } catch (error) {
       console.error('Error checking for duplicates:', error);
       toastActions.show('Error checking for duplicate parts');
@@ -1353,7 +1264,14 @@
   }
   async function buildDuplicate() {
     const manufacturedItems = buildBOM.filter(item => item.part_type === 'manufactured');
-    toastActions.show(`Would add all ${manufacturedItems.length} manufactured parts to parts list`);
+    if (manufacturedItems.length === 0) {
+      toastActions.show('No manufactured parts in this BOM');
+      return;
+    }
+    for (const item of manufacturedItems) {
+      await addSingleToBuild(item);
+    }
+    toastActions.show(`Added ${manufacturedItems.length} manufactured part${manufacturedItems.length === 1 ? '' : 's'} to the parts list`);
   }
   // Download part file (STL or STEP)
   async function downloadPartFile(item, fileType) {
@@ -1608,9 +1526,9 @@
             bounding_box_y: item.bounding_box_y || null,
             bounding_box_z: item.bounding_box_z || null,
             onshape_part_id: item.onshape_part_id || null,
-            part_id: null,
+            purchasing_id: purchasingData?.[0]?.id || null,
             status: 'pending',
-            added_to_purchasing: true
+            added: true
           }]);
           if (bomError) throw bomError;
 
@@ -1731,10 +1649,10 @@
           bounding_box_y: item.bounding_box_y,
           bounding_box_z: item.bounding_box_z,
           onshape_part_id: partId,
-          part_id: createdPart?.id || null,
+          parts_id: createdPart?.id || null,
           file_url: file_url, // Add file URL to build_bom for tracking
           status: 'pending',
-          added_to_parts_list: true
+          added: true
         }]);
 
       if (bomError) throw bomError;
@@ -1742,31 +1660,6 @@
       // Mark as added in UI
       const partKey = item.part_number || item.part_name || `${item.part_name}_${Date.now()}`;
       addedPartsSet = new Set([...addedPartsSet, partKey]);
-
-      // Append created part id to builds.part_ids so build views load it
-      if (createdPart && createdPart.id) {
-        try {
-          const { data: buildRow, error: updErr } = await supabase
-            .from('builds')
-            .select('part_ids')
-            .eq('id', buildId)
-            .single();
-
-          if (updErr && updErr.code !== 'PGRST116') throw updErr;
-
-          const currentIds = buildRow?.part_ids || [];
-          const newIds = currentIds.includes(createdPart.id) ? currentIds : [...currentIds, createdPart.id];
-          if (!currentIds.includes(createdPart.id)) {
-            const { error: appendErr } = await supabase
-              .from('builds')
-              .update({ part_ids: newIds })
-              .eq('id', buildId);
-            if (appendErr) console.warn('Failed to append part id to build.part_ids', appendErr.message || appendErr);
-          }
-        } catch (e) {
-          console.warn('Error updating build.part_ids:', e?.message || e);
-        }
-      }
 
       // Force reactivity update
       buildBOM = [...buildBOM];
@@ -1906,9 +1799,9 @@
                     <p class="timeline-description">{item.description}</p>
                   {/if}
                   {#if isSubsystemMember() && hasPermission(user, 'CREATE_BUILDS')}
-                    <button 
+                    <button
                       class="btn btn-primary btn-sm"
-                      on:click={() => goto(`/cad/bom?subsystem=${subsystem.id}&version=${item.id}`)}
+                      on:click={() => createBuildFromRelease(item)}
                     >
                       <Settings size={14} />
                       Create Build
@@ -2069,10 +1962,10 @@
       role="button"
       tabindex="0"
       aria-label="Close build BOM dialog"
-      on:click|self={() => showBuildModal = false}
+      on:click|self={closeBuildModal}
       on:keydown={(e) => {
         const activatesBackdrop = e.key === 'Escape' || ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget);
-        if (activatesBackdrop) { e.preventDefault(); showBuildModal = false; }
+        if (activatesBackdrop) { e.preventDefault(); closeBuildModal(); }
       }}
     >
       <div
@@ -2082,11 +1975,11 @@
         tabindex="0"
         style="--modal-width: 1200px;"
         on:click|stopPropagation
-        on:keydown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); showBuildModal = false; } }}
+        on:keydown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); closeBuildModal(); } }}
       >
         <div class="modal-header">
           <h2>Build BOM - {selectedVersion?.name}</h2>
-          <button type="button" class="modal-close-button" aria-label="Close build BOM dialog" on:click={() => showBuildModal = false}>×</button>
+          <button type="button" class="modal-close-button" aria-label="Close build BOM dialog" on:click={closeBuildModal}>×</button>
         </div>
 
         <div class="modal-content">
