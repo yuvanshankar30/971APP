@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import { supabase } from '$lib/supabase.js';
+  import { toastActions } from '$lib/toast.js';
   import { userStore, loadUserFromUUID, upsertProfileIfMissing, setUserUUID } from '$lib/stores/user.js';
   import { Settings, Package, Wrench, CheckCircle, Clock, ExternalLink, DollarSign } from 'lucide-svelte';
   import { goto } from '$app/navigation';
@@ -51,7 +52,7 @@
       tempProjectName = { ...tempProjectName, [newPid]: newPid };
     } catch (err) {
       console.error('Failed creating project container:', err);
-      alert('Failed to create project container: ' + (err?.message || err));
+      toastActions.show('Failed to create project container: ' + (err?.message || err));
     }
   }
 
@@ -67,7 +68,7 @@
       projectOpen = { ...projectOpen, [pid]: true };
     } catch (err) {
       console.error('Failed assigning build to project:', err);
-      alert('Failed to assign build to project: ' + (err?.message || err));
+      toastActions.show('Failed to assign build to project: ' + (err?.message || err));
     }
   }
 
@@ -93,7 +94,7 @@
       await loadBuilds();
     } catch (err) {
       console.error('Failed renaming project:', err);
-      alert('Failed renaming project: ' + (err?.message || err));
+      toastActions.show('Failed renaming project: ' + (err?.message || err));
     }
   }
 
@@ -359,7 +360,7 @@
       await loadBuilds();
     } catch (error) {
       console.error('Error marking as assembled:', error);
-      alert('Failed to mark as assembled');
+      toastActions.show('Failed to mark as assembled');
     }
   }
   // Calculate progress based on BOM rows (each row counts as one part regardless of quantity)

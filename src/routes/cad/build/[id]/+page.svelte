@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import { requestConfirmation } from '$lib/confirmation.js';
+  import { toastActions } from '$lib/toast.js';
   import { page } from '$app/stores';
   import { supabase } from '$lib/supabase.js';
   import { userStore, loadUserFromUUID, upsertProfileIfMissing, setUserUUID } from '$lib/stores/user.js';
@@ -312,7 +313,7 @@
       }
     } catch (error) {
       console.error('Error loading build details:', error);
-      alert('Failed to load build details: ' + error.message);
+      toastActions.show('Failed to load build details: ' + error.message);
       goto('/cad/build');
     } finally {
       loading = false;
@@ -334,7 +335,7 @@
       await loadBuildDetails();
     } catch (error) {
       console.error('Error marking as assembled:', error);
-      alert('Failed to mark as assembled');
+      toastActions.show('Failed to mark as assembled');
     }
   }
 
@@ -625,7 +626,7 @@
       await loadBuildDetails();
     } catch (e) {
       console.error('Edit save failed:', e);
-      alert('Failed to save changes');
+      toastActions.show('Failed to save changes');
     } finally {
       showEditModal = false;
       editTarget = null;
@@ -681,7 +682,7 @@
       const { error: delPartsErr } = await supabase.from('parts').delete().eq('id', normalizedId);
       if (delPartsErr && String(delPartsErr.message || delPartsErr).toLowerCase().includes('foreign key')) {
         console.error('Failed to delete part due to foreign key:', delPartsErr);
-        alert('Failed to delete part: ' + delPartsErr.message);
+        toastActions.show('Failed to delete part: ' + delPartsErr.message);
         return;
       }
       if (delPartsErr) console.warn('Non-critical error deleting from parts:', delPartsErr);
@@ -689,7 +690,7 @@
       const { error: delPurchErr } = await supabase.from('purchasing').delete().eq('id', normalizedId);
       if (delPurchErr && String(delPurchErr.message || delPurchErr).toLowerCase().includes('foreign key')) {
         console.error('Failed to delete purchasing due to foreign key:', delPurchErr);
-        alert('Failed to delete purchasing entry: ' + delPurchErr.message);
+        toastActions.show('Failed to delete purchasing entry: ' + delPurchErr.message);
         return;
       }
       if (delPurchErr) console.warn('Non-critical error deleting from purchasing:', delPurchErr);
@@ -697,7 +698,7 @@
       const { error: delKitErr } = await supabase.from('kitting').delete().eq('id', normalizedId);
       if (delKitErr && String(delKitErr.message || delKitErr).toLowerCase().includes('foreign key')) {
         console.error('Failed to delete kitting due to foreign key:', delKitErr);
-        alert('Failed to delete kitting entry: ' + delKitErr.message);
+        toastActions.show('Failed to delete kitting entry: ' + delKitErr.message);
         return;
       }
       if (delKitErr) console.warn('Non-critical error deleting from kitting:', delKitErr);
@@ -706,7 +707,7 @@
       await loadBuildDetails();
     } catch (e) {
       console.error('Remove from build failed:', e);
-      alert('Failed to remove from build: ' + (e?.message || e));
+      toastActions.show('Failed to remove from build: ' + (e?.message || e));
     }
   }
 
@@ -723,7 +724,7 @@
       if (error) throw error;
     } catch (e) {
       console.error('Failed to persist BOM update:', e);
-      alert('Failed to update BOM row: ' + (e?.message || e));
+      toastActions.show('Failed to update BOM row: ' + (e?.message || e));
     }
   }
 
@@ -951,7 +952,7 @@
       await loadBuildDetails();
     } catch (e) {
       console.error('Add from Full BOM failed:', e);
-      alert('Failed to add item to build: ' + (e?.message || e));
+      toastActions.show('Failed to add item to build: ' + (e?.message || e));
     } finally {
       processingAdd = false;
     }
@@ -996,11 +997,11 @@
       }
 
       await loadBuildDetails();
-      alert('Added to purchasing successfully!');
+      toastActions.show('Added to purchasing successfully!');
       
     } catch (e) {
       console.error('Failed to add from purchase modal:', e);
-      alert('Failed to add to purchasing: ' + (e?.message || e));
+      toastActions.show('Failed to add to purchasing: ' + (e?.message || e));
     } finally {
       purchaseModalItem = null;
       purchaseModalUrl = '';
@@ -1044,11 +1045,11 @@
 
       if (error) throw error;
 
-      alert('Build deleted successfully');
+      toastActions.show('Build deleted successfully');
       goto('/cad/build');
     } catch (error) {
       console.error('Error deleting build:', error);
-      alert('Failed to delete build: ' + error.message);
+      toastActions.show('Failed to delete build: ' + error.message);
     }
   }
 
@@ -1121,10 +1122,10 @@
       }
 
       await loadBuildDetails();
-      alert(`Build quantity updated to ${newQty}.`);
+      toastActions.show(`Build quantity updated to ${newQty}.`);
     } catch (error) {
       console.error('Error updating build quantity:', error);
-      alert('Failed to update build quantity: ' + (error?.message || error));
+      toastActions.show('Failed to update build quantity: ' + (error?.message || error));
       buildQuantityInput = String(oldQty);
     } finally {
       updatingBuildQuantity = false;
@@ -1134,7 +1135,7 @@
   // Version refetch functionality
   async function openVersionSelector() {
     if (!build?.subsystems?.onshape_document_id) {
-      alert('No OnShape document linked to this subsystem');
+      toastActions.show('No OnShape document linked to this subsystem');
       return;
     }
     
@@ -1163,7 +1164,7 @@
       
     } catch (error) {
       console.error('Error loading versions:', error);
-      alert('Failed to load versions: ' + (error?.message || error));
+      toastActions.show('Failed to load versions: ' + (error?.message || error));
     } finally {
       loadingVersions = false;
     }
@@ -1171,12 +1172,12 @@
 
   async function refetchBOMFromVersion() {
     if (!selectedVersionForRefetch) {
-      alert('Please select a version');
+      toastActions.show('Please select a version');
       return;
     }
     
     if (!build?.subsystems?.onshape_document_id || !build?.subsystems?.onshape_workspace_id || !build?.subsystems?.onshape_element_id) {
-      alert('Missing OnShape configuration for this build');
+      toastActions.show('Missing OnShape configuration for this build');
       return;
     }
     
@@ -1282,14 +1283,14 @@
       if (unaddedParts.length > 0) summary.push(`${unaddedParts.length} unadded parts replaced`);
       if (addedParts.length > 0) summary.push(`${addedParts.length} added parts preserved`);
       
-      alert(summary.length > 0 ? `BOM updated:\n• ${summary.join('\n• ')}` : 'BOM is already up to date');
+      toastActions.show(summary.length > 0 ? `BOM updated:\n• ${summary.join('\n• ')}` : 'BOM is already up to date');
       
       showVersionModal = false;
       selectedVersionForRefetch = null;
       
     } catch (error) {
       console.error('Error refetching BOM:', error);
-      alert('Failed to refetch BOM: ' + (error?.message || error));
+      toastActions.show('Failed to refetch BOM: ' + (error?.message || error));
     } finally {
       loadingVersions = false;
     }

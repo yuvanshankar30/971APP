@@ -1,6 +1,7 @@
 <script>
   import { browser } from '$app/environment';
   import { requestConfirmation } from '$lib/confirmation.js';
+  import { toastActions } from '$lib/toast.js';
   import { onMount, tick } from 'svelte';
   import { supabase } from '$lib/supabase.js';
   import { userStore, loadUserFromUUID, upsertProfileIfMissing, setUserUUID } from '$lib/stores/user.js';
@@ -287,7 +288,7 @@
       if (newSubsystem.onshape_url && newSubsystem.onshape_url.trim()) {
         const parsed = onShapeAPI.parseOnShapeUrl(newSubsystem.onshape_url.trim());
         if (!parsed) {
-          alert('Invalid OnShape URL format. Please paste a valid OnShape document URL or leave blank.');
+          toastActions.show('Invalid OnShape URL format. Please paste a valid OnShape document URL or leave blank.');
           return;
         }
         insertData.onshape_url = newSubsystem.onshape_url.trim();
@@ -340,7 +341,7 @@
       await loadSubsystems();
     } catch (error) {
       console.error('Error creating subsystem:', error);
-      alert('Failed to create subsystem');
+      toastActions.show('Failed to create subsystem');
     }
   }
 
@@ -376,10 +377,10 @@
       await loadSubsystems();
     } catch (error) {
       if (error.code === '23505') {
-        alert('You are already a member of this subsystem');
+        toastActions.show('You are already a member of this subsystem');
       } else {
         console.error('Error joining subsystem:', error);
-        alert('Failed to join subsystem');
+        toastActions.show('Failed to join subsystem');
       }
     }
   }
@@ -389,7 +390,7 @@
     try {
       const parsedUrl = onShapeAPI.parseOnShapeUrl(onshapeUrl);
       if (!parsedUrl) {
-        alert('Invalid OnShape URL format');
+        toastActions.show('Invalid OnShape URL format');
         return;
       }
 
@@ -432,7 +433,7 @@
       await loadSubsystems();
     } catch (error) {
       console.error('Error linking OnShape document:', error);
-      alert('Failed to link OnShape document');
+      toastActions.show('Failed to link OnShape document');
     } finally {
       loadingOnShape = false;
     }
@@ -470,10 +471,10 @@
       }
 
   if (inputEl) inputEl.value = '';
-      alert('Files uploaded successfully');
+      toastActions.show('Files uploaded successfully');
     } catch (error) {
       console.error('Error uploading files:', error);
-      alert('Failed to upload files');
+      toastActions.show('Failed to upload files');
     }
   }
   async function loadBuilds() {
@@ -515,7 +516,7 @@
     try {
       const subsystem = subsystems.find(s => s.id === subsystemId);
       if (!subsystem.onshape_document_id) {
-        alert('No OnShape document linked to this subsystem');
+        toastActions.show('No OnShape document linked to this subsystem');
         return;
       }
 
@@ -614,7 +615,7 @@
       await loadBuilds();
     } catch (error) {
       console.error('Error creating build:', error);
-      alert('Failed to create build: ' + error.message);
+      toastActions.show('Failed to create build: ' + error.message);
     } finally {
       loadingBuild = false;
     }
@@ -629,10 +630,10 @@
         .eq('part_type', 'COTS');
 
       if (error) throw error;
-      alert('All COTS parts added to purchasing (placeholder)');
+      toastActions.show('All COTS parts added to purchasing (placeholder)');
     } catch (error) {
       console.error('Error adding COTS to purchasing:', error);
-      alert('Failed to add COTS parts to purchasing');
+      toastActions.show('Failed to add COTS parts to purchasing');
     }
   }
 
@@ -687,10 +688,10 @@
         .in('part_name', newParts.map(p => p.part_name));
 
       if (updateError) throw updateError;
-      alert(`${newParts.length} new manufactured parts added to parts list`);
+      toastActions.show(`${newParts.length} new manufactured parts added to parts list`);
     } catch (error) {
       console.error('Error adding manufactured iteration:', error);
-      alert('Failed to add manufactured parts');
+      toastActions.show('Failed to add manufactured parts');
     }
   }
 
@@ -702,10 +703,10 @@
         .eq('build_id', buildId);
 
       if (error) throw error;
-      alert('All parts added to parts list');
+      toastActions.show('All parts added to parts list');
     } catch (error) {
       console.error('Error building duplicate:', error);
-      alert('Failed to add all parts');
+      toastActions.show('Failed to add all parts');
     }
   }
 
@@ -719,7 +720,7 @@
       if (error) throw error;
     } catch (error) {
       console.error('Error adding part to list:', error);
-      alert('Failed to add part to list');
+      toastActions.show('Failed to add part to list');
     }
   }
 
@@ -738,7 +739,7 @@
       await loadBuilds();
     } catch (error) {
       console.error('Error marking as assembled:', error);
-      alert('Failed to mark as assembled');
+      toastActions.show('Failed to mark as assembled');
     }
   }
 
@@ -799,10 +800,10 @@
       // Refresh data
       await loadSubsystems();
       await loadBuilds();
-      alert('Subsystem deleted successfully');
+      toastActions.show('Subsystem deleted successfully');
     } catch (error) {
       console.error('Error deleting subsystem:', error);
-      alert('Failed to delete subsystem: ' + error.message);
+      toastActions.show('Failed to delete subsystem: ' + error.message);
     }
   }
 
@@ -832,16 +833,16 @@
 
       // Refresh data
       await loadBuilds();
-      alert('Build deleted successfully');
+      toastActions.show('Build deleted successfully');
     } catch (error) {
       console.error('Error deleting build:', error);
-      alert('Failed to delete build: ' + error.message);
+      toastActions.show('Failed to delete build: ' + error.message);
     }
   }
 
   async function createBuildFromDocument(subsystem) {
     if (!subsystem.onshape_document_id || !subsystem.onshape_workspace_id || !subsystem.onshape_element_id) {
-      alert('OnShape document information is incomplete. Please re-link the document.');
+      toastActions.show('OnShape document information is incomplete. Please re-link the document.');
       return;
     }
 
@@ -894,11 +895,11 @@
       }
 
       await loadBuilds();
-      alert('Build created successfully!');
+      toastActions.show('Build created successfully!');
       
     } catch (error) {
       console.error('Error creating build:', error);
-      alert('Failed to create build: ' + error.message);
+      toastActions.show('Failed to create build: ' + error.message);
     } finally {
       loadingBuild = false;
     }
@@ -915,9 +916,9 @@
         `Public: ${docInfo.public ? 'Yes' : 'No'}`
       ].join('\n');
       
-      alert(`OnShape Document Details:\n\n${details}`);
+      toastActions.show(`OnShape Document Details:\n\n${details}`);
     } else {
-      alert('Document details not available. Try refreshing the page.');
+      toastActions.show('Document details not available. Try refreshing the page.');
     }
   }
 </script>

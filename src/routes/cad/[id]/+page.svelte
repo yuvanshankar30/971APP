@@ -1,6 +1,7 @@
 <script>
   import { browser } from '$app/environment';
   import { requestConfirmation } from '$lib/confirmation.js';
+  import { toastActions } from '$lib/toast.js';
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
   import { supabase } from '$lib/supabase.js';
@@ -181,7 +182,7 @@
       }
     } catch (error) {      console.error('Error loading subsystem:', error);
       // Don't redirect immediately on error, give user chance to see what's happening
-      alert('Failed to load subsystem: ' + error.message);
+      toastActions.show('Failed to load subsystem: ' + error.message);
     } finally {
       // Ensure loading is always set to false
       loading = false;
@@ -243,7 +244,7 @@
       await loadSubsystemBuilds();
     } catch (error) {
       console.error('Error marking as assembled:', error);
-      alert('Failed to mark as assembled: ' + error.message);
+      toastActions.show('Failed to mark as assembled: ' + error.message);
     }
   }
 
@@ -307,11 +308,11 @@
 
       if (error) throw error;
 
-      alert('Subsystem deleted successfully');
+      toastActions.show('Subsystem deleted successfully');
       goto('/cad');
     } catch (error) {
       console.error('Error deleting subsystem:', error);
-      alert('Failed to delete subsystem: ' + error.message);
+      toastActions.show('Failed to delete subsystem: ' + error.message);
     }
   }
 
@@ -408,7 +409,7 @@
 
       if (error) {
         if (error.code === '23505') {
-          alert('This user is already a member of this subsystem');
+          toastActions.show('This user is already a member of this subsystem');
         } else {
           throw error;
         }
@@ -418,14 +419,14 @@
       }
     } catch (error) {
       console.error('Error adding member:', error);
-      alert('Failed to add member: ' + error.message);
+      toastActions.show('Failed to add member: ' + error.message);
     }
   }
 
   async function removeMemberFromSubsystem(memberId, userId) {
     // Don't allow removing the lead
     if (userId === subsystem.lead_user_id) {
-      alert('Cannot remove the subsystem lead. Transfer leadership first.');
+      toastActions.show('Cannot remove the subsystem lead. Transfer leadership first.');
       return;
     }
 
@@ -445,7 +446,7 @@
       await loadSubsystem(); // Refresh subsystem data
     } catch (error) {
       console.error('Error removing member:', error);
-      alert('Failed to remove member: ' + error.message);
+      toastActions.show('Failed to remove member: ' + error.message);
     }
   }
 
@@ -465,7 +466,7 @@
 
   async function transferLeadership() {
     if (!transferTargetUserId) {
-      alert('Please select a user to transfer leadership to.');
+      toastActions.show('Please select a user to transfer leadership to.');
       return;
     }
 
@@ -493,7 +494,7 @@
           });
       }
 
-      alert('Leadership transferred successfully!');
+      toastActions.show('Leadership transferred successfully!');
       closeTransferModal();
       closeMemberModal();
       
@@ -502,7 +503,7 @@
       await loadSubsystemMembers();
     } catch (error) {
       console.error('Error transferring leadership:', error);
-      alert('Failed to transfer leadership: ' + error.message);
+      toastActions.show('Failed to transfer leadership: ' + error.message);
     }
   }
 
@@ -633,7 +634,7 @@
       }
     } catch (error) {
       console.error('Error loading BOM:', error);
-      alert('Failed to load BOM: ' + (error?.message || error));
+      toastActions.show('Failed to load BOM: ' + (error?.message || error));
       showBuildModal = false;
     } finally {
       loadingBOM = false;
@@ -1075,12 +1076,12 @@
         console.log(`Skipped inserting initial BOM: ${existingOtherCount} 'other' rows already exist for this build.`);
       }
 
-      alert('Build created successfully!');
+      toastActions.show('Build created successfully!');
       showBuildModal = false;
       
     } catch (error) {
       console.error('Error creating build:', error);
-      alert('Failed to create build: ' + error.message);
+      toastActions.show('Failed to create build: ' + error.message);
     } finally {
       loadingBuild = false;
     }
@@ -1089,7 +1090,7 @@
   async function addAllCOTSToPurchasing() {
     const cotsItems = buildBOM.filter(item => item.part_type === 'COTS');
     // Placeholder for now
-    alert(`Would add ${cotsItems.length} COTS items to purchasing`);
+    toastActions.show(`Would add ${cotsItems.length} COTS items to purchasing`);
   }
 
   async function confirmAddToPurchasingFromModal() {
@@ -1142,10 +1143,10 @@
       purchaseModalItem = null;
       purchaseModalUrl = '';
       purchaseModalPrice = '';
-      alert('Added to purchasing');
+      toastActions.show('Added to purchasing');
     } catch (e) {
       console.error('Failed to add from purchase modal:', e);
-      alert('Failed to add to purchasing: ' + (e?.message || e));
+      toastActions.show('Failed to add to purchasing: ' + (e?.message || e));
     }
   }
 
@@ -1176,20 +1177,20 @@
         !existingParts.has(`${item.part_name}_${item.part_number}_${item.material}_${item.workflow}`)
       );
 
-      alert(`Would add ${newParts.length} new manufactured parts to parts list`);
+      toastActions.show(`Would add ${newParts.length} new manufactured parts to parts list`);
     } catch (error) {
       console.error('Error checking for duplicates:', error);
-      alert('Error checking for duplicate parts');
+      toastActions.show('Error checking for duplicate parts');
     }
   }
   async function buildDuplicate() {
     const manufacturedItems = buildBOM.filter(item => item.part_type === 'manufactured');
-    alert(`Would add all ${manufacturedItems.length} manufactured parts to parts list`);
+    toastActions.show(`Would add all ${manufacturedItems.length} manufactured parts to parts list`);
   }
   // Download part file (STL or STEP)
   async function downloadPartFile(item, fileType) {
     if (!item.onshape_part_id) {
-      alert('No OnShape part ID available for this part');
+      toastActions.show('No OnShape part ID available for this part');
       return;
     }
 
@@ -1244,7 +1245,7 @@
       
     } catch (error) {
       console.error(`${fileType.toUpperCase()} download failed:`, error);
-      alert(`Failed to download ${fileType.toUpperCase()}: ${error.message}`);
+      toastActions.show(`Failed to download ${fileType.toUpperCase()}: ${error.message}`);
     }
   }
 
@@ -1340,14 +1341,14 @@
   }  // Add a single item to build and build_bom immediately
   async function addSingleToBuild(item) {
     if (!user || !selectedVersion) {
-      alert('User or version not available');
+      toastActions.show('User or version not available');
       return;
     }
 
     // Check if already added
     const partKey = item.part_number || item.part_name || `${item.part_name}_${Date.now()}`;
     if (addedPartsSet.has(partKey)) {
-      alert('Part already added to manufacturing queue');
+      toastActions.show('Part already added to manufacturing queue');
       return;
     }
 
@@ -1448,11 +1449,11 @@
           // Mark as added in UI
           addedPartsSet = new Set([...addedPartsSet, item.part_number || item.part_name || `${item.part_name}_${Date.now()}`]);
           loadingBuild = false;
-          alert('COTS item added to Purchasing');
+          toastActions.show('COTS item added to Purchasing');
           return;
         } catch (err) {
           console.error('Error adding COTS item to purchasing:', err);
-          alert('Failed to add COTS item: ' + (err?.message || err));
+          toastActions.show('Failed to add COTS item: ' + (err?.message || err));
           loadingBuild = false;
           return;
         }
@@ -1606,7 +1607,7 @@
       
     } catch (error) {
       console.error('Error adding part to manufacturing queue:', error);
-      alert('Failed to add part: ' + error.message);
+      toastActions.show('Failed to add part: ' + error.message);
     } finally {
       loadingBuild = false;
     }
@@ -1625,18 +1626,18 @@
 
       if (error) {
         if (error.code === '23505') { // unique_violation
-          alert('You are already a member of this subsystem');
+          toastActions.show('You are already a member of this subsystem');
         } else {
           throw error;
         }
       } else {
-        alert('Successfully joined subsystem!');
+        toastActions.show('Successfully joined subsystem!');
         // Reload subsystem data to update membership
         await loadSubsystem();
       }
     } catch (error) {
       console.error('Error joining subsystem:', error);
-      alert('Failed to join subsystem: ' + error.message);
+      toastActions.show('Failed to join subsystem: ' + error.message);
     }
   }
 </script>

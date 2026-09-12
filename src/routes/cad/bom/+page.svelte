@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { page } from '$app/stores';
   import { supabase } from '$lib/supabase.js';
+  import { toastActions } from '$lib/toast.js';
   import { userStore, loadUserFromUUID, upsertProfileIfMissing, setUserUUID } from '$lib/stores/user.js';
   import { onShapeAPI } from '$lib/onshape.js';
   import { goto } from '$app/navigation';
@@ -48,7 +49,7 @@
 
   async function loadDataAndCreateBuild() {
     if (!subsystemId || !versionId) {
-      alert('Missing subsystem or version ID');
+      toastActions.show('Missing subsystem or version ID');
       goto('/cad');
       return;
     }
@@ -84,7 +85,7 @@
 
     } catch (error) {
       console.error('Error loading data:', error);
-      alert('Failed to load data: ' + error.message);
+      toastActions.show('Failed to load data: ' + error.message);
       goto('/cad');
     } finally {
       loading = false;
@@ -293,7 +294,7 @@
       if (error) {
         console.error('Failed to save BOM snapshot:', error?.message || error);
         console.error('Full error details:', JSON.stringify(error, null, 2));
-        alert('Failed to save BOM data: ' + error.message);
+        toastActions.show('Failed to save BOM data: ' + error.message);
       } else {
         console.log('Successfully saved BOM snapshot with', bomRows.length, 'items');
       }
