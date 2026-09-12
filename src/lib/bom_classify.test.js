@@ -60,6 +60,10 @@ describe('manualClassification (COTS vs manufactured rules)', () => {
     expect(classify({ name: 'pivot gearbox plate', part_number: 'P1' }).manufacturing_process).toBe('router');
   });
 
+  it('assigns 3d-print for a spacer on a P-numbered part, same rule as the manual CSV path', () => {
+    expect(classify({ name: 'maxspline spacer', part_number: 'P1' }).manufacturing_process).toBe('3d-print');
+  });
+
   it('assigns router for foam even without a "P" part number', () => {
     const result = classify({ name: 'Bumper Foam', part_number: '' });
     expect(result.classification).toBe('manufactured');

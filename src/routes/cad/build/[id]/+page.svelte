@@ -186,6 +186,75 @@
   let notesDraft = '';
   let savingNotes = false;
 
+  // Manually add a part that's missing from the BOM entirely (e.g. an
+  // OnShape import missed it, or the build was created manually).
+  let showAddPartModal = false;
+  let addPartName = '';
+  let addPartNumber = '';
+  let addPartType = 'manufactured'; // 'manufactured' | 'COTS'
+  let addPartWorkflow = 'mill';
+  let addPartQuantity = 1;
+  let addPartMaterial = '';
+  let addPartStockChoice = '';
+  let addPartStockCustom = '';
+  let savingAddPart = false;
+
+  function openAddPartModal() {
+    addPartName = '';
+    addPartNumber = '';
+    addPartType = 'manufactured';
+    addPartWorkflow = 'mill';
+    addPartQuantity = 1;
+    addPartMaterial = '';
+    addPartStockChoice = '';
+    addPartStockCustom = '';
+    showAddPartModal = true;
+  }
+
+  function closeAddPartModal() {
+    showAddPartModal = false;
+  }
+
+  function updateAddPartType(newType) {
+    addPartType = newType;
+    addPartWorkflow = newType === 'COTS' ? 'purchase' : 'mill';
+  }
+
+  async function submitAddPart() {
+    const name = addPartName.trim();
+    if (!name) {
+      toastActions.show('Give the part a name first');
+      return;
+    }
+    savingAddPart = true;
+    try {
+      const stockAssignment = addPartType === 'manufactured'
+        ? (addPartStockChoice === '__other__' ? (addPartStockCustom || null) : (addPartStockChoice || null))
+        : null;
+      const { error } = await supabase.from('build_bom').insert([{
+        build_id: buildId,
+        part_name: name,
+        part_number: addPartNumber.trim() || null,
+        part_type: addPartType === 'COTS' ? 'COTS' : 'manufactured',
+        workflow: addPartWorkflow,
+        quantity: Math.max(1, Math.round(Number(addPartQuantity) || 1)),
+        material: addPartMaterial.trim() || null,
+        stock_assignment: stockAssignment,
+        stock_assignment_custom: addPartStockChoice === '__other__' ? (addPartStockCustom || null) : null,
+        added: false
+      }]);
+      if (error) throw error;
+      toastActions.show('Part added to BOM');
+      showAddPartModal = false;
+      await loadBuildDetails();
+    } catch (error) {
+      console.error('Error adding manual BOM part:', error);
+      toastActions.show('Failed to add part: ' + (error?.message || error));
+    } finally {
+      savingAddPart = false;
+    }
+  }
+
   // Edit modal state for build items (top table)
   let showEditModal = false;
   let editTarget = null;
@@ -1865,6 +1934,10 @@
       <div class="parts-header">
         <h2>Full BOM (Unadded Parts)</h2>
         <div style="display: flex; align-items: center; gap: 1rem;">
+          <button class="btn btn-primary btn-sm" on:click={openAddPartModal}>
+            <Plus size={16} />
+            Add Part
+          </button>
           <button class="btn btn-secondary btn-sm" on:click={openVersionSelector}>
             <Download size={16} />
             Change Version
@@ -2327,6 +2400,85 @@
   </div>
 {/if}
 
+{#if showAddPartModal}
+  <div
+    class="modal-backdrop"
+    on:click|self={closeAddPartModal}
+    role="button"
+    tabindex="0"
+    on:keydown={(e) => { if (e.key === 'Escape') { e.preventDefault(); closeAddPartModal(); } }}
+  >
+    <div class="modal" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h3>Add Part</h3>
+        <button type="button" class="modal-close-button" aria-label="Close dialog" on:click={closeAddPartModal}>
+          <X size={18} />
+        </button>
+      </div>
+      <div class="modal-body">
+        <p class="cad-modal-hint">
+          For a part that's missing from the BOM entirely - give it a name, pick its type and workflow, then save. It's added to the Full BOM below, not requested yet.
+        </p>
+        <div class="add-part-form">
+          <label for="add-part-name">Name</label>
+          <input id="add-part-name" class="form-input" type="text" bind:value={addPartName} placeholder="e.g. Idler Spacer" />
+
+          <label for="add-part-number">Part number (optional)</label>
+          <input id="add-part-number" class="form-input" type="text" bind:value={addPartNumber} />
+
+          <label for="add-part-type">Type</label>
+          <select id="add-part-type" class="form-input" value={addPartType} on:change={(e) => updateAddPartType(e.target.value)}>
+            <option value="manufactured">Manufactured</option>
+            <option value="COTS">COTS</option>
+          </select>
+
+          <label for="add-part-workflow">Workflow</label>
+          {#if addPartType === 'COTS'}
+            <select id="add-part-workflow" class="form-input" bind:value={addPartWorkflow}>
+              <option value="purchase">Purchase</option>
+              <option value="kit">Kit</option>
+            </select>
+          {:else}
+            <select id="add-part-workflow" class="form-input" bind:value={addPartWorkflow}>
+              <option value="mill">Mill</option>
+              <option value="router">Router</option>
+              <option value="lathe">Lathe</option>
+              <option value="3d-print">3D Print</option>
+              <option value="laser-cut">Laser Cut</option>
+            </select>
+          {/if}
+
+          <label for="add-part-qty">Quantity</label>
+          <input id="add-part-qty" class="form-input" type="number" min="1" step="1" bind:value={addPartQuantity} />
+
+          <label for="add-part-material">Material (optional)</label>
+          <input id="add-part-material" class="form-input" type="text" bind:value={addPartMaterial} />
+
+          {#if addPartType !== 'COTS'}
+            <label for="add-part-stock">Stock (optional)</label>
+            <select id="add-part-stock" class="form-input" bind:value={addPartStockChoice}>
+              <option value="">Select Stock</option>
+              {#each getStocksForWorkflow(addPartWorkflow) as stock}
+                <option value={stock.description}>{stock.description}</option>
+              {/each}
+              <option value="__other__">Other...</option>
+            </select>
+            {#if addPartStockChoice === '__other__'}
+              <input class="form-input" type="text" placeholder="Type custom stock" bind:value={addPartStockCustom} />
+            {/if}
+          {/if}
+        </div>
+        <div class="modal-actions">
+          <button class="btn" on:click={closeAddPartModal}>Cancel</button>
+          <button class="btn btn-primary" disabled={savingAddPart || !addPartName.trim()} on:click={submitAddPart}>
+            {savingAddPart ? 'Saving...' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+{/if}
+
 <style>
   /* Issue 2: Fix the status card / progress section - remove yellow background */
   .status-section {
@@ -2417,6 +2569,10 @@
 
   .notes-section { display: flex; flex-direction: column; gap: var(--gap-3); }
   .notes-textarea { resize: vertical; min-height: 5rem; }
+
+  .add-part-form { display: flex; flex-direction: column; gap: 0.4rem; }
+  .add-part-form label { font-weight: 500; margin-top: 0.5rem; }
+  .add-part-form label:first-child { margin-top: 0; }
 
   .parts-header {
     display: flex;

@@ -1312,6 +1312,7 @@
       await saveBomItemToBuild(item);
     }
     toastActions.show(`Saved ${itemsToAdd.length} item${itemsToAdd.length === 1 ? '' : 's'} to the build`);
+    closeBuildModal();
   }
 
   async function addAllCOTSToPurchasing() {

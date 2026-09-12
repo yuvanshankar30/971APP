@@ -103,6 +103,12 @@ class PartClassificationService {
                 } else if (materialContains('nylon') || materialContains('pla') || materialContains('abs') || materialContains('petg') || materialContains('onyx')) {
                     // 3D printing materials (immediate assignment)
                     manufacturingProcess = '3d-print';
+                } else if (nameContains('spacer')) {
+                    // Same rule as bom_csv_import.js's classifyManualBomRow -
+                    // spacers are small, print-friendly parts regardless of
+                    // material, and both classification paths should agree
+                    // on the same part imported either way.
+                    manufacturingProcess = '3d-print';
                 } else if (nameContains('shaft') || nameContains('standoff')) {
                     // Everything named shaft or standoff => lathe
                     manufacturingProcess = 'lathe';
