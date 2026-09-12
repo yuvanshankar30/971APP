@@ -50,8 +50,30 @@ export const BOM_CSV_HEADER_ALIASES = {
   quantity: ['quantity', 'qty'],
   material: ['material'],
   vendor: ['vendor', 'supplier'],
-  description: ['description', 'desc']
+  description: ['description', 'desc'],
+  // Optional - a manual CSV has no 3D bounding box, so without a thickness
+  // column stock_match.js's router sheet-goods matcher has nothing to match
+  // on and silently falls back to "first stock of the right material"
+  // (same wrong pick for every part regardless of actual thickness).
+  thickness: ['thickness', 'depth', 'material thickness']
 };
+
+// Parses a thickness cell into inches. Accepts a plain decimal ("0.0625"),
+// a simple fraction ("1/16"), or either with a trailing unit/quote mark
+// ("0.0625 in", "1/16\""). Returns null for anything unparseable so a bad
+// cell just skips depth-based stock matching instead of poisoning it with NaN.
+export function parseThicknessInches(raw) {
+  const text = String(raw || '').trim().replace(/["”]$/, '').replace(/\s*(in|inch|inches)$/i, '').trim();
+  if (!text) return null;
+  const fractionMatch = text.match(/^(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/);
+  if (fractionMatch) {
+    const numerator = Number(fractionMatch[1]);
+    const denominator = Number(fractionMatch[2]);
+    return denominator ? numerator / denominator : null;
+  }
+  const value = Number(text);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
 
 export function matchCsvColumn(headers, aliases) {
   const normalized = headers.map((h) => h.trim().toLowerCase());
@@ -91,8 +113,15 @@ export function parseBomCsvRows(text) {
     quantity: columnIndex.quantity !== -1 ? parseInt(cells[columnIndex.quantity], 10) || 1 : 1,
     material: columnIndex.material !== -1 ? (cells[columnIndex.material] || '').trim() : '',
     vendor: columnIndex.vendor !== -1 ? (cells[columnIndex.vendor] || '').trim() : '',
-    description: columnIndex.description !== -1 ? (cells[columnIndex.description] || '').trim() : ''
-  })).filter((row) => row.part_name);
+    description: columnIndex.description !== -1 ? (cells[columnIndex.description] || '').trim() : '',
+    thickness: columnIndex.thickness !== -1 ? parseThicknessInches(cells[columnIndex.thickness]) : null
+  }))
+    .filter((row) => row.part_name)
+    // OnShape's placeholder name for an unnamed body ("SOLID", "COMPOUND",
+    // or "SOLID_1"/"COMPOUND_2"... with more than one) - a modeling
+    // artifact, not a real part, whether it came in live from the API
+    // (see onshape.js's analyzeBOM) or through a CSV export of the same BOM.
+    .filter((row) => !/^(SOLID|COMPOUND)(_\d+)?$/i.test(row.part_name));
 
   if (rows.length === 0) {
     throw new Error('No usable rows found in the CSV (every row was missing a name)');
@@ -115,18 +144,36 @@ export function classifyManualBomRow(row) {
   const material = (row.material || '').toLowerCase();
   const vendor = (row.vendor || '').trim();
 
+  // COTS items stocked in the kitting bins by default, not requested
+  // through purchasing - SDS-branded parts, fasteners, motors, gears,
+  // electrical/control-system COTS (roboRIO, Pigeon, CANivore, breaker,
+  // battery, PDP/PDH), PCBs, and compression/extension springs.
+  // \bgears?\b (not "gear") so "gearbox" (a real router-cut plate part,
+  // "Gearbox Plate") isn't swept in by "gear" as a substring.
+  const isKitItem =
+    name.includes('sds') ||
+    name.includes('screw') || name.includes('bolt') || name.includes('nut') ||
+    name.includes('socket head cap') ||
+    name.includes('motor') || /\bgears?\b/.test(name) ||
+    name.includes('roborio') || name.includes('pigeon') || name.includes('canivore') || name.includes('canivor') ||
+    name.includes('breaker') || name.includes('battery') || name.includes('batteries') ||
+    name.includes('pdp') || name.includes('pdh') ||
+    name.includes('spring') || name.includes('pcb');
+
   const isCOTS =
+    isKitItem ||
     vendor !== '' ||
     material.includes('belt') || material.includes('acetal') || material.includes('delrin') ||
-    name.includes('wcp') ||
-    name.includes('screw') || name.includes('bolt') || name.includes('nut');
+    name.includes('wcp');
 
   if (isCOTS) {
-    return { part_type: 'COTS', workflow: 'purchase' };
+    return { part_type: 'COTS', workflow: isKitItem ? 'kit' : 'purchase' };
   }
 
   let workflow;
-  if (material.includes('nylon') || material.includes('pla') || material.includes('abs') || material.includes('petg') || material.includes('onyx')) {
+  if (name.includes('foam') || material.includes('foam')) {
+    workflow = 'router';
+  } else if (material.includes('nylon') || material.includes('pla') || material.includes('abs') || material.includes('petg') || material.includes('onyx')) {
     workflow = '3d-print';
   } else if (name.includes('spacer')) {
     workflow = '3d-print';

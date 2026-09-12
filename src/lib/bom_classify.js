@@ -59,10 +59,38 @@ class PartClassificationService {
                 isCOTS = true;
             }
 
+            // Rule 5/6/7: everything that's stocked in the kitting bins
+            // rather than requested through purchasing - SDS-branded parts,
+            // fasteners, motors, gears, electrical/control-system COTS
+            // (roboRIO, Pigeon, CANivore, breaker, battery, PDP/PDH), PCBs,
+            // and compression/extension springs. All COTS regardless of
+            // part number or vendor field. \bgears?\b (not "gear") so
+            // "gearbox" (a real router-cut plate part, "Gearbox Plate")
+            // isn't swept in by "gear" as a substring.
+            const isKitItem =
+                name.includes('sds') ||
+                name.includes('screw') || name.includes('bolt') || name.includes('nut') ||
+                name.includes('socket head cap') ||
+                name.includes('motor') || /\bgears?\b/.test(name) ||
+                name.includes('roborio') || name.includes('pigeon') || name.includes('canivore') || name.includes('canivor') ||
+                name.includes('breaker') || name.includes('battery') || name.includes('batteries') ||
+                name.includes('pdp') || name.includes('pdh') ||
+                name.includes('pcb') || name.includes('spring');
+            if (isKitItem) {
+                isCOTS = true;
+            }
+
+            // Foam is manufactured on the router, but often has no OnShape
+            // "P" part number (raw stock/purchased sheet modeled loosely) -
+            // it needs to bypass the part-number gate below the same way the
+            // COTS rules above do, rather than falling through to "force COTS".
+            const isFoam = !isCOTS && (name.includes('foam') || material.includes('foam'));
+
             let manufacturingProcess = null;
-            
+
             // Only classify as manufactured if part number begins with capital "P"
-            if (!isCOTS && partNumber.startsWith('P')) {
+            // (or it's foam, which is manufactured regardless of numbering).
+            if (!isCOTS && (partNumber.startsWith('P') || isFoam)) {
                 // Per new rules: never use bounding boxes for classification.
                 // Apply deterministic rules based on name and material.
 
@@ -70,8 +98,10 @@ class PartClassificationService {
                 const nameContains = (s) => name.includes(s);
                 const materialContains = (s) => material.includes(s);
 
-                // 3D printing materials (immediate assignment)
-                if (materialContains('nylon') || materialContains('pla') || materialContains('abs') || materialContains('petg') || materialContains('onyx')) {
+                if (isFoam) {
+                    manufacturingProcess = 'router';
+                } else if (materialContains('nylon') || materialContains('pla') || materialContains('abs') || materialContains('petg') || materialContains('onyx')) {
+                    // 3D printing materials (immediate assignment)
                     manufacturingProcess = '3d-print';
                 } else if (nameContains('shaft') || nameContains('standoff')) {
                     // Everything named shaft or standoff => lathe
@@ -90,7 +120,9 @@ class PartClassificationService {
                 part_name: item.name || item.part_name || 'Unknown',
                 classification: isCOTS ? 'COTS' : 'manufactured',
                 manufacturing_process: manufacturingProcess,
-                workflow_status: isCOTS ? 'purchase' : manufacturingProcess
+                // Fasteners/SDS parts are stocked in the kitting bins, not
+                // requested through purchasing, on every default classification.
+                workflow_status: isCOTS ? (isKitItem ? 'kit' : 'purchase') : manufacturingProcess
             };
         });
     }

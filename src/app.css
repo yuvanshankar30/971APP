@@ -328,9 +328,9 @@ body { transition: background-color 0.2s ease, color 0.2s ease; }
 .progress-bar.small { height: 6px; }
 /* Solid fills (all themes) — gradients read as decoration, not data */
 .progress-fill { height: 100%; transition: width 0.2s ease; background: var(--brand-gold-base); }
-.progress-fill.success, .progress-fill.mfg { background: var(--green-base); }
-.progress-fill.warning, .progress-fill.pur { background: var(--brand-gold-base); }
-.progress-fill.info, .progress-fill.kit { background: var(--purple-strong); }
+.progress-fill.success, .progress-fill.mfg, .progress-fill.pur, .progress-fill.kit { background: var(--green-base); }
+.progress-fill.warning { background: var(--brand-gold-base); }
+.progress-fill.info { background: var(--purple-strong); }
 
 /* ===== BOM TABLE (global) ===== */
 .bom-table-container { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-lg); }
@@ -1422,12 +1422,20 @@ textarea:focus,
 /* Workflow tags reuse the same hue families as the status chips (forest
    green / azure / teal) for a consistent, considered palette instead of
    raw saturated Tailwind swatches. Lathe gets its own rust tone, distinct
-   from the danger-red used for Rejected. */
-.tag-workflow-router,
-.tag-workflow-purchase {
+   from the danger-red used for Rejected. Purchase used to share this same
+   green with Router - same color on two different workflows made COTS
+   parts read as manufactured ones at a glance, so Purchase gets the same
+   gold family as the COTS type tag instead (they always appear together). */
+.tag-workflow-router {
   background: #dbe9c8;
   color: #4f7a2e;
   border-color: #a3c47a;
+}
+
+.tag-workflow-purchase {
+  background: var(--brand-gold-soft);
+  color: var(--orange-strong);
+  border-color: var(--brand-gold-base);
 }
 
 .tag-workflow-lathe {
@@ -2340,11 +2348,16 @@ textarea:focus,
   border-color: rgba(56, 138, 186, 0.5);
 }
 
-[data-theme="modern-dark"] .tag-workflow-router,
-[data-theme="modern-dark"] .tag-workflow-purchase {
+[data-theme="modern-dark"] .tag-workflow-router {
   background: rgba(130, 178, 80, 0.22);
   color: #b8d68f;
   border-color: rgba(130, 178, 80, 0.5);
+}
+
+[data-theme="modern-dark"] .tag-workflow-purchase {
+  background: rgba(212, 165, 60, 0.22);
+  color: #e6c877;
+  border-color: rgba(212, 165, 60, 0.5);
 }
 
 [data-theme="modern-dark"] .tag-workflow-lathe {

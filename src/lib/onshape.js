@@ -468,6 +468,16 @@ class OnShapeAPI {
                     vendor 
                 });
 
+                // OnShape gives an unnamed body the placeholder name "SOLID"
+                // or "COMPOUND" (and "SOLID_1", "COMPOUND_2", ... when
+                // there's more than one) - these are modeling artifacts, not
+                // real parts, and shouldn't clutter the manufacturing/
+                // purchasing workflow.
+                if (/^(SOLID|COMPOUND)(_\d+)?$/i.test(partName.trim())) {
+                    console.log(`Skipping unnamed OnShape body "${partName}"`);
+                    continue;
+                }
+
                 let boundingBox = null;
                 let boundingBoxX = null;
                 let boundingBoxY = null;

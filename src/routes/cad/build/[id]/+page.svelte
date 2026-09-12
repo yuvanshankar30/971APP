@@ -6,12 +6,152 @@
   import { supabase } from '$lib/supabase.js';
   import { userStore, loadUserFromUUID, upsertProfileIfMissing, setUserUUID } from '$lib/stores/user.js';
   import { goto } from '$app/navigation';
-  import { ArrowLeft, Package, CheckCircle, Clock, Wrench, ExternalLink, MapPin, Plus, Download, Trash2 } from 'lucide-svelte';
+  import { ArrowLeft, Package, CheckCircle, Clock, Wrench, ExternalLink, MapPin, Plus, Download, Trash2, Box, Upload, FileText, X } from 'lucide-svelte';
   import stockData from '$lib/stock.json';
   import { BUTTONS } from '$lib/statuses.js';
   import { detectVendorFromString, buildVendorSearchUrl } from '$lib/vendor_detect.js';
   import { GENERAL_ROLES } from '$lib/permissions.js';
   import { formatPacificDate, formatPacificDateTimeWithZone } from '$lib/timezone.js';
+  import CadViewer from '$lib/components/CadViewer.svelte';
+
+  // File-attachment helpers for router/lathe/3d-print rows in both BOM
+  // tables below - same {step_file, step_valid}/{pdf_file} JSON convention
+  // as manufacture/+page.svelte's parts.file_url, generic here over either
+  // a build_bom row (unadded) or a parts row (added), both of which have a
+  // file_url column of that shape.
+  function getFileMeta(item) {
+    try { return JSON.parse(item?.file_url || '{}') || {}; } catch { return {}; }
+  }
+  function getStepFileName(item) {
+    const meta = getFileMeta(item);
+    if (meta.step_file) return meta.step_file;
+    if (item?.file_name && /\.(step|stp)$/i.test(item.file_name)) return item.file_name;
+    return null;
+  }
+  function canViewCad(item) {
+    return !!getStepFileName(item);
+  }
+  function getPdfFileName(item) {
+    const meta = getFileMeta(item);
+    if (meta.pdf_file) return meta.pdf_file;
+    if (item?.file_name && /\.pdf$/i.test(item.file_name)) return item.file_name;
+    return null;
+  }
+  function canViewPdf(item) {
+    return !!getPdfFileName(item);
+  }
+
+  async function downloadManufacturingFile(fileName) {
+    try {
+      const { data, error } = await supabase.storage.from('manufacturing-files').createSignedUrl(fileName, 60);
+      if (error) throw error;
+      window.open(data.signedUrl, '_blank');
+    } catch (error) {
+      toastActions.show('Error downloading file: ' + (error?.message || error));
+    }
+  }
+  function installStepFile(item) {
+    return downloadManufacturingFile(getStepFileName(item));
+  }
+  function installPdfFile(item) {
+    return downloadManufacturingFile(getPdfFileName(item));
+  }
+
+  let cadViewerItem = null;
+  let showPdfModal = false;
+  let pdfViewerItem = null;
+  let pdfViewerUrl = null;
+
+  async function openPdfViewerFor(item) {
+    const fileName = getPdfFileName(item);
+    if (!fileName) return;
+    try {
+      const { data, error } = await supabase.storage.from('manufacturing-files').createSignedUrl(fileName, 600);
+      if (error) throw error;
+      pdfViewerItem = item;
+      pdfViewerUrl = data.signedUrl;
+      showPdfModal = true;
+    } catch (error) {
+      toastActions.show('Error opening PDF: ' + (error?.message || error));
+    }
+  }
+  function closePdfViewer() {
+    showPdfModal = false;
+    pdfViewerItem = null;
+    pdfViewerUrl = null;
+  }
+
+  let showAttachModal = false;
+  let attachModalItem = null;
+  let attachModalIsUnadded = false; // true = build_bom row, false = parts row
+  let attachFile = null;
+  let attachingFile = false;
+
+  function openAttachModal(item, isUnadded) {
+    attachModalItem = item;
+    attachModalIsUnadded = isUnadded;
+    attachFile = null;
+    showAttachModal = true;
+  }
+  function closeAttachModal() {
+    showAttachModal = false;
+    attachModalItem = null;
+    attachFile = null;
+  }
+
+  async function submitAttachFile() {
+    if (!attachModalItem || !attachFile) return;
+    attachingFile = true;
+    try {
+      const ext = (attachFile.name.split('.').pop() || 'step').toLowerCase();
+      const isPdf = ext === 'pdf';
+      const safeName = (attachModalItem.part_name || attachModalItem.name || 'part').replace(/[^a-zA-Z0-9]/g, '_');
+      const storedName = `${Date.now()}_${safeName}_cad.${ext}`;
+      const { error: uploadError } = await supabase.storage
+        .from('manufacturing-files')
+        .upload(storedName, attachFile, { cacheControl: '3600', upsert: false });
+      if (uploadError) throw uploadError;
+      let existingMeta = {};
+      try { existingMeta = JSON.parse(attachModalItem.file_url || '{}') || {}; } catch { existingMeta = {}; }
+      const newFileUrl = JSON.stringify(
+        isPdf ? { ...existingMeta, pdf_file: storedName } : { ...existingMeta, step_file: storedName, step_valid: true }
+      );
+      const table = attachModalIsUnadded ? 'build_bom' : 'parts';
+      const { error: updateError } = await supabase.from(table).update({ file_url: newFileUrl }).eq('id', attachModalItem.id);
+      if (updateError) throw updateError;
+      toastActions.show(isPdf ? 'PDF attached' : 'STEP file attached');
+      closeAttachModal();
+      await loadBuildDetails();
+    } catch (error) {
+      toastActions.show('Failed to attach file: ' + (error?.message || error));
+    } finally {
+      attachingFile = false;
+    }
+  }
+
+  // Clears one attached file (STEP or PDF) from a row's file_url meta,
+  // leaving the other one (if any) intact.
+  async function removeAttachedFile(item, isUnadded, kind) {
+    if (!await requestConfirmation({
+      title: 'Remove file',
+      message: `Remove the attached ${kind === 'pdf' ? 'PDF' : 'STEP'} file from "${item.name || item.part_name || 'this part'}"?`,
+      confirmLabel: 'Remove',
+      danger: true
+    })) return;
+    try {
+      const meta = getFileMeta(item);
+      if (kind === 'pdf') delete meta.pdf_file;
+      else { delete meta.step_file; delete meta.step_valid; }
+      const newFileUrl = (meta.step_file || meta.pdf_file) ? JSON.stringify(meta) : '';
+      const table = isUnadded ? 'build_bom' : 'parts';
+      const { error } = await supabase.from(table).update({ file_url: newFileUrl }).eq('id', item.id);
+      if (error) throw error;
+      toastActions.show(kind === 'pdf' ? 'PDF removed' : 'STEP file removed');
+      await loadBuildDetails();
+    } catch (error) {
+      toastActions.show('Failed to remove file: ' + (error?.message || error));
+    }
+  }
 
   // Same helper/endpoint as cad/[id]'s addSingleToBuild - notifies manufacturing
   // leads when a BOM row gets promoted to a real parts-table request.
@@ -43,6 +183,8 @@
   let projectTotalCost = 0;
   let projectPartsCount = 0;
   let buildQuantityInput = '1';
+  let notesDraft = '';
+  let savingNotes = false;
 
   // Edit modal state for build items (top table)
   let showEditModal = false;
@@ -60,6 +202,7 @@
   let purchaseModalItem = null;
   let purchaseModalUrl = '';
   let purchaseModalPrice = '';
+  let purchaseModalShipping = '';
 
   // Version selector modal for refetching BOM
   let showVersionModal = false;
@@ -180,6 +323,7 @@
       const normalizedBuildQty = normalizePositiveInt(data?.quantity, 1);
       build = { ...data, quantity: normalizedBuildQty };
       buildQuantityInput = String(normalizedBuildQty);
+      notesDraft = data?.notes || '';
 
       // Load saved BOM snapshot (all items)
       const { data: bomData, error: bomErr } = await supabase
@@ -731,6 +875,43 @@
     }
   }
 
+  // Moves an added part back to the unadded pool - confirms first, then
+  // deletes its parts/purchasing/kitting record (removeBuildAssociation
+  // already clears the build_bom row's reference and added flag rather than
+  // deleting the build_bom row itself, so the part reappears in Full BOM).
+  async function confirmUnaddBomRow(part) {
+    if (!part) return;
+    if (!await requestConfirmation({
+      title: 'Unadd part',
+      message: `Move "${part.name || part.part_name || 'this part'}" back to the unadded parts list? This cancels its manufacturing/purchasing/kitting request, but the part stays in the build's BOM so you can re-add it.`,
+      confirmLabel: 'Unadd',
+      danger: true
+    })) return;
+    await removeBuildAssociation(part.id);
+    toastActions.show('Moved back to unadded parts');
+  }
+
+  // Permanently deletes an unadded BOM row (one that was never promoted to
+  // a parts/purchasing/kitting record) from this build's BOM snapshot.
+  async function deleteUnaddedBomRow(item) {
+    if (!item) return;
+    if (!await requestConfirmation({
+      title: 'Delete BOM item',
+      message: `Permanently delete "${item.part_name || 'this item'}" from this build's BOM? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      danger: true
+    })) return;
+    try {
+      const { error } = await supabase.from('build_bom').delete().eq('id', item.id);
+      if (error) throw error;
+      await loadBuildDetails();
+      toastActions.show('Deleted from BOM');
+    } catch (e) {
+      console.error('Failed to delete BOM item:', e);
+      toastActions.show('Failed to delete item: ' + (e?.message || e));
+    }
+  }
+
   // Full BOM (bottom table) - editing helpers
   function finalStockFromRow(item) {
     return item._stock_choice === '__other__'
@@ -817,13 +998,15 @@
       const project_id = build?.subsystems?.name || 'Project';
 
       if (item.part_type === 'COTS' && item.workflow === 'kit') {
-        // Insert into kitting (in-stock COTS, just assign to bin later)
+        // Insert into kitting already marked kitted - a kit item is stocked
+        // and available immediately (that's the whole point of choosing kit
+        // over purchase), not a pending request like purchasing/manufacturing.
         const kittingInsertData = {
           name: item.part_name || item.part_number || 'Unnamed Item',
           requester: user?.full_name || user?.email,
           project_id,
           quantity: item.quantity || 1,
-          status: 'pending',
+          status: 'kitted',
           workflow: 'kit'
         };
         const { data: kit, error: kitErr } = await supabase
@@ -855,6 +1038,7 @@
           purchaseModalItem = { ...item, _buildId: buildId };
           purchaseModalUrl = '';
           purchaseModalPrice = '';
+          purchaseModalShipping = '';
           showPurchaseModal = true;
           processingAdd = false;
           return;
@@ -891,9 +1075,10 @@
       } else {
         // Insert into parts (manufactured)
         const wf = item.workflow || 'mill';
-        const file_format =
-          wf === '3d-print' ? 'step' :
-          (wf === 'laser-cut' || wf === 'lathe' || wf === 'mill' || wf === 'router') ? 'step' : 'step';
+        // Reflect the file actually attached to this row (a lathe part can
+        // carry a PDF instead of a STEP) rather than assuming STEP for
+        // every workflow.
+        const file_format = item.file_format || (item.file_url && item.file_url.includes('pdf_file') ? 'pdf' : 'step');
 
         const baseInsert = {
           name: item.part_name || item.part_number || 'Unnamed Part',
@@ -903,8 +1088,11 @@
           status: 'pending',
           quantity: item.quantity || 1,
           material: item.material || '',
-          file_name: '',
-          file_url: '',
+          // Carry over any STEP/PDF already attached to this BOM row (see
+          // the Files column above) - otherwise the manufacturing request
+          // starts with no file even though one was uploaded during review.
+          file_name: item.file_name || '',
+          file_url: item.file_url || '',
           frc_team: user?.frc_team || null
         };
 
@@ -1002,6 +1190,7 @@
         vendor: purchaseModalItem.vendor || null,
         url: purchaseModalUrl && purchaseModalUrl.trim() !== '' ? purchaseModalUrl.trim() : null,
         price: purchaseModalPrice && purchaseModalPrice !== '' ? Number(purchaseModalPrice) : null,
+        shipping_cost_allocated: purchaseModalShipping && purchaseModalShipping !== '' ? Number(purchaseModalShipping) : null,
         workflow: 'purchase',
         frc_team: user?.frc_team || null
       };
@@ -1031,6 +1220,7 @@
       purchaseModalItem = null;
       purchaseModalUrl = '';
       purchaseModalPrice = '';
+      purchaseModalShipping = '';
     }
   }
 
@@ -1159,6 +1349,22 @@
     }
   }
 
+  async function saveNotes() {
+    if (!build) return;
+    savingNotes = true;
+    try {
+      const { error } = await supabase.from('builds').update({ notes: notesDraft || null }).eq('id', buildId);
+      if (error) throw error;
+      build = { ...build, notes: notesDraft };
+      toastActions.show('Note saved');
+    } catch (error) {
+      console.error('Error saving build note:', error);
+      toastActions.show('Failed to save note: ' + (error?.message || error));
+    } finally {
+      savingNotes = false;
+    }
+  }
+
   // Version refetch functionality
   async function openVersionSelector() {
     if (!build?.subsystems?.onshape_document_id) {
@@ -1228,7 +1434,25 @@
       // Separate existing BOM parts into added and unadded
       const addedParts = bomSnapshot.filter(row => row.added === true);
       const unaddedParts = bomSnapshot.filter(row => row.added !== true);
-      
+
+      // Before wiping the unadded rows below, remember anything a person
+      // manually attached to them (a STEP/PDF file, a typed-in custom stock)
+      // - the fresh OnShape re-fetch has no way to know about those, so a
+      // matching new part (by name or part number) needs them carried over
+      // rather than silently discarded just because the version changed.
+      const unaddedManualDataByKey = new Map();
+      for (const row of unaddedParts) {
+        if (!row.file_url && !row.stock_assignment_custom) continue;
+        const manualData = {
+          file_url: row.file_url || null,
+          file_name: row.file_name || null,
+          file_format: row.file_format || null,
+          stock_assignment_custom: row.stock_assignment_custom || null
+        };
+        if (row.part_name) unaddedManualDataByKey.set(row.part_name.toLowerCase().trim(), manualData);
+        if (row.part_number) unaddedManualDataByKey.set(row.part_number.toLowerCase().trim(), manualData);
+      }
+
       // Delete ALL unadded parts - even if names match, Onshape parameters change between versions
       if (unaddedParts.length > 0) {
         const idsToDelete = unaddedParts.map(p => p.id);
@@ -1263,23 +1487,31 @@
       
       // Insert new BOM entries with fresh Onshape parameters from the new version
       if (partsToAdd.length > 0) {
-        const bomInserts = partsToAdd.map(part => ({
-          build_id: buildId,
-          part_name: part.part_name || 'Unnamed Part',
-          part_number: part.part_number || null,
-          part_type: part.part_type || 'manufactured',
-          workflow: part.workflow || 'mill',
-          quantity: (part.quantity || 1) * normalizePositiveInt(build?.quantity, 1),
-          material: part.material || '',
-          stock_assignment: part.stock_assignment || null,
-          stock_assignment_custom: part.stock_assignment_custom || null,
-          onshape_document_id: part.onshape_document_id || build?.subsystems?.onshape_document_id || null,
-          onshape_wvm: part.onshape_wvm || 'v',
-          onshape_wvmid: part.onshape_wvmid || selectedVersionForRefetch.id,
-          onshape_element_id: part.onshape_element_id || part.onshape_part_studio_element_id || build?.subsystems?.onshape_element_id || null,
-          onshape_part_id: part.onshape_part_id || null,
-          added: false
-        }));
+        const bomInserts = partsToAdd.map(part => {
+          const name = (part.part_name || '').toLowerCase().trim();
+          const partNum = (part.part_number || '').toLowerCase().trim();
+          const manualData = unaddedManualDataByKey.get(name) || unaddedManualDataByKey.get(partNum) || null;
+          return {
+            build_id: buildId,
+            part_name: part.part_name || 'Unnamed Part',
+            part_number: part.part_number || null,
+            part_type: part.part_type || 'manufactured',
+            workflow: part.workflow || 'mill',
+            quantity: (part.quantity || 1) * normalizePositiveInt(build?.quantity, 1),
+            material: part.material || '',
+            stock_assignment: part.stock_assignment || null,
+            stock_assignment_custom: manualData?.stock_assignment_custom || part.stock_assignment_custom || null,
+            file_url: manualData?.file_url || null,
+            file_name: manualData?.file_name || null,
+            file_format: manualData?.file_format || null,
+            onshape_document_id: part.onshape_document_id || build?.subsystems?.onshape_document_id || null,
+            onshape_wvm: part.onshape_wvm || 'v',
+            onshape_wvmid: part.onshape_wvmid || selectedVersionForRefetch.id,
+            onshape_element_id: part.onshape_element_id || part.onshape_part_studio_element_id || build?.subsystems?.onshape_element_id || null,
+            onshape_part_id: part.onshape_part_id || null,
+            added: false
+          };
+        });
         
         const { error: insertError } = await supabase
           .from('build_bom')
@@ -1390,13 +1622,10 @@
             </div>
           {/if}
           {#if build.status !== 'assembled'}
-            {@const progress = getBuildProgress()}
-            {#if progress.status === 'Ready to Assemble'}
-              <button class="btn btn-success btn-sm" on:click={markAsAssembled}>
-                <CheckCircle size={16} />
-                Mark as Assembled
-              </button>
-            {/if}
+            <button class="btn btn-success btn-sm" on:click={markAsAssembled}>
+              <CheckCircle size={16} />
+              Mark as Assembled
+            </button>
           {/if}
           {#if isSubsystemLead()}
             <button class="btn btn-outline-danger btn-sm" on:click={deleteBuild} title="Delete this build">
@@ -1453,6 +1682,21 @@
       </div>
     </div>
 
+    <div class="bom-section notes-section">
+      <div class="parts-header">
+        <h2>Notes</h2>
+      </div>
+      <textarea
+        class="form-input notes-textarea"
+        rows="4"
+        bind:value={notesDraft}
+        placeholder="Add context, blockers, or status for this build..."
+      ></textarea>
+      <button class="btn btn-primary btn-sm" on:click={saveNotes} disabled={savingNotes || notesDraft === (build.notes || '')}>
+        {savingNotes ? 'Saving...' : 'Save Note'}
+      </button>
+    </div>
+
     <!-- Build Components on top - Added Parts Only -->
     <div class="bom-section">
       <div class="parts-header">
@@ -1471,6 +1715,8 @@
                   <th>Qty</th>
                   <th>Status</th>
                   <th>Kitting</th>
+                  <th>Files</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -1530,6 +1776,69 @@
                         <span class="no-kitting">Not assigned</span>
                       {/if}
                     </td>
+                    <td on:click|stopPropagation on:keydown|stopPropagation role="presentation">
+                      {#if part.workflow === 'router' || part.workflow === 'lathe' || part.workflow === '3d-print'}
+                        <div class="file-actions">
+                          {#if canViewCad(part)}
+                            <button class="btn btn-outline btn-sm" on:click={() => (cadViewerItem = part)}>
+                              <Box size={12} /> View CAD
+                            </button>
+                            <button class="btn btn-outline btn-sm" on:click={() => installStepFile(part)}>
+                              <Download size={12} /> Install STEP
+                            </button>
+                            <button class="btn btn-outline btn-sm" on:click={() => openAttachModal(part, false)} title="Replace the attached STEP file">
+                              <Upload size={12} /> Change STEP
+                            </button>
+                            <button class="btn btn-outline btn-sm" on:click={() => removeAttachedFile(part, false, 'step')} title="Remove the attached STEP file">
+                              <X size={12} /> Remove STEP
+                            </button>
+                          {/if}
+                          {#if part.workflow === 'lathe' && canViewPdf(part)}
+                            <button class="btn btn-outline btn-sm" on:click={() => openPdfViewerFor(part)}>
+                              <FileText size={12} /> View PDF
+                            </button>
+                            <button class="btn btn-outline btn-sm" on:click={() => installPdfFile(part)}>
+                              <Download size={12} /> Download PDF
+                            </button>
+                            <button class="btn btn-outline btn-sm" on:click={() => openAttachModal(part, false)} title="Replace the attached PDF">
+                              <Upload size={12} /> Change PDF
+                            </button>
+                            <button class="btn btn-outline btn-sm" on:click={() => removeAttachedFile(part, false, 'pdf')} title="Remove the attached PDF">
+                              <X size={12} /> Remove PDF
+                            </button>
+                          {/if}
+                          {#if !canViewCad(part) && !(part.workflow === 'lathe' && canViewPdf(part))}
+                            <button class="btn btn-outline btn-sm" on:click={() => openAttachModal(part, false)}>
+                              <Upload size={12} /> Attach STEP{part.workflow === 'lathe' ? ' or PDF' : ''}
+                            </button>
+                          {/if}
+                        </div>
+                      {:else}
+                        <span class="no-data">—</span>
+                      {/if}
+                    </td>
+                    <td>
+                      <div class="added-part-actions">
+                        {#if part.workflow === 'purchase'}
+                          <a class="btn btn-outline btn-sm" href="/cad/purchasing" on:click|stopPropagation>
+                            <ExternalLink size={12} />
+                            View in Purchasing
+                          </a>
+                        {:else if part.workflow === 'kit'}
+                          <span class="tag tag-status tag-status-kitted">
+                            <CheckCircle size={12} /> Kitted
+                          </span>
+                        {:else}
+                          <a class="btn btn-outline btn-sm" href="/manufacture?part={part.id}" on:click|stopPropagation>
+                            <ExternalLink size={12} />
+                            View in Manufacturing
+                          </a>
+                        {/if}
+                        <button class="btn btn-outline-danger btn-sm" on:click|stopPropagation={() => confirmUnaddBomRow(part)}>
+                          Unadd
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 {/each}
               </tbody>
@@ -1574,6 +1883,7 @@
                 <th>Workflow</th>
                 <th>Qty</th>
                 <th>Stock</th>
+                <th>Files</th>
                 <th>Action</th>
               </tr>
             </thead>
@@ -1629,7 +1939,7 @@
                   <td class="quantity">{item.quantity || 1}</td>
                   <td class="material">
                     {#if item.part_type !== 'COTS'}
-                      <select on:change={(e) => updateBomStockChoice(actualIndex, e.target.value)} value={item._stock_choice || item.stock_assignment || ''}>
+                      <select class="form-input" on:change={(e) => updateBomStockChoice(actualIndex, e.target.value)} value={item._stock_choice || item.stock_assignment || ''}>
                         <option value="">Select Stock</option>
                         {#each getStocksForWorkflow(item.workflow || 'mill') as stock}
                           <option value={stock.description}>{stock.description}</option>
@@ -1646,19 +1956,72 @@
                     {/if}
                   </td>
                   <td>
-                    <button
-                      class="btn btn-sm btn-yellow add-btn"
-                      on:click={() => addFromFullBOM(item)}
-                      disabled={(item.parts_id || item.purchasing_id || item.kitting_id) || processingAdd}
-                    >
-                      {#if item.parts_id || item.purchasing_id || item.kitting_id}
-                        <CheckCircle size={14} />
-                        Added
-                      {:else}
-                        <Plus size={14} />
-                        Add
-                      {/if}
-                    </button>
+                    {#if item.workflow === 'router' || item.workflow === 'lathe' || item.workflow === '3d-print'}
+                      <div class="file-actions">
+                        {#if canViewCad(item)}
+                          <button class="btn btn-outline btn-sm" on:click={() => (cadViewerItem = item)}>
+                            <Box size={12} /> View CAD
+                          </button>
+                          <button class="btn btn-outline btn-sm" on:click={() => installStepFile(item)}>
+                            <Download size={12} /> Install STEP
+                          </button>
+                          <button class="btn btn-outline btn-sm" on:click={() => openAttachModal(item, true)} title="Replace the attached STEP file">
+                            <Upload size={12} /> Change STEP
+                          </button>
+                          <button class="btn btn-outline btn-sm" on:click={() => removeAttachedFile(item, true, 'step')} title="Remove the attached STEP file">
+                            <X size={12} /> Remove STEP
+                          </button>
+                        {/if}
+                        {#if item.workflow === 'lathe' && canViewPdf(item)}
+                          <button class="btn btn-outline btn-sm" on:click={() => openPdfViewerFor(item)}>
+                            <FileText size={12} /> View PDF
+                          </button>
+                          <button class="btn btn-outline btn-sm" on:click={() => installPdfFile(item)}>
+                            <Download size={12} /> Download PDF
+                          </button>
+                          <button class="btn btn-outline btn-sm" on:click={() => openAttachModal(item, true)} title="Replace the attached PDF">
+                            <Upload size={12} /> Change PDF
+                          </button>
+                          <button class="btn btn-outline btn-sm" on:click={() => removeAttachedFile(item, true, 'pdf')} title="Remove the attached PDF">
+                            <X size={12} /> Remove PDF
+                          </button>
+                        {/if}
+                        {#if !canViewCad(item) && !(item.workflow === 'lathe' && canViewPdf(item))}
+                          <button class="btn btn-outline btn-sm" on:click={() => openAttachModal(item, true)}>
+                            <Upload size={12} /> Attach STEP{item.workflow === 'lathe' ? ' or PDF' : ''}
+                          </button>
+                        {/if}
+                      </div>
+                    {:else}
+                      <span class="no-data">—</span>
+                    {/if}
+                  </td>
+                  <td>
+                    <div class="unadded-part-actions">
+                      <button
+                        class="btn btn-sm btn-yellow add-btn"
+                        on:click={() => addFromFullBOM(item)}
+                        disabled={(item.parts_id || item.purchasing_id || item.kitting_id) || processingAdd}
+                      >
+                        {#if item.parts_id || item.purchasing_id || item.kitting_id}
+                          <CheckCircle size={14} />
+                          Added
+                        {:else if item.part_type === 'COTS' && item.workflow === 'kit'}
+                          <CheckCircle size={14} />
+                          Mark as Kitted
+                        {:else}
+                          <Plus size={14} />
+                          {#if item.part_type === 'COTS'}
+                            Add to Purchasing
+                          {:else}
+                            Add to Manufacturing
+                          {/if}
+                        {/if}
+                      </button>
+                      <button class="btn btn-outline-danger btn-sm" on:click={() => deleteUnaddedBomRow(item)}>
+                        Remove
+                      </button>
+                    </div>
                   </td>
                 </tr>
               {/each}
@@ -1757,7 +2120,7 @@
       <input id="edit-quantity" class="form-input" type="number" min="1" step="1" bind:value={editQuantity} />
     </div>
     <div class="modal-actions">
-      <button class="btn btn-outline-danger" on:click={() => { removeBuildAssociation(editTarget.id); showEditModal = false; editTarget = null; }}>Delete</button>
+      <button class="btn btn-outline-danger" on:click={() => { confirmUnaddBomRow(editTarget); showEditModal = false; editTarget = null; }}>Unadd</button>
       <div style="flex:1"></div>
       <button class="btn" on:click={() => { showEditModal = false; editTarget = null; }}>Cancel</button>
       <button class="btn btn-yellow" on:click={saveEdit}>Save</button>
@@ -1790,6 +2153,9 @@
 
         <label for="purchase-price">Unit Price (optional):</label>
         <input id="purchase-price" class="form-input" type="number" step="0.01" min="0" placeholder="0.00" bind:value={purchaseModalPrice} />
+
+        <label for="purchase-shipping">Shipping cost (optional):</label>
+        <input id="purchase-shipping" class="form-input" type="number" step="0.01" min="0" placeholder="0.00" bind:value={purchaseModalShipping} />
       </div>
       <div class="modal-actions">
         <button class="btn" on:click={() => { showPurchaseModal = false; purchaseModalItem = null; }}>Cancel</button>
@@ -1858,6 +2224,103 @@
           disabled={!selectedVersionForRefetch || loadingVersions}
         >
           {loadingVersions ? 'Loading...' : 'Load BOM from Version'}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if cadViewerItem}
+  <div
+    class="modal-backdrop"
+    on:click|self={() => (cadViewerItem = null)}
+    role="button"
+    tabindex="0"
+    on:keydown={(e) => { if (e.key === 'Escape') { e.preventDefault(); cadViewerItem = null; } }}
+  >
+    <div class="modal cad-modal" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h3>{cadViewerItem.name || cadViewerItem.part_name || '3D Model'}</h3>
+        <button type="button" class="modal-close-button" aria-label="Close dialog" on:click={() => (cadViewerItem = null)}>
+          <X size={18} />
+        </button>
+      </div>
+      <div class="modal-body">
+        <CadViewer
+          part={{ ...cadViewerItem, source_type: cadViewerItem.is_onshape_part ? 'onshape_api' : 'file_upload' }}
+          stepFileName={getStepFileName(cadViewerItem)}
+        />
+        <p class="cad-modal-hint">Drag to rotate · scroll to zoom · right-drag to pan</p>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if showPdfModal && pdfViewerItem}
+  <div
+    class="modal-backdrop"
+    on:click|self={closePdfViewer}
+    role="button"
+    tabindex="0"
+    on:keydown={(e) => { if (e.key === 'Escape') { e.preventDefault(); closePdfViewer(); } }}
+  >
+    <div class="modal cad-modal" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h3>{pdfViewerItem.name || pdfViewerItem.part_name || 'Drawing'} - PDF</h3>
+        <div class="cad-modal-header-actions">
+          <button type="button" class="cad-download-btn" aria-label="Download PDF" title="Download PDF" on:click={() => installPdfFile(pdfViewerItem)}>
+            <Download size={18} />
+          </button>
+          <button type="button" class="modal-close-button" aria-label="Close dialog" on:click={closePdfViewer}>
+            <X size={18} />
+          </button>
+        </div>
+      </div>
+      <div class="modal-body">
+        <iframe class="pdf-viewer-frame" src={pdfViewerUrl} title="Drawing PDF">
+          <p>PDF preview isn't supported here - use the download button above.</p>
+        </iframe>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if showAttachModal && attachModalItem}
+  <div
+    class="modal-backdrop"
+    on:click|self={closeAttachModal}
+    role="button"
+    tabindex="0"
+    on:keydown={(e) => { if (e.key === 'Escape') { e.preventDefault(); closeAttachModal(); } }}
+  >
+    <div class="modal" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h3>{attachModalItem.workflow === 'lathe' ? 'Attach STEP or PDF' : 'Attach STEP File'} - {attachModalItem.name || attachModalItem.part_name}</h3>
+        <button type="button" class="modal-close-button" aria-label="Close dialog" on:click={closeAttachModal}>
+          <X size={18} />
+        </button>
+      </div>
+      <div class="modal-body">
+        <p class="cad-modal-hint">
+          {#if attachModalItem.workflow === 'lathe'}
+            Attach a STEP file (spindle axis along Z, centered at X=0, Y=0) to unlock the 3D viewer, or a PDF drawing to view/download in-app.
+          {:else}
+            Attach a STEP file to unlock the 3D viewer.
+          {/if}
+        </p>
+        <input
+          type="file"
+          class="form-input"
+          accept={attachModalItem.workflow === 'lathe' ? '.step,.stp,.pdf' : '.step,.stp'}
+          on:change={(e) => { attachFile = e.target.files?.[0] || null; }}
+        />
+        <button
+          class="btn btn-primary"
+          style="margin-top: 1rem;"
+          disabled={!attachFile || attachingFile}
+          on:click={submitAttachFile}
+        >
+          {attachingFile ? 'Attaching…' : 'Attach File'}
         </button>
       </div>
     </div>
@@ -1952,6 +2415,9 @@
     margin-bottom: var(--space-6);
   }
 
+  .notes-section { display: flex; flex-direction: column; gap: var(--gap-3); }
+  .notes-textarea { resize: vertical; min-height: 5rem; }
+
   .parts-header {
     display: flex;
     justify-content: space-between;
@@ -1997,9 +2463,9 @@
 
   /* Type dropdown colors */
   .type-cots {
-    background: var(--green-soft);
-    color: var(--green-strong);
-    border-color: var(--green-base);
+    background: var(--brand-gold-soft);
+    color: var(--brand-gold-strong);
+    border-color: var(--brand-gold-base);
   }
 
   .type-manufactured {
@@ -2008,12 +2474,14 @@
     border-color: var(--blue-soft);
   }
 
-  /* Workflow dropdown colors */
+  /* Workflow dropdown colors - Purchase/Kit share COTS's gold rather than
+     Router's green, since a COTS row's workflow is always purchase or kit
+     and the two greens made COTS and manufactured-router rows indistinguishable. */
   .workflow-purchase,
   .workflow-kit {
-    background: var(--green-soft);
-    color: var(--green-strong);
-    border-color: var(--green-base);
+    background: var(--brand-gold-soft);
+    color: var(--brand-gold-strong);
+    border-color: var(--brand-gold-base);
   }
 
   .workflow-mill {
@@ -2286,9 +2754,64 @@
     color: var(--secondary);
   }
 
-  /* Add button in Full BOM table */
+  /* Add button in Full BOM table - fixed width (sized to the longest
+     label, "Add to Manufacturing") so every row's button lines up at the
+     same length regardless of which label it's showing. */
   .add-btn {
     white-space: nowrap;
+    min-width: 172px;
+    justify-content: center;
+  }
+
+  .added-part-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+
+  .unadded-part-actions {
+    display: flex;
+    gap: 0.4rem;
+  }
+
+  .file-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+
+  .cad-modal {
+    width: min(900px, 95vw);
+    max-width: 95vw;
+  }
+
+  .cad-modal-hint {
+    margin: var(--space-2) 0 0 0;
+    text-align: center;
+    font-size: var(--font-xs);
+    color: var(--text-muted);
+  }
+
+  .cad-modal-header-actions { display: inline-flex; align-items: center; gap: 0.25rem; }
+
+  .cad-download-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0.25rem;
+    display: inline-flex;
+    align-items: center;
+    border-radius: var(--radius-sm);
+  }
+  .cad-download-btn:hover { background: var(--surface-2); color: var(--text); }
+
+  .pdf-viewer-frame {
+    width: 100%;
+    height: 75vh;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-1);
   }
 
   .btn-yellow {

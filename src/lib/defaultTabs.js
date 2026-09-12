@@ -71,8 +71,12 @@ export function defaultHeaderTabs(navConfig = navigation) {
   if (navConfig?.tabs?.manufacture !== false) manufacturingChildren.push({ key: 'manufacture', label: 'Manufacture' });
   if (navConfig?.tabs?.['fusion-autocam'] !== false) manufacturingChildren.push({ key: 'fusion-autocam', label: 'Fusion AutoCAM' });
   if (navConfig?.tabs?.['gcode-converter'] !== false) manufacturingChildren.push({ key: 'gcode-converter', label: 'G-code Converter' });
-  if (navConfig?.tabs?.kitting !== false) manufacturingChildren.push({ key: 'kitting', label: 'Kitting' });
-  if (navConfig?.tabs?.['cots-stocking'] !== false) manufacturingChildren.push({ key: 'cots-stocking', label: 'COTS Stocking' });
+  // Kitting and COTS Stocking: deliberately out of the default menu (same
+  // as the legacy Competition routes above) - still reachable by URL, and
+  // by anyone who already added them to their own saved nav, or who
+  // explicitly re-enables them (navConfig.tabs.kitting/['cots-stocking'] === true).
+  if (navConfig?.tabs?.kitting === true) manufacturingChildren.push({ key: 'kitting', label: 'Kitting' });
+  if (navConfig?.tabs?.['cots-stocking'] === true) manufacturingChildren.push({ key: 'cots-stocking', label: 'COTS Stocking' });
   if (navConfig?.tabs?.files !== false) manufacturingChildren.push({ key: 'files', label: 'Files' });
   if (manufacturingChildren.length) {
     tabs.push({ type: 'folder', label: 'Manufacturing', children: manufacturingChildren });
@@ -96,6 +100,11 @@ export function defaultHeaderTabs(navConfig = navigation) {
   const cadChildren = [];
   if (navConfig?.tabs?.cad !== false) cadChildren.push({ key: 'cad', label: 'CAD' });
   if (navConfig?.tabs?.build !== false) cadChildren.push({ key: 'build', label: 'Build' });
+  // Same key/route as Manufacturing's Files entry (the shared manufacturing-
+  // drive file browser) - CAD needs it too now that build BOM CSV exports
+  // and STEP/PDF drawings live in there (see the "BOM Files" folder on the
+  // /cad page).
+  if (navConfig?.tabs?.files !== false) cadChildren.push({ key: 'files', label: 'Files' });
   if (cadChildren.length) {
     tabs.push({ type: 'folder', label: 'CAD', children: cadChildren });
   }

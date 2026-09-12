@@ -5,7 +5,7 @@
 // otherwise distinguish by shape).
 export function matchStockInWorkflow(stockData, workflow, material, minDim, midDim, maxDim, dimX, dimY) {
   const workflowStocks = stockData[workflow] || [];
-  let bestMatch = null;
+  let bestMatch;
 
   for (const stock of workflowStocks) {
     if (!material.includes(stock.material.toLowerCase())) continue;
@@ -48,8 +48,15 @@ export function matchStockInWorkflow(stockData, workflow, material, minDim, midD
     }
   }
 
-  // Fallback to first material match if no exact match
-  if (!bestMatch) {
+  // Fallback to a plain material match for every workflow except router.
+  // Router stock is picked by real shape (sheet thickness or tube outer
+  // width/height) - a "1/16" Aluminum Sheet" guess for a part whose true
+  // dimensions don't actually match one is worse than no guess at all, since
+  // it reads as a verified, correct pick when it's really just "the first
+  // thing with the right material." That was the source of every router
+  // tube part in a BOM with no real dimension data getting the same wrong
+  // sheet stock pre-selected regardless of its actual shape.
+  if (!bestMatch && workflow !== 'router') {
     bestMatch = workflowStocks.find((stock) => material.includes(stock.material.toLowerCase()));
   }
 
@@ -71,7 +78,17 @@ export function pickStockAndWorkflow(stockData, part) {
   const dimX = part.bounding_box_x * 39.3701; // meters to inches
   const dimY = part.bounding_box_y * 39.3701;
   const dimZ = part.bounding_box_z * 39.3701;
-  const [minDim, midDim, maxDim] = [dimX, dimY, dimZ].sort((a, b) => a - b);
+  let [minDim, midDim, maxDim] = [dimX, dimY, dimZ].sort((a, b) => a - b);
+
+  // Manually-imported CSV parts have no 3D bounding box at all (dimX/Y/Z
+  // above are all NaN), so the sheet-thickness match below would never
+  // fire. An explicit thickness column (see bom_csv_import.js) covers that
+  // one dimension directly - it only ever feeds the sheet-thickness check,
+  // never the tube outer_width/outer_height match (that still needs real
+  // dimX/dimY, which a thickness-only CSV column can't provide).
+  if (Number.isNaN(minDim) && typeof part.thickness === 'number' && part.thickness > 0) {
+    minDim = part.thickness;
+  }
 
   if (part.workflow === 'mill') {
     const routerMatch = matchStockInWorkflow(stockData, 'router', material, minDim, midDim, maxDim, dimX, dimY);

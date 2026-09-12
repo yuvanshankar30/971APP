@@ -8,6 +8,7 @@
   import { formatPacificDate } from '$lib/timezone.js';
   import { getSeasonBucket, getCurrentSeasonBucket, getAllSeasonBuckets, passesSeasonFilter } from '$lib/frcSeason.js';
   import SeasonFilter from '$lib/components/SeasonFilter.svelte';
+  import { camelBreakHtml } from '$lib/camel_break.js';
 
   let user = null;
   let loading = true;
@@ -192,34 +193,18 @@
           const purchasingIds = addedBomRows.filter(row => row.purchasing_id).map(row => row.purchasing_id);
           const kittingIds = addedBomRows.filter(row => row.kitting_id).map(row => row.kitting_id);
 
-          // Fetch actual created items only (no placeholders)
-          let partsData = [];
-          let purchasingData = [];
-          let kittingData = [];
-
-          if (partsIds.length > 0) {
-            const { data, error: partsError } = await supabase
-              .from('parts')
-              .select('*')
-              .in('id', partsIds);
-            if (!partsError) partsData = data || [];
-          }
-
-          if (purchasingIds.length > 0) {
-            const { data, error: purchasingError } = await supabase
-              .from('purchasing')
-              .select('*')
-              .in('id', purchasingIds);
-            if (!purchasingError) purchasingData = data || [];
-          }
-
-          if (kittingIds.length > 0) {
-            const { data, error: kittingError } = await supabase
-              .from('kitting')
-              .select('*')
-              .in('id', kittingIds);
-            if (!kittingError) kittingData = data || [];
-          }
+          // Fetch actual created items only (no placeholders) - these 3
+          // lookups are independent of each other (only bom_bom above had
+          // to come first, to know which ids to look up), so run them
+          // concurrently instead of one after another.
+          const [partsResult, purchasingResult, kittingResult] = await Promise.all([
+            partsIds.length > 0 ? supabase.from('parts').select('*').in('id', partsIds) : { data: [] },
+            purchasingIds.length > 0 ? supabase.from('purchasing').select('*').in('id', purchasingIds) : { data: [] },
+            kittingIds.length > 0 ? supabase.from('kitting').select('*').in('id', kittingIds) : { data: [] }
+          ]);
+          const partsData = partsResult.error ? [] : (partsResult.data || []);
+          const purchasingData = purchasingResult.error ? [] : (purchasingResult.data || []);
+          const kittingData = kittingResult.error ? [] : (kittingResult.data || []);
 
           // Create placeholder entries only for BOM rows that were explicitly added
           // to the build (row.added === true). This ensures progress and cost
@@ -519,7 +504,7 @@
                 </div>
                 <div class="project-actions">
                   {#if pid === '__NO_PROJECT__'}
-                    <span class="muted">Unassigned</span>
+                    <!-- No rename control here - "Unassigned" isn't a real project name, it's already shown at left. -->
                   {:else}
                     {#if editingProjectName[pid]}
                       <input class="form-input" bind:value={tempProjectName[pid]} on:keydown={(e) => { if (e.key === 'Enter') saveProjectName(pid); }} />
@@ -548,8 +533,7 @@
                       <div class="build-header">
                         <div class="icon-wrap"><Package size={18} /></div>
                         <div class="build-info">
-                          <h3>{build.subsystems?.name || 'Unknown'} · {build.release_name}</h3>
-                          <p>Build #{build.build_hash?.split('_')[1] || 'N/A'}</p>
+                          <h3>{@html camelBreakHtml(build.subsystems?.name || 'Unknown')} · {build.release_name}</h3>
                         </div>
                         <span class="status-badge status-{build.status}">
                           {#if build.status === 'pending'}
@@ -640,13 +624,10 @@
                           </a>
                         {/if}
                         {#if build.status !== 'assembled'}
-                          {@const progress = getBuildProgress(build)}
-                          {#if progress.status === 'Ready'}
-                            <button class="btn btn-success btn-sm" on:click|stopPropagation={() => markAsAssembled(build.id)}>
-                              <CheckCircle size={14} />
-                              Build Finished
-                            </button>
-                          {/if}
+                          <button class="btn btn-success btn-sm" on:click|stopPropagation={() => markAsAssembled(build.id)}>
+                            <CheckCircle size={14} />
+                            Build Finished
+                          </button>
                         {/if}
                       </div>
                     </div>
@@ -681,7 +662,7 @@
 {/if}
 
 <style>
-  .build-container { max-width: 1400px; margin: 0 auto; padding: 0 var(--space-4) var(--space-4); }
+  .build-container { max-width: 1800px; margin: 0 auto; padding: 0 var(--space-4) var(--space-4); }
 
   .stats-grid {
     display: grid;

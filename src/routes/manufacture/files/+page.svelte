@@ -14,7 +14,10 @@
   // exists there. Filtered out of the UI below, never shown as a "file."
   const EMPTY_FOLDER_MARKER = '.emptyFolderPlaceholder';
 
-  let currentPath = ''; // '' = root, otherwise "a/b/c" (no leading/trailing slash)
+  // '' = root, otherwise "a/b/c" (no leading/trailing slash). Seeded from
+  // ?path= so a link elsewhere (e.g. the "BOM Files" shortcut on /cad) can
+  // deep-link straight into a folder instead of always opening at root.
+  let currentPath = $page.url.searchParams.get('path') || '';
   let entries = [];
   let loading = true;
   let uploading = false;
@@ -54,7 +57,31 @@
     }
   }
 
-  onMount(load);
+  // Creates `path` (with the same empty-placeholder convention as
+  // handleCreateFolder) if it doesn't already show up in its parent's
+  // listing - a link that deep-links here via ?path= (the "BOM Files"
+  // shortcut on /cad) shouldn't land on an empty "does not exist" view the
+  // very first time anyone visits it.
+  async function ensureFolderExists(path) {
+    if (!path) return;
+    const segments = path.split('/');
+    const name = segments.pop();
+    const parent = segments.join('/');
+    try {
+      const { data } = await supabase.storage.from(BUCKET).list(parent);
+      const exists = (data || []).some((e) => e.name === name);
+      if (!exists) {
+        await supabase.storage.from(BUCKET).upload(joinPath(path, EMPTY_FOLDER_MARKER), new Blob(['']));
+      }
+    } catch (e) {
+      console.warn('Failed to ensure folder exists:', path, e);
+    }
+  }
+
+  onMount(async () => {
+    if (currentPath) await ensureFolderExists(currentPath);
+    await load();
+  });
 
   // Storage's list() has no "type" field - a folder shows up as an entry
   // with id === null (no metadata, since it isn't a real object itself,

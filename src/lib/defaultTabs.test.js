@@ -35,24 +35,25 @@ describe('defaultHeaderTabs', () => {
     expect(order).toEqual(['home', 'Manufacturing', 'Competition', 'CAD', 'purchasing', 'docs', 'admin']);
   });
 
-  it('groups CAD and Build together in the CAD folder', () => {
+  it('groups CAD, Build, and Files together in the CAD folder', () => {
     const tabs = defaultHeaderTabs();
     const cad = tabs.find((tab) => tab.type === 'folder' && tab.label === 'CAD');
     expect(cad?.children).toEqual([
       { key: 'cad', label: 'CAD' },
-      { key: 'build', label: 'Build' }
+      { key: 'build', label: 'Build' },
+      { key: 'files', label: 'Files' }
     ]);
   });
 
-  it('drops a disabled CAD or Build entry from the folder without hiding the other one', () => {
+  it('drops a disabled CAD or Build entry from the folder without hiding the others', () => {
     expect(defaultHeaderTabs({ tabs: { cad: false } }).find((tab) => tab.label === 'CAD').children)
-      .toEqual([{ key: 'build', label: 'Build' }]);
+      .toEqual([{ key: 'build', label: 'Build' }, { key: 'files', label: 'Files' }]);
     expect(defaultHeaderTabs({ tabs: { build: false } }).find((tab) => tab.label === 'CAD').children)
-      .toEqual([{ key: 'cad', label: 'CAD' }]);
+      .toEqual([{ key: 'cad', label: 'CAD' }, { key: 'files', label: 'Files' }]);
   });
 
-  it('omits the CAD folder entirely once both CAD and Build are disabled', () => {
-    const tabs = defaultHeaderTabs({ tabs: { cad: false, build: false } });
+  it('omits the CAD folder entirely once CAD, Build, and Files are all disabled', () => {
+    const tabs = defaultHeaderTabs({ tabs: { cad: false, build: false, files: false } });
     expect(tabs.some((tab) => tab.label === 'CAD')).toBe(false);
   });
 
@@ -62,8 +63,27 @@ describe('defaultHeaderTabs', () => {
     expect(children.at(-1)).toEqual({ key: 'scouting-admin', label: 'Scouting Admin' });
   });
 
-  it('includes the raw G-code Converter in the Manufacturing folder', () => {
-    expect(manufacturingChildren(defaultHeaderTabs())).toContainEqual({ key: 'gcode-converter', label: 'G-code Converter' });
+  it('omits G-code Converter from the Manufacturing folder by default (deliberately out of the default menu, still reachable by URL)', () => {
+    const keys = manufacturingChildren(defaultHeaderTabs()).map((child) => child.key);
+    expect(keys).not.toContain('gcode-converter');
+  });
+
+  it('includes G-code Converter in the Manufacturing folder when explicitly re-enabled', () => {
+    const tabs = defaultHeaderTabs({ tabs: { 'gcode-converter': true } });
+    expect(manufacturingChildren(tabs)).toContainEqual({ key: 'gcode-converter', label: 'G-code Converter' });
+  });
+
+  it('omits Kitting and COTS Stocking from the Manufacturing folder by default (deliberately out of the default menu, still reachable by URL)', () => {
+    const keys = manufacturingChildren(defaultHeaderTabs()).map((child) => child.key);
+    expect(keys).not.toContain('kitting');
+    expect(keys).not.toContain('cots-stocking');
+  });
+
+  it('includes Kitting and COTS Stocking in the Manufacturing folder when explicitly re-enabled', () => {
+    const tabs = defaultHeaderTabs({ tabs: { kitting: true, 'cots-stocking': true } });
+    const keys = manufacturingChildren(tabs).map((child) => child.key);
+    expect(keys).toContain('kitting');
+    expect(keys).toContain('cots-stocking');
   });
 
   it('includes Files in the Manufacturing folder', () => {
@@ -125,17 +145,28 @@ describe('promoteChildrenOfDisabledFolders', () => {
 });
 
 describe('ensureGcodeConverterTab', () => {
+  // Passes an explicit empty navConfig ({}) rather than the real app
+  // navigation.json - G-code Converter is off there by default now
+  // (deliberately out of the default menu), and this backfill helper
+  // itself already honors that flag (see the guard test below), so these
+  // exercise the backfill mechanism in isolation from that default.
   it('adds G-code Converter to an existing Manufacturing folder', () => {
     const tabs = [{ type: 'folder', label: 'Manufacturing', children: [{ key: 'manufacture', label: 'Manufacture' }] }];
-    const result = ensureGcodeConverterTab(tabs);
+    const result = ensureGcodeConverterTab(tabs, {});
     expect(manufacturingChildren(result).at(-1)).toEqual({ key: 'gcode-converter', label: 'G-code Converter' });
   });
 
   it('replaces the mistaken Text Engraving entry in saved navigation', () => {
     const tabs = [{ type: 'tab', key: 'text-engraving', label: 'Text Engraving' }];
-    const result = ensureGcodeConverterTab(tabs);
+    const result = ensureGcodeConverterTab(tabs, {});
     expect(result).toEqual([{ type: 'tab', key: 'gcode-converter', label: 'G-code Converter' }]);
     expect(tabs[0].key).toBe('text-engraving');
+  });
+
+  it('does nothing when gcode-converter is disabled in navConfig (the current real default)', () => {
+    const tabs = [{ type: 'folder', label: 'Manufacturing', children: [{ key: 'manufacture', label: 'Manufacture' }] }];
+    const result = ensureGcodeConverterTab(tabs);
+    expect(result).toBe(tabs);
   });
 });
 
@@ -286,7 +317,8 @@ describe('mergeDefaultHeaderTabs', () => {
     const cad = tabs.find((item) => item.label === 'CAD');
     expect(cad?.children).toEqual([
       { key: 'cad', label: 'CAD' },
-      { key: 'build', label: 'Build' }
+      { key: 'build', label: 'Build' },
+      { key: 'files', label: 'Files' }
     ]);
   });
 });

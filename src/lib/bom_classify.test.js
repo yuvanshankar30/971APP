@@ -27,6 +27,49 @@ describe('manualClassification (COTS vs manufactured rules)', () => {
     expect(classify({ name: 'Screw', standard_content: 'true' }).classification).toBe('COTS');
   });
 
+  it('classifies anything with "spring" in the name as COTS regardless of part number', () => {
+    expect(classify({ name: '9657K285_Compression Spring', part_number: 'P006486' }).classification).toBe('COTS');
+    expect(classify({ name: 'Extension Spring', part_number: 'X1' }).classification).toBe('COTS');
+  });
+
+  it('classifies anything with "pcb" in the name as COTS regardless of part number', () => {
+    expect(classify({ name: 'Custom PCB', part_number: 'P1' }).classification).toBe('COTS');
+  });
+
+  it('classifies SDS-branded parts and fasteners as a COTS kit item (stocked, not purchased)', () => {
+    expect(classify({ name: 'SDS MK5n Top Assembly (A)' })).toMatchObject({ classification: 'COTS', workflow_status: 'kit' });
+    expect(classify({ name: 'M4 bolt' })).toMatchObject({ classification: 'COTS', workflow_status: 'kit' });
+    expect(classify({ name: '10-32 nylock nut' })).toMatchObject({ classification: 'COTS', workflow_status: 'kit' });
+    expect(classify({ name: 'Socket Head Cap Screw 1/4-20' })).toMatchObject({ classification: 'COTS', workflow_status: 'kit' });
+  });
+
+  it('classifies motors, gears, and electrical/control-system COTS as kit items regardless of part number', () => {
+    expect(classify({ name: 'Kraken X60 Brushless Motor', part_number: 'P1' })).toMatchObject({ classification: 'COTS', workflow_status: 'kit' });
+    expect(classify({ name: '20T Gear', part_number: 'P1' })).toMatchObject({ classification: 'COTS', workflow_status: 'kit' });
+    expect(classify({ name: 'roboRIO 2.0' })).toMatchObject({ classification: 'COTS', workflow_status: 'kit' });
+    expect(classify({ name: 'Pigeon 2.0' })).toMatchObject({ classification: 'COTS', workflow_status: 'kit' });
+    expect(classify({ name: 'CANivore' })).toMatchObject({ classification: 'COTS', workflow_status: 'kit' });
+    expect(classify({ name: '120A Breaker' })).toMatchObject({ classification: 'COTS', workflow_status: 'kit' });
+    expect(classify({ name: 'Battery' })).toMatchObject({ classification: 'COTS', workflow_status: 'kit' });
+    expect(classify({ name: 'PDP' })).toMatchObject({ classification: 'COTS', workflow_status: 'kit' });
+    expect(classify({ name: 'PowerDistribution PCB' })).toMatchObject({ classification: 'COTS', workflow_status: 'kit' });
+    expect(classify({ name: '9657K285_Compression Spring', part_number: 'P006486' })).toMatchObject({ classification: 'COTS', workflow_status: 'kit' });
+  });
+
+  it('does not let "gearbox" (a real manufactured plate part) match the gear keyword', () => {
+    expect(classify({ name: 'pivot gearbox plate', part_number: 'P1' }).manufacturing_process).toBe('router');
+  });
+
+  it('assigns router for foam even without a "P" part number', () => {
+    const result = classify({ name: 'Bumper Foam', part_number: '' });
+    expect(result.classification).toBe('manufactured');
+    expect(result.manufacturing_process).toBe('router');
+  });
+
+  it('assigns router for foam material on a P-numbered part', () => {
+    expect(classify({ name: 'Pad', part_number: 'P1', material: 'Pool Noodle Foam' }).manufacturing_process).toBe('router');
+  });
+
   it('forces COTS when a manufactured candidate has no part number starting with "P"', () => {
     const result = classify({ name: 'Custom Plate', part_number: 'X123' });
     expect(result.classification).toBe('COTS');

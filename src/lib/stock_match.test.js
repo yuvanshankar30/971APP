@@ -89,4 +89,28 @@ describe('pickStockAndWorkflow', () => {
     expect(result.workflow).toBe('mill');
     expect(result.stock).toBeUndefined();
   });
+
+  it('matches router sheet stock by an explicit thickness when there is no bounding box at all (manual CSV import)', () => {
+    // No bounding_box_x/y/z on this part - only a thickness value parsed
+    // from an optional CSV column.
+    const result = pickStockAndWorkflow(stockData, { workflow: 'router', material: 'Aluminum', thickness: 0.25 });
+    expect(result.workflow).toBe('router');
+    expect(result.stock?.description).toBe('1/4" Aluminum Sheet');
+  });
+
+  it('leaves router stock unassigned rather than guessing when a bare thickness matches neither sheet nor tube stock', () => {
+    // thickness=1.0 matches neither the 0.25" sheet nor (since dimX/dimY are
+    // still NaN with no bounding box) the tube's outer_width/outer_height.
+    // Router has no generic "any stock of the right material" fallback -
+    // an unverified guess would read as a confirmed match, so it's better
+    // left blank for the user to pick themselves.
+    const result = pickStockAndWorkflow(stockData, { workflow: 'router', material: 'Aluminum', thickness: 1.0 });
+    expect(result.stock).toBeUndefined();
+  });
+
+  it('reassigns a bare-thickness mill guess to router, same as the bounding-box case', () => {
+    const result = pickStockAndWorkflow(stockData, { workflow: 'mill', material: 'Aluminum', thickness: 0.25 });
+    expect(result.workflow).toBe('router');
+    expect(result.stock?.description).toBe('1/4" Aluminum Sheet');
+  });
 });

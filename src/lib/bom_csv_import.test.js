@@ -1,5 +1,28 @@
 import { describe, it, expect } from 'vitest';
-import { parseCsv, matchCsvColumn, parseBomCsvRows, classifyManualBomRow, classifyManualBomRows } from './bom_csv_import.js';
+import { parseCsv, matchCsvColumn, parseBomCsvRows, classifyManualBomRow, classifyManualBomRows, parseThicknessInches } from './bom_csv_import.js';
+
+describe('parseThicknessInches', () => {
+  it('parses a plain decimal', () => {
+    expect(parseThicknessInches('0.0625')).toBeCloseTo(0.0625);
+  });
+
+  it('parses a simple fraction', () => {
+    expect(parseThicknessInches('1/16')).toBeCloseTo(0.0625);
+  });
+
+  it('strips a trailing inch mark or unit word', () => {
+    expect(parseThicknessInches('0.25"')).toBeCloseTo(0.25);
+    expect(parseThicknessInches('0.25 in')).toBeCloseTo(0.25);
+    expect(parseThicknessInches('1/4 inches')).toBeCloseTo(0.25);
+  });
+
+  it('returns null for blank, zero, or unparseable input', () => {
+    expect(parseThicknessInches('')).toBeNull();
+    expect(parseThicknessInches(null)).toBeNull();
+    expect(parseThicknessInches('0')).toBeNull();
+    expect(parseThicknessInches('thick')).toBeNull();
+  });
+});
 
 describe('parseCsv', () => {
   it('splits a simple comma-separated table into rows of cells', () => {
@@ -59,16 +82,23 @@ describe('parseBomCsvRows', () => {
     ].join('\n');
 
     expect(parseBomCsvRows(csv)).toEqual([
-      { part_name: 'Gearbox Plate', part_number: 'P001', quantity: 2, material: '6061 Aluminum', vendor: '', description: 'Side plate' },
-      { part_name: '18t HTD Pulley', part_number: 'P002', quantity: 4, material: '', vendor: 'WCP', description: '' }
+      { part_name: 'Gearbox Plate', part_number: 'P001', quantity: 2, material: '6061 Aluminum', vendor: '', description: 'Side plate', thickness: null },
+      { part_name: '18t HTD Pulley', part_number: 'P002', quantity: 4, material: '', vendor: 'WCP', description: '', thickness: null }
     ]);
   });
 
   it('accepts alternate common header wording', () => {
     const csv = 'Item Name,Part No,Quantity\nStandoff,P010,8';
     expect(parseBomCsvRows(csv)).toEqual([
-      { part_name: 'Standoff', part_number: 'P010', quantity: 8, material: '', vendor: '', description: '' }
+      { part_name: 'Standoff', part_number: 'P010', quantity: 8, material: '', vendor: '', description: '', thickness: null }
     ]);
+  });
+
+  it('parses an optional thickness column into inches', () => {
+    const csv = 'Name,Thickness\nGearbox Plate,1/16\nSide Panel,0.25"';
+    const rows = parseBomCsvRows(csv);
+    expect(rows[0].thickness).toBeCloseTo(0.0625);
+    expect(rows[1].thickness).toBeCloseTo(0.25);
   });
 
   it('defaults quantity to 1 when the column is missing or unparseable', () => {
@@ -92,6 +122,17 @@ describe('parseBomCsvRows', () => {
   it('throws when every data row is missing a name', () => {
     expect(() => parseBomCsvRows('Name,QTY\n,5\n,3')).toThrow(/No usable rows/);
   });
+
+  it('drops OnShape placeholder bodies named SOLID/COMPOUND (with or without a numeric suffix)', () => {
+    const csv = 'Name,QTY\nBracket,2\nSOLID,1\nSOLID_1,1\nCOMPOUND,1\nCOMPOUND_2,1';
+    expect(parseBomCsvRows(csv)).toEqual([
+      { part_name: 'Bracket', part_number: '', quantity: 2, material: '', vendor: '', description: '', thickness: null }
+    ]);
+  });
+
+  it('throws when every data row is a SOLID/COMPOUND placeholder', () => {
+    expect(() => parseBomCsvRows('Name,QTY\nSOLID,1\nCOMPOUND,1')).toThrow(/No usable rows/);
+  });
 });
 
 describe('classifyManualBomRow', () => {
@@ -103,13 +144,51 @@ describe('classifyManualBomRow', () => {
     expect(classifyManualBomRow(row({ part_name: '18t HTD Pulley', vendor: 'WCP' }))).toEqual({ part_type: 'COTS', workflow: 'purchase' });
   });
 
-  it('classifies a screw or bolt as COTS even with no vendor', () => {
-    expect(classifyManualBomRow(row({ part_name: '#10-32 socket head screw' }))).toEqual({ part_type: 'COTS', workflow: 'purchase' });
-    expect(classifyManualBomRow(row({ part_name: 'M4 bolt' }))).toEqual({ part_type: 'COTS', workflow: 'purchase' });
+  it('classifies a screw or bolt as a COTS kit item (stocked, not purchased) even with no vendor', () => {
+    expect(classifyManualBomRow(row({ part_name: '#10-32 socket head screw' }))).toEqual({ part_type: 'COTS', workflow: 'kit' });
+    expect(classifyManualBomRow(row({ part_name: 'M4 bolt' }))).toEqual({ part_type: 'COTS', workflow: 'kit' });
   });
 
-  it('classifies a nut as COTS even with no vendor', () => {
-    expect(classifyManualBomRow(row({ part_name: '10-32 nylock nut' }))).toEqual({ part_type: 'COTS', workflow: 'purchase' });
+  it('classifies a nut as a COTS kit item even with no vendor', () => {
+    expect(classifyManualBomRow(row({ part_name: '10-32 nylock nut' }))).toEqual({ part_type: 'COTS', workflow: 'kit' });
+  });
+
+  it('classifies an SDS-branded part as a COTS kit item even with no vendor', () => {
+    expect(classifyManualBomRow(row({ part_name: 'SDS MK5n Top Assembly (A)' }))).toEqual({ part_type: 'COTS', workflow: 'kit' });
+    expect(classifyManualBomRow(row({ part_name: 'SDS MK5 Turret Assembly' }))).toEqual({ part_type: 'COTS', workflow: 'kit' });
+    expect(classifyManualBomRow(row({ part_name: 'SDS MK5 Molded Wheel' }))).toEqual({ part_type: 'COTS', workflow: 'kit' });
+  });
+
+  it('classifies a socket head cap screw as a COTS kit item', () => {
+    expect(classifyManualBomRow(row({ part_name: 'Socket Head Cap Screw 1/4-20' }))).toEqual({ part_type: 'COTS', workflow: 'kit' });
+  });
+
+  it('classifies a spring as a COTS kit item even with no vendor', () => {
+    expect(classifyManualBomRow(row({ part_name: '9657K285_Compression Spring' }))).toEqual({ part_type: 'COTS', workflow: 'kit' });
+  });
+
+  it('classifies a PCB as a COTS kit item even with no vendor', () => {
+    expect(classifyManualBomRow(row({ part_name: 'Custom PCB' }))).toEqual({ part_type: 'COTS', workflow: 'kit' });
+  });
+
+  it('classifies motors, gears, and electrical/control-system COTS as kit items', () => {
+    expect(classifyManualBomRow(row({ part_name: 'Kraken X60 Brushless Motor' }))).toEqual({ part_type: 'COTS', workflow: 'kit' });
+    expect(classifyManualBomRow(row({ part_name: '20T Gear' }))).toEqual({ part_type: 'COTS', workflow: 'kit' });
+    expect(classifyManualBomRow(row({ part_name: 'roboRIO 2.0' }))).toEqual({ part_type: 'COTS', workflow: 'kit' });
+    expect(classifyManualBomRow(row({ part_name: 'Pigeon 2.0' }))).toEqual({ part_type: 'COTS', workflow: 'kit' });
+    expect(classifyManualBomRow(row({ part_name: 'CANivore' }))).toEqual({ part_type: 'COTS', workflow: 'kit' });
+    expect(classifyManualBomRow(row({ part_name: '120A Breaker' }))).toEqual({ part_type: 'COTS', workflow: 'kit' });
+    expect(classifyManualBomRow(row({ part_name: 'Battery' }))).toEqual({ part_type: 'COTS', workflow: 'kit' });
+    expect(classifyManualBomRow(row({ part_name: 'PDP' }))).toEqual({ part_type: 'COTS', workflow: 'kit' });
+  });
+
+  it('does not let "gearbox" (a real manufactured plate part) match the gear keyword', () => {
+    expect(classifyManualBomRow(row({ part_name: 'pivot gearbox plate' }))).toEqual({ part_type: 'manufactured', workflow: 'router' });
+  });
+
+  it('classifies foam as manufactured/router', () => {
+    expect(classifyManualBomRow(row({ part_name: 'Bumper Foam' }))).toEqual({ part_type: 'manufactured', workflow: 'router' });
+    expect(classifyManualBomRow(row({ part_name: 'Pad', material: 'Pool Noodle Foam' }))).toEqual({ part_type: 'manufactured', workflow: 'router' });
   });
 
   it('classifies a plate with no vendor as manufactured/router', () => {

@@ -7,12 +7,13 @@
   import { userStore, loadUserFromUUID, upsertProfileIfMissing, setUserUUID } from '$lib/stores/user.js';
   import { hasPermission, GENERAL_ROLES } from '$lib/permissions.js';
   import { isTeam9584 } from '$lib/frcTeams.js';
+  import { camelBreakHtml } from '$lib/camel_break.js';
   import { onShapeAPI } from '$lib/onshape.js';
   import { formatPacificDate, formatPacificDateTimeWithZone } from '$lib/timezone.js';
   import { getCurrentSeasonBucket, getAllSeasonBuckets, passesSeasonFilter } from '$lib/frcSeason.js';
   import SeasonFilter from '$lib/components/SeasonFilter.svelte';
   import stockData from '$lib/stock.json';
-  import { Users, Plus, Link, Upload, Settings, FileText, ExternalLink, Edit, Download, Trash2, LayoutGrid, List } from 'lucide-svelte';
+  import { Users, Plus, Link, Upload, Settings, FileText, ExternalLink, Edit, Download, Trash2, LayoutGrid, List, Package, Calendar, User, CheckCircle2, Folder } from 'lucide-svelte';
   import { goto } from '$app/navigation';  let user = null;
   let loading = true;
   let loadingStep = 'Initializing...';
@@ -954,12 +955,18 @@
           <p>Manage robot subsystems with OnShape integration</p>
         </div>
       </div>
-  {#if hasPermission(user, 'CREATE_SUBSYSTEMS')}
-  <button class="btn btn-primary btn-sm" on:click={openCreateModal}>
-        <Plus size={16} />
-        Create Subsystem
-      </button>
-  {/if}
+  <div class="header-actions">
+    <a href="/manufacture/files?path=BOM%20Files" class="btn btn-outline btn-sm">
+      <Folder size={16} />
+      BOM Files
+    </a>
+    {#if hasPermission(user, 'CREATE_SUBSYSTEMS')}
+    <button class="btn btn-primary btn-sm" on:click={openCreateModal}>
+          <Plus size={16} />
+          Create Subsystem
+        </button>
+    {/if}
+  </div>
     </div>
 
     <div class="card">
@@ -1096,7 +1103,7 @@
         >
           <div class="subsystem-header">
             <div class="subsystem-title">
-              <h3 title={subsystem.name}>{subsystem.name}</h3>
+              <h3 title={subsystem.name}>{@html camelBreakHtml(subsystem.name)}</h3>
               {#if isTeam9584(subsystem.frc_team)}
                 <span class="tag team-tag tag-9584" title="Team 9584">9584</span>
               {/if}
@@ -1300,8 +1307,11 @@
               tabindex="0"
             >
               <div class="build-header">
+                <div class="build-icon-wrap">
+                  <Package size={18} />
+                </div>
                 <div class="build-title">
-                  <h3>{build.subsystems?.name || 'Unknown'} - {build.release_name}</h3>
+                  <h3>{@html camelBreakHtml(build.subsystems?.name || 'Unknown')} - {build.release_name}</h3>
                   {#if isTeam9584(build.frc_team)}
                     <span class="tag team-tag tag-9584" title="Team 9584">9584</span>
                   {/if}
@@ -1312,28 +1322,27 @@
               </div>
               <div class="build-info">
                 <div class="info-item">
-                  <span>Build Hash:</span>
-                  <code>{build.build_hash}</code>
-                </div>
-                <div class="info-item">
-                  <span>Created:</span>
+                  <span><Calendar size={12} /> Created</span>
                   <span>{formatPacificDate(build.created_at)}</span>
                 </div>
                 {#if build.creator}
                   <div class="info-item">
-                    <span>By:</span>
+                    <span><User size={12} /> By</span>
                     <span>{build.creator.email}</span>
                   </div>
                 {/if}
                 {#if build.assembled_at}
                   <div class="info-item">
-                    <span>Assembled:</span>
+                    <span><CheckCircle2 size={12} /> Assembled</span>
                     <span>{formatPacificDate(build.assembled_at)}</span>
                   </div>
                 {/if}
               </div>
               <div class="build-actions">
-                {#if build.status === 'ready_to_assemble'}
+                <a href="/cad/build/{build.id}" class="btn btn-primary btn-sm" on:click|stopPropagation>
+                  View Build <ExternalLink size={12} />
+                </a>
+                {#if build.status !== 'assembled'}
                   <button class="btn btn-primary btn-sm" on:click|stopPropagation={() => markAsAssembled(build.id)}>
                     Mark as Assembled
                   </button>
@@ -1588,6 +1597,7 @@
 <style>
   .cad-container { max-width: 1600px; margin: var(--space-6) auto; padding: 0 var(--space-4); }
   .page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--gap-4); flex-wrap: wrap; margin-bottom: var(--space-7); padding-bottom: var(--space-4); border-bottom: 1px solid var(--border); }
+  .header-actions { display: flex; align-items: center; gap: var(--gap-3); flex-wrap: wrap; }
   .header-content { display: flex; align-items: center; gap: var(--gap-3); color: var(--accent-strong); }
   .header-content h1 { font-size: var(--font-2xl); margin: 0; color: var(--text); letter-spacing: -0.01em; }
   .header-content p { margin: var(--space-1) 0 0 0; font-size: var(--font-md); color: var(--text-muted); }
@@ -1619,7 +1629,18 @@
   .subsystem-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: var(--space-4); gap: var(--gap-2); flex-wrap: wrap; }
   .subsystem-title, .build-title { display: flex; align-items: center; gap: var(--gap-1); flex: 1; min-width: 0; }
   .subsystem-toolbar { display: flex; align-items: center; gap: var(--gap-2); flex-shrink: 0; flex-wrap: wrap; }
-  .subsystem-header h3 { margin: 0; color: var(--secondary); font-size: 1.1rem; line-height: 24px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .subsystem-header h3 {
+    margin: 0;
+    color: var(--secondary);
+    font-size: 1.1rem;
+    line-height: 1.3;
+    min-width: 0;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+  }
   .subsystem-badges { display: flex; align-items: center; gap: var(--gap-1); flex-wrap: wrap; }
   .badge { display: inline-flex; align-items: center; justify-content: center; height: var(--control-height) !important; padding: 0 var(--space-2) !important; border-radius: var(--radius-sm); font-size: var(--font-xs); font-weight: 600; text-transform: uppercase; line-height: 1; box-sizing: border-box; white-space: nowrap; }
   .subsystem-header .btn-outline.btn-small { display: inline-flex; align-items: center; justify-content: center; height: var(--control-height) !important; width: var(--control-height) !important; padding: 0 !important; font-size: var(--font-xs); border-radius: var(--radius-sm); box-sizing: border-box; }
@@ -1656,13 +1677,13 @@
   .subsystem-builds .build-status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
   .subsystem-builds .build-status-dot.status-pending { background: var(--brand-gold-strong); }
   .subsystem-builds .build-status-dot.status-manufacturing { background: var(--blue-base); }
-  .subsystem-builds .build-status-dot.status-ready_to_assemble { background: var(--purple-strong); }
+  .subsystem-builds .build-status-dot.status-ready_to_assemble { background: var(--orange-strong); }
   .subsystem-builds .build-status-dot.status-assembled { background: var(--green-strong); }
 
   .builds-section { margin-top: var(--space-7); background: var(--primary); border-radius: var(--radius-lg); border: 1px solid var(--border); padding: var(--space-6); margin-bottom: var(--space-4); }
   .builds-section h2 { margin: 0 0 var(--space-6) 0; color: var(--secondary); font-size: var(--font-xl); }
   .builds-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: var(--gap-6); }
-  .build-header { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--gap-3); margin-bottom: var(--space-4); }
+  .build-header { display: flex; justify-content: space-between; align-items: center; gap: var(--gap-3); margin-bottom: var(--space-4); }
   .build-header h3 { margin: 0; color: var(--secondary); font-size: var(--font-md); line-height: 1.35; overflow-wrap: anywhere; min-width: 0; }
   /* A status word with no color was effectively invisible as a "badge" -
      just plain text with no distinguishing background, on the one section
@@ -1683,15 +1704,32 @@
   }
   .build-status.status-pending { background: var(--brand-gold-soft); color: var(--brand-gold-strong); }
   .build-status.status-manufacturing { background: var(--blue-soft); color: var(--blue-strong); }
-  .build-status.status-ready_to_assemble { background: var(--purple-soft); color: var(--purple-strong); }
+  .build-status.status-ready_to_assemble { background: var(--orange-soft); color: var(--orange-strong); }
   .build-status.status-assembled { background: var(--green-soft); color: var(--green-strong); }
   .build-card-clickable { padding: var(--space-6); cursor: pointer; transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease; }
   .build-card-clickable:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); border-color: var(--accent); }
+  .build-icon-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.25rem;
+    height: 2.25rem;
+    flex-shrink: 0;
+    border-radius: var(--radius-md, 8px);
+    background: var(--accent-subtle, var(--brand-gold-soft));
+    color: var(--accent-strong, var(--brand-gold-strong));
+  }
   .build-info { display: flex; flex-direction: column; gap: var(--gap-2); margin-bottom: var(--space-4); }
   .build-info .info-item { display: flex; justify-content: space-between; align-items: center; gap: var(--gap-2); font-size: var(--font-xs); }
-  .build-info .info-item span:first-child { font-weight: 500; color: var(--secondary); flex-shrink: 0; }
-  .build-info code { background: var(--primary); padding: var(--space-1) var(--space-2); border-radius: var(--radius-sm); font-family: monospace; font-size: var(--font-xs); overflow-wrap: anywhere; word-break: break-all; min-width: 0; text-align: right; }
-  .build-actions { display: flex; gap: var(--gap-3); }
+  .build-info .info-item span:first-child { display: inline-flex; align-items: center; gap: 0.3rem; font-weight: 500; color: var(--secondary); flex-shrink: 0; }
+  .build-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--gap-3);
+    margin-top: var(--space-2);
+    padding-top: var(--space-3);
+    border-top: 1px solid var(--border);
+  }
   .document-info { display: flex; flex-direction: column; gap: var(--gap-1); padding: var(--space-3) 0 0 0; }
   .doc-name { font-weight: 500; color: var(--text); font-size: var(--font-xs); }
   .click-hint { margin-top: var(--space-2); }

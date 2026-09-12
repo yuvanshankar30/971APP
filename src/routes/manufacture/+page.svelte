@@ -593,28 +593,33 @@
     const part = camProfileModalPart;
     queuingCamJobForPartId = part.id;
     try {
-      // Upload the STEP and attach it to the PART itself so
-      // canViewCad()/getStepFileName() pick it up - same JSON meta
-      // convention router already uses, merged with whatever's there.
-      const stepName = `${Date.now()}_${(part.name || 'part').replace(/[^a-zA-Z0-9]/g, '_')}_cad.${(camProfileFile.name.split('.').pop() || 'step')}`;
+      // Upload the file and attach it to the PART itself so
+      // canViewCad()/getStepFileName() (or canViewPdf()/getPdfFileName() for
+      // a lathe drawing) pick it up - same JSON meta convention router
+      // already uses, merged with whatever's there.
+      const ext = (camProfileFile.name.split('.').pop() || 'step').toLowerCase();
+      const isPdf = ext === 'pdf';
+      const storedName = `${Date.now()}_${(part.name || 'part').replace(/[^a-zA-Z0-9]/g, '_')}_cad.${ext}`;
       const { error: uploadError } = await supabase.storage
         .from('manufacturing-files')
-        .upload(stepName, camProfileFile, { cacheControl: '3600', upsert: false });
+        .upload(storedName, camProfileFile, { cacheControl: '3600', upsert: false });
       if (uploadError) {
-        showToastMessage(uploadError.message || 'Failed to upload STEP file');
+        showToastMessage(uploadError.message || 'Failed to upload file');
         return;
       }
       let existingMeta = {};
       try { existingMeta = JSON.parse(part.file_url || '{}') || {}; } catch { existingMeta = {}; }
-      const newFileUrl = JSON.stringify({ ...existingMeta, step_file: stepName, step_valid: true });
+      const newFileUrl = JSON.stringify(
+        isPdf ? { ...existingMeta, pdf_file: storedName } : { ...existingMeta, step_file: storedName, step_valid: true }
+      );
       const { error: partUpdateError } = await supabase.from('parts').update({ file_url: newFileUrl }).eq('id', part.id);
       if (partUpdateError) {
-        showToastMessage(partUpdateError.message || 'Failed to attach STEP to part');
+        showToastMessage(partUpdateError.message || 'Failed to attach file to part');
         return;
       }
-      showToastMessage('STEP file attached', 'success');
+      showToastMessage(isPdf ? 'PDF attached' : 'STEP file attached', 'success');
       closeCamProfileModal();
-      await loadParts(); // refresh so canViewCad() picks up the newly-attached STEP
+      await loadParts(); // refresh so canViewCad()/canViewPdf() pick up the newly-attached file
     } finally {
       queuingCamJobForPartId = null;
     }
@@ -628,7 +633,11 @@
       if (part.workflow === 'router') return downloadStepFromOnshape(part);
       return downloadFile(part, part.status);
     }
-    return downloadFromStorage(part.file_name, part.id);
+    return downloadFromStorage(getStepFileName(part) || part.file_name, part.id);
+  }
+
+  function installPdfFile(part) {
+    return downloadFromStorage(getPdfFileName(part), part.id);
   }
 
   // Loads a job's G-code files once and caches them on the same job object
@@ -1183,6 +1192,46 @@
   // do not qualify.)
   function canViewCad(part) {
     return !!getStepFileName(part);
+  }
+
+  // Lathe parts can be documented with a drawing PDF instead of (or in
+  // addition to) a STEP file - CadViewer can't render a PDF, so it gets its
+  // own lightweight in-app viewer rather than forcing a download.
+  function getPdfFileName(part) {
+    const meta = getFileMeta(part);
+    if (meta.pdf_file) return meta.pdf_file;
+    if (part.file_name && /\.pdf$/i.test(part.file_name)) return part.file_name;
+    return null;
+  }
+
+  function canViewPdf(part) {
+    return !!getPdfFileName(part);
+  }
+
+  let showPdfModal = false;
+  let pdfViewerPart = null;
+  let pdfViewerUrl = null;
+
+  async function openPdfViewer(part) {
+    const fileName = getPdfFileName(part);
+    if (!fileName) return;
+    try {
+      const { data, error } = await supabase.storage
+        .from('manufacturing-files')
+        .createSignedUrl(fileName, 600);
+      if (error) throw error;
+      pdfViewerPart = part;
+      pdfViewerUrl = data.signedUrl;
+      showPdfModal = true;
+    } catch (error) {
+      showToastMessage(`Error opening PDF: ${error.message}`);
+    }
+  }
+
+  function closePdfViewer() {
+    showPdfModal = false;
+    pdfViewerPart = null;
+    pdfViewerUrl = null;
   }
 
   function fusionQueueTools(machineId) {
@@ -2407,14 +2456,27 @@
                 <button class="fusion-cam-failed part-card-fusion-status" on:click={() => openFusionCamModal(part, fusionJob)} title={fusionJob.errors?.[0] || 'Unknown error'}>Fusion CAM failed - retry AutoCAM</button>
               {/if}
             {/if}
-          {:else if part.workflow === 'router' || part.workflow === 'lathe'}
+          {:else if part.workflow === 'router' || part.workflow === 'lathe' || part.workflow === '3d-print'}
             <button
               class="btn btn-secondary btn-sm"
               on:click|stopPropagation={() => openCamProfileModal(part)}
-              title="This part was created before STEP was required for its workflow - attach one to unlock the 3D viewer{part.workflow === 'router' ? ' and Fusion CAM' : ''}"
+              title="This part was created before a file was required for its workflow - attach one to unlock the 3D viewer{part.workflow === 'router' ? ' and Fusion CAM' : ''}"
             >
-              <Upload size={14} /> Attach STEP
+              <Upload size={14} /> Attach STEP{part.workflow === 'lathe' ? ' or PDF' : ''}
             </button>
+          {/if}
+
+          <!-- Lathe drawing PDF - independent of the STEP/CAD controls above,
+               since a lathe part can have a PDF, a STEP, or both. -->
+          {#if part.workflow === 'lathe' && canViewPdf(part)}
+            <div class="cad-action-grid" on:click|stopPropagation on:keydown|stopPropagation role="presentation">
+              <button class="btn btn-secondary btn-sm" on:click={() => openPdfViewer(part)} title="View drawing PDF">
+                <FileText size={14} /> View PDF
+              </button>
+              <button class="btn btn-secondary btn-sm" on:click={() => installPdfFile(part)} title="Download drawing PDF">
+                <Download size={14} /> Install PDF
+              </button>
+            </div>
           {/if}
 
           <!-- Status action buttons -->
@@ -2625,14 +2687,24 @@
                       <button class="fusion-cam-failed" on:click={() => openFusionCamModal(part, fusionJob)} title={fusionJob.errors?.[0] || 'Unknown error'}>Fusion CAM failed - retry AutoCAM</button>
                     {/if}
                   {/if}
-                {:else if part.workflow === 'router' || part.workflow === 'lathe'}
+                {:else if part.workflow === 'router' || part.workflow === 'lathe' || part.workflow === '3d-print'}
                   <button
                     class="btn btn-secondary btn-sm"
                     on:click={() => openCamProfileModal(part)}
-                    title="This part was created before STEP was required for its workflow - attach one to unlock the 3D viewer{part.workflow === 'router' ? ' and Fusion CAM' : ''}"
+                    title="This part was created before a file was required for its workflow - attach one to unlock the 3D viewer{part.workflow === 'router' ? ' and Fusion CAM' : ''}"
                   >
-                    <Upload size={13} /> Attach STEP
+                    <Upload size={13} /> Attach STEP{part.workflow === 'lathe' ? ' or PDF' : ''}
                   </button>
+                {/if}
+                {#if part.workflow === 'lathe' && canViewPdf(part)}
+                  <div class="cad-action-grid" on:click|stopPropagation on:keydown|stopPropagation role="presentation">
+                    <button class="btn btn-secondary btn-sm" on:click={() => openPdfViewer(part)} title="View drawing PDF">
+                      <FileText size={13} /> View PDF
+                    </button>
+                    <button class="btn btn-secondary btn-sm" on:click={() => installPdfFile(part)} title="Download drawing PDF">
+                      <Download size={13} /> Install PDF
+                    </button>
+                  </div>
                 {/if}
               </div>
               {#if part.status === 'pending' && !canViewCad(part)}
@@ -3029,6 +3101,35 @@
   </div>
 {/if}
 
+{#if showPdfModal && pdfViewerPart}
+  <div
+    class="modal-backdrop"
+    on:click|self={closePdfViewer}
+    role="button"
+    tabindex="0"
+    on:keydown={(e) => { if (e.key === 'Escape') { e.preventDefault(); closePdfViewer(); } }}
+  >
+    <div class="modal cad-modal" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h3>{pdfViewerPart.name || 'Drawing'} - PDF</h3>
+        <div class="cad-modal-header-actions">
+          <button type="button" class="cad-download-btn" aria-label="Download PDF" title="Download PDF" on:click={() => installPdfFile(pdfViewerPart)}>
+            <Download size={18} />
+          </button>
+          <button type="button" class="modal-close-button" aria-label="Close dialog" on:click={closePdfViewer}>
+            <X size={18} />
+          </button>
+        </div>
+      </div>
+      <div class="modal-body">
+        <iframe class="pdf-viewer-frame" src={pdfViewerUrl} title="Drawing PDF">
+          <p>PDF preview isn't supported here - use the download button above.</p>
+        </iframe>
+      </div>
+    </div>
+  </div>
+{/if}
+
 {#if showCamProfileModal && camProfileModalPart}
   <div
     class="modal-backdrop"
@@ -3039,22 +3140,24 @@
   >
     <div class="modal" role="dialog" aria-modal="true">
       <div class="modal-header">
-        <h3>Attach STEP File - {camProfileModalPart.name}</h3>
+        <h3>{camProfileModalPart.workflow === 'lathe' ? 'Attach STEP or PDF' : 'Attach STEP File'} - {camProfileModalPart.name}</h3>
         <button type="button" class="modal-close-button" aria-label="Close dialog" on:click={closeCamProfileModal}>
           <X size={18} />
         </button>
       </div>
       <div class="modal-body">
         <p class="cad-modal-hint">
-          This part was created before a STEP file was required for its workflow. Attach one now to unlock the 3D viewer{camProfileModalPart.workflow === 'router' ? ' and Fusion CAM' : ''}.
+          This part was created before a file was required for its workflow. Attach one now to unlock
           {#if camProfileModalPart.workflow === 'lathe'}
-            Model it with the spindle axis along the STEP file's Z axis, centered at X=0, Y=0.
+            the 3D viewer (STEP) or the in-app drawing viewer (PDF). Model a STEP file with the spindle axis along the file's Z axis, centered at X=0, Y=0.
+          {:else}
+            the 3D viewer{camProfileModalPart.workflow === 'router' ? ' and Fusion CAM' : ''}.
           {/if}
         </p>
         <input
           type="file"
           class="form-input"
-          accept=".step,.stp"
+          accept={camProfileModalPart.workflow === 'lathe' ? '.step,.stp,.pdf' : '.step,.stp'}
           on:change={(e) => { camProfileFile = e.target.files?.[0] || null; }}
         />
         <button
@@ -3063,7 +3166,7 @@
           disabled={!camProfileFile || queuingCamJobForPartId === camProfileModalPart.id}
           on:click={submitCamProfile}
         >
-          {queuingCamJobForPartId === camProfileModalPart.id ? 'Attaching…' : 'Attach STEP'}
+          {queuingCamJobForPartId === camProfileModalPart.id ? 'Attaching…' : 'Attach File'}
         </button>
       </div>
     </div>
@@ -3500,6 +3603,12 @@
   .table th.project-col,
   .table td.project-col {
     width: 6.5%;
+    /* Subsystem names are often CamelCase with no spaces
+       ("2026ThirdRobotDrivetrain") - same overflow the name column already
+       guards against (see its comment above), so it needs the same escape
+       hatch or a long one overflows straight into the Stock column. */
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
   .table th.quantity-col,
   .table td.quantity-col {
@@ -4223,6 +4332,14 @@
     text-align: center;
     font-size: var(--font-xs);
     color: var(--text-muted);
+  }
+
+  .pdf-viewer-frame {
+    width: 100%;
+    height: 75vh;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-1);
   }
 
   .job-details-modal { width: min(560px, 94vw); }

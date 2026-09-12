@@ -10,10 +10,11 @@
   import { onShapeAPI } from '$lib/onshape.js';  
   import { parseBomCsvRows, classifyManualBomRows } from '$lib/bom_csv_import.js';
   import { pickStockAndWorkflow } from '$lib/stock_match.js';
+  import { computeBuildHash } from '$lib/build_hash.js';
   import { detectVendorFromString, buildVendorSearchUrl } from '$lib/vendor_detect.js';
   import { formatPacificDate } from '$lib/timezone.js';
   import { goto } from '$app/navigation';
-  import { ArrowLeft, Triangle, Circle, Download, Settings, Plus, ShoppingCart, Zap, Copy, Trash2, Users, AlertTriangle, Box } from 'lucide-svelte';
+  import { ArrowLeft, Triangle, Circle, Download, Settings, Plus, ShoppingCart, Zap, Copy, Trash2, Users, AlertTriangle, Box, Upload } from 'lucide-svelte';
   import stockData from '$lib/stock.json';
   import CadViewer from '$lib/components/CadViewer.svelte';
 
@@ -99,6 +100,7 @@
   let savedBomPurchaseModalItem = null;
   let savedBomPurchaseModalUrl = '';
   let savedBomPurchaseModalPrice = '';
+  let savedBomPurchaseModalShipping = '';
 
   // Manual build creation - lets a build get created (and its BOM reviewed
   // through the exact same modal/add-to-manufacturing pipeline as an OnShape
@@ -271,14 +273,48 @@
     }
   }
 
+  // build_bom.status is just a static snapshot written once on save/kit -
+  // it never tracks what actually happens to the manufacturing/purchasing/
+  // kitting request created from a row. Once a row is "added", its real
+  // status lives in parts/purchasing/kitting instead, so look it up there
+  // and stamp it onto the row as `live_status` for display.
+  async function hydrateBuildBomStatuses(rows) {
+    const partsIds = [...new Set(rows.filter((r) => r.parts_id).map((r) => r.parts_id))];
+    const purchasingIds = [...new Set(rows.filter((r) => r.purchasing_id).map((r) => r.purchasing_id))];
+
+    const [partsStatus, purchasingStatus] = await Promise.all([
+      partsIds.length ? supabase.from('parts').select('id, status').in('id', partsIds) : { data: [] },
+      purchasingIds.length ? supabase.from('purchasing').select('id, status').in('id', purchasingIds) : { data: [] }
+    ]);
+
+    const partsMap = Object.fromEntries((partsStatus.data || []).map((p) => [p.id, p.status]));
+    const purchasingMap = Object.fromEntries((purchasingStatus.data || []).map((p) => [p.id, p.status]));
+
+    return rows.map((row) => {
+      let live_status = row.status;
+      // A kitting record just marks "this COTS item is stocked" - there's no
+      // separate machining/shipping lead time to track after that, so treat
+      // it as complete immediately rather than surfacing kitting's own
+      // pending/kitted lifecycle (which the build tab has no action for).
+      if (row.kitting_id) live_status = 'kitted';
+      else if (row.purchasing_id && purchasingMap[row.purchasing_id]) live_status = purchasingMap[row.purchasing_id];
+      else if (row.parts_id && partsMap[row.parts_id]) live_status = partsMap[row.parts_id];
+      else if (row.added && !row.parts_id && !row.purchasing_id && !row.kitting_id) live_status = 'found';
+      return { ...row, live_status };
+    });
+  }
+
   async function toggleBuildExpanded(build) {
     if (expandedBuildId === build.id) {
       expandedBuildId = null;
       return;
     }
     expandedBuildId = build.id;
-    if (buildBomByBuildId[build.id]) return;
-
+    // Always refetch on expand (no cache short-circuit) - a part's real
+    // status lives in parts/purchasing/kitting and can change from the
+    // manufacture/purchasing/kitting tabs while this page sits open, so a
+    // stale cached read here would show "pending" long after a part was
+    // actually kitted/machined/delivered there.
     loadingBuildBomId = build.id;
     try {
       const { data, error } = await supabase
@@ -287,7 +323,7 @@
         .eq('build_id', build.id)
         .order('part_name', { ascending: true });
       if (error) throw error;
-      buildBomByBuildId = { ...buildBomByBuildId, [build.id]: data || [] };
+      buildBomByBuildId = { ...buildBomByBuildId, [build.id]: await hydrateBuildBomStatuses(data || []) };
     } catch (error) {
       console.error('Error loading build BOM:', error);
     } finally {
@@ -324,7 +360,26 @@
       console.error('Error refreshing build BOM:', error);
       return;
     }
-    buildBomByBuildId = { ...buildBomByBuildId, [buildId]: data || [] };
+    buildBomByBuildId = { ...buildBomByBuildId, [buildId]: await hydrateBuildBomStatuses(data || []) };
+  }
+
+  // COTS parts that are already in the lab (fasteners, motors already on
+  // hand, etc.) don't need a purchasing request - this marks the row
+  // "added" (so it shows as fulfilled) without creating one.
+  async function markBomRowFound(item) {
+    if (!item || item.added || addingBomRowId) return;
+    addingBomRowId = item.id;
+    try {
+      const { error } = await supabase.from('build_bom').update({ added: true, status: 'found' }).eq('id', item.id);
+      if (error) throw error;
+      await refreshBuildBom(item.build_id);
+      toastActions.show('Marked as found/kitted');
+    } catch (error) {
+      console.error('Failed to mark BOM row as found:', error);
+      toastActions.show('Failed to mark as found: ' + (error?.message || error));
+    } finally {
+      addingBomRowId = null;
+    }
   }
 
   // Promotes an already-saved build_bom row (shown in the inline BOM table
@@ -338,6 +393,8 @@
       const project_id = subsystem?.name || 'Project';
 
       if (item.part_type === 'COTS' && item.workflow === 'kit') {
+        // Insert already marked kitted - a kit item is stocked and
+        // available immediately, not a pending request.
         const { data: kit, error: kitErr } = await supabase
           .from('kitting')
           .insert([{
@@ -345,7 +402,7 @@
             requester: user?.full_name || user?.email,
             project_id,
             quantity: item.quantity || 1,
-            status: 'pending',
+            status: 'kitted',
             workflow: 'kit'
           }])
           .select();
@@ -364,6 +421,7 @@
           savedBomPurchaseModalItem = item;
           savedBomPurchaseModalUrl = '';
           savedBomPurchaseModalPrice = '';
+          savedBomPurchaseModalShipping = '';
           showSavedBomPurchaseModal = true;
           return;
         }
@@ -401,8 +459,9 @@
             status: 'pending',
             quantity: item.quantity || 1,
             material: item.material || '',
-            file_name: '',
-            file_url: '',
+            // Carry over any STEP/PDF already attached to this BOM row.
+            file_name: item.file_name || '',
+            file_url: item.file_url || '',
             frc_team: user?.frc_team || null,
             stock_assignment: item.stock_assignment || null,
             onshape_document_id: item.onshape_document_id || subsystem?.onshape_document_id || null,
@@ -410,7 +469,7 @@
             onshape_wvmid: item.onshape_wvmid || null,
             onshape_element_id: item.onshape_element_id || subsystem?.onshape_element_id || null,
             onshape_part_id: item.onshape_part_id || null,
-            file_format: 'step',
+            file_format: item.file_format || (item.file_url && item.file_url.includes('pdf_file') ? 'pdf' : 'step'),
             is_onshape_part: !!(item.onshape_document_id || item.onshape_part_id)
           }])
           .select();
@@ -449,6 +508,7 @@
           vendor: item.vendor || null,
           url: savedBomPurchaseModalUrl && savedBomPurchaseModalUrl.trim() !== '' ? savedBomPurchaseModalUrl.trim() : null,
           price: savedBomPurchaseModalPrice && savedBomPurchaseModalPrice !== '' ? Number(savedBomPurchaseModalPrice) : null,
+          shipping_cost_allocated: savedBomPurchaseModalShipping && savedBomPurchaseModalShipping !== '' ? Number(savedBomPurchaseModalShipping) : null,
           workflow: 'purchase',
           frc_team: user?.frc_team || null
         }])
@@ -467,6 +527,7 @@
       savedBomPurchaseModalItem = null;
       savedBomPurchaseModalUrl = '';
       savedBomPurchaseModalPrice = '';
+      savedBomPurchaseModalShipping = '';
     }
   }
 
@@ -1277,7 +1338,11 @@
       const queued = {
         name: purchaseModalItem.part_name || purchaseModalItem.part_number || 'Unnamed Part',
         requester: user.full_name || user.email,
-        project_id: `${subsystem.name}-${selectedVersion.name}`,
+        // Same project_id format as every other purchasing/parts insert
+        // (just the subsystem name) - a per-version suffix here would
+        // orphan this request from the rest of the subsystem's rollup
+        // grouping (used by cad/build's "All Builds" project sections).
+        project_id: subsystem.name || 'Project',
         quantity: purchaseModalItem.quantity || 1,
         material: purchaseModalItem.material || '',
         status: 'pending',
@@ -1556,7 +1621,11 @@
 
     loadingBuild = true;
     try {
-      const buildHash = `${subsystem.onshape_document_id}_${subsystem.id}`;
+      // Hashed per-version (not just per-subsystem) so a subsystem can have
+      // more than one build - re-saving the SAME version stays idempotent
+      // (finds its existing row), but a different version or a new manual
+      // import gets its own build instead of silently merging into one.
+      const buildHash = computeBuildHash(subsystem.onshape_document_id, subsystem.id, selectedVersion.id);
       const { data: existingBuild, error: buildQueryError } = await supabase
         .from('builds')
         .select('id')
@@ -1663,10 +1732,10 @@
         try {
           const detection = detectVendorFromString(item.vendor || item.part_name || item.part_number || '');
 
-          // Ensure a build exists (create or find)
-          // Use subsystem ID in build hash (not version) so builds can be rolled up across versions
+          // Ensure a build exists (create or find) - hashed per-version so a
+          // subsystem can have more than one build (see saveBomItemToBuild).
           let buildId = null;
-          const buildHash = `${subsystem.onshape_document_id}_${subsystem.id}`;
+          const buildHash = computeBuildHash(subsystem.onshape_document_id, subsystem.id, selectedVersion.id);
           const { data: existingBuild, error: buildQueryError } = await supabase
             .from('builds')
             .select('id')
@@ -1716,7 +1785,7 @@
           const purchasingInsertData = {
             name: item.part_name || item.part_number || 'Unnamed Part',
             requester: user.full_name || user.email,
-            project_id: subsystem.name,
+            project_id: subsystem.name || 'Project',
             quantity: item.quantity || 1,
             material: item.material || '',
             status: 'pending',
@@ -1808,8 +1877,15 @@
         }
       }
 
+      // A file already saved on this BOM row from an earlier attach (not a
+      // freshly-picked attachedFile above) still needs to carry over.
+      if (!file_url && item.file_url) {
+        file_url = item.file_url;
+        file_name = item.file_name || file_name;
+      }
+
       // Project ID format: {subsystem name} (version-independent for rollup)
-      const project_id = subsystem.name;
+      const project_id = subsystem.name || 'Project';
         // Insert into parts table (main manufacturing queue)
       const { data: partData, error: partsError } = await supabase
         .from('parts')
@@ -1837,10 +1913,11 @@
     sendNotification('manufacturing-request', { part_id: createdPart.id });
   }
 
-      // Create or find existing build for this subsystem (version-independent for rollup)
+      // Create or find existing build for this subsystem - hashed per-version
+      // so a subsystem can have more than one build (see saveBomItemToBuild).
       let buildId = null;
-      const buildHash = `${subsystem.onshape_document_id}_${subsystem.id}`;
-      
+      const buildHash = computeBuildHash(subsystem.onshape_document_id, subsystem.id, selectedVersion.id);
+
       // Check if build already exists
       const { data: existingBuild, error: buildQueryError } = await supabase
         .from('builds')
@@ -2071,7 +2148,7 @@
                 <p>No timeline items available.</p>
                 {#if !loading}
                   <p style="font-size: 12px; color: #666;">
-                    Failed to load timeline from OnShape. Please try refreshing the page.
+                    Failed to load timeline from OnShape. Try refreshing the page - if it still doesn't load, the OnShape API may be down or unreachable right now.
                   </p>
                 {/if}
               </div>
@@ -2088,7 +2165,7 @@
     <!-- Builds for this subsystem, with inline BOM - kept on this page so
          creating/reviewing a build doesn't require navigating away. Full
          editing (quantities, purchasing, vendor lookup) still lives on
-         /cad/build/[id]; "Open Full Details" links there. -->
+         /cad/build/[id]; "Open Build" links there. -->
     <section class="subsystem-builds-section">
       <div class="subsystem-builds-heading">
         <h2>Builds ({subsystemBuilds.length})</h2>
@@ -2129,7 +2206,10 @@
               </button>
 
               <div class="subsystem-build-actions">
-                {#if build.status === 'ready_to_assemble' && isSubsystemMember()}
+                <a href="/cad/build/{build.id}" class="btn btn-outline btn-sm" on:click|stopPropagation>
+                  Open Build
+                </a>
+                {#if build.status !== 'assembled' && isSubsystemMember()}
                   <button
                     class="btn btn-primary btn-sm"
                     on:click|stopPropagation={() => markSubsystemBuildAssembled(build.id)}
@@ -2137,9 +2217,6 @@
                     Mark as Assembled
                   </button>
                 {/if}
-                <a href="/cad/build/{build.id}" class="btn btn-outline btn-sm" on:click|stopPropagation>
-                  Open Full Details
-                </a>
                 {#if isSubsystemLead()}
                   <button
                     class="btn btn-danger btn-sm"
@@ -2182,7 +2259,11 @@
                               <td>{item.part_type}</td>
                               <td>{item.workflow || '—'}</td>
                               <td>{item.material || '—'}</td>
-                              <td>{item.status}</td>
+                              <td>
+                                <span class="tag tag-status tag-status-{item.live_status || item.status || 'pending'}">
+                                  {item.live_status || item.status || 'pending'}
+                                </span>
+                              </td>
                               <td>
                                 {#if item.onshape_part_id}
                                   <button class="btn btn-outline btn-sm" on:click={() => (cadViewerItem = item)}>
@@ -2196,15 +2277,42 @@
                               {#if isSubsystemMember() && hasPermission(user, 'CREATE_BUILDS')}
                                 <td>
                                   {#if item.added}
-                                    <span class="bom-added-label">Added</span>
+                                    {#if item.workflow === 'purchase'}
+                                      <a class="btn btn-outline btn-sm" href="/cad/purchasing">View in Purchasing</a>
+                                    {:else if item.kitting_id}
+                                      <span class="tag tag-status tag-status-kitted">Kitted</span>
+                                    {:else if item.parts_id}
+                                      <a class="btn btn-outline btn-sm" href="/manufacture?part={item.parts_id}">View in Manufacturing</a>
+                                    {:else}
+                                      <span class="bom-added-label">Found</span>
+                                    {/if}
                                   {:else}
-                                    <button
-                                      class="btn btn-outline btn-sm"
-                                      disabled={addingBomRowId === item.id}
-                                      on:click={() => addSavedBomRowToDownstream(item)}
-                                    >
-                                      {addingBomRowId === item.id ? 'Adding…' : 'Add'}
-                                    </button>
+                                    <div class="bom-row-actions">
+                                      <button
+                                        class="btn btn-outline btn-sm"
+                                        disabled={addingBomRowId === item.id}
+                                        on:click={() => addSavedBomRowToDownstream(item)}
+                                      >
+                                        {#if addingBomRowId === item.id}
+                                          Adding…
+                                        {:else if item.part_type === 'COTS' && item.workflow === 'kit'}
+                                          Mark as Kitted
+                                        {:else if item.part_type === 'COTS'}
+                                          Add to Purchasing
+                                        {:else}
+                                          Add to Manufacturing
+                                        {/if}
+                                      </button>
+                                      {#if item.part_type === 'COTS' && item.workflow !== 'kit'}
+                                        <button
+                                          class="btn btn-outline btn-sm"
+                                          disabled={addingBomRowId === item.id}
+                                          on:click={() => markBomRowFound(item)}
+                                        >
+                                          Kitted/Mark as Found
+                                        </button>
+                                      {/if}
+                                    </div>
                                   {/if}
                                 </td>
                               {/if}
@@ -2296,7 +2404,7 @@
         role="dialog"
         aria-modal="true"
         tabindex="0"
-        style="--modal-width: 1200px;"
+        style="--modal-width: 1800px; max-height: 95vh;"
         on:click|stopPropagation
         on:keydown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); closeBuildModal(); } }}
       >
@@ -2315,7 +2423,12 @@
               <button class="btn btn-primary" on:click={saveAllBomItems}>
                 Save
               </button>
-            </div><div class="bom-table-container">
+            </div>
+            <p class="bom-classify-note">
+              <AlertTriangle size={17} />
+              <span>Type and workflow below are just an automatic best-guess preset — double-check each row and add any parts the guess missed before saving.</span>
+            </p>
+            <div class="bom-table-container">
               <table class="bom-table">
                 <thead>
                   <tr>
@@ -2326,7 +2439,6 @@
                     <th>Workflow</th>
                     <th>Bounding Box</th>
                     <th>Stock Assignment</th>
-                    <th>Action</th>
                     <th>Downloads</th>
                   </tr>
                 </thead>
@@ -2354,9 +2466,14 @@
                         </select>
                       </td>                      <td>
                         {#if item.part_type === 'COTS'}
-                          <span class="tag workflow-tag tag-workflow-purchase">
-                            Purchase
-                          </span>
+                          <select
+                            class="workflow-dropdown workflow-{item.workflow || 'purchase'}"
+                            value={item.workflow || 'purchase'}
+                            on:change={(e) => updateWorkflow(index, e.target.value)}
+                          >
+                            <option value="purchase">Purchase</option>
+                            <option value="kit">Kit</option>
+                          </select>
                         {:else}
                           <select 
                             class="workflow-dropdown workflow-{item.workflow || item.manufacturing_process || 'mill'}" 
@@ -2383,7 +2500,7 @@
                       <td>
                         {#if item.part_type !== 'COTS'}
                           <div class="stock-select">
-                            <select on:change={(e) => updateStockChoice(index, e.target.value)} value={item._stock_choice || item.stock_assignment}>
+                            <select class="form-input" on:change={(e) => updateStockChoice(index, e.target.value)} value={item._stock_choice || item.stock_assignment}>
                               <option value="">Select Stock</option>
                               {#each getStocksForWorkflow(item.workflow || 'mill') as stock}
                                 <option value={stock.description}>{stock.description}</option>
@@ -2398,15 +2515,6 @@
                         {:else}
                           <span class="no-stock">-</span>
                         {/if}
-                      </td>
-                      <td>
-                        <button
-                          class="btn btn-sm btn-add-part"
-                          on:click={() => saveBomItemToBuild(item)}
-                        >
-                          <Plus size={14} />
-                          Add
-                        </button>
                       </td>
                       <td>
                         {#if item.onshape_part_id}
@@ -2437,11 +2545,15 @@
                                PDF drawing (a lathe part is more often communicated as a print
                                than router/3d-print's watertight solid). -->
                           <div class="manual-file-attach">
-                            <input
-                              type="file"
-                              accept={item.workflow === 'lathe' ? '.step,.stp,.pdf' : '.step,.stp'}
-                              on:change={(e) => { item.attachedFile = e.target.files?.[0] || null; buildBOM = [...buildBOM]; }}
-                            />
+                            <label class="file-upload-btn">
+                              <Upload size={13} />
+                              {item.attachedFile ? item.attachedFile.name : (item.workflow === 'lathe' ? 'Attach STEP or PDF' : 'Attach STEP')}
+                              <input
+                                type="file"
+                                accept={item.workflow === 'lathe' ? '.step,.stp,.pdf' : '.step,.stp'}
+                                on:change={(e) => { item.attachedFile = e.target.files?.[0] || null; buildBOM = [...buildBOM]; }}
+                              />
+                            </label>
                             <span class="manual-file-hint">
                               {item.workflow === 'lathe' ? 'STEP or PDF, optional' : 'STEP, optional'}
                             </span>
@@ -2572,6 +2684,8 @@
             <input id="saved-bom-purchase-url" class="form-input" type="text" bind:value={savedBomPurchaseModalUrl} placeholder="https://..." />
             <label for="saved-bom-purchase-price">Unit price</label>
             <input id="saved-bom-purchase-price" class="form-input" type="number" min="0" step="0.01" bind:value={savedBomPurchaseModalPrice} />
+            <label for="saved-bom-purchase-shipping">Shipping cost (optional)</label>
+            <input id="saved-bom-purchase-shipping" class="form-input" type="number" min="0" step="0.01" placeholder="0.00" bind:value={savedBomPurchaseModalShipping} />
           </div>
           <div class="modal-actions">
             <button class="btn" on:click={() => { showSavedBomPurchaseModal = false; savedBomPurchaseModalItem = null; }}>Cancel</button>
@@ -2959,6 +3073,22 @@
   .subsystem-bom-table th { color: var(--secondary); font-weight: 600; }
   .bom-added-label { color: var(--green-strong); font-weight: 600; font-size: 0.8rem; }
   .cad-viewer-hint { text-align: center; color: var(--text-muted); font-size: 0.8rem; margin: 0.5rem 0 0; }
+  .bom-row-actions { display: flex; flex-direction: column; gap: 0.35rem; align-items: stretch; }
+  .bom-row-actions .btn { justify-content: center; white-space: nowrap; }
+
+  .tag-status {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: capitalize;
+  }
+  .tag-status-pending, .tag-status-found, .tag-status-needs_approval { background: var(--brand-gold-soft); color: var(--brand-gold-strong); }
+  .tag-status-in-progress, .tag-status-cammed { background: var(--blue-soft); color: var(--blue-base); }
+  .tag-status-ordered { background: var(--purple-soft); color: var(--purple-strong); }
+  .tag-status-delivered, .tag-status-complete, .tag-status-manufactured, .tag-status-kitted { background: var(--green-soft); color: var(--green-strong); }
 
   .build-status {
     display: inline-flex;
@@ -2973,37 +3103,93 @@
   }
   .build-status.status-pending { background: var(--brand-gold-soft); color: var(--brand-gold-strong); }
   .build-status.status-manufacturing { background: var(--blue-soft); color: var(--blue-strong); }
-  .build-status.status-ready_to_assemble { background: var(--purple-soft); color: var(--purple-strong); }
+  .build-status.status-ready_to_assemble { background: var(--orange-soft); color: var(--orange-strong); }
   .build-status.status-assembled { background: var(--green-soft); color: var(--green-strong); }
 
   .bom-actions {
     display: flex;
     gap: 1rem;
-    margin-bottom: 1.5rem;
+    margin-bottom: 1rem;
     padding-bottom: 1rem;
     border-bottom: 1px solid var(--border);
   }
+  .bom-actions .btn {
+    min-width: 200px;
+    padding: 0.65rem 1.5rem;
+    font-size: 1rem;
+    font-weight: 600;
+  }
+
+  .bom-classify-note {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+    margin: 0 0 1rem 0;
+    padding: 0.75rem 1rem;
+    background: var(--brand-gold-soft);
+    border: 1px solid var(--brand-gold-strong);
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--text);
+  }
+  .bom-classify-note :global(svg) {
+    flex-shrink: 0;
+    margin-top: 0.1rem;
+    color: var(--brand-gold-strong);
+  }
 
   .bom-table-container { margin-bottom: 1.5rem; overflow-x: auto; }
-  .bom-table { table-layout: auto; font-size: 0.85rem; }
+  .bom-table { table-layout: auto; font-size: 0.85rem; min-width: 1150px; }
   .bom-table th, .bom-table td { padding: 0.35rem 0.5rem; min-width: 80px; max-width: 350px; white-space: normal; overflow-wrap: anywhere; vertical-align: middle; }
   .bom-table th { font-size: 0.95rem; font-weight: 600; white-space: nowrap; }
   .bom-table td { font-size: 0.85rem; vertical-align: top; padding: 0.75rem 0.5rem; }
   .bom-table td select, .bom-table td input, .bom-table td .btn { max-width: 100%; }
-  .bom-table .stock-select { display: flex; flex-direction: column; gap: 0.35rem; min-width: 10rem; }
+  .bom-table td .btn { white-space: nowrap; overflow-wrap: normal; }
+  .bom-table .stock-select { display: flex; flex-direction: column; gap: 0.35rem; min-width: 14rem; }
+  .bom-table .stock-select select { min-width: 0; width: 100%; }
   .bom-table .download-buttons, .bom-table .part-name { min-width: 0; }
 
   .part-name { font-weight: 500; }
   .part-description { font-size: 0.75rem; color: var(--secondary); margin-top: 0.25rem; }
   .manual-file-attach { display: flex; flex-direction: column; gap: 0.25rem; min-width: 9rem; }
-  .manual-file-attach input[type="file"] { font-size: 0.75rem; }
   .manual-file-hint { font-size: 0.7rem; color: var(--secondary); font-style: italic; }
+
+  .file-upload-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.3rem 0.7rem;
+    font-size: 0.8rem;
+    font-weight: 500;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 4px);
+    background: var(--surface-1);
+    color: var(--text);
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+  }
+  .file-upload-btn:hover { background: var(--surface-2); border-color: var(--accent); }
+  .file-upload-btn input[type="file"] {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
 
   .workflow-mill { background: var(--blue-soft); color: var(--blue-base); border: 1px solid var(--blue-base); }
   .workflow-lasercut { background: var(--brand-gold-soft); color: var(--orange-strong); border: 1px solid var(--brand-gold-base); }
   .workflow-3dprint { background: var(--purple-soft); color: var(--purple-strong); border: 1px solid var(--purple-base); }
   .workflow-router { background: var(--green-soft); color: var(--green-base); border: 1px solid var(--green-base); }
-  .workflow-purchase { background: var(--green-soft); color: var(--green-base); border: 1px solid var(--green-base); }
+  .workflow-purchase, .workflow-kit { background: var(--brand-gold-soft); color: var(--orange-strong); border: 1px solid var(--brand-gold-base); }
   .workflow-lathe { background: var(--red-soft); color: var(--red-base); border: 1px solid var(--red-base); }
 
   .workflow-dropdown {
@@ -3029,7 +3215,7 @@
   .workflow-dropdown.workflow-3d-print { background: var(--purple-soft); color: var(--purple-strong); border-color: var(--purple-base); }
   .workflow-dropdown.workflow-router { background: var(--green-soft); color: var(--green-base); border-color: var(--green-base); }
   .workflow-dropdown.workflow-lathe { background: var(--red-soft); color: var(--red-base); border-color: var(--red-base); }
-  .workflow-dropdown.workflow-purchase { background: var(--green-soft); color: var(--green-base); border-color: var(--green-base); }
+  .workflow-dropdown.workflow-purchase, .workflow-dropdown.workflow-kit { background: var(--brand-gold-soft); color: var(--orange-strong); border-color: var(--brand-gold-base); }
 
   .type-badge { padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 500; display: inline-block; text-transform: uppercase; }
   .type-cots { background: var(--brand-gold-soft); color: var(--orange-strong); border: 1px solid var(--brand-gold-base); }
@@ -3435,7 +3621,6 @@
     border: 1px solid var(--brand-gold-strong);
     border-radius: 8px;
     padding: 1rem;
-    margin-bottom: 1.5rem;
     color: var(--text);
     font-size: 0.9rem;
   }

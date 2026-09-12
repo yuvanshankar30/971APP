@@ -1,6 +1,6 @@
 {
   "tabs": {
-    "kitting": true,
+    "kitting": false,
     "build": true,
     "manufacture": true,
     "cad": true,
@@ -15,10 +15,10 @@
     "pitscout": true,
     "scouting-admin": false,
     "vision": true,
-    "cots-stocking": true,
+    "cots-stocking": false,
     "autocam": true,
     "fusion-autocam": true,
-    "gcode-converter": true,
+    "gcode-converter": false,
     "matchscout": true,
     "strategy": true,
     "files": true
