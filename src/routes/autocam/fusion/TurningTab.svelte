@@ -86,14 +86,6 @@
     if (next.has(partId)) next.delete(partId); else next.add(partId);
     selectedPartIds = next;
   }
-  function toggleSelectAll() {
-    if (visibleSelectedCount === filteredTurningPartsByCreatedAt.length && filteredTurningPartsByCreatedAt.length > 0) {
-      const visibleIds = new Set(filteredTurningPartsByCreatedAt.map((p) => p.id));
-      selectedPartIds = new Set([...selectedPartIds].filter((id) => !visibleIds.has(id)));
-    } else {
-      selectedPartIds = new Set([...selectedPartIds, ...filteredTurningPartsByCreatedAt.map((p) => p.id)]);
-    }
-  }
   async function handleBulkDelete() {
     const ids = [...selectedPartIds];
     if (!ids.length) return;
@@ -473,22 +465,11 @@
     {#if filteredTurningPartsByCreatedAt.length === 0}
       <p class="empty-state">No turning stock matches "{turningListSearch}".</p>
     {/if}
-    {#if canManage && filteredTurningPartsByCreatedAt.length > 0}
+    {#if canManage && visibleSelectedCount > 0}
       <div class="bulk-select-bar">
-        <label class="bulk-select-all">
-          <input
-            type="checkbox"
-            checked={visibleSelectedCount > 0 && visibleSelectedCount === filteredTurningPartsByCreatedAt.length}
-            indeterminate={visibleSelectedCount > 0 && visibleSelectedCount < filteredTurningPartsByCreatedAt.length}
-            on:change={toggleSelectAll}
-          />
-          {visibleSelectedCount > 0 ? `${visibleSelectedCount} selected` : 'Select all'}
-        </label>
-        {#if visibleSelectedCount > 0}
-          <button type="button" class="btn btn-ghost btn-sm" disabled={bulkDeleting} on:click={handleBulkDelete}>
-            <Trash2 size={14} /> {bulkDeleting ? 'Deleting...' : `Delete ${visibleSelectedCount} selected`}
-          </button>
-        {/if}
+        <button type="button" class="btn btn-ghost btn-sm" disabled={bulkDeleting} on:click={handleBulkDelete}>
+          <Trash2 size={14} /> {bulkDeleting ? 'Deleting...' : `Delete ${visibleSelectedCount} selected`}
+        </button>
       </div>
     {/if}
     <div class="cam-list">
@@ -764,7 +745,7 @@
   .folder-search-result.selected { background: var(--accent-soft, rgba(47, 129, 247, 0.14)); color: var(--accent); font-weight: 600; }
   .folder-search-name { flex-shrink: 0; }
   .folder-search-path { color: var(--text-muted); font-size: 0.75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .cam-list-toolbar { display: flex; justify-content: space-between; align-items: flex-end; gap: 0.5rem; margin-bottom: 0.5rem; flex-wrap: wrap; }
+  .cam-list-toolbar { display: flex; justify-content: space-between; align-items: flex-end; gap: 1.5rem; margin-bottom: 0.5rem; flex-wrap: wrap; }
   .tab-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
   .tab-filters { flex: 1 1 32rem; --filters-columns: 2fr 1fr 1fr; margin: 0; }
   .form-row { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
@@ -779,8 +760,6 @@
   .cam-list-header-right { display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0; }
   .bulk-select-checkbox { width: 1rem; height: 1rem; flex-shrink: 0; cursor: pointer; }
   .bulk-select-bar { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.5rem 0.75rem; margin-bottom: 0.6rem; border: 1px solid var(--border); border-radius: var(--radius-md, 10px); background: var(--surface-2, #f7f7f5); flex-wrap: wrap; }
-  .bulk-select-all { display: flex; align-items: center; gap: 0.5rem; font-size: 0.82rem; font-weight: 500; color: var(--text-muted); cursor: pointer; }
-  .bulk-select-all input { width: 1rem; height: 1rem; cursor: pointer; }
   .quantity-control { display: inline-flex; }
   .quantity-input { min-width: 4rem; width: 4rem; }
   .cam-list-actions { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; flex-wrap: wrap; }

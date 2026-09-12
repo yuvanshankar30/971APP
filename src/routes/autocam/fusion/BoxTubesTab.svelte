@@ -113,14 +113,6 @@
     if (next.has(tubeId)) next.delete(tubeId); else next.add(tubeId);
     selectedTubeIds = next;
   }
-  function toggleSelectAllTubes() {
-    if (visibleSelectedTubeCount === filteredBoxTubesByCreatedAt.length && filteredBoxTubesByCreatedAt.length > 0) {
-      const visibleIds = new Set(filteredBoxTubesByCreatedAt.map((t) => t.id));
-      selectedTubeIds = new Set([...selectedTubeIds].filter((id) => !visibleIds.has(id)));
-    } else {
-      selectedTubeIds = new Set([...selectedTubeIds, ...filteredBoxTubesByCreatedAt.map((t) => t.id)]);
-    }
-  }
   async function handleBulkDeleteTubes() {
     const ids = [...selectedTubeIds];
     if (!ids.length) return;
@@ -619,22 +611,11 @@
     {#if filteredBoxTubesByCreatedAt.length === 0}
       <p class="empty-state">No tube stock matches "{boxTubesListSearch}".</p>
     {/if}
-    {#if canManage && filteredBoxTubesByCreatedAt.length > 0}
+    {#if canManage && visibleSelectedTubeCount > 0}
       <div class="bulk-select-bar">
-        <label class="bulk-select-all">
-          <input
-            type="checkbox"
-            checked={visibleSelectedTubeCount > 0 && visibleSelectedTubeCount === filteredBoxTubesByCreatedAt.length}
-            indeterminate={visibleSelectedTubeCount > 0 && visibleSelectedTubeCount < filteredBoxTubesByCreatedAt.length}
-            on:change={toggleSelectAllTubes}
-          />
-          {visibleSelectedTubeCount > 0 ? `${visibleSelectedTubeCount} selected` : 'Select all'}
-        </label>
-        {#if visibleSelectedTubeCount > 0}
-          <button type="button" class="btn btn-ghost btn-sm" disabled={bulkDeletingTubes} on:click={handleBulkDeleteTubes}>
-            <Trash2 size={14} /> {bulkDeletingTubes ? 'Deleting...' : `Delete ${visibleSelectedTubeCount} selected`}
-          </button>
-        {/if}
+        <button type="button" class="btn btn-ghost btn-sm" disabled={bulkDeletingTubes} on:click={handleBulkDeleteTubes}>
+          <Trash2 size={14} /> {bulkDeletingTubes ? 'Deleting...' : `Delete ${visibleSelectedTubeCount} selected`}
+        </button>
       </div>
     {/if}
     <div class="cam-list">
@@ -960,7 +941,7 @@
 {/if}
 
 <style>
-  .cam-list-toolbar { display: flex; justify-content: space-between; align-items: flex-end; gap: 0.5rem; margin-bottom: 0.5rem; flex-wrap: wrap; }
+  .cam-list-toolbar { display: flex; justify-content: space-between; align-items: flex-end; gap: 1.5rem; margin-bottom: 0.5rem; flex-wrap: wrap; }
   .tab-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
   .tab-filters { flex: 1 1 32rem; --filters-columns: 2fr 1fr 1fr; margin: 0; }
   .form-row { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
@@ -975,8 +956,6 @@
   .cam-list-header-right { display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0; }
   .bulk-select-checkbox { width: 1rem; height: 1rem; flex-shrink: 0; cursor: pointer; }
   .bulk-select-bar { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.5rem 0.75rem; margin-bottom: 0.6rem; border: 1px solid var(--border); border-radius: var(--radius-md, 10px); background: var(--surface-2, #f7f7f5); flex-wrap: wrap; }
-  .bulk-select-all { display: flex; align-items: center; gap: 0.5rem; font-size: 0.82rem; font-weight: 500; color: var(--text-muted); cursor: pointer; }
-  .bulk-select-all input { width: 1rem; height: 1rem; cursor: pointer; }
   .quantity-control { display: inline-flex; }
   .quantity-input { min-width: 4rem; width: 4rem; }
   .cam-list-actions { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; flex-wrap: wrap; }
