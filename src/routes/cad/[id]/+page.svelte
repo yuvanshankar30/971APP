@@ -1908,7 +1908,7 @@
       <div class="subsystem-builds-heading">
         <h2>Builds ({subsystemBuilds.length})</h2>
         {#if isSubsystemMember() && hasPermission(user, 'CREATE_BUILDS')}
-          <button class="btn btn-outline btn-sm" on:click={openManualBuildModal}>
+          <button class="btn btn-primary btn-sm" on:click={openManualBuildModal}>
             <Plus size={14} />
             Create Manual Build
           </button>
@@ -2989,12 +2989,14 @@
   .header-content {
     display: flex;
     flex-wrap: wrap;
-    align-items: flex-start;
+    align-items: center;
     gap: 1rem;
   }
 
   .header-actions {
     margin-left: auto;
+    display: flex;
+    align-items: center;
   }
 
   .member-section {
