@@ -9,6 +9,7 @@
   import { hasPermission, GENERAL_ROLES } from '$lib/permissions.js';
   import { onShapeAPI } from '$lib/onshape.js';  
   import { partClassificationService } from '$lib/bom_classify.js';
+  import { parseBomCsvRows } from '$lib/bom_csv_import.js';
   import { detectVendorFromString, buildVendorSearchUrl } from '$lib/vendor_detect.js';
   import { formatPacificDate } from '$lib/timezone.js';
   import { goto } from '$app/navigation';
@@ -97,6 +98,15 @@
   let savedBomPurchaseModalItem = null;
   let savedBomPurchaseModalUrl = '';
   let savedBomPurchaseModalPrice = '';
+
+  // Manual build creation - lets a build get created (and its BOM reviewed
+  // through the exact same modal/add-to-manufacturing pipeline as an OnShape
+  // release) entirely offline, from an uploaded BOM CSV export, for when
+  // OnShape is unreachable or a subsystem isn't linked to a document at all.
+  let showManualBuildModal = false;
+  let manualBuildName = '';
+  let manualBuildFile = null;
+  let loadingManualBom = false;
 
   function rememberLastSubsystem(subsystemData) {
     if (!browser || !subsystemData?.id) return;
@@ -762,6 +772,82 @@
     item.stock_assignment = value;
     item._stock_choice = '__other__';
     buildBOM = [...buildBOM];
+  }
+
+  function openManualBuildModal() {
+    manualBuildName = '';
+    manualBuildFile = null;
+    showManualBuildModal = true;
+  }
+
+  async function parseManualBomFile(file) {
+    const text = await file.text();
+    const rawRows = parseBomCsvRows(text);
+
+    // Reuse the same manual classification rules OnShape-sourced BOMs go
+    // through, so a manually-imported part gets the same COTS/manufactured
+    // + workflow assignment either way.
+    const classifications = await partClassificationService.classifyParts(rawRows);
+
+    return rawRows.map((row, index) => {
+      const classification = classifications[index] || { classification: 'manufactured', manufacturing_process: 'mill' };
+      const partType = classification.classification === 'COTS' ? 'COTS' : 'manufactured';
+      return {
+        part_name: row.part_name,
+        part_number: row.part_number || null,
+        quantity: row.quantity,
+        part_type: partType,
+        material: row.material,
+        workflow: partType === 'COTS' ? 'purchase' : (classification.manufacturing_process || 'mill'),
+        vendor: row.vendor,
+        description: row.description,
+        onshape_document_id: null,
+        onshape_wvm: null,
+        onshape_wvmid: null,
+        onshape_element_id: null,
+        onshape_part_id: null,
+        onshape_part_studio_element_id: null,
+        bounding_box_x: null,
+        bounding_box_y: null,
+        bounding_box_z: null,
+        stock_assignment: ''
+      };
+    });
+  }
+
+  async function submitManualBuild() {
+    if (!manualBuildName.trim()) {
+      toastActions.show('Name this build before importing its BOM');
+      return;
+    }
+    if (!manualBuildFile) {
+      toastActions.show('Choose a BOM CSV file to import');
+      return;
+    }
+
+    loadingManualBom = true;
+    try {
+      const parsed = await parseManualBomFile(manualBuildFile);
+
+      buildBOM = parsed;
+      buildBOM.forEach((part, index) => {
+        if (part.part_type === 'manufactured') autoAssignStock(index);
+      });
+
+      // A synthetic version-shaped object - every downstream function in the
+      // review modal (addSingleToBuild, downloadPartFile, etc.) only reads
+      // selectedVersion.id/.name, and a manual build has no real OnShape
+      // version to point at.
+      selectedVersion = { id: `manual-${Date.now()}`, name: manualBuildName.trim() };
+      addedPartsSet = new Set();
+      showManualBuildModal = false;
+      showBuildModal = true;
+    } catch (error) {
+      console.error('Error parsing manual BOM file:', error);
+      toastActions.show('Failed to import BOM: ' + (error?.message || error));
+    } finally {
+      loadingManualBom = false;
+    }
   }
 
   async function createBuildFromRelease(release) {
@@ -1851,10 +1937,19 @@
          editing (quantities, purchasing, vendor lookup) still lives on
          /cad/build/[id]; "Open Full Details" links there. -->
     <section class="subsystem-builds-section">
-      <h2>Builds ({subsystemBuilds.length})</h2>
+      <div class="subsystem-builds-heading">
+        <h2>Builds ({subsystemBuilds.length})</h2>
+        {#if isSubsystemMember() && hasPermission(user, 'CREATE_BUILDS')}
+          <button class="btn btn-outline btn-sm" on:click={openManualBuildModal}>
+            <Plus size={14} />
+            Create Manual Build
+          </button>
+        {/if}
+      </div>
       {#if subsystemBuilds.length === 0}
         <p class="no-builds-hint">
-          No builds yet. Pick a release above and click "Create Build" to start one.
+          No builds yet. Pick a release above and click "Create Build" to start one, or use
+          "Create Manual Build" to import a BOM from a CSV file - no OnShape connection needed.
         </p>
       {:else}
         <div class="subsystem-builds-list">
@@ -1954,6 +2049,61 @@
       {/if}
     </section>
   </main>
+
+  <!-- Manual Build Modal - OnShape-independent path into the same BOM review modal below -->
+  {#if showManualBuildModal}
+    <div
+      class="modal-backdrop"
+      role="button"
+      tabindex="0"
+      aria-label="Close manual build dialog"
+      on:click|self={() => showManualBuildModal = false}
+      on:keydown={(e) => {
+        const activatesBackdrop = e.key === 'Escape' || ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget);
+        if (activatesBackdrop) { e.preventDefault(); showManualBuildModal = false; }
+      }}
+    >
+      <div
+        class="modal"
+        role="dialog"
+        aria-modal="true"
+        tabindex="0"
+        style="--modal-width: 560px;"
+        on:click|stopPropagation
+        on:keydown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); showManualBuildModal = false; } }}
+      >
+        <div class="modal-header">
+          <h3>Create Manual Build</h3>
+          <button type="button" class="modal-close-button" aria-label="Close manual build dialog" on:click={() => showManualBuildModal = false}>×</button>
+        </div>
+        <div class="modal-content">
+          <p>
+            Import a BOM CSV export (from OnShape's own BOM table export, or any sheet with
+            Name/Part Number/Quantity/Material columns) to create a build without needing OnShape
+            reachable at all.
+          </p>
+          <div style="display:flex; flex-direction:column; gap:0.5rem;">
+            <label for="manual-build-name">Build name</label>
+            <input id="manual-build-name" class="form-input" type="text" bind:value={manualBuildName} placeholder="e.g. V1, Competition Bot" />
+            <label for="manual-build-file">BOM CSV file</label>
+            <input
+              id="manual-build-file"
+              class="form-input"
+              type="file"
+              accept=".csv,text/csv"
+              on:change={(e) => (manualBuildFile = e.target.files?.[0] || null)}
+            />
+          </div>
+          <div class="modal-actions">
+            <button class="btn" on:click={() => showManualBuildModal = false}>Cancel</button>
+            <button class="btn btn-yellow" disabled={loadingManualBom} on:click={submitManualBuild}>
+              {loadingManualBom ? 'Importing...' : 'Import BOM'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  {/if}
 
   <!-- Build Modal -->
   {#if showBuildModal}
@@ -2537,7 +2687,8 @@
     padding-top: 1.5rem;
     border-top: 1px solid var(--border);
   }
-  .subsystem-builds-section h2 { margin: 0 0 1rem 0; color: var(--secondary); font-size: 1.3rem; }
+  .subsystem-builds-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; }
+  .subsystem-builds-section h2 { margin: 0; color: var(--secondary); font-size: 1.3rem; }
   .no-builds-hint { color: var(--secondary); font-size: 0.9rem; }
   .subsystem-builds-list { display: flex; flex-direction: column; gap: 0.75rem; }
   .subsystem-build-card {
