@@ -2875,8 +2875,8 @@
   }
 
   .member-chip.is-lead {
-    background: var(--primary-soft, #e3f2fd);
-    border-color: var(--primary);
+    background: var(--accent-subtle);
+    border-color: var(--accent-strong);
   }
 
   .member-chip.more-chip {
@@ -2893,8 +2893,8 @@
   }
 
   .lead-badge {
-    background: var(--primary);
-    color: white;
+    background: var(--accent);
+    color: var(--color-white);
     padding: 0.15rem 0.4rem;
     border-radius: 4px;
     font-size: 0.7rem;
