@@ -273,6 +273,7 @@
     background: var(--surface-2);
   }
   .tab-nav button.active {
+    background: none;
     color: var(--accent);
     border-bottom-color: var(--accent);
   }

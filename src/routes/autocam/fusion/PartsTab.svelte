@@ -1126,13 +1126,38 @@
 {#if loading}
   <p>Loading parts...</p>
 {:else}
-  {#if canManage}
-    <div class="tab-actions">
-      <button class="btn btn-primary" on:click={() => (showAddPartForm = !showAddPartForm)}>
-        <Plus size={16} /> Add Part
-      </button>
-    </div>
-  {/if}
+  <div class="cam-list-toolbar">
+    {#if canManage}
+      <div class="tab-actions">
+        <button class="btn btn-primary" on:click={() => (showAddPartForm = !showAddPartForm)}>
+          <Plus size={16} /> Add Part
+        </button>
+      </div>
+    {/if}
+    {#if partsByCreatedAt.length > 0}
+      <div class="filters tab-filters">
+        <div class="form-group">
+          <label class="form-label" for="parts-search">Search</label>
+          <input
+            id="parts-search"
+            type="search"
+            class="form-input"
+            placeholder="Search parts by name, project, or material..."
+            bind:value={partsListSearch}
+            aria-label="Search parts"
+          />
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="parts-project-filter"><Filter size={14} /> Project</label>
+          <select id="parts-project-filter" class="form-select" bind:value={filterProject}>
+            <option value="">All Projects</option>
+            {#each projectIds as pid}<option value={pid}>{pid}</option>{/each}
+          </select>
+        </div>
+        <SeasonFilter options={seasonOptions} bind:value={filterSeason} />
+      </div>
+    {/if}
+  </div>
 
   {#if showAddPartForm && canManage}
     <div class="card">
@@ -1232,27 +1257,6 @@
   {#if partsByCreatedAt.length === 0}
     <p class="empty-state">No parts yet. {canManage ? 'Add one above to get started.' : 'Ask a manufacturing lead to add one.'}</p>
   {:else}
-    <div class="filters tab-filters">
-      <div class="form-group">
-        <label class="form-label" for="parts-search">Search</label>
-        <input
-          id="parts-search"
-          type="search"
-          class="form-input"
-          placeholder="Search parts by name, project, or material..."
-          bind:value={partsListSearch}
-          aria-label="Search parts"
-        />
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="parts-project-filter"><Filter size={14} /> Project</label>
-        <select id="parts-project-filter" class="form-select" bind:value={filterProject}>
-          <option value="">All Projects</option>
-          {#each projectIds as pid}<option value={pid}>{pid}</option>{/each}
-        </select>
-      </div>
-      <SeasonFilter options={seasonOptions} bind:value={filterSeason} />
-    </div>
     {#if filteredPartsByCreatedAt.length === 0}
       <p class="empty-state">No parts match "{partsListSearch}".</p>
     {/if}
@@ -1823,8 +1827,9 @@
   .recent-queue-name { font-weight: 600; font-size: 0.8rem; display: flex; align-items: center; gap: 0.25rem; }
   .recent-queue-detail { color: var(--text-muted); font-size: 0.72rem; }
   @media (max-width: 640px) { .recent-queue-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-  .tab-actions { margin-bottom: 1rem; display: flex; gap: 0.5rem; flex-wrap: wrap; }
-  .tab-filters { margin-bottom: 1rem; --filters-columns: 2fr 1fr 1fr; }
+  .cam-list-toolbar { display: flex; justify-content: space-between; align-items: flex-end; gap: 0.5rem; margin-bottom: 0.5rem; flex-wrap: wrap; }
+  .tab-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+  .tab-filters { flex: 1 1 32rem; --filters-columns: 2fr 1fr 1fr; margin: 0; }
   .form-row { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
   .form-row-final { padding-top: 0.75rem; border-top: 1px solid var(--border); }
   .form-row .form-group { flex: 1; min-width: 160px; }

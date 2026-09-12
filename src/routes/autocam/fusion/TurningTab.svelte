@@ -393,13 +393,31 @@
 {#if loading}
   <p>Loading turning stock...</p>
 {:else}
-  {#if canManage}
-  <div class="tab-actions">
-    <button class="btn btn-primary" on:click={() => (showAddForm = !showAddForm)}>
-      <Plus size={16} /> Add Turning Stock
-    </button>
+  <div class="cam-list-toolbar">
+    {#if canManage}
+      <div class="tab-actions">
+        <button class="btn btn-primary" on:click={() => (showAddForm = !showAddForm)}>
+          <Plus size={16} /> Add Turning Stock
+        </button>
+      </div>
+    {/if}
+    {#if turningParts.length > 0}
+      <div class="filters tab-filters">
+        <div class="form-group">
+          <label class="form-label" for="turning-search">Search</label>
+          <input id="turning-search" type="search" class="form-input" placeholder="Search turning stock by name or project..." bind:value={turningListSearch} aria-label="Search turning stock" />
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="turning-project-filter"><Filter size={14} /> Project</label>
+          <select id="turning-project-filter" class="form-select" bind:value={filterProject}>
+            <option value="">All Projects</option>
+            {#each projectIds as pid}<option value={pid}>{pid}</option>{/each}
+          </select>
+        </div>
+        <SeasonFilter options={seasonOptions} bind:value={filterSeason} />
+      </div>
+    {/if}
   </div>
-  {/if}
 
   {#if showAddForm && canManage}
     <div class="card">
@@ -452,20 +470,6 @@
   {#if turningParts.length === 0}
     <p class="empty-state">No turning stock yet. Add one above.</p>
   {:else}
-    <div class="filters tab-filters">
-      <div class="form-group">
-        <label class="form-label" for="turning-search">Search</label>
-        <input id="turning-search" type="search" class="form-input" placeholder="Search turning stock by name or project..." bind:value={turningListSearch} aria-label="Search turning stock" />
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="turning-project-filter"><Filter size={14} /> Project</label>
-        <select id="turning-project-filter" class="form-select" bind:value={filterProject}>
-          <option value="">All Projects</option>
-          {#each projectIds as pid}<option value={pid}>{pid}</option>{/each}
-        </select>
-      </div>
-      <SeasonFilter options={seasonOptions} bind:value={filterSeason} />
-    </div>
     {#if filteredTurningPartsByCreatedAt.length === 0}
       <p class="empty-state">No turning stock matches "{turningListSearch}".</p>
     {/if}
@@ -760,8 +764,9 @@
   .folder-search-result.selected { background: var(--accent-soft, rgba(47, 129, 247, 0.14)); color: var(--accent); font-weight: 600; }
   .folder-search-name { flex-shrink: 0; }
   .folder-search-path { color: var(--text-muted); font-size: 0.75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .tab-actions { margin-bottom: 1rem; }
-  .tab-filters { margin-bottom: 1rem; --filters-columns: 2fr 1fr 1fr; }
+  .cam-list-toolbar { display: flex; justify-content: space-between; align-items: flex-end; gap: 0.5rem; margin-bottom: 0.5rem; flex-wrap: wrap; }
+  .tab-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+  .tab-filters { flex: 1 1 32rem; --filters-columns: 2fr 1fr 1fr; margin: 0; }
   .form-row { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
   .form-row-final { padding-top: 0.75rem; border-top: 1px solid var(--border); }
   .form-row .form-group { flex: 1; min-width: 160px; }
