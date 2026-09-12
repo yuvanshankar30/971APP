@@ -73,6 +73,12 @@ describe('manualClassification (COTS vs manufactured rules)', () => {
     expect(classify({ name: '0.5" ID Bearing (1.125" OD, 0.313" WD, Shielded, Flanged)' })).toMatchObject({ classification: 'COTS', workflow_status: 'kit' });
   });
 
+  it('classifies washers, belts, and pulleys as COTS kit items, never a manufactured mill guess', () => {
+    expect(classify({ name: 'Type B Regular Flat Washer #10', part_number: 'P1' })).toMatchObject({ classification: 'COTS', workflow_status: 'kit', manufacturing_process: null });
+    expect(classify({ name: '40T 5M 15mm Wide Belt', part_number: 'P1' })).toMatchObject({ classification: 'COTS', workflow_status: 'kit', manufacturing_process: null });
+    expect(classify({ name: '18T Aluminum Pulley (HTD 5mm, 15mm Wide, 8mm Spline XS Bore)', part_number: 'P1' })).toMatchObject({ classification: 'COTS', workflow_status: 'kit', manufacturing_process: null });
+  });
+
   it('assigns router for foam even without a "P" part number', () => {
     const result = classify({ name: 'Bumper Foam', part_number: '' });
     expect(result.classification).toBe('manufactured');

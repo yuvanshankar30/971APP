@@ -542,9 +542,16 @@ class OnShapeAPI {
                 manufacturing_process: 'mill'
             };
             
-            // Map classification to our part type system
+            // Map classification to our part type system. COTS parts carry
+            // their kit/purchase routing in workflow_status, never
+            // manufacturing_process (that's null for every COTS item) - using
+            // manufacturing_process here unconditionally meant every COTS
+            // part (washers, belts, pulleys, ...) fell through to the
+            // `|| 'mill'` fallback and got mis-tagged as a milled part.
             let partType = classification.classification === 'COTS' ? 'COTS' : 'manufactured';
-            let workflow = classification.manufacturing_process || 'mill';
+            let workflow = partType === 'COTS'
+                ? (classification.workflow_status || 'purchase')
+                : classification.manufacturing_process;
               analyzedParts.push({
                 part_name: bomItem.name,
                 part_number: bomItem.part_number,

@@ -63,6 +63,7 @@
   let buildBOM = [];
   let stockTypes = [];
   let loadingBOM = false;
+  let savingBuildBOM = false;
   // Purchase modal (when auto-detect fails)
   let showPurchaseModal = false;
   let purchaseModalItem = null;
@@ -1311,6 +1312,12 @@
   // those more specific bulk actions belong there, not in this initial
   // review), not wired to a button here for now.
   async function saveAllBomItems() {
+    // A BOM can be 50-80+ rows, each needing its own sequential round trip
+    // (dedup check, then insert) - that can take many seconds with the
+    // button otherwise looking completely inert. Guard against a second
+    // click being read as "the first one didn't work" and pile on a
+    // duplicate save pass, and show real progress instead of nothing.
+    if (savingBuildBOM) return;
     const itemsToAdd = buildBOM.filter((item) => {
       const key = item.part_number || item.part_name;
       return key && !addedPartsSet.has(key);
@@ -1320,11 +1327,33 @@
       closeBuildModal();
       return;
     }
-    for (const item of itemsToAdd) {
-      await saveBomItemToBuild(item);
+    savingBuildBOM = true;
+    try {
+      // Resolve the build and fetch its existing rows ONCE up front instead
+      // of once per item - with 50+ rows that was 2-3 sequential round
+      // trips each, easily 30-60+ seconds of the button looking frozen.
+      const buildId = await resolveBuildId();
+      const { data: existingRows, error: existingErr } = await supabase
+        .from('build_bom')
+        .select('part_name, part_number')
+        .eq('build_id', buildId);
+      if (existingErr) throw existingErr;
+      const existingKeys = new Set((existingRows || []).map(bomDedupKey));
+
+      let saved = 0;
+      for (const item of itemsToAdd) {
+        await saveBomItemToBuild(item, { buildId, existingKeys });
+        existingKeys.add(bomDedupKey(item));
+        saved += 1;
+        if (itemsToAdd.length > 5) {
+          toastActions.show(`Saving... ${saved}/${itemsToAdd.length}`);
+        }
+      }
+      toastActions.show(`Saved ${itemsToAdd.length} item${itemsToAdd.length === 1 ? '' : 's'} to the build`);
+      closeBuildModal();
+    } finally {
+      savingBuildBOM = false;
     }
-    toastActions.show(`Saved ${itemsToAdd.length} item${itemsToAdd.length === 1 ? '' : 's'} to the build`);
-    closeBuildModal();
   }
 
   async function addAllCOTSToPurchasing() {
@@ -1620,7 +1649,41 @@
   // those downstream records - is reserved for the deferred bulk actions
   // ("Add All COTS to Purchasing"/"Manufacture Iteration"/"Build
   // Duplicate") that aren't wired to a button yet.
-  async function saveBomItemToBuild(item) {
+  // Resolves the build_hash row for the current subsystem/version, creating
+  // it if it doesn't exist yet. Shared by the bulk Save path (resolved once
+  // for the whole BOM) and standalone per-item saves.
+  async function resolveBuildId() {
+    const buildHash = computeBuildHash(subsystem.onshape_document_id, subsystem.id, selectedVersion.id);
+    const { data: existingBuild, error: buildQueryError } = await supabase
+      .from('builds')
+      .select('id')
+      .eq('build_hash', buildHash)
+      .single();
+    if (buildQueryError && buildQueryError.code !== 'PGRST116') throw buildQueryError;
+    if (existingBuild) return existingBuild.id;
+
+    const { data: newBuild, error: buildError } = await supabase
+      .from('builds')
+      .insert([{
+        subsystem_id: subsystem.id,
+        release_id: selectedVersion.id,
+        release_name: selectedVersion.name,
+        build_hash: buildHash,
+        status: 'pending',
+        created_by: user.id,
+        frc_team: user?.frc_team || null
+      }])
+      .select()
+      .single();
+    if (buildError) throw buildError;
+    return newBuild.id;
+  }
+
+  function bomDedupKey(row) {
+    return `${(row.part_name || '').toLowerCase().trim()}|${(row.part_number || '').toLowerCase().trim()}`;
+  }
+
+  async function saveBomItemToBuild(item, { buildId: preResolvedBuildId, existingKeys } = {}) {
     if (!user || !selectedVersion) {
       toastActions.show('User or version not available');
       return;
@@ -1638,49 +1701,30 @@
       // more than one build - re-saving the SAME version stays idempotent
       // (finds its existing row), but a different version or a new manual
       // import gets its own build instead of silently merging into one.
-      const buildHash = computeBuildHash(subsystem.onshape_document_id, subsystem.id, selectedVersion.id);
-      const { data: existingBuild, error: buildQueryError } = await supabase
-        .from('builds')
-        .select('id')
-        .eq('build_hash', buildHash)
-        .single();
-      if (buildQueryError && buildQueryError.code !== 'PGRST116') throw buildQueryError;
-
-      let buildId;
-      if (existingBuild) {
-        buildId = existingBuild.id;
-      } else {
-        const { data: newBuild, error: buildError } = await supabase
-          .from('builds')
-          .insert([{
-            subsystem_id: subsystem.id,
-            release_id: selectedVersion.id,
-            release_name: selectedVersion.name,
-            build_hash: buildHash,
-            status: 'pending',
-            created_by: user.id,
-            frc_team: user?.frc_team || null
-          }])
-          .select()
-          .single();
-        if (buildError) throw buildError;
-        buildId = newBuild.id;
-      }
+      const buildId = preResolvedBuildId ?? await resolveBuildId();
 
       // addedPartsSet only tracks what THIS page load has already saved -
       // it resets on every reload, so re-opening the review modal and
       // pressing Save again (e.g. because a stuck-open modal made it look
       // like the first Save failed) would otherwise silently re-insert the
-      // same row every time. Check the database itself for a matching row
-      // already on this build before inserting.
-      let dupQuery = supabase.from('build_bom').select('id').eq('build_id', buildId).eq('part_name', item.part_name);
-      dupQuery = item.part_number ? dupQuery.eq('part_number', item.part_number) : dupQuery.is('part_number', null);
-      const { data: existingRows, error: dupErr } = await dupQuery.limit(1);
-      if (dupErr) throw dupErr;
-      if (existingRows && existingRows.length > 0) {
-        addedPartsSet = new Set([...addedPartsSet, partKey]);
-        toastActions.show('Already saved to this build');
-        return;
+      // same row every time. When called standalone (no pre-fetched key
+      // set), check the database itself for a matching row on this build.
+      if (existingKeys) {
+        if (existingKeys.has(bomDedupKey(item))) {
+          addedPartsSet = new Set([...addedPartsSet, partKey]);
+          toastActions.show('Already saved to this build');
+          return;
+        }
+      } else {
+        let dupQuery = supabase.from('build_bom').select('id').eq('build_id', buildId).eq('part_name', item.part_name);
+        dupQuery = item.part_number ? dupQuery.eq('part_number', item.part_number) : dupQuery.is('part_number', null);
+        const { data: existingRows, error: dupErr } = await dupQuery.limit(1);
+        if (dupErr) throw dupErr;
+        if (existingRows && existingRows.length > 0) {
+          addedPartsSet = new Set([...addedPartsSet, partKey]);
+          toastActions.show('Already saved to this build');
+          return;
+        }
       }
 
       // A manually attached file (router/3d-print/lathe items with no
@@ -2449,8 +2493,8 @@
               <p>Loading BOM...</p>
             </div>
           {:else}            <div class="bom-actions">
-              <button class="btn btn-primary" on:click={saveAllBomItems}>
-                Save
+              <button class="btn btn-primary" on:click={saveAllBomItems} disabled={savingBuildBOM}>
+                {savingBuildBOM ? 'Saving…' : 'Save'}
               </button>
             </div>
             <p class="bom-classify-note">
@@ -3156,8 +3200,9 @@
     margin: 0 0 1rem 0;
     padding: 0.75rem 1rem;
     background: var(--brand-gold-soft);
-    border: 1px solid var(--brand-gold-strong);
-    border-radius: 8px;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--brand-gold-strong);
+    border-radius: var(--radius-sm);
     font-size: 0.85rem;
     font-weight: 500;
     color: var(--text);

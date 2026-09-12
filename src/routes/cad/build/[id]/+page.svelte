@@ -6,7 +6,7 @@
   import { supabase } from '$lib/supabase.js';
   import { userStore, loadUserFromUUID, upsertProfileIfMissing, setUserUUID } from '$lib/stores/user.js';
   import { goto } from '$app/navigation';
-  import { ArrowLeft, Package, CheckCircle, Clock, Wrench, ExternalLink, MapPin, Plus, Download, Trash2, Box, Upload, FileText, X } from 'lucide-svelte';
+  import { ArrowLeft, Package, CheckCircle, Clock, Wrench, ExternalLink, MapPin, Plus, Download, Trash2, Box, Upload, FileText, X, AlertTriangle } from 'lucide-svelte';
   import stockData from '$lib/stock.json';
   import { BUTTONS } from '$lib/statuses.js';
   import { detectVendorFromString, buildVendorSearchUrl } from '$lib/vendor_detect.js';
@@ -14,6 +14,7 @@
   import { formatPacificDate, formatPacificDateTimeWithZone } from '$lib/timezone.js';
   import CadViewer from '$lib/components/CadViewer.svelte';
   import { getFileMeta, getStepFileName, canViewCad, getPdfFileName, canViewPdf, fileRequirementError } from '$lib/file_meta.js';
+  import { parseBomCsvRows, classifyManualBomRows } from '$lib/bom_csv_import.js';
 
   async function downloadManufacturingFile(fileName) {
     try {
@@ -252,6 +253,8 @@
   let versionTimeline = [];
   let loadingVersions = false;
   let selectedVersionForRefetch = null;
+  let csvOverrideFile = null;
+  let loadingCsvOverride = false;
 
   onMount(async () => {
     // Hydrate from UUID and keep local var in sync
@@ -1456,23 +1459,133 @@
     }
   }
 
+  // Shared by both the OnShape version refetch and the manual CSV override
+  // below - replaces every UNADDED bom row with a freshly-fetched BOM while
+  // preserving already-added (promoted to production) rows untouched, and
+  // carries over any manually-attached file/custom stock on a matching
+  // unadded part (by name or part number) since neither an OnShape re-fetch
+  // nor a re-uploaded CSV has a way to know about those.
+  async function replaceUnaddedBom(newBOM, { onshapeMeta = {}, releaseId = null, releaseName = null, sourceLabel = 'BOM' } = {}) {
+    const addedParts = bomSnapshot.filter(row => row.added === true);
+    const unaddedParts = bomSnapshot.filter(row => row.added !== true);
+
+    const unaddedManualDataByKey = new Map();
+    for (const row of unaddedParts) {
+      if (!row.file_url && !row.stock_assignment_custom) continue;
+      const manualData = {
+        file_url: row.file_url || null,
+        file_name: row.file_name || null,
+        file_format: row.file_format || null,
+        stock_assignment_custom: row.stock_assignment_custom || null
+      };
+      if (row.part_name) unaddedManualDataByKey.set(row.part_name.toLowerCase().trim(), manualData);
+      if (row.part_number) unaddedManualDataByKey.set(row.part_number.toLowerCase().trim(), manualData);
+    }
+
+    // Delete ALL unadded parts - even if names match, source parameters can
+    // change between a version/CSV swap. A failed delete here must stop the
+    // refetch rather than being logged and ignored - silently proceeding to
+    // insert the new BOM on top of undeleted old rows is exactly how a build
+    // ends up with the same part duplicated many times over.
+    if (unaddedParts.length > 0) {
+      const idsToDelete = unaddedParts.map(p => p.id);
+      const { error: deleteError } = await supabase
+        .from('build_bom')
+        .delete()
+        .in('id', idsToDelete);
+
+      if (deleteError) {
+        throw new Error(`Failed to clear the old unadded BOM before replacing it: ${deleteError.message}`);
+      }
+    }
+
+    // Build set of identifiers for added parts only (these are preserved)
+    const addedIdentifiers = new Set();
+    addedParts.forEach(part => {
+      if (part.part_name) addedIdentifiers.add(part.part_name.toLowerCase().trim());
+      if (part.part_number) addedIdentifiers.add(part.part_number.toLowerCase().trim());
+    });
+
+    // Filter new BOM to exclude parts that are already added (in production)
+    const partsToAdd = newBOM.filter(newPart => {
+      const name = (newPart.part_name || '').toLowerCase().trim();
+      const partNum = (newPart.part_number || '').toLowerCase().trim();
+      if (name && addedIdentifiers.has(name)) return false;
+      if (partNum && addedIdentifiers.has(partNum)) return false;
+      return true;
+    });
+
+    if (partsToAdd.length > 0) {
+      const bomInserts = partsToAdd.map(part => {
+        const name = (part.part_name || '').toLowerCase().trim();
+        const partNum = (part.part_number || '').toLowerCase().trim();
+        const manualData = unaddedManualDataByKey.get(name) || unaddedManualDataByKey.get(partNum) || null;
+        return {
+          build_id: buildId,
+          part_name: part.part_name || 'Unnamed Part',
+          part_number: part.part_number || null,
+          part_type: part.part_type || 'manufactured',
+          workflow: part.workflow || 'mill',
+          quantity: (part.quantity || 1) * normalizePositiveInt(build?.quantity, 1),
+          material: part.material || '',
+          stock_assignment: part.stock_assignment || null,
+          stock_assignment_custom: manualData?.stock_assignment_custom || part.stock_assignment_custom || null,
+          file_url: manualData?.file_url || null,
+          file_name: manualData?.file_name || null,
+          file_format: manualData?.file_format || null,
+          onshape_document_id: part.onshape_document_id || onshapeMeta.onshape_document_id || null,
+          onshape_wvm: part.onshape_wvm || onshapeMeta.onshape_wvm || null,
+          onshape_wvmid: part.onshape_wvmid || onshapeMeta.onshape_wvmid || null,
+          onshape_element_id: part.onshape_element_id || part.onshape_part_studio_element_id || onshapeMeta.onshape_element_id || null,
+          onshape_part_id: part.onshape_part_id || null,
+          added: false
+        };
+      });
+
+      const { error: insertError } = await supabase
+        .from('build_bom')
+        .insert(bomInserts);
+
+      if (insertError) throw insertError;
+    }
+
+    // Update the version/source reference on the build
+    const { error: updateError } = await supabase
+      .from('builds')
+      .update({ release_id: releaseId, release_name: releaseName })
+      .eq('id', buildId);
+
+    if (updateError) {
+      console.warn('Failed to update build version reference:', updateError);
+    }
+
+    await loadBuildDetails();
+
+    const summary = [];
+    if (partsToAdd.length > 0) summary.push(`${partsToAdd.length} parts from new ${sourceLabel}`);
+    if (unaddedParts.length > 0) summary.push(`${unaddedParts.length} unadded parts replaced`);
+    if (addedParts.length > 0) summary.push(`${addedParts.length} added parts preserved`);
+
+    toastActions.show(summary.length > 0 ? `BOM updated:\n• ${summary.join('\n• ')}` : 'BOM is already up to date');
+  }
+
   async function refetchBOMFromVersion() {
     if (!selectedVersionForRefetch) {
       toastActions.show('Please select a version');
       return;
     }
-    
+
     if (!build?.subsystems?.onshape_document_id || !build?.subsystems?.onshape_workspace_id || !build?.subsystems?.onshape_element_id) {
       toastActions.show('Missing OnShape configuration for this build');
       return;
     }
-    
+
     try {
       loadingVersions = true;
-      
+
       // Import OnShape API
       const { onShapeAPI } = await import('$lib/onshape.js');
-      
+
       // Get BOM from OnShape using the selected version ID
       const bom = await onShapeAPI.getAssemblyBOM(
         build.subsystems.onshape_document_id,
@@ -1480,135 +1593,73 @@
         build.subsystems.onshape_element_id,
         selectedVersionForRefetch.id
       );
-      
+
       // Analyze BOM
       const newBOM = await onShapeAPI.analyzeBOM(bom, build.subsystems.onshape_workspace_id);
-      
-      // Separate existing BOM parts into added and unadded
-      const addedParts = bomSnapshot.filter(row => row.added === true);
-      const unaddedParts = bomSnapshot.filter(row => row.added !== true);
 
-      // Before wiping the unadded rows below, remember anything a person
-      // manually attached to them (a STEP/PDF file, a typed-in custom stock)
-      // - the fresh OnShape re-fetch has no way to know about those, so a
-      // matching new part (by name or part number) needs them carried over
-      // rather than silently discarded just because the version changed.
-      const unaddedManualDataByKey = new Map();
-      for (const row of unaddedParts) {
-        if (!row.file_url && !row.stock_assignment_custom) continue;
-        const manualData = {
-          file_url: row.file_url || null,
-          file_name: row.file_name || null,
-          file_format: row.file_format || null,
-          stock_assignment_custom: row.stock_assignment_custom || null
-        };
-        if (row.part_name) unaddedManualDataByKey.set(row.part_name.toLowerCase().trim(), manualData);
-        if (row.part_number) unaddedManualDataByKey.set(row.part_number.toLowerCase().trim(), manualData);
-      }
-
-      // Delete ALL unadded parts - even if names match, Onshape parameters change between versions.
-      // A failed delete here must stop the refetch rather than being logged
-      // and ignored - silently proceeding to insert the new BOM on top of
-      // undeleted old rows is exactly how a build ends up with the same
-      // part duplicated many times over.
-      if (unaddedParts.length > 0) {
-        const idsToDelete = unaddedParts.map(p => p.id);
-        const { error: deleteError } = await supabase
-          .from('build_bom')
-          .delete()
-          .in('id', idsToDelete);
-
-        if (deleteError) {
-          throw new Error('Failed to clear the old unadded BOM before refetching: ' + deleteError.message);
-        }
-      }
-      
-      // Build set of identifiers for added parts only (these are preserved)
-      const addedIdentifiers = new Set();
-      addedParts.forEach(part => {
-        if (part.part_name) addedIdentifiers.add(part.part_name.toLowerCase().trim());
-        if (part.part_number) addedIdentifiers.add(part.part_number.toLowerCase().trim());
+      await replaceUnaddedBom(newBOM, {
+        onshapeMeta: {
+          onshape_document_id: build.subsystems.onshape_document_id,
+          onshape_wvm: 'v',
+          onshape_wvmid: selectedVersionForRefetch.id,
+          onshape_element_id: build.subsystems.onshape_element_id
+        },
+        releaseId: selectedVersionForRefetch.id,
+        releaseName: selectedVersionForRefetch.name,
+        sourceLabel: 'version'
       });
-      
-      // Filter new BOM to exclude parts that are already added (in production)
-      const partsToAdd = newBOM.filter(newPart => {
-        const name = (newPart.part_name || '').toLowerCase().trim();
-        const partNum = (newPart.part_number || '').toLowerCase().trim();
-        
-        // If either name or part_number matches an added part, skip it (already in production)
-        if (name && addedIdentifiers.has(name)) return false;
-        if (partNum && addedIdentifiers.has(partNum)) return false;
-        
-        return true;
-      });
-      
-      // Insert new BOM entries with fresh Onshape parameters from the new version
-      if (partsToAdd.length > 0) {
-        const bomInserts = partsToAdd.map(part => {
-          const name = (part.part_name || '').toLowerCase().trim();
-          const partNum = (part.part_number || '').toLowerCase().trim();
-          const manualData = unaddedManualDataByKey.get(name) || unaddedManualDataByKey.get(partNum) || null;
-          return {
-            build_id: buildId,
-            part_name: part.part_name || 'Unnamed Part',
-            part_number: part.part_number || null,
-            part_type: part.part_type || 'manufactured',
-            workflow: part.workflow || 'mill',
-            quantity: (part.quantity || 1) * normalizePositiveInt(build?.quantity, 1),
-            material: part.material || '',
-            stock_assignment: part.stock_assignment || null,
-            stock_assignment_custom: manualData?.stock_assignment_custom || part.stock_assignment_custom || null,
-            file_url: manualData?.file_url || null,
-            file_name: manualData?.file_name || null,
-            file_format: manualData?.file_format || null,
-            onshape_document_id: part.onshape_document_id || build?.subsystems?.onshape_document_id || null,
-            onshape_wvm: part.onshape_wvm || 'v',
-            onshape_wvmid: part.onshape_wvmid || selectedVersionForRefetch.id,
-            onshape_element_id: part.onshape_element_id || part.onshape_part_studio_element_id || build?.subsystems?.onshape_element_id || null,
-            onshape_part_id: part.onshape_part_id || null,
-            added: false
-          };
-        });
-        
-        const { error: insertError } = await supabase
-          .from('build_bom')
-          .insert(bomInserts);
-        
-        if (insertError) throw insertError;
-      }
-      
-      // Update the version reference on the build
-      const { error: updateError } = await supabase
-        .from('builds')
-        .update({ 
-          release_id: selectedVersionForRefetch.id,
-          release_name: selectedVersionForRefetch.name
-        })
-        .eq('id', buildId);
-      
-      if (updateError) {
-        console.warn('Failed to update build version reference:', updateError);
-      }
-      
-      // Reload build details to show changes
-      await loadBuildDetails();
-      
-      // Show summary
-      const summary = [];
-      if (partsToAdd.length > 0) summary.push(`${partsToAdd.length} parts from new version`);
-      if (unaddedParts.length > 0) summary.push(`${unaddedParts.length} unadded parts replaced`);
-      if (addedParts.length > 0) summary.push(`${addedParts.length} added parts preserved`);
-      
-      toastActions.show(summary.length > 0 ? `BOM updated:\n• ${summary.join('\n• ')}` : 'BOM is already up to date');
-      
+
       showVersionModal = false;
       selectedVersionForRefetch = null;
-      
+
     } catch (error) {
       console.error('Error refetching BOM:', error);
       toastActions.show('Failed to refetch BOM: ' + (error?.message || error));
     } finally {
       loadingVersions = false;
+    }
+  }
+
+  // Overrides the unadded BOM with a freshly-uploaded CSV export, the same
+  // way "Create Manual Build" imports one when first creating a build - lets
+  // a build stay usable while OnShape is unreachable, or get corrected by
+  // hand when the live BOM has a mistake.
+  async function refetchBOMFromCsv() {
+    if (!csvOverrideFile) {
+      toastActions.show('Choose a BOM CSV file to load');
+      return;
+    }
+
+    loadingCsvOverride = true;
+    try {
+      const text = await csvOverrideFile.text();
+      const rawRows = parseBomCsvRows(text);
+      const classifiedRows = classifyManualBomRows(rawRows);
+
+      const newBOM = classifiedRows.map((row) => ({
+        part_name: row.part_name,
+        part_number: row.part_number || null,
+        quantity: row.quantity,
+        part_type: row.part_type,
+        material: row.material,
+        workflow: row.workflow,
+        stock_assignment: ''
+      }));
+
+      await replaceUnaddedBom(newBOM, {
+        releaseId: null,
+        releaseName: `Manual CSV: ${csvOverrideFile.name}`,
+        sourceLabel: 'CSV'
+      });
+
+      showVersionModal = false;
+      csvOverrideFile = null;
+
+    } catch (error) {
+      console.error('Error loading BOM from CSV:', error);
+      toastActions.show('Failed to load BOM from CSV: ' + (error?.message || error));
+    } finally {
+      loadingCsvOverride = false;
     }
   }
 
@@ -1932,6 +1983,10 @@
           </button>
         </div>
       </div>
+      <p class="bom-classify-note">
+        <AlertTriangle size={17} />
+        <span>Type, workflow, and stock below are an automatic best-guess, not a verified answer - double-check every field against the actual CAD before adding a part to manufacturing or purchasing.</span>
+      </p>
       {#if bomSnapshot && bomSnapshot.length > 0}
         {@const unaddedParts = bomSnapshot.filter(item => !item.added && !item.parts_id && !item.purchasing_id && !item.kitting_id)}
         {#if unaddedParts.length > 0}
@@ -2232,7 +2287,7 @@
     class="modal-backdrop"
     role="presentation"
     tabindex="-1"
-    on:click|self={() => { showVersionModal = false; selectedVersionForRefetch = null; }}
+    on:click|self={() => { showVersionModal = false; selectedVersionForRefetch = null; csvOverrideFile = null; }}
   >
     <div
       class="modal version-modal"
@@ -2240,12 +2295,32 @@
       aria-modal="true"
       tabindex="0"
       on:click|stopPropagation
-      on:keydown={(e) => { if (e.key === 'Escape') { showVersionModal = false; selectedVersionForRefetch = null; } }}
+      on:keydown={(e) => { if (e.key === 'Escape') { showVersionModal = false; selectedVersionForRefetch = null; csvOverrideFile = null; } }}
       style="--modal-width: 900px;"
     >
       <h3>Select Version to Load BOM</h3>
       <p style="color: #666; margin-bottom: 1rem;">Choose a version to fetch its BOM. Parts already added will be skipped.</p>
-      
+
+      <div class="csv-override-section">
+        <label for="csv-override-file">Or upload a BOM CSV to override the current BOM</label>
+        <div class="csv-override-row">
+          <input
+            id="csv-override-file"
+            type="file"
+            accept=".csv,text/csv"
+            on:change={(e) => { csvOverrideFile = e.target.files?.[0] || null; }}
+          />
+          <button
+            class="btn btn-secondary btn-sm"
+            on:click={refetchBOMFromCsv}
+            disabled={!csvOverrideFile || loadingCsvOverride}
+          >
+            <Upload size={14} />
+            {loadingCsvOverride ? 'Loading…' : 'Load BOM from CSV'}
+          </button>
+        </div>
+      </div>
+
       {#if loadingVersions}
         <div style="display: flex; flex-direction: column; align-items: center; padding: 2rem; gap: 1rem;">
           <div class="loading-spinner"></div>
@@ -2278,7 +2353,7 @@
       {/if}
       
       <div class="modal-actions">
-        <button class="btn" on:click={() => { showVersionModal = false; selectedVersionForRefetch = null; }}>Cancel</button>
+        <button class="btn" on:click={() => { showVersionModal = false; selectedVersionForRefetch = null; csvOverrideFile = null; }}>Cancel</button>
         <button 
           class="btn btn-yellow" 
           on:click={refetchBOMFromVersion}
@@ -2561,6 +2636,26 @@
   .add-part-form { display: flex; flex-direction: column; gap: 0.4rem; }
   .add-part-form label { font-weight: 500; margin-top: 0.5rem; }
   .add-part-form label:first-child { margin-top: 0; }
+
+  .bom-classify-note {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+    margin: 0.75rem 0 1rem 0;
+    padding: 0.75rem 1rem;
+    background: var(--brand-gold-soft);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--brand-gold-strong);
+    border-radius: var(--radius-sm);
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--text);
+  }
+  .bom-classify-note :global(svg) {
+    flex-shrink: 0;
+    margin-top: 0.1rem;
+    color: var(--brand-gold-strong);
+  }
 
   .parts-header {
     display: flex;
@@ -2850,6 +2945,34 @@
   }
 
   /* Version modal styling */
+  .csv-override-section {
+    padding: var(--space-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    margin-bottom: var(--space-4);
+  }
+
+  .csv-override-section label {
+    display: block;
+    font-size: var(--font-xs);
+    font-weight: 600;
+    margin-bottom: var(--space-2);
+  }
+
+  .csv-override-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
+
+  .csv-override-row input[type="file"] {
+    flex: 1;
+    min-width: 180px;
+    font-size: var(--font-xs);
+  }
+
   .version-item {
     display: flex;
     justify-content: space-between;

@@ -148,7 +148,16 @@ describe('classifyManualBomRow', () => {
   }
 
   it('classifies as COTS when a vendor is present', () => {
-    expect(classifyManualBomRow(row({ part_name: '18t HTD Pulley', vendor: 'WCP' }))).toEqual({ part_type: 'COTS', workflow: 'purchase' });
+    expect(classifyManualBomRow(row({ part_name: 'Custom Widget', vendor: 'WCP' }))).toEqual({ part_type: 'COTS', workflow: 'purchase' });
+  });
+
+  it('classifies pulleys as a COTS kit item (stocked, not purchased) even with a vendor', () => {
+    expect(classifyManualBomRow(row({ part_name: '18t HTD Pulley', vendor: 'WCP' }))).toEqual({ part_type: 'COTS', workflow: 'kit' });
+  });
+
+  it('classifies belts and washers as COTS kit items', () => {
+    expect(classifyManualBomRow(row({ part_name: '40T 5M 15mm Wide Belt' }))).toEqual({ part_type: 'COTS', workflow: 'kit' });
+    expect(classifyManualBomRow(row({ part_name: 'Type B Regular Flat Washer #10' }))).toEqual({ part_type: 'COTS', workflow: 'kit' });
   });
 
   it('classifies a screw or bolt as a COTS kit item (stocked, not purchased) even with no vendor', () => {
@@ -242,6 +251,6 @@ describe('classifyManualBomRows', () => {
     ];
     const result = classifyManualBomRows(rows);
     expect(result[0]).toEqual({ ...rows[0], part_type: 'manufactured', workflow: 'router' });
-    expect(result[1]).toEqual({ ...rows[1], part_type: 'COTS', workflow: 'purchase' });
+    expect(result[1]).toEqual({ ...rows[1], part_type: 'COTS', workflow: 'kit' });
   });
 });

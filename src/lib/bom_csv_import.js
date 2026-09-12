@@ -155,12 +155,13 @@ export function classifyManualBomRow(row) {
   const isKitItem =
     name.includes('sds') ||
     name.includes('screw') || name.includes('bolt') || name.includes('nut') ||
-    name.includes('socket head cap') ||
+    name.includes('socket head cap') || name.includes('washer') ||
     name.includes('motor') || /\bgears?\b/.test(name) ||
     name.includes('roborio') || name.includes('pigeon') || name.includes('canivore') || name.includes('canivor') ||
     name.includes('breaker') || name.includes('battery') || name.includes('batteries') ||
     name.includes('pdp') || name.includes('pdh') ||
-    name.includes('spring') || name.includes('pcb') || name.includes('chain') || name.includes('bearing');
+    name.includes('spring') || name.includes('pcb') || name.includes('chain') || name.includes('bearing') ||
+    name.includes('belt') || name.includes('pulley');
 
   const isCOTS =
     isKitItem ||
