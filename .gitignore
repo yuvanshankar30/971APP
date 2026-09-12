@@ -15,6 +15,10 @@ node_modules
 .DS_Store
 Thumbs.db
 
+# Editor (personal config - already excluded from the Docker build context
+# in .dockerignore, but was previously committed by mistake)
+.vscode/
+
 # Env
 .env
 .env.*
