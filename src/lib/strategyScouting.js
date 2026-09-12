@@ -1,5 +1,5 @@
 import { parseAutoPointsEstimate } from '$lib/matchScouting.js';
-import { summarizeTeamPerformance } from '$lib/scoutingStats.js';
+import { summarizeMatchScoutEntries, summarizeTeamPerformance } from '$lib/scoutingStats.js';
 
 export function strategyTeamNumber(teamKey) {
   return String(teamKey || '').replace(/^frc/i, '') || 'Unknown';
@@ -10,8 +10,10 @@ function average(values) {
   return usable.length ? usable.reduce((sum, value) => sum + value, 0) / usable.length : null;
 }
 
-function autoEstimate(value) {
-  return parseAutoPointsEstimate(String(value || ''))?.average ?? null;
+function autoEstimate(entry) {
+  const stored = Number(entry?.auto_points_average);
+  if (entry?.auto_points_average != null && Number.isFinite(stored)) return stored;
+  return parseAutoPointsEstimate(entry?.auto_points_band)?.average ?? null;
 }
 
 function groupByTeam(rows) {
@@ -46,8 +48,8 @@ export function buildStrategyRows(data = {}) {
     const autoPaths = byAutos.get(teamKey) || [];
     const problems = byProblems.get(teamKey) || [];
     const performance = summarizeTeamPerformance(dataEvents);
-    const autoAverage = average(matchEntries.map((entry) => autoEstimate(entry.auto_points_estimate)));
-    const movedReports = matchEntries.filter((entry) => entry.auto_moved === 'ran' || entry.auto_moved === true);
+    const matchScoutSummary = summarizeMatchScoutEntries(matchEntries);
+    const autoAverage = average(matchEntries.map(autoEstimate));
     return {
       teamKey,
       teamNumber: strategyTeamNumber(teamKey),
@@ -59,8 +61,9 @@ export function buildStrategyRows(data = {}) {
       problems,
       openProblems: problems.filter((problem) => !problem.resolved),
       performance,
+      matchScoutSummary,
       autoAverage,
-      autoMobilityRate: matchEntries.length ? movedReports.length / matchEntries.length : null,
+      autoMobilityRate: matchScoutSummary.autoRunRate,
       coverage: dataEvents.length + matchEntries.length + pitEntries.length + notes.length + autoPaths.length
     };
   }).sort((first, second) => Number(first.teamNumber) - Number(second.teamNumber));

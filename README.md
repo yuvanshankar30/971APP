@@ -127,7 +127,10 @@ browser confirmation or prompt popups.
   `scout_data_events`. Strategy combines the
   event's data observations, match reports, pit profiles, free-form notes,
   named autonomous routes, and open ACE issues into comparable team rows and
-  focused team briefs without duplicating data entry.
+  focused team briefs without duplicating data entry. Completed Match
+  Scouting reports flow into Strategy and Power Rankings and remain fully
+  inspectable there; Scouting Admin also shows event-level report coverage
+  and the complete attributed submissions for auditing.
 - **Vision Scouting**: a real Competition-folder nav tab, open to every
   approved user like the rest of Competition (no special permission needed),
   running post-match, multi-camera ML processing at `/scouting/vision` for
@@ -281,11 +284,13 @@ browser confirmation or prompt popups.
   impact attached to saved `scout_notes` contributes 15%, and structured pit
   capability/reliability contributes 15%; unresolved pit problems reduce the
   pit score while archetype and freeform prose remain human context. Neutral
-  and legacy notes remain review-only. Within match performance, weights are
-  average fuel
-  per match (40%), driving (20%), accuracy (15%), climb level (15%), and speed
-  (10%); missing dimensions are omitted and the remaining weights are
-  rebalanced instead of being treated as zero. Also
+  and legacy notes remain review-only. Within match performance, the original
+  event-tap inputs retain their weights: average fuel per match (40%), driving
+  (20%), accuracy (15%), climb level (15%), and speed (10%). Structured Match
+  Scouting reports add independently normalized balls scored, driver skill,
+  shot accuracy, cycle speed, auto points, and reliability evidence only when
+  those fields were actually observed; missing dimensions are omitted and the
+  remaining weights are rebalanced instead of being treated as zero. Also
   includes a **head-to-head comparison** view for any two event teams,
   covering scout power, human consensus, matches scouted, fuel, driving,
   accuracy, speed, and climb success. Its overlaid robot star plot normalizes

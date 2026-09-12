@@ -8,6 +8,7 @@
   import PitAssignmentPanel from '$lib/components/PitAssignmentPanel.svelte';
   import { fetchAvailableScoutingEvents } from '$lib/scoutingEvent.js';
   import SeasonFilter from '$lib/components/SeasonFilter.svelte';
+  import MatchScoutReport from '$lib/components/MatchScoutReport.svelte';
 
   let user;
   let loading = false;
@@ -50,11 +51,13 @@
     data: { assigned_percent: 0, scouted_percent: 0, missed_shift_percent: 0, missed_shifts: 0, assigned_matches: 0, scouted_matches: 0, total_matches: 0 },
     note: { assigned_percent: 0, scouted_percent: 0, missed_shift_percent: 0, missed_shifts: 0, assigned_matches: 0, scouted_matches: 0, total_matches: 0 },
     quick: { assigned_percent: 0, scouted_percent: 0, missed_shift_percent: 0, missed_shifts: 0, assigned_matches: 0, scouted_matches: 0, total_matches: 0 },
+    match: { reports: 0, matches: 0, teams: 0 },
     overall: { assigned_percent: 0, scouted_percent: 0, missed_shift_percent: 0 }
   };
 
   let users = [];
   let missedMatches = [];
+  let matchReports = [];
   let smartFuelModel = {
     enabled: false,
     match_count: 0,
@@ -144,6 +147,7 @@
       competitionRoleOptions = data.data?.competition_role_options || [];
       users = data.data?.users || [];
       missedMatches = data.data?.missed_matches || [];
+      matchReports = data.data?.match_reports || [];
       smartFuelModel = data.data?.smart_fuel_model || smartFuelModel;
       quickScoutModel = data.data?.quick_scout_model || quickScoutModel;
       googleSheetId = data.data?.google_sheet_id || '';
@@ -659,11 +663,33 @@
       </div>
       <div class="card stat-card">
         <div class="stat-content">
+          <div class="stat-label">Match Reports</div>
+          <div class="stat-value">{metrics.match?.reports || 0}</div>
+          <div class="stat-sub">{metrics.match?.matches || 0} matches / {metrics.match?.teams || 0} teams</div>
+        </div>
+      </div>
+      <div class="card stat-card">
+        <div class="stat-content">
           <div class="stat-label">Missed Shifts</div>
           <div class="stat-value">{metrics.overall.missed_shift_percent}%</div>
           <div class="stat-sub">Data {metrics.data.missed_shifts} / Note {metrics.note.missed_shifts} / Quick {metrics.quick.missed_shifts}</div>
         </div>
       </div>
+    </div>
+
+    <div class="card section-card">
+      <div class="section-header">
+        <h3>Match Scouting Submissions</h3>
+      </div>
+      {#if !matchReports.length}
+        <div class="empty-state compact-empty">No match scouting reports submitted for this event.</div>
+      {:else}
+        <div class="match-report-list">
+          {#each matchReports as report (report.id)}
+            <MatchScoutReport {report} showTeam />
+          {/each}
+        </div>
+      {/if}
     </div>
 
     <div class="card section-card">

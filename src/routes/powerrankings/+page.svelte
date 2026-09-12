@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { AlertTriangle, ArrowUpDown, RefreshCw, Search, Swords, Trophy, Vote } from 'lucide-svelte';
   import RobotStarPlot from '$lib/components/RobotStarPlot.svelte';
+  import MatchScoutReport from '$lib/components/MatchScoutReport.svelte';
   import { fetchActiveScoutingEventKey } from '$lib/scoutingEvent.js';
   import { getAuthHeader } from '$lib/supabase.js';
   import { applyPairwiseConsensus, buildPowerRankings, summarizePairwisePair } from '$lib/scoutingStats.js';
@@ -95,9 +96,10 @@
     warning = '';
     officialNote = '';
     const authHeaders = await getAuthHeader();
-    const [rosterResult, scoutResult, notesResult, pitResult, problemResult, officialResult, comparisonResult] = await Promise.all([
+    const [rosterResult, scoutResult, matchResult, notesResult, pitResult, problemResult, officialResult, comparisonResult] = await Promise.all([
       fetch(`/api/tba/event-teams?event_key=${encodeURIComponent(eventKey)}`).then((response) => response.json()).catch(() => null),
       fetch(`/datascout?all_teams=1&event_key=${encodeURIComponent(eventKey)}`, { headers: authHeaders }).then((response) => response.json()).catch(() => null),
+      fetch(`/api/matchscout?event_key=${encodeURIComponent(eventKey)}`, { headers: authHeaders }).then((response) => response.json()).catch(() => null),
       fetch(`/notescout?event_key=${encodeURIComponent(eventKey)}&recent=50000`, { headers: authHeaders }).then((response) => response.json()).catch(() => null),
       fetch(`/pitscout?event_key=${encodeURIComponent(eventKey)}`, { headers: authHeaders }).then((response) => response.json()).catch(() => null),
       fetch(`/api/matchscout?resource=pit-problems&event_key=${encodeURIComponent(eventKey)}`, { headers: authHeaders }).then((response) => response.json()).catch(() => null),
@@ -106,6 +108,7 @@
     ]);
 
     const scoutEvents = scoutResult?.success ? scoutResult.data : [];
+    const matchEntries = matchResult?.success ? matchResult.data : [];
     const scoutNotes = notesResult?.success ? notesResult.data : [];
     const pitEntries = pitResult?.success ? pitResult.data : [];
     const problemReports = problemResult?.success ? problemResult.data : [];
@@ -113,6 +116,7 @@
     pairwiseVotingAvailable = !comparisonResult?.unavailable;
     if (!scoutResult?.success) warning = scoutResult?.error || 'Local scouting data is unavailable.';
     else if (scoutResult.truncated) warning = 'Only the first 50,000 scouting observations were loaded.';
+    if (!matchResult?.success) warning = `${warning ? `${warning} ` : ''}${matchResult?.error || 'Match scouting reports are unavailable.'}`;
     if (!notesResult?.success) warning = `${warning ? `${warning} ` : ''}${notesResult?.error || 'Scouting notes are unavailable.'}`;
     if (!pitResult?.success) warning = `${warning ? `${warning} ` : ''}${pitResult?.error || 'Pit profiles are unavailable.'}`;
     if (!problemResult?.success) warning = `${warning ? `${warning} ` : ''}${problemResult?.error || 'Pit problem reports are unavailable.'}`;
@@ -121,7 +125,7 @@
     let roster = rosterResult?.success ? rosterResult.data : [];
     if (!roster.length) {
       const keys = [...new Set([
-        ...[...scoutEvents, ...scoutNotes, ...pitEntries, ...problemReports].map((row) => row.team_key),
+        ...[...scoutEvents, ...matchEntries, ...scoutNotes, ...pitEntries, ...problemReports].map((row) => row.team_key),
         ...pairwiseVotes.flatMap((row) => [row.team_a_key, row.team_b_key])
       ].filter(Boolean))];
       roster = keys.map((key) => ({
@@ -157,7 +161,7 @@
       officialNote = 'Official rank and TBA OPR are unavailable right now.';
     }
 
-    baseTeams = buildPowerRankings(roster, scoutEvents, scoutNotes, { pitEntries, problemReports });
+    baseTeams = buildPowerRankings(roster, scoutEvents, scoutNotes, { pitEntries, problemReports, matchEntries });
     teams = applyPairwiseConsensus(baseTeams, pairwiseVotes);
     const ranked = [...teams].sort((a, b) => (b.scoutPower ?? -1) - (a.scoutPower ?? -1));
     if (!compareLeftKey && ranked[0]) compareLeftKey = ranked[0].key;
@@ -260,6 +264,11 @@
         <b>{compareLeft.pitSummary.robotArchetype || '—'}</b><span>Archetype</span><b>{compareRight.pitSummary.robotArchetype || '—'}</b>
         <b>{compareLeft.pitSummary.openProblemCount}</b><span>Open pit problems</span><b>{compareRight.pitSummary.openProblemCount}</b>
         <b>{compareLeft.scoutSummary.matchesScouted}</b><span>Matches scouted</span><b>{compareRight.scoutSummary.matchesScouted}</b>
+        <b>{compareLeft.matchScoutSummary.reportCount}</b><span>Match reports</span><b>{compareRight.matchScoutSummary.reportCount}</b>
+        <b>{fmt(compareLeft.matchScoutSummary.avgBallsScored)}</b><span>Reported balls</span><b>{fmt(compareRight.matchScoutSummary.avgBallsScored)}</b>
+        <b>{fmt(compareLeft.matchScoutSummary.avgAutoPoints)}</b><span>Reported auto points</span><b>{fmt(compareRight.matchScoutSummary.avgAutoPoints)}</b>
+        <b>{fmt(compareLeft.matchScoutSummary.avgDriverSkill)}</b><span>Driver skill</span><b>{fmt(compareRight.matchScoutSummary.avgDriverSkill)}</b>
+        <b>{fmt(compareLeft.matchScoutSummary.ratingAverages.Reliability)}</b><span>Reliability</span><b>{fmt(compareRight.matchScoutSummary.ratingAverages.Reliability)}</b>
         <b>{fmt(compareLeft.scoutSummary.avgFuel)}</b><span>Avg fuel</span><b>{fmt(compareRight.scoutSummary.avgFuel)}</b>
         <b>{fmt(compareLeft.scoutSummary.avgDrivingRank)}</b><span>Driving</span><b>{fmt(compareRight.scoutSummary.avgDrivingRank)}</b>
         <b>{fmt(compareLeft.scoutSummary.avgAccuracy)}</b><span>Accuracy</span><b>{fmt(compareRight.scoutSummary.avgAccuracy)}</b>
@@ -268,6 +277,24 @@
       </div>
     {/if}
   </section>
+
+  {#if compareLeft || compareRight}
+    <section class="ranking-reports">
+      <h2>Match scouting evidence</h2>
+      <div class="ranking-report-grid">
+        {#each [compareLeft, compareRight].filter(Boolean) as team (team.key)}
+          <div>
+            <h3>Team {team.team_number}</h3>
+            {#if team.matchScoutEntries.length}
+              {#each team.matchScoutEntries as report (report.id)}
+                <MatchScoutReport {report} />
+              {/each}
+            {:else}<p class="text-muted">No match scouting reports yet.</p>{/if}
+          </div>
+        {/each}
+      </div>
+    </section>
+  {/if}
 
   <div class="search"><Search size={16} /><input class="form-input" placeholder="Filter teams..." bind:value={search} /></div>
   <div class="bom-table-container">
@@ -281,7 +308,7 @@
         <th>Review</th>
         <th class="reference" title="Official FRC qualification rank from The Blue Alliance">Official Rank</th>
         <th class="reference" title="The Blue Alliance's Offensive Power Rating - a statistical estimate, not a rank">TBA OPR</th>
-        <th>Matches</th><th>Pit Score</th><th>Problems</th><th>Archetype</th><th>Note Impact</th><th>Notes</th><th>Avg Fuel</th><th>Driving</th><th>Accuracy</th><th>Speed</th><th>Climb</th>
+        <th>Data Matches</th><th>Match Reports</th><th>Reported Balls</th><th>Auto Points</th><th>Driver</th><th>Reliability</th><th>Pit Score</th><th>Problems</th><th>Archetype</th><th>Note Impact</th><th>Notes</th><th>Avg Fuel</th><th>Driving</th><th>Accuracy</th><th>Speed</th><th>Climb</th>
       </tr></thead>
       <tbody>{#each filteredTeams as team (team.key)}<tr>
         <td class="strong">{team.powerRank ?? '—'}</td><td class="mono">{team.team_number}</td><td>{team.nickname}</td>
@@ -291,7 +318,7 @@
         <td>{#if team.reviewFlag}<span class="review-badge" title={`${team.consensusSummary.reviewCount} strong disagreement(s)`}><AlertTriangle size={13} /> Review</span>{:else}—{/if}</td>
         <td class="reference">{officialRank(team) ?? '—'}</td>
         <td class="reference">{fmt(officialOpr(team))}</td>
-        <td>{team.scoutSummary.matchesScouted}</td><td>{fmt(team.pitSummary.pitScore)}</td><td>{team.pitSummary.openProblemCount}</td><td>{team.pitSummary.robotArchetype || '—'}</td><td>{team.noteSummary.averageImpact ?? '—'}</td><td>{team.noteSummary.noteCount}</td><td>{fmt(team.scoutSummary.avgFuel)}</td>
+        <td>{team.scoutSummary.matchesScouted}</td><td>{team.matchScoutSummary.reportCount}</td><td>{fmt(team.matchScoutSummary.avgBallsScored)}</td><td>{fmt(team.matchScoutSummary.avgAutoPoints)}</td><td>{fmt(team.matchScoutSummary.avgDriverSkill)}</td><td>{fmt(team.matchScoutSummary.ratingAverages.Reliability)}</td><td>{fmt(team.pitSummary.pitScore)}</td><td>{team.pitSummary.openProblemCount}</td><td>{team.pitSummary.robotArchetype || '—'}</td><td>{team.noteSummary.averageImpact ?? '—'}</td><td>{team.noteSummary.noteCount}</td><td>{fmt(team.scoutSummary.avgFuel)}</td>
         <td>{fmt(team.scoutSummary.avgDrivingRank)}</td><td>{fmt(team.scoutSummary.avgAccuracy)}</td><td>{fmt(team.scoutSummary.avgSpeed)}</td><td>{fmtPercent(team.scoutSummary.climbSuccessRate)}</td>
       </tr>{/each}</tbody>
     </table>
@@ -302,6 +329,9 @@
   h1, h2, .search { display:flex; align-items:center; gap:var(--gap-2); }
   .comparison-card { padding:var(--space-4); margin:var(--space-4) 0; }
   .comparison-card h2 { margin-top:0; font-size:1rem; }
+  .ranking-reports { margin:var(--space-4) 0; }
+  .ranking-reports h2, .ranking-reports h3 { font-size:1rem; }
+  .ranking-report-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:var(--space-4); }
   .comparison-selectors { display:grid; grid-template-columns:1fr auto 1fr; align-items:end; gap:var(--gap-4); }
   .comparison-selectors label { display:grid; gap:var(--space-1); }
   .comparison-selectors > span { padding-bottom:var(--space-2); font-weight:700; color:var(--text-muted); }
@@ -318,6 +348,7 @@
   .review-badge { display:inline-flex; align-items:center; gap:4px; font-weight:700; white-space:nowrap; }
   /* Reference columns are visually recessive so the page reads as our ranking
      with official data alongside, not as a scoreboard of equals. */
+  @media (max-width:760px) { .ranking-report-grid { grid-template-columns:1fr; } }
   .reference { color:var(--text-muted); }
   .measure-key { display:grid; grid-template-columns:repeat(auto-fit, minmax(15rem, 1fr)); gap:var(--gap-4); margin:var(--space-4) 0; }
   .measure-key h3 { margin:0 0 var(--space-1); font-size:.82rem; text-transform:uppercase; letter-spacing:.04em; }

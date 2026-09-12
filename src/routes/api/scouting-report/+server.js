@@ -72,9 +72,21 @@ async function collectEventScouting(db, eventKey) {
   ].filter(Boolean);
   if (failures.length) throw new Error(failures[0].message);
 
+  const scoutIds = [...new Set((matchResult.data || []).map((entry) => entry.created_by).filter(Boolean))];
+  const usersResult = scoutIds.length
+    ? await db.from('user_profiles').select('id,full_name,email').in('id', scoutIds)
+    : { data: [], error: null };
+  const userNames = new Map((usersResult.data || []).map((user) => [
+    user.id,
+    user.full_name || user.email || user.id
+  ]));
+
   return {
     data_events: eventsResult.data || [],
-    match_entries: matchResult.data || [],
+    match_entries: (matchResult.data || []).map((entry) => ({
+      ...entry,
+      scout_name: userNames.get(entry.created_by) || null
+    })),
     pit_entries: pitResult.data || [],
     notes: notesResult.data || [],
     pit_problems: problemsResult.data || [],
