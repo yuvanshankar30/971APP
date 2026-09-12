@@ -151,8 +151,29 @@
   }
 
   async function createEmptyBuild() {
-    // Use subsystem ID in build hash (not version) so builds can be rolled up across versions
+    // Use subsystem ID in build hash (not version) so builds can be rolled up across versions.
+    // build_hash has a UNIQUE constraint, so - same as createBuildWithAllBOMItems below -
+    // find the subsystem's existing rolled-up build first instead of blindly inserting a
+    // second row with the same hash (that insert fails every time past the first build).
     const buildHash = `${subsystem.onshape_document_id}_${subsystem.id}`;
+
+    const { data: existingBuild, error: existingError } = await supabase
+      .from('builds')
+      .select('id')
+      .eq('build_hash', buildHash)
+      .maybeSingle();
+
+    if (existingError) throw existingError;
+
+    if (existingBuild) {
+      const { error: updateError } = await supabase
+        .from('builds')
+        .update({ release_id: version.id, release_name: version.name })
+        .eq('id', existingBuild.id);
+      if (updateError) throw updateError;
+      goto(`/cad/build/${existingBuild.id}`);
+      return;
+    }
 
     const { data: newBuild, error: buildCreateError } = await supabase
       .from('builds')
@@ -184,28 +205,58 @@
       .eq('build_hash', buildHash)
       .maybeSingle();
 
+    if (existingError) throw existingError;
+
+    let build;
     if (existingBuild) {
-      // Redirect to existing build
-      goto(`/cad/build/${existingBuild.id}`);
-      return;
+      // Roll the newly-selected release into the subsystem's existing build instead
+      // of silently redirecting with no change - previously this left the build's
+      // release_id/release_name stuck on whatever version created it, and never
+      // picked up parts newly added in a later OnShape release.
+      const { data: updatedBuild, error: updateError } = await supabase
+        .from('builds')
+        .update({ release_id: version.id, release_name: version.name })
+        .eq('id', existingBuild.id)
+        .select()
+        .single();
+      if (updateError) throw updateError;
+      build = updatedBuild;
+
+      const { data: existingBomRows, error: existingBomError } = await supabase
+        .from('build_bom')
+        .select('part_number, part_name')
+        .eq('build_id', build.id);
+      if (existingBomError) throw existingBomError;
+
+      const existingKeys = new Set(
+        (existingBomRows || []).map((row) => row.part_number || row.part_name)
+      );
+      buildBOM = buildBOM.filter((item) => !existingKeys.has(item.part_number || item.part_name));
+
+      if (buildBOM.length === 0) {
+        // Nothing new introduced by this release - existing BOM rows (and any
+        // progress already made against them) are left untouched.
+        goto(`/cad/build/${build.id}`);
+        return;
+      }
+    } else {
+      // Create new build
+      const { data: newBuild, error: buildCreateError } = await supabase
+        .from('builds')
+        .insert([{
+          subsystem_id: subsystem.id,
+          release_id: version.id,
+          release_name: version.name,
+          build_hash: buildHash,
+          status: 'pending',
+          created_by: user.id
+        }])
+        .select()
+        .single();
+
+      if (buildCreateError) throw buildCreateError;
+      build = newBuild;
     }
-
-    // Create new build
-    const { data: newBuild, error: buildCreateError } = await supabase
-      .from('builds')
-      .insert([{
-        subsystem_id: subsystem.id,
-        release_id: version.id,
-        release_name: version.name,
-        build_hash: buildHash,
-        status: 'pending',
-        created_by: user.id
-      }])
-      .select()
-      .single();
-
-    if (buildCreateError) throw buildCreateError;
-    const build = newBuild;
 
     // Project ID format: {subsystem name} (version-independent for rollup)
     const project_id = subsystem.name;

@@ -1238,8 +1238,8 @@
                   </a>
                 {/each}
                 {#if subsystemBuilds.length > 5}
-                  <a 
-                    href="/cad/build" 
+                  <a
+                    href="/cad/{subsystem.id}"
                     class="build-link more"
                     on:click|stopPropagation
                   >
@@ -1295,7 +1295,7 @@
                   {/if}
                 </div>
                 <span class="build-status status-{build.status}">
-                  {build.status.replace('_', ' ')}
+                  {build.status.replace(/_/g, ' ')}
                 </span>
               </div>
               <div class="build-info">
@@ -1598,7 +1598,7 @@
   .subsystem-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: var(--space-4); gap: var(--gap-2); flex-wrap: wrap; }
   .subsystem-title, .build-title { display: flex; align-items: center; gap: var(--gap-1); flex: 1; min-width: 0; }
   .subsystem-toolbar { display: flex; align-items: center; gap: var(--gap-2); flex-shrink: 0; flex-wrap: wrap; }
-  .subsystem-header h3 { margin: 0; color: var(--secondary); font-size: 1.3rem; line-height: 24px; }
+  .subsystem-header h3 { margin: 0; color: var(--secondary); font-size: 1.3rem; line-height: 24px; overflow-wrap: anywhere; min-width: 0; }
   .subsystem-badges { display: flex; align-items: center; gap: var(--gap-1); flex-wrap: wrap; }
   .badge { display: inline-flex; align-items: center; justify-content: center; height: var(--control-height) !important; padding: 0 var(--space-2) !important; border-radius: var(--radius-sm); font-size: var(--font-xs); font-weight: 600; text-transform: uppercase; line-height: 1; box-sizing: border-box; white-space: nowrap; }
   .subsystem-header .btn-outline.btn-small { display: inline-flex; align-items: center; justify-content: center; height: var(--control-height) !important; width: var(--control-height) !important; padding: 0 !important; font-size: var(--font-xs); border-radius: var(--radius-sm); box-sizing: border-box; }
@@ -1642,7 +1642,7 @@
   .builds-section h2 { margin: 0 0 var(--space-6) 0; color: var(--secondary); font-size: var(--font-xl); }
   .builds-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: var(--gap-6); }
   .build-header { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--gap-3); margin-bottom: var(--space-4); }
-  .build-header h3 { margin: 0; color: var(--secondary); font-size: var(--font-md); line-height: 1.35; }
+  .build-header h3 { margin: 0; color: var(--secondary); font-size: var(--font-md); line-height: 1.35; overflow-wrap: anywhere; min-width: 0; }
   /* A status word with no color was effectively invisible as a "badge" -
      just plain text with no distinguishing background, on the one section
      of this page whose whole point is showing status at a glance. Same
@@ -1667,9 +1667,9 @@
   .build-card-clickable { padding: var(--space-6); cursor: pointer; transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease; }
   .build-card-clickable:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); border-color: var(--accent); }
   .build-info { display: flex; flex-direction: column; gap: var(--gap-2); margin-bottom: var(--space-4); }
-  .build-info .info-item { display: flex; justify-content: space-between; align-items: center; font-size: var(--font-xs); }
-  .build-info .info-item span:first-child { font-weight: 500; color: var(--secondary); }
-  .build-info code { background: var(--primary); padding: var(--space-1) var(--space-2); border-radius: var(--radius-sm); font-family: monospace; font-size: var(--font-xs); }
+  .build-info .info-item { display: flex; justify-content: space-between; align-items: center; gap: var(--gap-2); font-size: var(--font-xs); }
+  .build-info .info-item span:first-child { font-weight: 500; color: var(--secondary); flex-shrink: 0; }
+  .build-info code { background: var(--primary); padding: var(--space-1) var(--space-2); border-radius: var(--radius-sm); font-family: monospace; font-size: var(--font-xs); overflow-wrap: anywhere; word-break: break-all; min-width: 0; text-align: right; }
   .build-actions { display: flex; gap: var(--gap-3); }
   .document-info { display: flex; flex-direction: column; gap: var(--gap-1); padding: var(--space-3) 0 0 0; }
   .doc-name { font-weight: 500; color: var(--text); font-size: var(--font-xs); }

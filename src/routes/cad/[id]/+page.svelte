@@ -78,6 +78,13 @@
   let loadingMembers = false;
   const LAST_SUBSYSTEM_STORAGE_KEY = '971hub:lastSubsystem';
 
+  // This subsystem's builds, shown inline so build creation/BOM review doesn't
+  // require leaving the subsystem page for a separate /cad/build[/id] route.
+  let subsystemBuilds = [];
+  let expandedBuildId = null;
+  let buildBomByBuildId = {};
+  let loadingBuildBomId = null;
+
   function rememberLastSubsystem(subsystemData) {
     if (!browser || !subsystemData?.id) return;
     localStorage.setItem(LAST_SUBSYSTEM_STORAGE_KEY, JSON.stringify({
@@ -117,6 +124,7 @@
       loadingStep = 'Loading subsystem data...';
       await loadSubsystem();
       await loadStockTypes();
+      await loadSubsystemBuilds();
       
       // Load member details if user is subsystem lead
       if (isSubsystemLead()) {
@@ -178,6 +186,64 @@
       // Ensure loading is always set to false
       loading = false;
       console.log('Loading state set to false');
+    }
+  }
+
+  async function loadSubsystemBuilds() {
+    try {
+      const { data, error } = await supabase
+        .from('builds')
+        .select('*')
+        .eq('subsystem_id', subsystemId)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      subsystemBuilds = data || [];
+    } catch (error) {
+      console.error('Error loading subsystem builds:', error);
+    }
+  }
+
+  async function toggleBuildExpanded(build) {
+    if (expandedBuildId === build.id) {
+      expandedBuildId = null;
+      return;
+    }
+    expandedBuildId = build.id;
+    if (buildBomByBuildId[build.id]) return;
+
+    loadingBuildBomId = build.id;
+    try {
+      const { data, error } = await supabase
+        .from('build_bom')
+        .select('*')
+        .eq('build_id', build.id)
+        .order('part_name', { ascending: true });
+      if (error) throw error;
+      buildBomByBuildId = { ...buildBomByBuildId, [build.id]: data || [] };
+    } catch (error) {
+      console.error('Error loading build BOM:', error);
+    } finally {
+      loadingBuildBomId = null;
+    }
+  }
+
+  async function markSubsystemBuildAssembled(buildId) {
+    try {
+      const { error } = await supabase
+        .from('builds')
+        .update({
+          status: 'assembled',
+          assembled_at: new Date().toISOString(),
+          assembled_by: user.id
+        })
+        .eq('id', buildId);
+
+      if (error) throw error;
+      await loadSubsystemBuilds();
+    } catch (error) {
+      console.error('Error marking as assembled:', error);
+      alert('Failed to mark as assembled: ' + error.message);
     }
   }
 
@@ -906,24 +972,55 @@
   async function confirmBuild() {
     loadingBuild = true;
     try {
-      // Use subsystem ID in build hash (not version) so builds can be rolled up across versions
+      // Use subsystem ID in build hash (not version) so builds can be rolled up across versions.
+      // build_hash has a UNIQUE constraint, so - same as addSingleToBuild/addPartToManufacturing
+      // below - find the existing rolled-up build for this subsystem instead of blindly
+      // inserting a second row with the same hash (that insert fails every time past the
+      // subsystem's first build).
       const buildHash = `${subsystem.onshape_document_id}_${subsystem.id}`;
-      
-      const { data: build, error } = await supabase
+
+      const { data: existingBuild, error: existingBuildError } = await supabase
         .from('builds')
-        .insert([{
-          subsystem_id: subsystem.id,
-          release_id: selectedVersion.id,
-          release_name: selectedVersion.name,
-          build_hash: buildHash,
-          created_by: user.id,
-          status: 'pending',
-          frc_team: user?.frc_team || null
-        }])
-        .select()
+        .select('id')
+        .eq('build_hash', buildHash)
         .single();
 
-      if (error) throw error;
+      if (existingBuildError && existingBuildError.code !== 'PGRST116') {
+        throw existingBuildError;
+      }
+
+      let build;
+      if (existingBuild) {
+        const { data: updatedBuild, error: updateError } = await supabase
+          .from('builds')
+          .update({
+            release_id: selectedVersion.id,
+            release_name: selectedVersion.name
+          })
+          .eq('id', existingBuild.id)
+          .select()
+          .single();
+
+        if (updateError) throw updateError;
+        build = updatedBuild;
+      } else {
+        const { data: newBuild, error } = await supabase
+          .from('builds')
+          .insert([{
+            subsystem_id: subsystem.id,
+            release_id: selectedVersion.id,
+            release_name: selectedVersion.name,
+            build_hash: buildHash,
+            created_by: user.id,
+            status: 'pending',
+            frc_team: user?.frc_team || null
+          }])
+          .select()
+          .single();
+
+        if (error) throw error;
+        build = newBuild;
+      }
 
       // Insert BOM items: save entire BOM as 'other' so they don't affect progress sliders yet
       // First, check if we've already inserted 'other' rows for this build to avoid duplicates
@@ -1686,6 +1783,96 @@
         <p>This subsystem is not linked to an OnShape document.</p>
       </div>
     {/if}
+
+    <!-- Builds for this subsystem, with inline BOM - kept on this page so
+         creating/reviewing a build doesn't require navigating away. Full
+         editing (quantities, purchasing, vendor lookup) still lives on
+         /cad/build/[id]; "Open Full Details" links there. -->
+    <section class="subsystem-builds-section">
+      <h2>Builds ({subsystemBuilds.length})</h2>
+      {#if subsystemBuilds.length === 0}
+        <p class="no-builds-hint">
+          No builds yet. Pick a release above and click "Create Build" to start one.
+        </p>
+      {:else}
+        <div class="subsystem-builds-list">
+          {#each subsystemBuilds as build (build.id)}
+            <div class="subsystem-build-card">
+              <button
+                type="button"
+                class="subsystem-build-summary"
+                on:click={() => toggleBuildExpanded(build)}
+                aria-expanded={expandedBuildId === build.id}
+              >
+                <div class="build-title">
+                  <span class="build-name">{build.release_name || 'Build'}</span>
+                  <span class="build-status status-{build.status}">
+                    {build.status.replace(/_/g, ' ')}
+                  </span>
+                </div>
+                <div class="subsystem-build-meta">
+                  <span>Created {formatPacificDate(build.created_at)}</span>
+                  {#if build.assembled_at}
+                    <span>Assembled {formatPacificDate(build.assembled_at)}</span>
+                  {/if}
+                </div>
+              </button>
+
+              <div class="subsystem-build-actions">
+                {#if build.status === 'ready_to_assemble' && isSubsystemMember()}
+                  <button
+                    class="btn btn-primary btn-sm"
+                    on:click|stopPropagation={() => markSubsystemBuildAssembled(build.id)}
+                  >
+                    Mark as Assembled
+                  </button>
+                {/if}
+                <a href="/cad/build/{build.id}" class="btn btn-outline btn-sm" on:click|stopPropagation>
+                  Open Full Details
+                </a>
+              </div>
+
+              {#if expandedBuildId === build.id}
+                <div class="subsystem-build-bom">
+                  {#if loadingBuildBomId === build.id}
+                    <p class="bom-loading">Loading BOM...</p>
+                  {:else if (buildBomByBuildId[build.id] || []).length === 0}
+                    <p class="bom-loading">No BOM items saved for this build.</p>
+                  {:else}
+                    <div class="subsystem-bom-table-wrap">
+                      <table class="subsystem-bom-table">
+                        <thead>
+                          <tr>
+                            <th>Part</th>
+                            <th>Qty</th>
+                            <th>Type</th>
+                            <th>Workflow</th>
+                            <th>Material</th>
+                            <th>Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {#each buildBomByBuildId[build.id] as item (item.id)}
+                            <tr>
+                              <td>{item.part_name}</td>
+                              <td>{item.quantity}</td>
+                              <td>{item.part_type}</td>
+                              <td>{item.workflow || '—'}</td>
+                              <td>{item.material || '—'}</td>
+                              <td>{item.status}</td>
+                            </tr>
+                          {/each}
+                        </tbody>
+                      </table>
+                    </div>
+                  {/if}
+                </div>
+              {/if}
+            </div>
+          {/each}
+        </div>
+      {/if}
+    </section>
   </main>
 
   <!-- Build Modal -->
@@ -2083,7 +2270,7 @@
 
 <style>
   .main-content {
-    max-width: 1200px;
+    max-width: 1800px;
     margin: 0 auto;
     padding: 2rem;
   }
@@ -2215,6 +2402,72 @@
     padding: 3rem;
     color: var(--secondary);
   }
+
+  .subsystem-builds-section {
+    margin-top: 2rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+  }
+  .subsystem-builds-section h2 { margin: 0 0 1rem 0; color: var(--secondary); font-size: 1.3rem; }
+  .no-builds-hint { color: var(--secondary); font-size: 0.9rem; }
+  .subsystem-builds-list { display: flex; flex-direction: column; gap: 0.75rem; }
+  .subsystem-build-card {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg, 8px);
+    background: var(--surface-1);
+    overflow: hidden;
+  }
+  .subsystem-build-summary {
+    width: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.9rem 1.1rem;
+    background: none;
+    border: none;
+    cursor: pointer;
+    text-align: left;
+    font: inherit;
+    color: inherit;
+  }
+  .subsystem-build-summary .build-title { display: flex; align-items: center; gap: 0.6rem; min-width: 0; flex-wrap: wrap; }
+  .subsystem-build-summary .build-name { font-weight: 600; overflow-wrap: anywhere; }
+  .subsystem-build-meta { display: flex; gap: 1rem; font-size: 0.8rem; color: var(--secondary); flex-wrap: wrap; }
+  .subsystem-build-actions {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0 1.1rem 0.9rem 1.1rem;
+    flex-wrap: wrap;
+  }
+  .subsystem-build-bom { padding: 0 1.1rem 1.1rem 1.1rem; border-top: 1px solid var(--border); }
+  .bom-loading { color: var(--secondary); font-size: 0.85rem; padding-top: 0.75rem; }
+  .subsystem-bom-table-wrap { overflow-x: auto; margin-top: 0.75rem; }
+  .subsystem-bom-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  .subsystem-bom-table th, .subsystem-bom-table td {
+    padding: 0.4rem 0.6rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  .subsystem-bom-table th { color: var(--secondary); font-weight: 600; }
+
+  .build-status {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+    padding: 0.2rem 0.6rem;
+    border-radius: var(--radius-full, 999px);
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: capitalize;
+    white-space: nowrap;
+  }
+  .build-status.status-pending { background: var(--brand-gold-soft); color: var(--brand-gold-strong); }
+  .build-status.status-manufacturing { background: var(--blue-soft); color: var(--blue-strong); }
+  .build-status.status-ready_to_assemble { background: var(--purple-soft); color: var(--purple-strong); }
+  .build-status.status-assembled { background: var(--green-soft); color: var(--green-strong); }
 
   .bom-actions {
     display: flex;
