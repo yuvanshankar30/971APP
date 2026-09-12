@@ -646,7 +646,8 @@
   .path-file-message { color:var(--text-muted); }
   .field-source { color:var(--text-muted); font-size:.68rem; line-height:1.35; }
   .teleop-roles { margin-bottom:var(--space-4); padding:var(--space-4); border:1px solid var(--border); background:var(--surface-2); }
-  .role-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); }
+  .role-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(8.5rem,1fr)); }
+  .role-grid button { overflow-wrap:anywhere; white-space:normal; height:auto; }
   .ratings-grid { display:grid; gap:var(--space-3); } .ratings-heading { display:flex; justify-content:space-between; gap:var(--gap-3); padding-bottom:var(--space-2); border-bottom:1px solid var(--border); } .ratings-heading small { color:var(--text-muted); } .rating-row { display:flex; align-items:center; justify-content:space-between; gap:var(--gap-4); padding-bottom:var(--space-3); border-bottom:1px solid var(--border); } .rating-row span { font-size:.9rem; } .rating-buttons button { width:2.25rem; padding:0; } .rating-buttons.large button { width:3rem; min-height:2.5rem; }
   .notes-label textarea { resize:vertical; min-height:7rem; line-height:1.5; } .scouter-notes textarea { min-height:12rem; } .incident-toggle { display:flex; grid-template-columns:auto 1fr; align-items:center; color:var(--text); font-size:.9rem; } .incident-toggle span { display:flex; align-items:center; gap:var(--gap-2); } .incident-toggle :global(svg) { color:var(--red-base); }
   .pit-report-field { margin-top:var(--space-3); }
@@ -741,7 +742,6 @@
     .position-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
     .auto-layout,.intake-observations { grid-template-columns:1fr; }
     .saved-path-controls { grid-template-columns:1fr; }
-    .role-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
     .ratings-heading,.rating-row,.persistent-status { align-items:flex-start; flex-direction:column; }
     .rating-row { gap:var(--space-3); }
     .rating-buttons { width:100%; }
@@ -758,7 +758,7 @@
     .stage-nav button { min-height:3.25rem; padding:var(--space-2); }
     .section-heading { align-items:flex-start; gap:var(--space-2); margin-bottom:var(--space-4); }
     .section-heading h2 { font-size:var(--font-lg); }
-    .position-grid,.role-grid { grid-template-columns:1fr; }
+    .position-grid { grid-template-columns:1fr; }
     .auto-source-grid { grid-template-columns:1fr; }
     .path-file-actions { display:grid; grid-template-columns:1fr; }
     .path-file-actions .btn { min-height:3rem; }
