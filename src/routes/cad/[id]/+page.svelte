@@ -11,6 +11,7 @@
   import { parseBomCsvRows, classifyManualBomRows } from '$lib/bom_csv_import.js';
   import { pickStockAndWorkflow } from '$lib/stock_match.js';
   import { computeBuildHash } from '$lib/build_hash.js';
+  import { fileRequirementError } from '$lib/file_meta.js';
   import { detectVendorFromString, buildVendorSearchUrl } from '$lib/vendor_detect.js';
   import { formatPacificDate } from '$lib/timezone.js';
   import { goto } from '$app/navigation';
@@ -388,6 +389,16 @@
   // no longer has to be reviewed on a separate page just to submit requests.
   async function addSavedBomRowToDownstream(item) {
     if (!item || item.added || addingBomRowId) return;
+    // Manufacturing requests need the right file attached first, per
+    // workflow (router/3d-print need STEP, lathe needs PDF) - purchasing/
+    // kitting items have no such requirement.
+    if (item.part_type !== 'COTS' && item.workflow !== 'purchase' && item.workflow !== 'kit') {
+      const fileError = fileRequirementError(item);
+      if (fileError) {
+        toastActions.show(fileError);
+        return;
+      }
+    }
     addingBomRowId = item.id;
     try {
       const project_id = subsystem?.name || 'Project';

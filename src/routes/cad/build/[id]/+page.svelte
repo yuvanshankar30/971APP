@@ -13,33 +13,7 @@
   import { GENERAL_ROLES } from '$lib/permissions.js';
   import { formatPacificDate, formatPacificDateTimeWithZone } from '$lib/timezone.js';
   import CadViewer from '$lib/components/CadViewer.svelte';
-
-  // File-attachment helpers for router/lathe/3d-print rows in both BOM
-  // tables below - same {step_file, step_valid}/{pdf_file} JSON convention
-  // as manufacture/+page.svelte's parts.file_url, generic here over either
-  // a build_bom row (unadded) or a parts row (added), both of which have a
-  // file_url column of that shape.
-  function getFileMeta(item) {
-    try { return JSON.parse(item?.file_url || '{}') || {}; } catch { return {}; }
-  }
-  function getStepFileName(item) {
-    const meta = getFileMeta(item);
-    if (meta.step_file) return meta.step_file;
-    if (item?.file_name && /\.(step|stp)$/i.test(item.file_name)) return item.file_name;
-    return null;
-  }
-  function canViewCad(item) {
-    return !!getStepFileName(item);
-  }
-  function getPdfFileName(item) {
-    const meta = getFileMeta(item);
-    if (meta.pdf_file) return meta.pdf_file;
-    if (item?.file_name && /\.pdf$/i.test(item.file_name)) return item.file_name;
-    return null;
-  }
-  function canViewPdf(item) {
-    return !!getPdfFileName(item);
-  }
+  import { getFileMeta, getStepFileName, canViewCad, getPdfFileName, canViewPdf, fileRequirementError } from '$lib/file_meta.js';
 
   async function downloadManufacturingFile(fileName) {
     try {
@@ -1061,6 +1035,16 @@
   async function addFromFullBOM(item) {
     if (!item) return;
     if (processingAdd) return;
+    // Manufacturing requests need the right file attached first, per
+    // workflow (router/3d-print need STEP, lathe needs PDF) - purchasing/
+    // kitting items have no such requirement.
+    if (item.part_type !== 'COTS' && item.workflow !== 'purchase' && item.workflow !== 'kit') {
+      const fileError = fileRequirementError(item);
+      if (fileError) {
+        toastActions.show(fileError);
+        return;
+      }
+    }
     processingAdd = true;
     try {
       // Project ID uses subsystem name only (version-independent for rollup)
@@ -1936,7 +1920,7 @@
         <div style="display: flex; align-items: center; gap: 1rem;">
           <button class="btn btn-primary btn-sm" on:click={openAddPartModal}>
             <Plus size={16} />
-            Add Part
+            Create Part
           </button>
           <button class="btn btn-secondary btn-sm" on:click={openVersionSelector}>
             <Download size={16} />
@@ -2410,7 +2394,7 @@
   >
     <div class="modal" role="dialog" aria-modal="true">
       <div class="modal-header">
-        <h3>Add Part</h3>
+        <h3>Create Part</h3>
         <button type="button" class="modal-close-button" aria-label="Close dialog" on:click={closeAddPartModal}>
           <X size={18} />
         </button>
