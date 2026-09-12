@@ -1096,7 +1096,7 @@
         >
           <div class="subsystem-header">
             <div class="subsystem-title">
-              <h3>{subsystem.name}</h3>
+              <h3 title={subsystem.name}>{subsystem.name}</h3>
               {#if isTeam9584(subsystem.frc_team)}
                 <span class="tag team-tag tag-9584" title="Team 9584">9584</span>
               {/if}
@@ -1619,7 +1619,7 @@
   .subsystem-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: var(--space-4); gap: var(--gap-2); flex-wrap: wrap; }
   .subsystem-title, .build-title { display: flex; align-items: center; gap: var(--gap-1); flex: 1; min-width: 0; }
   .subsystem-toolbar { display: flex; align-items: center; gap: var(--gap-2); flex-shrink: 0; flex-wrap: wrap; }
-  .subsystem-header h3 { margin: 0; color: var(--secondary); font-size: 1.3rem; line-height: 24px; overflow-wrap: anywhere; min-width: 0; }
+  .subsystem-header h3 { margin: 0; color: var(--secondary); font-size: 1.1rem; line-height: 24px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   .subsystem-badges { display: flex; align-items: center; gap: var(--gap-1); flex-wrap: wrap; }
   .badge { display: inline-flex; align-items: center; justify-content: center; height: var(--control-height) !important; padding: 0 var(--space-2) !important; border-radius: var(--radius-sm); font-size: var(--font-xs); font-weight: 600; text-transform: uppercase; line-height: 1; box-sizing: border-box; white-space: nowrap; }
   .subsystem-header .btn-outline.btn-small { display: inline-flex; align-items: center; justify-content: center; height: var(--control-height) !important; width: var(--control-height) !important; padding: 0 !important; font-size: var(--font-xs); border-radius: var(--radius-sm); box-sizing: border-box; }

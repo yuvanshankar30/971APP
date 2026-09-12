@@ -983,7 +983,7 @@
     cursor: pointer;
   }
   .recent-queue-button { transition: border-color 0.15s, background 0.15s, box-shadow 0.15s; }
-  .recent-queue-button:hover, .recent-queue-button:focus-visible { border-color: var(--accent); background: var(--surface); outline: none; }
+  .recent-queue-button:hover, .recent-queue-button:focus-visible { border-color: var(--accent); background: var(--surface-1); outline: none; }
   .recent-queue-button.selected {
     border-color: var(--accent);
     background: color-mix(in srgb, var(--accent) 12%, var(--primary));

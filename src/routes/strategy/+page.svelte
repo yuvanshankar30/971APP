@@ -171,7 +171,7 @@
   .summary-grid span { color:var(--text-secondary); font-size:.82rem; }
   .summary-grid .at-risk svg, .summary-grid .at-risk strong { color:var(--status-danger); }
   .strategy-layout { display:grid; grid-template-columns:minmax(0, 1.7fr) minmax(290px, .8fr); gap:var(--space-4); margin-top:var(--space-4); align-items:start; }
-  .strategy-board, .team-brief { border:1px solid var(--border); background:var(--surface); }
+  .strategy-board, .team-brief { border:1px solid var(--border); background:var(--surface-1); }
   .section-heading, .brief-title { display:flex; justify-content:space-between; gap:var(--space-3); align-items:center; padding:var(--space-3); border-bottom:1px solid var(--border); }
   h2, h3 { margin:0; }
   .team-search { width:min(260px, 100%); }

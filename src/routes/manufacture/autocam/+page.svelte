@@ -393,7 +393,7 @@
 
 <style>
   .card {
-    background: var(--surface);
+    background: var(--surface-1);
     border-radius: 8px;
     padding: 1.5rem;
     margin-bottom: 1rem;

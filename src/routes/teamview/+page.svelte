@@ -682,8 +682,8 @@
   .picker-card { max-width: 760px; margin: 0 auto; display: grid; gap: var(--gap-3); }
   .picker-title { margin: 0; }
   .team-list { display: grid; gap: var(--gap-2); max-height: 540px; overflow: auto; }
-  .team-row { display: flex; justify-content: space-between; align-items: center; border: none; border-radius: var(--radius-sm); padding: var(--space-2) var(--space-3); background: color-mix(in srgb, var(--surface) 70%, transparent); transition: background 120ms ease; }
-  .team-row:hover, .team-row:focus-visible { background: color-mix(in srgb, var(--accent) 12%, var(--surface)); outline: none; }
+  .team-row { display: flex; justify-content: space-between; align-items: center; border: none; border-radius: var(--radius-sm); padding: var(--space-2) var(--space-3); background: color-mix(in srgb, var(--surface-1) 70%, transparent); transition: background 120ms ease; }
+  .team-row:hover, .team-row:focus-visible { background: color-mix(in srgb, var(--accent) 12%, var(--surface-1)); outline: none; }
   .team-row-label { display: inline-flex; align-items: baseline; gap: 0.45rem; }
   .team-row-name { font-weight: 700; }
   .team-row-sub { color: var(--text-muted); font-size: 0.72rem; }
@@ -696,13 +696,13 @@
   .image-box { display: grid; align-items: center; justify-items: center; min-height: 170px; }
   .team-image, .image-empty { width: 100%; height: 170px; border-radius: var(--radius-sm); border: 1px solid var(--border); }
   .team-image { object-fit: cover; }
-  .image-empty { display: grid; place-items: center; color: var(--text-muted); font-size: var(--font-sm); background: var(--surface); }
+  .image-empty { display: grid; place-items: center; color: var(--text-muted); font-size: var(--font-sm); background: var(--surface-1); }
   .pit-fields { display: grid; gap: var(--gap-1); margin-top: var(--space-2); font-size: var(--font-sm); }
   .pit-long-answer { white-space: pre-wrap; line-height: 1.4; }
   .pit-auto-group { display: grid; gap: var(--gap-2); margin-top: var(--space-2); }
   .pit-auto-heading { font-size: var(--font-xs); font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); }
   .pit-auto-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: var(--gap-2); }
-  .pit-auto-card { display: grid; gap: 0.25rem; min-width: 0; padding: var(--space-2); border: 1px solid color-mix(in srgb, var(--border) 85%, transparent); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--surface) 92%, transparent); }
+  .pit-auto-card { display: grid; gap: 0.25rem; min-width: 0; padding: var(--space-2); border: 1px solid color-mix(in srgb, var(--border) 85%, transparent); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--surface-1) 92%, transparent); }
   .pit-auto-name { font-size: var(--font-sm); font-weight: 700; line-height: 1.2; }
   .pit-auto-description { font-size: var(--font-xs); color: var(--text-muted); line-height: 1.35; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
   .main-split { display: grid; grid-template-columns: minmax(0, 7fr) minmax(300px, 3fr); gap: var(--gap-3); }
@@ -716,7 +716,7 @@
   .trend-body { }
   .panel-title { margin: 0; font-size: var(--font-md); }
   .panel-subtitle { font-size: var(--font-xs); color: var(--text-muted); }
-  .line { width: 100%; height: 240px; margin: 0; background: color-mix(in srgb, var(--surface) 90%, transparent); border: none; border-radius: var(--radius-sm); cursor: pointer; }
+  .line { width: 100%; height: 240px; margin: 0; background: color-mix(in srgb, var(--surface-1) 90%, transparent); border: none; border-radius: var(--radius-sm); cursor: pointer; }
   .axis { stroke: color-mix(in srgb, var(--text) 35%, transparent); stroke-width: 1; }
   .grid { stroke: color-mix(in srgb, var(--text) 14%, transparent); stroke-width: 1; }
   .tick { font-size: 9px; fill: var(--text-muted); }
@@ -733,16 +733,16 @@
   .break-legend { display: flex; gap: var(--gap-2); flex-wrap: wrap; font-size: var(--font-xs); color: var(--text-muted); }
   .break-legend span { display: inline-flex; align-items: center; gap: 0.35rem; }
   .break-legend i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
-  .mini-bar { display: flex; height: 14px; background: color-mix(in srgb, var(--surface) 50%, transparent); border-radius: var(--radius-xs); overflow: hidden; gap: 0; font-size: 0; }
+  .mini-bar { display: flex; height: 14px; background: color-mix(in srgb, var(--surface-1) 50%, transparent); border-radius: var(--radius-xs); overflow: hidden; gap: 0; font-size: 0; }
   .mini-bar span { display: block; min-width: 0; flex-shrink: 0; transform: scaleX(1.02); }
   .match-stack { display: flex; gap: var(--gap-1); overflow-x: auto; padding: var(--space-1) 0; cursor: pointer; }
   .stack-col { display: grid; justify-items: center; gap: 0.2rem; }
-  .stack { width: 18px; height: 140px; display: flex; flex-direction: column-reverse; align-items: stretch; border-radius: var(--radius-xs); overflow: hidden; background: color-mix(in srgb, var(--surface) 50%, transparent); gap: 0; font-size: 0; }
+  .stack { width: 18px; height: 140px; display: flex; flex-direction: column-reverse; align-items: stretch; border-radius: var(--radius-xs); overflow: hidden; background: color-mix(in srgb, var(--surface-1) 50%, transparent); gap: 0; font-size: 0; }
   .stack span { display: block; width: 100%; min-height: 0; flex-shrink: 0; transform: scaleY(1.02); }
   .stack-col small { font-size: 0.62rem; color: var(--text-muted); }
   .notes-panel { max-height: 780px; overflow: auto; }
   .notes-title { margin: 0 0 var(--space-2); }
-  .note-row { border: none; border-radius: var(--radius-sm); padding: var(--space-2); margin-bottom: var(--space-2); background: color-mix(in srgb, var(--surface) 90%, transparent); }
+  .note-row { border: none; border-radius: var(--radius-sm); padding: var(--space-2); margin-bottom: var(--space-2); background: color-mix(in srgb, var(--surface-1) 90%, transparent); }
   .note-meta { font-size: var(--font-xs); color: var(--text-muted); margin-bottom: var(--space-1); }
   @media (max-width: 980px) {
     .team-top, .main-split { grid-template-columns: 1fr; }

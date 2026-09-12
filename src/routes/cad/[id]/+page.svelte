@@ -1248,11 +1248,7 @@
       return;
     }
     for (const item of itemsToAdd) {
-      await addSingleToBuild(item);
-      // A COTS item with no auto-detectable vendor URL opens the purchase
-      // modal and returns early - stop the batch there, same reasoning as
-      // addAllCOTSToPurchasing below.
-      if (showPurchaseModal) return;
+      await saveBomItemToBuild(item);
     }
     toastActions.show(`Saved ${itemsToAdd.length} item${itemsToAdd.length === 1 ? '' : 's'} to the build`);
   }
@@ -1535,6 +1531,118 @@
 
     return stockData[workflow] || [];
   }  // Add a single item to build and build_bom immediately
+  // Saves a reviewed BOM row into build_bom ONLY - no parts/purchasing/
+  // kitting record, no manufacturing-lead notification. Direct instruction:
+  // pressing Add while initially configuring a build should make the part
+  // show up in the build, not fire a request - requesting manufacturing/
+  // purchasing is a separate, later action (cad/build/[id]'s own "Full BOM"
+  // section already does exactly that, per build_bom row, once this row
+  // exists there). This is what the per-item "Add" button and the "Save"
+  // bulk action below call; addSingleToBuild (below) - which does create
+  // those downstream records - is reserved for the deferred bulk actions
+  // ("Add All COTS to Purchasing"/"Manufacture Iteration"/"Build
+  // Duplicate") that aren't wired to a button yet.
+  async function saveBomItemToBuild(item) {
+    if (!user || !selectedVersion) {
+      toastActions.show('User or version not available');
+      return;
+    }
+
+    const partKey = item.part_number || item.part_name || `${item.part_name}_${Date.now()}`;
+    if (addedPartsSet.has(partKey)) {
+      toastActions.show('Already saved to this build');
+      return;
+    }
+
+    loadingBuild = true;
+    try {
+      const buildHash = `${subsystem.onshape_document_id}_${subsystem.id}`;
+      const { data: existingBuild, error: buildQueryError } = await supabase
+        .from('builds')
+        .select('id')
+        .eq('build_hash', buildHash)
+        .single();
+      if (buildQueryError && buildQueryError.code !== 'PGRST116') throw buildQueryError;
+
+      let buildId;
+      if (existingBuild) {
+        buildId = existingBuild.id;
+      } else {
+        const { data: newBuild, error: buildError } = await supabase
+          .from('builds')
+          .insert([{
+            subsystem_id: subsystem.id,
+            release_id: selectedVersion.id,
+            release_name: selectedVersion.name,
+            build_hash: buildHash,
+            status: 'pending',
+            created_by: user.id,
+            frc_team: user?.frc_team || null
+          }])
+          .select()
+          .single();
+        if (buildError) throw buildError;
+        buildId = newBuild.id;
+      }
+
+      // A manually attached file (router/3d-print/lathe items with no
+      // OnShape part behind them) - same storage bucket/JSON convention
+      // addSingleToBuild's own attachment handling uses.
+      let file_url = null;
+      let file_format = null;
+      if (item.attachedFile) {
+        const ext = (item.attachedFile.name.split('.').pop() || 'step').toLowerCase();
+        const safeName = (item.part_name || 'part').replace(/[^a-zA-Z0-9]/g, '_');
+        const storagePath = `${crypto.randomUUID()}_${safeName}_cad.${ext}`;
+        const { error: uploadError } = await supabase.storage
+          .from('manufacturing-files')
+          .upload(storagePath, item.attachedFile, { cacheControl: '3600', upsert: false });
+        if (uploadError) {
+          toastActions.show('Failed to upload attached file: ' + uploadError.message);
+        } else {
+          file_url = JSON.stringify(
+            ext === 'pdf' ? { pdf_file: storagePath } : { step_file: storagePath, step_valid: true }
+          );
+          file_format = ext;
+        }
+      }
+
+      const { error: bomError } = await supabase.from('build_bom').insert([{
+        build_id: buildId,
+        part_name: item.part_name,
+        part_number: item.part_number || null,
+        quantity: item.quantity || 1,
+        part_type: item.part_type,
+        material: item.material || null,
+        stock_assignment: item.stock_assignment || null,
+        workflow: item.workflow,
+        bounding_box_x: item.bounding_box_x || null,
+        bounding_box_y: item.bounding_box_y || null,
+        bounding_box_z: item.bounding_box_z || null,
+        onshape_part_id: item.onshape_part_id || null,
+        onshape_document_id: item.onshape_document_id || subsystem.onshape_document_id || null,
+        onshape_wvm: item.onshape_wvm || null,
+        onshape_wvmid: item.onshape_wvmid || null,
+        onshape_element_id: item.onshape_element_id || subsystem.onshape_element_id || null,
+        file_url,
+        file_format,
+        is_onshape_part: !!(item.onshape_document_id || item.onshape_part_id),
+        status: 'pending',
+        added: false
+      }]);
+      if (bomError) throw bomError;
+
+      addedPartsSet = new Set([...addedPartsSet, partKey]);
+      buildBOM = [...buildBOM];
+      toastActions.show('Saved to build');
+    } catch (error) {
+      console.error('Error saving BOM item to build:', error);
+      toastActions.show('Failed to save item: ' + error.message);
+    } finally {
+      loadingBuild = false;
+    }
+  }
+
   async function addSingleToBuild(item) {
     if (!user || !selectedVersion) {
       toastActions.show('User or version not available');
@@ -2294,10 +2402,11 @@
                       <td>
                         <button
                           class="btn btn-sm btn-add-part"
-                          on:click={() => addSingleToBuild(item)}
+                          on:click={() => saveBomItemToBuild(item)}
                         >
                           <Plus size={14} />
-                          Add                        </button>
+                          Add
+                        </button>
                       </td>
                       <td>
                         {#if item.onshape_part_id}
@@ -2679,7 +2788,7 @@
     align-items: center;
     gap: 0.5rem;
     padding: 0.5rem 1rem;
-    background: var(--surface);
+    background: var(--surface-1);
     border: 1px solid var(--border);
     border-radius: 4px;
     color: var(--text);
@@ -2707,7 +2816,7 @@
   }
 
   .timeline-section {
-    background: var(--surface);
+    background: var(--surface-1);
     border: 1px solid var(--border);
     border-radius: 4px;
     padding: 1.5rem;
@@ -2750,7 +2859,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: var(--surface);
+    background: var(--surface-1);
     border: 2px solid var(--border);
     border-radius: 50%;
     color: var(--secondary);
@@ -2759,7 +2868,7 @@
   .timeline-item.release .timeline-marker {
     background: var(--primary);
     border-color: var(--primary);
-    color: var(--surface);
+    color: var(--surface-1);
   }
 
   .timeline-content {
@@ -2904,7 +3013,7 @@
     font-weight: 500;
     text-transform: uppercase;
     border: 1px solid var(--border);
-    background: var(--surface);
+    background: var(--surface-1);
     color: var(--text);
     min-width: 100px;
   }
@@ -2973,7 +3082,7 @@
   .form-input { border: 1px solid var(--border); background: var(--background); color: var(--text); }
   .form-input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25); }
 
-  select { padding: 0.375rem 0.75rem; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--text); font-size: 0.875rem; }
+  select { padding: 0.375rem 0.75rem; border: 1px solid var(--border); border-radius: 4px; background: var(--surface-1); color: var(--text); font-size: 0.875rem; }
 
   /* Mobile Responsive Styles */
   @media (max-width: 768px) {
@@ -3100,7 +3209,7 @@
   }
 
   .member-section {
-    background: var(--surface);
+    background: var(--surface-1);
     border: 1px solid var(--border);
     border-radius: 12px;
     padding: 1.25rem;
@@ -3225,7 +3334,7 @@
   }
 
   .user-search-item:hover {
-    background: var(--surface);
+    background: var(--surface-1);
   }
 
   .user-info {
@@ -3354,15 +3463,6 @@
     color: var(--text);
   }
 
-  .transfer-select select {
-    width: 100%;
-    padding: 0.6rem;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--surface);
-    color: var(--text);
-    font-size: 0.95rem;
-  }
 
   .btn-danger {
     background: var(--red-base);

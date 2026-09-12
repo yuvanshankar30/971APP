@@ -296,7 +296,7 @@
   }
   .quick-queue-choice-button:hover, .quick-queue-choice-button:focus-visible {
     border-color: var(--accent);
-    background: var(--surface);
+    background: var(--surface-1);
     outline: none;
   }
 </style>

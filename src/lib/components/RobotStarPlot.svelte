@@ -70,7 +70,7 @@
   .team-shape { stroke-width:2.5; stroke-linejoin:round; }
   .team-left { fill:color-mix(in srgb, var(--accent) 26%, transparent); stroke:var(--accent-strong); }
   .team-right { fill:color-mix(in srgb, #3987d8 22%, transparent); stroke:#3987d8; }
-  .marker { stroke:var(--surface); stroke-width:1.5; }
+  .marker { stroke:var(--surface-1); stroke-width:1.5; }
   .marker-left, .left-swatch { background:var(--accent-strong); fill:var(--accent-strong); }
   .marker-right, .right-swatch { background:#3987d8; fill:#3987d8; }
   .legend { display:flex; flex-wrap:wrap; justify-content:center; gap:var(--gap-4); font-size:.8rem; font-weight:600; }

@@ -1817,7 +1817,7 @@
     padding: 0 var(--space-3);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    background: var(--surface);
+    background: var(--surface-1);
     color: var(--text-muted);
     cursor: pointer;
   }
@@ -1911,7 +1911,7 @@
     padding: 0.6rem 0.8rem;
     border: 1px solid var(--border);
     border-radius: 999px;
-    background: color-mix(in srgb, var(--surface) 94%, transparent);
+    background: color-mix(in srgb, var(--surface-1) 94%, transparent);
   }
 
   .summary-pill strong {
@@ -1945,7 +1945,7 @@
     width: 100%;
     border: 1px solid var(--border);
     border-radius: 8px;
-    background: var(--surface);
+    background: var(--surface-1);
     padding: 0.7rem 0.8rem;
     cursor: pointer;
   }
@@ -2185,7 +2185,7 @@
     padding: 0.65rem 0.75rem;
     border: 1px solid var(--border);
     border-radius: 8px;
-    background: color-mix(in srgb, var(--surface) 94%, transparent);
+    background: color-mix(in srgb, var(--surface-1) 94%, transparent);
   }
 
   .auto-options-header,
@@ -2203,7 +2203,7 @@
     border-radius: 8px;
     padding: 0.8rem;
     color: var(--text-muted);
-    background: color-mix(in srgb, var(--surface) 90%, transparent);
+    background: color-mix(in srgb, var(--surface-1) 90%, transparent);
   }
 
   .auto-option-editor-list {
@@ -2259,7 +2259,7 @@
     padding: 0.7rem 0.8rem;
     border: 1px solid var(--border);
     border-radius: 8px;
-    background: color-mix(in srgb, var(--surface) 94%, transparent);
+    background: color-mix(in srgb, var(--surface-1) 94%, transparent);
   }
 
   .visually-hidden {
@@ -2298,7 +2298,7 @@
     border: 1px dashed var(--border);
     border-radius: 8px;
     padding: 0.75rem;
-    background: color-mix(in srgb, var(--surface) 92%, transparent);
+    background: color-mix(in srgb, var(--surface-1) 92%, transparent);
   }
 
   .pending-file-name {
