@@ -133,6 +133,13 @@ describe('parseBomCsvRows', () => {
   it('throws when every data row is a SOLID/COMPOUND placeholder', () => {
     expect(() => parseBomCsvRows('Name,QTY\nSOLID,1\nCOMPOUND,1')).toThrow(/No usable rows/);
   });
+
+  it('drops OnShape feature-name placeholder bodies (Chamfer1, Boss-Extrude1, ...)', () => {
+    const csv = 'Name,QTY\nBracket,2\nChamfer1,1\nBoss-Extrude1,1\nFillet1,1';
+    expect(parseBomCsvRows(csv)).toEqual([
+      { part_name: 'Bracket', part_number: '', quantity: 2, material: '', vendor: '', description: '', thickness: null }
+    ]);
+  });
 });
 
 describe('classifyManualBomRow', () => {
@@ -184,6 +191,10 @@ describe('classifyManualBomRow', () => {
 
   it('does not let "gearbox" (a real manufactured plate part) match the gear keyword', () => {
     expect(classifyManualBomRow(row({ part_name: 'pivot gearbox plate' }))).toEqual({ part_type: 'manufactured', workflow: 'router' });
+  });
+
+  it('classifies chain as a COTS kit item', () => {
+    expect(classifyManualBomRow(row({ part_name: '53 links #35 chain' }))).toEqual({ part_type: 'COTS', workflow: 'kit' });
   });
 
   it('classifies foam as manufactured/router', () => {

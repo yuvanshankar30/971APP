@@ -1317,6 +1317,7 @@
     });
     if (itemsToAdd.length === 0) {
       toastActions.show('Everything in this BOM has already been added');
+      closeBuildModal();
       return;
     }
     for (const item of itemsToAdd) {
@@ -1664,6 +1665,22 @@
           .single();
         if (buildError) throw buildError;
         buildId = newBuild.id;
+      }
+
+      // addedPartsSet only tracks what THIS page load has already saved -
+      // it resets on every reload, so re-opening the review modal and
+      // pressing Save again (e.g. because a stuck-open modal made it look
+      // like the first Save failed) would otherwise silently re-insert the
+      // same row every time. Check the database itself for a matching row
+      // already on this build before inserting.
+      let dupQuery = supabase.from('build_bom').select('id').eq('build_id', buildId).eq('part_name', item.part_name);
+      dupQuery = item.part_number ? dupQuery.eq('part_number', item.part_number) : dupQuery.is('part_number', null);
+      const { data: existingRows, error: dupErr } = await dupQuery.limit(1);
+      if (dupErr) throw dupErr;
+      if (existingRows && existingRows.length > 0) {
+        addedPartsSet = new Set([...addedPartsSet, partKey]);
+        toastActions.show('Already saved to this build');
+        return;
       }
 
       // A manually attached file (router/3d-print/lathe items with no

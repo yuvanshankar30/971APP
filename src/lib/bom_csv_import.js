@@ -2,6 +2,7 @@
 // (OnShape's own BOM table export, or any sheet with the right columns)
 // instead of a live OnShape API call, for when OnShape is unreachable or a
 // subsystem isn't linked to a document at all.
+import { isOnshapePlaceholderName } from './onshape_placeholder_names.js';
 
 // Minimal RFC 4180 CSV parser - handles quoted fields (commas/newlines/
 // escaped "" inside quotes), which a naive text.split(',') would mangle.
@@ -117,11 +118,12 @@ export function parseBomCsvRows(text) {
     thickness: columnIndex.thickness !== -1 ? parseThicknessInches(cells[columnIndex.thickness]) : null
   }))
     .filter((row) => row.part_name)
-    // OnShape's placeholder name for an unnamed body ("SOLID", "COMPOUND",
-    // or "SOLID_1"/"COMPOUND_2"... with more than one) - a modeling
-    // artifact, not a real part, whether it came in live from the API
-    // (see onshape.js's analyzeBOM) or through a CSV export of the same BOM.
-    .filter((row) => !/^(SOLID|COMPOUND)(_\d+)?$/i.test(row.part_name));
+    // OnShape's placeholder name for an unnamed body/feature ("SOLID",
+    // "COMPOUND", "Chamfer1", "Boss-Extrude1", ... - see
+    // onshape_placeholder_names.js) - a modeling artifact, not a real part,
+    // whether it came in live from the API (see onshape.js's analyzeBOM) or
+    // through a CSV export of the same BOM.
+    .filter((row) => !isOnshapePlaceholderName(row.part_name));
 
   if (rows.length === 0) {
     throw new Error('No usable rows found in the CSV (every row was missing a name)');
@@ -146,8 +148,8 @@ export function classifyManualBomRow(row) {
 
   // COTS items stocked in the kitting bins by default, not requested
   // through purchasing - SDS-branded parts, fasteners, motors, gears,
-  // electrical/control-system COTS (roboRIO, Pigeon, CANivore, breaker,
-  // battery, PDP/PDH), PCBs, and compression/extension springs.
+  // chain, electrical/control-system COTS (roboRIO, Pigeon, CANivore,
+  // breaker, battery, PDP/PDH), PCBs, and compression/extension springs.
   // \bgears?\b (not "gear") so "gearbox" (a real router-cut plate part,
   // "Gearbox Plate") isn't swept in by "gear" as a substring.
   const isKitItem =
@@ -158,7 +160,7 @@ export function classifyManualBomRow(row) {
     name.includes('roborio') || name.includes('pigeon') || name.includes('canivore') || name.includes('canivor') ||
     name.includes('breaker') || name.includes('battery') || name.includes('batteries') ||
     name.includes('pdp') || name.includes('pdh') ||
-    name.includes('spring') || name.includes('pcb');
+    name.includes('spring') || name.includes('pcb') || name.includes('chain');
 
   const isCOTS =
     isKitItem ||

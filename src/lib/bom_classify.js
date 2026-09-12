@@ -61,7 +61,7 @@ class PartClassificationService {
 
             // Rule 5/6/7: everything that's stocked in the kitting bins
             // rather than requested through purchasing - SDS-branded parts,
-            // fasteners, motors, gears, electrical/control-system COTS
+            // fasteners, motors, gears, chain, electrical/control-system COTS
             // (roboRIO, Pigeon, CANivore, breaker, battery, PDP/PDH), PCBs,
             // and compression/extension springs. All COTS regardless of
             // part number or vendor field. \bgears?\b (not "gear") so
@@ -75,7 +75,7 @@ class PartClassificationService {
                 name.includes('roborio') || name.includes('pigeon') || name.includes('canivore') || name.includes('canivor') ||
                 name.includes('breaker') || name.includes('battery') || name.includes('batteries') ||
                 name.includes('pdp') || name.includes('pdh') ||
-                name.includes('pcb') || name.includes('spring');
+                name.includes('pcb') || name.includes('spring') || name.includes('chain');
             if (isKitItem) {
                 isCOTS = true;
             }

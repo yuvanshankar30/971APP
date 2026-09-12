@@ -64,6 +64,10 @@ describe('manualClassification (COTS vs manufactured rules)', () => {
     expect(classify({ name: 'maxspline spacer', part_number: 'P1' }).manufacturing_process).toBe('3d-print');
   });
 
+  it('classifies chain as a COTS kit item', () => {
+    expect(classify({ name: '53 links #35 chain' })).toMatchObject({ classification: 'COTS', workflow_status: 'kit' });
+  });
+
   it('assigns router for foam even without a "P" part number', () => {
     const result = classify({ name: 'Bumper Foam', part_number: '' });
     expect(result.classification).toBe('manufactured');

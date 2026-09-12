@@ -1506,16 +1506,20 @@
         if (row.part_number) unaddedManualDataByKey.set(row.part_number.toLowerCase().trim(), manualData);
       }
 
-      // Delete ALL unadded parts - even if names match, Onshape parameters change between versions
+      // Delete ALL unadded parts - even if names match, Onshape parameters change between versions.
+      // A failed delete here must stop the refetch rather than being logged
+      // and ignored - silently proceeding to insert the new BOM on top of
+      // undeleted old rows is exactly how a build ends up with the same
+      // part duplicated many times over.
       if (unaddedParts.length > 0) {
         const idsToDelete = unaddedParts.map(p => p.id);
         const { error: deleteError } = await supabase
           .from('build_bom')
           .delete()
           .in('id', idsToDelete);
-        
+
         if (deleteError) {
-          console.error('Error deleting unadded parts:', deleteError);
+          throw new Error('Failed to clear the old unadded BOM before refetching: ' + deleteError.message);
         }
       }
       

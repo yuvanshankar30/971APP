@@ -6,6 +6,7 @@
 // only that server route signs requests. See GitHub issue #86.
 import { PUBLIC_ONSHAPE_BASE_URL } from '$env/static/public';
 import { partClassificationService } from './bom_classify.js';
+import { isOnshapePlaceholderName } from './onshape_placeholder_names.js';
 
 const ENABLE_BBOX = false;
 
@@ -468,12 +469,13 @@ class OnShapeAPI {
                     vendor 
                 });
 
-                // OnShape gives an unnamed body the placeholder name "SOLID"
-                // or "COMPOUND" (and "SOLID_1", "COMPOUND_2", ... when
-                // there's more than one) - these are modeling artifacts, not
-                // real parts, and shouldn't clutter the manufacturing/
+                // OnShape gives an unnamed body a placeholder name - either
+                // "SOLID"/"COMPOUND" (with a numeric suffix when there's more
+                // than one), or the literal feature-operation name it
+                // inherited ("Chamfer1", "Boss-Extrude1", ...). None of these
+                // are real parts, and shouldn't clutter the manufacturing/
                 // purchasing workflow.
-                if (/^(SOLID|COMPOUND)(_\d+)?$/i.test(partName.trim())) {
+                if (isOnshapePlaceholderName(partName)) {
                     console.log(`Skipping unnamed OnShape body "${partName}"`);
                     continue;
                 }
