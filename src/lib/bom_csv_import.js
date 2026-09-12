@@ -148,10 +148,10 @@ export function classifyManualBomRow(row) {
 
   // COTS items stocked in the kitting bins by default, not requested
   // through purchasing - SDS-branded parts, fasteners, motors, gears,
-  // chain, electrical/control-system COTS (roboRIO, Pigeon, CANivore,
-  // breaker, battery, PDP/PDH), PCBs, and compression/extension springs.
-  // \bgears?\b (not "gear") so "gearbox" (a real router-cut plate part,
-  // "Gearbox Plate") isn't swept in by "gear" as a substring.
+  // chain, bearings, electrical/control-system COTS (roboRIO, Pigeon,
+  // CANivore, breaker, battery, PDP/PDH), PCBs, and compression/extension
+  // springs. \bgears?\b (not "gear") so "gearbox" (a real router-cut plate
+  // part, "Gearbox Plate") isn't swept in by "gear" as a substring.
   const isKitItem =
     name.includes('sds') ||
     name.includes('screw') || name.includes('bolt') || name.includes('nut') ||
@@ -160,7 +160,7 @@ export function classifyManualBomRow(row) {
     name.includes('roborio') || name.includes('pigeon') || name.includes('canivore') || name.includes('canivor') ||
     name.includes('breaker') || name.includes('battery') || name.includes('batteries') ||
     name.includes('pdp') || name.includes('pdh') ||
-    name.includes('spring') || name.includes('pcb') || name.includes('chain');
+    name.includes('spring') || name.includes('pcb') || name.includes('chain') || name.includes('bearing');
 
   const isCOTS =
     isKitItem ||

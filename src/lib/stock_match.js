@@ -90,13 +90,44 @@ export function pickStockAndWorkflow(stockData, part) {
     minDim = part.thickness;
   }
 
+  const name = (part.part_name || part.name || '').toLowerCase();
+
+  // A part explicitly named "tube" is tube stock even when there's no real
+  // dimension data to confirm an exact size - direct instruction: the name
+  // itself is a strong enough signal to prefer a tube pick over leaving it
+  // unassigned (unlike the generic no-match case, which stays blank rather
+  // than guess). Never guesses sheet stock for it.
+  const pickTubeByName = () => {
+    const routerStocks = stockData.router || [];
+    return routerStocks.find((s) => s.dimensions === 'Tube' && material.includes(s.material.toLowerCase()))
+      || routerStocks.find((s) => s.dimensions === 'Tube');
+  };
+
+  // Direct instruction: an aluminum router part with no way to detect its
+  // real thickness (no bounding box, no CSV thickness column) still
+  // defaults to 1/4" sheet rather than staying unassigned - a router sheet
+  // part is overwhelmingly more likely to be 1/4" than any other size, so
+  // this is a deliberate default (unlike the earlier "never guess router
+  // stock" fix, which was about not picking the wrong SHAPE, not this).
+  const pickDefaultAluminumSheet = () => {
+    const routerStocks = stockData.router || [];
+    return routerStocks.find((s) => s.dimensions === 'Sheet' && s.thickness === 0.25 && s.material.toLowerCase().includes('aluminum'));
+  };
+
   if (part.workflow === 'mill') {
-    const routerMatch = matchStockInWorkflow(stockData, 'router', material, minDim, midDim, maxDim, dimX, dimY);
+    const routerMatch = matchStockInWorkflow(stockData, 'router', material, minDim, midDim, maxDim, dimX, dimY)
+      || (name.includes('tube') ? pickTubeByName() : undefined)
+      || (material.includes('aluminum') ? pickDefaultAluminumSheet() : undefined);
     if (routerMatch) {
       return { stock: routerMatch, workflow: 'router' };
     }
   }
 
-  const stock = matchStockInWorkflow(stockData, part.workflow, material, minDim, midDim, maxDim, dimX, dimY);
+  let stock = matchStockInWorkflow(stockData, part.workflow, material, minDim, midDim, maxDim, dimX, dimY);
+  if (!stock && part.workflow === 'router') {
+    if (name.includes('tube')) stock = pickTubeByName();
+    else if (material.includes('aluminum')) stock = pickDefaultAluminumSheet();
+  }
+
   return { stock, workflow: part.workflow };
 }

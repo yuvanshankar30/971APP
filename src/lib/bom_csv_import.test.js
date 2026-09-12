@@ -197,6 +197,10 @@ describe('classifyManualBomRow', () => {
     expect(classifyManualBomRow(row({ part_name: '53 links #35 chain' }))).toEqual({ part_type: 'COTS', workflow: 'kit' });
   });
 
+  it('classifies bearings as a COTS kit item', () => {
+    expect(classifyManualBomRow(row({ part_name: 'Hub Bearing' }))).toEqual({ part_type: 'COTS', workflow: 'kit' });
+  });
+
   it('classifies foam as manufactured/router', () => {
     expect(classifyManualBomRow(row({ part_name: 'Bumper Foam' }))).toEqual({ part_type: 'manufactured', workflow: 'router' });
     expect(classifyManualBomRow(row({ part_name: 'Pad', material: 'Pool Noodle Foam' }))).toEqual({ part_type: 'manufactured', workflow: 'router' });

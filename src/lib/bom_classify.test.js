@@ -68,6 +68,11 @@ describe('manualClassification (COTS vs manufactured rules)', () => {
     expect(classify({ name: '53 links #35 chain' })).toMatchObject({ classification: 'COTS', workflow_status: 'kit' });
   });
 
+  it('classifies bearings as a COTS kit item', () => {
+    expect(classify({ name: 'Hub Bearing', part_number: 'P007317' })).toMatchObject({ classification: 'COTS', workflow_status: 'kit' });
+    expect(classify({ name: '0.5" ID Bearing (1.125" OD, 0.313" WD, Shielded, Flanged)' })).toMatchObject({ classification: 'COTS', workflow_status: 'kit' });
+  });
+
   it('assigns router for foam even without a "P" part number', () => {
     const result = classify({ name: 'Bumper Foam', part_number: '' });
     expect(result.classification).toBe('manufactured');

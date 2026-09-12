@@ -98,18 +98,64 @@ describe('pickStockAndWorkflow', () => {
     expect(result.stock?.description).toBe('1/4" Aluminum Sheet');
   });
 
-  it('leaves router stock unassigned rather than guessing when a bare thickness matches neither sheet nor tube stock', () => {
+  it('falls back to the 1/4" aluminum sheet default when a bare thickness matches neither sheet nor tube stock', () => {
     // thickness=1.0 matches neither the 0.25" sheet nor (since dimX/dimY are
-    // still NaN with no bounding box) the tube's outer_width/outer_height.
-    // Router has no generic "any stock of the right material" fallback -
-    // an unverified guess would read as a confirmed match, so it's better
-    // left blank for the user to pick themselves.
+    // still NaN with no bounding box) the tube's outer_width/outer_height -
+    // an aluminum router part with no confirmed depth defaults to 1/4"
+    // sheet by direct instruction, same as the no-thickness-at-all case.
     const result = pickStockAndWorkflow(stockData, { workflow: 'router', material: 'Aluminum', thickness: 1.0 });
+    expect(result.stock?.description).toBe('1/4" Aluminum Sheet');
+  });
+
+  it('does not default a non-aluminum bare-thickness mismatch to any stock', () => {
+    const result = pickStockAndWorkflow(stockData, { workflow: 'router', material: 'Titanium', thickness: 1.0 });
     expect(result.stock).toBeUndefined();
   });
 
   it('reassigns a bare-thickness mill guess to router, same as the bounding-box case', () => {
     const result = pickStockAndWorkflow(stockData, { workflow: 'mill', material: 'Aluminum', thickness: 0.25 });
+    expect(result.workflow).toBe('router');
+    expect(result.stock?.description).toBe('1/4" Aluminum Sheet');
+  });
+
+  it('picks a tube stock by name alone when a router part named "tube" has no dimension data', () => {
+    const result = pickStockAndWorkflow(stockData, { workflow: 'router', material: 'Aluminum', part_name: 'Left Cross Tube' });
+    expect(result.stock?.description).toBe('1x2 Aluminum Tube');
+  });
+
+  it('never picks sheet stock for a "tube"-named part even though sheet stock exists for the same material', () => {
+    const result = pickStockAndWorkflow(stockData, { workflow: 'router', material: 'Aluminum', part_name: 'Bottom Tube' });
+    expect(result.stock?.dimensions).toBe('Tube');
+  });
+
+  it('still picks some tube stock by name when the part has no material at all', () => {
+    const result = pickStockAndWorkflow(stockData, { workflow: 'router', part_name: 'Left Tube' });
+    expect(result.stock?.description).toBe('1x2 Aluminum Tube');
+  });
+
+  it('does not apply the tube-by-name fallback to a part with no "tube" in its name - defaults to 1/4" aluminum sheet instead', () => {
+    const result = pickStockAndWorkflow(stockData, { workflow: 'router', material: 'Aluminum', part_name: 'Gearbox Plate' });
+    expect(result.stock?.description).toBe('1/4" Aluminum Sheet');
+  });
+
+  it('reassigns a mill-guessed part named "tube" to router via the name fallback too', () => {
+    const result = pickStockAndWorkflow(stockData, { workflow: 'mill', material: 'Aluminum', part_name: 'crossmember tube' });
+    expect(result.workflow).toBe('router');
+    expect(result.stock?.description).toBe('1x2 Aluminum Tube');
+  });
+
+  it('defaults an aluminum router part with no detectable depth to 1/4" sheet', () => {
+    const result = pickStockAndWorkflow(stockData, { workflow: 'router', material: 'Aluminum', part_name: 'Side Panel' });
+    expect(result.stock?.description).toBe('1/4" Aluminum Sheet');
+  });
+
+  it('does not default to aluminum sheet for a non-aluminum router part with no depth', () => {
+    const result = pickStockAndWorkflow(stockData, { workflow: 'router', material: 'Titanium', part_name: 'Side Panel' });
+    expect(result.stock).toBeUndefined();
+  });
+
+  it('reassigns a mill-guessed aluminum part with no depth to router via the default-sheet fallback', () => {
+    const result = pickStockAndWorkflow(stockData, { workflow: 'mill', material: 'Aluminum', part_name: 'Side Panel' });
     expect(result.workflow).toBe('router');
     expect(result.stock?.description).toBe('1/4" Aluminum Sheet');
   });
