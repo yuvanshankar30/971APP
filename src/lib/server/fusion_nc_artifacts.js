@@ -30,6 +30,17 @@ export function validateFusionNcFiles(files) {
     if (!validRelativeName(file?.name) || names.has(file.name)) throw new Error('Fusion NC filenames must be unique safe relative paths');
     names.add(file.name);
     const bytes = decodeCanonicalBase64(file.contentBase64);
+    // A zero-byte "G-code" file is a silent failure, not a real result - the
+    // Runner's own post-export guards (camPlate.py/camTube.py/camTurning.py)
+    // only check that *some* files were produced, not that each one actually
+    // has content, so an empty file Fusion's post-processor touched but never
+    // wrote to could otherwise reach a "completed" job. A job in that state
+    // shows "No G-code files were posted for this job" in the UI even though
+    // fusion_nc_files isn't empty, and if it were ever installed and opened
+    // in JProg (the shop's sheet-nesting tool), JProg's parser has nothing to
+    // read at all. Reject it here instead, at the one place every Runner
+    // completion funnels through, so this can never reach a completed job.
+    if (bytes.length === 0) throw new Error(`Fusion NC file "${file.name}" has no G-code content`);
     totalBytes += bytes.length;
     if (totalBytes > MAX_TOTAL_BYTES) throw new Error('Fusion NC output exceeds the 20 MiB job limit');
     const sha256 = createHash('sha256').update(bytes).digest('hex');

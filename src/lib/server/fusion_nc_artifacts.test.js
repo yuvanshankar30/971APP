@@ -33,4 +33,17 @@ describe('Fusion NC artifact validation', () => {
   ])('rejects unsafe or unverifiable artifacts', (files) => {
     expect(() => validateFusionNcFiles(files)).toThrow();
   });
+
+  it('rejects a zero-byte file even with an otherwise-safe name - real bug this catches: a job completing with a G-code file that has nothing in it', () => {
+    expect(() => validateFusionNcFiles([{ name: 'setup-1/output.tap', contentBase64: '' }]))
+      .toThrow(/no G-code content/);
+  });
+
+  it('accepts a file with real content alongside one that has none only if every file has content', () => {
+    const real = Buffer.from('%\nG54\nM30\n%').toString('base64');
+    expect(() => validateFusionNcFiles([
+      { name: 'G54.tap', contentBase64: real },
+      { name: 'G55.tap', contentBase64: '' }
+    ])).toThrow(/no G-code content/);
+  });
 });
