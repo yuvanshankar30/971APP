@@ -244,12 +244,16 @@ browser confirmation or prompt popups.
   requires a ball-count estimate with selectable 25-ball suggestions or typed
   whole numbers, ranges, and lower bounds, storing the input and parsed bounds.
   Pre-match captures the scout name and preload, and shows alliance-specific starting-position photos configured by scouting
-  admins (with clearly labeled schematic cues until actual photos are supplied).
+  admins (with the bundled WPILib 2026 REBUILT field image and highlighted
+  starting lanes as the default). Field previews orient the own alliance wall
+  on the left; the vendored image attribution/license is in
+  `static/rebuilt-2026-field.LICENSE.txt`.
   Admins can correct email-only profile names directly from Competition Roles;
   Match Scout display labels retain existing Data Scout permission keys.
   Auto records completed cycles and fuel sources (Neutral Zone, Outpost, Depot, Ground, Preload). Teleop requires
   roles (Scorer, Defense, Shuttler, or explicitly None observed), shot accuracy
-  and BPS ratings or explicit Unknown answers, significant-crash/target answers,
+  and BPS ratings (click a selected rating again to leave it unjudged; no
+  separate Unknown buttons), significant-crash/target answers,
   and active/dead/brownout/unknown status. Cycle speed and reliability are no
   longer collected; post-match uses a single driver-skill rating. Historical
   reports retain their original fields. Apply `20260913_match_scouting_form_v2.sql`
