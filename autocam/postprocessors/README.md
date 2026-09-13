@@ -53,29 +53,24 @@ prior assumptions here that turned out to be wrong:
   appears in `shopsabre.cps`'s `onClose` - matches this app's existing
   per-dialect M30 handling.
 
-## Deliberate patch: `shopsabre.cps` peck-drilling cycles (2026-09-12)
+## These files are kept pristine - known JProg gaps are NOT patched around here
 
-Unlike the facts above (which only *describe* the real post-processor),
-`onCyclePoint`'s `"chip-breaking"` and `"deep-drilling"` cases were actually
-edited here - the one place this file is not a pristine mirror of what a
-generic Autodesk post library would produce. Originally they emitted G73/G83
-canned peck-drilling cycles when the operation's depth/dwell made the canned
-form usable; now they always call `expandCyclePoint(x, y, z)` instead (the
-same standard Autodesk fallback the `default:` case already used for cycle
-types this post doesn't special-case). Reason: JProg (`jprog/`, the shop's
-sheet-nesting/G-code tool - see its own `Parser/GCode/GCodeParserWinCNC.java`)
-has a fixed, closed set of G-codes it understands and aborts the whole file
-on anything outside it; G73/G83 aren't in that set and JProg's parser cannot
-be modified (see `jprog/README.md`). `expandCyclePoint` writes the identical
-physical tool motion - same peck depths, same retracts, same feed - as plain
-G0/G1 moves instead of the canned-cycle shorthand, which a real WinCNC
-control executes identically either way. Tapping (G74/G84) was deliberately
-left alone: it requires spindle-feed synchronization that a plain G0/G1
-expansion cannot reproduce, so expanding it would be genuinely wrong, not
-just inconvenient - it stays gated behind the `useTappingCycle` property
-(`false` by default), which makes the post-processor refuse the job outright
-rather than emit an unsynchronized tapping move. Both copies of this file
-(`autocam/postprocessors/shopsabre.cps` and
-`autocam/fusion/runner/postprocessors/shopsabre.cps`, the one actually
-distributed to Fusion by the Runner) were updated together to stay
-identical, matching how they've always been kept in sync.
+Both `.cps` files are deliberately treated as an unmodified mirror of the
+real, vendor/Autodesk-sourced post-processor - not a place to work around a
+downstream consumer's limitations. `autocam/postprocessors/shopsabre.cps`
+and `autocam/fusion/runner/postprocessors/shopsabre.cps` (the one actually
+distributed to Fusion by the Runner) are kept byte-identical to each other
+and were last re-synced from a canonical copy on 2026-09-13.
+
+A real, still-open compatibility gap with this exact policy in mind: JProg
+(`jprog/`, the shop's sheet-nesting/G-code tool)'s WinCNC parser
+(`Parser/GCode/GCodeParserWinCNC.java`) has a fixed, closed set of G-codes it
+understands and aborts the whole file on anything outside it - and every
+real completed `.tap` job in the live `cam_jobs` table has come out in
+millimeters (`G22`, which that parser has no case for at all), and
+`onCyclePoint`'s `"chip-breaking"`/`"deep-drilling"` cycle types can emit
+G73/G83 (also unsupported) depending on the CAM operation's depth/dwell
+settings. Neither is patched here - see `autocam/fusion/gcodeUnitConvert.js`
+for the actual fix for the units gap, applied to already-posted G-code text
+rather than to this file. JProg's own parser cannot be modified either (see
+`jprog/README.md`).
