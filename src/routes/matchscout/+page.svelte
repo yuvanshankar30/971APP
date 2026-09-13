@@ -745,7 +745,7 @@
             {#if crashTarget === 'other'}<label>Other target (required)<input class="form-input" maxlength="500" bind:value={crashDetails} /></label>{/if}
           {/if}
         </fieldset>
-        <fieldset class="control-group"><legend>Robot status (required)</legend><div class="choice-grid">{#each [['active', 'Active'], ['dead', 'Dead / broke down'], ['unknown', 'Unknown']] as [status, label]}<button class:chosen={teleopRobotStatus === status} on:click={() => teleopRobotStatus = status}>{label}</button>{/each}</div></fieldset>
+        <fieldset class="control-group"><legend>Robot status (required)</legend><div class="choice-grid">{#each [['active', 'Active'], ['dead', 'Dead'], ['stopped', 'Stopped']] as [status, label]}<button class:chosen={teleopRobotStatus === status} on:click={() => teleopRobotStatus = status}>{label}</button>{/each}</div></fieldset>
         <label class="notes-label scouter-notes">Real-scout observations (optional)<textarea class="form-input" rows="9" placeholder="What did the robot actually do? Note repeatable strengths, defense response, cycle consistency, field awareness, or anything the numbers miss." bind:value={teleopNotes}></textarea></label>
         {#if error}<p class="submit-error" role="alert">{error}</p>{/if}
         <div class="section-footer"><button class="btn" on:click={() => selectPhase('auto')}>Back</button><button class="btn btn-primary" on:click={continueToPostMatch}>Continue to post-match <ChevronRight size={16} /></button></div>

@@ -24,6 +24,13 @@ describe('match scouting v2', () => {
     expect(result.error).toBeNull();
     expect(result.value).toMatchObject({ ratings: { ...report.ratings, Defense: 4, 'Driver awareness': 2, 'Cycle speed': 3, Reliability: 5 }, intake_speed: 3, intake_jammed: true });
   });
+  it('saves Stopped and continues to read historical status values', () => {
+    for (const status of ['active', 'dead', 'stopped', 'brownout', 'unknown']) {
+      const result = normalizeMatchScoutEntry({ ...report, teleop_robot_status: status }, 'actor');
+      expect(result.error).toBeNull();
+      expect(result.value.teleop_robot_status).toBe(status);
+    }
+  });
   it('accepts ranges and rejects malformed or fractional ball counts', () => {
     expect(normalizeMatchScoutEntry({ ...report, balls_scored_band: '100-150' }).value.balls_scored_average).toBe(125);
     for (const input of ['', 'lots', '150-100', '1.5']) {
