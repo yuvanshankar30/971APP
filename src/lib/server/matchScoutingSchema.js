@@ -12,7 +12,7 @@ import {
   MATCH_RATING_FIELDS,
   TELEOP_ROLES as SHARED_TELEOP_ROLES,
   parseAutoPointsEstimate,
-  AUTO_FUEL_SOURCES, MATCH_FORM_ROLES, MATCH_FORM_RATING_FIELDS, validateMatchScoutForm
+  AUTO_FUEL_SOURCES, MATCH_FORM_ROLES, MATCH_FORM_RATING_FIELDS, MATCH_OPTIONAL_RATING_FIELDS, validateMatchScoutForm
 } from '$lib/matchScouting.js';
 
 export const START_POSITIONS = ['left trench', 'left mound', 'center', 'right mound', 'right trench'];
@@ -158,7 +158,7 @@ export function normalizeMatchScoutEntry(body, actorId = null) {
         preload: body.preload,
         auto_cycles: Number.isInteger(body.auto_cycles) && body.auto_cycles >= 0 && body.auto_cycles <= 100 ? body.auto_cycles : null,
         teleop_roles_none: body.teleop_roles_none === true && !body.teleop_roles.length,
-        ratings_unknown: normalizeStringList(body.ratings_unknown, MATCH_FORM_RATING_FIELDS),
+        ratings_unknown: normalizeStringList(body.ratings_unknown, [...MATCH_FORM_RATING_FIELDS, ...MATCH_OPTIONAL_RATING_FIELDS]),
         significant_crash: body.significant_crash,
         crash_target: body.significant_crash ? body.crash_target : null,
         crash_details: body.significant_crash ? trimmed(body.crash_details, 500) : null,
@@ -188,7 +188,7 @@ export function normalizeMatchScoutEntry(body, actorId = null) {
       auto_collision_notes: trimmed(body?.auto_collision_notes, 500),
       auto_path_name: trimmed(body?.auto_path_name, 120),
       auto_path: normalizeAutoPath(body?.auto_path),
-      ratings: normalizeRatings(currentForm ? Object.fromEntries(MATCH_FORM_RATING_FIELDS.map(field => [field, body.ratings?.[field]])) : body?.ratings),
+      ratings: normalizeRatings(body?.ratings),
       teleop_roles: normalizeStringList(body?.teleop_roles, currentForm ? MATCH_FORM_ROLES : TELEOP_ROLES),
       teleop_notes: trimmed(body?.teleop_notes),
       intake_speed: Number.isFinite(Number(body?.intake_speed))

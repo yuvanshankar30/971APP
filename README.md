@@ -254,8 +254,12 @@ browser confirmation or prompt popups.
   roles (Scorer, Defense, Shuttler, or explicitly None observed), shot accuracy
   and BPS ratings (click a selected rating again to leave it unjudged; no
   separate Unknown buttons), significant-crash/target answers,
-  and active/dead/brownout/unknown status. Cycle speed and reliability are no
-  longer collected; post-match uses a single driver-skill rating. Historical
+  and robot status (Active, Dead / broke down, or Unknown). Brownouts use the
+  Dead / broke down option; historical brownout answers reopen under that
+  option when editing. Optional driver awareness, defense, and reliability ratings
+  use the original 1–5 scale. Intake speed (1–3) and intake-jam observations
+  are also collected and restored when editing reports. Cycle speed and driver skill are no longer collected; existing values
+  are preserved when editing historical reports. Historical
   reports retain their original fields. Match scouts can reopen their submitted
   answers immediately or find their own active-event reports in **My reports**,
   search by team or match, and save corrections to the existing report.

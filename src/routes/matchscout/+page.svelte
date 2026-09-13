@@ -1,15 +1,15 @@
 <script>
   import { onMount } from 'svelte';
   import RebuiltFieldMap from '$lib/components/RebuiltFieldMap.svelte';
-  import { BALL_COUNT_RANGES, MATCH_FORM_RATING_FIELDS, MATCH_FORM_ROLES as TELEOP_ROLES, AUTO_FUEL_SOURCES, ACCURACY_LABELS, BPS_LABELS, validateMatchScoutForm, parseAutoPointsEstimate } from '$lib/matchScouting.js';
+  import { BALL_COUNT_RANGES, MATCH_FORM_RATING_FIELDS, MATCH_OPTIONAL_RATING_FIELDS, MATCH_FORM_ROLES as TELEOP_ROLES, AUTO_FUEL_SOURCES, ACCURACY_LABELS, BPS_LABELS, validateMatchScoutForm, parseAutoPointsEstimate } from '$lib/matchScouting.js';
   import { userProfile } from '$lib/stores/auth.js';
   import { getAuthHeader } from '$lib/supabase.js';
   import { fetchActiveScoutingEventKey } from '$lib/scoutingEvent.js';
   import { AlertTriangle, Check, ChevronRight, ClipboardCheck, MapPinned, Route, RotateCcw, Timer, Trophy } from 'lucide-svelte';
 
   const START_POSITIONS = ['left trench', 'left mound', 'center', 'right mound', 'right trench'];
-  const RATING_FIELDS = MATCH_FORM_RATING_FIELDS;
-  const TELEOP_RATING_FIELDS = RATING_FIELDS;
+  const RATING_FIELDS = [...MATCH_FORM_RATING_FIELDS, ...MATCH_OPTIONAL_RATING_FIELDS];
+  const TELEOP_RATING_FIELDS = MATCH_FORM_RATING_FIELDS;
   const BALL_SOURCE_OPTIONS = AUTO_FUEL_SOURCES.map(source => [source, source]);
   const AUTO_POINTS_SLIDER_MAX = 500;
 
@@ -44,9 +44,11 @@
   let ratings = Object.fromEntries(RATING_FIELDS.map((field) => [field, 0]));
   let teleopRoles = [];
   let teleopNotes = '';
+  let intakeSpeed = 0;
+  let intakeJammed = false;
   let robotDisabled = '';
   let card = '';
-  let driverSkill = 0;
+  let driverSkill;
   let pitProblem = false;
   let pitProblemDetails = '';
   let postNotes = '';
@@ -94,9 +96,9 @@
     autoPoints = ''; autoMoved = ''; autoCycles = null; autoPath = []; autoPathName = '';
     ballSources = []; ballsScored = ''; autoCollision = false; autoCollisionNotes = '';
     ratings = Object.fromEntries(RATING_FIELDS.map(field => [field, 0])); ratingsUnknown = [];
-    teleopRoles = []; teleopRolesNone = false; teleopNotes = '';
+    teleopRoles = []; teleopRolesNone = false; teleopNotes = ''; intakeSpeed = 0; intakeJammed = false;
     significantCrash = null; crashTarget = ''; crashDetails = ''; teleopRobotStatus = '';
-    mechanicalBreak = null; robotDisabled = ''; card = ''; driverSkill = 0;
+    mechanicalBreak = null; robotDisabled = ''; card = ''; driverSkill = undefined;
     pitProblem = false; pitProblemDetails = ''; postNotes = ''; error = '';
     savedAutoPaths = []; selectedSavedPathId = ''; pathFileMessage = '';
     selectPhase('prematch');
@@ -318,19 +320,21 @@
       ballsScored = entry.balls_scored_band || '';
       autoCollision = entry.auto_collision === true;
       autoCollisionNotes = entry.auto_collision_notes || '';
-      ratings = Object.fromEntries(RATING_FIELDS.map(field => [field, entry.ratings?.[field] || 0]));
+      ratings = { ...(entry.ratings || {}), ...Object.fromEntries(RATING_FIELDS.map(field => [field, entry.ratings?.[field] || 0])) };
       ratingsUnknown = [...(entry.ratings_unknown || [])];
       teleopRoles = [...(entry.teleop_roles || [])];
       teleopRolesNone = entry.teleop_roles_none === true;
       teleopNotes = entry.teleop_notes || '';
+      intakeSpeed = entry.intake_speed || 0;
+      intakeJammed = entry.intake_jammed === true;
       significantCrash = entry.significant_crash ?? null;
       crashTarget = entry.crash_target || '';
       crashDetails = entry.crash_details || '';
-      teleopRobotStatus = entry.teleop_robot_status || '';
+      teleopRobotStatus = entry.teleop_robot_status === 'brownout' ? 'dead' : entry.teleop_robot_status || '';
       mechanicalBreak = entry.mechanical_break ?? null;
       robotDisabled = entry.robot_disabled || '';
       card = entry.card || 'none';
-      driverSkill = entry.driver_skill || 0;
+      driverSkill = entry.driver_skill ?? undefined;
       pitProblem = Boolean(problem);
       pitProblemDetails = problem?.summary || '';
       postNotes = entry.post_notes || '';
@@ -387,6 +391,8 @@
         ratings,
         teleop_roles: teleopRoles,
         teleop_notes: teleopNotes,
+        intake_speed: intakeSpeed || null,
+        intake_jammed: intakeJammed,
         robot_disabled: teleopRobotStatus === 'dead' ? 'died' : robotDisabled,
         // The UI says "None"; the stored vocabulary uses an empty string.
         card: card === 'none' ? '' : card,
@@ -713,6 +719,16 @@
             <small class="field-help">{(field === 'BPS' ? BPS_LABELS : ACCURACY_LABELS).map((label, index) => `${index + 1}: ${label}`).join(' · ')}</small>
           {/each}
         </div>
+        <div class="ratings-grid">
+          <div class="ratings-heading"><span class="field-label">Additional performance ratings (optional)</span><small>1 = poor, 5 = excellent. Leave blank when not observed; click a selected rating again to clear it.</small></div>
+          {#each MATCH_OPTIONAL_RATING_FIELDS as field}
+            <div class="rating-row"><span>{field}</span><div class="rating-buttons">{#each [1, 2, 3, 4, 5] as value}<button aria-pressed={ratings[field] === value} aria-label={`${field}: ${value} of 5`} class:chosen={ratings[field] === value} on:click={() => toggleRating(field, value)}>{value}</button>{/each}</div></div>
+          {/each}
+        </div>
+        <div class="intake-observations">
+          <div class="control-group"><span class="field-label">Intake speed (optional)</span><small class="field-help">1 = slow, 3 = fast. Leave blank when not observed; click again to clear.</small><div class="rating-buttons large">{#each [1, 2, 3] as value}<button aria-pressed={intakeSpeed === value} class:chosen={intakeSpeed === value} on:click={() => intakeSpeed = intakeSpeed === value ? 0 : value}>{value}</button>{/each}</div></div>
+          <label class="incident-toggle intake-jam-toggle"><input type="checkbox" bind:checked={intakeJammed} /><span><AlertTriangle size={17} /> Intake jammed during the match</span></label>
+        </div>
         <fieldset class="control-group">
           <legend>Significant crash (required)</legend>
           <div class="segmented">
@@ -729,14 +745,13 @@
             {#if crashTarget === 'other'}<label>Other target (required)<input class="form-input" maxlength="500" bind:value={crashDetails} /></label>{/if}
           {/if}
         </fieldset>
-        <fieldset class="control-group"><legend>Dead / brownout status (required)</legend><div class="choice-grid">{#each ['active', 'dead', 'brownout', 'unknown'] as status}<button class:chosen={teleopRobotStatus === status} on:click={() => teleopRobotStatus = status}>{status}</button>{/each}</div></fieldset>
+        <fieldset class="control-group"><legend>Robot status (required)</legend><div class="choice-grid">{#each [['active', 'Active'], ['dead', 'Dead / broke down'], ['unknown', 'Unknown']] as [status, label]}<button class:chosen={teleopRobotStatus === status} on:click={() => teleopRobotStatus = status}>{label}</button>{/each}</div></fieldset>
         <label class="notes-label scouter-notes">Real-scout observations (optional)<textarea class="form-input" rows="9" placeholder="What did the robot actually do? Note repeatable strengths, defense response, cycle consistency, field awareness, or anything the numbers miss." bind:value={teleopNotes}></textarea></label>
         {#if error}<p class="submit-error" role="alert">{error}</p>{/if}
         <div class="section-footer"><button class="btn" on:click={() => selectPhase('auto')}>Back</button><button class="btn btn-primary" on:click={continueToPostMatch}>Continue to post-match <ChevronRight size={16} /></button></div>
       {:else}
         <div class="section-heading"><div><span class="eyebrow">Post-match</span><h2>Match outcome</h2><p>Close out the report and flag anything the ACE Team needs to inspect.</p></div><Trophy size={20} /></div>
         <div class="post-grid"><fieldset><legend>Cards</legend><div class="choice-grid"><button class:chosen={card === 'none'} on:click={() => card = 'none'}>None</button><button class:chosen={card === 'yellow'} on:click={() => card = 'yellow'}>Yellow</button><button class:chosen={card === 'red'} on:click={() => card = 'red'}>Red</button></div></fieldset></div>
-        <div class="control-group"><span class="field-label">Driver skill</span><div class="rating-buttons large">{#each [1, 2, 3, 4, 5] as value}<button class:chosen={driverSkill === value} on:click={() => driverSkill = value}>{value}</button>{/each}</div></div>
         <fieldset class="control-group"><legend>Mechanical break (required)</legend><div class="segmented"><button class:chosen={mechanicalBreak === false} on:click={() => mechanicalBreak = false}>No</button><button class:chosen={mechanicalBreak === true} on:click={() => mechanicalBreak = true}>Yes — ACE Team report required</button></div></fieldset>
         {#if requiresPitReport}
           <div class="required-handoff"><AlertTriangle size={17} /><span>An ACE Team report is required for a mechanical break, dead, or disabled robot.</span></div>
