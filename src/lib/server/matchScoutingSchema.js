@@ -11,7 +11,8 @@ import {
   BALL_COUNT_RANGES as SHARED_BALL_COUNT_RANGES,
   MATCH_RATING_FIELDS,
   TELEOP_ROLES as SHARED_TELEOP_ROLES,
-  parseAutoPointsEstimate
+  parseAutoPointsEstimate,
+  AUTO_FUEL_SOURCES, MATCH_FORM_ROLES, MATCH_FORM_RATING_FIELDS, validateMatchScoutForm
 } from '$lib/matchScouting.js';
 
 export const START_POSITIONS = ['left trench', 'left mound', 'center', 'right mound', 'right trench'];
@@ -48,11 +49,11 @@ export function requiresPitProblemReport(robotDisabled) {
 }
 
 export function validatePitProblemHandoff(body) {
-  const requested = body?.report_pit_problem === true || requiresPitProblemReport(body?.robot_disabled);
+  const requested = body?.teleop_robot_status === 'dead' || body?.mechanical_break === true || body?.report_pit_problem === true || requiresPitProblemReport(body?.robot_disabled);
   if (!requested) return null;
   return trimmed(body?.pit_problem_summary, MAX_SUMMARY_LENGTH)
     ? null
-    : 'Describe the problem for pit scouting when the robot is disabled or died';
+    : 'Describe the problem for the ACE Team when the robot breaks, is disabled, or died';
 }
 
 /** Team keys arrive as "971", "frc971" or " frc971 " depending on the caller. */
@@ -91,7 +92,7 @@ export function normalizeAutoPath(value) {
 export function normalizeRatings(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   const ratings = {};
-  for (const field of RATING_FIELDS) {
+  for (const field of [...RATING_FIELDS, 'BPS']) {
     const raw = Number(value[field]);
     if (!Number.isFinite(raw)) continue;
     const clamped = Math.min(5, Math.max(0, Math.round(raw)));
@@ -134,7 +135,15 @@ export function normalizeMatchScoutEntry(body, actorId = null) {
   // Balls are picked from a fixed bucket list, so an unrecognized value is a
   // client that has drifted from the vocabulary rather than a scout typo -
   // dropped like every other out-of-vocabulary field instead of stored.
-  const ballsBand = oneOf(body?.balls_scored_band, BALL_COUNT_RANGES);
+  const currentForm = body?.form_version === 2;
+  if (currentForm) {
+    const invalid = validateMatchScoutForm(body);
+    if (invalid) return { value: null, error: invalid };
+    if (!START_POSITIONS.includes(body.starting_position)) return { value: null, error: 'Select a starting position.' };
+    if (typeof body.mechanical_break !== 'boolean') return { value: null, error: 'Select whether a mechanical break occurred.' };
+    if (body.auto_cycles != null && (!Number.isInteger(body.auto_cycles) || body.auto_cycles < 0 || body.auto_cycles > 100)) return { value: null, error: 'Auto cycles must be a whole number from 0 to 100.' };
+  }
+  const ballsBand = currentForm ? body.balls_scored_band : oneOf(body?.balls_scored_band, BALL_COUNT_RANGES);
   const balls = ballsBand ? parseAutoPointsEstimate(ballsBand) : null;
 
   const driverSkillRaw = Number(body?.driver_skill);
@@ -143,6 +152,19 @@ export function normalizeMatchScoutEntry(body, actorId = null) {
       event_key,
       match_key,
       team_key,
+      ...(currentForm ? {
+        form_version: 2,
+        scout_name: trimmed(body.scout_name, 120),
+        preload: body.preload,
+        auto_cycles: Number.isInteger(body.auto_cycles) && body.auto_cycles >= 0 && body.auto_cycles <= 100 ? body.auto_cycles : null,
+        teleop_roles_none: body.teleop_roles_none === true && !body.teleop_roles.length,
+        ratings_unknown: normalizeStringList(body.ratings_unknown, MATCH_FORM_RATING_FIELDS),
+        significant_crash: body.significant_crash,
+        crash_target: body.significant_crash ? body.crash_target : null,
+        crash_details: body.significant_crash ? trimmed(body.crash_details, 500) : null,
+        teleop_robot_status: body.teleop_robot_status,
+        mechanical_break: body.mechanical_break
+      } : {}),
       alliance: oneOf(body?.alliance, ['red', 'blue']),
       starting_position: oneOf(body?.starting_position, START_POSITIONS),
       auto_start_zone: oneOf(body?.auto_start_zone, AUTO_ZONES),
@@ -154,7 +176,7 @@ export function normalizeMatchScoutEntry(body, actorId = null) {
       auto_points_average: autoPoints?.average ?? null,
       auto_finish: trimmed(body?.auto_finish, 120),
       auto_moved: trimmed(body?.auto_moved, 40),
-      ball_sources: normalizeStringList(body?.ball_sources, BALL_SOURCES),
+      ball_sources: normalizeStringList(body?.ball_sources, currentForm ? AUTO_FUEL_SOURCES : BALL_SOURCES),
       // Same shape as auto points: the readable bucket plus its parsed bounds,
       // so analytics never has to re-parse text. "500+" has no max, and its
       // average is the lower bound rather than an invented midpoint.
@@ -166,15 +188,15 @@ export function normalizeMatchScoutEntry(body, actorId = null) {
       auto_collision_notes: trimmed(body?.auto_collision_notes, 500),
       auto_path_name: trimmed(body?.auto_path_name, 120),
       auto_path: normalizeAutoPath(body?.auto_path),
-      ratings: normalizeRatings(body?.ratings),
-      teleop_roles: normalizeStringList(body?.teleop_roles, TELEOP_ROLES),
+      ratings: normalizeRatings(currentForm ? Object.fromEntries(MATCH_FORM_RATING_FIELDS.map(field => [field, body.ratings?.[field]])) : body?.ratings),
+      teleop_roles: normalizeStringList(body?.teleop_roles, currentForm ? MATCH_FORM_ROLES : TELEOP_ROLES),
       teleop_notes: trimmed(body?.teleop_notes),
       intake_speed: Number.isFinite(Number(body?.intake_speed))
         ? Math.min(3, Math.max(1, Math.round(Number(body.intake_speed))))
         : null,
       intake_jammed: body?.intake_jammed === true,
-      crash_or_break: body?.crash_or_break === true,
-      robot_disabled: oneOf(body?.robot_disabled, DISABLED_STATES),
+      crash_or_break: currentForm ? body.mechanical_break || body.significant_crash : body?.crash_or_break === true,
+      robot_disabled: currentForm && body.teleop_robot_status === 'dead' ? 'died' : oneOf(body?.robot_disabled, DISABLED_STATES),
       card: oneOf(body?.card, CARDS),
       driver_skill: Number.isFinite(driverSkillRaw)
         ? Math.min(5, Math.max(0, Math.round(driverSkillRaw)))

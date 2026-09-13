@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte';
+  import { scoutDisplayName } from '$lib/scoutNames.js';
   import { userStore } from '$lib/stores/auth.js';
   import { getAuthHeader } from '$lib/supabase.js';
   import { fetchActiveScoutingEventKey } from '$lib/scoutingEvent.js';
@@ -60,7 +61,7 @@
 
   function findUserName(userId) {
     const matched = users.find((userRow) => userRow.id === userId);
-    return matched?.full_name || matched?.email || null;
+    return matched ? scoutDisplayName(matched) : null;
   }
 
   function stageAssignments(nextAssignments, message) {
@@ -207,7 +208,7 @@
       const chosen = shuffled[index % shuffled.length];
       newAssignments[team.key] = {
         user_id: chosen.id,
-        user_name: chosen.full_name || chosen.email
+        user_name: scoutDisplayName(chosen)
       };
     });
 
@@ -356,13 +357,13 @@
               class="scout-drop-zone"
               class:drop-target={dropTargetUserId === scout.id}
               role="group"
-              aria-label={`Drop teams onto ${scout.full_name || scout.email}`}
+              aria-label={`Drop teams onto ${scoutDisplayName(scout)}`}
               on:dragenter={() => (dropTargetUserId = scout.id)}
               on:dragleave={() => (dropTargetUserId = '')}
               on:dragover|preventDefault
               on:drop={(event) => dropTeamOnScout(event, scout.id)}
             >
-              <div class="scout-drop-name">{scout.full_name || scout.email}</div>
+              <div class="scout-drop-name">{scoutDisplayName(scout)}</div>
               <div class="team-chip-list">
                 {#each Object.entries(assignments).filter(([, value]) => value?.user_id === scout.id) as [teamKey]}
                   <button class="team-chip assigned" type="button" draggable="true" on:dragstart={(event) => startTeamDrag(event, teamKey)} on:dragend={finishTeamDrag}>

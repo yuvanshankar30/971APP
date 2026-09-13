@@ -233,7 +233,7 @@ browser confirmation or prompt popups.
   queue backed by `pit_problem_reports`; open problems can be resolved or
   reopened from Pit Scouting instead of disappearing into browser-local state.
   Match Scouting keeps robot status available throughout the workflow and
-  requires a described pit handoff whenever a robot is marked disabled or dead;
+  requires a described ACE Team handoff whenever a robot breaks mechanically or is marked disabled or dead;
   general notes and the auto-path drawing remain optional. The path tool uses
   a simplified, alliance-relative version of WPILib/AdvantageScope's top-down
   2026 REBUILT field, so the scout's wall is always on the left and red/blue
@@ -241,10 +241,19 @@ browser confirmation or prompt popups.
   continues the saved route; only Clear removes it. Auto scoring accepts an
   exact estimate, a bounded range such as `40-60` (stored average `50`), or an open
   lower bound such as `100+` (conservatively stored as at least `100`). Teleop
-  also offers an optional ball-count estimate in 25-ball buckets through an
-  open-ended `500+` bucket, storing the selected label and parsed bounds for
-  later analytics. It adds optional observed-role tags and five quick ratings while keeping every
-  subjective input skippable; teleop and post-match prose areas are deliberately
+  requires a ball-count estimate with selectable 25-ball suggestions or typed
+  whole numbers, ranges, and lower bounds, storing the input and parsed bounds.
+  Pre-match captures the scout name and preload, and shows alliance-specific starting-position photos configured by scouting
+  admins (with clearly labeled schematic cues until actual photos are supplied).
+  Admins can correct email-only profile names directly from Competition Roles;
+  Match Scout display labels retain existing Data Scout permission keys.
+  Auto records completed cycles and fuel sources (Neutral Zone, Outpost, Depot, Ground, Preload). Teleop requires
+  roles (Scorer, Defense, Shuttler, or explicitly None observed), shot accuracy
+  and BPS ratings or explicit Unknown answers, significant-crash/target answers,
+  and active/dead/brownout/unknown status. Cycle speed and reliability are no
+  longer collected; post-match uses a single driver-skill rating. Historical
+  reports retain their original fields. Apply `20260913_match_scouting_form_v2.sql`
+  before deploying this form. Teleop and post-match prose areas are deliberately
   large enough for real scout observations. Timed robot actions, per-fuel
   taps and the objective endgame result are recorded through Quick Scout
   (`quickscout/`), which writes the same `scout_data_events` the removed

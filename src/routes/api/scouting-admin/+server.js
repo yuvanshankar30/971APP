@@ -1603,6 +1603,37 @@ export async function POST({ request }) {
     }
 
     if (action !== 'update-competition-role') {
+      if (action === 'update-scout-name') {
+        const targetId = String(body.target_user_id || '').trim();
+        const name = String(body.full_name || '').trim();
+        if (!targetId || !name || name.length > 120 || name.includes('@')) return json({ error: 'Enter a real name of 1–120 characters, not an email.' }, { status: 400 });
+        const { data, error } = await db.from('user_profiles').update({ full_name: name }).eq('id', targetId).select('id, full_name').single();
+        if (error) return json({ error: error.message }, { status: 500 });
+        return json({ success: true, data });
+      }
+      if (action === 'create-start-photo-upload') {
+        const extension = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }[body.content_type];
+        if (!extension || !Number.isInteger(body.size) || body.size <= 0 || body.size > 5 * 1024 * 1024) return json({ error: 'Use a JPEG, PNG, or WebP image up to 5 MiB.' }, { status: 400 });
+        const path = `match-starts/${crypto.randomUUID()}.${extension}`;
+        const { data, error } = await db.storage.from(PIT_SCOUT_PHOTO_BUCKET).createSignedUploadUrl(path);
+        if (error) return json({ error: error.message }, { status: 500 });
+        return json({ success: true, data });
+      }
+      if (action === 'save-start-photo') {
+        const positions = ['left trench', 'left mound', 'center', 'right mound', 'right trench'];
+        if (!['red', 'blue'].includes(body.alliance) || !positions.includes(body.position) || !/^match-starts\/[a-f0-9-]+\.(jpg|png|webp)$/.test(body.path || '')) return json({ error: 'Invalid start-photo selection.' }, { status: 400 });
+        const filename = body.path.split('/')[1];
+        const { data: files, error: listError } = await db.storage.from(PIT_SCOUT_PHOTO_BUCKET).list('match-starts', { search: filename });
+        const file = files?.find(row => row.name === filename);
+        const size = Number(file?.metadata?.size);
+        if (listError || !file || !Number.isFinite(size) || size <= 0 || size > 5 * 1024 * 1024) return json({ error: 'Upload a valid photo before saving it.' }, { status: 400 });
+        const { data: settings, error: readError } = await db.from('scouting_settings').select('start_position_photos').eq('id', 1).maybeSingle();
+        if (readError) return json({ error: readError.message }, { status: 500 });
+        const photos = { ...(settings?.start_position_photos || {}), [`${body.alliance}:${body.position}`]: body.path };
+        const { error } = await db.from('scouting_settings').upsert({ id: 1, start_position_photos: photos, updated_by: actorId, updated_at: new Date().toISOString() }, { onConflict: 'id' });
+        if (error) return json({ error: error.message }, { status: 500 });
+        return json({ success: true });
+      }
       return json({ error: 'Invalid action' }, { status: 400 });
     }
 

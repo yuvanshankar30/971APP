@@ -85,7 +85,7 @@ async function collectEventScouting(db, eventKey) {
     data_events: eventsResult.data || [],
     match_entries: (matchResult.data || []).map((entry) => ({
       ...entry,
-      scout_name: userNames.get(entry.created_by) || null
+      scout_name: entry.scout_name || userNames.get(entry.created_by) || null
     })),
     pit_entries: pitResult.data || [],
     notes: notesResult.data || [],

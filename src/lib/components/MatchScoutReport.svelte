@@ -1,5 +1,5 @@
 <script>
-  import { MATCH_RATING_FIELDS } from '$lib/matchScouting.js';
+  import { MATCH_RATING_FIELDS, MATCH_FORM_RATING_FIELDS, ACCURACY_LABELS, BPS_LABELS } from '$lib/matchScouting.js';
 
   export let report;
   export let showTeam = false;
@@ -32,6 +32,7 @@
       <dl>
         <div><dt>Alliance</dt><dd>{valueOrDash(report?.alliance)}</dd></div>
         <div><dt>Starting position</dt><dd>{valueOrDash(report?.starting_position)}</dd></div>
+        {#if report?.form_version === 2}<div><dt>Preload</dt><dd>{yesNo(report.preload)}</dd></div>{/if}
       </dl>
     </section>
 
@@ -43,6 +44,7 @@
         <div><dt>Points</dt><dd>{points(report?.auto_points_average, report?.auto_points_band)}</dd></div>
         <div><dt>Finish</dt><dd>{valueOrDash(report?.auto_finish)}</dd></div>
         <div><dt>Fuel sources</dt><dd>{list(report?.ball_sources)}</dd></div>
+        {#if report?.form_version === 2}<div><dt>Auto cycles</dt><dd>{valueOrDash(report.auto_cycles)}</dd></div>{/if}
         <div><dt>Collision</dt><dd>{yesNo(report?.auto_collision)}</dd></div>
         <div><dt>Path</dt><dd>{valueOrDash(report?.auto_path_name)} ({Array.isArray(report?.auto_path) ? report.auto_path.length : 0} points)</dd></div>
       </dl>
@@ -53,15 +55,22 @@
       <h4>Teleop</h4>
       <dl>
         <div><dt>Balls scored</dt><dd>{points(report?.balls_scored_average, report?.balls_scored_band)}</dd></div>
-        <div><dt>Roles</dt><dd>{list(report?.teleop_roles)}</dd></div>
+        <div><dt>Roles</dt><dd>{report?.teleop_roles_none ? 'None observed' : list(report?.teleop_roles)}</dd></div>
+        {#if report?.form_version === 2}
+          <div><dt>Significant crash</dt><dd>{yesNo(report.significant_crash)}</dd></div>
+          {#if report.significant_crash}<div><dt>Crash target</dt><dd>{valueOrDash(report.crash_target)}</dd></div>{/if}
+          <div><dt>Teleop status</dt><dd>{valueOrDash(report.teleop_robot_status)}</dd></div>
+        {:else}
         <div><dt>Intake speed</dt><dd>{valueOrDash(report?.intake_speed)}</dd></div>
         <div><dt>Intake jammed</dt><dd>{yesNo(report?.intake_jammed)}</dd></div>
         <div><dt>Crash or break</dt><dd>{yesNo(report?.crash_or_break)}</dd></div>
-        {#each MATCH_RATING_FIELDS as field}
-          <div><dt>{field}</dt><dd>{valueOrDash(report?.ratings?.[field])}</dd></div>
+        {/if}
+        {#each report?.form_version === 2 ? MATCH_FORM_RATING_FIELDS : MATCH_RATING_FIELDS as field}
+          <div><dt>{field}</dt><dd>{report?.ratings_unknown?.includes(field) ? 'Unknown' : valueOrDash(report?.ratings?.[field])}{#if report?.form_version === 2 && report?.ratings?.[field]} · {(field === 'BPS' ? BPS_LABELS : ACCURACY_LABELS)[report.ratings[field] - 1]}{/if}</dd></div>
         {/each}
       </dl>
       {#if present(report?.teleop_notes)}<p>{report.teleop_notes}</p>{/if}
+      {#if present(report?.crash_details)}<p>{report.crash_details}</p>{/if}
     </section>
 
     <section>
@@ -70,6 +79,7 @@
         <div><dt>Robot status</dt><dd>{valueOrDash(report?.robot_disabled)}</dd></div>
         <div><dt>Card</dt><dd>{present(report?.card) ? report.card : 'None'}</dd></div>
         <div><dt>Driver skill</dt><dd>{valueOrDash(report?.driver_skill)}</dd></div>
+        {#if report?.form_version === 2}<div><dt>Mechanical break</dt><dd>{yesNo(report.mechanical_break)}</dd></div>{/if}
       </dl>
       {#if present(report?.post_notes)}<p>{report.post_notes}</p>{/if}
     </section>
