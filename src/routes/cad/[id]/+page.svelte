@@ -2242,7 +2242,14 @@
     <section class="subsystem-builds-section">
       <div class="subsystem-builds-heading">
         <h2>Builds ({subsystemBuilds.length})</h2>
-        {#if isSubsystemMember() && hasPermission(user, 'CREATE_BUILDS')}
+        {#if user}
+          <!-- Deliberately open to every approved user, not gated by
+               subsystem membership or CREATE_BUILDS - unlike the OnShape
+               release "Create Build" button above, a manual build is a
+               plain CSV import with no subsystem-scoped OnShape access
+               involved, and this page itself is already unreachable by
+               anyone who isn't an approved, logged-in team member (see
+               +layout.svelte's isApproved redirect). -->
           <button class="btn btn-primary btn-sm" on:click={openManualBuildModal}>
             <Plus size={14} />
             Create Manual Build
