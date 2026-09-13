@@ -19,6 +19,11 @@ describe('match scouting v2', () => {
       balls_scored_average: 137, preload: false, auto_cycles: 0, teleop_roles: ['Scorer'],
       ball_sources: ['Neutral Zone', 'Preload'], ratings: { 'Shot accuracy': 4, BPS: 3 } });
   });
+  it('preserves restored ratings and intake observations when saving v2 reports', () => {
+    const result = normalizeMatchScoutEntry({ ...report, ratings: { ...report.ratings, Defense: 4, 'Driver awareness': 2, 'Cycle speed': 3, Reliability: 5 }, intake_speed: 3, intake_jammed: true }, 'actor');
+    expect(result.error).toBeNull();
+    expect(result.value).toMatchObject({ ratings: { ...report.ratings, Defense: 4, 'Driver awareness': 2, 'Cycle speed': 3, Reliability: 5 }, intake_speed: 3, intake_jammed: true });
+  });
   it('accepts ranges and rejects malformed or fractional ball counts', () => {
     expect(normalizeMatchScoutEntry({ ...report, balls_scored_band: '100-150' }).value.balls_scored_average).toBe(125);
     for (const input of ['', 'lots', '150-100', '1.5']) {

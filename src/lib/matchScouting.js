@@ -15,6 +15,7 @@ export const TELEOP_ROLES = Object.freeze([
 
 // New reports use these labels; legacy vocabularies above remain readable.
 export const MATCH_FORM_RATING_FIELDS = Object.freeze(['Shot accuracy', 'BPS']);
+export const MATCH_OPTIONAL_RATING_FIELDS = Object.freeze(['Driver awareness', 'Defense', 'Reliability']);
 export const MATCH_FORM_ROLES = Object.freeze(['Scorer', 'Defense', 'Shuttler']);
 export const AUTO_FUEL_SOURCES = Object.freeze(['Neutral Zone', 'Outpost', 'Depot', 'Ground', 'Preload']);
 export const ACCURACY_LABELS = Object.freeze(['0–20%', '>20–50%', '>50–75%', '>75–85%', '>85–100%']);
