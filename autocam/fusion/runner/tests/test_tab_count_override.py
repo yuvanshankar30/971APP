@@ -15,7 +15,7 @@ def _load_resolve_tab_count_override():
     source = (Path(__file__).parents[1] / "workflows/camPlate.py").read_text()
     start = source.index("def _resolve_tab_count_override")
     end = source.index("\n# How little material")
-    namespace = {"DEFAULT_MIN_TABS": 4, "DEFAULT_MAX_TABS": 20}
+    namespace = {"MANUAL_TAB_COUNT_MIN": 3, "DEFAULT_MAX_TABS": 20}
     # _resolve_tab_count_override calls the module-level _get() helper -
     # slice that in too rather than duplicating its definition.
     get_start = source.index("def _get(payload")
@@ -48,12 +48,20 @@ class ResolveTabCountOverrideTests(unittest.TestCase):
         self.assertEqual(resolve_tab_count_override({"tab_count": 500}, self._log), 20)
 
     def test_clamps_a_too_low_value_to_the_min(self):
-        self.assertEqual(resolve_tab_count_override({"tab_count": 0}, self._log), 4)
-        self.assertEqual(resolve_tab_count_override({"tab_count": -3}, self._log), 4)
+        self.assertEqual(resolve_tab_count_override({"tab_count": 0}, self._log), 3)
+        self.assertEqual(resolve_tab_count_override({"tab_count": -3}, self._log), 3)
 
     def test_accepts_the_exact_boundary_values(self):
-        self.assertEqual(resolve_tab_count_override({"tab_count": 4}, self._log), 4)
+        self.assertEqual(resolve_tab_count_override({"tab_count": 3}, self._log), 3)
         self.assertEqual(resolve_tab_count_override({"tab_count": 20}, self._log), 20)
+
+    def test_allows_the_manual_floor_even_though_it_is_below_the_automatic_default(self):
+        # Direct instruction: an operator physically at the router can know
+        # a specific part (e.g. one with its own internal cross-bracing
+        # already holding it rigid) genuinely needs fewer tabs than the
+        # untrusted automatic default's own 4-tab floor (DEFAULT_MIN_TABS,
+        # unaffected by this override path) would ever choose.
+        self.assertEqual(resolve_tab_count_override({"tab_count": 3}, self._log), 3)
 
     def test_accepts_a_numeric_string_the_same_as_a_number(self):
         # The value crosses a JSON payload from the web app - a string

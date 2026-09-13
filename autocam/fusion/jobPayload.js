@@ -1,11 +1,14 @@
-// Same range TabPlacement.py's own DEFAULT_MIN_TABS/DEFAULT_MAX_TABS
-// already treat as reasonable for the automatic target - kept in sync by
-// hand (no shared config between the two languages), not derived.
-// Direct instruction: an operator-set tab count "cannot be too much" - a
-// real ceiling, not just a UI hint the Runner is trusted to also enforce
-// (see camPlate.py's own _resolve_tab_count_override, which re-clamps
-// this independently).
-const TAB_COUNT_MIN = 4;
+// TAB_COUNT_MIN mirrors TabPlacement.py's own MANUAL_TAB_COUNT_MIN, not
+// its DEFAULT_MIN_TABS - direct instruction: an operator physically at
+// the router can know a specific part (e.g. one with its own internal
+// cross-bracing already holding it rigid) genuinely needs fewer tabs
+// than the untrusted automatic default's own 4-tab floor. TAB_COUNT_MAX
+// mirrors DEFAULT_MAX_TABS - "cannot be too much" is a real ceiling for
+// both the automatic and the manual case, not just a UI hint. Kept in
+// sync by hand (no shared config between the two languages) - re-checked
+// server-side too (see camPlate.py's own _resolve_tab_count_override),
+// not trusted from this layer alone.
+const TAB_COUNT_MIN = 3;
 const TAB_COUNT_MAX = 20;
 async function resolveLoadedToolItems(supabase, machineId, toolId) {
   if (!machineId) return [];

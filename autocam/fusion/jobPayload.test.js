@@ -146,7 +146,16 @@ describe('Fusion plate payload tab_count override',()=>{
  it('clamps a too-low value up to the minimum',async()=>{
   const j=job(); j.params.tabCount=0;
   const payload=await buildJobPayload(db(),j);
-  expect(payload.tab_count).toBe(4);
+  expect(payload.tab_count).toBe(3);
+ });
+ it('allows the manual-override floor even though it is below the automatic default',async()=>{
+  // Direct instruction: an operator physically at the router can know a
+  // specific part (e.g. one with its own internal cross-bracing already
+  // holding it rigid) genuinely needs fewer tabs than the untrusted
+  // automatic default (DEFAULT_MIN_TABS=4 server-side) would ever choose.
+  const j=job(); j.params.tabCount=3;
+  const payload=await buildJobPayload(db(),j);
+  expect(payload.tab_count).toBe(3);
  });
  it('treats a non-numeric value the same as unset rather than sending garbage',async()=>{
   const j=job(); j.params.tabCount='not-a-number';

@@ -23,7 +23,7 @@ from ..commands.NewNCProgram import export
 from ..commands.DeleteToolpaths import DeleteToolpaths
 from ..commands.AutoArrange import AutoArrange
 from ..commands.Orientation import orient_plate_pocket_side_up
-from ..commands.TabPlacement import ConfigureTabs, DEFAULT_MAX_TABS, DEFAULT_MIN_TABS
+from ..commands.TabPlacement import ConfigureTabs, DEFAULT_MAX_TABS, MANUAL_TAB_COUNT_MIN
 from ..config import (
     BASE_URL,
     FINAL_PATH,
@@ -236,11 +236,18 @@ def _resolve_tab_count_override(payload: dict, log):
     perimeter) - returns None (stay automatic, this job's existing
     default) when nothing was set.
 
-    Clamped to [DEFAULT_MIN_TABS, DEFAULT_MAX_TABS] - the same range the
-    automatic system already treats as reasonable - server-side too (see
-    jobPayload.js), but re-checked here rather than trusting a single
-    layer: "cannot be too much" is a real constraint (this session's own
-    over-tabbing incident), not just a UI hint. A malformed value falls
+    Clamped to [MANUAL_TAB_COUNT_MIN, DEFAULT_MAX_TABS], not
+    [DEFAULT_MIN_TABS, DEFAULT_MAX_TABS] - direct instruction: an operator
+    physically at the router can know a specific part (e.g. one with its
+    own internal cross-bracing already holding it rigid) genuinely needs
+    fewer tabs than the untrusted automatic default's own 4-tab floor
+    would ever choose. DEFAULT_MIN_TABS itself is intentionally
+    unchanged - it still governs the no-override automatic case, so a
+    part queued without an explicit count keeps the same conservative
+    default it always has. The upper bound stays shared: "cannot be too
+    much" is a real constraint (this session's own over-tabbing incident)
+    regardless of who chose the count. Re-checked here rather than
+    trusting jobPayload.js's own clamp alone. A malformed value falls
     back to automatic rather than raising - the caller's own try/except
     around ConfigureTabs would otherwise turn one bad value into zero
     tabs for the whole job, a much worse outcome than ignoring it.
@@ -254,7 +261,7 @@ def _resolve_tab_count_override(payload: dict, log):
     if raw_value is None:
         return None
     try:
-        return max(DEFAULT_MIN_TABS, min(DEFAULT_MAX_TABS, int(raw_value)))
+        return max(MANUAL_TAB_COUNT_MIN, min(DEFAULT_MAX_TABS, int(raw_value)))
     except (TypeError, ValueError):
         log(f"Ignoring invalid tab_count override '{raw_value}': using the automatic default instead")
         return None

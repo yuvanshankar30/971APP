@@ -57,6 +57,18 @@ import adsk.cam
 
 
 DEFAULT_MIN_TABS = 4
+# Direct instruction: an operator physically at the router can know a
+# specific part - e.g. one with its own internal cross-bracing already
+# holding it rigid - genuinely needs fewer release tabs than the
+# perimeter-based automatic target would ever choose on its own
+# (DEFAULT_MIN_TABS's own 4-tab floor is for that untrusted default case,
+# not for a human override). Separate from DEFAULT_MIN_TABS on purpose so
+# lowering this can never also lower the automatic no-override floor for
+# every other job. 3, not lower still: this is a real physical safety
+# constraint (a part with too few tabs can come loose during machining),
+# not just a UI nicety, so an operator can choose less than the automatic
+# default but not below what still reasonably restrains a part.
+MANUAL_TAB_COUNT_MIN = 3
 # Raised from 10, live-confirmed too low for a large or complex part: a
 # real plate with a 16.317in straight side got only ONE tab on it, because
 # select_tab_edges spends its budget covering every distinct straight side
