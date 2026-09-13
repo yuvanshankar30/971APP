@@ -51,14 +51,18 @@
       }
       presets = presetRows || [];
       hubDefault = presets.find((p) => p.is_hub_default) || null;
-      // Show the INTENDED configuration (the hub default) rather than
-      // whatever happens to actually be loaded right now - saving a hub
-      // default only records the selection, it doesn't apply it to
-      // cam_machine_tools on its own. Without this, picking a hub default
-      // and closing the modal without a separate "Apply to Machine" left
-      // every slot silently reverting to "Empty" the next time it opened,
-      // with no visible sign the hub default had ever been set.
-      assignments = hubDefault ? { ...(hubDefault.slot_assignments || {}) } : loadedAssignments;
+      // Always show what's ACTUALLY loaded on the machine right now - this
+      // is the ground truth "Apply to Machine" writes to and the same data
+      // buildJobPayload's resolveLoadedToolItems reads for queued Fusion
+      // jobs. An earlier version of this preferred the hub default here
+      // instead, so pressing "Apply to Machine" with a config that
+      // differed from the hub default appeared to silently fail: the write
+      // to cam_machine_tools succeeded, but reopening the modal replaced
+      // the display with the (unchanged) hub default again, masking the
+      // save entirely. The hub default is still available on demand via
+      // "Reset to hub default" below - it just never overrides what's
+      // really loaded.
+      assignments = loadedAssignments;
     } catch (e) {
       toastActions.show(e.message || 'Failed to load ATC slot configuration');
     } finally {
