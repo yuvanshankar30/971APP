@@ -1,8 +1,10 @@
 <script>
   import { onMount } from 'svelte';
+  import { scoutDisplayName } from '$lib/scoutNames.js';
   import { requestConfirmation } from '$lib/confirmation.js';
   import { userStore } from '$lib/stores/auth.js';
   import { getAuthHeader } from '$lib/supabase.js';
+  import { supabase } from '$lib/supabase.js';
   import { FRC_TEAMS } from '$lib/permissions.js';
   import ScoutAssignmentPanel from '$lib/components/ScoutAssignmentPanel.svelte';
   import PitAssignmentPanel from '$lib/components/PitAssignmentPanel.svelte';
@@ -81,6 +83,12 @@
   const frcTeamOptions = Object.values(FRC_TEAMS);
 
   let drafts = {};
+  const startingPositions = ['left trench', 'left mound', 'center', 'right mound', 'right trench'];
+  let startPhotos = {};
+  let photoSaving = false;
+  let photoStatus = '';
+  let nameDrafts = {};
+  let savingNameId = null;
   let lastUserId = null;
   let canAccess = null;
 
@@ -103,6 +111,53 @@
       ...(await getAuthHeader())
     };
     return fetch(url, { ...options, headers });
+  }
+
+  async function loadStartPhotos() {
+    const response = await authFetch('/api/matchscout?resource=start-photos');
+    const payload = await response.json();
+    if (!response.ok || !payload.success) throw new Error(payload.error || 'Could not load start photos. Apply the v2 migration before deployment.');
+    startPhotos = payload.data || {};
+  }
+
+  async function uploadStartPhoto(event, photoAlliance, position) {
+    const file = event.currentTarget.files?.[0];
+    if (!file) return;
+    photoSaving = true; photoStatus = '';
+    try {
+      const response = await authFetch('/api/scouting-admin', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'create-start-photo-upload', content_type: file.type, size: file.size })
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) throw new Error(payload.error || 'Could not prepare upload.');
+      const { error } = await supabase.storage.from('pit-scout-photos').uploadToSignedUrl(payload.data.path, payload.data.token, file, { contentType: file.type });
+      if (error) throw error;
+      const saved = await authFetch('/api/scouting-admin', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'save-start-photo', alliance: photoAlliance, position, path: payload.data.path })
+      });
+      const result = await saved.json();
+      if (!saved.ok || !result.success) throw new Error(result.error || 'Could not save photo.');
+      await loadStartPhotos();
+      photoStatus = `Saved ${photoAlliance} ${position}.`;
+    } catch (error) { photoStatus = error.message; }
+    finally { photoSaving = false; }
+  }
+
+  async function saveScoutName(row) {
+    savingNameId = row.id; errorMsg = '';
+    try {
+      const response = await authFetch('/api/scouting-admin', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'update-scout-name', target_user_id: row.id, full_name: nameDrafts[row.id] })
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) throw new Error(payload.error || 'Could not save name.');
+      await loadDashboard({ silent: true });
+      successMsg = 'Scout name updated. Assignment panels show the corrected name after refresh.';
+    } catch (error) { errorMsg = error.message; }
+    finally { savingNameId = null; }
   }
 
   function initDrafts(list) {
@@ -146,6 +201,8 @@
       metrics = data.data?.metrics || metrics;
       competitionRoleOptions = data.data?.competition_role_options || [];
       users = data.data?.users || [];
+      nameDrafts = Object.fromEntries(users.map(row => [row.id, row.full_name && !row.full_name.includes('@') ? row.full_name : '']));
+      loadStartPhotos().catch(error => photoStatus = error.message);
       missedMatches = data.data?.missed_matches || [];
       matchReports = data.data?.match_reports || [];
       smartFuelModel = data.data?.smart_fuel_model || smartFuelModel;
@@ -621,7 +678,7 @@
       </div>
       <div class="card stat-card">
         <div class="stat-content">
-          <div class="stat-label">Data Assigned</div>
+          <div class="stat-label">Match Assigned</div>
           <div class="stat-value">{metrics.data.assigned_percent}%</div>
           <div class="stat-sub">{metrics.data.assigned_matches}/{metrics.data.total_matches} matches</div>
         </div>
@@ -642,7 +699,7 @@
       </div>
       <div class="card stat-card">
         <div class="stat-content">
-          <div class="stat-label">Data Scouted</div>
+          <div class="stat-label">Match Scouted</div>
           <div class="stat-value">{metrics.data.scouted_percent}%</div>
           <div class="stat-sub">{metrics.data.scouted_matches}/{metrics.data.total_matches} matches</div>
         </div>
@@ -742,8 +799,25 @@
     </div>
 
     <details class="role-accordion">
+      <summary class="role-summary"><span class="role-summary-title">Match Scouting Starting-Position Photos</span></summary>
+      <div class="role-body">
+        <p>Upload actual field photos for each alliance and starting position. JPEG, PNG, or WebP; maximum 5 MiB. Scouts see a schematic cue until a photo is supplied.</p>
+        {#each ['red', 'blue'] as photoAlliance}
+          <h3>{photoAlliance} alliance</h3>
+          {#each startingPositions as position}
+            <label class="start-photo-upload">{position}
+              {#if startPhotos[`${photoAlliance}:${position}`]}<img class="start-photo-preview" src={startPhotos[`${photoAlliance}:${position}`]} alt={`${photoAlliance} ${position} starting position`} />{/if}
+              <input type="file" accept="image/jpeg,image/png,image/webp" disabled={photoSaving} on:change={event => uploadStartPhoto(event, photoAlliance, position)} />
+            </label>
+          {/each}
+        {/each}
+        <p role="status">{photoStatus}</p>
+      </div>
+    </details>
+
+    <details class="role-accordion">
       <summary class="role-summary">
-        <span class="role-summary-title">Smart Fuel Calibration</span>
+        <span class="role-summary-title">Legacy Data Scout Fuel Calibration</span>
       </summary>
       <div class="role-body">
         <div class="smart-toolbar">
@@ -822,7 +896,7 @@
 
     <details class="role-accordion">
       <summary class="role-summary">
-        <span class="role-summary-title">Quick Scout Alliance Attribution</span>
+        <span class="role-summary-title">Quick Scouting Alliance Attribution</span>
       </summary>
       <div class="role-body">
         <div class="text-muted">
@@ -891,6 +965,7 @@
       </summary>
       <div class="role-body">
         <div class="role-search">
+          <p>Match Scout roles cover Match, Quick, and Pit assignments. Display names are updated; existing Data Scout roster keys are preserved for permissions. Note Scout roles continue to cover qualitative notes.</p>
           <input class="form-input user-search" placeholder="Search name or email" bind:value={userSearch} />
         </div>
 
@@ -908,12 +983,17 @@
               <tbody>
                 {#if !filteredUsers.length}
                   <tr>
-                    <td colspan="4" class="empty">No users match your search.</td>
+            <td colspan="4" class="empty">No users match your search.</td>
                   </tr>
                 {:else}
                   {#each filteredUsers as row}
                     <tr>
-                      <td>{row.full_name || '-'}</td>
+                      <td>
+                        <label class="sr-only" for={`scout-name-${row.id}`}>Name for {row.email}</label>
+                        <input id={`scout-name-${row.id}`} class="form-input" maxlength="120" placeholder="Enter actual full name" bind:value={nameDrafts[row.id]} />
+                        <small>{scoutDisplayName(row)}</small>
+                        <button class="btn btn-sm" disabled={savingNameId !== null || !nameDrafts[row.id]?.trim() || nameDrafts[row.id] === row.full_name} on:click={() => saveScoutName(row)}>Save name</button>
+                      </td>
                       <td>{row.email || '-'}</td>
                       <td class="role-cell">
                         <select
@@ -924,7 +1004,7 @@
                         >
                           <option value="">Not Assigned</option>
                           {#each competitionRoleOptions as opt}
-                            <option value={opt}>{opt}</option>
+                            <option value={opt}>{opt.replace('Data Scout', 'Match Scout')}</option>
                           {/each}
                         </select>
                       </td>
@@ -970,6 +1050,9 @@
 {/if}
 
 <style>
+  .start-photo-upload { display:flex; flex-wrap:wrap; align-items:center; gap:1rem; margin:1rem 0; }
+  .start-photo-preview { width:160px; height:100px; object-fit:cover; }
+  .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
   .scouting-admin-page {
     display: flex;
     flex-direction: column;

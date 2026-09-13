@@ -54,7 +54,7 @@ function countListValues(rows, key) {
 export function summarizeMatchScoutEntries(entries) {
   const rows = (entries || []).filter((row) => row?.match_key);
   const ratingAverages = {};
-  for (const field of MATCH_RATING_FIELDS) {
+  for (const field of [...MATCH_RATING_FIELDS, 'BPS']) {
     ratingAverages[field] = average(rows.map((row) => parseNumeric(row?.ratings?.[field])));
   }
   const knownAutoRuns = rows

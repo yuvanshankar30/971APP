@@ -13,6 +13,33 @@ export const TELEOP_ROLES = Object.freeze([
   'Defense'
 ]);
 
+// New reports use these labels; legacy vocabularies above remain readable.
+export const MATCH_FORM_RATING_FIELDS = Object.freeze(['Shot accuracy', 'BPS']);
+export const MATCH_FORM_ROLES = Object.freeze(['Scorer', 'Defense', 'Shuttler']);
+export const AUTO_FUEL_SOURCES = Object.freeze(['Neutral Zone', 'Outpost', 'Depot', 'Ground', 'Preload']);
+export const ACCURACY_LABELS = Object.freeze(['0–20%', '>20–50%', '>50–75%', '>75–85%', '>85–100%']);
+export const BPS_LABELS = Object.freeze(['0–5 BPS', '>5–10 BPS', '>10–20 BPS', '>20–30 BPS', '>30 BPS']);
+
+export function validateMatchScoutForm(body) {
+  if (!String(body.scout_name || '').trim()) return 'Enter the scout name.';
+  if (typeof body.preload !== 'boolean') return 'Select whether the robot has a preload.';
+  if (!Array.isArray(body.teleop_roles) || (!body.teleop_roles.length && body.teleop_roles_none !== true)) return 'Select teleop roles or None observed.';
+  if ((body.teleop_roles || []).some(role => !MATCH_FORM_ROLES.includes(role))) return 'Select valid teleop roles.';
+  const balls = parseAutoPointsEstimate(body.balls_scored_band);
+  if (!balls || !Number.isInteger(balls.min) || (balls.max !== null && !Number.isInteger(balls.max))) return 'Enter balls scored as a whole number, range, or lower bound.';
+  for (const field of MATCH_FORM_RATING_FIELDS) {
+    const rating = body.ratings?.[field];
+    const unknown = body.ratings_unknown?.includes(field);
+    if (!unknown && (!Number.isInteger(rating) || rating < 1 || rating > 5)) return `Rate ${field} or select Unknown.`;
+    if (unknown && rating > 0) return `Choose a rating or Unknown for ${field}, not both.`;
+  }
+  if (typeof body.significant_crash !== 'boolean') return 'Select whether a significant crash occurred.';
+  if (body.significant_crash && !['robot', 'wall', 'field element', 'other'].includes(body.crash_target)) return 'Select what the robot crashed into.';
+  if (body.significant_crash && body.crash_target === 'other' && !String(body.crash_details || '').trim()) return 'Describe the other crash target.';
+  if (!['active', 'dead', 'brownout', 'unknown'].includes(body.teleop_robot_status)) return 'Select the teleop robot status.';
+  return null;
+}
+
 const MAX_AUTO_POINTS = 1000;
 
 function finitePoints(raw) {

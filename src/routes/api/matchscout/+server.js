@@ -47,6 +47,17 @@ export async function GET({ request, url }) {
   if (!actor) return json({ error: 'Unauthorized' }, { status: 401 });
 
   const db = writeClient(client);
+  if (url.searchParams.get('resource') === 'start-photos') {
+    const { data, error } = await db.from('scouting_settings').select('start_position_photos').eq('id', 1).maybeSingle();
+    if (error) return json({ error: error.message }, { status: 500 });
+    const photos = {};
+    for (const [key, path] of Object.entries(data?.start_position_photos || {})) {
+      if (typeof path !== 'string' || !path.startsWith('match-starts/')) continue;
+      const { data: signed } = await db.storage.from('pit-scout-photos').createSignedUrl(path, 3600);
+      if (signed?.signedUrl) photos[key] = signed.signedUrl;
+    }
+    return json({ success: true, data: photos });
+  }
   const eventKey = String(url.searchParams.get('event_key') || '').trim();
   if (!eventKey) return json({ error: 'event_key is required' }, { status: 400 });
 
@@ -95,7 +106,7 @@ export async function GET({ request, url }) {
   ]));
   return json({
     success: true,
-    data: entries.map((entry) => ({ ...entry, scout_name: scoutNames.get(entry.created_by) || null }))
+    data: entries.map((entry) => ({ ...entry, scout_name: entry.scout_name || scoutNames.get(entry.created_by) || null }))
   });
 }
 
@@ -125,7 +136,9 @@ export async function POST({ request }) {
   }
 
   if (action === 'save-entry') {
-    const { value, error: invalid } = normalizeMatchScoutEntry(body, actor.id);
+    // All live submissions follow v2. The legacy normalizer exists only for
+    // historical data; omitting form_version cannot bypass required answers.
+    const { value, error: invalid } = normalizeMatchScoutEntry({ ...body, form_version: 2 }, actor.id);
     if (invalid) return json({ error: invalid }, { status: 400 });
     const handoffError = validatePitProblemHandoff(body);
     if (handoffError) return json({ error: handoffError }, { status: 400 });
@@ -141,14 +154,14 @@ export async function POST({ request }) {
     if (error) return json({ error: error.message }, { status: 500 });
 
     let pitProblem = null;
-    if (body.report_pit_problem === true || requiresPitProblemReport(body.robot_disabled)) {
+    if (body.teleop_robot_status === 'dead' || body.mechanical_break === true || body.report_pit_problem === true || requiresPitProblemReport(body.robot_disabled)) {
       const { value: report, error: reportInvalid } = normalizePitProblemReport({
         event_key: body.event_key,
         team_key: body.team_key,
         match_key: body.match_key,
         summary: body.pit_problem_summary,
         detail: body.pit_problem_detail,
-        robot_disabled: body.robot_disabled
+        robot_disabled: value.robot_disabled
       }, actor.id);
       if (reportInvalid) return json({ error: reportInvalid }, { status: 400 });
 

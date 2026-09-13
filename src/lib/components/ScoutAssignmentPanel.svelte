@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte';
+  import { scoutDisplayName } from '$lib/scoutNames.js';
   import { requestConfirmation } from '$lib/confirmation.js';
   import { userStore } from '$lib/stores/auth.js';
   import { getAuthHeader } from '$lib/supabase.js';
@@ -75,7 +76,7 @@
 
   function findUserName(userId) {
     const matched = users.find((userRow) => userRow.id === userId);
-    return matched?.full_name || matched?.email || null;
+    return matched ? scoutDisplayName(matched) : null;
   }
 
   function stageAssignments(nextAssignments, message) {
@@ -310,7 +311,7 @@
         if (!newAssignments[m.key]) newAssignments[m.key] = {};
         newAssignments[m.key][t] = {
           user_id: chosen.id,
-          user_name: chosen.full_name || chosen.email
+          user_name: scoutDisplayName(chosen)
         };
       }
     }
@@ -415,7 +416,7 @@
 <details class="assignment-accordion" bind:open={panelOpen}>
   <summary class="summary-row">
     <div class="summary-title">
-      {scoutingType === 'note' ? 'Note' : scoutingType === 'quick' ? 'Quick' : 'Data'} Scouting Assignments
+      {scoutingType === 'note' ? 'Note' : scoutingType === 'quick' ? 'Quick' : 'Match'} Scouting Assignments
     </div>
     <div class="summary-meta">
       <span class="mode-pill" class:editable={capabilities.can_edit}>
@@ -501,9 +502,9 @@
               class:drop-target={dropTargetUserId === scout.id}
               role="group"
               data-scout-drop-user={scout.id}
-              aria-label={`Drop teams onto ${scout.full_name || scout.email}`}
+              aria-label={`Drop teams onto ${scoutDisplayName(scout)}`}
             >
-              <div class="scout-drop-name">{scout.full_name || scout.email}</div>
+              <div class="scout-drop-name">{scoutDisplayName(scout)}</div>
               <div class="team-chip-list">
                 {#each scheduledTeamKeys.filter((teamKey) => teamOwner[teamKey] === scout.id) as teamKey}
                   <button class="team-chip assigned" class:dragging={draggingTeamKey === teamKey} type="button" on:pointerdown={(event) => startTeamDrag(event, teamKey)}>
@@ -583,7 +584,7 @@
       <select class="form-select" bind:value={selectedUserId} disabled={saving}>
         <option value="">-- choose user --</option>
         {#each users as u}
-          <option value={u.id}>{u.full_name || u.email}</option>
+          <option value={u.id}>{scoutDisplayName(u)}</option>
         {/each}
       </select>
       <div class="btn-row modal-actions">
