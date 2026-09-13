@@ -5,7 +5,7 @@
   import { onMount } from 'svelte';
   import { userStore, loadUserFromUUID } from '$lib/stores/user.js';
   import { validateStepFile } from '$lib/step_validation.js';
-  import { queueCamJobForPart, WORKFLOW_OPERATION_TYPE } from '$autocam/camJobs.js';
+  import { queueCamJobForPart, WORKFLOW_OPERATION_TYPE } from '$autocam/inprocess/camJobs.js';
   import { buildStockMaterialIndex, materialIdForStockAssignment, stockCatalogIdForStockAssignment } from '$autocam/stockMaterial.js';
 
   let partName = '';

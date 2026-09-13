@@ -387,7 +387,7 @@ Two invariants worth preserving if this is touched:
 ## Validation
 
 After changing geometry selection, chain direction, or tab placement, queue
-a real job (`autocam/scripts/queue-fusion-plate-job.mjs` against a real STEP
+a real job (`autocam/fusion/scripts/queue-fusion-plate-job.mjs` against a real STEP
 file - prefer one with a genuine mix of through-cuts and blind pockets,
 circular and non-circular) and confirm live in Fusion:
 

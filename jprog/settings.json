@@ -1,0 +1,19 @@
+{
+	"DebugMode": "false",
+	"Holes.METAL_030": "assets/holes/holes_030.ngc",
+	"Holes.METAL_060": "assets/holes/holes_060.ngc",
+	"Holes.METAL_090": "assets/holes/holes_090.ngc",
+	"Holes.METAL_125": "assets/holes/holes_125.ngc",
+	"Holes.METAL_188": "assets/holes/holes_1875.ngc",
+	"Holes.METAL_250": "assets/holes/holes_250.ngc",
+	"Holes.METAL_313": "assets/holes/holes_3125.ngc",
+	"Holes.METAL_375": "assets/holes/holes_375.ngc",
+	"Holes.METAL_500": "assets/holes/holes_500.ngc",
+	"Holes.METAL_750": "assets/holes/holes_750.ngc",
+	"IconImageFile": "Display/971 Icon.png",
+	"LoggerFile": "logger.log",
+	"ScrewHeadSize": "0.4",
+	"SettingsIconImage": "Display/gear.png",
+	"SettingsIconImage2": "Display/gear2.png",
+	"SheetParentFolder": "./sheets"
+}

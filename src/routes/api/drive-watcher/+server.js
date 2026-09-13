@@ -2,7 +2,7 @@ import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { createClient } from '@supabase/supabase-js';
 import { isAuthorizedCronRequest } from '$lib/server/cron_auth.js';
-import { runDriveWatcherSweep } from '$autocam/drive_watcher.js';
+import { runDriveWatcherSweep } from '$autocam/inprocess/drive_watcher.js';
 
 const LEASE_KEY = 'drive_watcher_sweep';
 const LEASE_SECONDS = 240; // generous - a sweep can involve several Drive downloads + STEP generation calls

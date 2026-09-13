@@ -85,7 +85,7 @@
         // Gray, not the brand-gold accent color - this is the actual stock
         // material being viewed, not a highlight/accent element. Matches
         // the same gray + metalness/roughness the 3D toolpath simulator
-        // uses for its own stock (autocam/components/ToolpathSimulator.svelte's
+        // uses for its own stock (autocam/inprocess/components/ToolpathSimulator.svelte's
         // createStockMaterial) so a part looks the same color whether it's
         // open here or in the toolpath sim.
         const material = new THREE.MeshStandardMaterial({ color: 0xb8bcc2, metalness: 0.75, roughness: 0.42 });

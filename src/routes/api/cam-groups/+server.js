@@ -1,9 +1,9 @@
 import { json } from '@sveltejs/kit';
 import { createClient } from '@supabase/supabase-js';
 import { PUBLIC_SUPABASE_ANON_KEY, PUBLIC_SUPABASE_URL } from '$env/static/public';
-import { planJobNesting } from '$autocam/nesting.js';
-import { generateGroupedRoutingGcode } from '$autocam/groupedGcode.js';
-import { gcodeFileNameFor } from '$autocam/camJobs.js';
+import { planJobNesting } from '$autocam/inprocess/nesting.js';
+import { generateGroupedRoutingGcode } from '$autocam/inprocess/groupedGcode.js';
+import { gcodeFileNameFor } from '$autocam/inprocess/camJobs.js';
 
 function client(request) {
   return createClient(PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY, {

@@ -19,8 +19,8 @@
  */
 import fs from 'fs';
 import { readStepMeshes, extractTurningProfileFromMeshes, extractRoutingContoursFromMeshes } from '../stepProfile.js';
-import { generateTurningGcode } from '../turning.js';
-import { generateRoutingGcode } from '../routing.js';
+import { generateTurningGcode } from '../inprocess/turning.js';
+import { generateRoutingGcode } from '../inprocess/routing.js';
 
 const args = process.argv.slice(2).filter((a) => !a.startsWith('--tools='));
 const toolsArg = process.argv.find((a) => a.startsWith('--tools='));

@@ -74,7 +74,7 @@ convention on reading a branch's PR before resuming work on it.
      the Plates tab.
    - **Scripted** (faster for repeat testing of the same plate size/material):
      ```
-     node --env-file=.env autocam/scripts/queue-fusion-plate-job.mjs <step-file-path> [part-name]
+     node --env-file=.env autocam/fusion/scripts/queue-fusion-plate-job.mjs <step-file-path> [part-name]
      ```
      Run from the repo root (Node resolves `node_modules` from its own
      directory) - needs `SUPABASE_URL`/`SUPABASE_SERVICE_KEY` in `.env`.

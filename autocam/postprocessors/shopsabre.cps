@@ -499,28 +499,22 @@ function onCyclePoint(x, y, z) {
       }
       break;
     case "chip-breaking":
-      if ((cycle.accumulatedDepth < cycle.depth) || (P > 0)) {
-        expandCyclePoint(x, y, z);
-      } else {
-        writeBlock(
-          gAbsIncModal.format(90), gCycleModal.format(73),
-          getCommonCycle(x, y, z, cycle.retract),
-          "Q" + xyzFormat.format(cycle.incrementalDepth),
-          feedOutput.format(F)
-        );
-      }
+      // Always expand rather than emit G73 - JProg (the shop's sheet-nesting
+      // tool, see jprog/) doesn't recognize G73/G83 and aborts the whole
+      // file on an unrecognized G-code. expandCyclePoint is Autodesk's own
+      // standard fallback (already used below for cycle types this post
+      // doesn't special-case, and above when a retract makes the canned
+      // form unusable) - it writes the exact same peck sequence as explicit
+      // G0/G1 moves instead of the canned-cycle shorthand: same physical
+      // tool motion, same depths/retracts/feeds, just not compressed into
+      // G73. A real WinCNC control runs both forms identically; this is a
+      // G-code encoding choice, not a toolpath change.
+      expandCyclePoint(x, y, z);
       break;
     case "deep-drilling":
-      if (P > 0) {
-        expandCyclePoint(x, y, z);
-      } else {
-        writeBlock(
-          gAbsIncModal.format(90), gCycleModal.format(83),
-          getCommonCycle(x, y, z, cycle.retract),
-          "Q" + xyzFormat.format(cycle.incrementalDepth),
-          feedOutput.format(F)
-        );
-      }
+      // Same reasoning as chip-breaking above: always expand instead of
+      // emitting G83, for JProg compatibility - identical physical motion.
+      expandCyclePoint(x, y, z);
       break;
     case "tapping":
       gCycleModal.reset();

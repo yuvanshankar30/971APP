@@ -1,0 +1,6 @@
+*.class
+logger.log*
+/out/
+/output/
+/parts_library/
+/sheets/

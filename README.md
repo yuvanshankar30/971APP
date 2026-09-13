@@ -369,10 +369,31 @@ own docs are all together in one place instead of scattered across
 `src/lib/cam/`, `src/lib/server/`, `src/lib/components/`, and
 `implementations/`.
 
+Two independent pipelines share this folder, each in its own subfolder, plus
+a handful of genuinely shared modules at the top level:
+
+- **`autocam/inprocess/`** - the in-process pipeline described below: pure
+  JS math, synchronous server-side generation
+  (`src/routes/api/cam-generate/+server.js`), no external process. It has no
+  dedicated page anymore (the old `/autocam` UI was removed) - it's called
+  directly from `/manufacture/create` and from `/api/cam-generate`/
+  `/api/cam-groups`. All of its generator modules, tests, and job-queueing/
+  UI components live together here.
+- **`autocam/fusion/`** - **Fusion AutoCAM**, described further down -
+  a real Fusion 360 Runner polling `cam_jobs`, reachable from
+  `/autocam/fusion`.
+- **Top level (`autocam/stepProfile.js`, `stockMaterial.js`,
+  `gcodeComments.js`, `gcodeLint.js`, `geometry2d.js`,
+  `components/AtcSlotConfig.svelte`, `postprocessors/`, `docs/`,
+  `__fixtures__/`)** - shared by both pipelines, or used by unrelated pages
+  entirely (`gcodeLint.js` backs `/manufacture/gcode-converter`;
+  `AtcSlotConfig.svelte` is also used directly by `/manufacture`) - not
+  specific to either pipeline, so not moved into either subfolder.
+
 - **`autocam/stepProfile.js`** - extracts 2D profiles (turning/routering) or
   tube-wall hole geometry (`extractTubeFeaturesFromMeshes`) directly from a
   STEP file's triangulated mesh (via `occt-import-js`).
-- **`autocam/turning.js`** / **`autocam/routing.js`** / **`autocam/tubestock.js`**
+- **`autocam/inprocess/turning.js`** / **`autocam/inprocess/routing.js`** / **`autocam/inprocess/tubestock.js`**
   - generate the actual G-code from that profile/geometry. Tube stock runs
   on the router (round holes only), with the operator flipping the tube
   between faces by hand - there is no rotary 4th axis, and a separate
@@ -411,18 +432,18 @@ own docs are all together in one place instead of scattered across
   release API at startup and every five idle minutes, checksum-verifies and
   stages newer packages in Fusion's AddIns directory, preserves machine-local
   state, and pauses new claims until Fusion restarts onto the new code.
-- **`autocam/gcodeFormatting.js`** / **`autocam/geometry2d.js`** - shared
+- **`autocam/inprocess/gcodeFormatting.js`** / **`autocam/geometry2d.js`** - shared
   numeric G-code formatting, pause/dwell dialect handling, and polygon-area
   primitives used across generators so safety-critical output rules do not
   drift between copied implementations.
-- **`autocam/toolpathPreview.js`** - parses generated G-code back into a
+- **`autocam/inprocess/toolpathPreview.js`** - parses generated G-code back into a
   toolpath for the 2D preview and 3D simulator, including a cumulative-distance
-  interpolation helper for playback (`autocam/components/ToolpathViewer.svelte`,
-  `autocam/components/ToolpathSimulator.svelte`).
+  interpolation helper for playback (`autocam/inprocess/components/ToolpathViewer.svelte`,
+  `autocam/inprocess/components/ToolpathSimulator.svelte`).
 - **`autocam/gcodeLint.js`** - checks a program against the conditions that
   stop LinuxCNC loading it (nested/unclosed comments, characters that are
   illegal outside a comment, words with no value) and repairs malformed
-  comments. `autocam/routingLinuxcnc.test.js` runs real generated router and
+  comments. `autocam/inprocess/routingLinuxcnc.test.js` runs real generated router and
   tube-stock output through it, so a generator change that emits something
   LinuxCNC would reject fails the suite. Backs the **G-code Converter**
   tab (`/manufacture/gcode-converter`), where a pasted program is checked
@@ -442,26 +463,31 @@ own docs are all together in one place instead of scattered across
   program number is the one version-sensitive line: 2.7 ignores a bare
   O-word, 2.8+ reads it as a Fanuc-style program number and keeps
   executing, and only an INI setting `DISABLE_FANUC_STYLE_SUB` rejects it.
-- **`autocam/nesting.js`** / **`autocam/groupedGcode.js`** - deterministic,
+- **`autocam/inprocess/nesting.js`** / **`autocam/inprocess/groupedGcode.js`** - deterministic,
   conservative router-job placement from real G-code bounds and one-program
   composition for grouped sheets; see `autocam/docs/router-job-grouping.md`.
-- **`autocam/drive_watcher.js`** - Google Drive input-sweep (`cad` →
+- **`autocam/inprocess/drive_watcher.js`** - Google Drive input-sweep (`cad` →
   auto-queue) and output-delivery (finished G-code → dated `cammed`
   subfolder) - see `autocam/docs/drive-watcher-folder-layout.md` for the real folder
   layout this was built for. Sweeps persist a cursor after each bounded
   Changes API page, and delivery names include the job ID so two jobs
   completed in the same second cannot overwrite or ambiguously duplicate
   one another.
-- **`autocam/camJobs.js`** - shared job-queue helpers used by both
-  `/autocam` and `/manufacture`.
+- **`autocam/inprocess/camJobs.js`** - shared job-queue helpers used by
+  `/manufacture/create` (auto-queues a job for a linked part) and the
+  `/api/cam-generate`/`/api/cam-groups` routes - no dedicated page of its
+  own since the old `/autocam` UI was removed.
 - **Machine-scoped tooling** - `cam_machine_tools` records which cutters are
   installed on each physical profile. Choosing a machine filters the job's
   Tool / End Mill selector and copies a selected router bit's diameter into
   the generated-job parameters and 3D simulation. The seeded UNC Router
   default is a `0.1575 in` flat end mill; operators can add another tool for
   the selected machine directly from the job form.
-- **`autocam/components/`** - `ToolpathViewer.svelte`, `CamParamFields.svelte`,
-  `RoutingToolSequence.svelte`, and `TurningFinishTool.svelte`.
+- **`autocam/inprocess/components/`** - `ToolpathViewer.svelte`,
+  `CamParamFields.svelte`, `RoutingToolSequence.svelte`,
+  `TurningFinishTool.svelte`, and `TurningDrilling.svelte`. (`AtcSlotConfig.svelte`
+  stays at the shared top-level `autocam/components/` - it's used outside
+  this pipeline too, by `/autocam/fusion` and `/manufacture` directly.)
 - **`autocam/scripts/test-cam-extraction.mjs`** - standalone CLI to run a
   real STEP file through the pipeline without the web app - the main tool
   used to stress-test this system against real CAD files.
@@ -566,11 +592,15 @@ own docs are all together in one place instead of scattered across
   the LinuxCNC/EMC router post.
   It is not connected to the job queue and does not generate G-code. See its
   `README.md` for design choices, the example CLI, and the staged implementation.
-- **Route files stay in `src/routes/`** regardless (`src/routes/autocam/+page.svelte`,
-  `src/routes/api/cam-generate/+server.js`, `src/routes/api/drive-watcher/+server.js`)
-  - SvelteKit determines a route's URL from its file location under
-    `src/routes/`, so these can't move into `autocam/` themselves; they just
-    import the engine from `$autocam/...` instead of holding logic directly.
+- **Route files stay in `src/routes/`** regardless
+  (`src/routes/api/cam-generate/+server.js`,
+  `src/routes/api/cam-groups/+server.js`,
+  `src/routes/api/drive-watcher/+server.js`) - SvelteKit determines a
+  route's URL from its file location under `src/routes/`, so these can't
+  move into `autocam/` themselves; they just import the engine from
+  `$autocam/inprocess/...` instead of holding logic directly. There is no
+  `src/routes/autocam/+page.svelte` anymore - only `/autocam/fusion` is a
+  page; the in-process pipeline is invoked directly by other pages/routes.
 - **Legacy, NOT part of the above, NOT moved**: `src/lib/autocam.js` and
   `src/routes/manufacture/autocam/+page.svelte` are remnants of an older,
   disabled DXF/PenguinCAM-based system (`DISABLE_AUTOCAM` in

@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { normalizeGcodeComments, MAX_GCODE_LINE_LENGTH } from './gcodeComments.js';
-import { generateRoutingGcode } from './routing.js';
-import { HEADER_WARNING } from './turning.js';
-import { generateTurningGcode } from './turning.js';
-import { generateTubestockGcode } from './tubestock.js';
+import { generateRoutingGcode } from './inprocess/routing.js';
+import { HEADER_WARNING } from './inprocess/turning.js';
+import { generateTurningGcode } from './inprocess/turning.js';
+import { generateTubestockGcode } from './inprocess/tubestock.js';
 
 const SQUARE = [{ points: [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 3 }, { x: 0, y: 3 }], isHole: false }];
 const TUBE = { tubeLength: 12, walls: [{ angleDeg: 0, holes: [{ position: 2, lateralOffset: 0, diameter: 0.25 }] }] };

@@ -1,0 +1,20 @@
+(Spindle Warmup)
+(Run this program prior to machining each time)
+(Run without any load.)
+(This ensures that the bearings reach their running temperature)
+(gradually and that the bearing races expand evenly.)
+
+(5min at 50%)
+S12000 M03
+G04 P300
+
+(3min at 75%)
+S18000 M03
+G04 P180
+
+(3min at 100%)
+S23500 M03
+G04 P180
+
+M05
+M30

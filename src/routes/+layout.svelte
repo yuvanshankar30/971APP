@@ -286,7 +286,7 @@
     if (compact === 'scoutingadmin' || compact === 'scoutadmin') return 'scouting-admin';
     if (compact === 'cotsstocking') return 'cots-stocking';
     if (compact === 'fusionautocam' || compact === 'fusion') return 'fusion-autocam';
-    if (compact.startsWith('autocam')) return 'autocam';
+    if (compact.startsWith('autocam')) return 'fusion-autocam';
     if (compact.startsWith('gcodeconverter')) return 'gcode-converter';
     return compact;
   }
@@ -310,7 +310,6 @@
     strategy: '/strategy',
     'scouting-admin': '/scouting-admin',
     'cots-stocking': '/cots-stocking',
-    autocam: '/autocam',
     'fusion-autocam': '/autocam/fusion',
     'gcode-converter': '/manufacture/gcode-converter',
     files: '/manufacture/files',
@@ -338,7 +337,6 @@
     strategy: Target,
     'scouting-admin': Briefcase,
     'cots-stocking': Package,
-    autocam: Cpu,
     'fusion-autocam': Cpu,
     'gcode-converter': FileText,
     files: Folder,
@@ -366,7 +364,6 @@
     strategy: 'Strategy',
     'scouting-admin': 'Scouting Admin',
     'cots-stocking': 'COTS Stocking',
-    autocam: 'AutoCAM',
     'fusion-autocam': 'Fusion AutoCAM',
     'gcode-converter': 'G-code Converter',
     files: 'Files',

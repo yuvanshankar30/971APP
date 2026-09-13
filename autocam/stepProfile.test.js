@@ -11,9 +11,9 @@ import {
   transformMeshesForTurningScene,
   transformMeshesForRoutingScene
 } from './stepProfile.js';
-import { generateTurningGcode } from './turning.js';
-import { generateRoutingGcode } from './routing.js';
-import { generateTubestockGcode } from './tubestock.js';
+import { generateTurningGcode } from './inprocess/turning.js';
+import { generateRoutingGcode } from './inprocess/routing.js';
+import { generateTubestockGcode } from './inprocess/tubestock.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const HEX_SHAFT = path.join(__dirname, '__fixtures__', 'hex-shaft.step');

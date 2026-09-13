@@ -2,10 +2,10 @@ import { json } from '@sveltejs/kit';
 import { createClient } from '@supabase/supabase-js';
 import { PUBLIC_SUPABASE_ANON_KEY, PUBLIC_SUPABASE_URL, PUBLIC_APP_ORIGIN, PUBLIC_SITE_URL } from '$env/static/public';
 import { readStepMeshes, extractTurningProfileFromMeshes, extractRoutingContoursFromMeshes, extractTubeFeaturesFromMeshes } from '$autocam/stepProfile.js';
-import { generateTurningGcode } from '$autocam/turning.js';
-import { generateRoutingGcode, THROUGH_CUT_ALLOWANCE } from '$autocam/routing.js';
-import { generateTubestockGcode, tubestockFaceFileName, tubestockFaceGroupFileName } from '$autocam/tubestock.js';
-import { deliverJobToDrive } from '$autocam/drive_watcher.js';
+import { generateTurningGcode } from '$autocam/inprocess/turning.js';
+import { generateRoutingGcode, THROUGH_CUT_ALLOWANCE } from '$autocam/inprocess/routing.js';
+import { generateTubestockGcode, tubestockFaceFileName, tubestockFaceGroupFileName } from '$autocam/inprocess/tubestock.js';
+import { deliverJobToDrive } from '$autocam/inprocess/drive_watcher.js';
 import stockData from '$lib/stock.json';
 
 const IN_PROCESS_OPERATION_TYPES = ['turning', 'routing', 'tubestock'];
