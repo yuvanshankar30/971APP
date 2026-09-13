@@ -726,6 +726,19 @@
         } else {
           // Converting from COTS to manufactured - create parts entry
           const wf = editWorkflow && editWorkflow !== 'purchase' ? editWorkflow : 'mill';
+          // Same file-attachment requirement as adding straight from the
+          // full BOM (fileRequirementError) - this modal is a second,
+          // easy-to-miss way to create a manufacturing request (switching
+          // an existing COTS/purchasing row to manufactured), and it was
+          // skipping the check entirely, letting a router part in with no
+          // STEP attached. Check the build_bom row's file first (that's
+          // where the attach-file modal writes it) since editTarget itself
+          // is the purchasing row here and was never expected to carry one.
+          const conversionFileError = fileRequirementError({ workflow: wf, file_url: bomRow?.file_url || editTarget?.file_url });
+          if (conversionFileError) {
+            toastActions.show(conversionFileError);
+            return;
+          }
           const baseInsert = {
             name: editTarget.name || editTarget.part_name || 'Unnamed Part',
             requester: user?.full_name || user?.email,
