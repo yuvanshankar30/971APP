@@ -29,6 +29,7 @@ import requests
 from ultralytics import YOLO
 
 from apriltag_calibration import probe_recording
+from fuel_tracking import PieceTracker, goal_entry, nearest_pixel_track
 
 API = os.environ["VISION_API_URL"].rstrip("/") + "/api/vision-runner"
 TOKEN = os.environ["VISION_RUNNER_TOKEN"]
@@ -448,10 +449,9 @@ class RobotReId:
 # --- Hybrid game-piece detection ------------------------------------------
 # Chosen over a YOLO class for game pieces specifically: per the source
 # community R&D, training a detector for small, fast-moving balls at a
-# distance is difficult and expensive, while classical HSV color
-# thresholding + contour filtering is both cheaper and more robust for this
-# one narrow task. Robot detection stays a YOLO class - the best tool
-# genuinely differs per problem here, not a blanket "avoid ML" stance.
+# distance needs reviewed labels. HSV is a cheap baseline, NOT a proven
+# accuracy winner: lighting, blur, occlusion and overlapping balls can defeat
+# it. Compare against a trained fuel detector on whole-match held-out footage.
 
 def detect_game_pieces(frame, mask, hsv_lower, hsv_upper, min_area, min_circularity):
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
@@ -477,50 +477,6 @@ def detect_game_pieces(frame, mask, hsv_lower, hsv_upper, min_area, min_circular
             continue
         centers.append((moments["m10"] / moments["m00"], moments["m01"] / moments["m00"]))
     return centers
-
-
-class PieceTracker:
-    """Frame-to-frame nearest-neighbor association of game-piece detections
-    into trajectories. Deliberately simple (no Kalman filter, no ML) to
-    match the "classical CV, not ML" choice for the whole piece pipeline - a
-    piece rarely jumps far between consecutive frames at typical capture
-    frame rates, so a distance-gated nearest-neighbor match is sufficient
-    and cheap."""
-
-    def __init__(self, max_match_distance_px=80, max_missed_frames=5):
-        self.max_match_distance_px = max_match_distance_px
-        self.max_missed_frames = max_missed_frames
-        self._next_id = 0
-        self._active = {}   # id -> {"points": [(t_ms, x, y)], "missed": int}
-        self.finished = []  # completed trajectories, each a list of (t_ms, x, y)
-
-    def update(self, timestamp_ms, detections):
-        unmatched = set(range(len(detections)))
-        for piece_id, track in list(self._active.items()):
-            last_x, last_y = track["points"][-1][1], track["points"][-1][2]
-            best_index, best_distance = None, self.max_match_distance_px
-            for index in unmatched:
-                x, y = detections[index]
-                distance = math.hypot(x - last_x, y - last_y)
-                if distance < best_distance:
-                    best_index, best_distance = index, distance
-            if best_index is not None:
-                x, y = detections[best_index]
-                track["points"].append((timestamp_ms, x, y))
-                track["missed"] = 0
-                unmatched.discard(best_index)
-            else:
-                track["missed"] += 1
-                if track["missed"] > self.max_missed_frames:
-                    self.finished.append(track["points"])
-                    del self._active[piece_id]
-        for index in unmatched:
-            x, y = detections[index]
-            self._active[self._next_id] = {"points": [(timestamp_ms, x, y)], "missed": 0}
-            self._next_id += 1
-
-    def all_trajectories(self):
-        return self.finished + [track["points"] for track in self._active.values()]
 
 
 def resolve_auto_start_zone(pixel_center, start_zones, frame_shape):
@@ -572,8 +528,8 @@ def attribute_climbs(detections, robot_tracks, view, config):
     return observations
 
 
-def attribute_scores(piece_trajectories, robot_tracks, goal_zones, frame_shape, view_id):
-    """A piece is "scored" once its trajectory ends inside a goal zone.
+def attribute_scores(piece_trajectories, robot_tracks, goal_zones, frame_shape, view_id, max_distance_px=120):
+    """Propose one score candidate for an observed entry into a goal zone.
     Attribution walks back to the trajectory's *origin* point (where the
     piece started, i.e. left the shooting robot) and finds whichever robot
     track was physically closest at that same moment - the shooter, not
@@ -582,12 +538,13 @@ def attribute_scores(piece_trajectories, robot_tracks, goal_zones, frame_shape, 
     for trajectory in piece_trajectories:
         if len(trajectory) < 2:
             continue
-        end_t, end_x, end_y = trajectory[-1]
-        scoring_zone = next((zone for zone in goal_zones if point_in_zone((end_x, end_y), zone.get("polygon"), frame_shape)), None)
-        if not scoring_zone:
+        entries = [(entry, zone) for zone in goal_zones
+                   if (entry := goal_entry(trajectory, lambda point: point_in_zone(point, zone.get("polygon"), frame_shape))) is not None]
+        if not entries:
             continue
+        (end_t, end_x, end_y), scoring_zone = min(entries, key=lambda item: item[0][0])
         start_t, start_x, start_y = trajectory[0]
-        best_track, best_distance = nearest_track((start_x, start_y), robot_tracks, start_t)
+        best_track, best_distance = nearest_pixel_track((start_x, start_y), robot_tracks, start_t, max_distance_px)
         observations.append({
             "view_id": view_id,
             "team_key": best_track["team_key"] if best_track else None,
@@ -600,7 +557,7 @@ def attribute_scores(piece_trajectories, robot_tracks, goal_zones, frame_shape, 
             "ended_ms": end_t,
             "confidence": 0.7 if best_track else 0.4,  # lower confidence when no robot track could be matched to the origin
             "source": "classical_cv", "review_status": "unreviewed",
-            "evidence": {"source": "classical_cv", "zone": scoring_zone.get("label"), "trajectory_points": len(trajectory), "review_required": True}
+            "evidence": {"source": "classical_cv", "zone": scoring_zone.get("label"), "trajectory_points": len(trajectory), "goal_entry_candidate": True, "review_required": True}
         })
     return observations
 
@@ -747,7 +704,10 @@ def process_view(model, view, config, video_path):
         )
 
     reid = RobotReId()
-    piece_tracker = PieceTracker()
+    piece_tracker = PieceTracker(
+        max_match_distance_px=float(config.get("piece_max_match_distance_px", 80)),
+        max_missed_frames=int(config.get("piece_max_missed_frames", 5)),
+    )
     climb_detections = []
     mask = None
     frame_shape = None
@@ -758,7 +718,9 @@ def process_view(model, view, config, video_path):
     robot_state = {}
     previously_seen_ids = set()
 
-    for frame_index, result in enumerate(model.track(source=str(video_path), stream=True, persist=True, verbose=False, conf=confidence_floor)):
+    # Each call is a different camera/video. Track within this source, but do
+    # not carry a previous camera's IDs/state into it via persist=True.
+    for frame_index, result in enumerate(model.track(source=str(video_path), stream=True, persist=False, verbose=False, conf=confidence_floor, tracker="bytetrack.yaml")):
         timestamp_ms = round(frame_index * 1000 / fps) + int(view.get("sync_offset_ms") or 0)
         frame = result.orig_img
         if frame_shape is None:
@@ -804,7 +766,7 @@ def process_view(model, view, config, video_path):
                     if timestamp_ms < auto_end_ms and "auto_start_pixel" not in track:
                         track["auto_start_pixel"] = center
                     track["tracking_confidence"] = min(track["tracking_confidence"], confidence)
-                    track["trajectory"].append({"t": timestamp_ms, "x": x, "y": y, "confidence": confidence, "calibrated": calibrated})
+                    track["trajectory"].append({"t": timestamp_ms, "x": x, "y": y, "pixel_x": center[0], "pixel_y": center[1], "confidence": confidence, "calibrated": calibrated})
 
                     previous_state = robot_state.get(canonical_id)
                     velocity = (
@@ -846,7 +808,7 @@ def process_view(model, view, config, video_path):
             track.pop("auto_start_pixel", None), start_zones, frame_shape,
         )
     climb_observations = attribute_climbs(climb_detections, finished_tracks, view, config)
-    fuel_observations = attribute_scores(piece_tracker.all_trajectories(), finished_tracks, goal_zones, frame_shape or (1, 1), view["id"])
+    fuel_observations = attribute_scores(piece_tracker.all_trajectories(), finished_tracks, goal_zones, frame_shape or (1, 1), view["id"], float(config.get("fuel_attribution_distance_px", 120)))
     return finished_tracks, climb_observations + fuel_observations
 
 
