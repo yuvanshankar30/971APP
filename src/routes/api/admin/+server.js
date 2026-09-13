@@ -93,15 +93,32 @@ export async function POST({ request }) {
 
     // Action shortcuts: promote / ban / approve
     if (action === 'promote') {
-      // Granting the 'admin' role is reserved for existing admins — leads
-      // with PROMOTE_USERS can still promote/approve in other ways, but
-      // minting new admins is not one of them.
-      if (!isActorAdmin) {
+      // Granting the 'admin' role is reserved for devs only - a regular
+      // admin (even one with PROMOTE_USERS) cannot mint new admins. Admins
+      // could still do this before; devs are a strictly smaller, more
+      // trusted set (see $lib/permissions.js isDev()), so this is a real
+      // tightening, not a rename.
+      if (!isActorDev) {
         return json({ error: 'Not authorized to promote users' }, { status: 403 });
       }
       const { error } = await supa
         .from('user_profiles')
         .update({ role: 'admin', banned: false })
+        .eq('id', target_id);
+      if (error) return json({ error: error.message }, { status: 500 });
+      return json({ success: true });
+    }
+
+    if (action === 'demote') {
+      // Symmetric with promote: only a dev may take the 'admin' role away,
+      // same trust boundary as granting it. A regular admin cannot demote
+      // another admin (or themselves) through this action.
+      if (!isActorDev) {
+        return json({ error: 'Not authorized to demote users' }, { status: 403 });
+      }
+      const { error } = await supa
+        .from('user_profiles')
+        .update({ role: 'member' })
         .eq('id', target_id);
       if (error) return json({ error: error.message }, { status: 500 });
       return json({ success: true });

@@ -149,6 +149,7 @@
     [TEAM_ROLES.MANUFACTURING_LEAD]: { bg: '#dcfce7', border: '#bbf7d0', text: 'var(--green-strong)' },
     [TEAM_ROLES.MANUFACTURING_MEMBER]: { bg: '#fff7ed', border: '#fed7aa', text: 'var(--orange-strong)' },
     [TEAM_ROLES.PURCHASING_LEAD]: { bg: '#ccfbf1', border: '#99f6e4', text: '#115e59' },
+    [TEAM_ROLES.SCOUTING_LEAD]: { bg: '#fce7f3', border: '#fbcfe8', text: '#9d174d' },
     [TEAM_ROLES.CAD_MEMBER]: { bg: '#fef2f2', border: '#fee2e2', text: '#991b1b' },
     [TEAM_ROLES.SOFTWARE_MEMBER]: { bg: '#e0f2fe', border: '#bae6fd', text: '#075985' },
     [TEAM_ROLES.OTHER]: { bg: '#f3f4f6', border: '#e5e7eb', text: '#374151' }
@@ -578,12 +579,13 @@
   $: isDevUser = !!$currentUser?.is_dev;
   $: canApproveUsers = !!($currentUser && (isAdminUser || hasPermission($currentUser, 'APPROVE_USERS')));
   $: canBanUsers = !!($currentUser && (isAdminUser || hasPermission($currentUser, 'BAN_USERS')));
-  // Granting the 'admin' role itself is admin-only — leads with PROMOTE_USERS
-  // can still approve/manage users elsewhere, just not mint new admins.
-  $: canPromoteUsers = isAdminUser;
+  // Granting or revoking the 'admin' role itself is dev-only — a regular
+  // admin (even one with PROMOTE_USERS) can neither mint nor demote admins.
+  $: canPromoteUsers = isDevUser;
+  $: canDemoteAdmins = isDevUser;
   $: canRemoveUsers = canBanUsers;
   // Show an Actions column when the current user can do at least one action.
-  $: showUserActions = canApproveUsers || canBanUsers || canPromoteUsers || canRemoveUsers;
+  $: showUserActions = canApproveUsers || canBanUsers || canPromoteUsers || canDemoteAdmins || canRemoveUsers;
 
   // Who may edit a given target's roles: nobody may edit their own row here
   // (avoids accidental self-lockout/self-escalation); dev targets require a
@@ -667,6 +669,16 @@
       confirmLabel: 'Make admin',
       danger: false,
       run: () => doUserAction(user, 'promote', { successMsg: `${userLabel(user)} is now an admin` })
+    });
+  }
+
+  function demoteUser(user) {
+    askConfirm({
+      title: 'Remove admin',
+      message: `Remove full admin access from ${userLabel(user)}? They will be reduced to whatever their other roles/permissions grant.`,
+      confirmLabel: 'Remove admin',
+      danger: true,
+      run: () => doUserAction(user, 'demote', { successMsg: `${userLabel(user)} is no longer an admin` })
     });
   }
 
@@ -1801,6 +1813,9 @@
                   {#if canPromoteUsers && user.role !== 'admin'}
                     <button class="btn btn-sm btn-secondary" disabled={savingRoleIds.has(user.id)} on:click={() => promoteUser(user)}>Make Admin</button>
                   {/if}
+                  {#if canDemoteAdmins && user.role === 'admin'}
+                    <button class="btn btn-sm btn-secondary" disabled={savingRoleIds.has(user.id)} on:click={() => demoteUser(user)}>Remove Admin</button>
+                  {/if}
                   {#if canRemoveUsers && user.id !== $currentUser?.id && (!user.is_dev || isDevUser)}
                     <button class="btn btn-sm btn-danger" disabled={savingRoleIds.has(user.id)} on:click={() => removeUser(user)}>Remove</button>
                   {/if}
@@ -1964,6 +1979,9 @@
                         {/if}
                         {#if canPromoteUsers && user.role !== 'admin'}
                           <button class="btn btn-sm btn-secondary" disabled={savingRoleIds.has(user.id)} on:click={() => promoteUser(user)}>Make Admin</button>
+                        {/if}
+                        {#if canDemoteAdmins && user.role === 'admin'}
+                          <button class="btn btn-sm btn-secondary" disabled={savingRoleIds.has(user.id)} on:click={() => demoteUser(user)}>Remove Admin</button>
                         {/if}
                         {#if canRemoveUsers && user.id !== $currentUser?.id}
                           <button class="btn btn-sm btn-danger" disabled={savingRoleIds.has(user.id)} on:click={() => removeUser(user)}>Remove</button>

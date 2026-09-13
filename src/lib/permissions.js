@@ -47,6 +47,7 @@ export const TEAM_ROLES = {
   MANUFACTURING_LEAD: 'Manufacturing Lead',
   MANUFACTURING_MEMBER: 'Manufacturing Member',
   PURCHASING_LEAD: 'Purchasing Lead',
+  SCOUTING_LEAD: 'Scouting Lead',
   CAD_MEMBER: 'CAD Member',
   SOFTWARE_MEMBER: 'Software Member',
   OTHER: 'Other'
@@ -92,8 +93,19 @@ const ROSTER_KEY_PERMISSIONS = {
 // Some team roles carry permissions of their own, independent of the general /
 // purchasing role axes. Purchasing Lead grants full control over the purchasing
 // tab (place/approve orders, purchasing admin, add vendors, edit budgets).
+// Scouting Lead has no permissions of its own yet (scouting-admin page access
+// is gated separately, by the "Scouting Admin" roster key - see
+// canManageScouting in src/routes/api/scouting-admin/+server.js, not by
+// team_role at all). Competition Lead spreads Scouting Lead's list in here
+// rather than duplicating it, so Competition Lead always has at least
+// whatever Scouting Lead has - a real embedding relationship, not a
+// snapshot that goes stale if Scouting Lead's own permissions grow later.
 export const TEAM_ROLE_PERMISSIONS = {
-  [TEAM_ROLES.PURCHASING_LEAD]: ['CAN_SEE_ROUTES', 'PLACE_ORDERS_MISC', 'APPROVE_PURCHASES', 'VIEW_PURCHASING_ADMIN', 'ADD_VENDORS', 'EDIT_BUDGETS']
+  [TEAM_ROLES.PURCHASING_LEAD]: ['CAN_SEE_ROUTES', 'PLACE_ORDERS_MISC', 'APPROVE_PURCHASES', 'VIEW_PURCHASING_ADMIN', 'ADD_VENDORS', 'EDIT_BUDGETS'],
+  [TEAM_ROLES.SCOUTING_LEAD]: [],
+  get [TEAM_ROLES.COMPETITION_LEAD]() {
+    return [...TEAM_ROLE_PERMISSIONS[TEAM_ROLES.SCOUTING_LEAD]];
+  }
 };
 
 export function getRoleDerivedPermissions({ general_role = GENERAL_ROLES.NONE, purchasing_role = PURCHASING_ROLES.BASIC, team_role, roster_keys = [] } = {}) {
