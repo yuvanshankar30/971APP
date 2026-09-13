@@ -254,9 +254,11 @@ browser confirmation or prompt popups.
   roles (Scorer, Defense, Shuttler, or explicitly None observed), shot accuracy
   and BPS ratings (click a selected rating again to leave it unjudged; no
   separate Unknown buttons), significant-crash/target answers,
-  and robot status (Active, Dead / broke down, or Unknown). Brownouts use the
-  Dead / broke down option; historical brownout answers reopen under that
-  option when editing. Optional driver awareness, defense, and reliability ratings
+  and robot status (Active, Dead, or Stopped). Brownouts use the
+  Dead option; historical brownout answers reopen under that
+  option when editing. Apply `20260913_match_scout_stopped_status.sql`
+  before deploying to allow Stopped in the database; historical Unknown
+  answers remain readable. Optional driver awareness, defense, and reliability ratings
   use the original 1–5 scale. Intake speed (1–3) and intake-jam observations
   are also collected and restored when editing reports. Cycle speed and driver skill are no longer collected; existing values
   are preserved when editing historical reports. Historical

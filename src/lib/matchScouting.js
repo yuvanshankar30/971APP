@@ -37,7 +37,7 @@ export function validateMatchScoutForm(body) {
   if (typeof body.significant_crash !== 'boolean') return 'Select whether a significant crash occurred.';
   if (body.significant_crash && !['robot', 'wall', 'field element', 'other'].includes(body.crash_target)) return 'Select what the robot crashed into.';
   if (body.significant_crash && body.crash_target === 'other' && !String(body.crash_details || '').trim()) return 'Describe the other crash target.';
-  if (!['active', 'dead', 'brownout', 'unknown'].includes(body.teleop_robot_status)) return 'Select the teleop robot status.';
+  if (!['active', 'dead', 'stopped', 'brownout', 'unknown'].includes(body.teleop_robot_status)) return 'Select the teleop robot status.';
   return null;
 }
 
