@@ -145,6 +145,7 @@
   const teamRoleThemes = {
     [TEAM_ROLES.COMPETITION_LEAD]: { bg: '#e0e7ff', border: '#c7d2fe', text: '#3730a3' },
     [TEAM_ROLES.MECHANICAL_LEAD]: { bg: '#fef3c7', border: '#fde68a', text: '#92400e' },
+    [TEAM_ROLES.ELECTRICAL_LEAD]: { bg: '#fef9c3', border: '#fef08a', text: '#854d0e' },
     [TEAM_ROLES.SOFTWARE_LEAD]: { bg: '#ddd6fe', border: '#c4b5fd', text: '#5b21b6' },
     [TEAM_ROLES.MANUFACTURING_LEAD]: { bg: '#dcfce7', border: '#bbf7d0', text: 'var(--green-strong)' },
     [TEAM_ROLES.MANUFACTURING_MEMBER]: { bg: '#fff7ed', border: '#fed7aa', text: 'var(--orange-strong)' },

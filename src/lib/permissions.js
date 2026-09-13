@@ -43,6 +43,7 @@ export const PURCHASING_ROLES = {
 export const TEAM_ROLES = {
   COMPETITION_LEAD: 'Competition Lead',
   MECHANICAL_LEAD: 'Mechanical Lead',
+  ELECTRICAL_LEAD: 'Electrical Lead',
   SOFTWARE_LEAD: 'Software Lead',
   MANUFACTURING_LEAD: 'Manufacturing Lead',
   MANUFACTURING_MEMBER: 'Manufacturing Member',
