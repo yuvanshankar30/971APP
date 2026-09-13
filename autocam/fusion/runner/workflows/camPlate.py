@@ -364,6 +364,129 @@ def _require_release_contour(cam) -> None:
     )
 
 
+def _require_through_hole_for_finishing_pass(cam) -> None:
+    """Raise if a setup has a Shape Through Finishing Pass with no matching
+    Shape Through Hole roughing operation, or vice versa - the pairing is
+    required in both directions.
+
+    A Shape Through Finishing Pass (contour2d) just follows the boundary
+    line of a through-cut shape - it never clears the shape's interior.
+    That's the roughing operations' job (Shape Through Hole / Small Shape
+    Through Hole / Shape Through Hole big endmill, all adaptive2d - see
+    DeleteToolpaths.py's through_shape_ops split). A finishing pass with
+    no roughing partner in the same setup is physically meaningless on
+    its own: nothing ever cleared the interior it's tracing the edge of.
+    Symmetrically, a roughing pass with no finishing partner leaves the
+    boundary it just roughed un-cleaned. Direct instruction: a Shape
+    Through Finishing Pass can only exist if there is a Shape Through
+    Hole, and vice versa - neither is ever valid alone.
+
+    The name/strategy filter below is deliberately identical to
+    DeleteToolpaths.py's own through_shape_ops filter (see that module -
+    "through" in the name, "circular" excluded so dedicated round-hole
+    bore/pocket2d ops never get swept in here, strategy != "bore") so this
+    checks the exact same operation set that module assigns chains to.
+    Kept as a duplicate rather than imported from there, same reason
+    _require_release_contour doesn't import DeleteToolpaths.py either -
+    that module imports Fusion's runtime-only `adsk` package at import
+    time, so this file (and its tests) can't pull the filter in directly.
+    If DeleteToolpaths.py's own filter ever changes, update this one to
+    match.
+
+    Checked per setup, same as _require_release_contour: the pairing is
+    per-setup, not a document-wide count that could let one setup's spare
+    roughing op quietly cover another setup's missing one.
+
+    Presence of both isn't the whole story either - direct instruction:
+    the Shape Through Hole roughing operation(s) must have the SAME
+    geometry selection as the finishing pass, not just exist somewhere in
+    the same setup. DeleteToolpaths.py builds both from the same shared
+    chain pool per setup (finishing gets every chain, roughing gets that
+    same pool split by which tool can reach each one - see its own
+    through_chain_assignments), so the union of every roughing tier's
+    edges equals the finishing pass's edges exactly in the success case;
+    this only ever fires when a chain assignment partially failed (e.g.
+    one roughing tier's geometry write raised and was swallowed, or
+    picked up an edge the finishing pass doesn't have) and left the two
+    selections disagreeing. Compared via each edge's entityToken - Fusion
+    can hand back a different Python wrapper object for the same
+    underlying edge on repeated property access, so identity/`==` on the
+    raw BRepEdge is not reliable within a single script run the way it
+    would be for a plain Python object.
+
+    Geometry is only compared when it can actually be read (a real
+    ChainSelection with getCurveSelections()) - a missing/unreadable
+    selection is a "can't tell" for this coverage check, not a "no
+    coverage" false positive, and is left for the presence check above
+    and DeleteToolpaths' own isToolpathValid cleanup to catch instead.
+
+    cam may be None (the CAM product failed to resolve) - nothing to
+    check in that case, same as _require_release_contour.
+    """
+    if cam is None:
+        return
+
+    def _edge_tokens(op):
+        param_name = "contours" if op.strategy == "contour2d" else "pockets"
+        try:
+            param = op.parameters.itemByName(param_name)
+            if param is None:
+                return None
+            value = param.value
+            if not hasattr(value, "getCurveSelections"):
+                return None
+            tokens = set()
+            for chain in value.getCurveSelections():
+                for edge in getattr(chain, "inputGeometry", None) or []:
+                    token = getattr(edge, "entityToken", None)
+                    tokens.add(token if token is not None else edge)
+            return tokens
+        except Exception:
+            return None
+
+    for setup in cam.setups:
+        through_shape_ops = [
+            op
+            for op in setup.operations
+            if "through" in str(op.name).lower()
+            and "circular" not in str(op.name).lower()
+            and op.strategy != "bore"
+        ]
+        if not through_shape_ops:
+            continue
+        finishing_ops = [op for op in through_shape_ops if op.strategy == "contour2d"]
+        roughing_ops = [op for op in through_shape_ops if op.strategy != "contour2d"]
+        if bool(finishing_ops) != bool(roughing_ops):
+            missing = "Shape Through Hole roughing operation" if finishing_ops else "Shape Through Finishing Pass"
+            present = "Shape Through Finishing Pass" if finishing_ops else "Shape Through Hole roughing operation"
+            raise RuntimeError(
+                f"A {present} survived toolpath generation with no "
+                f"matching {missing} in the same setup - the two only "
+                "ever exist together. Check the Runner's log for why the "
+                "missing operation isn't in the template or was pruned "
+                "by DeleteToolpaths for an invalid toolpath."
+            )
+        if not finishing_ops:
+            continue
+        finishing_edges = set()
+        roughing_edges = set()
+        readable = True
+        for op in finishing_ops + roughing_ops:
+            tokens = _edge_tokens(op)
+            if tokens is None:
+                readable = False
+                break
+            (finishing_edges if op.strategy == "contour2d" else roughing_edges).update(tokens)
+        if readable and finishing_edges != roughing_edges:
+            raise RuntimeError(
+                "A Shape Through Finishing Pass's geometry selection does "
+                "not exactly match its Shape Through Hole roughing "
+                "operation(s) in the same setup. Check the Runner's log "
+                "for a partial chain-assignment failure in "
+                "DeleteToolpaths."
+            )
+
+
 def _coverage_warnings(app, cam, nc_files) -> list:
     """Compares the posted program against the part's own CAD geometry and
     returns a warning per real problem found - an internal feature with no
@@ -742,6 +865,7 @@ def start(data, session):
             app.log("Failed to resolve the CAM product after DeleteToolpaths:\n{}".format(traceback.format_exc()))
 
         _require_release_contour(cam)
+        _require_through_hole_for_finishing_pass(cam)
 
         total_machining_time = None
         if cam:
