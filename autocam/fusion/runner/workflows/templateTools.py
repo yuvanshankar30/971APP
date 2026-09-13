@@ -250,6 +250,24 @@ def _is_aluminum_6061(material_name: Optional[str]) -> bool:
     }
 
 
+def _through_shape_roughing_tier(description: Optional[str]) -> Optional[str]:
+    """Classify the three named non-circular through-shape roughing tiers.
+
+    ``Shape Through Hole`` is the regular, middle tier. Its ``Small`` and
+    ``big endmill`` siblings are New Router ATC optimizations, not separate
+    finishing passes. Exact matching keeps the regular operation out of the
+    sibling-only lifecycle.
+    """
+    normalized = " ".join(str(description or "").lower().split())
+    if normalized == "shape through hole":
+        return "middle"
+    if normalized == "small shape through hole":
+        return "small"
+    if normalized == "shape through hole big endmill":
+        return "big"
+    return None
+
+
 def _choose_preset(tool: dict, material_name: Optional[str]) -> Optional[dict]:
     presets = tool.get("start-values", {}).get("presets", [])
     if not isinstance(presets, list) or not presets:
@@ -1133,6 +1151,15 @@ def patch_cam_template_with_tool_libraries(
         endmill_plan["reason"] = "single cutter; ATC swaps are limited to Aluminum 6061"
     planned_guids = {tool.get("guid") for tool in endmill_plan["tools"]}
     endmill_candidates = [entry for entry in endmill_candidates if entry[0].get("guid") in planned_guids]
+    # The New Router's three named through-shape roughing tiers are an ATC
+    # optimization. Shape Through Hole is the regular/middle operation;
+    # Small Shape Through Hole and Shape Through Hole big endmill only make
+    # sense when this job has a real Aluminum-6061 endmill swap plan. Old
+    # Router and any single-cutter New Router job must run the middle tier
+    # alone so one feature cannot be assigned to multiple roughing passes.
+    through_shape_tool_swaps_enabled = (
+        multi_tool_swaps_enabled and len(endmill_plan["tools"]) > 1
+    )
     largest_endmill = _find_largest_endmill([{"tools": [entry[0] for entry in endmill_candidates]}])
     # Only meaningful with a real second, genuinely-smaller candidate loaded
     # (see plan_endmills's own "only when materially smaller" detail-cutter
@@ -1175,6 +1202,49 @@ def patch_cam_template_with_tool_libraries(
         for template_elem in root.findall(f".//{_q('template')}")
         if template_elem.get("strategy") in ("adaptive2d", "pocket2d")
     ]
+    if not through_shape_tool_swaps_enabled:
+        for template_elem in list(roughing_templates):
+            tier = _through_shape_roughing_tier(template_elem.get("description"))
+            if tier not in {"small", "big"}:
+                continue
+            root.remove(template_elem)
+            roughing_templates.remove(template_elem)
+
+    # Direct instruction, New Router multi-tool only: a "decently large"
+    # recognized hole should use the bigger loaded endmill on the
+    # dedicated big-hole operation ("[.]3 Circular Through Hole (sized)"),
+    # not whichever cutter this operation would otherwise get uniformly.
+    # Clone it into a "regular" (kept, gets the detail cutter below) and a
+    # "big endmill" (gets largest_endmill below, like every other roughing/
+    # contour template) tier - DeleteToolpaths.py's own
+    # _split_big_circular_holes then routes each real recognized hole to
+    # whichever tier its actual diameter calls for. Gated on the exact
+    # same through_shape_tool_swaps_enabled flag as the Shape Through Hole
+    # family for the same reason: that flag is already only ever true for
+    # a real New Router multi-tool ATC swap plan (multi-tool mode itself
+    # is application-gated to New Router only), so no separate machine
+    # check is needed here - a single-cutter job (New Router or Old
+    # Router) keeps exactly the one operation it always has.
+    circular_hole_detail_template = None
+    if through_shape_tool_swaps_enabled and detail_endmill and largest_endmill:
+        big_hole_template = next(
+            (
+                template_elem
+                for template_elem in roughing_templates
+                if template_elem.get("strategy") == "pocket2d"
+                and "circular" in str(template_elem.get("description") or "").lower()
+                and "hole" in str(template_elem.get("description") or "").lower()
+            ),
+            None,
+        )
+        if big_hole_template is not None and detail_endmill[0].get("guid") != largest_endmill[0].get("guid"):
+            big_hole_clone = _clone_template(big_hole_template)
+            big_hole_clone.set(
+                "description", f"{big_hole_template.get('description') or ''} big endmill".strip()
+            )
+            _replace_template(root, big_hole_template, [big_hole_template, big_hole_clone])
+            roughing_templates.append(big_hole_clone)
+            circular_hole_detail_template = big_hole_template
 
     if multi_tool_swaps_enabled and bore_template_native is not None and endmill_candidates:
         # Real, confirmed live bug: the New Router's own template already
@@ -1363,33 +1433,39 @@ def patch_cam_template_with_tool_libraries(
     if largest_endmill:
         # Real, confirmed live bug: every roughing/contour template used to
         # get this same single largest_endmill uniformly, including the
-        # template's own "Small Shape Through Hole" tier - a dedicated
-        # small-tool operation whose entire purpose (see
-        # DeleteToolpaths.py's _split_through_roughing_ops) is to catch the
-        # through-hole chains too narrow for the big roughing tool to
-        # physically enter. With all three through-hole roughing tiers
-        # forced to the identical tool/diameter, that split had nothing to
-        # split on - every small-hole chain still routed to whichever tier
-        # won the diameter tie, which then produced a real, empty toolpath
-        # ("Tool doesn't fit" territory) because the tool assigned to it was
-        # too big for the hole, not because the geometry was missing.
-        # camPlate.py's own _require_through_hole_for_finishing_pass guard
-        # (a separate, direct instruction) then correctly failed the whole
-        # job over the resulting mismatch instead of shipping a bad
-        # toolpath. Routing this one named tier to the detail/smallest
-        # loaded endmill instead - when multi-tool mode actually loaded a
-        # second, genuinely smaller candidate - gives it a tool that can
-        # really enter a small hole, restoring the tiers' real distinction.
-        small_roughing_templates = [
-            template_elem for template_elem in roughing_templates
-            if "small" in str(template_elem.get("description") or "").lower()
+        # template's regular and Small Shape Through Hole tiers. The New
+        # Router export deliberately distinguishes three entry envelopes:
+        # big (6 mm cutter), regular (detail cutter with a normal helix),
+        # and small (the same detail cutter with a compact fixed helix).
+        # With the regular tier overwritten to 6 mm, a 0.4 in opening was
+        # routed to the big operation even though its 6 mm helix cannot
+        # enter, producing Fusion's valid-but-empty toolpath.
+        #
+        # Keep the big tier on the largest cutter and both regular/small
+        # tiers on the chosen detail cutter. DeleteToolpaths then selects
+        # exactly one operation by each operation's actual ramp envelope;
+        # regular and small are not duplicates because their template ramps
+        # differ. Single-tool jobs still use their sole cutter for all
+        # tiers, unchanged.
+        detail_through_roughing_templates = [
+            template_elem
+            for template_elem in roughing_templates
+            if "shape through hole" in str(template_elem.get("description") or "").lower()
+            and "big" not in str(template_elem.get("description") or "").lower()
         ]
+        # The dedicated big-hole operation's own "regular" tier (see the
+        # circular_hole_detail_template clone above) - same detail cutter,
+        # same reasoning: only its "big endmill" sibling clone should get
+        # largest_endmill, matching the Shape Through Hole family's own
+        # regular/big split.
+        if circular_hole_detail_template is not None:
+            detail_through_roughing_templates.append(circular_hole_detail_template)
         other_templates = [
             template_elem for template_elem in contour_templates + roughing_templates
-            if template_elem not in small_roughing_templates
+            if template_elem not in detail_through_roughing_templates
         ]
         for templates, (tool, idx) in (
-            (small_roughing_templates, detail_endmill or largest_endmill),
+            (detail_through_roughing_templates, detail_endmill or largest_endmill),
             (other_templates, largest_endmill),
         ):
             for template_elem in templates:

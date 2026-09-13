@@ -76,8 +76,10 @@ def _through_shape_op(name="Small Shape Through Hole", strategy="adaptive2d", op
     )
     curve_selection_param = types.SimpleNamespace(value=curve_selection_value)
 
+    selection_param_name = "contours" if strategy == "contour2d" else "pockets"
+
     def itemByName(param_name):
-        return curve_selection_param if param_name == "pockets" else None
+        return curve_selection_param if param_name == selection_param_name else None
 
     op = types.SimpleNamespace(
         strategy=strategy,
@@ -86,6 +88,7 @@ def _through_shape_op(name="Small Shape Through Hole", strategy="adaptive2d", op
         parameters=types.SimpleNamespace(itemByName=itemByName),
         deleteMe=lambda: deleted.append(operation_id),
     )
+    op._selections = selections
     return op, deleted, apply_calls
 
 
@@ -100,7 +103,7 @@ class _StaleAfterDeleteOp:
     def __init__(self, name, strategy, operation_id, selections, param_name):
         self.name = name
         self._strategy = strategy
-        self.operationId = operation_id
+        self._operation_id = operation_id
         self._deleted = False
         param = types.SimpleNamespace(
             value=types.SimpleNamespace(
@@ -119,6 +122,12 @@ class _StaleAfterDeleteOp:
         if self._deleted:
             raise RuntimeError('2 : InternalValidationError : ironObject.isValid()')
         return self._strategy
+
+    @property
+    def operationId(self):
+        if self._deleted:
+            raise RuntimeError('2 : InternalValidationError : ironObject.isValid()')
+        return self._operation_id
 
     def deleteMe(self):
         self._deleted = True
@@ -150,7 +159,7 @@ class RepairMissingSelectionsDeletionOrderingTests(unittest.TestCase):
         )
 
         pocket_op = _StaleAfterDeleteOp(
-            "Shape Pocket", "pocket_new", "shape-pocket", FakeCurveSelections(), "pockets"
+            "Generic Pocket", "pocket_new", "generic-pocket", FakeCurveSelections(), "pockets"
         )
 
         setup = types.SimpleNamespace(operations=[through_op, pocket_op])
@@ -160,6 +169,20 @@ class RepairMissingSelectionsDeletionOrderingTests(unittest.TestCase):
         self.assertTrue(through_op._deleted)
         self.assertFalse(pocket_op._deleted)
         self.assertTrue(any("removed" in entry for entry in repaired))
+
+    def test_cleanup_never_reads_a_feature_slot_operation_after_deleting_it(self):
+        # A feature-slot contour is classified both as an inactive contour
+        # and as a disabled feature-slot op. Fusion invalidates all property
+        # access after deleteMe(), including operationId.
+        namespace = _load_repair_missing_selections()
+        repair_missing_selections = namespace["_repair_missing_selections"]
+        feature_slot = _StaleAfterDeleteOp(
+            "Slot Cut for Features", "contour2d", "feature-slot", FakeCurveSelections(), "contours"
+        )
+
+        repair_missing_selections(types.SimpleNamespace(operations=[feature_slot]))
+
+        self.assertTrue(feature_slot._deleted)
 
 
 class RepairMissingSelectionsEmptyThroughBucketTests(unittest.TestCase):
@@ -206,6 +229,91 @@ class RepairMissingSelectionsEmptyThroughBucketTests(unittest.TestCase):
         self.assertEqual(len(apply_calls), 1)
         self.assertEqual(deleted, [])
         self.assertIn(op.name, repaired)
+
+    def test_shape_through_pair_receives_the_same_chain_seed_and_direction(self):
+        # Fusion resolves a chain seed to the full closed loop. Both sides
+        # must receive that exact seed and direction; adaptive2d cannot
+        # reliably generate from a complete imported edge list.
+        namespace = _load_repair_missing_selections()
+        repair_missing_selections = namespace["_repair_missing_selections"]
+        roughing, roughing_deleted, roughing_apply_calls = _through_shape_op(
+            "Shape Through Hole big endmill", operation_id="roughing"
+        )
+        finishing, finishing_deleted, finishing_apply_calls = _through_shape_op(
+            "Shape Through Finishing Pass", strategy="contour2d", operation_id="finishing"
+        )
+        seed_edge = types.SimpleNamespace()
+        namespace["_internal_feature_loop_chains_all_bodies"] = (
+            lambda design: ([(seed_edge, True, 2.0)], [])
+        )
+        namespace["_split_through_roughing_ops"] = (
+            lambda roughing_ops, shape_only: {"roughing": [(seed_edge, True)]}
+        )
+
+        repair_missing_selections(types.SimpleNamespace(operations=[roughing, finishing]))
+
+        self.assertEqual(roughing_deleted, [])
+        self.assertEqual(finishing_deleted, [])
+        self.assertEqual(len(roughing_apply_calls), 1)
+        self.assertEqual(len(finishing_apply_calls), 1)
+        self.assertEqual(roughing._selections.entries[0].inputGeometry, [seed_edge])
+        self.assertEqual(finishing._selections.entries[0].inputGeometry, [seed_edge])
+        self.assertTrue(roughing._selections.entries[0].isReverted)
+        self.assertTrue(finishing._selections.entries[0].isReverted)
+
+    def test_feature_slot_operation_is_removed_without_receiving_geometry(self):
+        # Feature-slot cuts are intentionally unused. Every non-circular
+        # through feature goes through the matched Shape Through Hole and
+        # Shape Through Finishing Pass operations instead.
+        namespace = _load_repair_missing_selections()
+        repair_missing_selections = namespace["_repair_missing_selections"]
+        feature_slot, deleted, apply_calls = _through_shape_op(
+            "Slot Cut for Features", strategy="contour2d", operation_id="feature-slot"
+        )
+        namespace["_internal_feature_loop_chains_all_bodies"] = lambda design: ([], [])
+
+        repaired = repair_missing_selections(types.SimpleNamespace(operations=[feature_slot]))
+
+        self.assertEqual(apply_calls, [])
+        self.assertEqual(deleted, ["feature-slot"])
+        self.assertTrue(any("removed unused contour pass" in entry for entry in repaired))
+
+    def test_shape_pocket_pair_receives_the_same_chain_seed_and_direction(self):
+        namespace = _load_repair_missing_selections()
+        repair_missing_selections = namespace["_repair_missing_selections"]
+        roughing, roughing_deleted, roughing_apply_calls = _through_shape_op(
+            "Shape Pocket", operation_id="pocket-roughing"
+        )
+        finishing, finishing_deleted, finishing_apply_calls = _through_shape_op(
+            "Shape Pocket Finishing Pass", strategy="contour2d", operation_id="pocket-finishing"
+        )
+        floor_seed = types.SimpleNamespace()
+        namespace["_blind_pocket_loops_all_bodies"] = lambda design: ([], [(floor_seed, True)])
+
+        repair_missing_selections(types.SimpleNamespace(operations=[roughing, finishing]))
+
+        self.assertEqual(roughing_deleted, [])
+        self.assertEqual(finishing_deleted, [])
+        self.assertEqual(len(roughing_apply_calls), 1)
+        self.assertEqual(len(finishing_apply_calls), 1)
+        self.assertEqual(roughing._selections.entries[0].inputGeometry, [floor_seed])
+        self.assertEqual(finishing._selections.entries[0].inputGeometry, [floor_seed])
+        self.assertTrue(roughing._selections.entries[0].isReverted)
+        self.assertTrue(finishing._selections.entries[0].isReverted)
+
+    def test_unpaired_shape_pocket_operations_are_removed_together(self):
+        namespace = _load_repair_missing_selections()
+        repair_missing_selections = namespace["_repair_missing_selections"]
+        roughing, roughing_deleted, roughing_apply_calls = _through_shape_op(
+            "Shape Pocket", operation_id="pocket-roughing"
+        )
+        namespace["_blind_pocket_loops_all_bodies"] = lambda design: ([], [([types.SimpleNamespace()], False)])
+
+        repaired = repair_missing_selections(types.SimpleNamespace(operations=[roughing]))
+
+        self.assertEqual(roughing_apply_calls, [])
+        self.assertEqual(roughing_deleted, ["pocket-roughing"])
+        self.assertTrue(any("removed unused pocket pair operation" in entry for entry in repaired))
 
 
 class ThroughShapeOpsExcludesBoreStrategyTests(unittest.TestCase):

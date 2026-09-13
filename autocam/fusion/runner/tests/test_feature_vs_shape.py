@@ -1,11 +1,7 @@
-"""A FEATURE (a slot - long, narrow, barely wider than the cutter) and a
-SHAPE (a broad polygon or blob with real area to clear) are different things
-to machine, and the real templates model them as separate operations
-("Slot Cut for Features" vs "Shape Through Hole"/"Shape Pocket").
-
-These cover the rule that separates them. It is deliberately shape-agnostic
-- it measures elongation, not any particular outline - so it holds for any
-slot-like feature rather than one example.
+"""Non-circular through features, including elongated slots, belong to the
+matched Shape Through Hole/Shape Through Finishing Pass workflow. The
+template's Slot Cut for Features operation remains recognizable only so it
+can be pruned; it must never receive feature geometry.
 
 DeleteToolpaths.py imports Fusion's runtime-only modules at import time, so
 the functions under test are loaded in isolation.

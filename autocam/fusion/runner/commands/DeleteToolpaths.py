@@ -40,6 +40,29 @@ def _is_dedicated_circular_pocket_op(name_lower: str) -> bool:
     """
     return "circular" in name_lower and "pocket" in name_lower and "hole" not in name_lower
 
+
+def _should_remove_for_missing_pocket_floor(op) -> bool:
+    """Whether a pocket-style operation is invalid without a blind floor.
+
+    adaptive2d also powers Shape Through Hole roughing. Those selections
+    intentionally cut all the way through a plate and therefore never have
+    a blind-pocket floor. Treating every adaptive operation as a pocket here
+    deleted a valid Shape Through Hole after it generated, leaving its
+    finishing pass orphaned and aborting the job in the pairing guard.
+    """
+    name_lower = str(op.name or "").lower()
+    is_through_shape = (
+        "through" in name_lower
+        and "circular" not in name_lower
+        and op.strategy != "bore"
+    )
+    return (
+        op.strategy in _POCKET_STRATEGIES
+        and not is_through_shape
+        and not _is_dedicated_circular_hole_op(name_lower)
+    )
+
+
 # Maps each strategy to the name of its geometry-selection parameter - the
 # thing that actually holds WHAT to cut, separate from all the how-to-cut
 # parameters (feeds, stepdown, etc.) already handled elsewhere. Confirmed
@@ -314,6 +337,73 @@ def _loop_min_dimension_cm(edges) -> float:
     return min(width, height)
 
 
+def _loop_min_clearance_cm(edges) -> float:
+    """Smallest planar width of a loop's CAD footprint, in cm.
+
+    An axis-aligned bounding box is sufficient for a rectangular feature
+    aligned to the setup, but it overstates usable opening width for a
+    rotated diamond, tapered shape, or arbitrary angled profile. Adaptive
+    entry must fit across the feature's narrowest direction, not merely the
+    narrowest X/Y bounding-box axis. Compute the minimum caliper width of
+    the sampled convex footprint instead. Circular loops are handled by
+    their dedicated operations, while endpoints plus ``pointOnEdge`` cover
+    the straight and arc-sided non-circular loops routed here.
+
+    If the CAD API cannot provide a usable footprint, retain the existing
+    bounding-box fallback rather than refusing an otherwise valid job.
+    """
+    points = []
+    for edge in edges:
+        for getter in ("startVertex", "endVertex"):
+            try:
+                point = getattr(edge, getter).geometry
+                points.append((float(point.x), float(point.y)))
+            except Exception:
+                continue
+        try:
+            point = edge.pointOnEdge
+            points.append((float(point.x), float(point.y)))
+        except Exception:
+            pass
+
+    points = sorted(set(points))
+    if len(points) < 3:
+        return _loop_min_dimension_cm(edges)
+
+    def _cross(origin, point_a, point_b):
+        return (
+            (point_a[0] - origin[0]) * (point_b[1] - origin[1])
+            - (point_a[1] - origin[1]) * (point_b[0] - origin[0])
+        )
+
+    lower = []
+    for point in points:
+        while len(lower) >= 2 and _cross(lower[-2], lower[-1], point) <= 0:
+            lower.pop()
+        lower.append(point)
+    upper = []
+    for point in reversed(points):
+        while len(upper) >= 2 and _cross(upper[-2], upper[-1], point) <= 0:
+            upper.pop()
+        upper.append(point)
+    hull = lower[:-1] + upper[:-1]
+    if len(hull) < 3:
+        return _loop_min_dimension_cm(edges)
+
+    minimum_width = float("inf")
+    for index, point_a in enumerate(hull):
+        point_b = hull[(index + 1) % len(hull)]
+        delta_x = point_b[0] - point_a[0]
+        delta_y = point_b[1] - point_a[1]
+        length = (delta_x * delta_x + delta_y * delta_y) ** 0.5
+        if length <= 1e-9:
+            continue
+        normal_x, normal_y = -delta_y / length, delta_x / length
+        projections = [point[0] * normal_x + point[1] * normal_y for point in hull]
+        minimum_width = min(minimum_width, max(projections) - min(projections))
+    return minimum_width if minimum_width != float("inf") else _loop_min_dimension_cm(edges)
+
+
 def _operation_tool_diameter_cm(op):
     """This operation's assigned tool diameter, in cm - None if it can't
     be read (no tool assigned yet, or the parameter is missing). Same
@@ -339,10 +429,232 @@ def _operation_tool_diameter_cm(op):
 _ROUGHING_FIT_CLEARANCE_FACTOR = 1.5
 
 
+def _adaptive_entry_clearance_cm(op, tool_diameter_cm):
+    """Minimum feature width this adaptive operation needs to enter safely.
+
+    A cutter fitting between two walls is not enough to make an adaptive
+    toolpath. When the template uses a helical ramp, Fusion must also fit
+    that helix beside the cutter. The New Router template's 6 mm through
+    operation has a 0.95-tool-diameter helix, so the former generic 1.5x
+    cutter rule could select it for a 0.4 in opening even though its roughly
+    0.46 in entry envelope cannot fit. Fusion then reports a valid operation
+    with an empty toolpath.
+
+    Prefer the operation's actual evaluated ramp diameter. A malformed or
+    unavailable Fusion parameter falls back to the conservative historical
+    1.5x rule, preserving compatibility with older templates and test mocks.
+    """
+    fallback = tool_diameter_cm * _ROUGHING_FIT_CLEARANCE_FACTOR
+    try:
+        ramp_type = op.parameters.itemByName("rampType")
+        if ramp_type is not None:
+            expression = str(ramp_type.expression).strip().strip("'").lower()
+            if expression and expression != "helix":
+                return fallback
+        ramp = op.parameters.itemByName("minimumRampDiameter")
+        if ramp is None:
+            ramp = op.parameters.itemByName("helicalRampDiameter")
+        if ramp is None:
+            return fallback
+        ramp_diameter_cm = float(ramp.value.value)
+        if ramp_diameter_cm <= 0:
+            return fallback
+        return tool_diameter_cm + ramp_diameter_cm
+    except Exception:
+        return fallback
+
+
+def _is_non_circular_through_roughing_op(op) -> bool:
+    """True for a generic through-shape roughing tier, never a round hole."""
+    name_lower = str(op.name or "").lower()
+    return (
+        op.strategy in _POCKET_STRATEGIES
+        and "through" in name_lower
+        and "circular" not in name_lower
+        and op.strategy != "bore"
+    )
+
+
+def _next_smaller_through_roughing_op(source, roughing_ops):
+    """The largest loaded through tier smaller than the source, if any."""
+    source_diameter = _operation_tool_diameter_cm(source)
+    if source_diameter is None:
+        return None
+    candidates = [
+        op
+        for op in roughing_ops
+        if op is not source
+        and (diameter := _operation_tool_diameter_cm(op)) is not None
+        and diameter < source_diameter - 1e-6
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=_operation_tool_diameter_cm)
+
+
+def _reroute_empty_through_roughing(setup):
+    """Move an empty large through tier's exact chains to its next smaller tool.
+
+    Geometry-width planning selects the fastest plausible tier before Fusion
+    generates. Fusion remains the authority for complex imported profiles:
+    an irregular shape can satisfy its sampled width yet still leave no valid
+    adaptive entry for the larger cutter. Deleting that empty operation
+    alone leaves the shared finishing selection unroughed. Retry the exact
+    chains with the next smaller loaded through tier before cleanup instead.
+    """
+    roughing_ops = [
+        op for op in list(setup.operations) if _is_non_circular_through_roughing_op(op)
+    ]
+    rerouted = []
+    for source in roughing_ops:
+        if "empty" not in str(source.warning or "").lower():
+            continue
+        target = _next_smaller_through_roughing_op(source, roughing_ops)
+        if target is None:
+            continue
+        try:
+            source_value = source.parameters.itemByName("pockets").value
+            target_value = target.parameters.itemByName("pockets").value
+            source_selections = source_value.getCurveSelections()
+            target_selections = target_value.getCurveSelections()
+            source_chains = [source_selections.item(i) for i in range(source_selections.count)]
+            if not source_chains:
+                continue
+            chain_specs = [
+                (
+                    list(getattr(chain, "inputGeometry", None) or []),
+                    bool(getattr(chain, "isOpen", False)),
+                    bool(getattr(chain, "isReverted", False)),
+                )
+                for selections in (target_selections, source_selections)
+                for chain in (selections.item(i) for i in range(selections.count))
+            ]
+            if not any(edges for edges, _is_open, _is_reverted in chain_specs):
+                continue
+            target_selections.clear()
+            for edges, is_open, is_reverted in chain_specs:
+                if not edges:
+                    continue
+                chain = target_selections.createNewChainSelection()
+                chain.isOpen = is_open
+                chain.isReverted = is_reverted
+                chain.inputGeometry = edges
+            target_value.applyCurveSelections(target_selections)
+            source_name, target_name = source.name, target.name
+            source.deleteMe()
+            rerouted.append(f"{source_name} -> {target_name}")
+        except Exception:
+            continue
+    return rerouted
+
+
+def _reconcile_through_roughing_coverage(setup):
+    """Give every finishing chain to a surviving through-shape rougher.
+
+    The initial feature split deliberately assigns each through chain to one
+    roughing tier and all chains to the finishing contour.  Fusion can still
+    prune a tier later, after its initial toolpath-generation result, which
+    leaves its finishing chain visibly orphaned.  Reconcile after that
+    cleanup with the finishing selection as the source of truth.  This is
+    independent of router type and whether the job has one cutter or an ATC:
+    it only considers the roughing operations that actually survived in this
+    setup, then uses the one with the smallest real entry envelope as the
+    safest fallback.
+    """
+    roughing_ops = [
+        op for op in list(setup.operations) if _is_non_circular_through_roughing_op(op)
+    ]
+    finishing_ops = [
+        op
+        for op in list(setup.operations)
+        if "through" in str(op.name or "").lower()
+        and "circular" not in str(op.name or "").lower()
+        and op.strategy == "contour2d"
+    ]
+    if not roughing_ops or not finishing_ops:
+        return []
+
+    def _chain_specs(op, parameter_name):
+        try:
+            parameter = op.parameters.itemByName(parameter_name)
+            value = parameter.value if parameter is not None else None
+            selections = value.getCurveSelections() if value is not None else None
+            if selections is None:
+                return None
+            return [
+                (
+                    list(getattr(chain, "inputGeometry", None) or []),
+                    bool(getattr(chain, "isOpen", False)),
+                    bool(getattr(chain, "isReverted", False)),
+                )
+                for chain in (selections.item(i) for i in range(selections.count))
+            ]
+        except Exception:
+            return None
+
+    def _edge_key(edge):
+        token = getattr(edge, "entityToken", None)
+        return ("token", token) if token is not None else ("object", id(edge))
+
+    def _chain_key(spec):
+        edges, is_open, is_reverted = spec
+        return (tuple(_edge_key(edge) for edge in edges), is_open, is_reverted)
+
+    roughing_specs = []
+    covered_chains = set()
+    for op in roughing_ops:
+        specs = _chain_specs(op, "pockets")
+        if specs is None:
+            continue
+        roughing_specs.append((op, specs))
+        covered_chains.update(_chain_key(spec) for spec in specs)
+    if not roughing_specs:
+        return []
+
+    missing_specs = []
+    for op in finishing_ops:
+        specs = _chain_specs(op, "contours")
+        if specs is None:
+            continue
+        missing_specs.extend(
+            spec
+            for spec in specs
+            if _chain_key(spec) not in covered_chains
+        )
+    if not missing_specs:
+        return []
+
+    def _entry_envelope(op):
+        diameter = _operation_tool_diameter_cm(op)
+        if diameter is None:
+            return float("inf")
+        return _adaptive_entry_clearance_cm(op, diameter)
+
+    target, target_specs = min(roughing_specs, key=lambda pair: _entry_envelope(pair[0]))
+    try:
+        parameter = target.parameters.itemByName("pockets")
+        value = parameter.value if parameter is not None else None
+        selections = value.getCurveSelections() if value is not None else None
+        if selections is None:
+            return []
+        selections.clear()
+        for edges, is_open, is_reverted in target_specs + missing_specs:
+            if not edges:
+                continue
+            chain = selections.createNewChainSelection()
+            chain.isOpen = is_open
+            chain.isReverted = is_reverted
+            chain.inputGeometry = edges
+        value.applyCurveSelections(selections)
+        return [f"{len(missing_specs)} finishing chain(s) -> {target.name}"]
+    except Exception:
+        return []
+
+
 def _split_through_roughing_ops(roughing_ops, shape_only):
-    """Routes each (edge, is_reverted, min_dimension_cm) chain in
+    """Routes each (seed_edge, is_reverted, min_clearance_cm) chain in
     shape_only to whichever of roughing_ops can actually clear it MOST
-    EFFICIENTLY, returning {operationId: [(edge, is_reverted), ...]}.
+    EFFICIENTLY, returning {operationId: [(seed_edge, is_reverted), ...]}.
 
     Direct instruction after live confirmation: a real template's "Shape
     Through Hole" and "Small Shape Through Hole" (both adaptive2d
@@ -364,15 +676,17 @@ def _split_through_roughing_ops(roughing_ops, shape_only):
     has no tool-clearance problem a roughing pass does.
 
     Fixed generally instead of patching in a third name-based tier:
-    every chain goes to the LARGEST-diameter op that can still actually
-    fit and maneuver inside it (fastest material removal - the same
-    "use the biggest tool that does the job" principle already applied
-    to endmill/detail selection elsewhere), falling back to the
-    SMALLEST-diameter op only when no op's own clearance threshold is
-    met at all (the tightest fit available, same as before). This is
-    purely diameter-driven, no longer name-dependent, so it generalizes
-    to however many roughing tiers a template ships without ever
-    duplicating work between two of them.
+    every chain goes to the LARGEST-diameter op whose actual entry envelope
+    can fit it (fastest material removal - the same "use the biggest tool
+    that does the job" principle already applied to endmill/detail
+    selection elsewhere), falling back to the SMALLEST-diameter op only
+    when no op's own clearance threshold is met at all (the tightest fit
+    available, same as before). The threshold includes a template's real
+    helical-ramp diameter where available; cutter diameter alone was the
+    live cause of a "Generated toolpath is empty" big-endmill operation.
+    This is diameter- and operation-envelope-driven, not name-dependent,
+    so it generalizes to however many roughing tiers a template ships
+    without ever duplicating work between two of them.
 
     Falls back to giving every roughing op every chain (the original
     behavior before this split existed) whenever the split can't be
@@ -382,7 +696,7 @@ def _split_through_roughing_ops(roughing_ops, shape_only):
     it should have had - the exact class of bug this file exists to
     prevent, not reproduce.
     """
-    stripped_all = [(edge, is_reverted) for edge, is_reverted, _min_dim in shape_only]
+    stripped_all = [(seed_edge, is_reverted) for seed_edge, is_reverted, _min_dim in shape_only]
     diameters_cm = {op.operationId: _operation_tool_diameter_cm(op) for op in roughing_ops}
     if len(roughing_ops) < 2 or any(diameters_cm[op.operationId] is None for op in roughing_ops):
         return {op.operationId: stripped_all for op in roughing_ops}
@@ -392,10 +706,13 @@ def _split_through_roughing_ops(roughing_ops, shape_only):
     # able to fit it - the most efficient choice. ordered[-1] (smallest
     # diameter) is the fallback when nothing clears its own threshold.
     ordered = sorted(roughing_ops, key=lambda op: diameters_cm[op.operationId], reverse=True)
-    thresholds = [diameters_cm[op.operationId] * _ROUGHING_FIT_CLEARANCE_FACTOR for op in ordered]
+    thresholds = [
+        _adaptive_entry_clearance_cm(op, diameters_cm[op.operationId])
+        for op in ordered
+    ]
 
     assignments = {op.operationId: [] for op in roughing_ops}
-    for edge, is_reverted, min_dim in shape_only:
+    for seed_edge, is_reverted, min_dim in shape_only:
         target = ordered[-1]
         for op, threshold in zip(ordered, thresholds):
             if min_dim >= threshold:
@@ -405,7 +722,7 @@ def _split_through_roughing_ops(roughing_ops, shape_only):
         # correct, not a bug - the same as any other operation this file
         # finds inapplicable to a given part: its toolpath comes out
         # empty and the existing cleanup below removes it.
-        assignments[target.operationId].append((edge, is_reverted))
+        assignments[target.operationId].append((seed_edge, is_reverted))
     return assignments
 
 
@@ -454,8 +771,12 @@ def _big_circular_loop_edges_all_bodies(design, min_diameter_cm: float):
     caller.
 
     Each entry pairs the loop's edges with its own real chain direction
-    (see is_reverted_for_loop_seed / docs/contour-chain-direction.md) -
-    confirmed live as a real bug, not hypothetical: this used to hand back
+    (see is_reverted_for_loop_seed / docs/contour-chain-direction.md) and
+    its own real diameter in cm - used by _split_big_circular_holes to
+    route a "decently large" hole to a bigger loaded endmill than a
+    merely-qualifying one, direct instruction, New Router multi-tool only
+    (see that function's own docstring) - confirmed live as a real bug,
+    not hypothetical: this used to hand back
     bare edge lists and the caller hardcoded isReverted=False for all of
     them, same as the internal-feature loops did before that was fixed -
     a shared BRepEdge can run either way on a given face, so a circular
@@ -476,10 +797,114 @@ def _big_circular_loop_edges_all_bodies(design, min_diameter_cm: float):
             edges = [co_edge.edge for co_edge in co_edges]
             if not edges or not _is_circular_loop(edges):
                 continue
-            if _circle_loop_diameter_cm(edges) >= min_diameter_cm:
+            diameter_cm = _circle_loop_diameter_cm(edges)
+            if diameter_cm >= min_diameter_cm:
                 is_reverted = is_reverted_for_loop_seed(co_edges[0].isOpposedToEdge)
-                loops.append((edges, is_reverted))
+                loops.append((edges, is_reverted, diameter_cm))
     return loops
+
+
+# Direct instruction: a "decently large" recognized hole should use the New
+# Router's bigger loaded endmill for the dedicated big-hole operation
+# instead of whichever smaller cutter also happens to qualify - both are
+# "efficient" in the sense of clearing the hole in one pass, but the bigger
+# cutter clears more material per pass. 0.6in is the floor the instruction
+# itself named; a hole between the operation's own base threshold (0.3in)
+# and this is left on the smaller/detail cutter, which real testing already
+# confirmed handles that range - see _min_hole_diameter_cm_from_name.
+#
+# This floor is also the real safety margin here, not just the requested
+# number: the "big endmill" tier is a plain XML clone of the regular
+# operation (see patch_cam_template_with_tool_libraries), so it inherits
+# the ORIGINAL operation's own captured ramp diameter (0.09in, sized for
+# the small 971 Main Bit tool that operation was authored against) even
+# after the 6mm tool gets swapped in - unlike "Shape Through Hole big
+# endmill", there is no separately-authored real template capture for a
+# 6mm circular-hole ramp to read instead. _adaptive_entry_clearance_cm is
+# still tried below (harmless - max() with this floor can only raise the
+# effective threshold, never lower it below 0.6in), but it cannot be
+# trusted alone here. Confirmed this floor is still real, not arbitrary:
+# the sibling "Shape Through Hole big endmill" operation's own separately-
+# authored real capture needs tool(0.236in) + ramp(0.224in) = 0.46in for
+# this exact 6mm cutter on this exact machine family - 0.6in already
+# clears that with a 0.14in margin.
+_BIG_CIRCULAR_HOLE_MIN_DIAMETER_IN = 0.6
+
+
+def _is_big_endmill_circular_hole_op(name_lower: str) -> bool:
+    """True only for the dedicated big-hole operation's own "big endmill"
+    tier clone, never its regular sibling - mirrors the Shape Through Hole
+    family's own name-based tier split (see templateTools.py's
+    _through_shape_roughing_tier).
+    """
+    return _is_dedicated_circular_hole_op(name_lower) and "big endmill" in name_lower
+
+
+def _split_big_circular_holes(big_hole_ops, loops):
+    """Routes each (edges, is_reverted, diameter_cm) loop in loops - every
+    real circular through-hole loop meeting the dedicated big-hole
+    operation's own base name threshold, see _min_hole_diameter_cm_from_name
+    and its only caller below - to one of ``big_hole_ops``, returning
+    {operationId: [(edges, is_reverted), ...]}. Mirrors
+    _split_through_roughing_ops's own shape: pure routing over pre-fetched
+    geometry, no Fusion design access of its own, so it can be unit tested
+    the same way.
+
+    New Router multi-tool only: templateTools.py's own
+    through_shape_tool_swaps_enabled gate only ever clones this operation
+    into a "regular" and a "big endmill" tier when a real second, smaller
+    loaded endmill exists alongside the largest one - every other template
+    (Old Router, or any New Router job without a real ATC swap plan) still
+    ships exactly one such operation here, and every real loop routes to it
+    unconditionally, identical to this function's behavior before the
+    split existed.
+
+    When both tiers are present, a loop at or past
+    _BIG_CIRCULAR_HOLE_MIN_DIAMETER_IN - or, whichever is stricter, past
+    _adaptive_entry_clearance_cm's own reading of the "big endmill" clone's
+    ramp parameters (harmless to try - see _BIG_CIRCULAR_HOLE_MIN_DIAMETER_IN's
+    own comment on why that floor, not this reading, is the real safety
+    margin here) - goes to the "big endmill" tier; everything else stays on
+    the regular tier. A tier
+    with no operation actually assigned to it (e.g. only one real tier
+    survived an earlier cleanup pass) never receives a loop meant for the
+    other.
+    """
+    assignments = {op.operationId: [] for op in big_hole_ops}
+
+    regular_ops = [op for op in big_hole_ops if not _is_big_endmill_circular_hole_op(op.name.lower())]
+    big_ops = [op for op in big_hole_ops if _is_big_endmill_circular_hole_op(op.name.lower())]
+    if not regular_ops or not big_ops:
+        # No real split to make (a single tier, or a template that only
+        # ever ships one) - every qualifying loop goes to every op present,
+        # same as this function's own behavior before the split existed.
+        for op in big_hole_ops:
+            assignments[op.operationId] = [(edges, is_reverted) for edges, is_reverted, _dia in loops]
+        return assignments
+
+    regular_target = regular_ops[0]
+    big_target = big_ops[0]
+
+    # Real, confirmed live class of bug (see _adaptive_entry_clearance_cm's
+    # own docstring): the flat _ROUGHING_FIT_CLEARANCE_FACTOR alone missed
+    # a real 6mm adaptive2d operation's actual helical-ramp entry envelope.
+    # This operation carries the identical rampType/minimumRampDiameter/
+    # helicalRampDiameter parameters (confirmed directly against the real
+    # template - it's a pocket2d hole-clearing operation, not a plain
+    # PocketRecognitionSelection), so it can fail the exact same way for
+    # the exact same reason. Use the same real-clearance function rather
+    # than assuming the flat factor is good enough here just because this
+    # is a different strategy.
+    big_threshold_cm = _BIG_CIRCULAR_HOLE_MIN_DIAMETER_IN * 2.54
+    big_tool_diameter_cm = _operation_tool_diameter_cm(big_target)
+    if big_tool_diameter_cm is not None:
+        big_threshold_cm = max(
+            big_threshold_cm, _adaptive_entry_clearance_cm(big_target, big_tool_diameter_cm)
+        )
+    for edges, is_reverted, diameter_cm in loops:
+        target = big_target if diameter_cm >= big_threshold_cm else regular_target
+        assignments[target.operationId].append((edges, is_reverted))
+    return assignments
 
 
 def _internal_feature_loop_chains_all_bodies(design):
@@ -487,15 +912,23 @@ def _internal_feature_loop_chains_all_bodies(design):
     split into ``(shape_chains, slot_chains)`` - see _FEATURE_ASPECT_RATIO
     for what separates the two and why they are machined differently.
 
-    Both halves carry the same (seed edge, is_reverted, min_dimension_cm)
-    shape - the third element is this loop's own narrow bounding
-    dimension (see _loop_min_dimension_cm), used by
+    Both halves carry the same (seed edge, is_reverted, min_clearance_cm)
+    shape - the third element is this loop's own narrow CAD-footprint
+    clearance (see _loop_min_clearance_cm), used by
     _split_through_roughing_ops to route a feature too narrow for the
     main roughing tool to the template's dedicated small-tool operation
     instead. A caller with no use for that (no dedicated feature
     operation, or building a contour2d finishing pass's own selection,
     which needs every chain regardless of size) can simply drop it and
     concatenate both halves, same as before this field existed.
+
+    Each entry deliberately carries the same seed edge and co-edge winding
+    used by both roughing and finishing. Fusion resolves that seed into its
+    own complete closed chain. Unlike contour2d, an adaptive2d `pockets`
+    selection can be valid yet generate an empty toolpath when given every
+    edge in an imported irregular loop; its chain seed must be one edge.
+    The pair therefore shares the same resolved geometry and direction
+    without forcing a multi-edge input that adaptive clearing cannot use.
 
     This used to only collect loops whose bounding box was elongated past
     a 2.5:1 aspect-ratio threshold (treating anything rounder as "not a
@@ -544,7 +977,7 @@ def _internal_feature_loop_chains_all_bodies(design):
             entry = (
                 seed.edge,
                 is_reverted_for_loop_seed(seed.isOpposedToEdge),
-                _loop_min_dimension_cm(edges),
+                _loop_min_clearance_cm(edges),
             )
             if _loop_aspect_ratio(edges) >= _FEATURE_ASPECT_RATIO:
                 slot_chains.append(entry)
@@ -674,7 +1107,6 @@ def _repair_missing_selections(setup) -> list[str]:
     design_cache = []  # single-item list used as a mutable box (no `nonlocal` needed)
     outer_edges_cache = None
     feature_chains_cache = None
-    big_hole_edges_cache = None
     blind_pocket_cache = None  # (circular_loops, non_circular_chains), see _blind_pocket_loops_all_bodies
 
     def _design():
@@ -800,33 +1232,21 @@ def _repair_missing_selections(setup) -> list[str]:
         and "circular" not in op.name.lower()
         and op.strategy != "bore"
     ]
-    # The template's own dedicated feature-slot operation, if it ships one.
-    # Confirmed against the two real templates: the New Router's
-    # "new router metal sheet" template has "Slot Cut for Features"
-    # (contour2d, group_tabs=false) alongside "Slot Cut for Edges"
-    # (contour2d, group_tabs=true - the outer release cut), while the UNC
-    # Router's "(DEPRECATED)971 Metal Sheet" template has only "2D Slot
-    # Cut" and no feature-slot operation at all.
+    # The template's legacy feature-slot operation is intentionally never a
+    # machining fallback. Its one boundary pass cannot clear a feature's
+    # interior, while the matched Shape Through Hole/Finishing Pass workflow
+    # handles both broad cutouts and narrow slots with the appropriate loaded
+    # roughing tool. Keep identifying the operation so it is always removed,
+    # even if a future template changes its strategy or default selection.
     feature_slot_ops = [op for op in ops_snapshot if _is_feature_slot_op(op.name.lower())]
 
     through_chain_assignments = {}
-    if through_shape_ops or feature_slot_ops:
+    if through_shape_ops:
         design = _design()
         shape_chains, slot_chains = (
             _internal_feature_loop_chains_all_bodies(design) if design else ([], [])
         )
-        # A slot only goes to a feature operation if the template actually
-        # has one. Where it doesn't, slots stay with the through-shape
-        # operations exactly as before - that keeps every template without
-        # a feature operation working unchanged rather than silently
-        # dropping its slots on the floor.
-        if feature_slot_ops and slot_chains:
-            stripped_slots = [(edge, is_reverted) for edge, is_reverted, _min_dim in slot_chains]
-            for op in feature_slot_ops:
-                through_chain_assignments[op.operationId] = stripped_slots
-            shape_only = shape_chains
-        else:
-            shape_only = shape_chains + slot_chains
+        shape_only = shape_chains + slot_chains
         if shape_only:
             # A finishing pass (contour2d) just follows the boundary line -
             # no tool-clearance problem a roughing pass has - so it always
@@ -835,32 +1255,98 @@ def _repair_missing_selections(setup) -> list[str]:
             # _split_through_roughing_ops for why and how.
             finishing_ops = [op for op in through_shape_ops if op.strategy == "contour2d"]
             roughing_ops = [op for op in through_shape_ops if op.strategy != "contour2d"]
-            stripped_shape_only = [(edge, is_reverted) for edge, is_reverted, _min_dim in shape_only]
+            stripped_shape_only = [(seed_edge, is_reverted) for seed_edge, is_reverted, _min_dim in shape_only]
             for op in finishing_ops:
                 through_chain_assignments[op.operationId] = stripped_shape_only
             through_chain_assignments.update(_split_through_roughing_ops(roughing_ops, shape_only))
 
-    # Pocket finishing passes are not a substitute for a real Shape Pocket:
-    # their stale template references are removed. The adaptive Shape Pocket
-    # operation below is rebuilt from PocketRecognitionSelection and owns
-    # actual recessed floors; Shape Through Finishing Pass owns through-cut
-    # chains. No generic "Feature Slot Cut" remains for a part that has no
-    # slot feature.
+    # Direct instruction, New Router multi-tool only: route a "decently
+    # large" recognized hole to the dedicated big-hole operation's own
+    # bigger loaded endmill tier when templateTools.py's
+    # through_shape_tool_swaps_enabled gate actually cloned one - see
+    # _split_big_circular_holes for the size threshold and its single-tier
+    # fallback (every other template/job still has exactly one such
+    # operation here and is unaffected).
+    big_hole_ops = [
+        op for op in ops_snapshot
+        if op.strategy == "pocket2d" and _is_dedicated_circular_hole_op(op.name.lower())
+    ]
+    big_hole_chain_assignments = {}
+    if big_hole_ops:
+        design = _design()
+        big_hole_threshold_cm = min(
+            (_min_hole_diameter_cm_from_name(op.name.lower()) or 0.0) for op in big_hole_ops
+        )
+        big_hole_loops = (
+            _big_circular_loop_edges_all_bodies(design, big_hole_threshold_cm) if design else []
+        )
+        big_hole_chain_assignments = _split_big_circular_holes(big_hole_ops, big_hole_loops)
+
+    # A Shape Pocket and its finishing pass are a matched pair just like the
+    # through-shape operations above. They receive the same real blind-pocket
+    # loops, or neither survives. A contour alone only traces a boundary and
+    # an adaptive alone leaves it unfinished; keeping either would be wrong.
+    shape_pocket_ops = [
+        op
+        for op in ops_snapshot
+        if "shape pocket" in op.name.lower()
+        and "circular" not in op.name.lower()
+        and op.strategy in (*_POCKET_STRATEGIES, "contour2d")
+    ]
+    shape_pocket_finishing_ops = [op for op in shape_pocket_ops if op.strategy == "contour2d"]
+    shape_pocket_roughing_ops = [op for op in shape_pocket_ops if op.strategy != "contour2d"]
+    pocket_chain_assignments = {}
+    if shape_pocket_finishing_ops and shape_pocket_roughing_ops:
+        if blind_pocket_cache is None:
+            design = _design()
+            blind_pocket_cache = _blind_pocket_loops_all_bodies(design) if design else ([], [])
+        circular_blind_loops, non_circular_blind_chains = blind_pocket_cache
+        claimed_diameters_cm = [
+            _min_hole_diameter_cm_from_name(other.name.lower())
+            for other in ops_snapshot
+            if other.strategy in _POCKET_STRATEGIES
+            and _is_dedicated_circular_pocket_op(other.name.lower())
+        ]
+        min_claimed_cm = min((d for d in claimed_diameters_cm if d is not None), default=None)
+        pocket_chains = non_circular_blind_chains + [
+            (edges, is_reverted)
+            for edges, is_reverted in circular_blind_loops
+            if min_claimed_cm is None or _circle_loop_diameter_cm(edges) < min_claimed_cm
+        ]
+        if pocket_chains:
+            for op in shape_pocket_ops:
+                pocket_chain_assignments[op.operationId] = pocket_chains
+
     finishing_pass_ops = [
         op for op in ops_snapshot if op.strategy == "contour2d" and not _is_outer_profile(op)
     ]
     active_through_ids = set(through_chain_assignments)
+    active_pocket_ids = set(pocket_chain_assignments)
     inactive_finishing_ops = [
-        op for op in finishing_pass_ops if op.operationId not in active_through_ids
+        op
+        for op in finishing_pass_ops
+        if op.operationId not in active_through_ids and op.operationId not in active_pocket_ids
+    ]
+    inactive_shape_pocket_ops = [
+        op for op in shape_pocket_ops if op.operationId not in active_pocket_ids
     ]
     inactive_finishing_ids = {op.operationId for op in inactive_finishing_ops}
-    empty_selection_ops = []
+    inactive_shape_pocket_ids = {op.operationId for op in inactive_shape_pocket_ops}
+    feature_slot_ids = {op.operationId for op in feature_slot_ops}
+    feature_slot_removal_ids = feature_slot_ids - inactive_finishing_ids - inactive_shape_pocket_ids
+    inactive_op_ids = {
+        *inactive_finishing_ids,
+        *inactive_shape_pocket_ids,
+        *feature_slot_ids,
+    }
+    empty_selection_ids = []
 
     for op in ops_snapshot:
-        if op.operationId in inactive_finishing_ids:
+        if op.operationId in inactive_op_ids:
             continue
         is_outer = _is_outer_profile(op)
         is_through_shape_op = op.operationId in active_through_ids
+        is_shape_pocket_op = op.operationId in active_pocket_ids
         # The template's own dedicated big-hole operation (pocket2d,
         # named for exactly this - see _set_min_hole_diameter_from_name's
         # own comment) suffers the identical stale-selection flakiness
@@ -898,6 +1384,7 @@ def _repair_missing_selections(setup) -> list[str]:
             if (
                 is_outer
                 or is_through_shape_op
+                or is_shape_pocket_op
                 or is_big_hole_op
                 or is_dedicated_circular_pocket_op
                 or is_generic_pocket_op
@@ -942,23 +1429,22 @@ def _repair_missing_selections(setup) -> list[str]:
                 # interior features.
                 chain.isReverted = is_reverted
                 chain.inputGeometry = edges
-        elif is_through_shape_op:
-            # Every real non-circular through feature belongs to the
-            # template's existing Shape Through operation(s). ChainSelection
-            # is necessary here: PocketRecognitionSelection recognizes a
-            # recessed pocket floor, not arbitrary full-depth cutouts.
+        elif is_through_shape_op or is_shape_pocket_op:
+            # Every real non-circular through feature and every real blind
+            # pocket belongs to its template's matching roughing/finishing
+            # operations. ChainSelection is necessary here:
+            # PocketRecognitionSelection cannot reliably identify arbitrary
+            # full-depth cutouts or recessed-pocket floors after a STEP
+            # import.
             #
-            # Seeded from a single edge, not the outer profile's own
-            # full-edge-list technique (assigning every edge in the loop to
-            # inputGeometry at once) - confirmed live that technique
-            # produces visibly wrong geometry here even though it works
-            # for the outer profile. Fusion's own ChainSelection
-            # auto-completes the rest of a closed, tangent-connected loop
-            # from just one of its edges, so this doesn't depend on
-            # loop.coEdges already being in the exact order/winding
-            # Fusion's chain builder expects, the way passing every edge
-            # explicitly does.
-            for seed_edge, is_reverted in through_chain_assignments.get(op.operationId, []):
+            # Both operations use the same chain seed and direction. Fusion
+            # resolves that to the same complete loop for the finishing pass
+            # and adaptive clearing; supplying every imported loop edge to
+            # adaptive2d can otherwise yield a valid but empty toolpath.
+            pair_assignments = (
+                through_chain_assignments if is_through_shape_op else pocket_chain_assignments
+            )
+            for seed_edge, is_reverted in pair_assignments.get(op.operationId, []):
                 chain = selections.createNewChainSelection()
                 chain.isOpen = False
                 # Follow this loop's co-edge orientation. A shared BRepEdge
@@ -976,6 +1462,10 @@ def _repair_missing_selections(setup) -> list[str]:
                     tabs_per_contour.expression = "0"
                 except Exception:
                     pass
+            if not is_through_shape_op:
+                value.applyCurveSelections(selections)
+                repaired.append(op.name)
+                continue
             # Direct instruction, after a real part (Anton plate) needed a
             # second feature-cut operation and its actual G-code came out
             # cutting to Z0.025 - barely below the surface, not through the
@@ -1033,26 +1523,29 @@ def _repair_missing_selections(setup) -> list[str]:
             # pocket with a floor, not reliably for an arbitrary large
             # full-depth-through circular cutout either. Built via
             # ChainSelection instead, from the real circular loop edges
-            # whose diameter meets this operation's own name threshold.
-            if big_hole_edges_cache is None:
-                design = _design()
-                threshold_cm = _min_hole_diameter_cm_from_name(name_lower) or 0.0
-                big_hole_edges_cache = (
-                    _big_circular_loop_edges_all_bodies(design, threshold_cm) if design else []
-                )
-            if big_hole_edges_cache:
-                for edges, is_reverted in big_hole_edges_cache:
+            # whose diameter meets this operation's own name threshold -
+            # and, when templateTools.py actually cloned a "big endmill"
+            # tier alongside this operation, split between the two by real
+            # loop diameter (see _split_big_circular_holes). Assignments
+            # are computed once for every big-hole op in this setup, not
+            # per-op here, so a decently-large hole is never handed to
+            # both tiers at once.
+            assigned_edges = big_hole_chain_assignments.get(op.operationId, [])
+            if assigned_edges:
+                for edges, is_reverted in assigned_edges:
                     chain = selections.createNewChainSelection()
                     chain.isOpen = False
                     chain.isReverted = is_reverted
                     chain.inputGeometry = edges
-            else:
-                # No real loop on this part actually meets this
+            elif not any(big_hole_chain_assignments.values()):
+                # No real loop on this part actually meets any big-hole
                 # operation's own name threshold - fall back to generic
                 # recognition (harmless: this file's own cleanup removes
                 # the operation afterward if that also finds nothing,
                 # same as any other template operation that doesn't apply
-                # to this specific part).
+                # to this specific part). Never the fallback for a tier
+                # that simply lost the size split to its sibling - that
+                # sibling already has the real geometry.
                 recognition = selections.createNewPocketRecognitionSelection()
                 recognition.isSetupModelSelected = True
                 recognition.areHolesIncluded = True
@@ -1158,7 +1651,7 @@ def _repair_missing_selections(setup) -> list[str]:
             # crashing the whole job to reach the exact outcome (op
             # deleted) that the isToolpathValid==False cleanup further
             # down would have given it anyway.
-            empty_selection_ops.append(op)
+            empty_selection_ids.append(op.operationId)
             continue
         value.applyCurveSelections(selections)
         repaired.append(op.name)
@@ -1174,22 +1667,27 @@ def _repair_missing_selections(setup) -> list[str]:
     # followed this same defer-until-after-the-loop rule; empty_selection_ops
     # (introduced with the same-turn fix above) originally deleted inline
     # instead and broke it.
-    for op in empty_selection_ops:
-        try:
-            removed_name = op.name
-            op.deleteMe()
-            repaired.append(f"removed unused (no matching geometry): {removed_name}")
-        except Exception:
-            pass
-    for op in inactive_finishing_ops:
-        try:
-            removed_name = op.name
-            op.deleteMe()
-            repaired.append(f"removed unused contour pass: {removed_name}")
-        except Exception:
-            # The final cleanup can still remove an empty operation if
-            # Fusion declines to delete it before the next regeneration.
-            pass
+    # Applying a CurveSelection can also invalidate proxies saved in the
+    # earlier snapshot. Reacquire live operations by ID only after every
+    # selection has been applied, then delete each ID at most once.
+    live_ops_by_id = {op.operationId: op for op in list(setup.operations)}
+
+    def _delete_ids(operation_ids, reason):
+        for operation_id in operation_ids:
+            op = live_ops_by_id.pop(operation_id, None)
+            if op is None:
+                continue
+            try:
+                removed_name = op.name
+                op.deleteMe()
+                repaired.append(f"removed {reason}: {removed_name}")
+            except Exception:
+                pass
+
+    _delete_ids(empty_selection_ids, "unused (no matching geometry)")
+    _delete_ids(inactive_finishing_ids, "unused contour pass")
+    _delete_ids(inactive_shape_pocket_ids, "unused pocket pair operation")
+    _delete_ids(feature_slot_removal_ids, "disabled feature-slot operation")
     return repaired
 
 
@@ -1508,6 +2006,17 @@ def DeleteToolpaths():
             cam.generateAllToolpaths(True)
             waitForGeneration(setup, waitforcontour=True)
 
+        # A larger through-shape tier can pass geometric preselection yet
+        # still have no legal adaptive entry once Fusion evaluates a complex
+        # imported profile. Retry its exact chains with the next smaller
+        # loaded tier before final cleanup, rather than deleting the only
+        # roughing coverage for the matching finishing pass.
+        rerouted_through_ops = _reroute_empty_through_roughing(setup)
+        if rerouted_through_ops:
+            app.log(f"Rerouted empty through-shape roughing: {rerouted_through_ops}")
+            cam.generateAllToolpaths(True)
+            waitForGeneration(setup, waitforcontour=True)
+
         # Real Design product (app.activeProduct is the CAM product by this
         # point, same "'CAM' object has no attribute 'rootComponent'" reason
         # TabPlacement.py's own ConfigureTabs() already documents) - needed
@@ -1582,11 +2091,7 @@ def DeleteToolpaths():
                 # above, so non-Drill operations have actually finished
                 # generating by this point.
                 toolpath.deleteMe()
-            elif (
-                toolpath.strategy in _POCKET_STRATEGIES
-                and not has_pocket_floor
-                and not _is_dedicated_circular_hole_op(toolpath.name.lower())
-            ):
+            elif not has_pocket_floor and _should_remove_for_missing_pocket_floor(toolpath):
                 # Confirmed on a real job: this template's Pocket operation
                 # is configured to cut the full stock depth within
                 # ~the model's own footprint - correct for a part with a
@@ -1598,17 +2103,12 @@ def DeleteToolpaths():
                 # _has_real_pocket_floor's own docstring for how this was
                 # confirmed and why boundaryMode isn't the actual fix.
                 #
-                # "hole" in the name is excluded on purpose: the template's
-                # own ">.3 Circular Through Hole" is a pocket2d strategy
-                # too (a bigger hole needs a real helical/pocket toolpath,
-                # not a single bore plunge) but is a genuine through-hole
-                # recognition operation, not a recessed pocket - direct
-                # instruction confirmed this operation existed in the
-                # template but was "never used" because this blanket
-                # no-pocket-floor check deleted it outright before its own
-                # hole-recognition ever got a chance to run. A real
-                # "Pocket" operation (no "hole" in its name) still has no
-                # such exemption and is still removed exactly as before.
+                # Both kinds of through cut are excluded on purpose:
+                # ">.3 Circular Through Hole" is pocket2d, while generic
+                # Shape Through Hole roughing is adaptive2d. Neither owns a
+                # blind floor; both are genuine through-cut operations.
+                # Actual Shape Pocket operations still have no exemption and
+                # are removed exactly as before.
                 toolpath.deleteMe()
             elif toolpath.isToolpathValid == False:
                 # Direct instruction: an operation the template included
@@ -1618,3 +2118,13 @@ def DeleteToolpaths():
                 toolpath.deleteMe()
         cam.generateAllToolpaths(True)
         waitForGeneration(setup, waitforcontour=True)
+
+        # The cleanup above can remove a roughing tier only after its first
+        # fallback opportunity.  Reconcile once more against the surviving
+        # operations, so a finishing selection can never outlive its
+        # roughing coverage merely because Fusion rejected one tier late.
+        reconciled_through_coverage = _reconcile_through_roughing_coverage(setup)
+        if reconciled_through_coverage:
+            app.log(f"Reconciled through-shape coverage: {reconciled_through_coverage}")
+            cam.generateAllToolpaths(True)
+            waitForGeneration(setup, waitforcontour=True)

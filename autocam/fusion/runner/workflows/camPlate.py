@@ -408,11 +408,12 @@ def _require_through_hole_for_finishing_pass(cam) -> None:
     this only ever fires when a chain assignment partially failed (e.g.
     one roughing tier's geometry write raised and was swallowed, or
     picked up an edge the finishing pass doesn't have) and left the two
-    selections disagreeing. Compared via each edge's entityToken - Fusion
-    can hand back a different Python wrapper object for the same
-    underlying edge on repeated property access, so identity/`==` on the
-    raw BRepEdge is not reliable within a single script run the way it
-    would be for a plain Python object.
+    selections disagreeing. Compared via each edge's entityToken and its
+    ChainSelection direction/open state - Fusion can hand back a different
+    Python wrapper object for the same underlying edge on repeated property
+    access, so identity/`==` on the raw BRepEdge is not reliable within a
+    single script run. Direction is part of the selection contract too: the
+    same edge with opposite compensation can cut the wrong side.
 
     Geometry is only compared when it can actually be read (a real
     ChainSelection with getCurveSelections()) - a missing/unreadable
@@ -437,9 +438,13 @@ def _require_through_hole_for_finishing_pass(cam) -> None:
                 return None
             tokens = set()
             for chain in value.getCurveSelections():
+                chain_state = (
+                    bool(getattr(chain, "isOpen", False)),
+                    bool(getattr(chain, "isReverted", False)),
+                )
                 for edge in getattr(chain, "inputGeometry", None) or []:
                     token = getattr(edge, "entityToken", None)
-                    tokens.add(token if token is not None else edge)
+                    tokens.add((token if token is not None else edge, *chain_state))
             return tokens
         except Exception:
             return None
@@ -484,6 +489,97 @@ def _require_through_hole_for_finishing_pass(cam) -> None:
                 "operation(s) in the same setup. Check the Runner's log "
                 "for a partial chain-assignment failure in "
                 "DeleteToolpaths."
+            )
+
+
+def _require_pocket_finishing_pass_pairing(cam) -> None:
+    """Raise if a setup has a Shape Pocket with no matching Shape Pocket
+    Finishing Pass, or vice versa - the same direct instruction as
+    _require_through_hole_for_finishing_pass, applied to pockets: "a
+    pocket through should always be accompanied by a pocket finishing
+    pass."
+
+    Shape Pocket (adaptive2d) clears a recessed floor's interior; Shape
+    Pocket Finishing Pass (contour2d) just follows its boundary. Neither
+    is meaningful alone - a finishing pass with nothing that cleared the
+    floor it traces, or a roughing pass whose floor was never finished.
+
+    Structurally identical to _require_through_hole_for_finishing_pass
+    (per-setup presence check in both directions, then an exact
+    entityToken-based geometry match) - kept as its own function rather
+    than a shared parameterized helper for the same isolated-testing
+    reason that function's own docstring gives for not importing
+    DeleteToolpaths.py: whatever calls this needs to stay loadable by
+    slicing this file's source without pulling in a shared helper defined
+    outside whatever range gets sliced.
+
+    Name filter: "pocket" in the name, "circular" excluded so the
+    template's own dedicated round-pocket operation (">.3 Circular
+    Pocket", pocket2d, its own hole-recognition machinery) never gets
+    swept in here - matches DeleteToolpaths.py's _POCKET_STRATEGIES
+    handling of that operation as a separate, dedicated case.
+
+    cam may be None (the CAM product failed to resolve) - nothing to
+    check in that case, same as the through-hole guard.
+    """
+    if cam is None:
+        return
+
+    def _edge_tokens(op):
+        param_name = "contours" if op.strategy == "contour2d" else "pockets"
+        try:
+            param = op.parameters.itemByName(param_name)
+            if param is None:
+                return None
+            value = param.value
+            if not hasattr(value, "getCurveSelections"):
+                return None
+            tokens = set()
+            for chain in value.getCurveSelections():
+                for edge in getattr(chain, "inputGeometry", None) or []:
+                    token = getattr(edge, "entityToken", None)
+                    tokens.add(token if token is not None else edge)
+            return tokens
+        except Exception:
+            return None
+
+    for setup in cam.setups:
+        pocket_ops = [
+            op
+            for op in setup.operations
+            if "pocket" in str(op.name).lower() and "circular" not in str(op.name).lower()
+        ]
+        if not pocket_ops:
+            continue
+        finishing_ops = [op for op in pocket_ops if op.strategy == "contour2d"]
+        roughing_ops = [op for op in pocket_ops if op.strategy != "contour2d"]
+        if bool(finishing_ops) != bool(roughing_ops):
+            missing = "Shape Pocket roughing operation" if finishing_ops else "Shape Pocket Finishing Pass"
+            present = "Shape Pocket Finishing Pass" if finishing_ops else "Shape Pocket roughing operation"
+            raise RuntimeError(
+                f"A {present} survived toolpath generation with no "
+                f"matching {missing} in the same setup - the two only "
+                "ever exist together. Check the Runner's log for why the "
+                "missing operation isn't in the template or was pruned "
+                "by DeleteToolpaths for an invalid toolpath."
+            )
+        if not finishing_ops:
+            continue
+        finishing_edges = set()
+        roughing_edges = set()
+        readable = True
+        for op in finishing_ops + roughing_ops:
+            tokens = _edge_tokens(op)
+            if tokens is None:
+                readable = False
+                break
+            (finishing_edges if op.strategy == "contour2d" else roughing_edges).update(tokens)
+        if readable and finishing_edges != roughing_edges:
+            raise RuntimeError(
+                "A Shape Pocket Finishing Pass's geometry selection does "
+                "not exactly match its Shape Pocket roughing operation(s) "
+                "in the same setup. Check the Runner's log for a partial "
+                "chain-assignment failure in DeleteToolpaths."
             )
 
 
@@ -866,6 +962,7 @@ def start(data, session):
 
         _require_release_contour(cam)
         _require_through_hole_for_finishing_pass(cam)
+        _require_pocket_finishing_pass_pairing(cam)
 
         total_machining_time = None
         if cam:

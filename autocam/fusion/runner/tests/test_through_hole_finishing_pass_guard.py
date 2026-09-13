@@ -35,15 +35,19 @@ def _edge(token):
     return types.SimpleNamespace(entityToken=token)
 
 
-def _chain(*edge_tokens):
-    return types.SimpleNamespace(inputGeometry=[_edge(t) for t in edge_tokens])
+def _chain(*edge_tokens, is_open=False, is_reverted=False):
+    return types.SimpleNamespace(
+        inputGeometry=[_edge(t) for t in edge_tokens],
+        isOpen=is_open,
+        isReverted=is_reverted,
+    )
 
 
 def _selection_value(*chains):
     return types.SimpleNamespace(getCurveSelections=lambda: list(chains))
 
 
-def _op(name, strategy, edges=None):
+def _op(name, strategy, edges=None, is_open=False, is_reverted=False):
     """edges=None means "geometry unreadable" (the real code's own
     can't-tell-so-don't-block case) - most tests only care about presence,
     not geometry, so they omit it and get a no-op parameters lookup.
@@ -52,7 +56,7 @@ def _op(name, strategy, edges=None):
         params = types.SimpleNamespace(itemByName=lambda _name: None)
     else:
         param_name = "contours" if strategy == "contour2d" else "pockets"
-        value = _selection_value(_chain(*edges))
+        value = _selection_value(_chain(*edges, is_open=is_open, is_reverted=is_reverted))
         param = types.SimpleNamespace(value=value)
         params = types.SimpleNamespace(itemByName=lambda n, p=param, pn=param_name: p if n == pn else None)
     return types.SimpleNamespace(name=name, strategy=strategy, parameters=params)
@@ -179,6 +183,14 @@ class RequireThroughHoleForFinishingPassTests(unittest.TestCase):
         cam = _cam(
             _op("Shape Through Hole", "adaptive2d", edges=["e1", "e2", "e3"]),
             _op("Shape Through Finishing Pass", "contour2d", edges=["e1", "e2"]),
+        )
+        with self.assertRaises(RuntimeError):
+            require_through_hole_for_finishing_pass(cam)
+
+    def test_raises_when_the_chain_direction_does_not_match(self):
+        cam = _cam(
+            _op("Shape Through Hole", "adaptive2d", edges=["e1"], is_reverted=False),
+            _op("Shape Through Finishing Pass", "contour2d", edges=["e1"], is_reverted=True),
         )
         with self.assertRaises(RuntimeError):
             require_through_hole_for_finishing_pass(cam)
