@@ -469,14 +469,18 @@
                 {#if startPhotos[`${alliance}:${position}`]}
                   <img src={startPhotos[`${alliance}:${position}`]} alt={`${alliance} alliance ${position} field starting position`} />
                 {:else}
-                  <svg viewBox="0 0 100 60" aria-hidden="true"><rect x="2" y="2" width="96" height="56" fill="none" stroke="currentColor" /><line x1="50" y1="2" x2="50" y2="58" stroke="currentColor" /><rect x="9" y={5 + index * 10} width="12" height="9" fill="currentColor" /></svg>
-                  <small>Schematic cue · not to scale</small>
+                  <svg viewBox="0 0 100 48.5" role="img" aria-label={`2026 REBUILT field, ${alliance} alliance wall on the left, ${position} starting lane highlighted`}>
+                    <image href="/rebuilt-2026-field.png" width="100" height="48.5" transform={alliance === 'red' ? 'translate(100 48.5) rotate(180)' : undefined} />
+                    <circle cx="23" cy={4 + index * 10} r="3" fill="none" stroke="#fff" stroke-width="0.8" />
+                    <rect x="21.5" y={2.5 + index * 10} width="3" height="3" fill={alliance === 'red' ? '#e33a46' : '#3486ef'} stroke="#fff" stroke-width="0.5" />
+                  </svg>
                 {/if}
                 <span>{position}</span>
               </button>
             {/each}
           </div>
-          {#if startPhotoError}<small class="field-help">Photos unavailable; schematic cues shown. {startPhotoError}</small>{/if}
+          <small class="field-help">Your alliance wall is on the left. Highlights indicate starting lanes, not exact robot locations.</small>
+          {#if startPhotoError}<small class="field-help">Custom photos unavailable; the 2026 field image is shown. {startPhotoError}</small>{/if}
         </div>
         <div class="section-footer"><span>{assignmentReady ? `Robot ${robotNumber} is ready to scout.` : 'Match, robot, and starting position are required.'}</span><button class="btn btn-primary" disabled={!assignmentReady} on:click={openAutoPhase}>Begin auto <ChevronRight size={16} /></button></div>
       {:else if phase === 'auto'}
@@ -587,7 +591,7 @@
         </div>
         <div class="section-footer"><button class="btn" on:click={() => selectPhase('prematch')}>Back</button><button class="btn btn-primary" disabled={autoPointsInvalid} on:click={() => selectPhase('teleop')}>Continue to teleop <ChevronRight size={16} /></button></div>
       {:else if phase === 'teleop'}
-        <div class="section-heading"><div><span class="eyebrow">Teleop</span><h2>Driver and robot performance</h2><p>Every question requires an answer except notes. Select Unknown when a rating cannot be judged.</p></div><Timer size={20} /></div>
+        <div class="section-heading"><div><span class="eyebrow">Teleop</span><h2>Driver and robot performance</h2><p>Every question requires an answer except notes. Click a selected rating again to leave it unjudged.</p></div><Timer size={20} /></div>
         <fieldset class="teleop-roles">
           <legend class="field-label">Observed roles</legend>
           <small class="field-help">Select every role this robot meaningfully performed.</small>
@@ -614,9 +618,9 @@
           {/if}
         </div>
         <div class="ratings-grid">
-          <div class="ratings-heading"><span class="field-label">Required ratings or Unknown</span><small>Click a selected rating again to clear it to Unknown. Boundary values belong to the lower band.</small></div>
+          <div class="ratings-heading"><span class="field-label">Performance ratings</span><small>Click a selected rating again to clear it if you cannot judge it. Boundary values belong to the lower band.</small></div>
           {#each TELEOP_RATING_FIELDS as field}
-            <div class="rating-row"><span>{field}</span><div class="rating-buttons">{#each [1, 2, 3, 4, 5] as value}<button aria-label={`${field}: ${value}, ${(field === 'BPS' ? BPS_LABELS : ACCURACY_LABELS)[value - 1]}`} title={(field === 'BPS' ? BPS_LABELS : ACCURACY_LABELS)[value - 1]} class:chosen={ratings[field] === value} on:click={() => toggleRating(field, value)}>{value}</button>{/each}<button class:chosen={ratingsUnknown.includes(field)} on:click={() => { ratings = { ...ratings, [field]: 0 }; ratingsUnknown = [...new Set([...ratingsUnknown, field])]; }}>Unknown</button></div></div>
+            <div class="rating-row"><span>{field}</span><div class="rating-buttons">{#each [1, 2, 3, 4, 5] as value}<button aria-pressed={ratings[field] === value} aria-label={`${field}: ${value}, ${(field === 'BPS' ? BPS_LABELS : ACCURACY_LABELS)[value - 1]}`} title={(field === 'BPS' ? BPS_LABELS : ACCURACY_LABELS)[value - 1]} class:chosen={ratings[field] === value} on:click={() => toggleRating(field, value)}>{value}</button>{/each}</div></div>
             <small class="field-help">{(field === 'BPS' ? BPS_LABELS : ACCURACY_LABELS).map((label, index) => `${index + 1}: ${label}`).join(' · ')}</small>
           {/each}
         </div>

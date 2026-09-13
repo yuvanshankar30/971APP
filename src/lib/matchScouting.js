@@ -30,8 +30,8 @@ export function validateMatchScoutForm(body) {
   for (const field of MATCH_FORM_RATING_FIELDS) {
     const rating = body.ratings?.[field];
     const unknown = body.ratings_unknown?.includes(field);
-    if (!unknown && (!Number.isInteger(rating) || rating < 1 || rating > 5)) return `Rate ${field} or select Unknown.`;
-    if (unknown && rating > 0) return `Choose a rating or Unknown for ${field}, not both.`;
+    if (!unknown && (!Number.isInteger(rating) || rating < 1 || rating > 5)) return `Rate ${field}; click a selected rating again to leave it unjudged.`;
+    if (unknown && rating > 0) return `Choose a rating or leave ${field} unjudged, not both.`;
   }
   if (typeof body.significant_crash !== 'boolean') return 'Select whether a significant crash occurred.';
   if (body.significant_crash && !['robot', 'wall', 'field element', 'other'].includes(body.crash_target)) return 'Select what the robot crashed into.';
