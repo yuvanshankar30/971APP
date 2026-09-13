@@ -51,6 +51,12 @@
   let pitProblemDetails = '';
   let postNotes = '';
   let submitted = false;
+  let editing = false;
+  let showReports = false;
+  let myReports = [];
+  let reportsLoading = false;
+  let reportsError = '';
+  let reportFilter = '';
   let eventKey = '';
   let eventTeams = [];
   let saving = false;
@@ -83,6 +89,7 @@
   }
 
   function nextAssignment() {
+    editing = false;
     matchNumber = ''; robotNumber = ''; startingPosition = ''; preload = null;
     autoPoints = ''; autoMoved = ''; autoCycles = null; autoPath = []; autoPathName = '';
     ballSources = []; ballsScored = ''; autoCollision = false; autoCollisionNotes = '';
@@ -273,6 +280,66 @@
     }
   }
 
+  async function loadMyReports() {
+    if (!eventKey) { reportsError = 'No active scouting event is set.'; return; }
+    reportsLoading = true;
+    reportsError = '';
+    try {
+      const response = await fetch(`/api/matchscout?event_key=${encodeURIComponent(eventKey)}&mine=1`, { headers: await getAuthHeader() });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || 'Could not load your reports.');
+      myReports = result.data || [];
+    } catch (exception) { reportsError = exception.message; }
+    finally { reportsLoading = false; }
+  }
+
+  async function editReport(entry) {
+    reportsLoading = true;
+    reportsError = '';
+    try {
+      // Load the handoff as well, so resubmitting an incident keeps its summary.
+      const response = await fetch(`/api/matchscout?resource=pit-problems&event_key=${encodeURIComponent(eventKey)}&team_key=${encodeURIComponent(entry.team_key)}`, { headers: await getAuthHeader() });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || 'Could not load the ACE Team report.');
+      const problem = (result.data || []).find(row => row.match_key === entry.match_key && row.created_by === entry.created_by && row.source === 'Match scout' && !row.resolved);
+      nextAssignment();
+      matchNumber = entry.match_key;
+      robotNumber = entry.team_key.replace(/^frc/, '');
+      alliance = entry.alliance || 'red';
+      startingPosition = entry.starting_position || '';
+      scoutName = entry.scout_name || scoutName;
+      preload = entry.preload ?? null;
+      autoCycles = entry.auto_cycles ?? null;
+      autoPoints = entry.auto_points_band || '';
+      autoMoved = entry.auto_moved || '';
+      autoPath = (entry.auto_path || []).map(point => [...point]);
+      autoPathName = entry.auto_path_name || '';
+      ballSources = [...(entry.ball_sources || [])];
+      ballsScored = entry.balls_scored_band || '';
+      autoCollision = entry.auto_collision === true;
+      autoCollisionNotes = entry.auto_collision_notes || '';
+      ratings = Object.fromEntries(RATING_FIELDS.map(field => [field, entry.ratings?.[field] || 0]));
+      ratingsUnknown = [...(entry.ratings_unknown || [])];
+      teleopRoles = [...(entry.teleop_roles || [])];
+      teleopRolesNone = entry.teleop_roles_none === true;
+      teleopNotes = entry.teleop_notes || '';
+      significantCrash = entry.significant_crash ?? null;
+      crashTarget = entry.crash_target || '';
+      crashDetails = entry.crash_details || '';
+      teleopRobotStatus = entry.teleop_robot_status || '';
+      mechanicalBreak = entry.mechanical_break ?? null;
+      robotDisabled = entry.robot_disabled || '';
+      card = entry.card || 'none';
+      driverSkill = entry.driver_skill || 0;
+      pitProblem = Boolean(problem);
+      pitProblemDetails = problem?.summary || '';
+      postNotes = entry.post_notes || '';
+      editing = true;
+      showReports = false;
+    } catch (exception) { reportsError = exception.message; }
+    finally { reportsLoading = false; }
+  }
+
   async function finishScout() {
     if (!assignmentReady) {
       phase = 'prematch';
@@ -330,6 +397,7 @@
         pit_problem_detail: postNotes
       });
       submitted = true;
+      editing = true;
     } catch (exception) {
       error = exception.message;
     } finally {
@@ -367,6 +435,25 @@
       {#if assignmentReady}<b>{alliance}</b>{/if}
     </div>
   </header>
+
+  <div class="report-actions">
+    <button class="btn btn-secondary" disabled={saving || reportsLoading} on:click={() => { showReports = !showReports; if (showReports) loadMyReports(); }}>My reports</button>
+    {#if editing && !submitted}<span>Editing saved report. Save changes when finished.</span><button class="btn" disabled={saving} on:click={nextAssignment}>New assignment</button>{/if}
+  </div>
+  {#if showReports}
+    <section class="card report-history" aria-label="My submitted scouting reports">
+      <h2>Teams you’ve scouted</h2>
+      <p>Your match reports for {eventKey || 'the active event'}. Choose a report to edit its answers.</p>
+      <label>Find a team or match<input class="form-input" bind:value={reportFilter} placeholder="Team number or match" /></label>
+      {#if reportsError}<p role="alert">{reportsError}</p>{/if}
+      {#if reportsLoading}<p>Loading reports...</p>
+      {:else}
+        {#each myReports.filter(entry => `${entry.team_key} ${entry.match_key}`.toLowerCase().includes(reportFilter.trim().toLowerCase())) as entry (entry.id)}
+          <div class="report-row"><span>Team {entry.team_key.replace(/^frc/, '')} · Match {entry.match_key}</span><button class="btn btn-secondary" on:click={() => editReport(entry)}>Edit answers</button></div>
+        {:else}<p>{myReports.length ? 'No reports match your search.' : 'You haven’t submitted any match reports for this event yet.'}</p>{/each}
+      {/if}
+    </section>
+  {/if}
 
   <div class="scouting-shell">
     <aside class="stage-nav" aria-label="Match scouting stages">
@@ -434,13 +521,14 @@
             <p class="star-empty">No ratings were recorded for this robot.</p>
           {/if}
 
+          <button class="btn btn-secondary" on:click={() => selectPhase('prematch')}>Edit answers</button>
           <button class="btn btn-primary" on:click={nextAssignment}>Next assignment</button>
         </div>
       {:else if phase === 'prematch'}
         <div class="section-heading"><div><span class="eyebrow">Pre-match</span><h2>Match assignment</h2><p>Set the robot and its opening location before the field goes live.</p></div><MapPinned size={20} /></div>
         <div class="assignment-grid">
           <label>Scout name (required)<input class="form-input" maxlength="120" autocomplete="name" bind:value={scoutName} /></label>
-          <label>Match #<input class="form-input" inputmode="numeric" placeholder="14" bind:value={matchNumber} /></label>
+          <label>Match #<input class="form-input" inputmode="numeric" placeholder="14" bind:value={matchNumber} disabled={editing} /></label>
           <label>
             Robot #
             <input
@@ -449,6 +537,7 @@
               placeholder="Start typing a team number"
               list="event-team-options"
               autocomplete="off"
+              disabled={editing}
               value={robotNumber}
               on:input={normalizeRobotNumber}
             />
@@ -658,7 +747,7 @@
           <label class="notes-label pit-report-field">Problem for ACE Team (required)<textarea class="form-input" required rows="3" placeholder="What failed, and what should the ACE Team inspect before the next match?" bind:value={pitProblemDetails}></textarea></label>
         {/if}
         <label class="notes-label scouter-notes">Post-match scout notes (optional)<textarea class="form-input" rows="8" placeholder="Anything strategy should know that the structured fields missed? Leave blank if not." bind:value={postNotes}></textarea></label>
-        <div class="section-footer"><button class="btn" on:click={() => selectPhase('teleop')}>Back</button><button class="btn btn-primary" on:click={finishScout} disabled={!canFinish}>{saving ? 'Saving...' : 'Finish match scouting'} <Check size={16} /></button></div>
+        <div class="section-footer"><button class="btn" on:click={() => selectPhase('teleop')}>Back</button><button class="btn btn-primary" on:click={finishScout} disabled={!canFinish}>{saving ? 'Saving...' : editing ? 'Save changes' : 'Finish match scouting'} <Check size={16} /></button></div>
         {#if error}<p class="submit-error">{error}</p>{/if}
       {/if}
     </section>
@@ -666,6 +755,10 @@
 </main>
 
 <style>
+  .report-actions { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-3); margin-bottom:var(--space-3); }
+  .report-history { padding:var(--space-4); margin-bottom:var(--space-4); }
+  .report-row { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:var(--space-2); padding:var(--space-2) 0; }
+
   .start-position-card { display:flex; flex-direction:column; gap:.4rem; align-items:center; }
   .start-position-card img, .start-position-card svg { width:100%; max-width:160px; height:90px; object-fit:cover; }
   .submit-error { margin:var(--space-2) 0 0; color:var(--danger); font-size:.85rem; }

@@ -89,6 +89,7 @@ export async function GET({ request, url }) {
   }
 
   let query = db.from('match_scout_entries').select('*').eq('event_key', eventKey);
+  if (url.searchParams.get('mine') === '1') query = query.eq('created_by', actor.id);
   const teamKey = normalizeTeamKey(url.searchParams.get('team_key'));
   if (teamKey) query = query.eq('team_key', teamKey);
   const matchKey = String(url.searchParams.get('match_key') || '').trim();

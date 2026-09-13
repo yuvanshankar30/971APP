@@ -256,7 +256,10 @@ browser confirmation or prompt popups.
   separate Unknown buttons), significant-crash/target answers,
   and active/dead/brownout/unknown status. Cycle speed and reliability are no
   longer collected; post-match uses a single driver-skill rating. Historical
-  reports retain their original fields. Apply `20260913_match_scouting_form_v2.sql`
+  reports retain their original fields. Match scouts can reopen their submitted
+  answers immediately or find their own active-event reports in **My reports**,
+  search by team or match, and save corrections to the existing report.
+  Pit scouting reloads each team’s saved entry for further edits. Apply `20260913_match_scouting_form_v2.sql`
   before deploying this form. Teleop and post-match prose areas are deliberately
   large enough for real scout observations. Timed robot actions, per-fuel
   taps and the objective endgame result are recorded through Quick Scout
