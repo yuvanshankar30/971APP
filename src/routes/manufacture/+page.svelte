@@ -14,6 +14,7 @@
   import { Search, Filter, Clock, Truck, Package, Download, Zap, Wrench, FileText, Upload, ExternalLink, Pencil, Trash2, X, Users, Box, Route, CircleCheck, Layers, Folder, ListChecks, BookOpen } from 'lucide-svelte';
   import { searchFolderTree } from '$lib/fusionFolderSearch.js';
   import ROUTER_FLOW from '$lib/router_flow.json';
+  import { convertGcodeToInches } from '$autocam/fusion/gcodeUnitConvert.js';
   import { getDisplayStatus, BUTTONS, getBadgeClass, getWorkflowStatuses } from '$lib/statuses.js';
   import { summarizeRouterStages, isFullyKitted, buildRouterProgressUpdate, canAdvanceRouterToCamReview } from '$lib/router_progress.js';
   import { isManufacturingLead, canCamReview as camReviewAllowed, canDeleteParts } from '$lib/permissions.js';
@@ -655,7 +656,14 @@
   }
 
   function downloadNcFile(file) {
-    const binary = atob(file.contentBase64);
+    // Real, confirmed live bug: every real Fusion AutoCAM job posted
+    // through the New Router (shopsabre.cps/WinCNC) comes out in
+    // millimeters (G22) - JProg's WinCNC parser has no G22 case at all and
+    // aborts the whole file with "Fatal Error: UnknownGCodeError" the
+    // moment an operator opens it. Convert at export time, not storage
+    // time - stored fusion_nc_files stay byte-for-byte as Fusion posted
+    // them (their own sha256/size are checksummed against that content).
+    const { gcode: binary } = convertGcodeToInches(atob(file.contentBase64));
     const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
     const blob = new Blob([bytes], { type: 'application/octet-stream' });
     const url = URL.createObjectURL(blob);

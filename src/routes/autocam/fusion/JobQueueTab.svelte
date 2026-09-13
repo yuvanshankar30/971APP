@@ -9,6 +9,7 @@
   import SeasonFilter from '$lib/components/SeasonFilter.svelte';
   import { getAllSeasonBuckets, passesSeasonFilter } from '$lib/frcSeason.js';
   import { ListChecks, X, Download, Trash2, Upload, AlertTriangle, ChevronDown, Box, Folder, Pencil, Check, Filter } from 'lucide-svelte';
+  import { convertGcodeToInches } from '$autocam/fusion/gcodeUnitConvert.js';
 
   let jobs = [];
   let loading = true;
@@ -448,7 +449,18 @@
     posting = true;
     try {
       for (const [index, file] of files.entries()) {
-        const binary = atob(file.contentBase64);
+        // Real, confirmed live bug: every real Fusion AutoCAM job posted
+        // through the New Router (shopsabre.cps/WinCNC) comes out in
+        // millimeters (G22) - JProg's WinCNC parser has no G22 case at all
+        // and aborts the whole file with "Fatal Error: UnknownGCodeError"
+        // the moment an operator opens it. gcodeUnitConvert.js exists
+        // specifically to fix this but was never actually wired into
+        // either real distribution path until now - stored fusion_nc_files
+        // stay byte-for-byte as Fusion posted them (their own sha256/size
+        // are checksummed against that exact content), so the conversion
+        // happens here, at export time, not at storage time.
+        const { gcode: converted } = convertGcodeToInches(atob(file.contentBase64));
+        const binary = converted;
         const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
         for (const folder of FILES_TARGET_FOLDERS) {
           const path = `${folder}/${fusionNcDestinationName(baseName, index, files.length, file.name)}`;
@@ -468,7 +480,9 @@
   }
 
   function downloadNcFile(file) {
-    const binary = atob(file.contentBase64);
+    // See the "Post to Files" conversion above for why this is needed -
+    // same real, confirmed live JProg "UnknownGCodeError" on G22.
+    const { gcode: binary } = convertGcodeToInches(atob(file.contentBase64));
     const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
     const blob = new Blob([bytes], { type: 'application/octet-stream' });
     const url = URL.createObjectURL(blob);
