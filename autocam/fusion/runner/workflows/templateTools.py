@@ -990,6 +990,27 @@ def _find_largest_endmill(indexes: list[dict]) -> Optional[tuple[dict, dict]]:
     return None
 
 
+def _find_smallest_endmill(indexes: list[dict]) -> Optional[tuple[dict, dict]]:
+    """Find the smallest endmill (by diameter) from all tool indexes - the
+    "detail" cutter plan_endmills() already chose alongside the largest
+    "roughing" one. Mirrors _find_largest_endmill exactly, just inverted.
+    """
+    candidates = _select_tools(indexes, _is_endmill_tool)
+    best_tool = None
+    best_idx = None
+    best_diameter = float("inf")
+    for tool, idx, diameter in candidates:
+        if diameter is None:
+            continue
+        if best_tool is None or diameter < best_diameter:
+            best_diameter = diameter
+            best_tool = tool
+            best_idx = idx
+    if best_tool and best_idx:
+        return best_tool, best_idx
+    return None
+
+
 _NESTED_SHEET_LEAD_STRATEGIES = {"contour2d", "pocket2d"}
 
 
@@ -1113,6 +1134,16 @@ def patch_cam_template_with_tool_libraries(
     planned_guids = {tool.get("guid") for tool in endmill_plan["tools"]}
     endmill_candidates = [entry for entry in endmill_candidates if entry[0].get("guid") in planned_guids]
     largest_endmill = _find_largest_endmill([{"tools": [entry[0] for entry in endmill_candidates]}])
+    # Only meaningful with a real second, genuinely-smaller candidate loaded
+    # (see plan_endmills's own "only when materially smaller" detail-cutter
+    # rule) - with one endmill or two near-identical ones, this comes back
+    # None and every roughing/contour template below falls back to
+    # largest_endmill exactly as before, so single-tool jobs are unaffected.
+    detail_endmill = (
+        _find_smallest_endmill([{"tools": [entry[0] for entry in endmill_candidates]}])
+        if len(endmill_candidates) > 1
+        else None
+    )
 
     drill_template = _find_template(root, strategy="drill")
     bore_template_native = _find_template(root, strategy="bore")
@@ -1330,20 +1361,50 @@ def patch_cam_template_with_tool_libraries(
             replaced += 1
 
     if largest_endmill:
-        tool, idx = largest_endmill
-        for template_elem in contour_templates + roughing_templates:
-            tool_elem = template_elem.find(_q("tool"))
-            if tool_elem is None:
-                continue
-            _apply_tool_to_elem(
-                template_elem,
-                tool_elem,
-                tool,
-                tool_library_version=idx.get("version"),
-                material_name=material_name,
-            )
-            handled_templates.add(id(template_elem))
-            replaced += 1
+        # Real, confirmed live bug: every roughing/contour template used to
+        # get this same single largest_endmill uniformly, including the
+        # template's own "Small Shape Through Hole" tier - a dedicated
+        # small-tool operation whose entire purpose (see
+        # DeleteToolpaths.py's _split_through_roughing_ops) is to catch the
+        # through-hole chains too narrow for the big roughing tool to
+        # physically enter. With all three through-hole roughing tiers
+        # forced to the identical tool/diameter, that split had nothing to
+        # split on - every small-hole chain still routed to whichever tier
+        # won the diameter tie, which then produced a real, empty toolpath
+        # ("Tool doesn't fit" territory) because the tool assigned to it was
+        # too big for the hole, not because the geometry was missing.
+        # camPlate.py's own _require_through_hole_for_finishing_pass guard
+        # (a separate, direct instruction) then correctly failed the whole
+        # job over the resulting mismatch instead of shipping a bad
+        # toolpath. Routing this one named tier to the detail/smallest
+        # loaded endmill instead - when multi-tool mode actually loaded a
+        # second, genuinely smaller candidate - gives it a tool that can
+        # really enter a small hole, restoring the tiers' real distinction.
+        small_roughing_templates = [
+            template_elem for template_elem in roughing_templates
+            if "small" in str(template_elem.get("description") or "").lower()
+        ]
+        other_templates = [
+            template_elem for template_elem in contour_templates + roughing_templates
+            if template_elem not in small_roughing_templates
+        ]
+        for templates, (tool, idx) in (
+            (small_roughing_templates, detail_endmill or largest_endmill),
+            (other_templates, largest_endmill),
+        ):
+            for template_elem in templates:
+                tool_elem = template_elem.find(_q("tool"))
+                if tool_elem is None:
+                    continue
+                _apply_tool_to_elem(
+                    template_elem,
+                    tool_elem,
+                    tool,
+                    tool_library_version=idx.get("version"),
+                    material_name=material_name,
+                )
+                handled_templates.add(id(template_elem))
+                replaced += 1
 
     for template_elem in root.findall(f".//{_q('template')}"):
         if id(template_elem) in handled_templates:
