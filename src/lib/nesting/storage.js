@@ -1,7 +1,7 @@
 import { supabase } from '$lib/supabase.js';
 const BUCKET = 'manufacturing-drive';
 const PART_ROOT = 'Nesting Parts Library';
-const OUTPUT_ROOT = 'Jprog Output';
+const OUTPUT_ROOT = 'JustinProgOutput';
 const clean = (value) => String(value || '').replace(/^\/+|\/+$/g, '');
 
 export function sheetPartLibraryRoot(sheetName) {
