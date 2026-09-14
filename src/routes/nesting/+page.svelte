@@ -1,5 +1,5 @@
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import { supabase } from '$lib/supabase.js';
@@ -8,8 +8,8 @@
   import { canUseNesting } from '$lib/permissions.js';
   import { toastActions } from '$lib/toast.js';
   import { requestConfirmation } from '$lib/confirmation.js';
-  import { Plus, Save, Undo2, Redo2, RotateCw, RotateCcw, Download, Upload, Crosshair, MousePointer2, FolderOpen, Search, RefreshCw, Ruler, FileCode, Trash2, Copy, Settings, X } from 'lucide-svelte';
-  import { listSheets, createSheet, getSheet, savePlacements, createCut, setActiveCut, setSheetProgramType, recordEmission } from '$lib/nesting/db.js';
+  import { Plus, Save, Undo2, Redo2, RotateCw, RotateCcw, Download, Upload, Crosshair, MousePointer2, FolderOpen, Search, RefreshCw, Ruler, FileCode, Trash2, Copy, Settings, X, Pencil } from 'lucide-svelte';
+  import { listSheets, createSheet, getSheet, savePlacements, createCut, renameCut, deleteCut, setActiveCut, setSheetProgramType, recordEmission } from '$lib/nesting/db.js';
   import { listPartsLibrary, listPartLibraryAtPath, sheetPartLibraryRoot, uploadPartFile, downloadText, uploadEmittedGcode } from '$lib/nesting/storage.js';
   import { clampPlacementToSheet, makePlacement, placementContains, sheetContains, rotatePlacement } from '$lib/nesting/sheetModel.js';
   import { screenToSheet, sheetToScreen, zoomAt } from '$lib/nesting/coords.js';
@@ -20,11 +20,11 @@
 
   export let forcedScreen = null;
   export let sheetId = null;
-  let canvas, ctx, sheets = [], sheet = null, placements = [], selectedId = null, loading = true, saving = false;
-  let screen = forcedScreen || 'select', view = { scale: 28, originX: 80, originY: 520 }, drag = null, placing = null, activePart = null, placingWithShortcut = false;
+  let canvas, ctx, canvasResizeObserver, sheets = [], sheet = null, placements = [], selectedId = null, loading = true, saving = false;
+  let screen = forcedScreen || 'select', view = { scale: 28, originX: 80, originY: 520 }, drag = null, rotationDrag = null, placing = null, activePart = null, placingWithShortcut = false;
   let undo = createUndoStack([]), gcodePrograms = {}, partGroups = [], newSheet = { name: '', width: 48, height: 30, thickness: '0.125' };
   let showNewSheet = false, showLibrary = false, showEmit = false, showProgram = false, activeCutId = null, user = null, loadError = '';
-  let sheetSearch = '', measure = [], measuring = false, emitName = '', emitSuffix = '', selectedProgram = null;
+  let sheetSearch = '', measure = [], measuring = false, emitName = '', emitSuffix = '', selectedProgram = null, editingCutName = false, cutName = '';
   $: selected = placements.find((item) => item.id === selectedId) || null;
   $: activeCut = sheet?.nesting_cuts?.find((cut) => cut.id === activeCutId) || null;
   $: visibleSheets = sheets.filter(item => item.name.toLowerCase().includes(sheetSearch.trim().toLowerCase()));
@@ -66,21 +66,28 @@
         loadError = error?.message || 'Could not load JProg sheets.';
       } finally { loading = false; }
     })();
-    return () => { unsubscribe(); window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onKeyUp); };
+    return () => { unsubscribe(); canvasResizeObserver?.disconnect(); window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onKeyUp); };
   });
 
   async function refreshSheets() { sheets = await listSheets(); }
   async function openSheet(id) {
     sheet = await getSheet(id); activeCutId = sheet.active_cut_id || sheet.nesting_cuts?.[0]?.id;
     placements = structuredClone(sheet.nesting_cuts?.find(c => c.id === activeCutId)?.nesting_placements || []);
-    undo = createUndoStack(placements); selectedId = null; screen = 'edit'; emitName = sheet.name; fitView(); await loadLibrary(); await loadPlacedPrograms(); draw();
+    undo = createUndoStack(placements); selectedId = null; screen = 'edit'; emitName = sheet.name; await tick(); observeCanvas(); fitView(); await loadLibrary(); await loadPlacedPrograms(); await tick(); fitView(); draw(); requestAnimationFrame(() => { fitView(); draw(); });
     if (!forcedScreen) goto(`/jprog/sheets/${id}`, { replaceState: true, keepFocus: true, noScroll: true });
+  }
+  function observeCanvas() {
+    if (!canvas || canvasResizeObserver) return;
+    canvasResizeObserver = new ResizeObserver(() => { if (screen === 'edit') { fitView(); draw(); } });
+    canvasResizeObserver.observe(canvas);
   }
   function fitView() {
     if (!sheet) return;
-    const width = canvas?.clientWidth || 900, height = canvas?.clientHeight || 600;
-    const scale = Math.max(5, Math.min(48, Math.min((width - 100) / Number(sheet.width_in), (height - 100) / Number(sheet.height_in))));
-    view = { scale, originX: 52, originY: height - 52 }; requestAnimationFrame(draw);
+    const rect = canvas?.getBoundingClientRect();
+    const width = rect?.width || 900, height = rect?.height || 600;
+    const padding = 64;
+    const scale = Math.max(5, Math.min(500, Math.min((width - padding * 2) / Number(sheet.width_in), (height - padding * 2) / Number(sheet.height_in))));
+    view = { scale, originX: width / 2 - Number(sheet.width_in) * scale / 2, originY: height / 2 + Number(sheet.height_in) * scale / 2 }; requestAnimationFrame(draw);
   }
   async function createNewSheet() {
     if (!newSheet.name.trim()) return toastActions.show('Name the sheet first');
@@ -96,6 +103,24 @@
     try { const cut = await createCut(sheet.id, name); sheet.nesting_cuts = [...sheet.nesting_cuts, { ...cut, nesting_placements: [] }]; activeCutId = cut.id; placements = []; undo = createUndoStack([]); await setActiveCut(sheet.id, cut.id); draw(); } catch (error) { toastActions.show(error.message); }
   }
   async function chooseCut(id) { await save(); activeCutId = id; placements = structuredClone(sheet.nesting_cuts.find(c => c.id === id)?.nesting_placements || []); undo = createUndoStack(placements); selectedId = null; await setActiveCut(sheet.id, id); draw(); }
+  function beginRenameCut() { cutName = activeCut?.name || ''; editingCutName = true; }
+  async function saveCutName() {
+    const name = cutName.trim();
+    if (!name) return toastActions.show('Name the cut first');
+    try { const renamed = await renameCut(activeCutId, name); sheet.nesting_cuts = sheet.nesting_cuts.map(cut => cut.id === activeCutId ? { ...cut, ...renamed } : cut); editingCutName = false; } catch (error) { toastActions.show(error.message); }
+  }
+  async function removeActiveCut() {
+    if ((sheet?.nesting_cuts?.length || 0) <= 1) return toastActions.show('A sheet needs at least one cut');
+    if (!await requestConfirmation({ title: 'Delete cut', message: `Delete ${activeCut?.name || 'this cut'} and its placements?`, confirmLabel: 'Delete', danger: true })) return;
+    try {
+      const remaining = sheet.nesting_cuts.filter(cut => cut.id !== activeCutId);
+      const nextCut = remaining[0];
+      await deleteCut(activeCutId);
+      sheet = { ...sheet, active_cut_id: nextCut.id, nesting_cuts: remaining };
+      activeCutId = nextCut.id; placements = structuredClone(nextCut.nesting_placements || []); undo = createUndoStack(placements); selectedId = null;
+      await setActiveCut(sheet.id, nextCut.id); await loadPlacedPrograms(); draw();
+    } catch (error) { toastActions.show(error.message); }
+  }
   async function loadLibrary() {
     try {
       const root = sheetPartLibraryRoot(sheet?.name);
@@ -191,16 +216,31 @@
       }
       ctx.restore();
     }
+    if (selected) {
+      const center = sheetToScreen(selected, view), handle = { x: center.x, y: center.y - Math.max(28, selected.height_in * view.scale / 2 + 18) };
+      ctx.strokeStyle = '#d97706'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(center.x, center.y); ctx.lineTo(handle.x, handle.y); ctx.stroke();
+      ctx.fillStyle = '#fbbf24'; ctx.beginPath(); ctx.arc(handle.x, handle.y, 8, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = '#7c2d12'; ctx.stroke();
+    }
     if (measure.length) {
       const points = measure.map(point => sheetToScreen(point, view)); ctx.strokeStyle = '#fbbf24'; ctx.fillStyle = '#fbbf24'; ctx.lineWidth = 2;
       for (const point of points) { ctx.beginPath(); ctx.arc(point.x, point.y, 4, 0, Math.PI * 2); ctx.fill(); }
       if (points.length === 2) { ctx.beginPath(); ctx.moveTo(points[0].x, points[0].y); ctx.lineTo(points[1].x, points[1].y); ctx.stroke(); }
     }
   }
+  function rotationHandlePoint(placement) {
+    const center = sheetToScreen(placement, view);
+    return { center, handle: { x: center.x, y: center.y - Math.max(28, placement.height_in * view.scale / 2 + 18) } };
+  }
   function pointerDown(event) {
     if (!sheet) return;
     const rect = canvas.getBoundingClientRect(), point = screenToSheet({ x: event.clientX - rect.left, y: event.clientY - rect.top }, view);
     if (measuring || event.shiftKey) { measure = measure.length === 1 ? [...measure, point] : [point]; if (measure.length === 2) measuring = false; draw(); return; }
+    if (selected) {
+      const { center, handle } = rotationHandlePoint(selected);
+      if (Math.hypot(event.clientX - rect.left - handle.x, event.clientY - rect.top - handle.y) <= 14) {
+        rotationDrag = { id: selected.id, center }; return;
+      }
+    }
     if (placing) {
       const item = clampPlacementToSheet(sheet, makePlacement({ ...placing, x: point.x, y: point.y }));
       if (!item) return toastActions.show('This part is larger than the selected sheet');
@@ -211,17 +251,20 @@
     drag = hit ? { id: hit.id, start: point, placement: structuredClone(hit) } : { pan: true, start: { x: event.clientX, y: event.clientY }, view: { ...view } }; draw();
   }
   function pointerMove(event) {
+    if (rotationDrag) {
+      const rect = canvas.getBoundingClientRect(), dx = event.clientX - rect.left - rotationDrag.center.x, dy = event.clientY - rect.top - rotationDrag.center.y;
+      const rotation = Math.atan2(dx, -dy);
+      placements = placements.map(p => p.id === rotationDrag.id ? { ...p, rotation } : p); draw(); return;
+    }
     if (!drag) return;
     if (drag.pan) { view = { ...view, originX: drag.view.originX + event.clientX - drag.start.x, originY: drag.view.originY + event.clientY - drag.start.y }; draw(); return; }
     const rect = canvas.getBoundingClientRect(), point = screenToSheet({ x: event.clientX - rect.left, y: event.clientY - rect.top }, view), dx = point.x - drag.start.x, dy = point.y - drag.start.y;
     placements = placements.map(p => p.id === drag.id ? { ...p, x: drag.placement.x + dx, y: drag.placement.y + dy } : p); draw();
   }
-  function pointerUp() { if (drag && !drag.pan) { const moved = placements.find(item => item.id === drag.id); if (moved && !sheetContains(sheet, moved)) placements = placements.map(item => item.id === drag.id ? drag.placement : item); else undo.commit(placements); } drag = null; draw(); }
-  function wheel(event) { event.preventDefault(); const r = canvas.getBoundingClientRect(); view = zoomAt(view, { x: event.clientX - r.left, y: event.clientY - r.top }, event.deltaY < 0 ? 1.12 : .89); draw(); }
+  function pointerUp() { if (rotationDrag) { undo.commit(placements); rotationDrag = null; draw(); return; } if (drag && !drag.pan) { const moved = placements.find(item => item.id === drag.id); if (moved && !sheetContains(sheet, moved)) placements = placements.map(item => item.id === drag.id ? drag.placement : item); else undo.commit(placements); } drag = null; draw(); }
+  function wheel(event) { event.preventDefault(); const r = canvas.getBoundingClientRect(); view = zoomAt(view, { x: event.clientX - r.left, y: event.clientY - r.top }, event.deltaY < 0 ? 1.06 : .94); draw(); }
   function placeHole() { placing = { kind: 'hole', label: 'Hole', width_in: .3, height_in: .3 }; measure = []; toastActions.show('Uses the selected sheet thickness hole program'); }
   function rotateSelected(turns = 1) { if (selected) commit(placements.map(p => p.id === selected.id ? rotatePlacement(p, turns) : p)); }
-  function rotationDegrees(placement) { const degrees = (placement.rotation * 180 / Math.PI) % 360; return degrees < 0 ? degrees + 360 : degrees; }
-  function setSelectedRotation(degrees) { if (!selected || !Number.isFinite(degrees)) return; commit(placements.map(p => p.id === selected.id ? { ...p, rotation: (degrees % 360) * Math.PI / 180 } : p)); }
   function duplicateSelected() { if (!selected) return; const copy = makePlacement({ ...selected, id: undefined, x: selected.x + .5, y: selected.y + .5, label: `${selected.label} copy` }); if (!sheetContains(sheet, copy)) return toastActions.show('Duplicated placement would leave the sheet'); commit([...placements, copy]); selectedId = copy.id; }
   async function removeSelected() { if (!selected || !await requestConfirmation({ title: 'Delete placement', message: `Remove ${selected.label}?`, confirmLabel: 'Remove', danger: true })) return; commit(placements.filter(p => p.id !== selected.id)); }
   function inspectSelected() { const program = selected && gcodePrograms[selected.part_library_path]; if (!program) return toastActions.show('Reload the part library before inspecting this part'); selectedProgram = program; showProgram = true; }
@@ -262,7 +305,7 @@
   <main class="nesting jprog-home"><header class="jprog-home-header"><div><p class="eyebrow">Manufacturing</p><h1>JProg</h1><p class="home-subtitle">Manual sheet layout and G-code emission</p></div><div class="header-actions"><button class="btn btn-secondary" on:click={() => screen = 'settings'}><Settings size={16}/> Settings</button><button class="btn btn-primary" on:click={() => showNewSheet = true}><Plus size={16}/> New sheet</button></div></header><section class="sheet-index"><div class="sheet-index-toolbar"><div><h2>Sheets</h2><span>{sheets.length} total</span></div><label class="search"><Search size={17}/><input bind:value={sheetSearch} placeholder="Search sheets"/></label></div><div class="sheet-list">{#each visibleSheets as item}<button class="sheet-row" on:click={() => openSheet(item.id)}><span class="sheet-mark"><FolderOpen size={18}/></span><span class="sheet-details"><strong>{item.name}</strong><span>{item.width_in} x {item.height_in} in stock · {item.thickness_key} in thick · {item.nesting_cuts?.length || 0} cuts</span></span><span class="open-sheet">Open</span></button>{:else}<div class="empty-sheets"><strong>{sheetSearch ? 'No sheets match that search.' : 'No sheets yet.'}</strong><span>{sheetSearch ? 'Try a different name.' : 'Create a sheet to begin laying out parts.'}</span></div>{/each}</div></section></main>
 {:else}
   <main class="workspace"><header class="workspace-header"><div class="jprog-identity"><h1>JProg</h1><button class="btn btn-secondary" on:click={() => { screen = 'select'; goto('/jprog'); }}><FolderOpen size={16}/> JProg Home</button></div><div class="header-sheet-name"><strong>{sheet?.name}</strong><span>{sheet?.width_in} x {sheet?.height_in} in · {sheet?.thickness_key} in</span></div><div class="header-actions"><button class="btn btn-secondary" on:click={fitView}><Crosshair size={16}/> Fit sheet</button><button class:active={measuring || measure.length} class="btn btn-secondary" on:click={() => { measuring = !measuring; if (measuring) measure = []; toastActions.show(measuring ? 'Click two points to measure' : 'Measurement cancelled'); }}><Ruler size={16}/> Measure</button><button class="btn btn-secondary" disabled={!undo.canUndo} on:click={undoChange}><Undo2 size={16}/> Undo</button><button class="btn btn-secondary" disabled={!undo.canRedo} on:click={redoChange}><Redo2 size={16}/> Redo</button><button class="btn btn-secondary" on:click={save}><Save size={16}/>{saving ? 'Saving' : 'Save'}</button><button class="btn btn-primary" on:click={() => { showEmit = true; emitSuffix = availableSuffixes.length === 1 ? availableSuffixes[0] : 'all'; }}><Download size={16}/> Emit G-code</button></div></header>
-  <div class="workspace-body"><aside><section class="sheet-specs"><strong>{sheet?.name}</strong><span>{sheet?.width_in} x {sheet?.height_in} in · {sheet?.thickness_key} in thick</span></section><section><label for="active-cut">Active cut</label><select id="active-cut" value={activeCutId} on:change={(e) => chooseCut(e.currentTarget.value)}>{#each sheet?.nesting_cuts || [] as cut}<option value={cut.id}>{cut.name}</option>{/each}</select><button class="text-button" on:click={addCut}><Plus size={15}/> Add cut</button></section><section><h2>Place</h2><label class="btn btn-secondary upload"><Upload size={16}/> Upload part program(s)<input type="file" accept=".ngc,.tap" multiple on:change={uploadParts}/></label><div class="row"><button class="btn btn-secondary" on:click={() => showLibrary = !showLibrary}><FolderOpen size={16}/> Library</button><button class="btn btn-secondary" on:click={loadLibrary}><RefreshCw size={16}/> Reload</button></div>{#if showLibrary}<div class="library">{#each partGroups as group}<button title={`Place ${group.label}`} on:click={() => armStoredPart(group)}>{group.label}<span>{group.files.length}</span></button>{:else}<span class="hint">No part folders found.</span>{/each}</div>{/if}<button class:active={placing?.kind === 'hole'} class="btn btn-secondary" on:click={placeHole}><Crosshair size={16}/> Add hole</button>{#if placing}<p class="hint">Click the sheet to place {placing.label}. Keep clicking to add copies, then press Esc to finish.</p>{/if}</section>{#if selected}<section><h2>Selection</h2><strong>{selected.label}</strong><div class="coordinate-grid"><label>X<input type="number" step="0.001" value={selected.x} on:change={(e) => commit(placements.map(item => item.id === selected.id ? { ...item, x: Number(e.currentTarget.value) } : item))}/></label><label>Y<input type="number" step="0.001" value={selected.y} on:change={(e) => commit(placements.map(item => item.id === selected.id ? { ...item, y: Number(e.currentTarget.value) } : item))}/></label><label class="rotation-control">Rotation (deg)<input class="rotation-slider" type="range" min="0" max="360" step="0.1" value={rotationDegrees(selected)} on:input={(e) => setSelectedRotation(Number(e.currentTarget.value))}/><input type="number" min="0" max="360" step="0.1" value={rotationDegrees(selected).toFixed(1)} on:change={(e) => setSelectedRotation(Number(e.currentTarget.value))}/></label></div><div class="selection-actions"><button class="btn btn-secondary" on:click={() => rotateSelected(-1)}><RotateCcw size={16}/> Rotate left</button><button class="btn btn-secondary" on:click={() => rotateSelected(1)}><RotateCw size={16}/> Rotate right</button><button class="btn btn-secondary" on:click={duplicateSelected}><Copy size={16}/> Duplicate</button>{#if selected.kind === 'part'}<button class="btn btn-secondary" on:click={inspectSelected}><FileCode size={16}/> Inspect G-code</button>{/if}<button class="btn btn-secondary danger" on:click={removeSelected}><Trash2 size={16}/> Delete</button></div></section>{/if}<section><h2>Measurement</h2>{#if measure.length === 2}<strong>{Math.hypot(measure[1].x - measure[0].x, measure[1].y - measure[0].y).toFixed(3)} in</strong><button class="text-button" on:click={() => { measure = []; draw(); }}>Clear measurement</button>{:else}<p class="hint">Select the ruler, then click two points.</p>{/if}</section></aside>
+  <div class="workspace-body"><aside><section class="sheet-specs"><strong>{sheet?.name}</strong><span>{sheet?.width_in} x {sheet?.height_in} in · {sheet?.thickness_key} in thick</span></section><section><label for="active-cut">Active cut</label><select id="active-cut" value={activeCutId} on:change={(e) => chooseCut(e.currentTarget.value)}>{#each sheet?.nesting_cuts || [] as cut}<option value={cut.id}>{cut.name}</option>{/each}</select>{#if editingCutName}<div class="cut-rename"><input aria-label="Cut name" bind:value={cutName} on:keydown={(event) => { if (event.key === 'Enter') saveCutName(); if (event.key === 'Escape') editingCutName = false; }}/><button class="icon-button" title="Save cut name" on:click={saveCutName}><Save size={15}/></button><button class="icon-button" title="Cancel rename" on:click={() => editingCutName = false}><X size={15}/></button></div>{/if}<div class="cut-actions"><button class="btn btn-secondary add-cut-button" on:click={addCut}><Plus size={15}/> Add cut</button><button class="icon-button" title="Rename cut" on:click={beginRenameCut}><Pencil size={15}/></button><button class="icon-button danger" title="Delete cut" disabled={(sheet?.nesting_cuts?.length || 0) <= 1} on:click={removeActiveCut}><Trash2 size={15}/></button></div></section><section><h2>Place</h2><label class="btn btn-secondary upload"><Upload size={16}/> Upload part program(s)<input type="file" accept=".ngc,.tap" multiple on:change={uploadParts}/></label><div class="row"><button class="btn btn-secondary" on:click={() => showLibrary = !showLibrary}><FolderOpen size={16}/> Library</button><button class="btn btn-secondary" on:click={loadLibrary}><RefreshCw size={16}/> Reload</button></div>{#if showLibrary}<div class="library">{#each partGroups as group}<button title={`Place ${group.label}`} on:click={() => armStoredPart(group)}>{group.label}<span>{group.files.length}</span></button>{:else}<span class="hint">No part folders found.</span>{/each}</div>{/if}<button class:active={placing?.kind === 'hole'} class="btn btn-secondary" on:click={placeHole}><Crosshair size={16}/> Add hole</button>{#if placing}<p class="hint">Click the sheet to place {placing.label}. Keep clicking to add copies, then press Esc to finish.</p>{/if}</section>{#if selected}<section><h2>Selection</h2><strong>{selected.label}</strong><div class="coordinate-grid"><label>X<input type="number" step="0.001" value={selected.x} on:change={(e) => commit(placements.map(item => item.id === selected.id ? { ...item, x: Number(e.currentTarget.value) } : item))}/></label><label>Y<input type="number" step="0.001" value={selected.y} on:change={(e) => commit(placements.map(item => item.id === selected.id ? { ...item, y: Number(e.currentTarget.value) } : item))}/></label></div><div class="selection-actions"><button class="btn btn-secondary" on:click={() => rotateSelected(-1)}><RotateCcw size={16}/> Rotate left</button><button class="btn btn-secondary" on:click={() => rotateSelected(1)}><RotateCw size={16}/> Rotate right</button><button class="btn btn-secondary" on:click={duplicateSelected}><Copy size={16}/> Duplicate</button>{#if selected.kind === 'part'}<button class="btn btn-secondary" on:click={inspectSelected}><FileCode size={16}/> Inspect G-code</button>{/if}<button class="btn btn-secondary danger" on:click={removeSelected}><Trash2 size={16}/> Delete</button></div></section>{/if}<section><h2>Measurement</h2>{#if measure.length === 2}<strong>{Math.hypot(measure[1].x - measure[0].x, measure[1].y - measure[0].y).toFixed(3)} in</strong><button class="text-button" on:click={() => { measure = []; draw(); }}>Clear measurement</button>{:else}<p class="hint">Select the ruler, then click two points.</p>{/if}</section></aside>
   <section class="canvas-wrap"><canvas bind:this={canvas} on:pointerdown={pointerDown} on:pointermove={pointerMove} on:pointerup={pointerUp} on:pointerleave={pointerUp} on:wheel={wheel}></canvas><div class="canvas-status"><MousePointer2 size={15}/> Click to place selected G-code · Esc to finish · Drag to move/pan · Wheel to zoom · R to rotate · Delete to remove</div></section></div></main>
 {/if}
 {#if showNewSheet}<div class="scrim"><form class="modal" on:submit|preventDefault={createNewSheet}><button type="button" class="modal-close" title="Close" on:click={() => showNewSheet = false}><X size={18}/></button><h2>New Sheet</h2><label>Name<input bind:value={newSheet.name} /></label><div class="two"><label>Width (in)<input type="number" min="1" bind:value={newSheet.width}/></label><label>Height (in)<input type="number" min="1" bind:value={newSheet.height}/></label></div><label>Thickness<select bind:value={newSheet.thickness}><option value="0.063">1/16 in</option><option value="0.09">0.090 in</option><option value="0.125">1/8 in</option><option value="0.1875">3/16 in</option><option value="0.25">1/4 in</option><option value="0.3125">5/16 in</option><option value="0.375">3/8 in</option><option value="0.5">1/2 in</option><option value="0.75">3/4 in</option></select></label><div class="row"><button type="button" class="btn btn-secondary" on:click={() => showNewSheet = false}>Cancel</button><button class="btn btn-primary">Create sheet</button></div></form></div>{/if}
@@ -270,7 +313,7 @@
 {#if showProgram}<div class="scrim"><section class="modal program"><button type="button" class="modal-close" title="Close" on:click={() => showProgram = false}><X size={18}/></button><h2>{selected?.label} programs</h2>{#each selectedProgram?.variants || [] as variant}<details><summary>{variant.name} · {variant.dialect} · {variant.suffix || 'default'}</summary><pre>{variant.source}</pre></details>{/each}</section></div>{/if}
 
 <style>
-  .nesting,.workspace{max-width:1400px;margin:0 auto;padding:28px}.nesting header,.workspace-header,.row{display:flex;align-items:center;justify-content:space-between;gap:12px}.eyebrow{margin:0;color:var(--muted-text,#667085);font-size:.8rem;text-transform:uppercase;letter-spacing:0}.nesting h1,.workspace h1{margin:2px 0;font-size:1.7rem}.settings-panel{max-width:700px;margin-top:24px;padding:20px;border:1px solid var(--border-color,#d0d5dd);border-radius:6px}.settings-panel h2{font-size:1rem;margin:16px 0 4px}.settings-panel h2:first-child{margin-top:0}.settings-panel p,.hint{color:var(--muted-text,#667085);line-height:1.45}.header-actions{display:flex;gap:8px;align-items:center}.jprog-identity{display:grid;gap:8px;justify-items:start}.jprog-identity h1{margin:0}.header-sheet-name{display:grid;gap:2px;text-align:center;color:var(--muted-text,#667085)}.header-sheet-name strong{color:var(--text,#101828);font-size:1rem}.header-sheet-name span{font-size:.8rem}.search{display:flex;margin-top:24px;max-width:540px;align-items:center;gap:8px;border:1px solid var(--border-color,#d0d5dd);padding:8px 10px}.search input{border:0;padding:0;min-width:0;width:100%}.sheet-list{margin-top:14px;display:grid;gap:8px;max-width:720px}.sheet-row{display:flex;justify-content:space-between;gap:12px;text-align:left;padding:16px;border:1px solid var(--border-color,#d0d5dd);background:var(--card-bg,#fff);border-radius:6px}.sheet-row span{color:var(--muted-text,#667085)}.workspace{max-width:none;padding:14px;height:calc(100vh - 70px);display:flex;flex-direction:column}.workspace-header{padding:0 4px 14px;border-bottom:1px solid var(--border-color,#d0d5dd)}.workspace-body{flex:1;min-height:0;display:grid;grid-template-columns:270px 1fr;margin-top:12px;gap:12px}aside{border:1px solid var(--border-color,#d0d5dd);padding:12px;overflow:auto}aside section{display:grid;gap:9px;padding:12px 0;border-bottom:1px solid var(--border-color,#d0d5dd)}aside h2{font-size:1rem;margin:0}.sheet-specs{display:grid;gap:2px;color:var(--muted-text,#667085);font-size:.85rem}.sheet-specs strong{color:var(--text,#101828)}.library{display:grid;gap:4px;max-height:190px;overflow:auto}.library button{padding:7px;text-align:left;border:1px solid var(--border-color,#d0d5dd);background:var(--card-bg,#fff);display:flex;justify-content:space-between;transition:transform .16s ease,box-shadow .16s ease,border-color .16s ease}.library button:hover,.library button:focus-visible{transform:translateX(3px);border-color:var(--primary,#2563eb);box-shadow:0 3px 10px #10182822;outline:none}.canvas-wrap{position:relative;min-height:0;background:#000;border:1px solid #344054;overflow:hidden}canvas{width:100%;height:100%;touch-action:none}.canvas-status{position:absolute;bottom:12px;left:12px;color:#fff;background:#101828d9;padding:7px 10px;display:flex;gap:7px;font-size:.8rem}.btn,.text-button{display:inline-flex;align-items:center;justify-content:center;gap:7px}.text-button{border:0;background:none;color:var(--primary,#2563eb);justify-content:start;padding:2px}.upload input{display:none}.active{outline:2px solid var(--primary,#2563eb)}.danger{color:#b42318}.selection-actions{display:grid;gap:6px}.selection-actions .btn{justify-content:flex-start}label{display:grid;gap:5px;font-size:.85rem}input,select{padding:8px;border:1px solid var(--border-color,#d0d5dd);border-radius:4px;background:var(--card-bg,#fff);color:inherit}.coordinate-grid,.two{display:grid;grid-template-columns:1fr 1fr;gap:8px}.rotation-control{grid-column:1 / -1}.rotation-slider{width:100%;padding:0}.scrim{position:fixed;inset:0;background:#10182899;display:grid;place-items:center;z-index:10}.modal{position:relative;background:var(--card-bg,#fff);padding:22px;width:min(460px,calc(100vw - 32px));display:grid;gap:14px;border-radius:8px;max-height:calc(100vh - 32px);overflow:auto}.modal h2{margin:0}.modal-close{position:absolute;right:12px;top:12px;border:0;background:none;color:inherit}.modal fieldset{display:grid;gap:8px;border:1px solid var(--border-color,#d0d5dd)}.radio{display:flex;align-items:center;gap:8px}.radio input{padding:0}.program{width:min(900px,calc(100vw - 32px))}.program details{border:1px solid var(--border-color,#d0d5dd);padding:8px}.program pre{white-space:pre;overflow:auto;max-height:320px;font-size:.75rem}@media(max-width:720px){.workspace{height:auto;min-height:100vh;padding:10px}.workspace-body{grid-template-columns:1fr;grid-template-rows:auto 65vh}.workspace-header{align-items:flex-start}.header-actions{flex-wrap:wrap;justify-content:end}.nesting,.workspace{padding:16px}.sheet-row{display:grid;gap:4px}.canvas-status{max-width:calc(100% - 24px)}}
+  .nesting,.workspace{max-width:1400px;margin:0 auto;padding:28px}.nesting header,.workspace-header,.row{display:flex;align-items:center;justify-content:space-between;gap:12px}.eyebrow{margin:0;color:var(--muted-text,#667085);font-size:.8rem;text-transform:uppercase;letter-spacing:0}.nesting h1,.workspace h1{margin:2px 0;font-size:1.7rem}.settings-panel{max-width:700px;margin-top:24px;padding:20px;border:1px solid var(--border-color,#d0d5dd);border-radius:6px}.settings-panel h2{font-size:1rem;margin:16px 0 4px}.settings-panel h2:first-child{margin-top:0}.settings-panel p,.hint{color:var(--muted-text,#667085);line-height:1.45}.header-actions{display:flex;gap:8px;align-items:center}.jprog-identity{display:grid;gap:8px;justify-items:start}.jprog-identity h1{margin:0}.header-sheet-name{display:grid;gap:2px;text-align:center;color:var(--muted-text,#667085)}.header-sheet-name strong{color:var(--text,#101828);font-size:1rem}.header-sheet-name span{font-size:.8rem}.search{display:flex;margin-top:24px;max-width:540px;align-items:center;gap:8px;border:1px solid var(--border-color,#d0d5dd);padding:8px 10px}.search input{border:0;padding:0;min-width:0;width:100%}.sheet-list{margin-top:14px;display:grid;gap:8px;max-width:720px}.sheet-row{display:flex;justify-content:space-between;gap:12px;text-align:left;padding:16px;border:1px solid var(--border-color,#d0d5dd);background:var(--card-bg,#fff);border-radius:6px}.sheet-row span{color:var(--muted-text,#667085)}.workspace{max-width:none;padding:14px;height:calc(100vh - 70px);display:flex;flex-direction:column}.workspace-header{padding:0 4px 14px;border-bottom:1px solid var(--border-color,#d0d5dd)}.workspace-body{flex:1;min-height:0;display:grid;grid-template-columns:270px 1fr;margin-top:12px;gap:12px}aside{border:1px solid var(--border-color,#d0d5dd);padding:12px;overflow:auto}aside section{display:grid;gap:9px;padding:12px 0;border-bottom:1px solid var(--border-color,#d0d5dd)}aside h2{font-size:1rem;margin:0}.sheet-specs{display:grid;gap:2px;color:var(--muted-text,#667085);font-size:.85rem}.sheet-specs strong{color:var(--text,#101828)}.library{display:grid;gap:4px;max-height:190px;overflow:auto}.library button{padding:7px;text-align:left;border:1px solid var(--border-color,#d0d5dd);background:var(--card-bg,#fff);display:flex;justify-content:space-between;transition:transform .16s ease,box-shadow .16s ease,border-color .16s ease}.library button:hover,.library button:focus-visible{transform:translateX(3px);border-color:var(--primary,#2563eb);box-shadow:0 3px 10px #10182822;outline:none}.canvas-wrap{position:relative;min-height:0;background:#000;border:1px solid #344054;overflow:hidden}canvas{width:100%;height:100%;touch-action:none}.canvas-status{position:absolute;bottom:12px;left:12px;color:#fff;background:#101828d9;padding:7px 10px;display:flex;gap:7px;font-size:.8rem}.btn,.text-button{display:inline-flex;align-items:center;justify-content:center;gap:7px}.text-button{border:0;background:none;color:var(--primary,#2563eb);justify-content:start;padding:2px}.upload input{display:none}.active{outline:2px solid var(--primary,#2563eb)}.danger{color:#b42318}.selection-actions{display:grid;gap:6px}.selection-actions .btn{justify-content:flex-start}label{display:grid;gap:5px;font-size:.85rem}input,select{padding:8px;border:1px solid var(--border-color,#d0d5dd);border-radius:4px;background:var(--card-bg,#fff);color:inherit}.coordinate-grid,.two{display:grid;grid-template-columns:1fr 1fr;gap:8px}.scrim{position:fixed;inset:0;background:#10182899;display:grid;place-items:center;z-index:10}.modal{position:relative;background:var(--card-bg,#fff);padding:22px;width:min(460px,calc(100vw - 32px));display:grid;gap:14px;border-radius:8px;max-height:calc(100vh - 32px);overflow:auto}.modal h2{margin:0}.modal-close{position:absolute;right:12px;top:12px;border:0;background:none;color:inherit}.modal fieldset{display:grid;gap:8px;border:1px solid var(--border-color,#d0d5dd)}.radio{display:flex;align-items:center;gap:8px}.radio input{padding:0}.program{width:min(900px,calc(100vw - 32px))}.program details{border:1px solid var(--border-color,#d0d5dd);padding:8px}.program pre{white-space:pre;overflow:auto;max-height:320px;font-size:.75rem}@media(max-width:720px){.workspace{height:auto;min-height:100vh;padding:10px}.workspace-body{grid-template-columns:1fr;grid-template-rows:auto 65vh}.workspace-header{align-items:flex-start}.header-actions{flex-wrap:wrap;justify-content:end}.nesting,.workspace{padding:16px}.sheet-row{display:grid;gap:4px}.canvas-status{max-width:calc(100% - 24px)}}
 
   .jprog-home { max-width: 1180px; padding-top: 48px; }
   .jprog-home-header { padding-bottom: 26px; border-bottom: 1px solid var(--border-color, #d0d5dd); }
@@ -298,4 +341,9 @@
     .sheet-row { grid-template-columns: auto 1fr; }
     .open-sheet { display: none; }
   }
+  .cut-actions, .cut-rename { display: flex; align-items: center; gap: 6px; }
+  .cut-actions .add-cut-button { flex: 1; color: var(--primary, #2563eb); border-color: var(--primary, #2563eb); }
+  .cut-rename input { min-width: 0; flex: 1; }
+  .icon-button { width: 2rem; height: 2rem; padding: 0; border: 1px solid var(--border-color, #d0d5dd); border-radius: 4px; background: var(--card-bg, #fff); display: inline-flex; align-items: center; justify-content: center; }
+  .icon-button:disabled { opacity: .45; cursor: not-allowed; }
 </style>
