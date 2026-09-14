@@ -2158,7 +2158,7 @@
   <div class="page-actions">
     <a href="/nesting" class="btn btn-secondary" target="_blank">
       <Scissors size={16} />
-      Sheet Nesting
+      JProg
     </a>
     {#if canDelete}
       <button class="btn {batchSelectMode ? 'btn-primary' : 'btn-secondary'}" on:click={toggleBatchSelectMode}>

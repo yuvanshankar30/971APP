@@ -1,3 +1,5 @@
+import { parseGcodeToolpath, toolpathBounds } from './gcodeToolpath.js';
+
 export function detectDialect(gcode) {
   return /\b(?:M32|G22|WinCNC)\b/i.test(gcode) ? 'wincnc' : 'linuxcnc';
 }
@@ -9,14 +11,7 @@ export function gcodeSuffix(name = '') {
 }
 
 export function gcodeBounds(text) {
-  let x = 0, y = 0, minX = 0, maxX = 0, minY = 0, maxY = 0;
-  for (const line of String(text || '').split(/\r?\n/)) {
-    const xMatch = line.match(/\bX\s*(-?\d*\.?\d+)/i), yMatch = line.match(/\bY\s*(-?\d*\.?\d+)/i);
-    if (xMatch) x = Number(xMatch[1]);
-    if (yMatch) y = Number(yMatch[1]);
-    minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y);
-  }
-  return { minX, minY, maxX, maxY, width: Math.max(0.01, maxX - minX), height: Math.max(0.01, maxY - minY) };
+  return toolpathBounds(parseGcodeToolpath(text));
 }
 
 export function parseGcodeDocument(text, name = 'program.ngc') {
@@ -30,5 +25,6 @@ export function parseGcodeDocument(text, name = 'program.ngc') {
     if (!layers.has(key)) layers.set(key, []);
     layers.get(key).push(raw);
   }
-  return { name, suffix: gcodeSuffix(name), source: String(text || ''), dialect: detectDialect(text), bounds: gcodeBounds(text), tools: [...tools].map(([number, diameter]) => ({ number, diameter })), layers: [...layers].map(([tool, lines]) => ({ tool, text: lines.join('\n') })) };
+  const source = String(text || ''), toolpath = parseGcodeToolpath(source);
+  return { name, suffix: gcodeSuffix(name), source, dialect: detectDialect(text), bounds: toolpathBounds(toolpath), toolpath, tools: [...tools].map(([number, diameter]) => ({ number, diameter })), layers: [...layers].map(([tool, lines]) => ({ tool, text: lines.join('\n') })) };
 }

@@ -1,10 +1,11 @@
 import { buildEmitFilename } from './emitFilename.js';
 import { holeProgramForThickness } from './holePrograms.js';
+import { gcodeBounds } from './gcodeDocument.js';
 
 const coordinatePattern = /([XYIJ])\s*(-?\d*\.?\d+)/gi;
 const terminatePattern = /^\s*(?:%|M2|M30)\b/i;
 
-function transformLine(line, placement, state) {
+function transformLine(line, placement, state, bounds) {
   if (/\bG90\b/i.test(line)) state.absolute = true;
   if (/\bG91\b/i.test(line)) state.absolute = false;
   const values = {};
@@ -17,7 +18,7 @@ function transformLine(line, placement, state) {
   const transformed = { ...values };
   if ('X' in values || 'Y' in values) {
     const localX = 'X' in values ? values.X : state.x, localY = 'Y' in values ? values.Y : state.y;
-    const point = rotate(localX, localY);
+    const point = rotate(localX - bounds.centerX, localY - bounds.centerY);
     if (state.absolute) { transformed.X = point.x + placement.x; transformed.Y = point.y + placement.y; state.x = localX; state.y = localY; }
     else { transformed.X = point.x; transformed.Y = point.y; }
   }
@@ -29,27 +30,34 @@ function transformLine(line, placement, state) {
   return line.replace(coordinatePattern, (_all, axis) => `${axis.toUpperCase()}${Number(transformed[axis.toUpperCase()]).toFixed(4)}`);
 }
 
-function transformedProgram(source, placement) {
+function transformedProgram(source, placement, bounds) {
   const state = { x: 0, y: 0, absolute: true };
-  return String(source || '').split(/\r?\n/).filter(line => !terminatePattern.test(line)).map(line => transformLine(line, placement, state));
+  return String(source || '').split(/\r?\n/).filter(line => !terminatePattern.test(line)).map(line => transformLine(line, placement, state, bounds));
 }
 
 function sourceForPlacement(placement, programs, suffix, thickness, dialect) {
-  if (placement.kind === 'hole') return suffix === 'holes' ? holeProgramForThickness(thickness, dialect) : null;
+  if (placement.kind === 'hole') {
+    const source = suffix === 'holes' ? holeProgramForThickness(thickness, dialect) : null;
+    return source ? { source, bounds: gcodeBounds(source) } : null;
+  }
   const candidate = programs[placement.part_library_path];
   if (!candidate) return null;
-  if (candidate.variants) return candidate.variants.find(variant => variant.suffix === suffix)?.source || null;
-  return candidate.suffix && candidate.suffix !== suffix ? null : candidate.source || candidate;
+  if (candidate.variants) {
+    const variant = candidate.variants.find(item => item.suffix === suffix);
+    return variant ? { source: variant.source, bounds: variant.bounds } : null;
+  }
+  const source = candidate.suffix && candidate.suffix !== suffix ? null : candidate.source || candidate;
+  return source ? { source, bounds: candidate.bounds || gcodeBounds(source) } : null;
 }
 
 export function emitNestingGcode({ name, placements, programs, suffix = '', suffixCount = 1, dialect = 'linuxcnc', thickness = '0.125' }) {
   const lines = [`(${name} - Sheet Nesting)`, dialect === 'wincnc' ? 'G20' : 'G20 G90'];
   let emitted = 0;
   for (const placement of placements) {
-    const source = sourceForPlacement(placement, programs, suffix, thickness, dialect);
-    if (!source) continue;
+    const program = sourceForPlacement(placement, programs, suffix, thickness, dialect);
+    if (!program) continue;
     emitted += 1;
-    lines.push(`(Part: ${placement.label})`, ...transformedProgram(source, placement));
+    lines.push(`(Part: ${placement.label})`, ...transformedProgram(program.source, placement, program.bounds));
   }
   lines.push('M30');
   return { filename: buildEmitFilename(name, suffix, suffixCount, dialect === 'wincnc' ? 'tap' : 'ngc'), text: lines.join('\n') + '\n', emitted };

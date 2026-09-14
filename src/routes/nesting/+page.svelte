@@ -22,7 +22,7 @@
   let screen = forcedScreen || 'select', view = { scale: 28, originX: 80, originY: 520 }, drag = null, placing = null;
   let undo = createUndoStack([]), gcodePrograms = {}, partGroups = [], newSheet = { name: '', width: 48, height: 30, thickness: '0.125' };
   let showNewSheet = false, showLibrary = false, showEmit = false, showProgram = false, activeCutId = null, user = null, loadError = '';
-  let sheetSearch = '', measure = [], measuring = false, aHeld = false, dialect = 'linuxcnc', emitName = '', emitSuffix = '', selectedProgram = null;
+  let sheetSearch = '', measure = [], measuring = false, dialect = 'linuxcnc', emitName = '', emitSuffix = '', selectedProgram = null;
   $: selected = placements.find((item) => item.id === selectedId) || null;
   $: activeCut = sheet?.nesting_cuts?.find((cut) => cut.id === activeCutId) || null;
   $: visibleSheets = sheets.filter(item => item.name.toLowerCase().includes(sheetSearch.trim().toLowerCase()));
@@ -35,15 +35,13 @@
     const unsubscribe = userStore.subscribe(value => user = value);
     const onKey = (event) => {
       if (screen !== 'edit' || ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return;
-      if (event.key.toLowerCase() === 'a') aHeld = event.type === 'keydown';
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? redoChange() : undoChange(); }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') { event.preventDefault(); save(); }
       if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); removeSelected(); }
       if (event.key.toLowerCase() === 'r' && selected) { event.preventDefault(); rotateSelected(); }
       if (event.key === 'Escape') { placing = null; measure = []; }
     };
-    const onKeyUp = (event) => { if (event.key.toLowerCase() === 'a') aHeld = false; };
-    window.addEventListener('keydown', onKey); window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('keydown', onKey);
     (async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
@@ -59,14 +57,14 @@
         loadError = error?.message || 'Could not load nesting sheets.';
       } finally { loading = false; }
     })();
-    return () => { unsubscribe(); window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onKeyUp); };
+    return () => { unsubscribe(); window.removeEventListener('keydown', onKey); };
   });
 
   async function refreshSheets() { sheets = await listSheets(); }
   async function openSheet(id) {
     sheet = await getSheet(id); activeCutId = sheet.active_cut_id || sheet.nesting_cuts?.[0]?.id;
     placements = structuredClone(sheet.nesting_cuts?.find(c => c.id === activeCutId)?.nesting_placements || []);
-    undo = createUndoStack(placements); selectedId = null; screen = 'edit'; emitName = sheet.name; fitView(); await loadLibrary();
+    undo = createUndoStack(placements); selectedId = null; screen = 'edit'; emitName = sheet.name; fitView(); await loadLibrary(); await loadPlacedPrograms(); draw();
     if (!forcedScreen) goto(`/nesting/sheets/${id}`, { replaceState: true, keepFocus: true, noScroll: true });
   }
   function fitView() {
@@ -97,7 +95,9 @@
         const pieces = item.path.split('/');
         const folder = pieces.length > 2 ? pieces.slice(-2, -1)[0] : item.name.replace(/\.[^.]+$/, '');
         const key = `Nesting Parts Library/${folder}`;
-        if (!groups.has(key)) groups.set(key, { key, label: folder, files: [], suffixes: [] });
+        const isUuidFolder = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(folder);
+        const fileStem = item.name.replace(/\.[^.]+$/, ''), label = isUuidFolder ? fileStem.replace(/_[^_]+$/, '') : folder;
+        if (!groups.has(key)) groups.set(key, { key, label, files: [], suffixes: [] });
         groups.get(key).files.push(item);
         const stem = item.name.replace(/\.[^.]+$/, ''), suffixIndex = stem.lastIndexOf('_');
         groups.get(key).suffixes.push(suffixIndex === -1 ? '' : stem.slice(suffixIndex + 1).toLowerCase());
@@ -110,11 +110,18 @@
     const primary = variants[0], bounds = variants.reduce((largest, item) => item.bounds.width * item.bounds.height > largest.width * largest.height ? item.bounds : largest, primary.bounds);
     return { variants, bounds };
   }
+  async function loadPlacedPrograms() {
+    await Promise.all(placements.filter(item => item.kind === 'part' && !gcodePrograms[item.part_library_path]).map(async item => {
+      const group = partGroups.find(candidate => candidate.key === item.part_library_path);
+      if (!group) return;
+      try { gcodePrograms[item.part_library_path] = await readPartGroup(group); } catch { /* Keep existing placements editable if a library file is unavailable. */ }
+    }));
+  }
   async function armStoredPart(group) {
     try {
       const program = await readPartGroup(group); gcodePrograms[group.key] = program;
       placing = { label: group.label, part_library_path: group.key, width_in: program.bounds.width, height_in: program.bounds.height };
-      showLibrary = false; toastActions.show(`Hold A and click the sheet to place ${group.label}`);
+      showLibrary = false; toastActions.show(`Click the sheet to place ${group.label}. Press Esc when finished.`);
     } catch (error) { toastActions.show(error.message); }
   }
   async function uploadParts(event) {
@@ -127,7 +134,7 @@
       const primary = variants[0], bounds = variants.reduce((largest, item) => item.bounds.width * item.bounds.height > largest.width * largest.height ? item.bounds : largest, primary.bounds);
       const key = `Nesting Parts Library/${partName}`; gcodePrograms[key] = { variants, bounds };
       placing = { label: partName, part_library_path: key, width_in: bounds.width, height_in: bounds.height };
-      await loadLibrary(); toastActions.show(`Uploaded ${files.length} program${files.length === 1 ? '' : 's'}; hold A and click to place`);
+      await loadLibrary(); toastActions.show(`Uploaded ${files.length} program${files.length === 1 ? '' : 's'}; click the sheet to place it`);
     } catch (error) { toastActions.show(error.message); }
     event.currentTarget.value = '';
   }
@@ -139,10 +146,23 @@
     ctx.fillStyle = '#f5f5f2'; ctx.fillRect(a.x, b.y, b.x - a.x, a.y - b.y); ctx.strokeStyle = '#667085'; ctx.lineWidth = 2; ctx.strokeRect(a.x, b.y, b.x - a.x, a.y - b.y);
     for (const p of placements) {
       const s = sheetToScreen(p, view); ctx.save(); ctx.translate(s.x, s.y); ctx.rotate(-p.rotation);
-      ctx.fillStyle = p.id === selectedId ? '#fbbf24' : p.kind === 'hole' ? '#22c55e' : '#3b82f6'; ctx.globalAlpha = .86;
-      if (p.kind === 'hole') { ctx.beginPath(); ctx.arc(0, 0, Math.max(4, p.width_in * view.scale / 2), 0, Math.PI * 2); ctx.fill(); }
-      else ctx.fillRect(-p.width_in * view.scale / 2, -p.height_in * view.scale / 2, p.width_in * view.scale, p.height_in * view.scale);
-      ctx.globalAlpha = 1; ctx.fillStyle = '#101828'; ctx.font = '12px sans-serif'; if (p.kind !== 'hole') ctx.fillText(p.label, -p.width_in * view.scale / 2 + 5, 4); ctx.restore();
+      const preview = gcodePrograms[p.part_library_path]?.variants?.[0];
+      if (preview?.toolpath?.length) {
+        ctx.scale(view.scale, -view.scale); ctx.strokeStyle = p.id === selectedId ? '#d97706' : '#2563eb'; ctx.lineWidth = 1.5 / view.scale;
+        for (const segment of preview.toolpath) {
+          ctx.globalAlpha = segment.rapid ? .18 : 1; ctx.beginPath();
+          segment.points.forEach((point, index) => { const x = point.x - preview.bounds.centerX, y = point.y - preview.bounds.centerY; if (index) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
+          ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+      } else {
+        ctx.fillStyle = p.id === selectedId ? '#fbbf24' : p.kind === 'hole' ? '#22c55e' : '#3b82f6'; ctx.globalAlpha = .86;
+        if (p.kind === 'hole') { ctx.beginPath(); ctx.arc(0, 0, Math.max(4, p.width_in * view.scale / 2), 0, Math.PI * 2); ctx.fill(); }
+        else ctx.fillRect(-p.width_in * view.scale / 2, -p.height_in * view.scale / 2, p.width_in * view.scale, p.height_in * view.scale);
+        ctx.globalAlpha = 1;
+      }
+      ctx.restore();
+      if (p.kind !== 'hole') { ctx.fillStyle = '#101828'; ctx.font = '12px sans-serif'; ctx.fillText(p.label, s.x - p.width_in * view.scale / 2 + 5, s.y + 4); }
     }
     if (measure.length) {
       const points = measure.map(point => sheetToScreen(point, view)); ctx.strokeStyle = '#fbbf24'; ctx.fillStyle = '#fbbf24'; ctx.lineWidth = 2;
@@ -154,7 +174,7 @@
     if (!sheet) return;
     const rect = canvas.getBoundingClientRect(), point = screenToSheet({ x: event.clientX - rect.left, y: event.clientY - rect.top }, view);
     if (measuring || event.shiftKey) { measure = measure.length === 1 ? [...measure, point] : [point]; if (measure.length === 2) measuring = false; draw(); return; }
-    if ((event.altKey || aHeld) && placing) {
+    if (placing) {
       const item = clampPlacementToSheet(sheet, makePlacement({ ...placing, x: point.x, y: point.y }));
       if (!item) return toastActions.show('This part is larger than the selected sheet');
       commit([...placements, item]); selectedId = item.id; return;
@@ -211,8 +231,8 @@
   <main class="nesting"><header><div><p class="eyebrow">Manufacturing</p><h1>Sheet Nesting</h1></div><div class="header-actions"><button class="btn btn-secondary" on:click={() => screen = 'settings'}><Settings size={16}/> Settings</button><button class="btn btn-primary" on:click={() => showNewSheet = true}><Plus size={16}/> New sheet</button></div></header><label class="search"><Search size={17}/><input bind:value={sheetSearch} placeholder="Search sheets"/></label><section class="sheet-list">{#each visibleSheets as item}<button class="sheet-row" on:click={() => openSheet(item.id)}><strong>{item.name}</strong><span>{item.width_in} x {item.height_in} in · {item.thickness_key} in · {item.nesting_cuts?.length || 0} cuts</span></button>{:else}<p>No matching sheets.</p>{/each}</section></main>
 {:else}
   <main class="workspace"><header class="workspace-header"><button class="btn btn-secondary" on:click={() => { screen = 'select'; goto('/nesting'); }}><FolderOpen size={16}/> Sheets</button><div><p class="eyebrow">{sheet?.name} · {sheet?.width_in} x {sheet?.height_in} in · {sheet?.thickness_key} in</p><h1>Sheet Nesting</h1></div><div class="header-actions"><button class="btn btn-secondary" on:click={fitView}><Crosshair size={16}/> Fit sheet</button><button class:active={measuring || measure.length} class="btn btn-secondary" on:click={() => { measuring = !measuring; if (measuring) measure = []; toastActions.show(measuring ? 'Click two points to measure' : 'Measurement cancelled'); }}><Ruler size={16}/> Measure</button><button class="btn btn-secondary" disabled={!undo.canUndo} on:click={undoChange}><Undo2 size={16}/> Undo</button><button class="btn btn-secondary" disabled={!undo.canRedo} on:click={redoChange}><Redo2 size={16}/> Redo</button><button class="btn btn-secondary" on:click={save}><Save size={16}/>{saving ? 'Saving' : 'Save'}</button><button class="btn btn-primary" on:click={() => { showEmit = true; emitSuffix = availableSuffixes.length === 1 ? availableSuffixes[0] : 'all'; }}><Download size={16}/> Emit G-code</button></div></header>
-  <div class="workspace-body"><aside><section><label for="active-cut">Active cut</label><select id="active-cut" value={activeCutId} on:change={(e) => chooseCut(e.currentTarget.value)}>{#each sheet?.nesting_cuts || [] as cut}<option value={cut.id}>{cut.name}</option>{/each}</select><button class="text-button" on:click={addCut}><Plus size={15}/> Add cut</button></section><section><h2>Place</h2><label class="btn btn-secondary upload"><Upload size={16}/> Upload part program(s)<input type="file" accept=".ngc,.tap" multiple on:change={uploadParts}/></label><div class="row"><button class="btn btn-secondary" on:click={() => showLibrary = !showLibrary}><FolderOpen size={16}/> Library</button><button class="btn btn-secondary" on:click={loadLibrary}><RefreshCw size={16}/> Reload</button></div>{#if showLibrary}<div class="library">{#each partGroups as group}<button title={`${group.files.length} program file(s)`} on:click={() => armStoredPart(group)}>{group.label}<span>{group.files.length}</span></button>{:else}<span class="hint">No part folders found.</span>{/each}</div>{/if}<button class:active={placing?.kind === 'hole'} class="btn btn-secondary" on:click={placeHole}><Crosshair size={16}/> Add hole</button>{#if placing}<p class="hint">Hold <kbd>A</kbd> and click to place {placing.label}. Press Esc to cancel.</p>{/if}</section>{#if selected}<section><h2>Selection</h2><strong>{selected.label}</strong><div class="coordinate-grid"><label>X<input type="number" step="0.001" value={selected.x} on:change={(e) => commit(placements.map(item => item.id === selected.id ? { ...item, x: Number(e.currentTarget.value) } : item))}/></label><label>Y<input type="number" step="0.001" value={selected.y} on:change={(e) => commit(placements.map(item => item.id === selected.id ? { ...item, y: Number(e.currentTarget.value) } : item))}/></label></div><div class="selection-actions"><button class="btn btn-secondary" on:click={() => rotateSelected(-1)}><RotateCcw size={16}/> Rotate left</button><button class="btn btn-secondary" on:click={() => rotateSelected(1)}><RotateCw size={16}/> Rotate right</button><button class="btn btn-secondary" on:click={duplicateSelected}><Copy size={16}/> Duplicate</button>{#if selected.kind === 'part'}<button class="btn btn-secondary" on:click={inspectSelected}><FileCode size={16}/> Inspect G-code</button>{/if}<button class="btn btn-secondary danger" on:click={removeSelected}><Trash2 size={16}/> Delete</button></div></section>{/if}<section><h2>Measurement</h2>{#if measure.length === 2}<strong>{Math.hypot(measure[1].x - measure[0].x, measure[1].y - measure[0].y).toFixed(3)} in</strong><button class="text-button" on:click={() => { measure = []; draw(); }}>Clear measurement</button>{:else}<p class="hint">Select the ruler, then click two points.</p>{/if}</section></aside>
-  <section class="canvas-wrap"><canvas bind:this={canvas} on:pointerdown={pointerDown} on:pointermove={pointerMove} on:pointerup={pointerUp} on:pointerleave={pointerUp} on:wheel={wheel}></canvas><div class="canvas-status"><MousePointer2 size={15}/> Drag to move/pan · Wheel to zoom · Hold A to place · R to rotate · Delete to remove</div></section></div></main>
+  <div class="workspace-body"><aside><section><label for="active-cut">Active cut</label><select id="active-cut" value={activeCutId} on:change={(e) => chooseCut(e.currentTarget.value)}>{#each sheet?.nesting_cuts || [] as cut}<option value={cut.id}>{cut.name}</option>{/each}</select><button class="text-button" on:click={addCut}><Plus size={15}/> Add cut</button></section><section><h2>Place</h2><label class="btn btn-secondary upload"><Upload size={16}/> Upload part program(s)<input type="file" accept=".ngc,.tap" multiple on:change={uploadParts}/></label><div class="row"><button class="btn btn-secondary" on:click={() => showLibrary = !showLibrary}><FolderOpen size={16}/> Library</button><button class="btn btn-secondary" on:click={loadLibrary}><RefreshCw size={16}/> Reload</button></div>{#if showLibrary}<div class="library">{#each partGroups as group}<button title={`Place ${group.label}`} on:click={() => armStoredPart(group)}>{group.label}<span>{group.files.length}</span></button>{:else}<span class="hint">No part folders found.</span>{/each}</div>{/if}<button class:active={placing?.kind === 'hole'} class="btn btn-secondary" on:click={placeHole}><Crosshair size={16}/> Add hole</button>{#if placing}<p class="hint">Click the sheet to add {placing.label}. Keep clicking to add copies, then press Esc to finish.</p>{/if}</section>{#if selected}<section><h2>Selection</h2><strong>{selected.label}</strong><div class="coordinate-grid"><label>X<input type="number" step="0.001" value={selected.x} on:change={(e) => commit(placements.map(item => item.id === selected.id ? { ...item, x: Number(e.currentTarget.value) } : item))}/></label><label>Y<input type="number" step="0.001" value={selected.y} on:change={(e) => commit(placements.map(item => item.id === selected.id ? { ...item, y: Number(e.currentTarget.value) } : item))}/></label></div><div class="selection-actions"><button class="btn btn-secondary" on:click={() => rotateSelected(-1)}><RotateCcw size={16}/> Rotate left</button><button class="btn btn-secondary" on:click={() => rotateSelected(1)}><RotateCw size={16}/> Rotate right</button><button class="btn btn-secondary" on:click={duplicateSelected}><Copy size={16}/> Duplicate</button>{#if selected.kind === 'part'}<button class="btn btn-secondary" on:click={inspectSelected}><FileCode size={16}/> Inspect G-code</button>{/if}<button class="btn btn-secondary danger" on:click={removeSelected}><Trash2 size={16}/> Delete</button></div></section>{/if}<section><h2>Measurement</h2>{#if measure.length === 2}<strong>{Math.hypot(measure[1].x - measure[0].x, measure[1].y - measure[0].y).toFixed(3)} in</strong><button class="text-button" on:click={() => { measure = []; draw(); }}>Clear measurement</button>{:else}<p class="hint">Select the ruler, then click two points.</p>{/if}</section></aside>
+  <section class="canvas-wrap"><canvas bind:this={canvas} on:pointerdown={pointerDown} on:pointermove={pointerMove} on:pointerup={pointerUp} on:pointerleave={pointerUp} on:wheel={wheel}></canvas><div class="canvas-status"><MousePointer2 size={15}/> Click to place selected G-code · Esc to finish · Drag to move/pan · Wheel to zoom · R to rotate · Delete to remove</div></section></div></main>
 {/if}
 {#if showNewSheet}<div class="scrim"><form class="modal" on:submit|preventDefault={createNewSheet}><button type="button" class="modal-close" title="Close" on:click={() => showNewSheet = false}><X size={18}/></button><h2>New Sheet</h2><label>Name<input bind:value={newSheet.name} /></label><div class="two"><label>Width (in)<input type="number" min="1" bind:value={newSheet.width}/></label><label>Height (in)<input type="number" min="1" bind:value={newSheet.height}/></label></div><label>Thickness<select bind:value={newSheet.thickness}><option value="0.063">1/16 in</option><option value="0.09">0.090 in</option><option value="0.125">1/8 in</option><option value="0.1875">3/16 in</option><option value="0.25">1/4 in</option><option value="0.3125">5/16 in</option><option value="0.375">3/8 in</option><option value="0.5">1/2 in</option><option value="0.75">3/4 in</option></select></label><div class="row"><button type="button" class="btn btn-secondary" on:click={() => showNewSheet = false}>Cancel</button><button class="btn btn-primary">Create sheet</button></div></form></div>{/if}
 {#if showEmit}<div class="scrim"><form class="modal" on:submit|preventDefault={emit}><button type="button" class="modal-close" title="Close" on:click={() => showEmit = false}><X size={18}/></button><h2>Emit G-code</h2><label>Program name<input bind:value={emitName}/></label><label>Controller<select bind:value={dialect}><option value="linuxcnc">971 / LinuxCNC (.ngc)</option><option value="wincnc">WinCNC (.tap)</option></select></label><fieldset><legend>Program group</legend><label class="radio"><input type="radio" bind:group={emitSuffix} value="all"/> All available groups</label>{#each availableSuffixes as suffix}<label class="radio"><input type="radio" bind:group={emitSuffix} value={suffix}/> {suffix || 'default'}</label>{/each}{#if !availableSuffixes.length}<p class="hint">Add a part or hole before emitting.</p>{/if}</fieldset><div class="row"><button type="button" class="btn btn-secondary" on:click={() => showEmit = false}>Cancel</button><button class="btn btn-primary" disabled={!placements.length || !availableSuffixes.length}>Emit and download</button></div></form></div>{/if}

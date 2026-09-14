@@ -5,8 +5,15 @@ import { clampPlacementToSheet, placementContains, rotatePlacement, sheetContain
 import { screenToSheet, sheetToScreen, zoomAt } from './coords.js';
 import { createUndoStack } from './undoStack.js';
 import { emittedGcodePath } from './storage.js';
+import { parseGcodeToolpath, toolpathBounds } from './gcodeToolpath.js';
 
 describe('nesting geometry', () => {
+  it('parses linear and arc G-code into a contour preview', () => {
+    const segments = parseGcodeToolpath('G90\nG0 X0 Y0\nG1 X2 Y0\nG3 X2 Y2 I0 J1');
+    expect(segments).toHaveLength(3);
+    expect(segments[2].points.length).toBeGreaterThan(6);
+    expect(toolpathBounds(segments)).toMatchObject({ minX: 0, minY: 0, maxX: 3, maxY: 2 });
+  });
   it('round-trips positive sheet coordinates through the canvas view', () => {
     const view = { scale: 20, originX: 10, originY: 300 };
     expect(screenToSheet(sheetToScreen({ x: 4.5, y: 8 }, view), view)).toEqual({ x: 4.5, y: 8 });
@@ -48,12 +55,12 @@ describe('nesting emission', () => {
   });
   it('translates each placed program and leaves one program terminator', () => {
     const result = emitNestingGcode({ name: 'nest', placements: [{ label: 'A', x: 2, y: 3, part_library_path: 'a' }], programs: { a: { source: 'G1 X1 Y2\nM30' } } });
-    expect(result.text).toContain('G1 X3.0000 Y5.0000');
+    expect(result.text).toContain('G1 X2.5000 Y4.0000');
     expect(result.text.match(/M30/g)).toHaveLength(1);
   });
   it('rotates coordinates and arc centers when a part is rotated', () => {
     const result = emitNestingGcode({ name: 'nest', placements: [{ label: 'A', x: 2, y: 3, rotation: Math.PI / 2, part_library_path: 'a' }], programs: { a: { source: 'G1 X1 Y0 I1 J0' } } });
-    expect(result.text).toContain('X2.0000 Y4.0000 I0.0000 J1.0000');
+    expect(result.text).toContain('X2.0000 Y3.5000 I0.0000 J1.0000');
   });
   it('emits the bundled hole template only in the holes group', () => {
     const result = emitNestingGcode({ name: 'nest', suffix: 'holes', thickness: '0.125', placements: [{ kind: 'hole', label: 'Hole', x: 2, y: 3 }], programs: {} });
