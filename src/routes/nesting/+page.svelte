@@ -389,7 +389,7 @@
   .workspace-header { display: grid; grid-template-columns: 150px minmax(0, 1fr) auto; align-items: start; }
   .workspace-header .jprog-identity { justify-self: start; min-width: 0; }
   .workspace-header .jprog-identity .btn { white-space: nowrap; }
-  .workspace-header .header-sheet-name { justify-self: start; text-align: left; padding-top: 2px; }
+  .workspace-header .header-sheet-name { justify-self: start; text-align: left; padding-top: 9px; }
   .workspace { position: relative; left: -96px; width: calc(100% + 96px); }
   .workspace-body { margin-left: -14px; width: calc(100% + 14px); }
   .workspace-output-link { position: fixed; right: 16px; bottom: 16px; z-index: 3; }
