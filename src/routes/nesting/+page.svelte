@@ -163,7 +163,6 @@
         ctx.globalAlpha = 1;
       }
       ctx.restore();
-      if (p.kind !== 'hole') { ctx.fillStyle = '#101828'; ctx.font = '12px sans-serif'; ctx.fillText(p.label, s.x - p.width_in * view.scale / 2 + 5, s.y + 4); }
     }
     if (measure.length) {
       const points = measure.map(point => sheetToScreen(point, view)); ctx.strokeStyle = '#fbbf24'; ctx.fillStyle = '#fbbf24'; ctx.lineWidth = 2;
