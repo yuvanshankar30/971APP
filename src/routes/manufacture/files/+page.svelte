@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte';
-  import { getAuthHeader, supabase } from '$lib/supabase.js';
+  import { supabase } from '$lib/supabase.js';
+  import { isJprogOutputPath, publishJprogOutput } from '$lib/jprog_output.js';
   import { page } from '$app/stores';
   import { toastActions } from '$lib/toast.js';
   import { requestConfirmation } from '$lib/confirmation.js';
@@ -40,22 +41,7 @@
     return prefix ? `${prefix}/${name}` : name;
   }
 
-  function isJprogOutput(path) {
-    return /^Jprog Output\/\d{8}\/[A-Za-z0-9._-]+\.(?:ngc|tap)$/i.test(path);
-  }
-
-  async function publishJprogOutput(storagePath, content) {
-    if (!isJprogOutput(storagePath)) return;
-    const response = await fetch('/api/jprog-output', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(await getAuthHeader()) },
-      body: JSON.stringify({ storagePath, content })
-    });
-    if (!response.ok) {
-      const detail = await response.json().catch(() => ({}));
-      throw new Error(detail.error || 'Could not publish JProg output to GitHub.');
-    }
-  }
+  const isJprogOutput = isJprogOutputPath;
 
   async function load() {
     loading = true;

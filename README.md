@@ -109,7 +109,9 @@ browser confirmation or prompt popups.
   WinCNC G-code emission. Emitted programs are stored in the Manufacturing
   Files bucket under `Jprog Output/YYYYMMDD/`, with the date folder created on
   the first emission that day and the same file committed to the public
-  `yuvanshankar30/output` repository. It intentionally has no AutoCAM or Fusion
+  `yuvanshankar30/output` repository via a Supabase Edge Function. Its GitHub
+  credential lives only in Supabase function secrets, so neither the browser nor
+  the Cloud Run deployment needs access to it. It intentionally has no AutoCAM or Fusion
   Runner connection; its tables and Storage paths are owned by the nesting
   JProg feature and its entry point is the Manufacturing page action.
 - **Scouting**: pit scouting (a topic-at-a-time form with per-topic
