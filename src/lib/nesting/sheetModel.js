@@ -4,11 +4,14 @@ export function makePlacement(values = {}) {
 
 export function rotatePlacement(placement, quarterTurns = 1) {
   const turns = ((quarterTurns % 4) + 4) % 4;
-  return { ...placement, rotation: placement.rotation + turns * Math.PI / 2, ...(turns % 2 ? { width_in: placement.height_in, height_in: placement.width_in } : {}) };
+  return { ...placement, rotation: placement.rotation + turns * Math.PI / 2 };
 }
 
 export function placementBounds(placement) {
-  return { left: placement.x - placement.width_in / 2, right: placement.x + placement.width_in / 2, bottom: placement.y - placement.height_in / 2, top: placement.y + placement.height_in / 2 };
+  const c = Math.abs(Math.cos(placement.rotation)), s = Math.abs(Math.sin(placement.rotation));
+  const halfWidth = (c * placement.width_in + s * placement.height_in) / 2;
+  const halfHeight = (s * placement.width_in + c * placement.height_in) / 2;
+  return { left: placement.x - halfWidth, right: placement.x + halfWidth, bottom: placement.y - halfHeight, top: placement.y + halfHeight };
 }
 
 export function placementContains(placement, x, y) {

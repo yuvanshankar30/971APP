@@ -14,9 +14,9 @@ describe('nesting geometry', () => {
     const view = { scale: 20, originX: 10, originY: 300 }, cursor = { x: 210, y: 160 };
     expect(screenToSheet(cursor, zoomAt(view, cursor, 1.5))).toEqual(screenToSheet(cursor, view));
   });
-  it('uses rotated dimensions for sheet containment', () => {
+  it('uses rotation-aware bounds for sheet containment without mutating part dimensions', () => {
     const item = rotatePlacement({ x: 1, y: 3, width_in: 3, height_in: 1, rotation: 0 });
-    expect(item.width_in).toBe(1); expect(item.height_in).toBe(3);
+    expect(item.width_in).toBe(3); expect(item.height_in).toBe(1);
     expect(sheetContains({ width_in: 4, height_in: 4 }, item)).toBe(false);
     expect(placementContains(item, 1, 3)).toBe(true);
   });
@@ -38,5 +38,15 @@ describe('nesting emission', () => {
     const result = emitNestingGcode({ name: 'nest', placements: [{ label: 'A', x: 2, y: 3, part_library_path: 'a' }], programs: { a: { source: 'G1 X1 Y2\nM30' } } });
     expect(result.text).toContain('G1 X3.0000 Y5.0000');
     expect(result.text.match(/M30/g)).toHaveLength(1);
+  });
+  it('rotates coordinates and arc centers when a part is rotated', () => {
+    const result = emitNestingGcode({ name: 'nest', placements: [{ label: 'A', x: 2, y: 3, rotation: Math.PI / 2, part_library_path: 'a' }], programs: { a: { source: 'G1 X1 Y0 I1 J0' } } });
+    expect(result.text).toContain('X2.0000 Y4.0000 I0.0000 J1.0000');
+  });
+  it('emits the bundled hole template only in the holes group', () => {
+    const result = emitNestingGcode({ name: 'nest', suffix: 'holes', thickness: '0.125', placements: [{ kind: 'hole', label: 'Hole', x: 2, y: 3 }], programs: {} });
+    expect(result.emitted).toBe(1);
+    expect(result.text).toContain('(Part: Hole)');
+    expect(result.text).toContain('M30');
   });
 });
