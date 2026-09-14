@@ -24,20 +24,21 @@
   let screen = forcedScreen || 'select', view = { scale: 28, originX: 80, originY: 520 }, drag = null, rotationDrag = null, placing = null, activePart = null, placingWithShortcut = false;
   let undo = createUndoStack([]), gcodePrograms = {}, partGroups = [], newSheet = { name: '', width: 48, height: 30, thickness: '0.125' };
   let showNewSheet = false, showLibrary = false, showEmit = false, showProgram = false, activeCutId = null, user = null, loadError = '';
-  let sheetSearch = '', measure = [], measuring = false, emitName = '', emitSuffix = '', selectedProgram = null, editingCutName = false, cutName = '';
+  let sheetSearch = '', librarySearch = '', measure = [], measuring = false, emitName = '', emitSuffix = '', selectedProgram = null, editingCutName = false, cutName = '';
   const CUT_COLORS = ['#2563eb', '#d97706', '#16a34a', '#9333ea', '#dc2626', '#0891b2', '#ca8a04', '#db2777'];
   const JPROG_OUTPUT_REPOSITORY = 'https://github.com/yuvanshankar30/output';
   $: selected = placements.find((item) => item.id === selectedId) || null;
   $: activeCut = sheet?.nesting_cuts?.find((cut) => cut.id === activeCutId) || null;
   $: renderedPlacements = (sheet?.nesting_cuts || []).flatMap((cut, cutIndex) => (cut.id === activeCutId ? placements : cut.nesting_placements || []).map((placement) => ({ ...placement, renderCutId: cut.id, renderCutIndex: cutIndex, renderActive: cut.id === activeCutId })));
   $: visibleSheets = sheets.filter(item => item.name.toLowerCase().includes(sheetSearch.trim().toLowerCase()));
+  $: visiblePartGroups = partGroups.filter(group => group.label.toLowerCase().includes(librarySearch.trim().toLowerCase()));
   $: availableSuffixes = [...new Set([
     ...(placements.some(item => item.kind === 'hole') ? ['holes'] : []),
     ...placements.flatMap(item => gcodePrograms[item.part_library_path]?.variants?.map(variant => variant.suffix) || partGroups.find(group => group.key === item.part_library_path)?.suffixes || [])
   ])].map(suffix => suffix || defaultGroupLabel).sort();
   $: programType = sheet?.program_extension || 'ngc';
   $: dialect = dialectForProgramType(programType);
-  $: defaultGroupLabel = activeCut?.name ? `Cut ${activeCut.name}` : 'default';
+  $: defaultGroupLabel = activeCut?.name || 'default';
 
   onMount(() => {
     const unsubscribe = userStore.subscribe(value => user = value);
