@@ -2156,7 +2156,7 @@
 <div class="page-header">
   <h1>Parts List</h1>
   <div class="page-actions">
-    <a href="/jprog" class="btn btn-secondary" target="_blank">
+    <a href="/jprog" class="btn btn-secondary">
       <Scissors size={16} />
       JProg
     </a>
