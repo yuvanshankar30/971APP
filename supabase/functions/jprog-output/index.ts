@@ -11,11 +11,19 @@ function githubOutputPath(storagePath: unknown) {
   if (!path.startsWith(OUTPUT_ROOT)) throw new Error('JProg output must be stored under Jprog Output.');
   const repositoryPath = path.slice(OUTPUT_ROOT.length);
   if (!/^\d{8}\/[A-Za-z0-9._-]+\.(?:ngc|tap)$/i.test(repositoryPath)) throw new Error('Invalid JProg output path.');
-  return repositoryPath;
+  return path;
 }
 
 function response(body: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } });
+}
+
+async function githubFailure(githubResponse: Response, fallback: string) {
+  const detail = await githubResponse.json().catch(() => ({}));
+  if (detail.message === 'Resource not accessible by personal access token') {
+    return response({ error: 'GitHub token cannot write yuvanshankar30/output. Create a fine-grained token for that repository with Contents: Read and write, then replace the Supabase JPROG_OUTPUT_GITHUB_TOKEN secret.' }, 403);
+  }
+  return response({ error: detail.message || fallback }, githubResponse.status);
 }
 
 Deno.serve(async (request) => {
@@ -42,13 +50,12 @@ Deno.serve(async (request) => {
     const contentUrl = `https://api.github.com/repos/${repository}/contents/${path.split('/').map(encodeURIComponent).join('/')}`;
     const headers = { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'Content-Type': 'application/json', 'X-GitHub-Api-Version': '2022-11-28' };
     const existing = await fetch(contentUrl, { headers });
-    if (!existing.ok && existing.status !== 404) return response({ error: 'GitHub could not inspect existing JProg output.' }, existing.status);
+    if (!existing.ok && existing.status !== 404) return githubFailure(existing, 'GitHub could not inspect existing JProg output.');
     const payload: Record<string, string> = { message: `Add JProg output ${path}`, content: btoa(content) };
     if (existing.ok) payload.sha = (await existing.json()).sha;
     const githubResponse = await fetch(contentUrl, { method: 'PUT', headers, body: JSON.stringify(payload) });
     if (!githubResponse.ok) {
-      const detail = await githubResponse.json().catch(() => ({}));
-      return response({ error: detail.message || 'GitHub could not publish JProg output.' }, githubResponse.status);
+      return githubFailure(githubResponse, 'GitHub could not publish JProg output.');
     }
     const result = await githubResponse.json();
     return response({ path, commit: result.commit?.sha || null });
