@@ -269,6 +269,7 @@
     if (!compact) return '';
     if (compact === 'home') return 'home';
     if (compact === 'profile') return 'profile';
+    if (compact === 'jprog') return 'jprog';
     if (compact.startsWith('manufacture')) return 'manufacture';
     if (compact.startsWith('kitting')) return 'kitting';
     if (compact === 'cad') return 'cad';
@@ -312,6 +313,7 @@
     'cots-stocking': '/cots-stocking',
     'fusion-autocam': '/autocam/fusion',
     'gcode-converter': '/manufacture/gcode-converter',
+    jprog: '/jprog',
     files: '/manufacture/files',
     home: '/',
     profile: '/profile',
@@ -339,6 +341,7 @@
     'cots-stocking': Package,
     'fusion-autocam': Cpu,
     'gcode-converter': FileText,
+    jprog: Hammer,
     files: Folder,
     home: Home,
     profile: User,
@@ -366,6 +369,7 @@
     'cots-stocking': 'COTS Stocking',
     'fusion-autocam': 'Fusion AutoCAM',
     'gcode-converter': 'G-code Converter',
+    jprog: 'JProg',
     files: 'Files',
     admin: 'Admin'
   };

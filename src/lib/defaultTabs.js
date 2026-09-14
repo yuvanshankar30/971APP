@@ -77,6 +77,7 @@ export function defaultHeaderTabs(navConfig = navigation) {
   // explicitly re-enables them (navConfig.tabs.kitting/['cots-stocking'] === true).
   if (navConfig?.tabs?.kitting === true) manufacturingChildren.push({ key: 'kitting', label: 'Kitting' });
   if (navConfig?.tabs?.['cots-stocking'] === true) manufacturingChildren.push({ key: 'cots-stocking', label: 'COTS Stocking' });
+  if (navConfig?.tabs?.jprog !== false) manufacturingChildren.push({ key: 'jprog', label: 'JProg' });
   if (navConfig?.tabs?.files !== false) manufacturingChildren.push({ key: 'files', label: 'Files' });
   if (manufacturingChildren.length) {
     tabs.push({ type: 'folder', label: 'Manufacturing', children: manufacturingChildren });

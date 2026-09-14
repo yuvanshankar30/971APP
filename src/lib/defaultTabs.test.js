@@ -90,6 +90,11 @@ describe('defaultHeaderTabs', () => {
     expect(manufacturingChildren(defaultHeaderTabs())).toContainEqual({ key: 'files', label: 'Files' });
   });
 
+  it('places JProg immediately above Files in the Manufacturing folder', () => {
+    const keys = manufacturingChildren(defaultHeaderTabs()).map((child) => child.key);
+    expect(keys.indexOf('jprog')).toBe(keys.indexOf('files') - 1);
+  });
+
   it('includes Fusion AutoCAM but not the removed legacy AutoCAM tab in the Manufacturing folder', () => {
     const keys = manufacturingChildren(defaultHeaderTabs()).map((child) => child.key);
     expect(keys).toContain('fusion-autocam');
