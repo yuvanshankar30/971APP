@@ -34,9 +34,10 @@
   $: availableSuffixes = [...new Set([
     ...(placements.some(item => item.kind === 'hole') ? ['holes'] : []),
     ...placements.flatMap(item => gcodePrograms[item.part_library_path]?.variants?.map(variant => variant.suffix) || partGroups.find(group => group.key === item.part_library_path)?.suffixes || [])
-  ])].sort();
+  ])].map(suffix => suffix || defaultGroupLabel).sort();
   $: programType = sheet?.program_extension || 'ngc';
   $: dialect = dialectForProgramType(programType);
+  $: defaultGroupLabel = activeCut?.name ? `Cut ${activeCut.name}` : 'default';
 
   onMount(() => {
     const unsubscribe = userStore.subscribe(value => user = value);
@@ -289,8 +290,8 @@
   async function emit() {
     try {
       await ensurePrograms();
-      const suffixes = availableSuffixes.length ? availableSuffixes : [''];
-      const targets = emitSuffix === 'all' ? suffixes : [emitSuffix || suffixes[0]];
+      const suffixes = availableSuffixes.length ? availableSuffixes.map(suffix => suffix === defaultGroupLabel ? '' : suffix) : [''];
+      const targets = emitSuffix === 'all' ? suffixes : [emitSuffix === defaultGroupLabel ? '' : emitSuffix || suffixes[0]];
       let count = 0;
       for (const suffix of targets) {
         const result = emitNestingGcode({ name: emitName || sheet.name, placements, programs: gcodePrograms, suffix, suffixCount: targets.length, dialect, thickness: sheet.thickness_key });
