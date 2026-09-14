@@ -245,6 +245,7 @@
   }
   function pointerDown(event) {
     if (!sheet) return;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
     const rect = canvas.getBoundingClientRect(), point = screenToSheet({ x: event.clientX - rect.left, y: event.clientY - rect.top }, view);
     if (measuring || event.shiftKey) { measure = measure.length === 1 ? [...measure, point] : [point]; if (measure.length === 2) measuring = false; draw(); return; }
     if (selected) {
@@ -273,7 +274,7 @@
     const rect = canvas.getBoundingClientRect(), point = screenToSheet({ x: event.clientX - rect.left, y: event.clientY - rect.top }, view), dx = point.x - drag.start.x, dy = point.y - drag.start.y;
     placements = placements.map(p => p.id === drag.id ? { ...p, x: drag.placement.x + dx, y: drag.placement.y + dy } : p); draw();
   }
-  function pointerUp() { if (rotationDrag) { undo.commit(placements); rotationDrag = null; draw(); return; } if (drag && !drag.pan) { const moved = placements.find(item => item.id === drag.id); if (moved && !sheetContains(sheet, moved)) placements = placements.map(item => item.id === drag.id ? drag.placement : item); else undo.commit(placements); } drag = null; draw(); }
+  function pointerUp(event) { if (event?.type === 'pointerleave') return; if (event?.currentTarget?.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); if (rotationDrag) { undo.commit(placements); rotationDrag = null; draw(); return; } if (drag && !drag.pan) { const moved = placements.find(item => item.id === drag.id); if (moved && !sheetContains(sheet, moved)) placements = placements.map(item => item.id === drag.id ? drag.placement : item); else undo.commit(placements); } drag = null; draw(); }
   function wheel(event) { event.preventDefault(); const r = canvas.getBoundingClientRect(); view = zoomAt(view, { x: event.clientX - r.left, y: event.clientY - r.top }, event.deltaY < 0 ? 1.06 : .94); draw(); }
   function placeHole() { placing = { kind: 'hole', label: 'Hole', width_in: .3, height_in: .3 }; measure = []; toastActions.show('Uses the selected sheet thickness hole program'); }
   function rotateSelected(turns = 1) { if (selected?.kind === 'part') commit(placements.map(p => p.id === selected.id ? rotatePlacement(p, -turns) : p)); }
