@@ -21,11 +21,11 @@
   export let forcedScreen = null;
   export let sheetId = null;
   let canvas, ctx, canvasResizeObserver, sheets = [], sheet = null, placements = [], selectedId = null, loading = true, saving = false;
-  let screen = forcedScreen || 'select', view = { scale: 28, originX: 80, originY: 520 }, drag = null, rotationDrag = null, placing = null, activePart = null, placingWithShortcut = false;
+  let screen = forcedScreen || 'select', view = { scale: 28, originX: 80, originY: 520 }, drag = null, rotationDrag = null, rotationAnimationFrame = null, placing = null, activePart = null, placingWithShortcut = false;
   let undo = createUndoStack([]), gcodePrograms = {}, partGroups = [], newSheet = { name: '', width: 48, height: 30, thickness: '0.125' };
-  let showNewSheet = false, showLibrary = false, showEmit = false, showProgram = false, activeCutId = null, user = null, loadError = '';
+  let showNewSheet = false, showLibrary = true, showEmit = false, showProgram = false, committingGcode = false, activeCutId = null, user = null, loadError = '';
   let sheetSearch = '', librarySearch = '', measure = [], measuring = false, emitName = '', emitSuffix = '', selectedProgram = null, editingCutName = false, cutName = '';
-  const CUT_COLORS = ['#2563eb', '#d97706', '#16a34a', '#9333ea', '#dc2626', '#0891b2', '#ca8a04', '#db2777'];
+  const CUT_COLORS = ['#f59e0b', '#22c55e', '#f43f5e', '#e879f9', '#facc15', '#2dd4bf', '#fb923c', '#a3e635'];
   const JPROG_OUTPUT_REPOSITORY = 'https://github.com/yuvanshankar30/output';
   $: selected = placements.find((item) => item.id === selectedId) || null;
   $: activeCut = sheet?.nesting_cuts?.find((cut) => cut.id === activeCutId) || null;
@@ -42,25 +42,31 @@
 
   onMount(() => {
     const unsubscribe = userStore.subscribe(value => user = value);
+    const keepLibraryOpen = () => { if (screen === 'edit') showLibrary = true; };
     const onKey = (event) => {
       if (screen !== 'edit' || ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return;
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? redoChange() : undoChange(); }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') { event.preventDefault(); save(); }
       if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); removeSelected(); }
-      if (event.key.toLowerCase() === 'r' && selected?.kind === 'part') { event.preventDefault(); rotateSelected(); }
+      if (event.key.toLowerCase() === 'r' && selected?.kind === 'part') { event.preventDefault(); rotateSelectedSmoothly(); }
       if (event.key.toLowerCase() === 'a' && activePart) { event.preventDefault(); placing = { ...activePart }; placingWithShortcut = true; }
-      if (event.key === 'Escape') { placing = null; measure = []; }
+      if (event.key === 'Escape') { placing = null; measure = []; selectedId = null; draw(); }
     };
     const onKeyUp = (event) => {
       if (event.key.toLowerCase() === 'a' && placingWithShortcut) { placing = null; placingWithShortcut = false; }
     };
     const clearSelectionOutsideEditor = (event) => {
       if (screen !== 'edit' || !selectedId || !(event.target instanceof Element)) return;
-      if (!event.target.closest('canvas, aside, .workspace-header, .modal')) selectedId = null;
+      // Canvas hit-testing handles selection changes there. Preserve the
+      // explicit selection controls, but clear it for every other page click.
+      if (event.target.closest('canvas, aside section:has(.selection-actions), .modal')) return;
+      selectedId = null;
+      draw();
     };
     window.addEventListener('keydown', onKey);
     window.addEventListener('keyup', onKeyUp);
     window.addEventListener('pointerdown', clearSelectionOutsideEditor, true);
+    window.addEventListener('click', keepLibraryOpen);
     (async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
@@ -76,7 +82,7 @@
         loadError = error?.message || 'Could not load JProg sheets.';
       } finally { loading = false; }
     })();
-    return () => { unsubscribe(); canvasResizeObserver?.disconnect(); window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onKeyUp); window.removeEventListener('pointerdown', clearSelectionOutsideEditor, true); };
+    return () => { unsubscribe(); canvasResizeObserver?.disconnect(); if (rotationAnimationFrame) cancelAnimationFrame(rotationAnimationFrame); window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onKeyUp); window.removeEventListener('pointerdown', clearSelectionOutsideEditor, true); window.removeEventListener('click', keepLibraryOpen); };
   });
 
   async function refreshSheets() { sheets = await listSheets(); }
@@ -84,7 +90,8 @@
     if (screen === 'select' && !sheet) { await goto(`/jprog/sheets/${id}`, { noScroll: true }); return; }
     sheet = await getSheet(id); activeCutId = sheet.active_cut_id || sheet.nesting_cuts?.[0]?.id;
     placements = structuredClone(sheet.nesting_cuts?.find(c => c.id === activeCutId)?.nesting_placements || []);
-    undo = createUndoStack(placements); selectedId = null; screen = 'edit'; emitName = sheet.name; await tick(); observeCanvas(); fitView(); await loadLibrary(); await loadPlacedPrograms(); await tick(); fitView(); draw(); requestAnimationFrame(() => { fitView(); draw(); });
+    undo = createUndoStack(placements); selectedId = null; screen = 'edit'; emitName = sheet.name; await tick(); observeCanvas(); fitView(); await loadLibrary(); await loadPlacedPrograms(placements); await tick(); fitView(); draw(); requestAnimationFrame(() => { fitView(); draw(); });
+    void loadPlacedPrograms(renderedPlacements.filter(item => !item.renderActive)).then(draw);
     if (!forcedScreen && $page.url.pathname !== `/jprog/sheets/${id}`) goto(`/jprog/sheets/${id}`, { replaceState: true, keepFocus: true, noScroll: true });
   }
   function observeCanvas() {
@@ -163,8 +170,12 @@
     const primary = variants[0], bounds = variants.reduce((largest, item) => item.bounds.width * item.bounds.height > largest.width * largest.height ? item.bounds : largest, primary.bounds);
     return { variants, bounds };
   }
-  async function loadPlacedPrograms() {
-    await Promise.all(renderedPlacements.filter(item => item.kind === 'part' && !gcodePrograms[item.part_library_path]).map(async item => {
+  async function loadPlacedPrograms(items = renderedPlacements) {
+    const missingPrograms = new Map();
+    for (const item of items) {
+      if (item.kind === 'part' && item.part_library_path && !gcodePrograms[item.part_library_path]) missingPrograms.set(item.part_library_path, item);
+    }
+    await Promise.all([...missingPrograms.values()].map(async item => {
       let group = partGroups.find(candidate => candidate.key === item.part_library_path);
       if (!group && item.part_library_path) {
         try {
@@ -184,7 +195,7 @@
       const program = await readPartGroup(group); gcodePrograms[group.key] = program;
       activePart = { label: group.label, part_library_path: group.key, width_in: program.bounds.width, height_in: program.bounds.height };
       placing = { ...activePart }; placingWithShortcut = false;
-      showLibrary = false; toastActions.show(`Click the sheet to place ${group.label}. Press Esc when finished.`);
+      toastActions.show(`Click the sheet to place ${group.label}. Press Esc when finished.`);
     } catch (error) { toastActions.show(error.message); }
   }
   async function uploadParts(event) {
@@ -235,9 +246,15 @@
       ctx.restore();
     }
     if (selected?.kind === 'part') {
-      const center = sheetToScreen(selected, view), handle = { x: center.x, y: center.y - Math.max(28, selected.height_in * view.scale / 2 + 18) };
-      ctx.strokeStyle = '#d97706'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(center.x, center.y); ctx.lineTo(handle.x, handle.y); ctx.stroke();
-      ctx.fillStyle = '#fbbf24'; ctx.beginPath(); ctx.arc(handle.x, handle.y, 8, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = '#7c2d12'; ctx.stroke();
+      const { center, handle, radius } = rotationHandlePoint(selected);
+      ctx.save();
+      ctx.setLineDash([4, 5]); ctx.strokeStyle = '#fbbf24'; ctx.globalAlpha = .6; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(center.x, center.y, radius, 0, Math.PI * 2); ctx.stroke();
+      ctx.setLineDash([]); ctx.globalAlpha = 1; ctx.strokeStyle = '#d97706'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(center.x, center.y); ctx.lineTo(handle.x, handle.y); ctx.stroke();
+      ctx.fillStyle = '#17345f'; ctx.beginPath(); ctx.arc(center.x, center.y, 5, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = '#fbbf24'; ctx.stroke();
+      ctx.fillStyle = '#fbbf24'; ctx.beginPath(); ctx.arc(handle.x, handle.y, 9, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = '#7c2d12'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.restore();
     }
     if (measure.length) {
       const points = measure.map(point => sheetToScreen(point, view)); ctx.strokeStyle = '#fbbf24'; ctx.fillStyle = '#fbbf24'; ctx.lineWidth = 2;
@@ -247,7 +264,8 @@
   }
   function rotationHandlePoint(placement) {
     const center = sheetToScreen(placement, view);
-    return { center, handle: { x: center.x, y: center.y - Math.max(28, placement.height_in * view.scale / 2 + 18) } };
+    const radius = Math.min(64, Math.max(30, placement.height_in * view.scale / 2 + 14));
+    return { center, radius, handle: { x: center.x, y: center.y - radius } };
   }
   function pointerDown(event) {
     if (!sheet) return;
@@ -284,6 +302,19 @@
   function wheel(event) { event.preventDefault(); const r = canvas.getBoundingClientRect(); view = zoomAt(view, { x: event.clientX - r.left, y: event.clientY - r.top }, event.deltaY < 0 ? 1.06 : .94); draw(); }
   function placeHole() { placing = { kind: 'hole', label: 'Hole', width_in: .3, height_in: .3 }; measure = []; toastActions.show('Uses the selected sheet thickness hole program'); }
   function rotateSelected(turns = 1) { if (selected?.kind === 'part') commit(placements.map(p => p.id === selected.id ? rotatePlacement(p, -turns) : p)); }
+  function rotateSelectedSmoothly() {
+    if (!selected?.kind || rotationAnimationFrame) return;
+    const id = selected.id, startRotation = selected.rotation, step = Math.PI / 12, startedAt = performance.now(), duration = 260;
+    const animate = (now) => {
+      const progress = Math.min(1, (now - startedAt) / duration);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      placements = placements.map(item => item.id === id ? { ...item, rotation: startRotation - step * eased } : item);
+      draw();
+      if (progress < 1) rotationAnimationFrame = requestAnimationFrame(animate);
+      else { rotationAnimationFrame = null; commit(placements); }
+    };
+    rotationAnimationFrame = requestAnimationFrame(animate);
+  }
   function duplicateSelected() { if (!selected) return; const copy = makePlacement({ ...selected, id: undefined, x: selected.x + .5, y: selected.y + .5, label: `${selected.label} copy` }); if (!sheetContains(sheet, copy)) return toastActions.show('Duplicated placement would leave the sheet'); commit([...placements, copy]); selectedId = copy.id; }
   async function removeSelected() { if (!selected || !await requestConfirmation({ title: 'Delete placement', message: `Remove ${selected.label}?`, confirmLabel: 'Remove', danger: true })) return; commit(placements.filter(p => p.id !== selected.id)); }
   function inspectSelected() { const program = selected && gcodePrograms[selected.part_library_path]; if (!program) return toastActions.show('Reload the part library before inspecting this part'); selectedProgram = program; showProgram = true; }
@@ -310,7 +341,15 @@
       results.forEach(downloadEmission); showEmit = false; toastActions.show(`Downloaded ${results.length} G-code file${results.length === 1 ? '' : 's'}`);
     } catch (error) { toastActions.show(error.message); }
   }
+  async function closeEmitAfterCommit() {
+    const scrim = document.querySelector('.scrim');
+    scrim?.classList.add('emit-success-close');
+    await new Promise(resolve => setTimeout(resolve, 190));
+    showEmit = false;
+  }
   async function commitGcode() {
+    if (committingGcode) return;
+    committingGcode = true;
     try {
       const results = await buildEmissions();
       if (!results.length) throw new Error('No placed item has a program for the selected suffix.');
@@ -319,8 +358,8 @@
         await publishJprogOutput(path, result.text);
         await recordEmission({ cut_id: activeCutId, suffix: result.suffix || '', dialect, output_storage_path: path, tool_order: [] });
       }
-      showEmit = false; toastActions.show(`Committed ${results.length} G-code file${results.length === 1 ? '' : 's'} to output`);
-    } catch (error) { toastActions.show(error.message); }
+      await closeEmitAfterCommit(); toastActions.show(`Committed ${results.length} G-code file${results.length === 1 ? '' : 's'} to output`);
+    } catch (error) { toastActions.show(error.message); } finally { committingGcode = false; }
   }
 </script>
 
@@ -383,8 +422,8 @@
   .workspace-header { display: grid; grid-template-columns: 150px minmax(0, 1fr) auto; align-items: start; }
   .workspace-header .jprog-identity { justify-self: start; min-width: 0; }
   .workspace-header .jprog-identity .btn { white-space: nowrap; }
-  .workspace-header .header-sheet-name { justify-self: start; text-align: left; padding-top: 2px; }
-  .workspace { position: relative; left: -64px; width: calc(100% + 64px); }
+  .workspace-header .header-sheet-name { justify-self: start; text-align: left; padding-top: 9px; }
+  .workspace { position: relative; left: -96px; width: calc(100% + 96px); }
   .workspace-body { margin-left: -14px; width: calc(100% + 14px); }
   .workspace-output-link { position: fixed; right: 16px; bottom: 16px; z-index: 3; }
   @media (max-width: 900px) { .workspace-header .header-actions { flex-wrap: wrap; } }
@@ -396,6 +435,12 @@
   .modal select { width: 100%; min-width: 0; box-sizing: border-box; height: 44px; padding: 8px 3rem 8px 12px; line-height: 1.4; white-space: nowrap; text-overflow: clip; appearance: none; -webkit-appearance: none; }
   .library-panel { display: grid; gap: 6px; min-height: 0; }
   .library-search { width: 100%; min-width: 0; box-sizing: border-box; }
-  .library { height: 220px; max-height: 220px; overflow-y: auto; overscroll-behavior: contain; align-content: start; }
+  .library { height: min(220px, 30vh); max-height: min(220px, 30vh); overflow-y: auto; overscroll-behavior: contain; align-content: start; }
   .library button { min-height: 40px; white-space: normal; overflow-wrap: anywhere; line-height: 1.25; align-items: center; }
+  /* The part library is the primary placement surface, so keep it visible. */
+  aside section:nth-child(3) .row button:first-child { outline: 2px solid var(--primary, #2563eb); outline-offset: -2px; }
+  .emit-success-close { pointer-events: none; animation: emit-scrim-out 190ms ease forwards; }
+  .emit-success-close .modal { animation: emit-modal-out 190ms cubic-bezier(.4,0,.2,1) forwards; }
+  @keyframes emit-scrim-out { to { opacity: 0; } }
+  @keyframes emit-modal-out { to { opacity: 0; transform: translateY(-12px) scale(.96); } }
 </style>
