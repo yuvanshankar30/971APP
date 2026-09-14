@@ -21,7 +21,7 @@
   export let forcedScreen = null;
   export let sheetId = null;
   let canvas, ctx, canvasResizeObserver, sheets = [], sheet = null, placements = [], selectedId = null, loading = true, saving = false;
-  let screen = forcedScreen || 'select', view = { scale: 28, originX: 80, originY: 520 }, drag = null, rotationDrag = null, placing = null, activePart = null, placingWithShortcut = false;
+  let screen = forcedScreen || 'select', view = { scale: 28, originX: 80, originY: 520 }, drag = null, rotationDrag = null, rotationAnimationFrame = null, placing = null, activePart = null, placingWithShortcut = false;
   let undo = createUndoStack([]), gcodePrograms = {}, partGroups = [], newSheet = { name: '', width: 48, height: 30, thickness: '0.125' };
   let showNewSheet = false, showLibrary = true, showEmit = false, showProgram = false, activeCutId = null, user = null, loadError = '';
   let sheetSearch = '', librarySearch = '', measure = [], measuring = false, emitName = '', emitSuffix = '', selectedProgram = null, editingCutName = false, cutName = '';
@@ -48,7 +48,7 @@
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? redoChange() : undoChange(); }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') { event.preventDefault(); save(); }
       if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); removeSelected(); }
-      if (event.key.toLowerCase() === 'r' && selected?.kind === 'part') { event.preventDefault(); rotateSelected(); }
+      if (event.key.toLowerCase() === 'r' && selected?.kind === 'part') { event.preventDefault(); rotateSelectedSmoothly(); }
       if (event.key.toLowerCase() === 'a' && activePart) { event.preventDefault(); placing = { ...activePart }; placingWithShortcut = true; }
       if (event.key === 'Escape') { placing = null; measure = []; selectedId = null; draw(); }
     };
@@ -82,7 +82,7 @@
         loadError = error?.message || 'Could not load JProg sheets.';
       } finally { loading = false; }
     })();
-    return () => { unsubscribe(); canvasResizeObserver?.disconnect(); window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onKeyUp); window.removeEventListener('pointerdown', clearSelectionOutsideEditor, true); window.removeEventListener('click', keepLibraryOpen); };
+    return () => { unsubscribe(); canvasResizeObserver?.disconnect(); if (rotationAnimationFrame) cancelAnimationFrame(rotationAnimationFrame); window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onKeyUp); window.removeEventListener('pointerdown', clearSelectionOutsideEditor, true); window.removeEventListener('click', keepLibraryOpen); };
   });
 
   async function refreshSheets() { sheets = await listSheets(); }
@@ -241,9 +241,15 @@
       ctx.restore();
     }
     if (selected?.kind === 'part') {
-      const center = sheetToScreen(selected, view), handle = { x: center.x, y: center.y - Math.max(28, selected.height_in * view.scale / 2 + 18) };
-      ctx.strokeStyle = '#d97706'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(center.x, center.y); ctx.lineTo(handle.x, handle.y); ctx.stroke();
-      ctx.fillStyle = '#fbbf24'; ctx.beginPath(); ctx.arc(handle.x, handle.y, 8, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = '#7c2d12'; ctx.stroke();
+      const { center, handle, radius } = rotationHandlePoint(selected);
+      ctx.save();
+      ctx.setLineDash([4, 5]); ctx.strokeStyle = '#fbbf24'; ctx.globalAlpha = .6; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(center.x, center.y, radius, 0, Math.PI * 2); ctx.stroke();
+      ctx.setLineDash([]); ctx.globalAlpha = 1; ctx.strokeStyle = '#d97706'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(center.x, center.y); ctx.lineTo(handle.x, handle.y); ctx.stroke();
+      ctx.fillStyle = '#17345f'; ctx.beginPath(); ctx.arc(center.x, center.y, 5, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = '#fbbf24'; ctx.stroke();
+      ctx.fillStyle = '#fbbf24'; ctx.beginPath(); ctx.arc(handle.x, handle.y, 9, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = '#7c2d12'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.restore();
     }
     if (measure.length) {
       const points = measure.map(point => sheetToScreen(point, view)); ctx.strokeStyle = '#fbbf24'; ctx.fillStyle = '#fbbf24'; ctx.lineWidth = 2;
@@ -253,7 +259,8 @@
   }
   function rotationHandlePoint(placement) {
     const center = sheetToScreen(placement, view);
-    return { center, handle: { x: center.x, y: center.y - Math.max(28, placement.height_in * view.scale / 2 + 18) } };
+    const radius = Math.max(34, placement.height_in * view.scale / 2 + 24);
+    return { center, radius, handle: { x: center.x, y: center.y - radius } };
   }
   function pointerDown(event) {
     if (!sheet) return;
@@ -290,6 +297,19 @@
   function wheel(event) { event.preventDefault(); const r = canvas.getBoundingClientRect(); view = zoomAt(view, { x: event.clientX - r.left, y: event.clientY - r.top }, event.deltaY < 0 ? 1.06 : .94); draw(); }
   function placeHole() { placing = { kind: 'hole', label: 'Hole', width_in: .3, height_in: .3 }; measure = []; toastActions.show('Uses the selected sheet thickness hole program'); }
   function rotateSelected(turns = 1) { if (selected?.kind === 'part') commit(placements.map(p => p.id === selected.id ? rotatePlacement(p, -turns) : p)); }
+  function rotateSelectedSmoothly() {
+    if (!selected?.kind || rotationAnimationFrame) return;
+    const id = selected.id, startRotation = selected.rotation, step = Math.PI / 12, startedAt = performance.now(), duration = 260;
+    const animate = (now) => {
+      const progress = Math.min(1, (now - startedAt) / duration);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      placements = placements.map(item => item.id === id ? { ...item, rotation: startRotation - step * eased } : item);
+      draw();
+      if (progress < 1) rotationAnimationFrame = requestAnimationFrame(animate);
+      else { rotationAnimationFrame = null; commit(placements); }
+    };
+    rotationAnimationFrame = requestAnimationFrame(animate);
+  }
   function duplicateSelected() { if (!selected) return; const copy = makePlacement({ ...selected, id: undefined, x: selected.x + .5, y: selected.y + .5, label: `${selected.label} copy` }); if (!sheetContains(sheet, copy)) return toastActions.show('Duplicated placement would leave the sheet'); commit([...placements, copy]); selectedId = copy.id; }
   async function removeSelected() { if (!selected || !await requestConfirmation({ title: 'Delete placement', message: `Remove ${selected.label}?`, confirmLabel: 'Remove', danger: true })) return; commit(placements.filter(p => p.id !== selected.id)); }
   function inspectSelected() { const program = selected && gcodePrograms[selected.part_library_path]; if (!program) return toastActions.show('Reload the part library before inspecting this part'); selectedProgram = program; showProgram = true; }
