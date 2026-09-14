@@ -293,22 +293,32 @@
       gcodePrograms[placement.part_library_path] = await readPartGroup(group);
     }
   }
-  async function emit() {
+  async function buildEmissions() {
+    await ensurePrograms();
+    const suffixes = availableSuffixes.length ? availableSuffixes.map(suffix => suffix === defaultGroupLabel ? '' : suffix) : [''];
+    const targets = emitSuffix === 'all' ? suffixes : [emitSuffix === defaultGroupLabel ? '' : emitSuffix || suffixes[0]];
+    return targets.map(suffix => ({ ...emitNestingGcode({ name: emitName || sheet.name, placements, programs: gcodePrograms, suffix, suffixCount: targets.length, dialect, thickness: sheet.thickness_key }), suffix })).filter(result => result.emitted);
+  }
+  function downloadEmission(result) {
+    const url = URL.createObjectURL(new Blob([result.text], { type: 'text/plain' })), link = document.createElement('a'); link.href = url; link.download = result.filename; link.click(); URL.revokeObjectURL(url);
+  }
+  async function downloadGcode() {
     try {
-      await ensurePrograms();
-      const suffixes = availableSuffixes.length ? availableSuffixes.map(suffix => suffix === defaultGroupLabel ? '' : suffix) : [''];
-      const targets = emitSuffix === 'all' ? suffixes : [emitSuffix === defaultGroupLabel ? '' : emitSuffix || suffixes[0]];
-      let count = 0;
-      for (const suffix of targets) {
-        const result = emitNestingGcode({ name: emitName || sheet.name, placements, programs: gcodePrograms, suffix, suffixCount: targets.length, dialect, thickness: sheet.thickness_key });
-        if (!result.emitted) continue;
+      const results = await buildEmissions();
+      if (!results.length) throw new Error('No placed item has a program for the selected suffix.');
+      results.forEach(downloadEmission); showEmit = false; toastActions.show(`Downloaded ${results.length} G-code file${results.length === 1 ? '' : 's'}`);
+    } catch (error) { toastActions.show(error.message); }
+  }
+  async function commitGcode() {
+    try {
+      const results = await buildEmissions();
+      if (!results.length) throw new Error('No placed item has a program for the selected suffix.');
+      for (const result of results) {
         const path = await uploadEmittedGcode(result.filename, result.text);
         await publishJprogOutput(path, result.text);
-        await recordEmission({ cut_id: activeCutId, suffix, dialect, output_storage_path: path, tool_order: [] });
-        const url = URL.createObjectURL(new Blob([result.text], { type: 'text/plain' })), link = document.createElement('a'); link.href = url; link.download = result.filename; link.click(); URL.revokeObjectURL(url); count += 1;
+        await recordEmission({ cut_id: activeCutId, suffix: result.suffix || '', dialect, output_storage_path: path, tool_order: [] });
       }
-      if (!count) throw new Error('No placed item has a program for the selected suffix.');
-      showEmit = false; toastActions.show(`Emitted ${count} G-code file${count === 1 ? '' : 's'}`);
+      showEmit = false; toastActions.show(`Committed ${results.length} G-code file${results.length === 1 ? '' : 's'} to output`);
     } catch (error) { toastActions.show(error.message); }
   }
 </script>
@@ -327,7 +337,7 @@
   <section class="canvas-wrap"><canvas bind:this={canvas} on:pointerdown={pointerDown} on:pointermove={pointerMove} on:pointerup={pointerUp} on:pointerleave={pointerUp} on:wheel={wheel}></canvas><div class="canvas-status"><MousePointer2 size={15}/> Click to place selected G-code · Esc to finish · Drag to move/pan · Wheel to zoom · R to rotate · Delete to remove</div></section></div></main>
 {/if}
 {#if showNewSheet}<div class="scrim"><form class="modal" on:submit|preventDefault={createNewSheet}><button type="button" class="modal-close" title="Close" on:click={() => showNewSheet = false}><X size={18}/></button><h2>New Sheet</h2><label>Name<input bind:value={newSheet.name} /></label><div class="two"><label>Width (in)<input type="number" min="1" bind:value={newSheet.width}/></label><label>Height (in)<input type="number" min="1" bind:value={newSheet.height}/></label></div><label>Thickness<select bind:value={newSheet.thickness}><option value="0.063">1/16 in</option><option value="0.09">0.090 in</option><option value="0.125">1/8 in</option><option value="0.1875">3/16 in</option><option value="0.25">1/4 in</option><option value="0.3125">5/16 in</option><option value="0.375">3/8 in</option><option value="0.5">1/2 in</option><option value="0.75">3/4 in</option></select></label><div class="row"><button type="button" class="btn btn-secondary" on:click={() => showNewSheet = false}>Cancel</button><button class="btn btn-primary">Create sheet</button></div></form></div>{/if}
-{#if showEmit}<div class="scrim"><form class="modal" on:submit|preventDefault={emit}><button type="button" class="modal-close" title="Close" on:click={() => showEmit = false}><X size={18}/></button><h2>Emit G-code</h2><label>Program name<input bind:value={emitName}/></label><p class="hint">{programType === 'tap' ? 'WinCNC (.tap)' : '971 / LinuxCNC (.ngc)'}</p><fieldset><legend>Program group</legend><label class="radio"><input type="radio" bind:group={emitSuffix} value="all"/> All available groups</label>{#each availableSuffixes as suffix}<label class="radio"><input type="radio" bind:group={emitSuffix} value={suffix}/> {suffix || 'default'}</label>{/each}{#if !availableSuffixes.length}<p class="hint">Add a part or hole before emitting.</p>{/if}</fieldset><div class="row"><button type="button" class="btn btn-secondary" on:click={() => showEmit = false}>Cancel</button><button class="btn btn-primary" disabled={!placements.length || !availableSuffixes.length}>Emit and download</button></div></form></div>{/if}
+{#if showEmit}<div class="scrim"><form class="modal" on:submit|preventDefault={commitGcode}><button type="button" class="modal-close" title="Close" on:click={() => showEmit = false}><X size={18}/></button><h2>Emit G-code</h2><label>Program name<input bind:value={emitName}/></label><p class="hint">{programType === 'tap' ? 'WinCNC (.tap)' : '971 / LinuxCNC (.ngc)'}</p><fieldset><legend>Program group</legend><label class="radio"><input type="radio" bind:group={emitSuffix} value="all"/> All available groups</label>{#each availableSuffixes as suffix}<label class="radio"><input type="radio" bind:group={emitSuffix} value={suffix}/> {suffix || 'default'}</label>{/each}{#if !availableSuffixes.length}<p class="hint">Add a part or hole before emitting.</p>{/if}</fieldset><div class="row emit-actions"><button type="button" class="btn btn-secondary" on:click={() => showEmit = false}>Cancel</button><button type="button" class="btn btn-secondary" on:click={downloadGcode} disabled={!placements.length || !availableSuffixes.length}><Download size={16}/> Download</button><button class="btn btn-primary" disabled={!placements.length || !availableSuffixes.length}><Upload size={16}/> Commit to Output</button></div></form></div>{/if}
 {#if showProgram}<div class="scrim"><section class="modal program"><button type="button" class="modal-close" title="Close" on:click={() => showProgram = false}><X size={18}/></button><h2>{selected?.label} programs</h2>{#each selectedProgram?.variants || [] as variant}<details><summary>{variant.name} · {variant.dialect} · {variant.suffix || 'default'}</summary><pre>{variant.source}</pre></details>{/each}</section></div>{/if}
 
 {#if screen === 'edit'}<a class="workspace-output-link btn btn-primary" href={JPROG_OUTPUT_REPOSITORY} target="_blank" rel="noreferrer"><ExternalLink size={16}/> Open Output Repository</a>{/if}
