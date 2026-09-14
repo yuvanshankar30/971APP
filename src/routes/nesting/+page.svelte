@@ -276,7 +276,8 @@
     if (selected?.kind === 'part') {
       const { center, handle } = rotationHandlePoint(selected);
       if (Math.hypot(event.clientX - rect.left - handle.x, event.clientY - rect.top - handle.y) <= 14) {
-        rotationDrag = { id: selected.id, center }; return;
+        const dx = event.clientX - rect.left - center.x, dy = event.clientY - rect.top - center.y;
+        rotationDrag = { id: selected.id, center, startRotation: selected.rotation, startPointerAngle: -Math.atan2(dx, -dy) }; return;
       }
     }
     if (placing) {
@@ -291,7 +292,9 @@
   function pointerMove(event) {
     if (rotationDrag) {
       const rect = canvas.getBoundingClientRect(), dx = event.clientX - rect.left - rotationDrag.center.x, dy = event.clientY - rect.top - rotationDrag.center.y;
-      const rotation = -Math.atan2(dx, -dy);
+      const pointerAngle = -Math.atan2(dx, -dy);
+      const delta = Math.atan2(Math.sin(pointerAngle - rotationDrag.startPointerAngle), Math.cos(pointerAngle - rotationDrag.startPointerAngle));
+      const rotation = rotationDrag.startRotation + delta;
       placements = placements.map(p => p.id === rotationDrag.id ? { ...p, rotation } : p); draw(); return;
     }
     if (!drag) return;
