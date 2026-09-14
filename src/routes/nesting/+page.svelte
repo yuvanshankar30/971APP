@@ -349,7 +349,8 @@
   .cut-actions, .cut-rename { display: flex; align-items: center; gap: 6px; }
   .cut-actions .add-cut-button { flex: 1; color: var(--primary, #2563eb); border-color: var(--primary, #2563eb); }
   .cut-rename input { min-width: 0; flex: 1; }
-  .radio { display: flex !important; align-items: center; gap: 8px; }
+  label.radio { display: grid !important; grid-template-columns: 24px minmax(0, 1fr); align-items: center; gap: 8px; }
+  label.radio input { grid-column: 1; margin: 0; }
   .workspace-header .header-actions { flex-wrap: nowrap; margin-left: auto; }
   @media (max-width: 900px) { .workspace-header .header-actions { flex-wrap: wrap; } }
   .icon-button { width: 2rem; height: 2rem; padding: 0; border: 1px solid var(--border-color, #d0d5dd); border-radius: 4px; background: var(--card-bg, #fff); display: inline-flex; align-items: center; justify-content: center; }
