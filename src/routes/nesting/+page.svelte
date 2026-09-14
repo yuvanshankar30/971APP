@@ -83,7 +83,7 @@
 
 <svelte:head><title>Sheet Nesting</title></svelte:head>
 {#if loading}<main class="nesting"><p>Loading sheet nesting...</p></main>
-{:else if loadError}<main class="nesting"><h1>Sheet Nesting</h1><p>{loadError}</p><p>Apply <code>migrations/20260913_nesting_system.sql</code>, then reload this page.</p></main>
+{:else if loadError}<main class="nesting"><h1>Sheet Nesting</h1><p>{loadError}</p><p>Reload this page. If the error persists after deployment, apply <code>migrations/20260914000000_nesting_system.sql</code>.</p></main>
 {:else if !user}<main class="nesting"><h1>Sheet Nesting</h1><p>Sign in to use the nesting workspace.</p></main>
 {:else if screen === 'settings'}
   <main class="nesting"><header><div><p class="eyebrow">Sheet Nesting</p><h1>Settings</h1></div><a class="btn btn-secondary" href="/nesting">Back to sheets</a></header><section class="settings-panel"><h2>Coordinate system</h2><p>Sheets use positive inch dimensions. The lower-left of each sheet is X0 Y0; the canvas handles its screen-space inversion internally.</p><h2>Part library</h2><p>Part G-code is stored in the shared Manufacturing Drive under <code>Nesting Parts Library/</code>. Emitted files are saved under <code>Nesting Output/</code>.</p><h2>Workflow boundary</h2><p>Nesting is standalone. Emitting a program does not queue or update AutoCAM or Fusion.</p></section></main>
