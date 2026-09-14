@@ -271,6 +271,15 @@ browser confirmation or prompt popups.
   reports retain their original fields. Match scouts can reopen their submitted
   answers immediately or find their own active-event reports in **My reports**,
   search by team or match, and save corrections to the existing report.
+  **Compare** in My reports opens labeled blue/manual and orange/vision charts
+  for the same event, match, and team. Scouts can select a vision run, refresh
+  results, and filter reviewed observations or include provisional candidates.
+  The comparison includes every manual answer, vision event evidence, and
+  calibrated track metrics; missing data is labeled rather than treated as
+  zero. Subjective ratings and autonomous points are not inferred from ball
+  counts. `src/lib/scoutingComparison.js` builds the comparison, rendered by
+  `ScoutingComparison.svelte`; `/api/matchscout/comparison` restricts manual
+  report access to its authenticated author and retains vision’s RLS policy.
   Pit scouting reloads each team’s saved entry for further edits. Apply `20260913_match_scouting_form_v2.sql`
   before deploying this form. Teleop and post-match prose areas are deliberately
   large enough for real scout observations. Timed robot actions, per-fuel
