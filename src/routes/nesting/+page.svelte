@@ -231,7 +231,7 @@
       const preview = gcodePrograms[p.part_library_path]?.variants?.[0];
       const cutColor = CUT_COLORS[p.renderCutIndex % CUT_COLORS.length];
       if (preview?.toolpath?.length) {
-        ctx.scale(view.scale, -view.scale); ctx.strokeStyle = p.renderActive && p.id === selectedId ? '#101828' : cutColor; ctx.lineWidth = (p.renderActive ? 1.7 : 1.25) / view.scale;
+        ctx.scale(view.scale, -view.scale); ctx.strokeStyle = p.renderActive && p.id === selectedId ? '#f8fafc' : cutColor; ctx.lineWidth = (p.renderActive ? 2.25 : 1.25) / view.scale;
         for (const segment of preview.toolpath) {
           ctx.globalAlpha = segment.rapid ? .18 : 1; ctx.beginPath();
           segment.points.forEach((point, index) => { const x = point.x - preview.bounds.centerX, y = point.y - preview.bounds.centerY; if (index) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
@@ -239,7 +239,7 @@
         }
         ctx.globalAlpha = 1;
       } else {
-        ctx.fillStyle = p.renderActive && p.id === selectedId ? '#101828' : cutColor; ctx.globalAlpha = p.renderActive ? .86 : .5;
+        ctx.fillStyle = p.renderActive && p.id === selectedId ? '#f8fafc' : cutColor; ctx.globalAlpha = p.renderActive ? .94 : .5;
         if (p.kind === 'hole') { ctx.beginPath(); ctx.arc(0, 0, Math.max(4, p.width_in * view.scale / 2), 0, Math.PI * 2); ctx.fill(); }
         else ctx.fillRect(-p.width_in * view.scale / 2, -p.height_in * view.scale / 2, p.width_in * view.scale, p.height_in * view.scale);
         ctx.globalAlpha = 1;
@@ -264,7 +264,16 @@
     }
   }
   function rotationHandlePoint(placement) {
-    const center = sheetToScreen(placement, view);
+    const preview = gcodePrograms[placement.part_library_path]?.variants?.[0];
+    const cuttingPoints = preview?.toolpath?.filter(segment => !segment.rapid).flatMap(segment => segment.points) || [];
+    let center = sheetToScreen(placement, view);
+    if (cuttingPoints.length && preview?.bounds) {
+      const minX = Math.min(...cuttingPoints.map(point => point.x)), maxX = Math.max(...cuttingPoints.map(point => point.x));
+      const minY = Math.min(...cuttingPoints.map(point => point.y)), maxY = Math.max(...cuttingPoints.map(point => point.y));
+      const offsetX = (minX + maxX) / 2 - preview.bounds.centerX, offsetY = (minY + maxY) / 2 - preview.bounds.centerY;
+      const cos = Math.cos(placement.rotation || 0), sin = Math.sin(placement.rotation || 0);
+      center = sheetToScreen({ x: placement.x + offsetX * cos - offsetY * sin, y: placement.y + offsetX * sin + offsetY * cos }, view);
+    }
     const radius = Math.min(64, Math.max(30, placement.height_in * view.scale / 2 + 14));
     return { center, radius, handle: { x: center.x, y: center.y - radius } };
   }
