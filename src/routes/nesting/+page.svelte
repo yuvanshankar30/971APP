@@ -357,7 +357,7 @@
     .open-sheet { display: none; }
   }
   .cut-actions, .cut-rename { display: flex; align-items: center; gap: 6px; }
-  .cut-actions .add-cut-button { flex: 1; color: var(--primary, #2563eb); border-color: var(--primary, #2563eb); }
+  .cut-actions .add-cut-button { flex: 1; color: #1c1913; background: #d4a72c; border-color: #b88912; }
   .cut-rename input { min-width: 0; flex: 1; }
   label.radio { display: grid !important; grid-template-columns: 24px minmax(0, 1fr); align-items: center; gap: 8px; }
   label.radio input { grid-column: 1; margin: 0; }
