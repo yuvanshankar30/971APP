@@ -21,18 +21,29 @@
   let canvas, ctx, sheets = [], sheet = null, placements = [], selectedId = null, loading = true, saving = false;
   let screen = forcedScreen || 'select', view = { scale: 28, originX: 80, originY: 520 }, drag = null, placing = null;
   let undo = createUndoStack([]), gcodePrograms = {}, partFiles = [], newSheet = { name: '', width: 48, height: 24, thickness: '0.125' };
-  let showNewSheet = false, showLibrary = false, emitName = '', activeCutId = null, user = null;
+  let showNewSheet = false, showLibrary = false, emitName = '', activeCutId = null, user = null, loadError = '';
   $: selected = placements.find((item) => item.id === selectedId) || null;
   $: activeCut = sheet?.nesting_cuts?.find((cut) => cut.id === activeCutId) || null;
 
   onMount(async () => {
-    await loadUserFromUUID(supabase); const unsubscribe = userStore.subscribe(value => user = value);
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session || !canUseNesting(user)) { loading = false; return unsubscribe; }
-    await refreshSheets();
-    const id = sheetId || $page.params?.sheetId;
-    if (id) await openSheet(id);
-    loading = false;
+    const unsubscribe = userStore.subscribe(value => user = value);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      // Nesting only requires a session. Profile hydration is useful for the
+      // rest of the app but must not stall this standalone workspace.
+      user = user || { id: session.user.id };
+      void loadUserFromUUID(supabase);
+      if (!canUseNesting(user)) return;
+      await refreshSheets();
+      const id = sheetId || $page.params?.sheetId;
+      if (id) await openSheet(id);
+    } catch (error) {
+      console.error('Failed to load sheet nesting:', error);
+      loadError = error?.message || 'Could not load nesting sheets.';
+    } finally {
+      loading = false;
+    }
     return unsubscribe;
   });
 
@@ -72,6 +83,7 @@
 
 <svelte:head><title>Sheet Nesting</title></svelte:head>
 {#if loading}<main class="nesting"><p>Loading sheet nesting...</p></main>
+{:else if loadError}<main class="nesting"><h1>Sheet Nesting</h1><p>{loadError}</p><p>Apply <code>migrations/20260913_nesting_system.sql</code>, then reload this page.</p></main>
 {:else if !user}<main class="nesting"><h1>Sheet Nesting</h1><p>Sign in to use the nesting workspace.</p></main>
 {:else if screen === 'settings'}
   <main class="nesting"><header><div><p class="eyebrow">Sheet Nesting</p><h1>Settings</h1></div><a class="btn btn-secondary" href="/nesting">Back to sheets</a></header><section class="settings-panel"><h2>Coordinate system</h2><p>Sheets use positive inch dimensions. The lower-left of each sheet is X0 Y0; the canvas handles its screen-space inversion internally.</p><h2>Part library</h2><p>Part G-code is stored in the shared Manufacturing Drive under <code>Nesting Parts Library/</code>. Emitted files are saved under <code>Nesting Output/</code>.</p><h2>Workflow boundary</h2><p>Nesting is standalone. Emitting a program does not queue or update AutoCAM or Fusion.</p></section></main>
