@@ -11,7 +11,7 @@
   import SeasonFilter from '$lib/components/SeasonFilter.svelte';
   import { goto } from '$app/navigation';
   import { PUBLIC_ONSHAPE_BASE_URL } from '$env/static/public';
-  import { Search, Filter, Clock, Truck, Package, Download, Zap, Wrench, FileText, Upload, ExternalLink, Pencil, Trash2, X, Users, Box, Route, CircleCheck, Layers, Folder, ListChecks, BookOpen } from 'lucide-svelte';
+  import { Search, Filter, Clock, Truck, Package, Download, Zap, Wrench, FileText, Upload, ExternalLink, Pencil, Trash2, X, Users, Box, Route, CircleCheck, Layers, Folder, ListChecks, BookOpen, Scissors } from 'lucide-svelte';
   import { searchFolderTree } from '$lib/fusionFolderSearch.js';
   import ROUTER_FLOW from '$lib/router_flow.json';
   import { convertGcodeToInches } from '$autocam/fusion/gcodeUnitConvert.js';
@@ -2156,6 +2156,10 @@
 <div class="page-header">
   <h1>Parts List</h1>
   <div class="page-actions">
+    <a href="/jprog" class="btn btn-secondary">
+      <Scissors size={16} />
+      JProg
+    </a>
     {#if canDelete}
       <button class="btn {batchSelectMode ? 'btn-primary' : 'btn-secondary'}" on:click={toggleBatchSelectMode}>
         <Package size={16} />

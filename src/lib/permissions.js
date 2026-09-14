@@ -199,6 +199,12 @@ export function canManageCamProfiles(user) {
   return user.general_role === GENERAL_ROLES.LEAD || user.general_role === GENERAL_ROLES.SUBSYSTEM_LEAD;
 }
 
+// JProg historically had no role gate. Keep this named boundary so a future
+// policy can tighten it without changing the standalone nesting UI.
+export function canUseNesting(user) {
+  return Boolean(user);
+}
+
 // Who can create orders — bundle requested items into an order and enter the
 // total cost after shipping. Restricted to admins, Purchasing Leads, and
 // mentors (frc_team = 'Mentor'). Everyone else can only *request* items via

@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import { supabase } from '$lib/supabase.js';
+  import { isJprogOutputPath, publishJprogOutput } from '$lib/jprog_output.js';
   import { page } from '$app/stores';
   import { toastActions } from '$lib/toast.js';
   import { requestConfirmation } from '$lib/confirmation.js';
@@ -39,6 +40,8 @@
   function joinPath(prefix, name) {
     return prefix ? `${prefix}/${name}` : name;
   }
+
+  const isJprogOutput = isJprogOutputPath;
 
   async function load() {
     loading = true;
@@ -128,10 +131,12 @@
     uploading = true;
     try {
       for (const file of files) {
+        const storagePath = joinPath(currentPath, file.name);
         const { error } = await supabase.storage
           .from(BUCKET)
-          .upload(joinPath(currentPath, file.name), file, { upsert: true });
+          .upload(storagePath, file, { upsert: true });
         if (error) throw error;
+        if (isJprogOutput(storagePath)) await publishJprogOutput(storagePath, await file.text());
       }
       toastActions.show(`Uploaded ${files.length} file${files.length === 1 ? '' : 's'}`);
     } catch (e) {
@@ -293,6 +298,12 @@
         .from(BUCKET)
         .move(joinPath(currentPath, entry.name), joinPath(currentPath, name));
       if (moveError) throw moveError;
+      const destination = joinPath(currentPath, name);
+      if (isJprogOutput(destination)) {
+        const { data, error: downloadError } = await supabase.storage.from(BUCKET).download(destination);
+        if (downloadError) throw downloadError;
+        await publishJprogOutput(destination, await data.text());
+      }
       cancelRename();
       await load();
       toastActions.show('File renamed');

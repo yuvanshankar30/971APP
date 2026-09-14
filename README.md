@@ -100,6 +100,20 @@ browser confirmation or prompt popups.
   status/link beside AutoCAM completed. See
   `autocam/docs/router-job-grouping.md` for the deliberate conservative
   placement and program-composition rules.
+- **JProg**: a standalone, session-authenticated `/jprog` workspace
+  that ports the shop's manual JProg sheet workflow to the web: searchable
+  persistent stock sheets/cuts, a reloadable Storage-backed grouped part
+  library, thickness-specific bundled hole programs, G-code inspection,
+  measurement, reusable click-to-place canvas placement,
+  selection/drag/rotation/pan/zoom/undo, and suffix-grouped LinuxCNC or
+  WinCNC G-code emission. Emitted programs are stored in the Manufacturing
+  Files bucket under `Jprog Output/YYYYMMDD/`, with the date folder created on
+  the first emission that day and the same file committed to the public
+  `yuvanshankar30/output` repository via a Supabase Edge Function. Its GitHub
+  credential lives only in Supabase function secrets, so neither the browser nor
+  the Cloud Run deployment needs access to it. It intentionally has no AutoCAM or Fusion
+  Runner connection; its tables and Storage paths are owned by the nesting
+  JProg feature and its entry point is the Manufacturing page action.
 - **Scouting**: pit scouting (a topic-at-a-time form with per-topic
   completion counts, scout/contact attribution, and up to three robot photos,
   built for filling in a noisy pit on a phone while a team answers out of
