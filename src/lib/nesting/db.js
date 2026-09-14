@@ -14,7 +14,9 @@ export async function deleteSheet(sheetId) { const { error } = await supabase.fr
 export async function savePlacements(cutId, placements) {
   const { error: removeError } = await supabase.from('nesting_placements').delete().eq('cut_id', cutId); fail(removeError);
   if (!placements.length) return;
-  const rows = placements.map(({ id, ...placement }) => ({ ...placement, cut_id: cutId }));
+  // The database owns created_at. Omitting it lets the column default apply
+  // when a placement is rewritten after it was loaded from PostgREST.
+  const rows = placements.map(({ id, created_at, ...placement }) => ({ ...placement, cut_id: cutId }));
   const { error } = await supabase.from('nesting_placements').insert(rows); fail(error);
 }
 export async function createCut(sheetId, name) { const { data, error } = await supabase.from('nesting_cuts').insert({ sheet_id: sheetId, name }).select().single(); fail(error); return data; }
