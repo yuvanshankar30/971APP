@@ -383,5 +383,5 @@
   @media (max-width: 900px) { .workspace-header .header-actions { flex-wrap: wrap; } }
   .icon-button { width: 2rem; height: 2rem; padding: 0; border: 1px solid var(--border-color, #d0d5dd); border-radius: 4px; background: var(--card-bg, #fff); display: inline-flex; align-items: center; justify-content: center; }
   .icon-button:disabled { opacity: .45; cursor: not-allowed; }
-  .modal select { width: 100%; min-width: 0; box-sizing: border-box; }
+  .modal select { width: 100%; min-width: 0; box-sizing: border-box; padding: 8px 3rem 8px 12px; white-space: nowrap; text-overflow: clip; }
 </style>
