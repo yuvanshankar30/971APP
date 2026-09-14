@@ -81,10 +81,11 @@
 
   async function refreshSheets() { sheets = await listSheets(); }
   async function openSheet(id) {
+    if (screen === 'select' && !sheet) { await goto(`/jprog/sheets/${id}`, { noScroll: true }); return; }
     sheet = await getSheet(id); activeCutId = sheet.active_cut_id || sheet.nesting_cuts?.[0]?.id;
     placements = structuredClone(sheet.nesting_cuts?.find(c => c.id === activeCutId)?.nesting_placements || []);
     undo = createUndoStack(placements); selectedId = null; screen = 'edit'; emitName = sheet.name; await tick(); observeCanvas(); fitView(); await loadLibrary(); await loadPlacedPrograms(); await tick(); fitView(); draw(); requestAnimationFrame(() => { fitView(); draw(); });
-    if (!forcedScreen) goto(`/jprog/sheets/${id}`, { replaceState: true, keepFocus: true, noScroll: true });
+    if (!forcedScreen && $page.url.pathname !== `/jprog/sheets/${id}`) goto(`/jprog/sheets/${id}`, { replaceState: true, keepFocus: true, noScroll: true });
   }
   function observeCanvas() {
     if (!canvas || canvasResizeObserver) return;
