@@ -21,6 +21,7 @@
     "gcode-converter": false,
     "matchscout": true,
     "strategy": true,
-    "files": true
+    "files": true,
+    "jprog": true
   }
 }
