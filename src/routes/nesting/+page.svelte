@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
-  import { supabase } from '$lib/supabase.js';
+  import { getAuthHeader, supabase } from '$lib/supabase.js';
   import { userStore, loadUserFromUUID } from '$lib/stores/user.js';
   import { canUseNesting } from '$lib/permissions.js';
   import { toastActions } from '$lib/toast.js';
@@ -212,6 +212,8 @@
         const result = emitNestingGcode({ name: emitName || sheet.name, placements, programs: gcodePrograms, suffix, suffixCount: targets.length, dialect, thickness: sheet.thickness_key });
         if (!result.emitted) continue;
         const path = await uploadEmittedGcode(result.filename, result.text);
+        const githubResponse = await fetch('/api/jprog-output', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(await getAuthHeader()) }, body: JSON.stringify({ storagePath: path, content: result.text }) });
+        if (!githubResponse.ok) { const detail = await githubResponse.json().catch(() => ({})); throw new Error(detail.error || 'JProg output was saved to Manufacturing Files but could not be published to GitHub.'); }
         await recordEmission({ cut_id: activeCutId, suffix, dialect, output_storage_path: path, tool_order: [] });
         const url = URL.createObjectURL(new Blob([result.text], { type: 'text/plain' })), link = document.createElement('a'); link.href = url; link.download = result.filename; link.click(); URL.revokeObjectURL(url); count += 1;
       }

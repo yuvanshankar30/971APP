@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { supabase } from '$lib/supabase.js';
+  import { getAuthHeader, supabase } from '$lib/supabase.js';
   import { page } from '$app/stores';
   import { toastActions } from '$lib/toast.js';
   import { requestConfirmation } from '$lib/confirmation.js';
@@ -38,6 +38,23 @@
 
   function joinPath(prefix, name) {
     return prefix ? `${prefix}/${name}` : name;
+  }
+
+  function isJprogOutput(path) {
+    return /^Jprog Output\/\d{8}\/[A-Za-z0-9._-]+\.(?:ngc|tap)$/i.test(path);
+  }
+
+  async function publishJprogOutput(storagePath, content) {
+    if (!isJprogOutput(storagePath)) return;
+    const response = await fetch('/api/jprog-output', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(await getAuthHeader()) },
+      body: JSON.stringify({ storagePath, content })
+    });
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      throw new Error(detail.error || 'Could not publish JProg output to GitHub.');
+    }
   }
 
   async function load() {
@@ -128,10 +145,12 @@
     uploading = true;
     try {
       for (const file of files) {
+        const storagePath = joinPath(currentPath, file.name);
         const { error } = await supabase.storage
           .from(BUCKET)
-          .upload(joinPath(currentPath, file.name), file, { upsert: true });
+          .upload(storagePath, file, { upsert: true });
         if (error) throw error;
+        if (isJprogOutput(storagePath)) await publishJprogOutput(storagePath, await file.text());
       }
       toastActions.show(`Uploaded ${files.length} file${files.length === 1 ? '' : 's'}`);
     } catch (e) {
@@ -293,6 +312,12 @@
         .from(BUCKET)
         .move(joinPath(currentPath, entry.name), joinPath(currentPath, name));
       if (moveError) throw moveError;
+      const destination = joinPath(currentPath, name);
+      if (isJprogOutput(destination)) {
+        const { data, error: downloadError } = await supabase.storage.from(BUCKET).download(destination);
+        if (downloadError) throw downloadError;
+        await publishJprogOutput(destination, await data.text());
+      }
       cancelRename();
       await load();
       toastActions.show('File renamed');
