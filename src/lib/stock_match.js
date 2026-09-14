@@ -115,18 +115,32 @@ export function pickStockAndWorkflow(stockData, part) {
   };
 
   if (part.workflow === 'mill') {
-    const routerMatch = matchStockInWorkflow(stockData, 'router', material, minDim, midDim, maxDim, dimX, dimY)
-      || (name.includes('tube') ? pickTubeByName() : undefined)
+    // Direct instruction: a part named "tube" is tube stock, full stop -
+    // checked before the generic shape match, not only as its fallback.
+    // Real, confirmed live bug: a tube part's actual wall thickness (a
+    // real dimension on the part) can coincidentally fall within the
+    // sheet-thickness matcher's own 0.1in tolerance of a real sheet
+    // stock entry, so matchStockInWorkflow returned a false-positive
+    // sheet match before the name-based tube fallback (which only ran
+    // when nothing matched at all) ever got a chance to apply - six real
+    // tube-named CAD parts ("Bottom Tube", "Left Tube", ...) all
+    // defaulted to "1/16in Aluminum Sheet" instead of any tube stock.
+    const routerMatch = (name.includes('tube') ? pickTubeByName() : undefined)
+      || matchStockInWorkflow(stockData, 'router', material, minDim, midDim, maxDim, dimX, dimY)
       || (material.includes('aluminum') ? pickDefaultAluminumSheet() : undefined);
     if (routerMatch) {
       return { stock: routerMatch, workflow: 'router' };
     }
   }
 
-  let stock = matchStockInWorkflow(stockData, part.workflow, material, minDim, midDim, maxDim, dimX, dimY);
-  if (!stock && part.workflow === 'router') {
-    if (name.includes('tube')) stock = pickTubeByName();
-    else if (material.includes('aluminum')) stock = pickDefaultAluminumSheet();
+  let stock;
+  if (part.workflow === 'router' && name.includes('tube')) {
+    stock = pickTubeByName();
+  } else {
+    stock = matchStockInWorkflow(stockData, part.workflow, material, minDim, midDim, maxDim, dimX, dimY);
+  }
+  if (!stock && part.workflow === 'router' && material.includes('aluminum')) {
+    stock = pickDefaultAluminumSheet();
   }
 
   return { stock, workflow: part.workflow };

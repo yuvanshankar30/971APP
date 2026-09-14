@@ -128,6 +128,27 @@ describe('pickStockAndWorkflow', () => {
     expect(result.stock?.dimensions).toBe('Tube');
   });
 
+  it('picks tube stock by name even when the part\'s own dimensions coincidentally match a sheet thickness', () => {
+    // Real, confirmed live bug: a real tube-named CAD part's own bounding
+    // box (e.g. a 0.3in wall/flange dimension) can land within
+    // matchStockInWorkflow's own 0.1in tolerance of an unrelated sheet
+    // stock's thickness (0.25in here) - the sheet-thickness match used to
+    // run BEFORE the name-based tube check, so six real tube-named parts
+    // ("Bottom Tube", "Left Tube", ...) all silently defaulted to
+    // "1/16in Aluminum Sheet" instead of any tube stock. The name check
+    // must win regardless of what the generic shape matcher would have
+    // found.
+    const result = pickStockAndWorkflow(stockData, {
+      workflow: 'router',
+      material: 'Aluminum',
+      part_name: 'Bottom Tube',
+      bounding_box_x: 0.3 * M_PER_IN,
+      bounding_box_y: 2 * M_PER_IN,
+      bounding_box_z: 24 * M_PER_IN
+    });
+    expect(result.stock?.dimensions).toBe('Tube');
+  });
+
   it('still picks some tube stock by name when the part has no material at all', () => {
     const result = pickStockAndWorkflow(stockData, { workflow: 'router', part_name: 'Left Tube' });
     expect(result.stock?.description).toBe('1x2 Aluminum Tube');
@@ -142,6 +163,19 @@ describe('pickStockAndWorkflow', () => {
     const result = pickStockAndWorkflow(stockData, { workflow: 'mill', material: 'Aluminum', part_name: 'crossmember tube' });
     expect(result.workflow).toBe('router');
     expect(result.stock?.description).toBe('1x2 Aluminum Tube');
+  });
+
+  it('picks tube stock for a mill-guessed "tube"-named part even when its dimensions coincidentally match router sheet stock', () => {
+    const result = pickStockAndWorkflow(stockData, {
+      workflow: 'mill',
+      material: 'Aluminum',
+      part_name: 'crossmember tube',
+      bounding_box_x: 0.3 * M_PER_IN,
+      bounding_box_y: 2 * M_PER_IN,
+      bounding_box_z: 24 * M_PER_IN
+    });
+    expect(result.workflow).toBe('router');
+    expect(result.stock?.dimensions).toBe('Tube');
   });
 
   it('defaults an aluminum router part with no detectable depth to 1/4" sheet', () => {
