@@ -4,6 +4,7 @@ import { emitNestingGcode } from './gcodeEmit.js';
 import { placementContains, rotatePlacement, sheetContains } from './sheetModel.js';
 import { screenToSheet, sheetToScreen, zoomAt } from './coords.js';
 import { createUndoStack } from './undoStack.js';
+import { emittedGcodePath } from './storage.js';
 
 describe('nesting geometry', () => {
   it('round-trips positive sheet coordinates through the canvas view', () => {
@@ -30,6 +31,9 @@ describe('nesting edit history', () => {
 });
 
 describe('nesting emission', () => {
+  it('writes each emission into the Jprog Output folder for its UTC day', () => {
+    expect(emittedGcodePath('nest.ngc', new Date('2026-09-12T18:00:00Z'))).toBe('Jprog Output/20260912/nest.ngc');
+  });
   it('prevents suffix filename collisions', () => {
     expect(buildEmitFilename('My Sheet', 'router', 2, '.tap')).toBe('My_Sheet_router.tap');
     expect(buildEmitFilename('My Sheet', 'router', 1, 'tap')).toBe('My_Sheet.tap');

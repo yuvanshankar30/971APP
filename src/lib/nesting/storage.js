@@ -1,7 +1,7 @@
 import { supabase } from '$lib/supabase.js';
 const BUCKET = 'manufacturing-drive';
 const PART_ROOT = 'Nesting Parts Library';
-const OUTPUT_ROOT = 'Nesting Output';
+const OUTPUT_ROOT = 'Jprog Output';
 const clean = (value) => String(value || '').replace(/^\/+|\/+$/g, '');
 
 export async function listPartsLibrary(prefix = PART_ROOT) {
@@ -27,9 +27,12 @@ export async function downloadText(path) {
   if (error) throw error;
   return data.text();
 }
+export function emittedGcodePath(filename, date = new Date()) {
+  const day = date.toISOString().slice(0, 10).replaceAll('-', '');
+  return `${OUTPUT_ROOT}/${day}/${filename}`;
+}
 export async function uploadEmittedGcode(filename, text) {
-  const day = new Date().toISOString().slice(0, 10).replaceAll('-', '');
-  const path = `${OUTPUT_ROOT}/${day}/${filename}`;
+  const path = emittedGcodePath(filename);
   const { error } = await supabase.storage.from(BUCKET).upload(path, new Blob([text], { type: 'text/plain' }), { upsert: true });
   if (error) throw error;
   return path;
