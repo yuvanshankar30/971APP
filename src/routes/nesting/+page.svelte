@@ -384,6 +384,7 @@
   .workspace-header .jprog-identity { justify-self: start; min-width: 0; }
   .workspace-header .jprog-identity .btn { white-space: nowrap; }
   .workspace-header .header-sheet-name { justify-self: start; text-align: left; padding-top: 2px; }
+  .workspace-body { margin-left: -14px; width: calc(100% + 14px); }
   .workspace-output-link { position: fixed; right: 16px; bottom: 16px; z-index: 3; }
   @media (max-width: 900px) { .workspace-header .header-actions { flex-wrap: wrap; } }
   .icon-button { width: 2rem; height: 2rem; padding: 0; border: 1px solid var(--border-color, #d0d5dd); border-radius: 4px; background: var(--card-bg, #fff); display: inline-flex; align-items: center; justify-content: center; }
