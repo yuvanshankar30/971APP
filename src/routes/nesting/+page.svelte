@@ -25,8 +25,10 @@
   let undo = createUndoStack([]), gcodePrograms = {}, partGroups = [], newSheet = { name: '', width: 48, height: 30, thickness: '0.125' };
   let showNewSheet = false, showLibrary = false, showEmit = false, showProgram = false, activeCutId = null, user = null, loadError = '';
   let sheetSearch = '', measure = [], measuring = false, emitName = '', emitSuffix = '', selectedProgram = null, editingCutName = false, cutName = '';
+  const CUT_COLORS = ['#2563eb', '#d97706', '#16a34a', '#9333ea', '#dc2626', '#0891b2', '#ca8a04', '#db2777'];
   $: selected = placements.find((item) => item.id === selectedId) || null;
   $: activeCut = sheet?.nesting_cuts?.find((cut) => cut.id === activeCutId) || null;
+  $: renderedPlacements = (sheet?.nesting_cuts || []).flatMap((cut, cutIndex) => (cut.id === activeCutId ? placements : cut.nesting_placements || []).map((placement) => ({ ...placement, renderCutId: cut.id, renderCutIndex: cutIndex, renderActive: cut.id === activeCutId })));
   $: visibleSheets = sheets.filter(item => item.name.toLowerCase().includes(sheetSearch.trim().toLowerCase()));
   $: availableSuffixes = [...new Set([
     ...(placements.some(item => item.kind === 'hole') ? ['holes'] : []),
@@ -96,13 +98,14 @@
   function commit(next) { placements = undo.commit(next); selectedId = selectedId && placements.some(p => p.id === selectedId) ? selectedId : null; draw(); }
   function undoChange() { placements = undo.undo(); draw(); }
   function redoChange() { placements = undo.redo(); draw(); }
-  async function save() { if (!activeCutId) return; saving = true; try { await savePlacements(activeCutId, placements); updateActiveCutInMemory(); toastActions.show('Sheet saved'); } catch (error) { toastActions.show(error.message); } finally { saving = false; } }
+  async function save({ quiet = false } = {}) { if (!activeCutId) return false; saving = true; try { await savePlacements(activeCutId, placements); updateActiveCutInMemory(); if (!quiet) toastActions.show('Sheet saved'); return true; } catch (error) { toastActions.show(error.message); return false; } finally { saving = false; } }
   function updateActiveCutInMemory() { const cut = sheet?.nesting_cuts?.find(item => item.id === activeCutId); if (cut) cut.nesting_placements = structuredClone(placements); }
   async function addCut() {
     const name = `Cut ${(sheet.nesting_cuts?.length || 0) + 1}`;
+    if (!await save({ quiet: true })) return;
     try { const cut = await createCut(sheet.id, name); sheet.nesting_cuts = [...sheet.nesting_cuts, { ...cut, nesting_placements: [] }]; activeCutId = cut.id; placements = []; undo = createUndoStack([]); await setActiveCut(sheet.id, cut.id); draw(); } catch (error) { toastActions.show(error.message); }
   }
-  async function chooseCut(id) { await save(); activeCutId = id; placements = structuredClone(sheet.nesting_cuts.find(c => c.id === id)?.nesting_placements || []); undo = createUndoStack(placements); selectedId = null; await setActiveCut(sheet.id, id); draw(); }
+  async function chooseCut(id) { if (id === activeCutId || !await save({ quiet: true })) return; activeCutId = id; placements = structuredClone(sheet.nesting_cuts.find(c => c.id === id)?.nesting_placements || []); undo = createUndoStack(placements); selectedId = null; await setActiveCut(sheet.id, id); await loadPlacedPrograms(); draw(); }
   function beginRenameCut() { cutName = activeCut?.name || ''; editingCutName = true; }
   async function saveCutName() {
     const name = cutName.trim();
@@ -112,6 +115,7 @@
   async function removeActiveCut() {
     if ((sheet?.nesting_cuts?.length || 0) <= 1) return toastActions.show('A sheet needs at least one cut');
     if (!await requestConfirmation({ title: 'Delete cut', message: `Delete ${activeCut?.name || 'this cut'} and its placements?`, confirmLabel: 'Delete', danger: true })) return;
+    if (!await save({ quiet: true })) return;
     try {
       const remaining = sheet.nesting_cuts.filter(cut => cut.id !== activeCutId);
       const nextCut = remaining[0];
@@ -147,7 +151,7 @@
     return { variants, bounds };
   }
   async function loadPlacedPrograms() {
-    await Promise.all(placements.filter(item => item.kind === 'part' && !gcodePrograms[item.part_library_path]).map(async item => {
+    await Promise.all(renderedPlacements.filter(item => item.kind === 'part' && !gcodePrograms[item.part_library_path]).map(async item => {
       let group = partGroups.find(candidate => candidate.key === item.part_library_path);
       if (!group && item.part_library_path) {
         try {
@@ -197,11 +201,12 @@
     ctx = canvas.getContext('2d'); ctx.scale(devicePixelRatio, devicePixelRatio); ctx.clearRect(0, 0, rect.width, rect.height);
     const a = sheetToScreen({ x: 0, y: 0 }, view), b = sheetToScreen({ x: Number(sheet.width_in), y: Number(sheet.height_in) }, view);
     ctx.fillStyle = '#17345f'; ctx.fillRect(a.x, b.y, b.x - a.x, a.y - b.y); ctx.strokeStyle = '#8aa4c7'; ctx.lineWidth = 2; ctx.strokeRect(a.x, b.y, b.x - a.x, a.y - b.y);
-    for (const p of placements) {
+    for (const p of renderedPlacements) {
       const s = sheetToScreen(p, view); ctx.save(); ctx.translate(s.x, s.y); ctx.rotate(-p.rotation);
       const preview = gcodePrograms[p.part_library_path]?.variants?.[0];
+      const cutColor = CUT_COLORS[p.renderCutIndex % CUT_COLORS.length];
       if (preview?.toolpath?.length) {
-        ctx.scale(view.scale, -view.scale); ctx.strokeStyle = p.id === selectedId ? '#d97706' : '#2563eb'; ctx.lineWidth = 1.5 / view.scale;
+        ctx.scale(view.scale, -view.scale); ctx.strokeStyle = p.renderActive && p.id === selectedId ? '#101828' : cutColor; ctx.lineWidth = (p.renderActive ? 1.7 : 1.25) / view.scale;
         for (const segment of preview.toolpath) {
           ctx.globalAlpha = segment.rapid ? .18 : 1; ctx.beginPath();
           segment.points.forEach((point, index) => { const x = point.x - preview.bounds.centerX, y = point.y - preview.bounds.centerY; if (index) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
@@ -209,7 +214,7 @@
         }
         ctx.globalAlpha = 1;
       } else {
-        ctx.fillStyle = p.id === selectedId ? '#fbbf24' : p.kind === 'hole' ? '#22c55e' : '#3b82f6'; ctx.globalAlpha = .86;
+        ctx.fillStyle = p.renderActive && p.id === selectedId ? '#101828' : cutColor; ctx.globalAlpha = p.renderActive ? .86 : .5;
         if (p.kind === 'hole') { ctx.beginPath(); ctx.arc(0, 0, Math.max(4, p.width_in * view.scale / 2), 0, Math.PI * 2); ctx.fill(); }
         else ctx.fillRect(-p.width_in * view.scale / 2, -p.height_in * view.scale / 2, p.width_in * view.scale, p.height_in * view.scale);
         ctx.globalAlpha = 1;
@@ -264,7 +269,7 @@
   function pointerUp() { if (rotationDrag) { undo.commit(placements); rotationDrag = null; draw(); return; } if (drag && !drag.pan) { const moved = placements.find(item => item.id === drag.id); if (moved && !sheetContains(sheet, moved)) placements = placements.map(item => item.id === drag.id ? drag.placement : item); else undo.commit(placements); } drag = null; draw(); }
   function wheel(event) { event.preventDefault(); const r = canvas.getBoundingClientRect(); view = zoomAt(view, { x: event.clientX - r.left, y: event.clientY - r.top }, event.deltaY < 0 ? 1.06 : .94); draw(); }
   function placeHole() { placing = { kind: 'hole', label: 'Hole', width_in: .3, height_in: .3 }; measure = []; toastActions.show('Uses the selected sheet thickness hole program'); }
-  function rotateSelected(turns = 1) { if (selected) commit(placements.map(p => p.id === selected.id ? rotatePlacement(p, turns) : p)); }
+  function rotateSelected(turns = 1) { if (selected) commit(placements.map(p => p.id === selected.id ? rotatePlacement(p, -turns) : p)); }
   function duplicateSelected() { if (!selected) return; const copy = makePlacement({ ...selected, id: undefined, x: selected.x + .5, y: selected.y + .5, label: `${selected.label} copy` }); if (!sheetContains(sheet, copy)) return toastActions.show('Duplicated placement would leave the sheet'); commit([...placements, copy]); selectedId = copy.id; }
   async function removeSelected() { if (!selected || !await requestConfirmation({ title: 'Delete placement', message: `Remove ${selected.label}?`, confirmLabel: 'Remove', danger: true })) return; commit(placements.filter(p => p.id !== selected.id)); }
   function inspectSelected() { const program = selected && gcodePrograms[selected.part_library_path]; if (!program) return toastActions.show('Reload the part library before inspecting this part'); selectedProgram = program; showProgram = true; }
@@ -344,6 +349,9 @@
   .cut-actions, .cut-rename { display: flex; align-items: center; gap: 6px; }
   .cut-actions .add-cut-button { flex: 1; color: var(--primary, #2563eb); border-color: var(--primary, #2563eb); }
   .cut-rename input { min-width: 0; flex: 1; }
+  .radio { display: flex !important; align-items: center; gap: 8px; }
+  .workspace-header .header-actions { flex-wrap: nowrap; margin-left: auto; }
+  @media (max-width: 900px) { .workspace-header .header-actions { flex-wrap: wrap; } }
   .icon-button { width: 2rem; height: 2rem; padding: 0; border: 1px solid var(--border-color, #d0d5dd); border-radius: 4px; background: var(--card-bg, #fff); display: inline-flex; align-items: center; justify-content: center; }
   .icon-button:disabled { opacity: .45; cursor: not-allowed; }
 </style>
