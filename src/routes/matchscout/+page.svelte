@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte';
+  import ScoutingComparison from '$lib/components/ScoutingComparison.svelte';
   import RebuiltFieldMap from '$lib/components/RebuiltFieldMap.svelte';
   import { BALL_COUNT_RANGES, MATCH_FORM_RATING_FIELDS, MATCH_OPTIONAL_RATING_FIELDS, MATCH_FORM_ROLES as TELEOP_ROLES, AUTO_FUEL_SOURCES, ACCURACY_LABELS, BPS_LABELS, validateMatchScoutForm, parseAutoPointsEstimate } from '$lib/matchScouting.js';
   import { userProfile } from '$lib/stores/auth.js';
@@ -59,6 +60,10 @@
   let reportsLoading = false;
   let reportsError = '';
   let reportFilter = '';
+  let comparisonData = null;
+  let comparisonLoading = false;
+  let comparisonError = '';
+  let comparisonRequest = 0;
   let eventKey = '';
   let eventTeams = [];
   let saving = false;
@@ -295,6 +300,30 @@
     finally { reportsLoading = false; }
   }
 
+  async function compareReport(entry, runId = '') {
+    const requestId = ++comparisonRequest;
+    comparisonLoading = true;
+    comparisonError = '';
+    // Keep the header tied to the report being loaded, including empty/error states.
+    if (comparisonData?.manual?.id !== entry.id) comparisonData = { manual: entry, matches: [], runs: [], run: null, observations: [], tracks: [] };
+    try {
+      const params = new URLSearchParams({ report_id: entry.id });
+      if (runId) params.set('run_id', runId);
+      const response = await fetch(`/api/matchscout/comparison?${params}`, { headers: await getAuthHeader() });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || 'Could not load comparison.');
+      if (requestId === comparisonRequest) comparisonData = result.data;
+    } catch (exception) { if (requestId === comparisonRequest) comparisonError = exception.message; }
+    finally { if (requestId === comparisonRequest) comparisonLoading = false; }
+  }
+
+  function closeComparison() {
+    comparisonRequest += 1;
+    comparisonData = null;
+    comparisonLoading = false;
+    comparisonError = '';
+  }
+
   async function editReport(entry) {
     reportsLoading = true;
     reportsError = '';
@@ -443,24 +472,29 @@
   </header>
 
   <div class="report-actions">
-    <button class="btn btn-secondary" disabled={saving || reportsLoading} on:click={() => { showReports = !showReports; if (showReports) loadMyReports(); }}>My reports</button>
+    <button class="btn btn-secondary" disabled={saving || reportsLoading} on:click={() => { closeComparison(); showReports = !showReports; if (showReports) loadMyReports(); }}>My reports</button>
     {#if editing && !submitted}<span>Editing saved report. Save changes when finished.</span><button class="btn" disabled={saving} on:click={nextAssignment}>New assignment</button>{/if}
   </div>
   {#if showReports}
+    {#if comparisonData}
+      <ScoutingComparison data={comparisonData} loading={comparisonLoading} error={comparisonError} onClose={closeComparison} onRunChange={runId => compareReport(comparisonData.manual, runId)} onRefresh={() => compareReport(comparisonData.manual, comparisonData.run?.id || '')} />
+    {:else}
     <section class="card report-history" aria-label="My submitted scouting reports">
       <h2>Teams you’ve scouted</h2>
-      <p>Your match reports for {eventKey || 'the active event'}. Choose a report to edit its answers.</p>
+      <p>Your match reports for {eventKey || 'the active event'}. Choose a report to edit its answers or compare it with vision scouting.</p>
       <label>Find a team or match<input class="form-input" bind:value={reportFilter} placeholder="Team number or match" /></label>
       {#if reportsError}<p role="alert">{reportsError}</p>{/if}
       {#if reportsLoading}<p>Loading reports...</p>
       {:else}
         {#each myReports.filter(entry => `${entry.team_key} ${entry.match_key}`.toLowerCase().includes(reportFilter.trim().toLowerCase())) as entry (entry.id)}
-          <div class="report-row"><span>Team {entry.team_key.replace(/^frc/, '')} · Match {entry.match_key}</span><button class="btn btn-secondary" on:click={() => editReport(entry)}>Edit answers</button></div>
+          <div class="report-row"><span>Team {entry.team_key.replace(/^frc/, '')} · Match {entry.match_key}</span><div class="report-row-actions"><button class="btn btn-secondary" on:click={() => compareReport(entry)}>Compare</button><button class="btn btn-secondary" on:click={() => editReport(entry)}>Edit answers</button></div></div>
         {:else}<p>{myReports.length ? 'No reports match your search.' : 'You haven’t submitted any match reports for this event yet.'}</p>{/each}
       {/if}
     </section>
+    {/if}
   {/if}
 
+  {#if !comparisonData}
   <div class="scouting-shell">
     <aside class="stage-nav" aria-label="Match scouting stages">
       <button class:active={phase === 'prematch'} on:click={() => selectPhase('prematch')}><MapPinned size={18} /><span>Pre-match</span><small>01</small></button>
@@ -767,9 +801,11 @@
       {/if}
     </section>
   </div>
+  {/if}
 </main>
 
 <style>
+  .report-row-actions { display:flex; flex-wrap:wrap; gap:var(--space-2); }
   .report-actions { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-3); margin-bottom:var(--space-3); }
   .report-history { padding:var(--space-4); margin-bottom:var(--space-4); }
   .report-row { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:var(--space-2); padding:var(--space-2) 0; }
