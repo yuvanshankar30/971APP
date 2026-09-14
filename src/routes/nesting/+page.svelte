@@ -11,7 +11,7 @@
   import { Plus, Save, Undo2, Redo2, RotateCw, RotateCcw, Download, Upload, Crosshair, MousePointer2, FolderOpen, Search, RefreshCw, Ruler, FileCode, Trash2, Copy, Settings, X, Pencil, ExternalLink } from 'lucide-svelte';
   import { listSheets, createSheet, getSheet, deleteSheet, savePlacements, createCut, renameCut, deleteCut, setActiveCut, setSheetProgramType, recordEmission } from '$lib/nesting/db.js';
   import { listPartsLibrary, listPartLibraryAtPath, sheetPartLibraryRoot, uploadPartFile, downloadText, uploadEmittedGcode } from '$lib/nesting/storage.js';
-  import { clampPlacementToSheet, makePlacement, placementContains, sheetContains, rotatePlacement } from '$lib/nesting/sheetModel.js';
+  import { clampPlacementToSheet, makePlacement, placementContains, placementHasEdgeClearance, sheetContains, rotatePlacement } from '$lib/nesting/sheetModel.js';
   import { screenToSheet, sheetToScreen, zoomAt } from '$lib/nesting/coords.js';
   import { createUndoStack } from '$lib/nesting/undoStack.js';
   import { parseGcodeDocument } from '$lib/nesting/gcodeDocument.js';
@@ -27,6 +27,7 @@
   let sheetSearch = '', librarySearch = '', measure = [], measuring = false, emitName = '', emitSuffix = '', emitCutId = null, selectedProgram = null, editingCutName = false, cutName = '';
   const CUT_COLORS = ['#f59e0b', '#22c55e', '#f43f5e', '#e879f9', '#facc15', '#2dd4bf', '#fb923c', '#a3e635'];
   const ROTATION_DRAG_SENSITIVITY = .35;
+  const HOLE_EDGE_CLEARANCE_IN = .05;
   const JPROG_OUTPUT_REPOSITORY = 'https://github.com/yuvanshankar30/output';
   $: selected = placements.find((item) => item.id === selectedId) || null;
   $: activeCut = sheet?.nesting_cuts?.find((cut) => cut.id === activeCutId) || null;
@@ -293,7 +294,11 @@
       }
     }
     if (placing) {
-      const item = clampPlacementToSheet(sheet, makePlacement({ ...placing, x: point.x, y: point.y }));
+      const candidate = makePlacement({ ...placing, x: point.x, y: point.y });
+      if (candidate.kind === 'hole' && !placementHasEdgeClearance(sheet, candidate, HOLE_EDGE_CLEARANCE_IN)) {
+        return toastActions.show('Holes need clearance from every sheet edge');
+      }
+      const item = clampPlacementToSheet(sheet, candidate);
       if (!item) return toastActions.show('This part is larger than the selected sheet');
       commit([...placements, item]); selectedId = item.id; return;
     }

@@ -7,7 +7,8 @@ export function rotatePlacement(placement, quarterTurns = 1) {
 }
 
 export function placementBounds(placement) {
-  const c = Math.abs(Math.cos(placement.rotation)), s = Math.abs(Math.sin(placement.rotation));
+  const rotation = Number(placement.rotation) || 0;
+  const c = Math.abs(Math.cos(rotation)), s = Math.abs(Math.sin(rotation));
   const halfWidth = (c * placement.width_in + s * placement.height_in) / 2;
   const halfHeight = (s * placement.width_in + c * placement.height_in) / 2;
   return { left: placement.x - halfWidth, right: placement.x + halfWidth, bottom: placement.y - halfHeight, top: placement.y + halfHeight };
@@ -23,6 +24,11 @@ export function placementContains(placement, x, y) {
 export function sheetContains(sheet, placement) {
   const bounds = placementBounds(placement);
   return bounds.left >= 0 && bounds.bottom >= 0 && bounds.right <= Number(sheet.width_in) && bounds.top <= Number(sheet.height_in);
+}
+
+export function placementHasEdgeClearance(sheet, placement, clearance = 0) {
+  const bounds = placementBounds(placement), margin = Number(clearance) || 0;
+  return bounds.left > margin && bounds.bottom > margin && bounds.right < Number(sheet.width_in) - margin && bounds.top < Number(sheet.height_in) - margin;
 }
 
 export function clampPlacementToSheet(sheet, placement) {

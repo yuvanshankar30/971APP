@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildEmitFilename } from './emitFilename.js';
 import { emitNestingGcode } from './gcodeEmit.js';
-import { clampPlacementToSheet, placementContains, rotatePlacement, sheetContains } from './sheetModel.js';
+import { clampPlacementToSheet, placementContains, placementHasEdgeClearance, rotatePlacement, sheetContains } from './sheetModel.js';
 import { screenToSheet, sheetToScreen, zoomAt } from './coords.js';
 import { createUndoStack } from './undoStack.js';
 import { emittedGcodePath, sheetPartLibraryRoot } from './storage.js';
@@ -39,6 +39,11 @@ describe('nesting geometry', () => {
   });
   it('rejects only a placement that is larger than the sheet itself', () => {
     expect(clampPlacementToSheet({ width_in: 4, height_in: 4 }, { x: 2, y: 2, width_in: 5, height_in: 1, rotation: 0 })).toBeNull();
+  });
+  it('requires holes to stay clear of sheet edges', () => {
+    const sheet = { width_in: 48, height_in: 24 };
+    expect(placementHasEdgeClearance(sheet, { x: .15, y: 12, width_in: .3, height_in: .3 })).toBe(false);
+    expect(placementHasEdgeClearance(sheet, { x: .25, y: 12, width_in: .3, height_in: .3 }, .05)).toBe(true);
   });
 });
 
