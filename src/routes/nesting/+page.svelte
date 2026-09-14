@@ -23,7 +23,7 @@
   let canvas, ctx, canvasResizeObserver, sheets = [], sheet = null, placements = [], selectedId = null, loading = true, saving = false;
   let screen = forcedScreen || 'select', view = { scale: 28, originX: 80, originY: 520 }, drag = null, rotationDrag = null, rotationAnimationFrame = null, placing = null, activePart = null, placingWithShortcut = false;
   let undo = createUndoStack([]), gcodePrograms = {}, partGroups = [], newSheet = { name: '', width: 48, height: 30, thickness: '0.125' };
-  let showNewSheet = false, showLibrary = true, showEmit = false, showProgram = false, activeCutId = null, user = null, loadError = '';
+  let showNewSheet = false, showLibrary = true, showEmit = false, showProgram = false, committingGcode = false, activeCutId = null, user = null, loadError = '';
   let sheetSearch = '', librarySearch = '', measure = [], measuring = false, emitName = '', emitSuffix = '', selectedProgram = null, editingCutName = false, cutName = '';
   const CUT_COLORS = ['#f59e0b', '#22c55e', '#f43f5e', '#e879f9', '#facc15', '#2dd4bf', '#fb923c', '#a3e635'];
   const JPROG_OUTPUT_REPOSITORY = 'https://github.com/yuvanshankar30/output';
@@ -90,7 +90,8 @@
     if (screen === 'select' && !sheet) { await goto(`/jprog/sheets/${id}`, { noScroll: true }); return; }
     sheet = await getSheet(id); activeCutId = sheet.active_cut_id || sheet.nesting_cuts?.[0]?.id;
     placements = structuredClone(sheet.nesting_cuts?.find(c => c.id === activeCutId)?.nesting_placements || []);
-    undo = createUndoStack(placements); selectedId = null; screen = 'edit'; emitName = sheet.name; await tick(); observeCanvas(); fitView(); await loadLibrary(); await loadPlacedPrograms(); await tick(); fitView(); draw(); requestAnimationFrame(() => { fitView(); draw(); });
+    undo = createUndoStack(placements); selectedId = null; screen = 'edit'; emitName = sheet.name; await tick(); observeCanvas(); fitView(); await loadLibrary(); await loadPlacedPrograms(placements); await tick(); fitView(); draw(); requestAnimationFrame(() => { fitView(); draw(); });
+    void loadPlacedPrograms(renderedPlacements.filter(item => !item.renderActive)).then(draw);
     if (!forcedScreen && $page.url.pathname !== `/jprog/sheets/${id}`) goto(`/jprog/sheets/${id}`, { replaceState: true, keepFocus: true, noScroll: true });
   }
   function observeCanvas() {
@@ -169,8 +170,12 @@
     const primary = variants[0], bounds = variants.reduce((largest, item) => item.bounds.width * item.bounds.height > largest.width * largest.height ? item.bounds : largest, primary.bounds);
     return { variants, bounds };
   }
-  async function loadPlacedPrograms() {
-    await Promise.all(renderedPlacements.filter(item => item.kind === 'part' && !gcodePrograms[item.part_library_path]).map(async item => {
+  async function loadPlacedPrograms(items = renderedPlacements) {
+    const missingPrograms = new Map();
+    for (const item of items) {
+      if (item.kind === 'part' && item.part_library_path && !gcodePrograms[item.part_library_path]) missingPrograms.set(item.part_library_path, item);
+    }
+    await Promise.all([...missingPrograms.values()].map(async item => {
       let group = partGroups.find(candidate => candidate.key === item.part_library_path);
       if (!group && item.part_library_path) {
         try {
@@ -336,7 +341,15 @@
       results.forEach(downloadEmission); showEmit = false; toastActions.show(`Downloaded ${results.length} G-code file${results.length === 1 ? '' : 's'}`);
     } catch (error) { toastActions.show(error.message); }
   }
+  async function closeEmitAfterCommit() {
+    const scrim = document.querySelector('.scrim');
+    scrim?.classList.add('emit-success-close');
+    await new Promise(resolve => setTimeout(resolve, 190));
+    showEmit = false;
+  }
   async function commitGcode() {
+    if (committingGcode) return;
+    committingGcode = true;
     try {
       const results = await buildEmissions();
       if (!results.length) throw new Error('No placed item has a program for the selected suffix.');
@@ -345,8 +358,8 @@
         await publishJprogOutput(path, result.text);
         await recordEmission({ cut_id: activeCutId, suffix: result.suffix || '', dialect, output_storage_path: path, tool_order: [] });
       }
-      showEmit = false; toastActions.show(`Committed ${results.length} G-code file${results.length === 1 ? '' : 's'} to output`);
-    } catch (error) { toastActions.show(error.message); }
+      await closeEmitAfterCommit(); toastActions.show(`Committed ${results.length} G-code file${results.length === 1 ? '' : 's'} to output`);
+    } catch (error) { toastActions.show(error.message); } finally { committingGcode = false; }
   }
 </script>
 
@@ -426,4 +439,8 @@
   .library button { min-height: 40px; white-space: normal; overflow-wrap: anywhere; line-height: 1.25; align-items: center; }
   /* The part library is the primary placement surface, so keep it visible. */
   aside section:nth-child(3) .row button:first-child { outline: 2px solid var(--primary, #2563eb); outline-offset: -2px; }
+  .emit-success-close { pointer-events: none; animation: emit-scrim-out 190ms ease forwards; }
+  .emit-success-close .modal { animation: emit-modal-out 190ms cubic-bezier(.4,0,.2,1) forwards; }
+  @keyframes emit-scrim-out { to { opacity: 0; } }
+  @keyframes emit-modal-out { to { opacity: 0; transform: translateY(-12px) scale(.96); } }
 </style>
