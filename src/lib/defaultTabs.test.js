@@ -93,6 +93,7 @@ describe('defaultHeaderTabs', () => {
   it('places JProg immediately above Files in the Manufacturing folder', () => {
     const keys = manufacturingChildren(defaultHeaderTabs()).map((child) => child.key);
     expect(keys.indexOf('jprog')).toBe(keys.indexOf('files') - 1);
+    expect(manufacturingChildren(defaultHeaderTabs()).find((child) => child.key === 'jprog').label).toBe('JustinProg');
   });
 
   it('includes Fusion AutoCAM but not the removed legacy AutoCAM tab in the Manufacturing folder', () => {

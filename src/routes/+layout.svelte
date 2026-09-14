@@ -369,7 +369,7 @@
     'cots-stocking': 'COTS Stocking',
     'fusion-autocam': 'Fusion AutoCAM',
     'gcode-converter': 'G-code Converter',
-    jprog: 'JProg',
+    jprog: 'JustinProg',
     files: 'Files',
     admin: 'Admin'
   };

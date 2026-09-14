@@ -8,7 +8,7 @@
   import { canUseNesting } from '$lib/permissions.js';
   import { toastActions } from '$lib/toast.js';
   import { requestConfirmation } from '$lib/confirmation.js';
-  import { Plus, Save, Undo2, Redo2, RotateCw, RotateCcw, Download, Upload, Crosshair, MousePointer2, FolderOpen, Search, RefreshCw, Ruler, FileCode, Trash2, Copy, Settings, X, Pencil } from 'lucide-svelte';
+  import { Plus, Save, Undo2, Redo2, RotateCw, RotateCcw, Download, Upload, Crosshair, MousePointer2, FolderOpen, Search, RefreshCw, Ruler, FileCode, Trash2, Copy, Settings, X, Pencil, ExternalLink } from 'lucide-svelte';
   import { listSheets, createSheet, getSheet, savePlacements, createCut, renameCut, deleteCut, setActiveCut, setSheetProgramType, recordEmission } from '$lib/nesting/db.js';
   import { listPartsLibrary, listPartLibraryAtPath, sheetPartLibraryRoot, uploadPartFile, downloadText, uploadEmittedGcode } from '$lib/nesting/storage.js';
   import { clampPlacementToSheet, makePlacement, placementContains, sheetContains, rotatePlacement } from '$lib/nesting/sheetModel.js';
@@ -26,6 +26,7 @@
   let showNewSheet = false, showLibrary = false, showEmit = false, showProgram = false, activeCutId = null, user = null, loadError = '';
   let sheetSearch = '', measure = [], measuring = false, emitName = '', emitSuffix = '', selectedProgram = null, editingCutName = false, cutName = '';
   const CUT_COLORS = ['#2563eb', '#d97706', '#16a34a', '#9333ea', '#dc2626', '#0891b2', '#ca8a04', '#db2777'];
+  const JPROG_OUTPUT_REPOSITORY = 'https://github.com/yuvanshankar30/output';
   $: selected = placements.find((item) => item.id === selectedId) || null;
   $: activeCut = sheet?.nesting_cuts?.find((cut) => cut.id === activeCutId) || null;
   $: renderedPlacements = (sheet?.nesting_cuts || []).flatMap((cut, cutIndex) => (cut.id === activeCutId ? placements : cut.nesting_placements || []).map((placement) => ({ ...placement, renderCutId: cut.id, renderCutIndex: cutIndex, renderActive: cut.id === activeCutId })));
@@ -51,8 +52,13 @@
     const onKeyUp = (event) => {
       if (event.key.toLowerCase() === 'a' && placingWithShortcut) { placing = null; placingWithShortcut = false; }
     };
+    const clearSelectionOutsideEditor = (event) => {
+      if (screen !== 'edit' || !selectedId || !(event.target instanceof Element)) return;
+      if (!event.target.closest('canvas, aside, .workspace-header, .modal')) selectedId = null;
+    };
     window.addEventListener('keydown', onKey);
     window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('pointerdown', clearSelectionOutsideEditor, true);
     (async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
@@ -68,7 +74,7 @@
         loadError = error?.message || 'Could not load JProg sheets.';
       } finally { loading = false; }
     })();
-    return () => { unsubscribe(); canvasResizeObserver?.disconnect(); window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onKeyUp); };
+    return () => { unsubscribe(); canvasResizeObserver?.disconnect(); window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onKeyUp); window.removeEventListener('pointerdown', clearSelectionOutsideEditor, true); };
   });
 
   async function refreshSheets() { sheets = await listSheets(); }
@@ -258,7 +264,7 @@
   function pointerMove(event) {
     if (rotationDrag) {
       const rect = canvas.getBoundingClientRect(), dx = event.clientX - rect.left - rotationDrag.center.x, dy = event.clientY - rect.top - rotationDrag.center.y;
-      const rotation = Math.atan2(dx, -dy);
+      const rotation = -Math.atan2(dx, -dy);
       placements = placements.map(p => p.id === rotationDrag.id ? { ...p, rotation } : p); draw(); return;
     }
     if (!drag) return;
@@ -317,6 +323,8 @@
 {#if showEmit}<div class="scrim"><form class="modal" on:submit|preventDefault={emit}><button type="button" class="modal-close" title="Close" on:click={() => showEmit = false}><X size={18}/></button><h2>Emit G-code</h2><label>Program name<input bind:value={emitName}/></label><p class="hint">{programType === 'tap' ? 'WinCNC (.tap)' : '971 / LinuxCNC (.ngc)'}</p><fieldset><legend>Program group</legend><label class="radio"><input type="radio" bind:group={emitSuffix} value="all"/> All available groups</label>{#each availableSuffixes as suffix}<label class="radio"><input type="radio" bind:group={emitSuffix} value={suffix}/> {suffix || 'default'}</label>{/each}{#if !availableSuffixes.length}<p class="hint">Add a part or hole before emitting.</p>{/if}</fieldset><div class="row"><button type="button" class="btn btn-secondary" on:click={() => showEmit = false}>Cancel</button><button class="btn btn-primary" disabled={!placements.length || !availableSuffixes.length}>Emit and download</button></div></form></div>{/if}
 {#if showProgram}<div class="scrim"><section class="modal program"><button type="button" class="modal-close" title="Close" on:click={() => showProgram = false}><X size={18}/></button><h2>{selected?.label} programs</h2>{#each selectedProgram?.variants || [] as variant}<details><summary>{variant.name} · {variant.dialect} · {variant.suffix || 'default'}</summary><pre>{variant.source}</pre></details>{/each}</section></div>{/if}
 
+{#if screen === 'edit'}<a class="workspace-output-link btn btn-secondary" href={JPROG_OUTPUT_REPOSITORY} target="_blank" rel="noreferrer"><ExternalLink size={16}/> Open Output Repository</a>{/if}
+
 <style>
   .nesting,.workspace{max-width:1400px;margin:0 auto;padding:28px}.nesting header,.workspace-header,.row{display:flex;align-items:center;justify-content:space-between;gap:12px}.eyebrow{margin:0;color:var(--muted-text,#667085);font-size:.8rem;text-transform:uppercase;letter-spacing:0}.nesting h1,.workspace h1{margin:2px 0;font-size:1.7rem}.settings-panel{max-width:700px;margin-top:24px;padding:20px;border:1px solid var(--border-color,#d0d5dd);border-radius:6px}.settings-panel h2{font-size:1rem;margin:16px 0 4px}.settings-panel h2:first-child{margin-top:0}.settings-panel p,.hint{color:var(--muted-text,#667085);line-height:1.45}.header-actions{display:flex;gap:8px;align-items:center}.jprog-identity{display:grid;gap:8px;justify-items:start}.jprog-identity h1{margin:0}.header-sheet-name{display:grid;gap:2px;text-align:center;color:var(--muted-text,#667085)}.header-sheet-name strong{color:var(--text,#101828);font-size:1rem}.header-sheet-name span{font-size:.8rem}.search{display:flex;margin-top:24px;max-width:540px;align-items:center;gap:8px;border:1px solid var(--border-color,#d0d5dd);padding:8px 10px}.search input{border:0;padding:0;min-width:0;width:100%}.sheet-list{margin-top:14px;display:grid;gap:8px;max-width:720px}.sheet-row{display:flex;justify-content:space-between;gap:12px;text-align:left;padding:16px;border:1px solid var(--border-color,#d0d5dd);background:var(--card-bg,#fff);border-radius:6px}.sheet-row span{color:var(--muted-text,#667085)}.workspace{max-width:none;padding:14px;height:calc(100vh - 70px);display:flex;flex-direction:column}.workspace-header{padding:0 4px 14px;border-bottom:1px solid var(--border-color,#d0d5dd)}.workspace-body{flex:1;min-height:0;display:grid;grid-template-columns:270px 1fr;margin-top:12px;gap:12px}aside{border:1px solid var(--border-color,#d0d5dd);padding:12px;overflow:auto}aside section{display:grid;gap:9px;padding:12px 0;border-bottom:1px solid var(--border-color,#d0d5dd)}aside h2{font-size:1rem;margin:0}.sheet-specs{display:grid;gap:2px;color:var(--muted-text,#667085);font-size:.85rem}.sheet-specs strong{color:var(--text,#101828)}.library{display:grid;gap:4px;max-height:190px;overflow:auto}.library button{padding:7px;text-align:left;border:1px solid var(--border-color,#d0d5dd);background:var(--card-bg,#fff);display:flex;justify-content:space-between;transition:transform .16s ease,box-shadow .16s ease,border-color .16s ease}.library button:hover,.library button:focus-visible{transform:translateX(3px);border-color:var(--primary,#2563eb);box-shadow:0 3px 10px #10182822;outline:none}.canvas-wrap{position:relative;min-height:0;background:#000;border:1px solid #344054;overflow:hidden}canvas{width:100%;height:100%;touch-action:none}.canvas-status{position:absolute;bottom:12px;left:12px;color:#fff;background:#101828d9;padding:7px 10px;display:flex;gap:7px;font-size:.8rem}.btn,.text-button{display:inline-flex;align-items:center;justify-content:center;gap:7px}.text-button{border:0;background:none;color:var(--primary,#2563eb);justify-content:start;padding:2px}.upload input{display:none}.active{outline:2px solid var(--primary,#2563eb)}.danger{color:#b42318}.selection-actions{display:grid;gap:6px}.selection-actions .btn{justify-content:flex-start}label{display:grid;gap:5px;font-size:.85rem}input,select{padding:8px;border:1px solid var(--border-color,#d0d5dd);border-radius:4px;background:var(--card-bg,#fff);color:inherit}.coordinate-grid,.two{display:grid;grid-template-columns:1fr 1fr;gap:8px}.scrim{position:fixed;inset:0;background:#10182899;display:grid;place-items:center;z-index:10}.modal{position:relative;background:var(--card-bg,#fff);padding:22px;width:min(460px,calc(100vw - 32px));display:grid;gap:14px;border-radius:8px;max-height:calc(100vh - 32px);overflow:auto}.modal h2{margin:0}.modal-close{position:absolute;right:12px;top:12px;border:0;background:none;color:inherit}.modal fieldset{display:grid;gap:8px;border:1px solid var(--border-color,#d0d5dd)}.radio{display:flex;align-items:center;gap:8px}.radio input{padding:0}.program{width:min(900px,calc(100vw - 32px))}.program details{border:1px solid var(--border-color,#d0d5dd);padding:8px}.program pre{white-space:pre;overflow:auto;max-height:320px;font-size:.75rem}@media(max-width:720px){.workspace{height:auto;min-height:100vh;padding:10px}.workspace-body{grid-template-columns:1fr;grid-template-rows:auto 65vh}.workspace-header{align-items:flex-start}.header-actions{flex-wrap:wrap;justify-content:end}.nesting,.workspace{padding:16px}.sheet-row{display:grid;gap:4px}.canvas-status{max-width:calc(100% - 24px)}}
 
@@ -352,6 +360,7 @@
   label.radio { display: grid !important; grid-template-columns: 24px minmax(0, 1fr); align-items: center; gap: 8px; }
   label.radio input { grid-column: 1; margin: 0; }
   .workspace-header .header-actions { flex-wrap: nowrap; margin-left: auto; }
+  .workspace-output-link { position: fixed; right: 16px; bottom: 16px; z-index: 3; }
   @media (max-width: 900px) { .workspace-header .header-actions { flex-wrap: wrap; } }
   .icon-button { width: 2rem; height: 2rem; padding: 0; border: 1px solid var(--border-color, #d0d5dd); border-radius: 4px; background: var(--card-bg, #fff); display: inline-flex; align-items: center; justify-content: center; }
   .icon-button:disabled { opacity: .45; cursor: not-allowed; }
