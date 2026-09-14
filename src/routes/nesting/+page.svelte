@@ -25,7 +25,7 @@
   let undo = createUndoStack([]), gcodePrograms = {}, partGroups = [], newSheet = { name: '', width: 48, height: 30, thickness: '0.125' };
   let showNewSheet = false, showLibrary = true, showEmit = false, showProgram = false, activeCutId = null, user = null, loadError = '';
   let sheetSearch = '', librarySearch = '', measure = [], measuring = false, emitName = '', emitSuffix = '', selectedProgram = null, editingCutName = false, cutName = '';
-  const CUT_COLORS = ['#2563eb', '#d97706', '#16a34a', '#9333ea', '#dc2626', '#0891b2', '#ca8a04', '#db2777'];
+  const CUT_COLORS = ['#f59e0b', '#22c55e', '#f43f5e', '#e879f9', '#facc15', '#2dd4bf', '#fb923c', '#a3e635'];
   const JPROG_OUTPUT_REPOSITORY = 'https://github.com/yuvanshankar30/output';
   $: selected = placements.find((item) => item.id === selectedId) || null;
   $: activeCut = sheet?.nesting_cuts?.find((cut) => cut.id === activeCutId) || null;
@@ -259,7 +259,7 @@
   }
   function rotationHandlePoint(placement) {
     const center = sheetToScreen(placement, view);
-    const radius = Math.max(34, placement.height_in * view.scale / 2 + 24);
+    const radius = Math.min(64, Math.max(30, placement.height_in * view.scale / 2 + 14));
     return { center, radius, handle: { x: center.x, y: center.y - radius } };
   }
   function pointerDown(event) {
