@@ -9,13 +9,14 @@
   import { toastActions } from '$lib/toast.js';
   import { requestConfirmation } from '$lib/confirmation.js';
   import { Plus, Save, Undo2, Redo2, RotateCw, RotateCcw, Download, Upload, Crosshair, MousePointer2, FolderOpen, Search, RefreshCw, Ruler, FileCode, Trash2, Copy, Settings, X } from 'lucide-svelte';
-  import { listSheets, createSheet, getSheet, savePlacements, createCut, setActiveCut, recordEmission } from '$lib/nesting/db.js';
+  import { listSheets, createSheet, getSheet, savePlacements, createCut, setActiveCut, setSheetProgramType, recordEmission } from '$lib/nesting/db.js';
   import { listPartsLibrary, uploadPartFile, downloadText, uploadEmittedGcode } from '$lib/nesting/storage.js';
   import { clampPlacementToSheet, makePlacement, placementContains, sheetContains, rotatePlacement } from '$lib/nesting/sheetModel.js';
   import { screenToSheet, sheetToScreen, zoomAt } from '$lib/nesting/coords.js';
   import { createUndoStack } from '$lib/nesting/undoStack.js';
   import { parseGcodeDocument } from '$lib/nesting/gcodeDocument.js';
   import { emitNestingGcode } from '$lib/nesting/gcodeEmit.js';
+  import { assertProgramTypeCompatible, dialectForProgramType, programTypeForName, singleProgramType } from '$lib/nesting/programType.js';
 
   export let forcedScreen = null;
   export let sheetId = null;
@@ -23,7 +24,7 @@
   let screen = forcedScreen || 'select', view = { scale: 28, originX: 80, originY: 520 }, drag = null, placing = null, activePart = null, placingWithShortcut = false;
   let undo = createUndoStack([]), gcodePrograms = {}, partGroups = [], newSheet = { name: '', width: 48, height: 30, thickness: '0.125' };
   let showNewSheet = false, showLibrary = false, showEmit = false, showProgram = false, activeCutId = null, user = null, loadError = '';
-  let sheetSearch = '', measure = [], measuring = false, dialect = 'linuxcnc', emitName = '', emitSuffix = '', selectedProgram = null;
+  let sheetSearch = '', measure = [], measuring = false, emitName = '', emitSuffix = '', selectedProgram = null;
   $: selected = placements.find((item) => item.id === selectedId) || null;
   $: activeCut = sheet?.nesting_cuts?.find((cut) => cut.id === activeCutId) || null;
   $: visibleSheets = sheets.filter(item => item.name.toLowerCase().includes(sheetSearch.trim().toLowerCase()));
@@ -31,6 +32,8 @@
     ...(placements.some(item => item.kind === 'hole') ? ['holes'] : []),
     ...placements.flatMap(item => gcodePrograms[item.part_library_path]?.variants?.map(variant => variant.suffix) || partGroups.find(group => group.key === item.part_library_path)?.suffixes || [])
   ])].sort();
+  $: programType = sheet?.program_extension || 'ngc';
+  $: dialect = dialectForProgramType(programType);
 
   onMount(() => {
     const unsubscribe = userStore.subscribe(value => user = value);
@@ -103,12 +106,13 @@
         const key = `Nesting Parts Library/${folder}`;
         const isUuidFolder = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(folder);
         const fileStem = item.name.replace(/\.[^.]+$/, ''), label = isUuidFolder ? fileStem.replace(/_[^_]+$/, '') : folder;
-        if (!groups.has(key)) groups.set(key, { key, label, files: [], suffixes: [] });
+        if (!groups.has(key)) groups.set(key, { key, label, files: [], suffixes: [], programTypes: new Set() });
         groups.get(key).files.push(item);
+        groups.get(key).programTypes.add(programTypeForName(item.name));
         const stem = item.name.replace(/\.[^.]+$/, ''), suffixIndex = stem.lastIndexOf('_');
         groups.get(key).suffixes.push(suffixIndex === -1 ? '' : stem.slice(suffixIndex + 1).toLowerCase());
       }
-      partGroups = [...groups.values()].sort((a, b) => a.label.localeCompare(b.label));
+      partGroups = [...groups.values()].map(({ programTypes, ...group }) => ({ ...group, programType: programTypes.size === 1 ? [...programTypes][0] : null })).sort((a, b) => a.label.localeCompare(b.label));
     } catch { partGroups = []; }
   }
   async function readPartGroup(group) {
@@ -125,6 +129,9 @@
   }
   async function armStoredPart(group) {
     try {
+      const type = group.programType || singleProgramType(group.files.map(file => file.name));
+      assertProgramTypeCompatible(sheet?.program_extension, type);
+      if (!sheet?.program_extension && type) { await setSheetProgramType(sheet.id, type); sheet = { ...sheet, program_extension: type }; }
       const program = await readPartGroup(group); gcodePrograms[group.key] = program;
       activePart = { label: group.label, part_library_path: group.key, width_in: program.bounds.width, height_in: program.bounds.height };
       placing = { ...activePart }; placingWithShortcut = false;
@@ -133,6 +140,11 @@
   }
   async function uploadParts(event) {
     const files = [...(event.currentTarget.files || [])]; if (!files.length) return;
+    let type;
+    try {
+      type = singleProgramType(files.map(file => file.name));
+      assertProgramTypeCompatible(sheet?.program_extension, type);
+    } catch (error) { toastActions.show(error.message); event.currentTarget.value = ''; return; }
     const firstStem = files[0].name.replace(/\.[^.]+$/, '');
     const partName = firstStem.replace(/_[^_]+$/, '') || firstStem;
     try {
@@ -140,6 +152,7 @@
       const variants = await Promise.all(files.map(async file => parseGcodeDocument(await file.text(), file.name)));
       const primary = variants[0], bounds = variants.reduce((largest, item) => item.bounds.width * item.bounds.height > largest.width * largest.height ? item.bounds : largest, primary.bounds);
       const key = `Nesting Parts Library/${partName}`; gcodePrograms[key] = { variants, bounds };
+      if (!sheet?.program_extension && type) { await setSheetProgramType(sheet.id, type); sheet = { ...sheet, program_extension: type }; }
       activePart = { label: partName, part_library_path: key, width_in: bounds.width, height_in: bounds.height };
       placing = { ...activePart }; placingWithShortcut = false;
       await loadLibrary(); toastActions.show(`Uploaded ${files.length} program${files.length === 1 ? '' : 's'}; click the sheet to place it`);
@@ -244,7 +257,7 @@
   <section class="canvas-wrap"><canvas bind:this={canvas} on:pointerdown={pointerDown} on:pointermove={pointerMove} on:pointerup={pointerUp} on:pointerleave={pointerUp} on:wheel={wheel}></canvas><div class="canvas-status"><MousePointer2 size={15}/> Click to place selected G-code · Esc to finish · Drag to move/pan · Wheel to zoom · R to rotate · Delete to remove</div></section></div></main>
 {/if}
 {#if showNewSheet}<div class="scrim"><form class="modal" on:submit|preventDefault={createNewSheet}><button type="button" class="modal-close" title="Close" on:click={() => showNewSheet = false}><X size={18}/></button><h2>New Sheet</h2><label>Name<input bind:value={newSheet.name} /></label><div class="two"><label>Width (in)<input type="number" min="1" bind:value={newSheet.width}/></label><label>Height (in)<input type="number" min="1" bind:value={newSheet.height}/></label></div><label>Thickness<select bind:value={newSheet.thickness}><option value="0.063">1/16 in</option><option value="0.09">0.090 in</option><option value="0.125">1/8 in</option><option value="0.1875">3/16 in</option><option value="0.25">1/4 in</option><option value="0.3125">5/16 in</option><option value="0.375">3/8 in</option><option value="0.5">1/2 in</option><option value="0.75">3/4 in</option></select></label><div class="row"><button type="button" class="btn btn-secondary" on:click={() => showNewSheet = false}>Cancel</button><button class="btn btn-primary">Create sheet</button></div></form></div>{/if}
-{#if showEmit}<div class="scrim"><form class="modal" on:submit|preventDefault={emit}><button type="button" class="modal-close" title="Close" on:click={() => showEmit = false}><X size={18}/></button><h2>Emit G-code</h2><label>Program name<input bind:value={emitName}/></label><label>Controller<select bind:value={dialect}><option value="linuxcnc">971 / LinuxCNC (.ngc)</option><option value="wincnc">WinCNC (.tap)</option></select></label><fieldset><legend>Program group</legend><label class="radio"><input type="radio" bind:group={emitSuffix} value="all"/> All available groups</label>{#each availableSuffixes as suffix}<label class="radio"><input type="radio" bind:group={emitSuffix} value={suffix}/> {suffix || 'default'}</label>{/each}{#if !availableSuffixes.length}<p class="hint">Add a part or hole before emitting.</p>{/if}</fieldset><div class="row"><button type="button" class="btn btn-secondary" on:click={() => showEmit = false}>Cancel</button><button class="btn btn-primary" disabled={!placements.length || !availableSuffixes.length}>Emit and download</button></div></form></div>{/if}
+{#if showEmit}<div class="scrim"><form class="modal" on:submit|preventDefault={emit}><button type="button" class="modal-close" title="Close" on:click={() => showEmit = false}><X size={18}/></button><h2>Emit G-code</h2><label>Program name<input bind:value={emitName}/></label><p class="hint">{programType === 'tap' ? 'WinCNC (.tap)' : '971 / LinuxCNC (.ngc)'}</p><fieldset><legend>Program group</legend><label class="radio"><input type="radio" bind:group={emitSuffix} value="all"/> All available groups</label>{#each availableSuffixes as suffix}<label class="radio"><input type="radio" bind:group={emitSuffix} value={suffix}/> {suffix || 'default'}</label>{/each}{#if !availableSuffixes.length}<p class="hint">Add a part or hole before emitting.</p>{/if}</fieldset><div class="row"><button type="button" class="btn btn-secondary" on:click={() => showEmit = false}>Cancel</button><button class="btn btn-primary" disabled={!placements.length || !availableSuffixes.length}>Emit and download</button></div></form></div>{/if}
 {#if showProgram}<div class="scrim"><section class="modal program"><button type="button" class="modal-close" title="Close" on:click={() => showProgram = false}><X size={18}/></button><h2>{selected?.label} programs</h2>{#each selectedProgram?.variants || [] as variant}<details><summary>{variant.name} · {variant.dialect} · {variant.suffix || 'default'}</summary><pre>{variant.source}</pre></details>{/each}</section></div>{/if}
 
 <style>
