@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildEmitFilename } from './emitFilename.js';
 import { emitNestingGcode } from './gcodeEmit.js';
-import { placementContains, rotatePlacement, sheetContains } from './sheetModel.js';
+import { clampPlacementToSheet, placementContains, rotatePlacement, sheetContains } from './sheetModel.js';
 import { screenToSheet, sheetToScreen, zoomAt } from './coords.js';
 import { createUndoStack } from './undoStack.js';
 import { emittedGcodePath } from './storage.js';
@@ -20,6 +20,14 @@ describe('nesting geometry', () => {
     expect(item.width_in).toBe(3); expect(item.height_in).toBe(1);
     expect(sheetContains({ width_in: 4, height_in: 4 }, item)).toBe(false);
     expect(placementContains(item, 1, 3)).toBe(true);
+  });
+  it('snaps a valid edge placement inside the stock rather than rejecting it', () => {
+    const result = clampPlacementToSheet({ width_in: 48, height_in: 24 }, { x: 47.9, y: 23.9, width_in: 2, height_in: 2, rotation: 0 });
+    expect(result).toMatchObject({ x: 47, y: 23 });
+    expect(sheetContains({ width_in: 48, height_in: 24 }, result)).toBe(true);
+  });
+  it('rejects only a placement that is larger than the sheet itself', () => {
+    expect(clampPlacementToSheet({ width_in: 4, height_in: 4 }, { x: 2, y: 2, width_in: 5, height_in: 1, rotation: 0 })).toBeNull();
   });
 });
 

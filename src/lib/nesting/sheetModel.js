@@ -25,3 +25,12 @@ export function sheetContains(sheet, placement) {
   const bounds = placementBounds(placement);
   return bounds.left >= 0 && bounds.bottom >= 0 && bounds.right <= Number(sheet.width_in) && bounds.top <= Number(sheet.height_in);
 }
+
+export function clampPlacementToSheet(sheet, placement) {
+  const bounds = placementBounds(placement);
+  const width = Number(sheet.width_in), height = Number(sheet.height_in);
+  if (bounds.right - bounds.left > width || bounds.top - bounds.bottom > height) return null;
+  const dx = Math.max(0, -bounds.left) - Math.max(0, bounds.right - width);
+  const dy = Math.max(0, -bounds.bottom) - Math.max(0, bounds.top - height);
+  return { ...placement, x: placement.x + dx, y: placement.y + dy };
+}

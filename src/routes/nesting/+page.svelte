@@ -10,7 +10,7 @@
   import { Plus, Save, Undo2, Redo2, RotateCw, RotateCcw, Download, Upload, Crosshair, MousePointer2, FolderOpen, Search, RefreshCw, Ruler, FileCode, Trash2, Copy, Settings, X } from 'lucide-svelte';
   import { listSheets, createSheet, getSheet, savePlacements, createCut, setActiveCut, recordEmission } from '$lib/nesting/db.js';
   import { listPartsLibrary, uploadPartFile, downloadText, uploadEmittedGcode } from '$lib/nesting/storage.js';
-  import { makePlacement, placementContains, sheetContains, rotatePlacement } from '$lib/nesting/sheetModel.js';
+  import { clampPlacementToSheet, makePlacement, placementContains, sheetContains, rotatePlacement } from '$lib/nesting/sheetModel.js';
   import { screenToSheet, sheetToScreen, zoomAt } from '$lib/nesting/coords.js';
   import { createUndoStack } from '$lib/nesting/undoStack.js';
   import { parseGcodeDocument } from '$lib/nesting/gcodeDocument.js';
@@ -155,8 +155,8 @@
     const rect = canvas.getBoundingClientRect(), point = screenToSheet({ x: event.clientX - rect.left, y: event.clientY - rect.top }, view);
     if (measuring || event.shiftKey) { measure = measure.length === 1 ? [...measure, point] : [point]; if (measure.length === 2) measuring = false; draw(); return; }
     if ((event.altKey || aHeld) && placing) {
-      const item = makePlacement({ ...placing, x: point.x, y: point.y });
-      if (!sheetContains(sheet, item)) return toastActions.show('Placement must stay on the sheet');
+      const item = clampPlacementToSheet(sheet, makePlacement({ ...placing, x: point.x, y: point.y }));
+      if (!item) return toastActions.show('This part is larger than the selected sheet');
       commit([...placements, item]); selectedId = item.id; return;
     }
     const hit = [...placements].reverse().find(p => placementContains(p, point.x, point.y)); selectedId = hit?.id || null;
