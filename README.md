@@ -114,6 +114,9 @@ browser confirmation or prompt popups.
   the Cloud Run deployment needs access to it. It intentionally has no AutoCAM or Fusion
   Runner connection; its tables and Storage paths are owned by the nesting
   JProg feature and its entry point is the Manufacturing page action.
+  Manual `.ngc` and `.tap` uploads made at the JProg Output root are placed in
+  that day's UTC folder automatically; uploads made inside an existing date
+  folder stay there and are committed to the same GitHub mirror.
   A sheet is locked to either LinuxCNC `.ngc` or WinCNC `.tap` programs on its
   first upload, and emission uses that one corresponding program type.
   Its part programs are isolated in Manufacturing Files under `Nesting Parts
