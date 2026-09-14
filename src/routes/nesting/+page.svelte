@@ -20,7 +20,7 @@
   export let forcedScreen = null;
   export let sheetId = null;
   let canvas, ctx, sheets = [], sheet = null, placements = [], selectedId = null, loading = true, saving = false;
-  let screen = forcedScreen || 'select', view = { scale: 28, originX: 80, originY: 520 }, drag = null, placing = null;
+  let screen = forcedScreen || 'select', view = { scale: 28, originX: 80, originY: 520 }, drag = null, placing = null, activePart = null, placingWithShortcut = false;
   let undo = createUndoStack([]), gcodePrograms = {}, partGroups = [], newSheet = { name: '', width: 48, height: 30, thickness: '0.125' };
   let showNewSheet = false, showLibrary = false, showEmit = false, showProgram = false, activeCutId = null, user = null, loadError = '';
   let sheetSearch = '', measure = [], measuring = false, dialect = 'linuxcnc', emitName = '', emitSuffix = '', selectedProgram = null;
@@ -40,9 +40,14 @@
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') { event.preventDefault(); save(); }
       if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); removeSelected(); }
       if (event.key.toLowerCase() === 'r' && selected) { event.preventDefault(); rotateSelected(); }
+      if (event.key.toLowerCase() === 'a' && activePart) { event.preventDefault(); placing = { ...activePart }; placingWithShortcut = true; }
       if (event.key === 'Escape') { placing = null; measure = []; }
     };
+    const onKeyUp = (event) => {
+      if (event.key.toLowerCase() === 'a' && placingWithShortcut) { placing = null; placingWithShortcut = false; }
+    };
     window.addEventListener('keydown', onKey);
+    window.addEventListener('keyup', onKeyUp);
     (async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
@@ -58,7 +63,7 @@
         loadError = error?.message || 'Could not load JProg sheets.';
       } finally { loading = false; }
     })();
-    return () => { unsubscribe(); window.removeEventListener('keydown', onKey); };
+    return () => { unsubscribe(); window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onKeyUp); };
   });
 
   async function refreshSheets() { sheets = await listSheets(); }
@@ -121,7 +126,8 @@
   async function armStoredPart(group) {
     try {
       const program = await readPartGroup(group); gcodePrograms[group.key] = program;
-      placing = { label: group.label, part_library_path: group.key, width_in: program.bounds.width, height_in: program.bounds.height };
+      activePart = { label: group.label, part_library_path: group.key, width_in: program.bounds.width, height_in: program.bounds.height };
+      placing = { ...activePart }; placingWithShortcut = false;
       showLibrary = false; toastActions.show(`Click the sheet to place ${group.label}. Press Esc when finished.`);
     } catch (error) { toastActions.show(error.message); }
   }
@@ -134,7 +140,8 @@
       const variants = await Promise.all(files.map(async file => parseGcodeDocument(await file.text(), file.name)));
       const primary = variants[0], bounds = variants.reduce((largest, item) => item.bounds.width * item.bounds.height > largest.width * largest.height ? item.bounds : largest, primary.bounds);
       const key = `Nesting Parts Library/${partName}`; gcodePrograms[key] = { variants, bounds };
-      placing = { label: partName, part_library_path: key, width_in: bounds.width, height_in: bounds.height };
+      activePart = { label: partName, part_library_path: key, width_in: bounds.width, height_in: bounds.height };
+      placing = { ...activePart }; placingWithShortcut = false;
       await loadLibrary(); toastActions.show(`Uploaded ${files.length} program${files.length === 1 ? '' : 's'}; click the sheet to place it`);
     } catch (error) { toastActions.show(error.message); }
     event.currentTarget.value = '';
@@ -180,6 +187,7 @@
       commit([...placements, item]); selectedId = item.id; return;
     }
     const hit = [...placements].reverse().find(p => placementContains(p, point.x, point.y)); selectedId = hit?.id || null;
+    if (hit?.kind === 'part') activePart = { kind: hit.kind, label: hit.label, part_library_path: hit.part_library_path, width_in: hit.width_in, height_in: hit.height_in };
     drag = hit ? { id: hit.id, start: point, placement: structuredClone(hit) } : { pan: true, start: { x: event.clientX, y: event.clientY }, view: { ...view } }; draw();
   }
   function pointerMove(event) {
