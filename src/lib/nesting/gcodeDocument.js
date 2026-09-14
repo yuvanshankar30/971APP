@@ -1,6 +1,7 @@
 import { parseGcodeToolpath, toolpathBounds } from './gcodeToolpath.js';
 
-export function detectDialect(gcode) {
+export function detectDialect(gcode, name = '') {
+  if (/\.tap$/i.test(String(name))) return 'wincnc';
   return /\b(?:M32|G22|WinCNC)\b/i.test(gcode) ? 'wincnc' : 'linuxcnc';
 }
 
@@ -26,5 +27,5 @@ export function parseGcodeDocument(text, name = 'program.ngc') {
     layers.get(key).push(raw);
   }
   const source = String(text || ''), toolpath = parseGcodeToolpath(source);
-  return { name, suffix: gcodeSuffix(name), source, dialect: detectDialect(text), bounds: toolpathBounds(toolpath), toolpath, tools: [...tools].map(([number, diameter]) => ({ number, diameter })), layers: [...layers].map(([tool, lines]) => ({ tool, text: lines.join('\n') })) };
+  return { name, suffix: gcodeSuffix(name), source, dialect: detectDialect(text, name), bounds: toolpathBounds(toolpath), toolpath, tools: [...tools].map(([number, diameter]) => ({ number, diameter })), layers: [...layers].map(([tool, lines]) => ({ tool, text: lines.join('\n') })) };
 }

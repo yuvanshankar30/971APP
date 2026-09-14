@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { assertProgramTypeCompatible, dialectForProgramType, programTypeForName, singleProgramType } from './programType.js';
+import { parseGcodeDocument } from './gcodeDocument.js';
 
 describe('JProg program types', () => {
 	it('identifies supported program extensions without case sensitivity', () => {
@@ -15,5 +16,9 @@ describe('JProg program types', () => {
 		expect(() => assertProgramTypeCompatible('tap', 'ngc')).toThrow('uses .tap');
 		expect(dialectForProgramType('tap')).toBe('wincnc');
 		expect(dialectForProgramType('ngc')).toBe('linuxcnc');
+	});
+
+	it('treats .tap inspection programs as ShopSabre WinCNC', () => {
+		expect(parseGcodeDocument('G20\nG00 X0 Y0', 'part.tap').dialect).toBe('wincnc');
 	});
 });
