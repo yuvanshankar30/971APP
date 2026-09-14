@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import { supabase } from '$lib/supabase.js';
-  import { isJprogOutputPath, publishJprogOutput } from '$lib/jprog_output.js';
+  import { isJprogOutputPath, jprogOutputUploadPath, publishJprogOutput } from '$lib/jprog_output.js';
   import { page } from '$app/stores';
   import { toastActions } from '$lib/toast.js';
   import { requestConfirmation } from '$lib/confirmation.js';
@@ -131,7 +131,7 @@
     uploading = true;
     try {
       for (const file of files) {
-        const storagePath = joinPath(currentPath, file.name);
+        const storagePath = jprogOutputUploadPath(currentPath, file.name) || joinPath(currentPath, file.name);
         const { error } = await supabase.storage
           .from(BUCKET)
           .upload(storagePath, file, { upsert: true });

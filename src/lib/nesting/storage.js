@@ -12,6 +12,11 @@ export function sheetPartLibraryRoot(sheetName) {
 
 export async function listPartsLibrary(sheetName) {
   const base = sheetPartLibraryRoot(sheetName);
+  return listPartLibraryAtPath(base);
+}
+
+// Keep old saved placements renderable after the library became sheet-scoped.
+export async function listPartLibraryAtPath(base) {
   const { data, error } = await supabase.storage.from(BUCKET).list(base, { limit: 200, sortBy: { column: 'name', order: 'asc' } });
   if (error) throw error;
   const entries = data || [];
