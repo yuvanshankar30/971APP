@@ -108,7 +108,7 @@ browser confirmation or prompt popups.
   selection/drag/rotation/pan/zoom/undo, and suffix-grouped LinuxCNC or
   WinCNC G-code emission. Emitted programs are stored in the Manufacturing
   Files bucket under `Jprog Output/YYYYMMDD/`, with the date folder created on
-  the first emission that day and the same file committed to the public
+  the first emission that day and the same path committed to the public
   `yuvanshankar30/output` repository via a Supabase Edge Function. Its GitHub
   credential lives only in Supabase function secrets, so neither the browser nor
   the Cloud Run deployment needs access to it. It intentionally has no AutoCAM or Fusion
