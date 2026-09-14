@@ -50,7 +50,7 @@
       if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); removeSelected(); }
       if (event.key.toLowerCase() === 'r' && selected?.kind === 'part') { event.preventDefault(); rotateSelected(); }
       if (event.key.toLowerCase() === 'a' && activePart) { event.preventDefault(); placing = { ...activePart }; placingWithShortcut = true; }
-      if (event.key === 'Escape') { placing = null; measure = []; }
+      if (event.key === 'Escape') { placing = null; measure = []; selectedId = null; draw(); }
     };
     const onKeyUp = (event) => {
       if (event.key.toLowerCase() === 'a' && placingWithShortcut) { placing = null; placingWithShortcut = false; }
