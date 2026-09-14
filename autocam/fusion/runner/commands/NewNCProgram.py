@@ -143,11 +143,25 @@ def export(name, post_processor_path, setup_program_names=None):
         if setup_program_names is None and allSetups.count > 1:
             program_name = f"{program_name}-{index + 1}"
 
+        # Direct instruction: everything AutoCAM posts should be in inches.
+        # Real, confirmed live root cause of a whole class of bugs: this was
+        # hardcoded to MillimetersOutput, so every New Router job posted
+        # through shopsabre.cps came out in millimeters regardless of the
+        # design's own modeling units - shopsabre.cps emits G22 for
+        # millimeters (writeBlock(gUnitModal.format(unit == MM ? 22 : 20))),
+        # and JProg's WinCNC parser has no G22 case at all, aborting the
+        # whole file with "Fatal Error: UnknownGCodeError" the moment an
+        # operator opens it. gcodeUnitConvert.js already patches this up
+        # after the fact at download/export time (JobQueueTab.svelte,
+        # manufacture/+page.svelte) - fixing it here, at the actual source
+        # of every posted program's units, means that downstream patch is
+        # no longer covering for a real gap in what this file asks Fusion
+        # to produce in the first place.
         postProcessInput = adsk.cam.PostProcessInput.create(
             program_name,
             absolutePath,
             folder_path,
-            adsk.cam.PostOutputUnitOptions.MillimetersOutput,
+            adsk.cam.PostOutputUnitOptions.InchesOutput,
         )
         postProcessInput.isOpenInEditor = False
         # Retries first (see _post_process_with_retry); if every attempt
