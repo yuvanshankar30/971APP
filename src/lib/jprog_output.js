@@ -2,9 +2,9 @@ import { PUBLIC_SUPABASE_ANON_KEY, PUBLIC_SUPABASE_URL } from '$env/static/publi
 import { getAuthHeader } from '$lib/supabase.js';
 
 const OUTPUT_ROOT = 'JustinProgOutput';
-const OUTPUT_PATH = /^JustinProgOutput\/\d{8}\/[A-Za-z0-9._-]+\.(?:ngc|tap)$/i;
+const OUTPUT_PATH = /^JustinProgOutput\/\d{8}\/[^/\\\0]+\.(?:ngc|tap)$/i;
 const OUTPUT_FOLDER_PATH = /^JustinProgOutput\/\d{8}$/;
-const OUTPUT_FILENAME = /^[A-Za-z0-9._-]+\.(?:ngc|tap)$/i;
+const OUTPUT_FILENAME = /^[^/\\\0]+\.(?:ngc|tap)$/i;
 
 export function isJprogOutputPath(storagePath) {
 	return OUTPUT_PATH.test(String(storagePath || ''));
@@ -22,7 +22,7 @@ export function jprogOutputUploadPath(currentPath, filename, date = new Date()) 
 	const name = String(filename || '').trim();
 	if (folder !== OUTPUT_ROOT && !OUTPUT_FOLDER_PATH.test(folder)) return null;
 	if (!OUTPUT_FILENAME.test(name)) {
-		throw new Error('JProg Output accepts only .ngc or .tap files with simple names.');
+		throw new Error('JustinProgOutput accepts only .ngc or .tap files without path separators.');
 	}
 	const targetFolder = folder === OUTPUT_ROOT ? `${OUTPUT_ROOT}/${utcDateFolder(date)}` : folder;
 	return `${targetFolder}/${name}`;

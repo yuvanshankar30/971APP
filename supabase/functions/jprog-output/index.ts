@@ -10,7 +10,7 @@ function githubOutputPath(storagePath: unknown) {
   const path = String(storagePath || '');
   if (!path.startsWith(OUTPUT_ROOT)) throw new Error('JProg output must be stored under JustinProgOutput.');
   const repositoryPath = path.slice(OUTPUT_ROOT.length);
-  if (!/^\d{8}\/[A-Za-z0-9._-]+\.(?:ngc|tap)$/i.test(repositoryPath)) throw new Error('Invalid JProg output path.');
+  if (!/^\d{8}\/[^/\\\0]+\.(?:ngc|tap)$/i.test(repositoryPath)) throw new Error('Invalid JProg output path.');
   return path;
 }
 
