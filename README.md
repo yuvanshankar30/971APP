@@ -107,14 +107,14 @@ browser confirmation or prompt popups.
   measurement, reusable click-to-place canvas placement,
   selection/drag/rotation/pan/zoom/undo, and suffix-grouped LinuxCNC or
   WinCNC G-code emission. Emitted programs are stored in the Manufacturing
-  Files bucket under `Jprog Output/YYYYMMDD/`, with the date folder created on
+  Files bucket under `JustinProgOutput/YYYYMMDD/`, with the date folder created on
   the first emission that day and the same path committed to the public
   `yuvanshankar30/output` repository via a Supabase Edge Function. Its GitHub
   credential lives only in Supabase function secrets, so neither the browser nor
   the Cloud Run deployment needs access to it. It intentionally has no AutoCAM or Fusion
   Runner connection; its tables and Storage paths are owned by the nesting
   JProg feature and its entry point is the Manufacturing page action.
-  Manual `.ngc` and `.tap` uploads made at the JProg Output root are placed in
+  Manual `.ngc` and `.tap` uploads made at the JustinProgOutput root are placed in
   that day's UTC folder automatically; uploads made inside an existing date
   folder stay there and are committed to the same GitHub mirror.
   The JProg layout visualizer restores saved part toolpaths, including legacy
@@ -127,6 +127,15 @@ browser confirmation or prompt popups.
   A sheet can contain multiple named cuts: every cut remains visible in its own
   canvas color, while editing and G-code emission apply only to the selected
   cut and its holes.
+- **JustinProgOutput contract**: `JustinProgOutput` is the canonical output root
+  in both the `manufacturing-drive` Storage bucket and the public
+  `yuvanshankar30/output` repository. Every emitted or manually uploaded
+  `.ngc`/`.tap` file is stored as `JustinProgOutput/YYYYMMDD/filename`, using
+  the UTC calendar date. Root uploads are routed into the current date folder;
+  uploads inside an existing date folder remain there. The Supabase
+  `jprog-output` Edge Function authenticates the caller, validates the path and
+  content size, then creates or updates the matching GitHub Contents API path
+  with a commit. The browser never receives the GitHub write token.
 - **Scouting**: pit scouting (a topic-at-a-time form with per-topic
   completion counts, scout/contact attribution, and up to three robot photos,
   built for filling in a noisy pit on a phone while a team answers out of

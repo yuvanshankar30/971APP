@@ -50,8 +50,8 @@ describe('nesting edit history', () => {
 });
 
 describe('nesting emission', () => {
-  it('writes each emission into the Jprog Output folder for its UTC day', () => {
-    expect(emittedGcodePath('nest.ngc', new Date('2026-09-12T18:00:00Z'))).toBe('Jprog Output/20260912/nest.ngc');
+  it('writes each emission into the JustinProgOutput folder for its UTC day', () => {
+    expect(emittedGcodePath('nest.ngc', new Date('2026-09-12T18:00:00Z'))).toBe('JustinProgOutput/20260912/nest.ngc');
   });
 
   it('keeps each sheet part library in its own named folder', () => {

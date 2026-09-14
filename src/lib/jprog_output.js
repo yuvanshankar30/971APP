@@ -1,9 +1,9 @@
 import { PUBLIC_SUPABASE_ANON_KEY, PUBLIC_SUPABASE_URL } from '$env/static/public';
 import { getAuthHeader } from '$lib/supabase.js';
 
-const OUTPUT_ROOT = 'Jprog Output';
-const OUTPUT_PATH = /^Jprog Output\/\d{8}\/[A-Za-z0-9._-]+\.(?:ngc|tap)$/i;
-const OUTPUT_FOLDER_PATH = /^Jprog Output\/\d{8}$/;
+const OUTPUT_ROOT = 'JustinProgOutput';
+const OUTPUT_PATH = /^JustinProgOutput\/\d{8}\/[A-Za-z0-9._-]+\.(?:ngc|tap)$/i;
+const OUTPUT_FOLDER_PATH = /^JustinProgOutput\/\d{8}$/;
 const OUTPUT_FILENAME = /^[A-Za-z0-9._-]+\.(?:ngc|tap)$/i;
 
 export function isJprogOutputPath(storagePath) {
