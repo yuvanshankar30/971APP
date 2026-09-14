@@ -171,6 +171,14 @@
       "workflow": "router"
     },
     {
+      "id": "al_0_09_sheet",
+      "material": "Aluminum",
+      "description": "0.090\" Aluminum Sheet",
+      "thickness": 0.09,
+      "dimensions": "Sheet",
+      "workflow": "router"
+    },
+    {
       "id": "al_3_16_sheet",
       "material": "Aluminum",
       "description": "3/16\" Aluminum Sheet",
