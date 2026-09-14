@@ -4,8 +4,14 @@ const PART_ROOT = 'Nesting Parts Library';
 const OUTPUT_ROOT = 'Jprog Output';
 const clean = (value) => String(value || '').replace(/^\/+|\/+$/g, '');
 
-export async function listPartsLibrary(prefix = PART_ROOT) {
-  const base = clean(prefix);
+export function sheetPartLibraryRoot(sheetName) {
+  const name = clean(sheetName).replaceAll('/', '-');
+  if (!name) throw new Error('Save the sheet with a name before adding part programs.');
+  return `${PART_ROOT}/${name}`;
+}
+
+export async function listPartsLibrary(sheetName) {
+  const base = sheetPartLibraryRoot(sheetName);
   const { data, error } = await supabase.storage.from(BUCKET).list(base, { limit: 200, sortBy: { column: 'name', order: 'asc' } });
   if (error) throw error;
   const entries = data || [];
@@ -16,8 +22,8 @@ export async function listPartsLibrary(prefix = PART_ROOT) {
   }));
   return [...entries.filter((entry) => entry.id !== null).map((file) => ({ ...file, path: `${base}/${file.name}` })), ...nested.flat()];
 }
-export async function uploadPartFile(file, folder) {
-  const path = `${PART_ROOT}/${clean(folder)}/${file.name}`;
+export async function uploadPartFile(file, sheetName, folder) {
+  const path = `${sheetPartLibraryRoot(sheetName)}/${clean(folder)}/${file.name}`;
   const { error } = await supabase.storage.from(BUCKET).upload(path, file, { upsert: true });
   if (error) throw error;
   return path;

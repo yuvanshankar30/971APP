@@ -10,7 +10,7 @@
   import { requestConfirmation } from '$lib/confirmation.js';
   import { Plus, Save, Undo2, Redo2, RotateCw, RotateCcw, Download, Upload, Crosshair, MousePointer2, FolderOpen, Search, RefreshCw, Ruler, FileCode, Trash2, Copy, Settings, X } from 'lucide-svelte';
   import { listSheets, createSheet, getSheet, savePlacements, createCut, setActiveCut, setSheetProgramType, recordEmission } from '$lib/nesting/db.js';
-  import { listPartsLibrary, uploadPartFile, downloadText, uploadEmittedGcode } from '$lib/nesting/storage.js';
+  import { listPartsLibrary, sheetPartLibraryRoot, uploadPartFile, downloadText, uploadEmittedGcode } from '$lib/nesting/storage.js';
   import { clampPlacementToSheet, makePlacement, placementContains, sheetContains, rotatePlacement } from '$lib/nesting/sheetModel.js';
   import { screenToSheet, sheetToScreen, zoomAt } from '$lib/nesting/coords.js';
   import { createUndoStack } from '$lib/nesting/undoStack.js';
@@ -98,12 +98,13 @@
   async function chooseCut(id) { await save(); activeCutId = id; placements = structuredClone(sheet.nesting_cuts.find(c => c.id === id)?.nesting_placements || []); undo = createUndoStack(placements); selectedId = null; await setActiveCut(sheet.id, id); draw(); }
   async function loadLibrary() {
     try {
-      const files = (await listPartsLibrary()).filter(item => /\.(ngc|tap)$/i.test(item.name));
+      const root = sheetPartLibraryRoot(sheet?.name);
+      const files = (await listPartsLibrary(sheet?.name)).filter(item => /\.(ngc|tap)$/i.test(item.name));
       const groups = new Map();
       for (const item of files) {
         const pieces = item.path.split('/');
         const folder = pieces.length > 2 ? pieces.slice(-2, -1)[0] : item.name.replace(/\.[^.]+$/, '');
-        const key = `Nesting Parts Library/${folder}`;
+        const key = `${root}/${folder}`;
         const isUuidFolder = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(folder);
         const fileStem = item.name.replace(/\.[^.]+$/, ''), label = isUuidFolder ? fileStem.replace(/_[^_]+$/, '') : folder;
         if (!groups.has(key)) groups.set(key, { key, label, files: [], suffixes: [], programTypes: new Set() });
@@ -148,10 +149,10 @@
     const firstStem = files[0].name.replace(/\.[^.]+$/, '');
     const partName = firstStem.replace(/_[^_]+$/, '') || firstStem;
     try {
-      await Promise.all(files.map(file => uploadPartFile(file, partName)));
+      await Promise.all(files.map(file => uploadPartFile(file, sheet.name, partName)));
       const variants = await Promise.all(files.map(async file => parseGcodeDocument(await file.text(), file.name)));
       const primary = variants[0], bounds = variants.reduce((largest, item) => item.bounds.width * item.bounds.height > largest.width * largest.height ? item.bounds : largest, primary.bounds);
-      const key = `Nesting Parts Library/${partName}`; gcodePrograms[key] = { variants, bounds };
+      const key = `${sheetPartLibraryRoot(sheet.name)}/${partName}`; gcodePrograms[key] = { variants, bounds };
       if (!sheet?.program_extension && type) { await setSheetProgramType(sheet.id, type); sheet = { ...sheet, program_extension: type }; }
       activePart = { label: partName, part_library_path: key, width_in: bounds.width, height_in: bounds.height };
       placing = { ...activePart }; placingWithShortcut = false;

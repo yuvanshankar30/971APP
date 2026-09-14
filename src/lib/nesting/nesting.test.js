@@ -4,7 +4,7 @@ import { emitNestingGcode } from './gcodeEmit.js';
 import { clampPlacementToSheet, placementContains, rotatePlacement, sheetContains } from './sheetModel.js';
 import { screenToSheet, sheetToScreen, zoomAt } from './coords.js';
 import { createUndoStack } from './undoStack.js';
-import { emittedGcodePath } from './storage.js';
+import { emittedGcodePath, sheetPartLibraryRoot } from './storage.js';
 import { parseGcodeToolpath, toolpathBounds } from './gcodeToolpath.js';
 
 describe('nesting geometry', () => {
@@ -48,6 +48,10 @@ describe('nesting edit history', () => {
 describe('nesting emission', () => {
   it('writes each emission into the Jprog Output folder for its UTC day', () => {
     expect(emittedGcodePath('nest.ngc', new Date('2026-09-12T18:00:00Z'))).toBe('Jprog Output/20260912/nest.ngc');
+  });
+
+  it('keeps each sheet part library in its own named folder', () => {
+    expect(sheetPartLibraryRoot('Drive Side')).toBe('Nesting Parts Library/Drive Side');
   });
   it('prevents suffix filename collisions', () => {
     expect(buildEmitFilename('My Sheet', 'router', 2, '.tap')).toBe('My_Sheet_router.tap');

@@ -116,6 +116,8 @@ browser confirmation or prompt popups.
   JProg feature and its entry point is the Manufacturing page action.
   A sheet is locked to either LinuxCNC `.ngc` or WinCNC `.tap` programs on its
   first upload, and emission uses that one corresponding program type.
+  Its part programs are isolated in Manufacturing Files under `Nesting Parts
+  Library/<sheet name>/`.
 - **Scouting**: pit scouting (a topic-at-a-time form with per-topic
   completion counts, scout/contact attribution, and up to three robot photos,
   built for filling in a noisy pit on a phone while a team answers out of
