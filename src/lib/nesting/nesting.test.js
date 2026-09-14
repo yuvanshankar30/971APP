@@ -61,6 +61,10 @@ describe('nesting emission', () => {
     expect(buildEmitFilename('My Sheet', 'router', 2, '.tap')).toBe('My_Sheet_router.tap');
     expect(buildEmitFilename('My Sheet', 'router', 1, 'tap')).toBe('My_Sheet.tap');
   });
+  it('uses the selected cut label in an emitted filename', () => {
+    const result = emitNestingGcode({ name: 'Main Plate', filenameSuffix: 'Cut 1', suffixCount: 2, placements: [{ label: 'A', x: 2, y: 3, part_library_path: 'a' }], programs: { a: { source: 'G1 X1 Y2\nM30' } } });
+    expect(result.filename).toBe('Main_Plate_Cut_1.ngc');
+  });
   it('translates each placed program and leaves one program terminator', () => {
     const result = emitNestingGcode({ name: 'nest', placements: [{ label: 'A', x: 2, y: 3, part_library_path: 'a' }], programs: { a: { source: 'G1 X1 Y2\nM30' } } });
     expect(result.text).toContain('G1 X2.5000 Y4.0000');

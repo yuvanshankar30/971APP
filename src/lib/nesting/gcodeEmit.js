@@ -50,7 +50,7 @@ function sourceForPlacement(placement, programs, suffix, thickness, dialect) {
   return source ? { source, bounds: candidate.bounds || gcodeBounds(source) } : null;
 }
 
-export function emitNestingGcode({ name, placements, programs, suffix = '', suffixCount = 1, dialect = 'linuxcnc', thickness = '0.125' }) {
+export function emitNestingGcode({ name, placements, programs, suffix = '', filenameSuffix = suffix, suffixCount = 1, dialect = 'linuxcnc', thickness = '0.125' }) {
   const lines = [`(${name} - Sheet Nesting)`, dialect === 'wincnc' ? 'G20' : 'G20 G90'];
   let emitted = 0;
   for (const placement of placements) {
@@ -60,5 +60,5 @@ export function emitNestingGcode({ name, placements, programs, suffix = '', suff
     lines.push(`(Part: ${placement.label})`, ...transformedProgram(program.source, placement, program.bounds));
   }
   lines.push('M30');
-  return { filename: buildEmitFilename(name, suffix, suffixCount, dialect === 'wincnc' ? 'tap' : 'ngc'), text: lines.join('\n') + '\n', emitted };
+  return { filename: buildEmitFilename(name, filenameSuffix, suffixCount, dialect === 'wincnc' ? 'tap' : 'ngc'), text: lines.join('\n') + '\n', emitted };
 }
