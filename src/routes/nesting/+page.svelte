@@ -23,7 +23,7 @@
   let canvas, ctx, canvasResizeObserver, sheets = [], sheet = null, placements = [], selectedId = null, loading = true, saving = false;
   let screen = forcedScreen || 'select', view = { scale: 28, originX: 80, originY: 520 }, drag = null, rotationDrag = null, placing = null, activePart = null, placingWithShortcut = false;
   let undo = createUndoStack([]), gcodePrograms = {}, partGroups = [], newSheet = { name: '', width: 48, height: 30, thickness: '0.125' };
-  let showNewSheet = false, showLibrary = false, showEmit = false, showProgram = false, activeCutId = null, user = null, loadError = '';
+  let showNewSheet = false, showLibrary = true, showEmit = false, showProgram = false, activeCutId = null, user = null, loadError = '';
   let sheetSearch = '', librarySearch = '', measure = [], measuring = false, emitName = '', emitSuffix = '', selectedProgram = null, editingCutName = false, cutName = '';
   const CUT_COLORS = ['#2563eb', '#d97706', '#16a34a', '#9333ea', '#dc2626', '#0891b2', '#ca8a04', '#db2777'];
   const JPROG_OUTPUT_REPOSITORY = 'https://github.com/yuvanshankar30/output';
@@ -42,6 +42,7 @@
 
   onMount(() => {
     const unsubscribe = userStore.subscribe(value => user = value);
+    const keepLibraryOpen = () => { if (screen === 'edit') showLibrary = true; };
     const onKey = (event) => {
       if (screen !== 'edit' || ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return;
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? redoChange() : undoChange(); }
@@ -56,11 +57,16 @@
     };
     const clearSelectionOutsideEditor = (event) => {
       if (screen !== 'edit' || !selectedId || !(event.target instanceof Element)) return;
-      if (!event.target.closest('canvas, aside, .workspace-header, .modal')) selectedId = null;
+      // Canvas hit-testing handles selection changes there. Preserve the
+      // explicit selection controls, but clear it for every other page click.
+      if (event.target.closest('canvas, aside section:has(.selection-actions), .modal')) return;
+      selectedId = null;
+      draw();
     };
     window.addEventListener('keydown', onKey);
     window.addEventListener('keyup', onKeyUp);
     window.addEventListener('pointerdown', clearSelectionOutsideEditor, true);
+    window.addEventListener('click', keepLibraryOpen);
     (async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
@@ -76,7 +82,7 @@
         loadError = error?.message || 'Could not load JProg sheets.';
       } finally { loading = false; }
     })();
-    return () => { unsubscribe(); canvasResizeObserver?.disconnect(); window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onKeyUp); window.removeEventListener('pointerdown', clearSelectionOutsideEditor, true); };
+    return () => { unsubscribe(); canvasResizeObserver?.disconnect(); window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onKeyUp); window.removeEventListener('pointerdown', clearSelectionOutsideEditor, true); window.removeEventListener('click', keepLibraryOpen); };
   });
 
   async function refreshSheets() { sheets = await listSheets(); }
@@ -184,7 +190,7 @@
       const program = await readPartGroup(group); gcodePrograms[group.key] = program;
       activePart = { label: group.label, part_library_path: group.key, width_in: program.bounds.width, height_in: program.bounds.height };
       placing = { ...activePart }; placingWithShortcut = false;
-      showLibrary = false; toastActions.show(`Click the sheet to place ${group.label}. Press Esc when finished.`);
+      toastActions.show(`Click the sheet to place ${group.label}. Press Esc when finished.`);
     } catch (error) { toastActions.show(error.message); }
   }
   async function uploadParts(event) {
@@ -384,7 +390,7 @@
   .workspace-header .jprog-identity { justify-self: start; min-width: 0; }
   .workspace-header .jprog-identity .btn { white-space: nowrap; }
   .workspace-header .header-sheet-name { justify-self: start; text-align: left; padding-top: 2px; }
-  .workspace { position: relative; left: -64px; width: calc(100% + 64px); }
+  .workspace { position: relative; left: -96px; width: calc(100% + 96px); }
   .workspace-body { margin-left: -14px; width: calc(100% + 14px); }
   .workspace-output-link { position: fixed; right: 16px; bottom: 16px; z-index: 3; }
   @media (max-width: 900px) { .workspace-header .header-actions { flex-wrap: wrap; } }
@@ -396,6 +402,8 @@
   .modal select { width: 100%; min-width: 0; box-sizing: border-box; height: 44px; padding: 8px 3rem 8px 12px; line-height: 1.4; white-space: nowrap; text-overflow: clip; appearance: none; -webkit-appearance: none; }
   .library-panel { display: grid; gap: 6px; min-height: 0; }
   .library-search { width: 100%; min-width: 0; box-sizing: border-box; }
-  .library { height: 220px; max-height: 220px; overflow-y: auto; overscroll-behavior: contain; align-content: start; }
+  .library { height: min(220px, 30vh); max-height: min(220px, 30vh); overflow-y: auto; overscroll-behavior: contain; align-content: start; }
   .library button { min-height: 40px; white-space: normal; overflow-wrap: anywhere; line-height: 1.25; align-items: center; }
+  /* The part library is the primary placement surface, so keep it visible. */
+  aside section:nth-child(3) .row button:first-child { outline: 2px solid var(--primary, #2563eb); outline-offset: -2px; }
 </style>
