@@ -383,5 +383,7 @@
   @media (max-width: 900px) { .workspace-header .header-actions { flex-wrap: wrap; } }
   .icon-button { width: 2rem; height: 2rem; padding: 0; border: 1px solid var(--border-color, #d0d5dd); border-radius: 4px; background: var(--card-bg, #fff); display: inline-flex; align-items: center; justify-content: center; }
   .icon-button:disabled { opacity: .45; cursor: not-allowed; }
-  .modal select { width: 100%; min-width: 0; box-sizing: border-box; padding: 8px 3rem 8px 12px; white-space: nowrap; text-overflow: clip; }
+  .modal label:has(> select) { position: relative; }
+  .modal label:has(> select)::after { content: ''; position: absolute; right: 15px; bottom: 15px; width: 8px; height: 8px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(45deg); pointer-events: none; }
+  .modal select { width: 100%; min-width: 0; box-sizing: border-box; height: 44px; padding: 8px 3rem 8px 12px; line-height: 1.4; white-space: nowrap; text-overflow: clip; appearance: none; -webkit-appearance: none; }
 </style>
