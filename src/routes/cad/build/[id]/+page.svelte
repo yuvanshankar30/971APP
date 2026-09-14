@@ -1179,7 +1179,19 @@
             onshape_element_id: item.onshape_element_id || item.onshape_part_studio_element_id || build?.subsystems?.onshape_element_id || null,
             onshape_part_id: item.onshape_part_id || null,
             file_format,
-            is_onshape_part: !!(item.onshape_document_id || item.onshape_part_id)
+            // Real, confirmed live bug: onshape_document_id above falls back
+            // to the BUILD's own subsystem-level document ID, which exists
+            // for nearly every build regardless of whether this specific
+            // part has a real Onshape Part Studio of its own - a manually
+            // attached-STEP part with no onshape_part_id still got
+            // is_onshape_part=true from that build-level fallback alone,
+            // making "View CAD" try a real Onshape lookup (with
+            // onshape_part_id null) instead of rendering the attached STEP
+            // file, and fail with "Could not find Part Studio for this
+            // part." Only a real per-part onshape_part_id - the one ID
+            // Onshape's API actually needs to resolve a specific Part
+            // Studio - means this part truly came from Onshape.
+            is_onshape_part: !!item.onshape_part_id
           };
           const { data, error } = await supabase.from('parts').insert([withOnshape]).select();
           if (error) primaryError = error;
@@ -1199,7 +1211,10 @@
               onshape_element_id: item.onshape_element_id || item.onshape_part_studio_element_id || build?.subsystems?.onshape_element_id || null,
               onshape_part_id: item.onshape_part_id || null,
               file_format,
-              is_onshape_part: !!(item.onshape_document_id || item.onshape_part_id)
+              // See the primary insert's own comment above - only a real
+              // per-part onshape_part_id means this part truly came from
+              // Onshape, not the build-level document fallback alone.
+              is_onshape_part: !!item.onshape_part_id
             };
             const { data, error } = await supabase.from('parts').insert([withOnshapeNoStock]).select();
             if (error) throw error;
