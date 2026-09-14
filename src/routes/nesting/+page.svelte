@@ -225,7 +225,7 @@
     const rect = canvas.getBoundingClientRect(); canvas.width = rect.width * devicePixelRatio; canvas.height = rect.height * devicePixelRatio;
     ctx = canvas.getContext('2d'); ctx.scale(devicePixelRatio, devicePixelRatio); ctx.clearRect(0, 0, rect.width, rect.height);
     const a = sheetToScreen({ x: 0, y: 0 }, view), b = sheetToScreen({ x: Number(sheet.width_in), y: Number(sheet.height_in) }, view);
-    ctx.fillStyle = '#17345f'; ctx.fillRect(a.x, b.y, b.x - a.x, a.y - b.y); ctx.strokeStyle = '#8aa4c7'; ctx.lineWidth = 2; ctx.strokeRect(a.x, b.y, b.x - a.x, a.y - b.y);
+    ctx.strokeStyle = '#f8fafc'; ctx.lineWidth = 2; ctx.strokeRect(a.x, b.y, b.x - a.x, a.y - b.y);
     for (const p of renderedPlacements) {
       const s = sheetToScreen(p, view); ctx.save(); ctx.translate(s.x, s.y); ctx.rotate(-p.rotation);
       const preview = gcodePrograms[p.part_library_path]?.variants?.[0];
@@ -253,7 +253,7 @@
       ctx.beginPath(); ctx.arc(center.x, center.y, radius, 0, Math.PI * 2); ctx.stroke();
       ctx.setLineDash([]); ctx.globalAlpha = 1; ctx.strokeStyle = '#d97706'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.moveTo(center.x, center.y); ctx.lineTo(handle.x, handle.y); ctx.stroke();
-      ctx.fillStyle = '#17345f'; ctx.beginPath(); ctx.arc(center.x, center.y, 5, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = '#fbbf24'; ctx.stroke();
+      ctx.fillStyle = '#000'; ctx.beginPath(); ctx.arc(center.x, center.y, 5, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = '#fbbf24'; ctx.stroke();
       ctx.fillStyle = '#fbbf24'; ctx.beginPath(); ctx.arc(handle.x, handle.y, 9, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = '#7c2d12'; ctx.lineWidth = 2; ctx.stroke();
       ctx.restore();
     }
