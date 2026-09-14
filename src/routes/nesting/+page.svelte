@@ -388,6 +388,6 @@
   .modal select { width: 100%; min-width: 0; box-sizing: border-box; height: 44px; padding: 8px 3rem 8px 12px; line-height: 1.4; white-space: nowrap; text-overflow: clip; appearance: none; -webkit-appearance: none; }
   .library-panel { display: grid; gap: 6px; min-height: 0; }
   .library-search { width: 100%; min-width: 0; box-sizing: border-box; }
-  .library { height: 220px; max-height: 220px; overflow-y: auto; overscroll-behavior: contain; }
-  .library button { min-height: 40px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .library { height: 220px; max-height: 220px; overflow-y: auto; overscroll-behavior: contain; align-content: start; }
+  .library button { min-height: 40px; white-space: normal; overflow-wrap: anywhere; line-height: 1.25; align-items: center; }
 </style>
