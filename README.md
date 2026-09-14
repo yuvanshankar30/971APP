@@ -118,6 +118,9 @@ browser confirmation or prompt popups.
   first upload, and emission uses that one corresponding program type.
   Its part programs are isolated in Manufacturing Files under `Nesting Parts
   Library/<sheet name>/`.
+  A sheet can contain multiple named cuts: every cut remains visible in its own
+  canvas color, while editing and G-code emission apply only to the selected
+  cut and its holes.
 - **Scouting**: pit scouting (a topic-at-a-time form with per-topic
   completion counts, scout/contact attribution, and up to three robot photos,
   built for filling in a noisy pit on a phone while a team answers out of

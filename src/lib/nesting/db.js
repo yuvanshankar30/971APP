@@ -17,6 +17,8 @@ export async function savePlacements(cutId, placements) {
   const { error } = await supabase.from('nesting_placements').insert(rows); fail(error);
 }
 export async function createCut(sheetId, name) { const { data, error } = await supabase.from('nesting_cuts').insert({ sheet_id: sheetId, name }).select().single(); fail(error); return data; }
+export async function renameCut(cutId, name) { const { data, error } = await supabase.from('nesting_cuts').update({ name }).eq('id', cutId).select().single(); fail(error); return data; }
+export async function deleteCut(cutId) { const { error } = await supabase.from('nesting_cuts').delete().eq('id', cutId); fail(error); }
 export async function setActiveCut(sheetId, cutId) { const { error } = await supabase.from('nesting_sheets').update({ active_cut_id: cutId, updated_at: new Date().toISOString() }).eq('id', sheetId); fail(error); }
 export async function setSheetProgramType(sheetId, programType) { const { error } = await supabase.from('nesting_sheets').update({ program_extension: programType, updated_at: new Date().toISOString() }).eq('id', sheetId); fail(error); }
 export async function recordEmission(values) { const { error } = await supabase.from('nesting_emissions').insert(values); fail(error); }
