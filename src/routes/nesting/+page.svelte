@@ -21,7 +21,7 @@
   export let forcedScreen = null;
   export let sheetId = null;
   let canvas, ctx, canvasResizeObserver, sheets = [], sheet = null, placements = [], selectedId = null, loading = true, saving = false;
-  let screen = forcedScreen || 'select', view = { scale: 28, originX: 80, originY: 520 }, drag = null, rotationDrag = null, rotationAnimationFrame = null, placing = null, activePart = null, placingWithShortcut = false;
+  let screen = forcedScreen || 'select', view = { scale: 28, originX: 80, originY: 520 }, drag = null, rotationDrag = null, rotationAnimationFrame = null, rotationKeyHeld = false, placing = null, activePart = null, placingWithShortcut = false;
   let undo = createUndoStack([]), gcodePrograms = {}, partGroups = [], newSheet = { name: '', width: 48, height: 30, thickness: '0.125' };
   let showNewSheet = false, showLibrary = true, showEmit = false, showProgram = false, committingGcode = false, activeCutId = null, user = null, loadError = '';
   let sheetSearch = '', librarySearch = '', measure = [], measuring = false, emitName = '', emitSuffix = '', selectedProgram = null, editingCutName = false, cutName = '';
@@ -48,11 +48,12 @@
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? redoChange() : undoChange(); }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') { event.preventDefault(); save(); }
       if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); removeSelected(); }
-      if (event.key.toLowerCase() === 'r' && selected?.kind === 'part') { event.preventDefault(); rotateSelectedSmoothly(); }
+      if (event.key.toLowerCase() === 'r' && selected?.kind === 'part') { event.preventDefault(); rotationKeyHeld = true; rotateSelectedSmoothly(); }
       if (event.key.toLowerCase() === 'a' && activePart) { event.preventDefault(); placing = { ...activePart }; placingWithShortcut = true; }
       if (event.key === 'Escape') { placing = null; measure = []; selectedId = null; draw(); }
     };
     const onKeyUp = (event) => {
+      if (event.key.toLowerCase() === 'r') rotationKeyHeld = false;
       if (event.key.toLowerCase() === 'a' && placingWithShortcut) { placing = null; placingWithShortcut = false; }
     };
     const clearSelectionOutsideEditor = (event) => {
@@ -311,7 +312,11 @@
       placements = placements.map(item => item.id === id ? { ...item, rotation: startRotation - step * eased } : item);
       draw();
       if (progress < 1) rotationAnimationFrame = requestAnimationFrame(animate);
-      else { rotationAnimationFrame = null; commit(placements); }
+      else {
+        rotationAnimationFrame = null;
+        commit(placements);
+        if (rotationKeyHeld && selected?.id === id) rotateSelectedSmoothly();
+      }
     };
     rotationAnimationFrame = requestAnimationFrame(animate);
   }
