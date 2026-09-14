@@ -11,7 +11,7 @@ from pathlib import Path
 import cv2
 import torch
 from PIL import Image
-from transformers import AutoModelForMultimodalLM, AutoProcessor
+from transformers import Qwen3_5ForConditionalGeneration, AutoProcessor
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "qwen"))
 from qwen_contract import SYSTEM_PROMPT, TASK_PROMPT, normalize_result, parse_json_response
@@ -45,8 +45,8 @@ def parse_args():
 def load_model(model_name: str, revision: str, attention: str):
     if not torch.cuda.is_available():
         raise SystemExit("Full BF16 Qwen3.8-27B inference requires CUDA")
-    model = AutoModelForMultimodalLM.from_pretrained(
-        model_name, device_map="auto", torch_dtype=torch.bfloat16,
+    model = Qwen3_5ForConditionalGeneration.from_pretrained(
+        model_name, device_map="cuda", dtype=torch.bfloat16,
         revision=revision, attn_implementation=attention, low_cpu_mem_usage=True,
     ).eval()
     processor = AutoProcessor.from_pretrained(model_name, revision=revision)

@@ -15,10 +15,19 @@ runner token.
   occlusion instead of splitting it into two unrelated tracks.
 - **Game pieces (fuel)**: *not* a YOLO class - classical HSV color
   thresholding + contour/circularity filtering (`detect_game_pieces`),
-  tracked frame-to-frame (`PieceTracker`), and attributed to a scoring robot
+  tracked with constant-velocity prediction and distance-ordered association
+  (`fuel_tracking.PieceTracker`), and attributed to a scoring robot
   by tracing a piece's trajectory back to its origin and finding the closest
   robot track at that moment (`attribute_scores`) - not whichever robot is
-  nearest the goal when the piece lands.
+  nearest the goal when the piece lands. Robot attribution uses retained pixel
+  centres, never compares ball pixels to calibrated robot metres, and has a
+  distance gate. Only an observed outside-to-inside goal transition produces
+  a candidate; this is not proof that a ball scored and always needs review.
+
+YOLO is already required for robot detection (training base: `yolo11n.pt`,
+six custom robot/climb classes). There are no production weights committed.
+HSV is an unvalidated baseline, not inherently better than YOLO for balls.
+See `../evaluation/pipeline-review.md` for detector/model/harness decisions.
 
 Requires a per-view **field mask** (audience/background exclusion) and
 **goal zone** calibration (where a scored piece's trajectory should end) to
@@ -37,7 +46,7 @@ VISION_API_URL=https://your-spartans-hub-origin
 VISION_RUNNER_TOKEN=shared-secret
 VISION_RUNNER_ID=vision-runner-gpu-1
 VISION_MODEL_PATH=/models/frc-vision-v1.pt
-VISION_QWEN_URL=http://qwen:8000
+VISION_QWEN_URL=http://127.0.0.1:8000
 VISION_QWEN_TOKEN=separate-shared-secret
 VISION_QWEN_MODEL=Qwen/Qwen3.8-27B
 VISION_QWEN_DEVICE_MAP=cuda
@@ -149,19 +158,24 @@ sane reported camera position before its numbers are trusted.
 
 This has to run continuously on the DGX Spark, not on Cloud Run
 (no GPU support there, and this polls for work rather than serving inbound
-requests). No such host is provisioned yet as of this doc - see
-`../../docs/plans/scoutingvision-remaining-work.md`. Three ready-to-use options,
+requests). A Spark exists, but its current service/weight state requires host
+verification - see `../evaluation/pipeline-review.md`. Two existing options,
 depending on what hardware ends up hosting this:
 
-- **`Dockerfile`** + **`docker-compose.yml`** - the recommended DGX Spark
+- **`Dockerfile`** + **`docker-compose.yml`** - an existing optional DGX Spark
   deployment. It starts both the BF16 Qwen service and dense runner, persists
   the model cache, pins a Spark-driver-compatible NGC runtime, places Qwen on
   CUDA explicitly, and waits for Qwen health before claiming work. `cp
   .env.example .env`, fill it in, `mkdir models`, add the tracker `.pt`, then
-  run `docker compose up -d --build`.
+  use the existing Compose artifact only on an already-approved Docker host.
+  Do not install/start Docker for this Spark.
 - **`vision-runner.service`** + **`../qwen/qwen.service`** - a systemd
   alternative for running both processes directly on DGX Spark without
-  Docker. Install steps are in the files' header comments.
+  Docker. This is the selected Spark deployment path. Install steps are in the
+  files' header comments; copy both imported helper modules with the runner.
+  Use `sudo` for host administration; Qwen binds only to loopback. No new Spark
+  services are started by the review. See `../evaluation/pipeline-review.md`
+  for scheduling training separately from large-model inference.
 
 Either way, `VISION_RUNNER_TOKEN` must be set to the *same* value as the web
 service's `VISION_RUNNER_TOKEN` secret. Cloud Run receives its copy from GCP

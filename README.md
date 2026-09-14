@@ -139,7 +139,10 @@ browser confirmation or prompt popups.
   A full BF16 Qwen3.8-27B service on NVIDIA DGX Spark proposes semantic
   events from bounded multi-camera clips; a
   separate versioned YOLO/ByteTrack runner supplies dense tracking and
-  mobility. Both feed a human-reviewed evidence queue rather than silently
+  mobility. Fuel uses an HSV/contour baseline with motion-predicted association,
+  observed goal-entry candidates, and pixel-space shooter matching (not ball
+  pixels compared to robot metres). Each camera video gets fresh tracker state.
+  Both feed a human-reviewed evidence queue rather than silently
   treating model predictions as ground truth; compatible alliance totals are
   reconciled with TBA and material differences enter an evidence-backed
   human-review queue. A separate, higher `VISION_RELEASE` permission gates
@@ -154,8 +157,11 @@ browser confirmation or prompt popups.
   `implementations/vision-scouting-system.md` for the design/contracts,
   `docs/guides/scoutingvision.md` for the full file-by-file implementation
   reference, and `docs/plans/scoutingvision-remaining-work.md` for what
-  still has to happen before it is usable (it is not deployed or running
-  against real footage yet).
+  still has to happen before it is usable. No real trained detector or reviewed
+  footage is supplied in this repository; current Spark runtime state requires
+  host verification. See `vision/evaluation/pipeline-review.md` for the YOLO fuel
+  benchmark, bounded-review-agent decision, OpenAI/DeepSeek candidates, and
+  precision/training plan. External model APIs are not enabled by that plan.
 - **Planning**: Gantt-based build/task scheduling (`wx-svelte-gantt`),
   Slack-driven prompts and reminders on a 15-minute cron sweep.
 - **Purchasing/Budget**: COTS (commercial off-the-shelf) part stock
@@ -735,13 +741,14 @@ AutoCAM's own code (engine, Drive watcher, `camJobs.js`, its components) is
 - **Vercel**: the original deployment target, being phased out per
   `implementations/vercel-and-supabase-to-google-plan.md` - not yet
   decommissioned as of this writing (see that plan doc's TODOs).
-- **Vision GPU worker**: `vision/runner/docker-compose.yml` deploys the
-  dense YOLO/ByteTrack runner and private full-BF16 Qwen3.8 vision service together
-  on NVIDIA DGX Spark. The Qwen container pins a Spark-compatible NGC runtime
-  and explicit CUDA placement to avoid accidental CPU offload. It is separate
-  from the web deployment, uses a
-  persistent Hugging Face model cache, and calls the app through authenticated
-  runner APIs; see `vision/runner/README.md`.
+- **Vision GPU worker**: use the bare-metal `vision-runner.service` and
+  `vision/qwen/qwen.service` on NVIDIA DGX Spark; no Docker installation is
+  required. Qwen binds only to `127.0.0.1:8000`, with explicit CUDA placement
+  and a separate token. The worker is separate from the web deployment and
+  calls the app through authenticated outbound runner APIs. Existing Compose
+  files remain an optional artifact, not an instruction to install Docker.
+  Schedule large-model inference and detector training separately until actual
+  peak memory/throughput are measured; see `vision/runner/README.md`.
 - **No GitHub Actions CI** - "the GitHub workflow" for this project is the
   branch/PR process below, not a `.github/workflows/*.yml` file (none
   exists). The closest thing to a CI check is the Cloud Build trigger

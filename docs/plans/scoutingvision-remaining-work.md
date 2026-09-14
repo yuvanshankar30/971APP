@@ -63,12 +63,15 @@ subsequent deploy, which is exactly how the `CRON_NOTIFICATION_TOKEN` gap
 
 ### A2. Provision the DGX Spark host **[BLOCKER]**
 
-The Compose stack and systemd units are written and ready; no host is running
-them. Needed: current DGX OS, NVIDIA Container Toolkit, `docker login` against
-NVIDIA NGC (the base image is `nvcr.io/nvidia/pytorch`), the ~60+ GB
-Qwen3.8-27B checkpoint downloaded into the persistent cache, both example
-secrets in `vision/runner/.env.example` replaced with real generated values,
-and a decision about who owns uptime and cache maintenance.
+The systemd units and optional Compose artifact exist. The selected Spark
+path is now bare-metal/systemd: do not install Docker or expose an inbound
+LAN/public listener. Verify the existing CUDA runtime, trained weights,
+checkpoint cache, and ignored environment secrets on the host using `sudo`.
+Match the deployed runner token rather than generating a different one.
+Qwen must bind to loopback only. Current privileged host state could not be
+verified in the 2026-09-13 review because `sudo -n` requires a password.
+Schedule training separately from large-model inference until memory and
+throughput are measured; see `vision/evaluation/pipeline-review.md`.
 
 ### A3. Apply the cron migration **on merge**, and pick a retention window **[NEEDED]**
 
