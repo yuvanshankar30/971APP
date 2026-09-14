@@ -380,8 +380,9 @@
   label.radio { display: grid !important; grid-template-columns: 24px minmax(0, 1fr); align-items: center; gap: 8px; }
   label.radio input { grid-column: 1; margin: 0; }
   .workspace-header .header-actions { flex-wrap: nowrap; margin-left: auto; }
-  .workspace-header { display: grid; grid-template-columns: 150px minmax(140px, 1fr) auto; align-items: start; }
-  .workspace-header .jprog-identity { justify-self: start; }
+  .workspace-header { display: grid; grid-template-columns: 150px minmax(0, 1fr) auto; align-items: start; }
+  .workspace-header .jprog-identity { justify-self: start; min-width: 0; }
+  .workspace-header .jprog-identity .btn { white-space: nowrap; }
   .workspace-header .header-sheet-name { justify-self: start; text-align: left; padding-top: 2px; }
   .workspace-output-link { position: fixed; right: 16px; bottom: 16px; z-index: 3; }
   @media (max-width: 900px) { .workspace-header .header-actions { flex-wrap: wrap; } }
