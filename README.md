@@ -100,7 +100,7 @@ browser confirmation or prompt popups.
   status/link beside AutoCAM completed. See
   `autocam/docs/router-job-grouping.md` for the deliberate conservative
   placement and program-composition rules.
-- **Sheet Nesting**: a standalone, session-authenticated `/nesting` workspace
+- **JProg**: a standalone, session-authenticated `/jprog` workspace
   that ports the shop's manual JProg sheet workflow to the web: searchable
   persistent stock sheets/cuts, a reloadable Storage-backed grouped part
   library, thickness-specific bundled hole programs, G-code inspection,
