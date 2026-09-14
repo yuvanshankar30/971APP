@@ -45,7 +45,7 @@
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? redoChange() : undoChange(); }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') { event.preventDefault(); save(); }
       if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); removeSelected(); }
-      if (event.key.toLowerCase() === 'r' && selected) { event.preventDefault(); rotateSelected(); }
+      if (event.key.toLowerCase() === 'r' && selected?.kind === 'part') { event.preventDefault(); rotateSelected(); }
       if (event.key.toLowerCase() === 'a' && activePart) { event.preventDefault(); placing = { ...activePart }; placingWithShortcut = true; }
       if (event.key === 'Escape') { placing = null; measure = []; }
     };
@@ -227,7 +227,7 @@
       }
       ctx.restore();
     }
-    if (selected) {
+    if (selected?.kind === 'part') {
       const center = sheetToScreen(selected, view), handle = { x: center.x, y: center.y - Math.max(28, selected.height_in * view.scale / 2 + 18) };
       ctx.strokeStyle = '#d97706'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(center.x, center.y); ctx.lineTo(handle.x, handle.y); ctx.stroke();
       ctx.fillStyle = '#fbbf24'; ctx.beginPath(); ctx.arc(handle.x, handle.y, 8, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = '#7c2d12'; ctx.stroke();
@@ -275,7 +275,7 @@
   function pointerUp() { if (rotationDrag) { undo.commit(placements); rotationDrag = null; draw(); return; } if (drag && !drag.pan) { const moved = placements.find(item => item.id === drag.id); if (moved && !sheetContains(sheet, moved)) placements = placements.map(item => item.id === drag.id ? drag.placement : item); else undo.commit(placements); } drag = null; draw(); }
   function wheel(event) { event.preventDefault(); const r = canvas.getBoundingClientRect(); view = zoomAt(view, { x: event.clientX - r.left, y: event.clientY - r.top }, event.deltaY < 0 ? 1.06 : .94); draw(); }
   function placeHole() { placing = { kind: 'hole', label: 'Hole', width_in: .3, height_in: .3 }; measure = []; toastActions.show('Uses the selected sheet thickness hole program'); }
-  function rotateSelected(turns = 1) { if (selected) commit(placements.map(p => p.id === selected.id ? rotatePlacement(p, -turns) : p)); }
+  function rotateSelected(turns = 1) { if (selected?.kind === 'part') commit(placements.map(p => p.id === selected.id ? rotatePlacement(p, -turns) : p)); }
   function duplicateSelected() { if (!selected) return; const copy = makePlacement({ ...selected, id: undefined, x: selected.x + .5, y: selected.y + .5, label: `${selected.label} copy` }); if (!sheetContains(sheet, copy)) return toastActions.show('Duplicated placement would leave the sheet'); commit([...placements, copy]); selectedId = copy.id; }
   async function removeSelected() { if (!selected || !await requestConfirmation({ title: 'Delete placement', message: `Remove ${selected.label}?`, confirmLabel: 'Remove', danger: true })) return; commit(placements.filter(p => p.id !== selected.id)); }
   function inspectSelected() { const program = selected && gcodePrograms[selected.part_library_path]; if (!program) return toastActions.show('Reload the part library before inspecting this part'); selectedProgram = program; showProgram = true; }
