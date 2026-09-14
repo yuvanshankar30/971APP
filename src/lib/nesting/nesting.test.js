@@ -28,6 +28,10 @@ describe('nesting geometry', () => {
     expect(sheetContains({ width_in: 4, height_in: 4 }, item)).toBe(false);
     expect(placementContains(item, 1, 3)).toBe(true);
   });
+  it('supports rotating in either direction without snapping the stored angle', () => {
+    const item = rotatePlacement({ rotation: 0 }, -0.25);
+    expect(item.rotation).toBeCloseTo(-Math.PI / 8);
+  });
   it('snaps a valid edge placement inside the stock rather than rejecting it', () => {
     const result = clampPlacementToSheet({ width_in: 48, height_in: 24 }, { x: 47.9, y: 23.9, width_in: 2, height_in: 2, rotation: 0 });
     expect(result).toMatchObject({ x: 47, y: 23 });

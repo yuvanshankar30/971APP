@@ -3,8 +3,7 @@ export function makePlacement(values = {}) {
 }
 
 export function rotatePlacement(placement, quarterTurns = 1) {
-  const turns = ((quarterTurns % 4) + 4) % 4;
-  return { ...placement, rotation: placement.rotation + turns * Math.PI / 2 };
+  return { ...placement, rotation: placement.rotation + quarterTurns * Math.PI / 2 };
 }
 
 export function placementBounds(placement) {

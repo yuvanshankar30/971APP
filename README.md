@@ -117,6 +117,9 @@ browser confirmation or prompt popups.
   Manual `.ngc` and `.tap` uploads made at the JProg Output root are placed in
   that day's UTC folder automatically; uploads made inside an existing date
   folder stay there and are committed to the same GitHub mirror.
+  The JProg layout visualizer restores saved part toolpaths, including legacy
+  pre-sheet-scoped library placements, and supports arbitrary 0-360 degree
+  part rotation alongside quarter-turn shortcuts.
   A sheet is locked to either LinuxCNC `.ngc` or WinCNC `.tap` programs on its
   first upload, and emission uses that one corresponding program type.
   Its part programs are isolated in Manufacturing Files under `Nesting Parts
