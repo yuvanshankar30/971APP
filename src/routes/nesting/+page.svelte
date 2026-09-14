@@ -26,6 +26,7 @@
   let showNewSheet = false, showLibrary = true, showEmit = false, showProgram = false, committingGcode = false, activeCutId = null, user = null, loadError = '';
   let sheetSearch = '', librarySearch = '', measure = [], measuring = false, emitName = '', emitSuffix = '', selectedProgram = null, editingCutName = false, cutName = '';
   const CUT_COLORS = ['#f59e0b', '#22c55e', '#f43f5e', '#e879f9', '#facc15', '#2dd4bf', '#fb923c', '#a3e635'];
+  const ROTATION_DRAG_SENSITIVITY = .35;
   const JPROG_OUTPUT_REPOSITORY = 'https://github.com/yuvanshankar30/output';
   $: selected = placements.find((item) => item.id === selectedId) || null;
   $: activeCut = sheet?.nesting_cuts?.find((cut) => cut.id === activeCutId) || null;
@@ -303,7 +304,7 @@
       const rect = canvas.getBoundingClientRect(), dx = event.clientX - rect.left - rotationDrag.center.x, dy = event.clientY - rect.top - rotationDrag.center.y;
       const pointerAngle = -Math.atan2(dx, -dy);
       const delta = Math.atan2(Math.sin(pointerAngle - rotationDrag.startPointerAngle), Math.cos(pointerAngle - rotationDrag.startPointerAngle));
-      const rotation = rotationDrag.startRotation + delta;
+      const rotation = rotationDrag.startRotation + delta * ROTATION_DRAG_SENSITIVITY;
       placements = placements.map(p => p.id === rotationDrag.id ? { ...p, rotation } : p); draw(); return;
     }
     if (!drag) return;
