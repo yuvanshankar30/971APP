@@ -100,6 +100,13 @@ browser confirmation or prompt popups.
   status/link beside AutoCAM completed. See
   `autocam/docs/router-job-grouping.md` for the deliberate conservative
   placement and program-composition rules.
+- **Sheet Nesting**: a standalone, session-authenticated `/nesting` workspace
+  that ports the shop's manual JProg sheet workflow to the web: persistent
+  stock sheets/cuts, Storage-backed part G-code, canvas placement with
+  hold-A-to-place, selection/drag/rotate/pan/zoom/undo, and independent
+  LinuxCNC or WinCNC G-code emission. It intentionally has no AutoCAM or
+  Fusion Runner connection; its tables and Storage paths are owned by the
+  nesting feature and its entry point is the Manufacturing page action.
 - **Scouting**: pit scouting (a topic-at-a-time form with per-topic
   completion counts, scout/contact attribution, and up to three robot photos,
   built for filling in a noisy pit on a phone while a team answers out of
