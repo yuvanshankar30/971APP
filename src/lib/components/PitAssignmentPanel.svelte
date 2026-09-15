@@ -270,13 +270,20 @@
         body: JSON.stringify({ action: 'bulk-assign', event_key: eventKey, items: list })
       });
 
-      const data = await res.json();
-      if (!data?.success) {
-        throw new Error(data?.error || 'unknown');
-      } else {
-        await loadAssignments();
-        statusMsg = 'Assignments published.';
+      const responseText = await res.text();
+      let data = null;
+      try {
+        data = responseText ? JSON.parse(responseText) : null;
+      } catch {
+        // A proxy/deployment failure can return HTML instead of the API's
+        // JSON envelope. Keep enough of it to make the problem actionable.
       }
+      if (!res.ok || !data?.success) {
+        const detail = data?.error || responseText.trim().slice(0, 240);
+        throw new Error(detail || `Request failed (${res.status})`);
+      }
+      await loadAssignments();
+      statusMsg = 'Assignments published.';
     } catch (e) {
       errorMsg = `Publish failed: ${e.message}`;
     } finally {
