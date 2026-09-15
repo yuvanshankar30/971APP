@@ -15,9 +15,9 @@ describe('isJprogOutputPath', () => {
 });
 
 describe('jprogOutputUploadPath', () => {
-	it('puts files uploaded at the JProg root in the UTC date folder', () => {
-		expect(jprogOutputUploadPath('JustinProgOutput', 'manual.tap', new Date('2026-09-13T23:59:00Z')))
-			.toBe('JustinProgOutput/20260913/manual.tap');
+	it('uses the Pacific calendar day for files uploaded at the JProg root', () => {
+		expect(jprogOutputUploadPath('JustinProgOutput', 'manual.tap', new Date('2026-09-15T02:00:00Z')))
+			.toBe('JustinProgOutput/20260914/manual.tap');
 	});
 
 	it('keeps manual files in an existing date folder', () => {

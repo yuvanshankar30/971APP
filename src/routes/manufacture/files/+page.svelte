@@ -355,6 +355,11 @@
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   }
+
+  function formatAddedAt(entry) {
+    const value = entry?.created_at || entry?.updated_at;
+    return value ? new Date(value).toLocaleString() : 'Unknown date';
+  }
 </script>
 
 <svelte:head><title>Files | Manufacturing</title></svelte:head>
@@ -482,6 +487,7 @@
               <FileIcon size={18} />
               <span class="file-name">{entry.name}</span>
               <span class="file-size">{formatSize(entry.metadata?.size)}</span>
+              <span class="file-added">Added {formatAddedAt(entry)}</span>
             </div>
             <div class="file-row-actions">
               <button class="btn btn-ghost btn-sm" on:click={() => startRename(entry)}><Pencil size={14} /></button>
@@ -515,6 +521,7 @@
   .file-row-rename .form-input { flex: 1; min-width: 0; }
   .file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .file-size { color: var(--text-muted, #888); font-size: 0.8rem; flex-shrink: 0; margin-left: auto; }
+  .file-added { color: var(--text-muted, #888); font-size: 0.78rem; flex-shrink: 0; }
   .file-row-actions { display: flex; gap: 0.35rem; flex-shrink: 0; }
   .empty-state { color: var(--text-muted, #888); padding: 2rem 0; text-align: center; }
 </style>

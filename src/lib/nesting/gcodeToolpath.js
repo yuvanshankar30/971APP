@@ -44,8 +44,11 @@ export function parseGcodeToolpath(text) {
   return segments;
 }
 
-export function toolpathBounds(segments) {
-  const points = segments.flatMap(segment => segment.points);
+export function toolpathBounds(segments, { includeRapid = false } = {}) {
+  const cuttingSegments = includeRapid ? segments : segments.filter(segment => !segment.rapid);
+  // Rapids are retained for the faint visual preview, but a transit move is
+  // not part geometry and must not expand the placement or collision bounds.
+  const points = (cuttingSegments.length ? cuttingSegments : segments).flatMap(segment => segment.points);
   if (!points.length) return { minX: 0, minY: 0, maxX: 0.01, maxY: 0.01, width: 0.01, height: 0.01, centerX: 0, centerY: 0 };
   const minX = Math.min(...points.map(point => point.x)), maxX = Math.max(...points.map(point => point.x));
   const minY = Math.min(...points.map(point => point.y)), maxY = Math.max(...points.map(point => point.y));

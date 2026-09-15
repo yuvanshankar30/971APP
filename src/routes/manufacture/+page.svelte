@@ -674,6 +674,15 @@
     URL.revokeObjectURL(url);
   }
 
+  function sendFusionGcodeToJprog(job, file) {
+    const params = new URLSearchParams({
+      autocamJob: job.id,
+      autocamFile: file.name,
+      autocamName: job.params?.fusionFileName || job.name || 'Fusion'
+    });
+    goto(`/jprog?${params.toString()}`);
+  }
+
   // Downloads every G-code file a completed Fusion CAM job produced in one
   // go - the details modal below lists them individually for a one-at-a-
   // time install instead.
@@ -3397,6 +3406,9 @@
                     <span class="file-name">{file.name}</span>
                     <button type="button" class="btn btn-secondary btn-sm" on:click={() => downloadNcFile(file)}>
                       <Download size={13} /> Install
+                    </button>
+                    <button type="button" class="btn btn-secondary btn-sm" on:click={() => sendFusionGcodeToJprog(jobDetailsModalJob, file)}>
+                      <Route size={13} /> Send to JProg
                     </button>
                   </li>
                 {/each}
