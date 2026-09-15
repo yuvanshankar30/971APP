@@ -98,6 +98,7 @@ describe('normalizeMatchScoutEntry', () => {
       intake_jammed: true,
       crash_or_break: true,
       card: 'yellow',
+      beached: true,
       driver_skill: 4
     }, 'user-1');
     expect(value.team_key).toBe('frc971');
@@ -114,6 +115,7 @@ describe('normalizeMatchScoutEntry', () => {
     expect(value.intake_speed).toBe(2);
     expect(value.intake_jammed).toBe(true);
     expect(value.crash_or_break).toBe(true);
+    expect(value.beached).toBe(true);
     expect(value.created_by).toBe('user-1');
   });
 
