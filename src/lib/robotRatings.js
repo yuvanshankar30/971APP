@@ -46,6 +46,17 @@ export function summarizeRobotRatings(ratings = []) {
   return summary;
 }
 
+export function rankRobotTeams(teams = [], summaryByTeam = new Map()) {
+  return [...teams].sort((a, b) => {
+    const left = summaryByTeam.get(a.key)?.overallAvg;
+    const right = summaryByTeam.get(b.key)?.overallAvg;
+    if (left == null && right == null) return Number(a.team_number) - Number(b.team_number);
+    if (left == null) return 1;
+    if (right == null) return -1;
+    return right - left || Number(a.team_number) - Number(b.team_number);
+  });
+}
+
 const EMPTY_SUMMARY = { overallAvg: null, offenseAvg: null, shuttlingAvg: null, drivingAvg: null, defenseAvg: null, raterCount: 0, entries: [] };
 
 // Attaches the rating summary to each team row without touching scoutPower/

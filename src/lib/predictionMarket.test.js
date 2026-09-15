@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { STARTING_BALANCE, availableBalance, myBetForMatch, poolForMatch, resolvePariMutuel, summarizeStandings } from './predictionMarket.js';
+import { STARTING_BALANCE, availableBalance, buildTestMarketMatch, isTestMarketKey, myBetForMatch, poolForMatch, resolvePariMutuel, summarizeStandings } from './predictionMarket.js';
+
+describe('test prediction market', () => {
+  it('uses the active event roster and a stable event-scoped key', () => {
+    const match = buildTestMarketMatch('2026test', ['frc1', 'frc2', 'frc3', 'frc4', 'frc5', 'frc6']);
+    expect(match.key).toBe('2026test_test1');
+    expect(match.alliances.red.team_keys).toEqual(['frc1', 'frc2', 'frc3']);
+    expect(match.alliances.blue.team_keys).toEqual(['frc4', 'frc5', 'frc6']);
+    expect(isTestMarketKey(match.key, '2026test')).toBe(true);
+    expect(match.actual_time).toBeNull();
+  });
+});
 
 describe('resolvePariMutuel', () => {
   it('pays winners their stake back plus a proportional share of the losing pool', () => {
@@ -59,6 +70,12 @@ describe('summarizeStandings', () => {
     const standings = summarizeStandings(bets);
     expect(standings.find((row) => row.userId === 'a').wins).toBe(1);
     expect(standings.find((row) => row.userId === 'b').losses).toBe(1);
+  });
+
+  it('keeps practice predictions out of standings and balances', () => {
+    const practice = [{ id: 'test', match_key: '2026test_test1', created_by: 'a', side: 'red', stake: 900, resolved_at: null }];
+    expect(summarizeStandings(practice)).toEqual([]);
+    expect(availableBalance(practice, 'a')).toBe(STARTING_BALANCE);
   });
 });
 

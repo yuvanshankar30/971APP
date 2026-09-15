@@ -4,7 +4,7 @@
   import { fetchActiveScoutingEventKey } from '$lib/scoutingEvent.js';
   import { getAuthHeader, supabase } from '$lib/supabase.js';
   import { isMatchPlayed, matchLabel } from '$lib/matchProjection.js';
-  import { STARTING_BALANCE, availableBalance, myBetForMatch, poolForMatch, summarizeStandings } from '$lib/predictionMarket.js';
+  import { STARTING_BALANCE, availableBalance, buildTestMarketMatch, myBetForMatch, poolForMatch, summarizeStandings } from '$lib/predictionMarket.js';
 
   let eventKey = '';
   let loading = true;
@@ -22,7 +22,7 @@
 
   const RANK_MEDAL = ['gold', 'silver', 'bronze'];
   const teamNumber = (teamKey) => String(teamKey || '').replace(/^frc/i, '');
-  const money = (value) => `${value < 0 ? '-' : ''}$${Math.abs(value).toFixed(2)}`;
+  const points = (value) => `${Number(value || 0).toLocaleString([], { maximumFractionDigits: 2 })} pts`;
   const matchLabelFor = (matchKey) => {
     const match = matches.find((item) => item.key === matchKey);
     return match ? matchLabel(match) : matchKey;
@@ -79,8 +79,13 @@
     loading = true;
     error = '';
     warning = '';
-    const matchesResult = await fetch(`/api/tba/event-matches?event_key=${encodeURIComponent(eventKey)}&comp_level=all`).then((res) => res.json()).catch(() => null);
-    matches = matchesResult?.success ? matchesResult.data : [];
+    const [matchesResult, teamsResult] = await Promise.all([
+      fetch(`/api/tba/event-matches?event_key=${encodeURIComponent(eventKey)}&comp_level=all`).then((res) => res.json()).catch(() => null),
+      fetch(`/api/tba/event-teams?event_key=${encodeURIComponent(eventKey)}`).then((res) => res.json()).catch(() => null)
+    ]);
+    const scheduledMatches = matchesResult?.success ? matchesResult.data || [] : [];
+    const eventTeams = teamsResult?.success ? teamsResult.data || [] : [];
+    matches = [buildTestMarketMatch(eventKey, eventTeams), ...scheduledMatches];
     if (!matchesResult?.success) warning = matchesResult?.error || 'Could not load the match schedule.';
     await loadBets();
     loading = false;
@@ -146,7 +151,7 @@
 <div class="page-header">
   <div class="header-content">
     <h1><Coins size={22} /> Prediction Market</h1>
-    <p>Play-money bets on match outcomes{eventKey ? ` for ${eventKey}` : ''}. Winners split the losing side's stakes; whoever ends the event with the most money earns the candy.</p>
+    <p>Play-point predictions on match outcomes{eventKey ? ` for ${eventKey}` : ''}. Winners split the losing side's points; whoever ends the event with the most points earns the candy.</p>
   </div>
   {#if eventKey}
     <button class="btn btn-sm" on:click={loadAll} disabled={loading}><RefreshCw size={14} /> Refresh</button>
@@ -171,7 +176,7 @@
       </div>
       <div class="candy-balance">
         <span class="candy-eyebrow">Balance</span>
-        <strong>{money(candyLeader.balance)}</strong>
+        <strong>{points(candyLeader.balance)}</strong>
       </div>
     </section>
   {/if}
@@ -179,7 +184,7 @@
   <section class="stat-row">
     <div class="surface-card stat-tile">
       <span class="text-muted">Your balance</span>
-      <strong class="stat-amount" class:positive={myBalance > STARTING_BALANCE} class:negative={myBalance < STARTING_BALANCE}>{money(myBalance)}</strong>
+      <strong class="stat-amount" class:positive={myBalance > STARTING_BALANCE} class:negative={myBalance < STARTING_BALANCE}>{points(myBalance)}</strong>
     </div>
     <div class="surface-card stat-tile">
       <span class="text-muted">Record</span>
@@ -203,9 +208,9 @@
             <tr class:leader={index === 0} class:me={row.userId === userId}>
               <td class="mono"><span class="rank-badge" class:medal={index < 3} data-medal={RANK_MEDAL[index]}>{index + 1}</span></td>
               <td>{displayName(row.userId)}{#if index === 0}<Candy size={14} class="candy-inline" />{/if}</td>
-              <td class="strong">{money(row.balance)}</td>
+              <td class="strong">{points(row.balance)}</td>
               <td>{row.wins}-{row.losses}{row.pushes ? ` (${row.pushes} push)` : ''}</td>
-              <td class="text-muted">{row.pendingStake ? money(row.pendingStake) : '—'}</td>
+              <td class="text-muted">{row.pendingStake ? points(row.pendingStake) : '—'}</td>
             </tr>
           {/each}
         </tbody>
@@ -226,10 +231,12 @@
           <div class="bet-row">
             <div class="bet-row-header">
               <strong>{matchLabel(match)}</strong>
+              {#if match.is_test_market}<span class="test-badge">Practice</span>{/if}
               <span class="alliance-chip alliance-red">{match.alliances?.red?.team_keys?.map(teamNumber).join(', ')}</span>
               <span class="text-muted">vs</span>
               <span class="alliance-chip alliance-blue">{match.alliances?.blue?.team_keys?.map(teamNumber).join(', ')}</span>
             </div>
+            {#if match.is_test_market}<p class="practice-note">Try placing, updating, or cancelling a prediction here. This practice market never settles or changes leaderboard scores.</p>{/if}
             {#if pool.total > 0}
               <div class="pool-bar" title={`Crowd so far: ${Math.round(pool.redShare * 100)}% red, ${Math.round(pool.blueShare * 100)}% blue over ${pool.betCount} bet${pool.betCount === 1 ? '' : 's'}`}>
                 <span class="pool-fill" style={`width:${pool.redShare * 100}%`}></span>
@@ -241,8 +248,8 @@
                 <button type="button" class="side-btn side-blue" class:chosen={draft.side === 'blue'} on:click={() => setSide(match.key, 'blue')}>Blue</button>
               </div>
               <label class="stake-input">
-                <span>$</span>
                 <input type="number" min="1" step="1" placeholder="Stake" bind:value={draft.stake} />
+                <span>pts</span>
               </label>
               <button class="btn btn-primary btn-sm" disabled={saving[match.key]} on:click={() => placeBet(match)}>{mine ? 'Update' : 'Place bet'}</button>
               {#if mine}
@@ -250,7 +257,7 @@
               {/if}
               {#if saveMessage[match.key]}<span class="text-muted">{saveMessage[match.key]}</span>{/if}
             </div>
-            {#if mine}<p class="my-pick text-muted">Your pick: <span class:alliance-red={mine.side === 'red'} class:alliance-blue={mine.side === 'blue'}>{mine.side}</span> for {money(mine.stake)}</p>{/if}
+            {#if mine}<p class="my-pick text-muted">Your pick: <span class:alliance-red={mine.side === 'red'} class:alliance-blue={mine.side === 'blue'}>{mine.side}</span> for {points(mine.stake)}</p>{/if}
           </div>
         {/each}
       </div>
@@ -267,9 +274,9 @@
             <tr>
               <td>{matchLabelFor(bet.match_key)}</td>
               <td class:alliance-red={bet.side === 'red'} class:alliance-blue={bet.side === 'blue'}>{bet.side}</td>
-              <td>{money(bet.stake)}</td>
-              <td>{money(bet.payout ?? 0)}</td>
-              <td class:positive={bet.payout > bet.stake} class:negative={bet.payout < bet.stake}>{money((bet.payout ?? 0) - bet.stake)}</td>
+              <td>{points(bet.stake)}</td>
+              <td>{points(bet.payout ?? 0)}</td>
+              <td class:positive={bet.payout > bet.stake} class:negative={bet.payout < bet.stake}>{points((bet.payout ?? 0) - bet.stake)}</td>
             </tr>
           {/each}
         </tbody>
@@ -317,6 +324,8 @@
   .bet-list { display:flex; flex-direction:column; gap:var(--space-2); margin-top:var(--space-2); }
   .bet-row { border:1px solid var(--border); border-radius:var(--radius-sm); padding:var(--space-2) var(--space-3); }
   .bet-row-header { display:flex; align-items:center; gap:var(--gap-2); flex-wrap:wrap; margin-bottom:var(--space-2); }
+  .test-badge { padding:.12rem .45rem; border-radius:999px; background:var(--brand-gold-soft); color:var(--text); font-size:.68rem; font-weight:700; text-transform:uppercase; }
+  .practice-note { margin:0 0 var(--space-2); color:var(--text-muted); font-size:.8rem; }
 
   .pool-bar { height:6px; border-radius:3px; background:var(--brand-blue, #2563eb); overflow:hidden; margin-bottom:var(--space-2); }
   .pool-fill { display:block; height:100%; background:var(--status-danger); }
