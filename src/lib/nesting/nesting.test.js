@@ -309,6 +309,29 @@ describe("nesting emission", () => {
     expect(result.text).toContain("G18 G3 X-0.003 Z0.05 I-0.0158 K0.");
     expect(result.text).toContain("G17 G3 X1.0000 Y3.0000 I-1.0000 J0.0000");
   });
+  it("emits complete rotated XY and IJ words for AutoCAM-style modal arcs", () => {
+    const result = emitNestingGcode({
+      name: "rotated-autocam",
+      dialect: "wincnc",
+      placements: [{ label: "A", x: 2, y: 3, rotation: Math.PI / 2, part_library_path: "a" }],
+      programs: {
+        a: {
+          bounds: { centerX: 0, centerY: 0 },
+          source: [
+            "G90",
+            "T1",
+            "G0 X1 Y0",
+            // Fusion/AutoCAM commonly omits the unchanged endpoint axis and
+            // zero arc-center component. Both are required after rotation.
+            "G3 X-1 I-1",
+            "M5",
+          ].join("\n"),
+        },
+      },
+    });
+    expect(result.text).toContain("G0 X2.0000 Y4.0000");
+    expect(result.text).toContain("G3 X2.0000 Y2.0000 I0.0000 J-1.0000");
+  });
   it("groups WinCNC parts by tool before emitting them", () => {
     const result = emitNestingGcode({
       name: "tool-order",

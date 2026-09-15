@@ -48,10 +48,28 @@ function transformLine(line, placement, state, bounds) {
   }
   if ('I' in values || 'J' in values) {
     const vector = rotate(values.I || 0, values.J || 0);
-    if ('I' in values) transformed.I = vector.x;
-    if ('J' in values) transformed.J = vector.y;
+    // I/J describe one vector. Once it has been rotated both components must
+    // be emitted, even when the source omitted its zero component. Keeping an
+    // old modal J (or I) makes the resulting arc geometrically impossible.
+    transformed.I = vector.x;
+    transformed.J = vector.y;
   }
-  return `${code.replace(coordinatePattern, (_all, axis) => `${axis.toUpperCase()}${Number(transformed[axis.toUpperCase()]).toFixed(4)}`)}${comment}`;
+  if (!('X' in values || 'Y' in values || 'I' in values || 'J' in values)) return line;
+
+  // The original Java JProg transformer always writes both X/Y and I/J after
+  // a rotation. A source program may legally omit an unchanged axis, but that
+  // axis generally changes after rotation. Rebuilding these words prevents a
+  // controller from reusing a stale modal coordinate or arc-center component.
+  const retainedCode = code.replace(coordinatePattern, ' ').replace(/\s+/g, ' ').trim();
+  const formatted = (value) => (Math.abs(value) < 0.00000001 ? 0 : value).toFixed(4);
+  const words = [retainedCode];
+  if ('X' in values || 'Y' in values) {
+    words.push(`X${formatted(transformed.X)}`, `Y${formatted(transformed.Y)}`);
+  }
+  if ('I' in values || 'J' in values) {
+    words.push(`I${formatted(transformed.I)}`, `J${formatted(transformed.J)}`);
+  }
+  return `${words.filter(Boolean).join(' ')}${comment}`;
 }
 
 function transformedProgram(source, placement, bounds) {
