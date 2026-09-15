@@ -6,6 +6,8 @@
   import { userProfile } from '$lib/stores/auth.js';
   import { getAuthHeader } from '$lib/supabase.js';
   import { fetchActiveScoutingEventKey } from '$lib/scoutingEvent.js';
+  import { submitOrQueue } from '$lib/offlineQueue.js';
+  import OfflineSyncBadge from '$lib/components/OfflineSyncBadge.svelte';
   import { AlertTriangle, Check, ChevronRight, ClipboardCheck, MapPinned, Route, RotateCcw, Timer, Trophy } from 'lucide-svelte';
 
   const START_POSITIONS = ['left trench', 'left mound', 'center', 'right mound', 'right trench'];
@@ -55,6 +57,7 @@
   let beached = false;
   let postNotes = '';
   let submitted = false;
+  let queuedOffline = false;
   let editing = false;
   let showReports = false;
   let myReports = [];
@@ -94,6 +97,7 @@
   function selectPhase(nextPhase) {
     phase = nextPhase;
     submitted = false;
+    queuedOffline = false;
   }
 
   function nextAssignment() {
@@ -400,40 +404,55 @@
     saving = true;
     error = '';
     try {
-      await post({
-        action: 'save-entry',
-        form_version: 2,
-        ...formAnswers(),
-        auto_cycles: autoCycles,
-        mechanical_break: mechanicalBreak,
-        event_key: eventKey,
-        match_key: matchNumber.trim(),
-        team_key: robotNumber.trim(),
-        alliance,
-        starting_position: startingPosition,
-        auto_points_estimate: autoPoints,
-        auto_moved: autoMoved,
-        ball_sources: ballSources,
-        balls_scored_band: ballsScored,
-        auto_collision: autoCollision,
-        auto_collision_notes: autoCollision ? autoCollisionNotes : '',
-        auto_path_name: autoPathName,
-        auto_path: autoPath,
-        ratings,
-        teleop_roles: teleopRoles,
-        teleop_notes: teleopNotes,
-        intake_speed: intakeSpeed || null,
-        intake_jammed: intakeJammed,
-        robot_disabled: teleopRobotStatus === 'dead' ? 'died' : robotDisabled,
-        // The UI says "None"; the stored vocabulary uses an empty string.
-        card: card === 'none' ? '' : card,
-        driver_skill: driverSkill,
-        beached,
-        post_notes: postNotes,
-        report_pit_problem: shouldReportPitProblem,
-        pit_problem_summary: pitProblemDetails,
-        pit_problem_detail: postNotes
+      // A dropped connection here must not cost the scout their report -
+      // submitOrQueue tries the real save with a short timeout, and only
+      // falls back to a local queue (synced automatically once back
+      // online) for a genuine network failure. The API's save-entry is an
+      // upsert keyed on event_key/match_key/team_key/created_by, so a
+      // queued retry landing after an earlier attempt actually succeeded
+      // (response merely lost) overwrites the same row instead of
+      // duplicating it - see offlineQueue.js's own docstring for why this
+      // matters before pointing it at any other endpoint.
+      const result = await submitOrQueue({
+        url: '/api/matchscout',
+        headers: await getAuthHeader(),
+        label: `Match ${matchNumber.trim()} / Team ${robotNumber.trim()}`,
+        body: {
+          action: 'save-entry',
+          form_version: 2,
+          ...formAnswers(),
+          auto_cycles: autoCycles,
+          mechanical_break: mechanicalBreak,
+          event_key: eventKey,
+          match_key: matchNumber.trim(),
+          team_key: robotNumber.trim(),
+          alliance,
+          starting_position: startingPosition,
+          auto_points_estimate: autoPoints,
+          auto_moved: autoMoved,
+          ball_sources: ballSources,
+          balls_scored_band: ballsScored,
+          auto_collision: autoCollision,
+          auto_collision_notes: autoCollision ? autoCollisionNotes : '',
+          auto_path_name: autoPathName,
+          auto_path: autoPath,
+          ratings,
+          teleop_roles: teleopRoles,
+          teleop_notes: teleopNotes,
+          intake_speed: intakeSpeed || null,
+          intake_jammed: intakeJammed,
+          robot_disabled: teleopRobotStatus === 'dead' ? 'died' : robotDisabled,
+          // The UI says "None"; the stored vocabulary uses an empty string.
+          card: card === 'none' ? '' : card,
+          driver_skill: driverSkill,
+          beached,
+          post_notes: postNotes,
+          report_pit_problem: shouldReportPitProblem,
+          pit_problem_summary: pitProblemDetails,
+          pit_problem_detail: postNotes
+        }
       });
+      queuedOffline = result.queued;
       submitted = true;
       editing = true;
     } catch (exception) {
@@ -472,6 +491,7 @@
       <span>{assignmentLabel}</span>
       {#if assignmentReady}<b>{alliance}</b>{/if}
     </div>
+    <OfflineSyncBadge />
   </header>
 
   <div class="report-actions">
@@ -521,7 +541,11 @@
         <div class="submitted-state">
           <div class="submitted-icon"><Check size={28} /></div>
           <h2>Match {matchNumber} &middot; Robot {robotNumber}</h2>
-          <p>Saved. Here is how you rated them.</p>
+          {#if queuedOffline}
+            <p>Saved on this phone - no connection right now, so it'll sync automatically once you're back online.</p>
+          {:else}
+            <p>Saved. Here is how you rated them.</p>
+          {/if}
 
           {#if ratedCount}
             <figure class="rating-star">

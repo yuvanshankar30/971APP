@@ -2,7 +2,9 @@
   import { onMount } from 'svelte';
   import { supabase, getAuthHeader } from '$lib/supabase.js';
   import { fetchActiveScoutingEventKey, fetchAvailableScoutingEvents, fetchManualScoutingTeams } from '$lib/scoutingEvent.js';
+  import { isQueueableFailure, submitOrQueue } from '$lib/offlineQueue.js';
   import SeasonFilter from '$lib/components/SeasonFilter.svelte';
+  import OfflineSyncBadge from '$lib/components/OfflineSyncBadge.svelte';
 
   const DRIVEBASE_OPTIONS = ['Mechanum', 'Swerve', 'Tank'];
   const SHOOTER_OPTIONS = ['Single Fixed', 'Multi Fixed', 'Wide', 'Turret', 'Double Turret'];
@@ -792,7 +794,18 @@
     apiNote = '';
 
     try {
-      const uploadedPaths = await uploadPendingPhotos(selectedTeam);
+      // A photo upload failing over a bad connection must not cost the
+      // scout their actual pit interview notes - fall back to whatever
+      // photos were already saved and keep going with the rest of the
+      // save below, rather than throwing the whole entry away.
+      let uploadedPaths = [];
+      let photoUploadFailed = false;
+      try {
+        uploadedPaths = await uploadPendingPhotos(selectedTeam);
+      } catch (uploadError) {
+        if (!isQueueableFailure(uploadError)) throw uploadError;
+        photoUploadFailed = true;
+      }
       const photo_paths = [...editablePhotoPaths, ...uploadedPaths].slice(0, 3);
       const payload = {
         action: 'save-entry',
@@ -815,24 +828,39 @@
         photo_paths
       };
 
-      const res = await authFetch('/pitscout', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(payload)
+      // A dropped connection here must not cost the scout their pit
+      // interview - submitOrQueue tries the real save with a short
+      // timeout and falls back to a local queue (synced automatically once
+      // back online) for a genuine network failure. /pitscout's save-entry
+      // is an upsert keyed on event_key/team_key, so a queued retry that
+      // lands after an earlier attempt actually succeeded (response merely
+      // lost) overwrites the same row instead of duplicating it.
+      const result = await submitOrQueue({
+        url: '/pitscout',
+        headers: await getAuthHeader(),
+        label: `Pit scout / Team ${displayTeam(selectedTeam)}`,
+        body: payload
       });
-      const data = await res.json().catch(() => null);
-      if (!res.ok || !data?.success) {
-        throw new Error(data?.error || `Save failed (${res.status})`);
-      }
 
-      pitSchema = {
-        ...pitSchema,
-        ...(data?.meta?.schema || {})
-      };
-      schemaWarning = data?.meta?.warning || schemaWarning;
-      entriesByTeam[selectedTeam] = data.data;
-      entriesByTeam = { ...entriesByTeam };
-      apiNote = `Saved pit data for Team ${displayTeam(selectedTeam)}.`;
+      if (result.queued) {
+        entriesByTeam[selectedTeam] = { ...entriesByTeam[selectedTeam], ...payload };
+        entriesByTeam = { ...entriesByTeam };
+        apiNote = photoUploadFailed
+          ? `Saved pit data for Team ${displayTeam(selectedTeam)} on this phone - no connection right now, so it (and the photo) will sync once you're back online.`
+          : `Saved pit data for Team ${displayTeam(selectedTeam)} on this phone - no connection right now, so it'll sync once you're back online.`;
+      } else {
+        const data = result.data;
+        pitSchema = {
+          ...pitSchema,
+          ...(data?.meta?.schema || {})
+        };
+        schemaWarning = data?.meta?.warning || schemaWarning;
+        entriesByTeam[selectedTeam] = data.data;
+        entriesByTeam = { ...entriesByTeam };
+        apiNote = photoUploadFailed
+          ? `Saved pit data for Team ${displayTeam(selectedTeam)}, but the photo didn't upload - no connection. Try adding it again once you're back online.`
+          : `Saved pit data for Team ${displayTeam(selectedTeam)}.`;
+      }
       goToTeamPicker();
     } catch (e) {
       apiNote = e.message || 'Save failed';
@@ -902,6 +930,7 @@
     {#if schemaWarning}
       <div class="note" style="margin-top:0.5rem">{schemaWarning}</div>
     {/if}
+    <div style="margin-top:0.5rem"><OfflineSyncBadge /></div>
   </div>
 
   <div class="page-summary">
