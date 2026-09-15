@@ -1,11 +1,12 @@
 <script>
   import { requestConfirmation } from '$lib/confirmation.js';
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { Camera, ChevronRight, Eye, RefreshCw, Upload, Video, LayoutDashboard, UploadCloud } from 'lucide-svelte';
   import { getAuthHeader, supabase } from '$lib/supabase.js';
   import { fetchActiveScoutingEventKey } from '$lib/scoutingEvent.js';
   import { userStore } from '$lib/stores/auth.js';
   import { hasPermission } from '$lib/permissions.js';
+  import { evaluateVisionReadiness, formatBytes } from '$lib/visionReadiness.js';
   import VisionCalibrator from '$lib/components/VisionCalibrator.svelte';
   import VisionHeatmap from '$lib/components/VisionHeatmap.svelte';
 
@@ -48,6 +49,10 @@
   let observationTeamDraft = {};
   let observationValueDraft = {};
   let viewPlayers = {};
+  let runners = [];
+  let acknowledgeReadinessWarnings = false;
+  let releasePreview = null;
+  let focusedObservationId = '';
 
   // Observation timestamps are in match time (the runner already added the
   // view's sync offset), so subtract it back out to land on the right frame of
@@ -118,7 +123,12 @@
     loading = true;
     error = '';
     try {
-      matches = await api();
+      const [matchRows, dashboard] = await Promise.all([
+        api(),
+        eventKey ? api(`?dashboard=${encodeURIComponent(eventKey)}`).catch(() => null) : Promise.resolve(null)
+      ]);
+      matches = matchRows;
+      runners = dashboard?.runners || [];
       if (selectedId) await loadDetail(selectedId);
     } catch (exception) {
       error = exception.message;
@@ -132,6 +142,8 @@
     const query = new URLSearchParams({ id });
     if (runId) query.set('run_id', runId);
     detail = await api(`?${query}`);
+    releasePreview = null;
+    acknowledgeReadinessWarnings = false;
     selectedRunId = detail.runs?.some((run) => run.id === runId) ? runId : (detail.runs?.[0]?.id || '');
     for (const track of detail.tracks || []) trackTeamDraft[track.id] = track.team_key || '';
     for (const observation of detail.observations || []) {
@@ -220,6 +232,7 @@
       await post({
         action: 'queue-run', vision_match_id: selectedId, model_name: modelName, model_version: modelVersion,
         qwen_model: qwenModel, qwen_revision: qwenRevision,
+        acknowledge_readiness_warnings: acknowledgeReadinessWarnings,
         config: {
           confidence_floor: Number(confidenceFloor),
           // Hybrid classical-CV game-piece detection tuning (see
@@ -267,12 +280,30 @@
   }
 
   let releasingRunId = '';
+  async function previewRelease(run) {
+    releasingRunId = run.id;
+    error = '';
+    try {
+      const result = await post({ action: 'preview-release', run_id: run.id });
+      releasePreview = { runId: run.id, ...result };
+    } catch (exception) {
+      releasePreview = null;
+      error = exception.message;
+    } finally {
+      releasingRunId = '';
+    }
+  }
+
   async function releaseRun(run) {
+    if (releasePreview?.runId !== run.id) {
+      error = 'Preview the exact scouting rows before releasing this run.';
+      return;
+    }
     if (!await requestConfirmation({ title: 'Release scouting results', message: `Release ${run.model_name} ${run.model_version}'s results into real scouting data? This cannot be undone.`, confirmLabel: 'Release', danger: true })) return;
     releasingRunId = run.id;
     error = '';
     try {
-      const result = await post({ action: 'release-run', run_id: run.id });
+      const result = await post({ action: 'release-run', run_id: run.id, preview_rows: releasePreview.rows });
       await loadDetail(selectedId);
       const skipped = result.skipped_climbs?.length
         ? ` ${result.skipped_climbs.length} climb(s) skipped for an unrecognized level.`
@@ -358,6 +389,8 @@
     return summary;
   }, { accepted: 0, corrected: 0, rejected: 0, unobservable: 0, unreviewed: 0, unattributed: 0, eligible: 0 });
   $: selectedRun = detail?.runs?.find((run) => run.id === selectedRunId) || null;
+  $: queueReadiness = evaluateVisionReadiness({ match: detail?.match, views: detail?.views || [], modelName, modelVersion, runners });
+  $: selectedUploadBytes = files.reduce((total, file) => total + (file.size || 0), 0);
   $: sortedDiscrepancies = [...(detail?.discrepancies || [])].sort((left, right) => {
     const open = Number(left.status !== 'open') - Number(right.status !== 'open');
     const severity = (left.severity === 'critical' ? 0 : 1) - (right.severity === 'critical' ? 0 : 1);
@@ -377,11 +410,14 @@
   }
 
   async function reviewObservation(observation, status) {
+    const priorIndex = visibleObservations.findIndex((candidate) => candidate.id === observation.id);
     busy = true;
     error = '';
     try {
       await post({ action: 'review-observation', id: observation.id, status });
       await loadDetail(selectedId);
+      await tick();
+      if (visibleObservations.length) focusObservation(Math.max(0, priorIndex));
     } catch (exception) { error = exception.message; }
     finally { busy = false; }
   }
@@ -406,9 +442,37 @@
     finally { busy = false; }
   }
 
-  onMount(async () => {
-    eventKey = (await fetchActiveScoutingEventKey()) || '';
-    await loadMatches();
+  function focusObservation(index) {
+    if (!visibleObservations.length) return;
+    const bounded = Math.max(0, Math.min(index, visibleObservations.length - 1));
+    focusedObservationId = visibleObservations[bounded].id;
+    document.getElementById(`vision-observation-${focusedObservationId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  function handleReviewShortcut(event) {
+    const tag = event.target?.tagName?.toLowerCase();
+    if (['input', 'textarea', 'select', 'button'].includes(tag) || event.metaKey || event.ctrlKey || event.altKey) return;
+    const current = visibleObservations.findIndex((observation) => observation.id === focusedObservationId);
+    if (event.key === 'j' || event.key === 'k') {
+      event.preventDefault();
+      focusObservation(event.key === 'j' ? (current < 0 ? 0 : current + 1) : (current < 0 ? 0 : current - 1));
+      return;
+    }
+    const observation = visibleObservations[current];
+    const status = { a: 'accepted', r: 'rejected', u: 'unobservable' }[event.key.toLowerCase()];
+    if (observation && status && !busy && (observation.review_status || 'unreviewed') === 'unreviewed') {
+      event.preventDefault();
+      reviewObservation(observation, status);
+    }
+  }
+
+  onMount(() => {
+    window.addEventListener('keydown', handleReviewShortcut);
+    (async () => {
+      eventKey = (await fetchActiveScoutingEventKey()) || '';
+      await loadMatches();
+    })();
+    return () => window.removeEventListener('keydown', handleReviewShortcut);
   });
 </script>
 
@@ -479,7 +543,7 @@
           <label>View label <input class="form-input" placeholder="Full field" bind:value={cameraLabel} /></label>
           <label>Camera position <input class="form-input" placeholder="Elevated fixed tripod" bind:value={cameraPosition} /></label>
           <label>Sync offset (ms) <input class="form-input" type="number" bind:value={syncOffsetMs} /></label>
-          <label>Recording file(s) <input class="form-input" type="file" accept="video/*" multiple on:change={(event) => files = [...event.currentTarget.files]} /></label>
+          <label>Recording file(s) <input class="form-input" type="file" accept="video/*" multiple on:change={(event) => files = [...event.currentTarget.files]} />{#if files.length}<small>{files.length} file{files.length === 1 ? '' : 's'} · {formatBytes(selectedUploadBytes)}</small>{/if}</label>
         </div>
         <details class="hybrid-cv-config">
           <summary>Calibration (optional)</summary>
@@ -505,7 +569,18 @@
               {#each CLIMB_LEVELS as level}<option value={level}>{level}</option>{/each}
             </select>
           </label>
-          <button class="btn btn-primary btn-sm" on:click={queueRun} disabled={busy || !detail.views.length}>Queue run</button>
+          <button class="btn btn-primary btn-sm" on:click={queueRun} disabled={busy || queueReadiness.blocking.length || (queueReadiness.warnings.length && !acknowledgeReadinessWarnings)}>Queue shadow run</button>
+        </div>
+        <div class="queue-readiness">
+          <b>Run readiness</b>
+          <ul>
+            {#each queueReadiness.checks as check}
+              <li class:ready={check.ready} class:blocking={!check.ready && check.level === 'blocking'}>{check.ready ? '✓' : check.level === 'blocking' ? '✕' : '⚠'} {check.label}</li>
+            {/each}
+          </ul>
+          {#if queueReadiness.warnings.length}
+            <label class="acknowledge"><input type="checkbox" bind:checked={acknowledgeReadinessWarnings} /> Queue as a shadow run with these warnings; manual scouting remains authoritative.</label>
+          {/if}
         </div>
         <details class="hybrid-cv-config">
           <summary>Hybrid game-piece detection tuning (optional)</summary>
@@ -525,7 +600,8 @@
               {#if run.released_at}
                 <em class="released-tag">released</em>
               {:else if run.status === 'complete' && canRelease}
-                <button class="btn btn-sm btn-primary" on:click={() => releaseRun(run)} disabled={releasingRunId === run.id}><UploadCloud size={12} /> Release to scouting data</button>
+                <button class="btn btn-sm" on:click={() => previewRelease(run)} disabled={releasingRunId === run.id}>Preview release</button>
+                <button class="btn btn-sm btn-primary" on:click={() => releaseRun(run)} disabled={releasingRunId === run.id || releasePreview?.runId !== run.id}><UploadCloud size={12} /> Release to scouting data</button>
               {:else if ['queued', 'claimed', 'processing'].includes(run.status)}
                 <button class="btn btn-sm" on:click={() => cancelRun(run)} disabled={busy}>Cancel</button>
               {:else if ['failed', 'cancelled'].includes(run.status)}
@@ -553,6 +629,18 @@
             <p class="readiness-warning">Nothing can be released yet. Accept or correct an observation and assign it to a team.</p>
           {/if}
         </section>
+        {#if releasePreview?.runId === selectedRun.id}
+          <section class="surface-card section release-preview">
+            <h2>Exact release preview · {releasePreview.rows.length} row{releasePreview.rows.length === 1 ? '' : 's'}</h2>
+            <p>These are the rows the atomic release will write. Previewing does not change scouting data.</p>
+            <div class="table-wrap"><table><thead><tr><th>Team</th><th>Field</th><th>Value</th><th>Match</th></tr></thead><tbody>
+              {#each releasePreview.rows as row}
+                <tr><td>{row.team_key.replace(/^frc/i, '')}</td><td>{row.event_type.replaceAll('_', ' ')}</td><td>{row.event_value}</td><td>{row.match_key}</td></tr>
+              {/each}
+            </tbody></table></div>
+            {#if releasePreview.skipped_climbs?.length}<p class="readiness-warning">{releasePreview.skipped_climbs.length} climb value(s) will be skipped. Correct them before release.</p>{/if}
+          </section>
+        {/if}
       {/if}
 
       {#if detail.tracks.length}
@@ -595,6 +683,7 @@
       {#if detail.observations.length}
         <section class="surface-card section">
           <h2>Detected actions ({visibleObservations.length} of {detail.observations.length})</h2>
+          <p class="review-shortcuts">Keyboard: <kbd>J</kbd>/<kbd>K</kbd> move · <kbd>A</kbd> accept · <kbd>R</kbd> reject · <kbd>U</kbd> unobservable</p>
 
           <div class="review-presets" aria-label="Observation filter presets">
             <button class="btn btn-sm" on:click={() => applyObservationPreset('attention')}>Needs attention</button>
@@ -654,7 +743,7 @@
 
           <div class="observation-list">
             {#each visibleObservations as observation (observation.id)}
-              <div>
+              <div id={`vision-observation-${observation.id}`} class:focused={focusedObservationId === observation.id}>
                 <b>{observation.observation_type.replaceAll('_', ' ')}</b>
                 <span>
                   {observation.team_key || observation.alliance || 'unattributed'} ·
@@ -735,6 +824,12 @@
   .hybrid-cv-config { margin-top:var(--space-4); }
   .hybrid-cv-config summary { cursor:pointer; color:var(--text-muted); font-size:.85rem; padding:var(--space-1) 0; }
   .hybrid-cv-config .upload-grid,.hybrid-cv-config .run-controls { margin-top:var(--space-3); }
+  .queue-readiness { margin-top:var(--space-3); padding:var(--space-3); border:1px solid var(--border); border-radius:var(--radius-md); background:var(--surface-2); }
+  .queue-readiness ul { display:grid; grid-template-columns:repeat(auto-fit,minmax(15rem,1fr)); gap:var(--gap-1) var(--gap-3); margin:var(--space-2) 0; padding:0; list-style:none; }
+  .queue-readiness li { color:var(--brand-gold-strong); font-size:.8rem; }
+  .queue-readiness li.ready { color:var(--green-strong); }
+  .queue-readiness li.blocking { color:var(--danger); }
+  .acknowledge { display:flex; align-items:flex-start; gap:var(--gap-2); color:var(--text-muted); font-size:.8rem; }
   .status { padding:var(--space-2); border-radius:var(--radius-sm); background:var(--surface-2); display:flex; align-items:center; justify-content:space-between; gap:var(--gap-2); overflow-wrap:anywhere; }
   .status.failed { color:var(--red,#c33); }
   .status button { display:inline-flex; align-items:center; gap:4px; }
@@ -746,11 +841,14 @@
   .roster-bar { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:var(--gap-2); margin:var(--space-4) 0 var(--space-2); color:var(--text-muted); font-size:.82rem; }
   .track-warning { margin:0 0 var(--space-2); color:var(--danger); font-size:.82rem; }
   .observation-list > div { display:grid; grid-template-columns:minmax(9rem,.75fr) minmax(11rem,1fr) minmax(0,1.5fr) auto; gap:var(--gap-2); padding:var(--space-3) var(--space-2); border-bottom:1px solid var(--border); align-items:center; }
+  .observation-list > div.focused { outline:2px solid var(--brand-gold-base,#d9a413); outline-offset:-2px; background:var(--surface-2); }
   .observation-list code { min-width:0; overflow-wrap:anywhere; white-space:pre-wrap; font-size:.78rem; color:var(--text-muted); }
   .observation-filters { display:grid; grid-template-columns:repeat(auto-fit,minmax(9rem,1fr)); gap:var(--gap-3); align-items:end; margin-bottom:var(--space-3); }
   .bulk-actions { display:flex; gap:var(--gap-2); flex-wrap:wrap; }
   .review-presets { display:flex; flex-wrap:wrap; gap:var(--gap-2); margin-bottom:var(--space-3); }
   .review-priority-note { margin:calc(-1 * var(--space-1)) 0 var(--space-3); color:var(--text-muted); font-size:.8rem; }
+  .review-shortcuts { margin:calc(-1 * var(--space-1)) 0 var(--space-3); color:var(--text-muted); font-size:.78rem; }
+  kbd { border:1px solid var(--border); border-bottom-width:2px; border-radius:3px; padding:0 .3rem; background:var(--surface-2); color:var(--text); font:inherit; }
   .release-readiness { display:grid; grid-template-columns:minmax(14rem,1fr) auto; gap:var(--gap-4); align-items:center; }
   .release-readiness h2 { margin-bottom:var(--space-1); }
   .release-readiness p { margin:0; color:var(--text-muted); font-size:.82rem; }
@@ -759,6 +857,8 @@
   .readiness-grid b { color:var(--text); font-size:1.1rem; }
   .readiness-grid .needs-review b { color:var(--brand-gold-strong); }
   .release-readiness .readiness-warning { grid-column:1/-1; color:var(--danger); }
+  .release-preview p { color:var(--text-muted); font-size:.82rem; }
+  .release-preview .readiness-warning { color:var(--danger); }
   .calibrate-panel { border:1px solid var(--border); border-radius:var(--radius-md); padding:var(--space-2) var(--space-3); }
   .calibrate-panel summary { cursor:pointer; font-size:.85rem; color:var(--text-muted); }
   .calibrate-panel[open] summary { margin-bottom:var(--space-3); }

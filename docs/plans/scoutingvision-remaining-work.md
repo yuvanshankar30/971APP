@@ -306,10 +306,11 @@ not robot speed, so releasing our m/s into it would be silently wrong; and
 enough from the code to synthesize. Surface these as vision-native analytics
 instead of forcing them into fields that mean something else.
 
-### B5. Keyboard-driven review **[NICE]**
+### ~~B5. Keyboard-driven review~~ **[DONE]**
 
-Bulk accept and filters exist now. A j/k/a/r keyboard loop over the filtered
-list would make a match's worth of proposals genuinely fast to clear.
+Bulk accept and filters exist. The filtered list now supports `j`/`k` movement
+and `a`/`r`/`u` for accept, reject, and unobservable, while ignoring shortcuts
+when focus is inside a form control.
 
 ### B6. `approved_for_release` gate **[NICE — pending A8]**
 
@@ -332,6 +333,9 @@ Still needs a human to pick the window and schedule the sweep.
 ### ~~B8. Test coverage for the release bridge~~ **[DONE]**
 
 `release_bridge.test.js` covers release-run and the `update-track` cascade.
+The release holder can also preview the exact proposed `scout_data_events`
+rows without writing them. The UI keeps release disabled until that preview
+exists and the API rejects a stale client preview if the reviewed rows changed.
 
 ---
 

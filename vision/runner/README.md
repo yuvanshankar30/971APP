@@ -156,6 +156,17 @@ sane reported camera position before its numbers are trusted.
 
 ## Deployment (long-running - pick one)
 
+Before either deployment path is used, run the read-only host check:
+
+```bash
+python3 preflight.py
+```
+
+It checks required environment names, real model-file size, web API
+reachability, and Qwen health without printing secret values or claiming a
+job. `--skip-network` checks only local configuration; `--json` emits a result
+that can be attached to an event-readiness record.
+
 This has to run continuously on the DGX Spark, not on Cloud Run
 (no GPU support there, and this polls for work rather than serving inbound
 requests). A Spark exists, but its current service/weight state requires host

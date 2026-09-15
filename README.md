@@ -198,6 +198,14 @@ browser confirmation or prompt popups.
   host verification. See `vision/evaluation/pipeline-review.md` for the YOLO fuel
   benchmark, bounded-review-agent decision, OpenAI/DeepSeek candidates, and
   precision/training plan. External model APIs are not enabled by that plan.
+  The run screen now shows a pre-queue readiness checklist (views, pinned model,
+  live runner, roster, masks, goal/start zones, and homographies), requires an
+  explicit acknowledgement for incomplete shadow runs, shows selected upload
+  size, and provides keyboard observation review. A `VISION_RELEASE` holder
+  must generate and inspect the exact proposed `scout_data_events` rows before
+  the release button is enabled. The Chezy capture, storage, review, fallback,
+  and ownership procedure is in `docs/guides/chezy-vision-runbook.md`; runner
+  hosts have a read-only `vision/runner/preflight.py` check.
 - **Planning**: Gantt-based build/task scheduling (`wx-svelte-gantt`),
   Slack-driven prompts and reminders on a 15-minute cron sweep.
 - **Purchasing/Budget**: COTS (commercial off-the-shelf) part stock

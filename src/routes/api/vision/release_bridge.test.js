@@ -106,6 +106,34 @@ describe('release-run', () => {
     });
   });
 
+  it('previews exact rows without calling the release transaction', async () => {
+    const client = makeMockClient({ run: RUN, observations: [observation()] });
+    mockClient = client;
+    mockDb = client;
+    const { POST } = await import('./+server.js');
+    const res = await POST({ request: request({ action: 'preview-release', run_id: 'run-1' }) });
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.data.rows).toEqual([{
+      match_key: '2026casj_qm1', team_key: 'frc971', event_type: 'hub_fuel_override', event_value: '1'
+    }]);
+    expect(rpcCalls).toHaveLength(0);
+    expect(written.scout_data_events).toHaveLength(0);
+  });
+
+  it('refuses a stale client preview when reviewed rows changed', async () => {
+    const client = makeMockClient({ run: RUN, observations: [observation()] });
+    mockClient = client;
+    mockDb = client;
+    const { POST } = await import('./+server.js');
+    const res = await POST({ request: request({
+      action: 'release-run', run_id: 'run-1',
+      preview_rows: [{ match_key: '2026casj_qm1', team_key: 'frc971', event_type: 'hub_fuel_override', event_value: '99' }]
+    }) });
+    expect(res.status).toBe(409);
+    expect(rpcCalls).toHaveLength(0);
+  });
+
   it('counts one scored piece once when two cameras both saw it', async () => {
     // fuseObservations collapses same type/team/alliance within 350ms, so two
     // views of a single shot must not release as two scored pieces.

@@ -4,16 +4,8 @@ import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/publi
 import { env } from '$env/dynamic/private';
 import { getSupabase } from '$lib/server/971bot.js';
 import { fetchTbaMatchRoster } from '$lib/server/vision_reference.js';
-import { summarizeVision } from '$lib/visionAnalytics.js';
-
-// Valid scout_data_events.event_type climb_pos values (see
-// src/lib/scoutingStats.js's CLIMB_LEVEL map) - vision's own climb value is
-// free-form (usually the literal string 'success' when no specific level was
-// configured; see vision_runner.py's default_climb_level), so only a value
-// that already matches this real vocabulary is safe to release. Anything
-// else is silently skipped rather than corrupting downstream power-ranking
-// aggregation with a value nothing else recognizes.
-const VALID_CLIMB_POS = new Set(['N/A', 'Failed', 'L1', 'L2', 'L3']);
+import { buildVisionReleasePreview, VALID_CLIMB_POS } from '$lib/server/visionRelease.js';
+import { evaluateVisionReadiness } from '$lib/visionReadiness.js';
 
 function clientFor(request) {
   return createClient(PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY, {
@@ -244,8 +236,26 @@ export async function POST({ request }) {
 
   if (action === 'queue-run') {
     if (!body.vision_match_id || !body.model_name || !body.model_version) return json({ error: 'vision_match_id and model identity required' }, { status: 400 });
-    const { data: views } = await client.from('vision_views').select('id').eq('vision_match_id', body.vision_match_id);
+    const [{ data: views }, { data: match }, { data: runners }] = await Promise.all([
+      client.from('vision_views').select('id, field_mask, goal_zones, homography, start_zones').eq('vision_match_id', body.vision_match_id),
+      client.from('vision_matches').select('team_roster').eq('id', body.vision_match_id).single(),
+      client.from('vision_runners').select('last_seen_at')
+    ]);
     if (!views?.length) return json({ error: 'Upload at least one camera view first' }, { status: 400 });
+    const now = Date.now();
+    const readiness = evaluateVisionReadiness({
+      match, views, modelName: body.model_name, modelVersion: body.model_version,
+      runners: (runners || []).map((runner) => ({
+        ...runner,
+        online: runner.last_seen_at ? now - new Date(runner.last_seen_at).getTime() < RUNNER_ONLINE_THRESHOLD_MS : false
+      }))
+    });
+    if (readiness.blocking.length) {
+      return json({ error: readiness.blocking.map((check) => check.label).join('; '), readiness }, { status: 400 });
+    }
+    if (readiness.warnings.length && !body.acknowledge_readiness_warnings) {
+      return json({ error: 'Acknowledge the vision readiness warnings before queueing a shadow run', readiness }, { status: 409 });
+    }
     const { data, error } = await client.from('vision_runs').insert({
       vision_match_id: body.vision_match_id,
       model_name: body.model_name,
@@ -343,7 +353,7 @@ export async function POST({ request }) {
   // advisory vision output into real scouting data. Every other action
   // above is available to any approved user; this one requires the
   // separate VISION_RELEASE permission (see permissions.js).
-  if (action === 'release-run') {
+  if (action === 'preview-release' || action === 'release-run') {
     if (!body.run_id) return json({ error: 'run_id required' }, { status: 400 });
 
     const { data: actorProfile } = await client.from('user_profiles').select('role, permissions').eq('id', actor.id).single();
@@ -366,66 +376,9 @@ export async function POST({ request }) {
       db.from('vision_observations').select('*').eq('vision_run_id', run.id),
       db.from('vision_views').select('id, start_zones').eq('vision_match_id', run.vision_match_id)
     ]);
-    const reviewedObservations = (observations || []).filter((observation) => ['accepted', 'corrected'].includes(observation.review_status));
-    // Start zones are per view because they're drawn against that camera's own
-    // image; a track only resolves to a named start position on a view that
-    // actually has them calibrated.
-    const startZonesByView = Object.fromEntries((runViews || []).map((view) => [view.id, view.start_zones || []]));
-    const summary = summarizeVision(reviewedObservations, tracks || [], {
-      autoEndMs: Number(run.config?.auto_end_ms) || undefined,
-      startZonesByView
+    const { rows, skippedClimbs, teamCount } = buildVisionReleasePreview({
+      matchKey, run, observations: observations || [], tracks: tracks || [], views: runViews || []
     });
-
-    // Only the fields release_vision_run() actually reads. role, created_by
-    // and created_at are set inside the function so every released row is
-    // stamped by the same transaction that claimed the release.
-    const rows = [];
-    const skippedClimbs = [];
-    for (const [teamKey, team] of Object.entries(summary.teams)) {
-      if (!teamKey) continue; // never release an alliance-only, unattributed result as a specific team's data
-      if (team.fuelObservations > 0 && Number.isFinite(team.fuelScored)) {
-        rows.push({
-          match_key: matchKey, team_key: teamKey,
-          event_type: 'hub_fuel_override', event_value: String(Math.round(team.fuelScored))
-        });
-      }
-      if (team.climb && VALID_CLIMB_POS.has(team.climb)) {
-        rows.push({
-          match_key: matchKey, team_key: teamKey,
-          event_type: 'climb_pos', event_value: team.climb
-        });
-      } else if (team.climb) {
-        // Refusing an unrecognized climb value is right, but doing it silently
-        // isn't: the release looks like it worked while that team's climb
-        // quietly never lands. Name it so a reviewer can correct the value.
-        skippedClimbs.push({ team_key: teamKey, value: team.climb });
-      }
-      // A climb during auto is its own scouting field. The runner already
-      // records each observation's phase; this is what stops that from being
-      // computed and then thrown away.
-      if (team.autoClimb && VALID_CLIMB_POS.has(team.autoClimb)) {
-        rows.push({
-          match_key: matchKey, team_key: teamKey,
-          event_type: 'auto_climb_pos', event_value: team.autoClimb
-        });
-      } else if (team.autoClimb) {
-        skippedClimbs.push({ team_key: teamKey, value: team.autoClimb, field: 'auto_climb_pos' });
-      }
-      // null means "we never saw enough of this robot in auto to say" - only
-      // a measured answer is worth releasing.
-      if (typeof team.deadAuto === 'boolean') {
-        rows.push({
-          match_key: matchKey, team_key: teamKey,
-          event_type: 'dead_auto', event_value: String(team.deadAuto)
-        });
-      }
-      if (team.autoStartPosition) {
-        rows.push({
-          match_key: matchKey, team_key: teamKey,
-          event_type: 'auto_start_position', event_value: team.autoStartPosition
-        });
-      }
-    }
     if (!rows.length) {
       return json({
         error: skippedClimbs.length
@@ -433,6 +386,13 @@ export async function POST({ request }) {
           : 'No reviewed, attributable team results to release yet - accept/correct observations and resolve team identity first',
         skipped_climbs: skippedClimbs
       }, { status: 400 });
+    }
+
+    if (action === 'preview-release') {
+      return json({ success: true, data: { rows, skipped_climbs: skippedClimbs, team_count: teamCount } });
+    }
+    if (body.preview_rows && JSON.stringify(body.preview_rows) !== JSON.stringify(rows)) {
+      return json({ error: 'Reviewed results changed after the release preview. Preview the run again.' }, { status: 409 });
     }
 
     // One transaction for the scouting rows, the run's released_at, and the
@@ -446,7 +406,7 @@ export async function POST({ request }) {
       p_run_id: run.id,
       p_actor: actor.id,
       p_rows: rows,
-      p_team_count: Object.keys(summary.teams).length
+      p_team_count: teamCount
     });
     if (releaseError) return json({ error: releaseError.message }, { status: 500 });
     if (!released?.ok) {
