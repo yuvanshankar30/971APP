@@ -264,8 +264,26 @@ describe("nesting emission", () => {
       ],
       programs: { a: { source: "G1 X1 Y0 I1 J0" } },
     });
-    expect(result.text).toContain("G10 L2 P9 X[#5221+1.5000] Y[#5222+3.0000] Z[#5223] R90.0000");
+    expect(result.text).toContain("G10 L2 P9 X[#5221+2.0000] Y[#5222+2.5000] Z[#5223] R90.0000");
     expect(result.text).toContain("G1 X1 Y0 I1 J0");
+  });
+  it("keeps a rotated source bounds center at the selected sheet coordinate", () => {
+    const result = emitNestingGcode({
+      name: "nest",
+      placements: [
+        {
+          label: "A",
+          x: 10,
+          y: 20,
+          rotation: Math.PI / 2,
+          part_library_path: "a",
+        },
+      ],
+      programs: { a: { source: "G0 X2 Y4\nG1 X4 Y8" } },
+    });
+    // The source center is (2, 4); after a 90-degree rotation it is (-4, 2).
+    // The G59.3 translation must therefore be (14, 18), not (8, 16).
+    expect(result.text).toContain("G10 L2 P9 X[#5221+14.0000] Y[#5222+18.0000] Z[#5223] R90.0000");
   });
   it("only transforms XY cutting motion, not router control parameters", () => {
     const result = emitNestingGcode({
