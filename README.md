@@ -318,6 +318,9 @@ browser confirmation or prompt popups.
   reports retain their original fields. Match scouts can reopen their submitted
   answers immediately or find their own active-event reports in **My reports**,
   search by team or match, and save corrections to the existing report.
+  Match report lists use compact cards that surface auto points, balls scored,
+  robot status, and incidents while collapsed; opening a card shows a dense,
+  color-coded breakdown so multiple matches for one robot stay easy to scan.
   **Compare** in My reports opens labeled blue/manual and orange/vision charts
   for the same event, match, and team. Scouts can select a vision run, refresh
   results, and filter reviewed observations or include provisional candidates.

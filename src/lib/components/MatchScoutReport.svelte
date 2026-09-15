@@ -11,23 +11,51 @@
   const teamNumber = (value) => String(value || '').replace(/^frc/i, '') || '-';
   const matchLabel = (value) => String(value || '').split('_').at(-1) || '-';
   const points = (average, band) => present(band) ? band : present(average) ? average : '-';
-  const timestamp = (value) => {
+  const dateValue = (value, compact = false) => {
     if (!value) return '-';
     const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? '-' : date.toLocaleString();
+    if (Number.isNaN(date.getTime())) return '-';
+    return compact
+      ? date.toLocaleString([], { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' })
+      : date.toLocaleString();
   };
+
+  $: reportTime = report?.updated_at || report?.created_at;
+  $: autoScore = points(report?.auto_points_average, report?.auto_points_band);
+  $: ballsScore = points(report?.balls_scored_average, report?.balls_scored_band);
+  $: robotStatus = report?.form_version === 2
+    ? valueOrDash(report?.teleop_robot_status)
+    : valueOrDash(report?.robot_disabled);
+  $: incidentLabels = [
+    report?.auto_collision ? 'Collision' : '',
+    report?.significant_crash || report?.crash_or_break ? 'Crash' : '',
+    report?.mechanical_break ? 'Break' : '',
+    present(report?.card) ? `${report.card} card` : ''
+  ].filter(Boolean);
 </script>
 
 <details class="match-report">
-  <summary class:show-team={showTeam}>
-    <strong>{matchLabel(report?.match_key)}</strong>
-    {#if showTeam}<span>Team {teamNumber(report?.team_key)}</span>{/if}
-    <span>{report?.scout_name || report?.created_by || 'Scout not identified'}</span>
-    <time>{timestamp(report?.updated_at || report?.created_at)}</time>
+  <summary>
+    <span class="identity">
+      <strong class="match-badge">{matchLabel(report?.match_key)}</strong>
+      {#if showTeam}<strong class="team-badge">Team {teamNumber(report?.team_key)}</strong>{/if}
+    </span>
+    <span class="quick-stats" aria-label="Report summary">
+      <span><small>Auto</small><b>{autoScore}</b></span>
+      <span><small>Balls</small><b>{ballsScore}</b></span>
+      <span><small>Status</small><b class:status-active={String(robotStatus).toLowerCase() === 'active'}>{robotStatus}</b></span>
+      <span class:has-alerts={incidentLabels.length > 0}>
+        <small>Incidents</small><b>{incidentLabels.length ? incidentLabels.join(', ') : 'Clear'}</b>
+      </span>
+    </span>
+    <span class="report-meta">
+      <span>{report?.scout_name || report?.created_by || 'Unknown scout'}</span>
+      <time datetime={reportTime || undefined} title={dateValue(reportTime)}>{dateValue(reportTime, true)}</time>
+    </span>
   </summary>
 
   <div class="report-body">
-    <section>
+    <section class="assignment">
       <h4>Assignment</h4>
       <dl>
         <div><dt>Alliance</dt><dd>{valueOrDash(report?.alliance)}</dd></div>
@@ -36,25 +64,24 @@
       </dl>
     </section>
 
-    <section>
+    <section class="auto">
       <h4>Autonomous</h4>
       <dl>
         <div><dt>Ran</dt><dd>{report?.auto_moved === 'ran' ? 'Yes' : report?.auto_moved === 'did-not-run' ? 'No' : valueOrDash(report?.auto_moved)}</dd></div>
         <div><dt>Start zone</dt><dd>{valueOrDash(report?.auto_start_zone)}</dd></div>
-        <div><dt>Points</dt><dd>{points(report?.auto_points_average, report?.auto_points_band)}</dd></div>
+        <div><dt>Points</dt><dd>{autoScore}</dd></div>
         <div><dt>Finish</dt><dd>{valueOrDash(report?.auto_finish)}</dd></div>
         <div><dt>Fuel sources</dt><dd>{list(report?.ball_sources)}</dd></div>
         {#if report?.form_version === 2}<div><dt>Auto cycles</dt><dd>{valueOrDash(report.auto_cycles)}</dd></div>{/if}
         <div><dt>Collision</dt><dd>{yesNo(report?.auto_collision)}</dd></div>
-        <div><dt>Path</dt><dd>{valueOrDash(report?.auto_path_name)} ({Array.isArray(report?.auto_path) ? report.auto_path.length : 0} points)</dd></div>
+        {#if present(report?.auto_path_name) || report?.auto_path?.length}<div><dt>Path</dt><dd>{valueOrDash(report?.auto_path_name)} ({Array.isArray(report?.auto_path) ? report.auto_path.length : 0} points)</dd></div>{/if}
       </dl>
-      {#if present(report?.auto_collision_notes)}<p>{report.auto_collision_notes}</p>{/if}
     </section>
 
-    <section>
+    <section class="teleop">
       <h4>Teleop</h4>
       <dl>
-        <div><dt>Balls scored</dt><dd>{points(report?.balls_scored_average, report?.balls_scored_band)}</dd></div>
+        <div><dt>Balls scored</dt><dd>{ballsScore}</dd></div>
         <div><dt>Roles</dt><dd>{report?.teleop_roles_none ? 'None observed' : list(report?.teleop_roles)}</dd></div>
         {#if report?.form_version === 2}
           <div><dt>Significant crash</dt><dd>{yesNo(report.significant_crash)}</dd></div>
@@ -69,11 +96,9 @@
           <div><dt>{field}</dt><dd>{report?.ratings_unknown?.includes(field) ? 'Unknown' : valueOrDash(report?.ratings?.[field])}{#if report?.form_version === 2 && report?.ratings?.[field]} · {(field === 'BPS' ? BPS_LABELS : ACCURACY_LABELS)[report.ratings[field] - 1]}{/if}</dd></div>
         {/each}
       </dl>
-      {#if present(report?.teleop_notes)}<p>{report.teleop_notes}</p>{/if}
-      {#if present(report?.crash_details)}<p>{report.crash_details}</p>{/if}
     </section>
 
-    <section>
+    <section class="post-match">
       <h4>Post-match</h4>
       <dl>
         <div><dt>Robot status</dt><dd>{valueOrDash(report?.robot_disabled)}</dd></div>
@@ -81,32 +106,91 @@
         <div><dt>Driver skill</dt><dd>{valueOrDash(report?.driver_skill)}</dd></div>
         {#if report?.form_version === 2}<div><dt>Mechanical break</dt><dd>{yesNo(report.mechanical_break)}</dd></div>{/if}
       </dl>
-      {#if present(report?.post_notes)}<p>{report.post_notes}</p>{/if}
     </section>
   </div>
+  {#if present(report?.auto_collision_notes) || present(report?.teleop_notes) || present(report?.crash_details) || present(report?.post_notes)}
+    <div class="report-notes">
+      {#if present(report?.auto_collision_notes)}<p><strong>Auto</strong>{report.auto_collision_notes}</p>{/if}
+      {#if present(report?.teleop_notes)}<p><strong>Teleop</strong>{report.teleop_notes}</p>{/if}
+      {#if present(report?.crash_details)}<p><strong>Crash</strong>{report.crash_details}</p>{/if}
+      {#if present(report?.post_notes)}<p><strong>Post-match</strong>{report.post_notes}</p>{/if}
+    </div>
+  {/if}
 </details>
 
 <style>
-  .match-report { border-top:1px solid var(--border); }
-  .match-report:last-child { border-bottom:1px solid var(--border); }
-  summary { display:grid; grid-template-columns:minmax(7rem, .7fr) minmax(8rem, 1fr) minmax(10rem, 1.4fr); gap:var(--space-2); align-items:center; min-height:2.75rem; padding:var(--space-2) var(--space-3); cursor:pointer; }
-  summary.show-team { grid-template-columns:minmax(6rem, .6fr) minmax(7rem, .7fr) minmax(9rem, 1.2fr) minmax(10rem, 1fr); }
-  summary time { color:var(--text-muted); font-size:.75rem; text-align:right; }
-  .report-body { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); border-top:1px solid var(--border); }
-  section { min-width:0; padding:var(--space-3); border-right:1px solid var(--border); border-bottom:1px solid var(--border); }
-  section:nth-child(2n) { border-right:0; }
-  section:nth-last-child(-n + 2) { border-bottom:0; }
-  h4 { margin:0 0 var(--space-2); font-size:.82rem; }
-  dl { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:var(--space-2); margin:0; }
-  dl div { min-width:0; }
-  dt { color:var(--text-muted); font-size:.7rem; text-transform:uppercase; }
-  dd { margin:2px 0 0; overflow-wrap:anywhere; font-size:.82rem; }
-  p { margin:var(--space-2) 0 0; padding-top:var(--space-2); border-top:1px solid var(--border); white-space:pre-wrap; overflow-wrap:anywhere; font-size:.82rem; }
-  @media (max-width:720px) {
-    summary, summary.show-team { grid-template-columns:1fr 1fr; }
-    summary time { text-align:left; }
+  .match-report {
+    overflow:hidden;
+    margin:0 0 var(--space-2);
+    border:1px solid var(--border);
+    border-radius:8px;
+    background:var(--surface-1, #fff);
+  }
+  .match-report[open] { box-shadow:0 5px 18px rgb(55 45 25 / 8%); }
+  summary {
+    display:grid;
+    grid-template-columns:minmax(8rem, .7fr) minmax(24rem, 2fr) minmax(9rem, .7fr);
+    gap:var(--space-3);
+    align-items:center;
+    min-height:3.25rem;
+    padding:.55rem var(--space-3);
+    cursor:pointer;
+    list-style-position:outside;
+  }
+  summary:hover { background:color-mix(in srgb, var(--accent, #c99525) 6%, transparent); }
+  summary:focus-visible { outline:2px solid var(--accent, #b98000); outline-offset:-2px; }
+  .identity { display:flex; gap:.4rem; align-items:center; min-width:0; }
+  .match-badge, .team-badge {
+    display:inline-flex;
+    align-items:center;
+    min-height:1.7rem;
+    padding:0 .55rem;
+    border-radius:999px;
+    white-space:nowrap;
+    font-size:.78rem;
+  }
+  .match-badge { background:var(--text, #201c15); color:var(--surface-1, #fff); }
+  .team-badge { border:1px solid color-mix(in srgb, var(--accent, #b98000) 45%, var(--border)); background:color-mix(in srgb, var(--accent, #c99525) 12%, transparent); }
+  .quick-stats { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); min-width:0; }
+  .quick-stats > span { min-width:0; padding:0 .65rem; border-left:1px solid var(--border); }
+  .quick-stats small, .quick-stats b { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .quick-stats small { color:var(--text-muted); font-size:.61rem; letter-spacing:.055em; text-transform:uppercase; }
+  .quick-stats b { margin-top:1px; font-size:.78rem; font-weight:650; }
+  .quick-stats .status-active { color:#177348; }
+  .quick-stats .has-alerts b { color:#b33a2f; }
+  .report-meta { display:flex; flex-direction:column; min-width:0; text-align:right; }
+  .report-meta > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:.75rem; }
+  .report-meta time { color:var(--text-muted); font-size:.66rem; }
+  .report-body {
+    display:grid;
+    grid-template-columns:minmax(9rem, .72fr) repeat(3, minmax(12rem, 1fr));
+    gap:1px;
+    padding-top:1px;
+    background:var(--border);
+  }
+  section { --section-color:#8b6b24; min-width:0; padding:.75rem; background:var(--surface-1, #fff); box-shadow:inset 0 3px var(--section-color); }
+  section.assignment { --section-color:#687076; }
+  section.auto { --section-color:#b98000; }
+  section.teleop { --section-color:#306fa8; }
+  section.post-match { --section-color:#437d55; }
+  h4 { margin:0 0 .45rem; color:var(--section-color); font-size:.73rem; letter-spacing:.055em; text-transform:uppercase; }
+  dl { display:grid; gap:0; margin:0; }
+  dl div { display:flex; gap:.6rem; justify-content:space-between; min-width:0; padding:.27rem 0; border-top:1px solid color-mix(in srgb, var(--border) 70%, transparent); }
+  dl div:first-child { border-top:0; }
+  dt { flex:0 1 auto; color:var(--text-muted); font-size:.67rem; }
+  dd { flex:1 1 auto; margin:0; overflow-wrap:anywhere; text-align:right; font-size:.72rem; font-weight:600; }
+  .report-notes { display:grid; grid-template-columns:repeat(auto-fit, minmax(14rem, 1fr)); gap:1px; border-top:1px solid var(--border); background:var(--border); }
+  .report-notes p { margin:0; padding:.65rem .75rem; background:var(--surface-1, #fff); white-space:pre-wrap; overflow-wrap:anywhere; font-size:.74rem; line-height:1.4; }
+  .report-notes strong { display:block; margin-bottom:.2rem; color:var(--text-muted); font-size:.62rem; letter-spacing:.055em; text-transform:uppercase; }
+  @media (max-width:1050px) {
+    summary { grid-template-columns:minmax(8rem, .7fr) minmax(20rem, 2fr); }
+    .report-meta { display:none; }
+    .report-body { grid-template-columns:repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width:680px) {
+    summary { grid-template-columns:1fr; gap:.45rem; padding:.7rem var(--space-3); }
+    .quick-stats > span:first-child { border-left:0; padding-left:0; }
+    .quick-stats > span { padding:0 .4rem; }
     .report-body { grid-template-columns:1fr; }
-    section, section:nth-child(2n) { border-right:0; border-bottom:1px solid var(--border); }
-    section:last-child { border-bottom:0; }
   }
 </style>
