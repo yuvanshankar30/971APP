@@ -241,15 +241,6 @@ def _material_aliases(material_name: str) -> list[str]:
     return out
 
 
-def _is_aluminum_6061(material_name: Optional[str]) -> bool:
-    return _normalize_desc(material_name or "") in {
-        "aluminum 6061",
-        "aluminium 6061",
-        "6061 aluminum",
-        "6061 aluminium",
-    }
-
-
 def _through_shape_roughing_tier(description: Optional[str]) -> Optional[str]:
     """Classify the three named non-circular through-shape roughing tiers.
 
@@ -288,16 +279,19 @@ def _choose_preset(tool: dict, material_name: Optional[str]) -> Optional[dict]:
         if any(len(alias) >= 3 and alias in preset_name for alias in aliases):
             return preset
 
-    # The checked-in 971 Main Bit's historic "Default preset" is the
-    # reviewed Aluminum 6061 setting. Keep that legacy library usable for
-    # aluminum only, while requiring every other material to have a named
-    # preset. This exception is deliberately narrow; a generic default is
-    # never permission to cut an unreviewed material.
-    normalized_material = _normalize_desc(material_name or "")
-    if normalized_material in {"aluminum", "aluminium"} or _is_aluminum_6061(material_name):
-        for preset in presets:
-            if _normalize_desc(str(preset.get("name") or "")) == "default preset":
-                return preset
+    # Direct instruction: a tool's generic "Default preset" (no material-
+    # specific feeds) is now an acceptable fallback for ANY material when
+    # nothing more specific has been named for it - the shop manually
+    # adjusts feed rate at the router for whatever material is actually
+    # loaded, so a reviewed-but-generic preset is enough to authorize the
+    # cut. This used to be restricted to Aluminum 6061 only (the 971 Main
+    # Bit's historic "Default preset" was originally captured as an
+    # Aluminum 6061 setting); that restriction is gone. Spindle RPM still
+    # comes from this same preset's own single programmed value regardless
+    # of material - there is no separate per-material RPM to pick between.
+    for preset in presets:
+        if _normalize_desc(str(preset.get("name") or "")) == "default preset":
+            return preset
 
     raise ValueError(
         f"No reviewed feed/speed preset for {material_name!r} on {_tool_display_name(tool)}; "
@@ -554,6 +548,72 @@ def load_tool_library_json(path: str) -> dict:
     return data
 
 
+def _tool_nc_number(tool: dict) -> Optional[int]:
+    post = tool.get("post-process")
+    if not isinstance(post, dict):
+        return None
+    try:
+        return int(post.get("number"))
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_sized_description(tool: dict) -> bool:
+    return "sized" in str(tool.get("description") or "").lower()
+
+
+def _drop_stale_duplicate_tool_numbers(tools: list) -> list:
+    """Drops a same-numbered duplicate tool that isn't the real, measured
+    tool for that physical ATC slot.
+
+    A physical ATC magazine cannot hold two different tools in one numbered
+    slot at once, so two loaded tools sharing an NC tool number is always
+    stale library data, never a legitimate pair. Confirmed directly against
+    "Normal router tools (use this).tools": tool number 6 carries both a
+    real, calibrated "4mm sized for toolchager" endmill (0.1575in) and a
+    generic, undescribed "for tool changer" placeholder at 0.25in that was
+    never removed after the real one was added. Since largest_endmill/
+    detail_endmill (see _find_largest_endmill/_find_smallest_endmill) pick
+    candidates purely by diameter, that stale 0.25in placeholder was
+    silently winning "biggest loaded endmill" ahead of the real T2 tool
+    (a different, non-conflicting tool number) whenever it was smaller than
+    the real T2 diameter, and otherwise corrupting which physical tool
+    detail_endmill/T6 itself resolved to.
+
+    "sized" in a tool's own description is this shop's own established
+    naming convention for an entry whose diameter reflects a real measured
+    calibration (matches the real T6 entry, and the vocabulary used to
+    describe the real T2 tool) - a plain, undescribed duplicate of the same
+    tool number is the stale one to drop. Only ever removes a tool when
+    exactly one same-numbered sibling is "sized" and at least one other
+    isn't; an unresolvable conflict (no sibling is "sized", or more than
+    one is - e.g. the loaded library's two identically-named T5 "82˚ couter
+    sink" entries at 0.372in and 0.5in) is left alone rather than guessed
+    at.
+    """
+    by_number: dict = {}
+    for tool in tools:
+        if not isinstance(tool, dict):
+            continue
+        number = _tool_nc_number(tool)
+        if number is None:
+            continue
+        by_number.setdefault(number, []).append(tool)
+
+    stale_ids = set()
+    for group in by_number.values():
+        if len(group) < 2:
+            continue
+        sized = [tool for tool in group if _is_sized_description(tool)]
+        unsized = [tool for tool in group if not _is_sized_description(tool)]
+        if len(sized) == 1 and unsized:
+            stale_ids.update(id(tool) for tool in unsized)
+
+    if not stale_ids:
+        return tools
+    return [tool for tool in tools if id(tool) not in stale_ids]
+
+
 def _index_tools(
     tool_library: dict,
     filter_guids: Optional[set[str]] = None,
@@ -561,6 +621,7 @@ def _index_tools(
     tools = tool_library.get("data")
     if not isinstance(tools, list):
         tools = []
+    tools = _drop_stale_duplicate_tool_numbers(tools)
 
     # Filter tools by GUID if filter_guids is provided
     if filter_guids is not None:
@@ -1100,7 +1161,14 @@ def patch_cam_template_with_tool_libraries(
     # cannot slip back in through a later operation and force an ATC swap.
     unreviewed_tool_guids: list[str] = []
     swap_restricted_guids: list[str] = []
-    multi_tool_swaps_enabled = multi_tool_mode and _is_aluminum_6061(material_name)
+    # Direct instruction: ATC tool swaps are no longer restricted to
+    # Aluminum 6061 - the shop manually adjusts feed rate at the router for
+    # whatever material is actually loaded, so a generic, unreviewed-by-
+    # material "Default preset" (see _choose_preset) is an acceptable basis
+    # for swapping tools on any material now, not only the one with a named
+    # preset. Spindle RPM still comes from that same single preset value
+    # regardless of material, unchanged.
+    multi_tool_swaps_enabled = multi_tool_mode
     source_endmill_candidates = _select_tools(indexes, _is_endmill_tool)
     if multi_tool_mode:
         indexes, unreviewed_tool_guids = _indexes_with_reviewed_presets(
@@ -1112,16 +1180,10 @@ def patch_cam_template_with_tool_libraries(
                 f"No loaded multi-tool endmill has a reviewed feed/speed preset for "
                 f"{material_name!r}; add a named preset before queueing this material"
             )
-        if not multi_tool_swaps_enabled and reviewed_endmill_candidates:
-            primary_tool = plan_endmills(
-                [entry[0] for entry in reviewed_endmill_candidates], multi_tool_mode=False
-            )["tools"][0]
-            primary_guid = primary_tool.get("guid")
-            swap_restricted_guids = [
-                entry[0].get("guid") for entry in reviewed_endmill_candidates
-                if entry[0].get("guid") != primary_guid
-            ]
-            indexes = _indexes_with_tool_guids(indexes, {primary_guid})
+        # swap_restricted_guids stays empty now that multi_tool_swaps_enabled
+        # always matches multi_tool_mode (see its own comment above) - there
+        # is no longer a material-restricted single-cutter case to fall back
+        # to here. Left in the return shape below unchanged.
 
     ET.register_namespace("", _TEMPLATE_NS)
     tree = ET.parse(template_path)
@@ -1147,16 +1209,15 @@ def patch_cam_template_with_tool_libraries(
     endmill_plan = plan_endmills(
         [entry[0] for entry in endmill_candidates], multi_tool_mode=multi_tool_swaps_enabled
     )
-    if multi_tool_mode and not multi_tool_swaps_enabled and endmill_plan["tools"]:
-        endmill_plan["reason"] = "single cutter; ATC swaps are limited to Aluminum 6061"
     planned_guids = {tool.get("guid") for tool in endmill_plan["tools"]}
     endmill_candidates = [entry for entry in endmill_candidates if entry[0].get("guid") in planned_guids]
     # The New Router's three named through-shape roughing tiers are an ATC
     # optimization. Shape Through Hole is the regular/middle operation;
     # Small Shape Through Hole and Shape Through Hole big endmill only make
-    # sense when this job has a real Aluminum-6061 endmill swap plan. Old
-    # Router and any single-cutter New Router job must run the middle tier
-    # alone so one feature cannot be assigned to multiple roughing passes.
+    # sense when this job has a real endmill swap plan (any material now,
+    # not only Aluminum 6061). Old Router and any single-cutter New Router
+    # job must run the middle tier alone so one feature cannot be assigned
+    # to multiple roughing passes.
     through_shape_tool_swaps_enabled = (
         multi_tool_swaps_enabled and len(endmill_plan["tools"]) > 1
     )

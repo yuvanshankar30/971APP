@@ -18,6 +18,77 @@ def tool_with(*preset_names):
     }
 
 
+def _tool(description, number, diameter=None, guid=None):
+    tool = {"description": description, "post-process": {"number": number}}
+    if diameter is not None:
+        tool["geometry"] = {"DC": diameter}
+    if guid is not None:
+        tool["guid"] = guid
+    return tool
+
+
+class DropStaleDuplicateToolNumbersTests(unittest.TestCase):
+    def test_drops_the_undescribed_duplicate_of_a_sized_tool(self):
+        # Real, confirmed data: "Normal router tools (use this).tools" ships
+        # both of these under NC tool number 6.
+        stale = _tool("for tool changer", 6, diameter=0.25)
+        real = _tool("4mm sized for toolchager", 6, diameter=0.1575)
+        other = _tool("6mm for toolchanger", 2, diameter=0.2362205)
+
+        kept = template_tools._drop_stale_duplicate_tool_numbers([stale, real, other])
+
+        self.assertNotIn(stale, kept)
+        self.assertIn(real, kept)
+        self.assertIn(other, kept)
+
+    def test_leaves_non_conflicting_tool_numbers_alone(self):
+        tools = [_tool("971 Main Bit", 1, diameter=0.1575), _tool("6mm for toolchanger", 2, diameter=0.2362205)]
+
+        kept = template_tools._drop_stale_duplicate_tool_numbers(tools)
+
+        self.assertEqual(kept, tools)
+
+    def test_leaves_an_unresolvable_conflict_alone_when_neither_side_is_sized(self):
+        # Real, confirmed data: the library's two identically-named T5
+        # countersinks (0.372in and 0.5in) - no "sized" tag on either side,
+        # so there's no real basis to prefer one over the other.
+        a = _tool("82˚ couter sink for toolchanger", 5, diameter=0.372)
+        b = _tool("82˚ couter sink for toolchanger", 5, diameter=0.5)
+
+        kept = template_tools._drop_stale_duplicate_tool_numbers([a, b])
+
+        self.assertEqual(kept, [a, b])
+
+    def test_leaves_an_unresolvable_conflict_alone_when_both_sides_are_sized(self):
+        a = _tool("4mm sized variant a", 6, diameter=0.1575)
+        b = _tool("4mm sized variant b", 6, diameter=0.16)
+
+        kept = template_tools._drop_stale_duplicate_tool_numbers([a, b])
+
+        self.assertEqual(kept, [a, b])
+
+    def test_ignores_tools_with_no_readable_tool_number(self):
+        no_post_process = {"description": "mystery tool"}
+
+        kept = template_tools._drop_stale_duplicate_tool_numbers([no_post_process])
+
+        self.assertEqual(kept, [no_post_process])
+
+
+class IndexToolsAppliesDedupeTests(unittest.TestCase):
+    def test_index_tools_excludes_the_stale_duplicate_from_by_type(self):
+        stale = _tool("for tool changer", 6, diameter=0.25)
+        real = _tool("4mm sized for toolchager", 6, diameter=0.1575)
+        stale["type"] = "flat end mill"
+        real["type"] = "flat end mill"
+
+        index = template_tools._index_tools({"data": [stale, real]})
+
+        self.assertNotIn(stale, index["tools"])
+        self.assertIn(real, index["tools"])
+        self.assertNotIn(stale, index["by_type"]["flat end mill"])
+
+
 class TemplateToolPresetTests(unittest.TestCase):
     def test_conservative_router_preset_quarters_every_motion_feed(self):
         preset = {
@@ -43,7 +114,7 @@ class TemplateToolPresetTests(unittest.TestCase):
         self.assertEqual(scaled["v_f_retract"], 10)
         self.assertEqual(preset["v_f"], 80)
 
-    def test_default_preset_is_allowed_only_for_known_aluminum(self):
+    def test_default_preset_is_allowed_for_aluminum(self):
         selected = template_tools._choose_preset(tool_with("Default preset"), "Aluminum 6061")
         self.assertEqual(selected["name"], "Default preset")
 
@@ -53,13 +124,23 @@ class TemplateToolPresetTests(unittest.TestCase):
         )
         self.assertEqual(selected["name"], "Polycarbonate (Lexan)")
 
-    def test_unreviewed_material_cannot_fall_back_to_default(self):
-        with self.assertRaisesRegex(ValueError, "No reviewed feed/speed preset"):
-            template_tools._choose_preset(tool_with("Default preset"), "Steel")
+    def test_default_preset_is_now_a_fallback_for_any_material(self):
+        # Direct instruction: "Default preset" is no longer restricted to
+        # Aluminum 6061 - the shop manually adjusts feed rate at the router
+        # for whatever material is loaded, so a reviewed-but-generic preset
+        # is now an acceptable basis for any material.
+        for material in ("Steel", "Aluminum Composite", "Titanium"):
+            with self.subTest(material=material):
+                selected = template_tools._choose_preset(tool_with("Default preset"), material)
+                self.assertEqual(selected["name"], "Default preset")
 
-    def test_short_aluminum_alias_cannot_match_default_by_accident(self):
+    def test_still_raises_when_no_default_preset_exists_at_all(self):
+        # The universal Default-preset fallback only helps a tool that
+        # actually has one. A tool with only OTHER named presets, none of
+        # which match the requested material, must still refuse rather than
+        # guess at an unrelated material's feeds/speeds.
         with self.assertRaisesRegex(ValueError, "No reviewed feed/speed preset"):
-            template_tools._choose_preset(tool_with("Default preset"), "Aluminum Composite")
+            template_tools._choose_preset(tool_with("Steel Preset", "Titanium Preset"), "Aluminum")
 
 
 class EntryFeedSafetyTests(unittest.TestCase):

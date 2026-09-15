@@ -111,6 +111,15 @@ class NativeBoreToolAssignmentTests(unittest.TestCase):
         clone = dict(source)
         clone["guid"] = desc_match_guid
         clone["description"] = "971 Main Bit"
+        # A real, distinct physical tool, not sharing an NC tool number with
+        # the source it was cloned from - `dict(source)` is a shallow copy,
+        # so without this override the clone would still carry the SAME
+        # post-process dict (and its tool number 6) as the real "4mm sized
+        # for toolchager" tool it was cloned from, spuriously tripping
+        # _drop_stale_duplicate_tool_numbers's real-duplicate-number
+        # detection and dropping this clone entirely before it ever reaches
+        # the description-match path this test exists to exercise.
+        clone["post-process"] = {**source.get("post-process", {}), "number": 99}
         parsed["data"].append(clone)
         with tempfile.TemporaryDirectory() as directory:
             tool_json = Path(directory) / "tools.json"
