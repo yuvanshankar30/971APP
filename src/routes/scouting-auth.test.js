@@ -45,7 +45,8 @@ vi.mock('$lib/server/971bot.js', () => ({
 
 vi.mock('$lib/server/slack_notifications.js', () => ({
   notifyScoutAssignment: vi.fn(),
-  notifyPitAssignment: vi.fn()
+  notifyPitAssignment: vi.fn(),
+  notifyPrescoutAssignment: vi.fn()
 }));
 
 function request(body = {}) {
@@ -69,7 +70,8 @@ describe('scouting route authentication', () => {
     ['pit entries', () => import('./pitscout/+server.js'), { action: 'save-entry' }],
     ['pick-list changes', () => import('./api/scouting-picklist/+server.js'), { action: 'add' }],
     ['match assignments', () => import('./api/scout-assignments/+server.js'), { action: 'bulk-assign', scouting_type: 'data' }],
-    ['pit assignments', () => import('./api/pit-scout-assignments/+server.js'), { action: 'bulk-assign', event_key: '2026test' }]
+    ['pit assignments', () => import('./api/pit-scout-assignments/+server.js'), { action: 'bulk-assign', event_key: '2026test' }],
+    ['pre-scout assignments', () => import('./api/prescout-assignments/+server.js'), { action: 'bulk-assign', event_key: '2026test' }]
   ])('rejects unauthenticated localhost writes for %s', async (_name, loadRoute, body) => {
     const { POST } = await loadRoute();
     const response = await POST({ request: request(body), url: localUrl('/') });
@@ -85,7 +87,8 @@ describe('scouting route authentication', () => {
 
   it.each([
     ['match assignments', () => import('./api/scout-assignments/+server.js'), '/api/scout-assignments?scouting_type=data'],
-    ['pit assignments', () => import('./api/pit-scout-assignments/+server.js'), '/api/pit-scout-assignments?event_key=2026test']
+    ['pit assignments', () => import('./api/pit-scout-assignments/+server.js'), '/api/pit-scout-assignments?event_key=2026test'],
+    ['pre-scout assignments', () => import('./api/prescout-assignments/+server.js'), '/api/prescout-assignments?event_key=2026test']
   ])('rejects unauthenticated localhost assignment reads for %s', async (_name, loadRoute, path) => {
     const { GET } = await loadRoute();
     const response = await GET({ request: request(), url: localUrl(path) });

@@ -5,10 +5,19 @@
   import { getAuthHeader } from '$lib/supabase.js';
   import { fetchActiveScoutingEventKey } from '$lib/scoutingEvent.js';
 
+  export let assignmentKind = 'pit';
+  export let initiallyOpen = false;
+
+  $: isPrescout = assignmentKind === 'prescout';
+  $: assignmentEndpoint = isPrescout ? '/api/prescout-assignments' : '/api/pit-scout-assignments';
+  $: assignmentTitle = isPrescout ? 'Pre-Scouting Assignments' : 'Pit Scouting Assignments';
+  $: assignmentVerb = isPrescout ? 'pre-scout' : 'pit scout';
+  $: teamSourceLabel = isPrescout ? 'Pre-scout teams' : 'Event teams';
+
   let user;
   userStore.subscribe((v) => (user = v));
 
-  let panelOpen = false;
+  let panelOpen = initiallyOpen;
   let eventTeams = []; // [{key, team_number, nickname}]
   let eventKey = '';
   let publishedAssignments = {}; // team_key -> { user_id, user_name }
@@ -108,7 +117,7 @@
   async function loadCapabilities() {
     try {
       const qs = new URLSearchParams({ capabilities: '1' });
-      const res = await authFetch(`/api/pit-scout-assignments?${qs}`);
+      const res = await authFetch(`${assignmentEndpoint}?${qs}`);
       const data = await res.json();
       if (data?.success && data?.data) {
         capabilities = { ...capabilities, ...data.data };
@@ -126,7 +135,7 @@
 
     try {
       const qs = new URLSearchParams({ eligible: '1' });
-      const res = await authFetch(`/api/pit-scout-assignments?${qs}`);
+      const res = await authFetch(`${assignmentEndpoint}?${qs}`);
       const data = await res.json();
       if (data?.success) {
         users = data.data || [];
@@ -137,6 +146,28 @@
   }
 
   async function loadEventTeams() {
+    if (isPrescout) {
+      try {
+        loading = true;
+        errorMsg = '';
+        const res = await authFetch(`${assignmentEndpoint}?teams=1`);
+        const data = await res.json();
+        if (!data?.success) {
+          errorMsg = data?.error || 'Failed to load pre-scout teams';
+          return;
+        }
+        eventKey = data.event_key || '';
+        eventTeams = (data.data || [])
+          .map((teamKey) => ({ key: teamKey, team_number: Number(String(teamKey).replace(/^frc/i, '')) || 0 }))
+          .sort((a, b) => a.team_number - b.team_number);
+      } catch (e) {
+        errorMsg = e.message || 'Load error';
+      } finally {
+        loading = false;
+      }
+      return;
+    }
+
     eventKey = (await fetchActiveScoutingEventKey()) || '';
     if (!eventKey) {
       errorMsg = 'No event configured';
@@ -176,7 +207,7 @@
     if (!eventKey) return;
     try {
       const qs = new URLSearchParams({ event_key: eventKey });
-      const res = await authFetch(`/api/pit-scout-assignments?${qs}`);
+      const res = await authFetch(`${assignmentEndpoint}?${qs}`);
       const data = await res.json();
       if (!data?.success) return;
 
@@ -233,7 +264,7 @@
 
     saving = true;
     try {
-      const res = await authFetch('/api/pit-scout-assignments', {
+      const res = await authFetch(assignmentEndpoint, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ action: 'bulk-assign', event_key: eventKey, items: list })
@@ -279,7 +310,7 @@
 
 <details class="assignment-accordion" bind:open={panelOpen}>
   <summary class="summary-row">
-    <div class="summary-title">Pit Scouting Assignments</div>
+    <div class="summary-title">{assignmentTitle}</div>
     <div class="summary-meta">
       <span class="mode-pill" class:editable={capabilities.can_edit}>
         {capabilities.can_edit ? 'Lead edit mode' : 'View only'}
@@ -291,7 +322,7 @@
     <div class="panel-header">
       <div class="hint">
         {#if capabilities.can_edit}
-          Drag a team onto a scout to assign them pit-scouting duty for that team. Nothing is sent until you publish.
+          Drag a team onto a scout to assign them {assignmentVerb} duty for that team. Nothing is sent until you publish.
         {:else}
           Assignments are read-only unless you are a scouting lead in Roster Studio.
         {/if}
@@ -325,7 +356,7 @@
       <section class="drag-assignment-board" aria-label="Drag and drop pit scouting assignments">
         <div class="assignment-toolbar">
           <div class="team-drag-source">
-            <span>Event teams</span>
+            <span>{teamSourceLabel}</span>
             <div class="team-drag-bar" aria-label="Drag an FRC team to a scout">
               {#each eventTeams as team}
                 <button
@@ -341,7 +372,7 @@
                 </button>
               {/each}
               {#if !eventTeams.length}
-                <span class="assignment-empty">No teams loaded for this event.</span>
+                <span class="assignment-empty">{isPrescout ? 'Add teams in the Pre-Scouting list above.' : 'No teams loaded for this event.'}</span>
               {/if}
             </div>
           </div>
