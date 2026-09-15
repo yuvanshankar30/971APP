@@ -301,7 +301,7 @@ class TabDistributionTests(unittest.TestCase):
     def test_tab_budget_uses_nearest_spacing_interval(self):
         self.assertEqual(TabPlacement._tab_count_for_perimeter(16.0, 4, 10), 4)
         self.assertEqual(TabPlacement._tab_count_for_perimeter(16.01, 4, 10), 4)
-        self.assertEqual(TabPlacement._tab_count_for_perimeter(36.01, 4, 10), 9)
+        self.assertEqual(TabPlacement._tab_count_for_perimeter(36.01, 4, 10), 6)
 
     def test_a_side_much_longer_than_its_competitors_gets_more_than_one_tab(self):
         # Live-confirmed bug, reported against a real plate: one straight
