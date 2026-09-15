@@ -205,8 +205,10 @@ below, which adds its own explicit `VISION_RELEASE` check.
   - `add-view` — inserts the `vision_views` row (storage path is
     `event_key/match_key/<uuid>-<sanitized filename>`) and returns a signed
     *upload* URL the client uploads the raw file to directly.
-  - `queue-run` — requires at least one view already uploaded; inserts a
-    `vision_runs` row and flips the match to `queued`.
+  - `queue-run` — requires at least one view and a pinned model identity,
+    evaluates runner/roster/calibration readiness, and requires an explicit
+    acknowledgement before incomplete inputs can be queued as a shadow run;
+    inserts a `vision_runs` row and flips the match to `queued`.
   - `review` — resolves a discrepancy (one of the 5 allowed statuses),
     stamping reviewer id and timestamp.
   - `update-track` / `update-observation` — human correction of a track's
@@ -219,6 +221,10 @@ below, which adds its own explicit `VISION_RELEASE` check.
   - `review-observations` — the same verdicts applied to up to 500 ids at
     once, for clearing a match's worth of proposals without a click per row.
     Deliberately excludes `corrected`, which needs a per-row value and team.
+  - `preview-release` — permission-gated, read-only construction of the exact
+    `scout_data_events` rows a completed run would release, including skipped
+    climb values. The review UI requires this before enabling release and
+    sends the preview rows back so the server can reject a stale preview.
   - `cancel-run` — abandons a `queued`/`claimed`/`processing` run. A runner
     that crashes mid-job otherwise leaves the run wedged forever, since only
     the worker actively holding a run ever terminates it. The status filter is

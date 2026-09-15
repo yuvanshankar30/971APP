@@ -171,6 +171,36 @@ describe('api/vision', () => {
       expect(res.status).toBe(400);
     });
 
+    it('requires an explicit acknowledgement before queueing with readiness warnings', async () => {
+      mockClient = makeMockClient({
+        vision_views: [{ data: [{ id: 'v1', field_mask: null, goal_zones: [], homography: null, start_zones: [] }], error: null }],
+        vision_matches: [{ data: { team_roster: {} }, error: null }],
+        vision_runners: [{ data: [], error: null }]
+      });
+      const { POST } = await import('./+server.js');
+      const res = await POST({ request: request({ action: 'queue-run', vision_match_id: 'm1', model_name: 'yolo', model_version: 'v1' }) });
+      expect(res.status).toBe(409);
+      expect((await res.json()).readiness.warnings.length).toBeGreaterThan(0);
+    });
+
+    it('queues an acknowledged shadow run', async () => {
+      mockClient = makeMockClient({
+        vision_views: [{ data: [{ id: 'v1', field_mask: null, goal_zones: [], homography: null, start_zones: [] }], error: null }],
+        vision_matches: [
+          { data: { team_roster: {} }, error: null },
+          { data: { id: 'm1', status: 'queued' }, error: null }
+        ],
+        vision_runners: [{ data: [], error: null }],
+        vision_runs: [{ data: { id: 'r1', status: 'queued' }, error: null }]
+      });
+      const { POST } = await import('./+server.js');
+      const res = await POST({ request: request({
+        action: 'queue-run', vision_match_id: 'm1', model_name: 'yolo', model_version: 'v1',
+        acknowledge_readiness_warnings: true
+      }) });
+      expect(res.status).toBe(200);
+    });
+
     it('persists start zones drawn in the visual calibrator', async () => {
       const startZones = [{ label: 'center', polygon: [[0.4, 0.1], [0.6, 0.1], [0.6, 0.3]] }];
       mockClient = makeMockClient({ vision_views: [{ data: { id: 'view-1', start_zones: startZones }, error: null }] });
