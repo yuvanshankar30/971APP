@@ -144,7 +144,7 @@
 
 <div class="page-header">
   <h1><Layers size={28} /> Fusion AutoCAM</h1>
-  <div class="header-guide-links">
+  <div class="page-actions">
     {#if canManage}
       <button type="button" class="btn btn-secondary btn-sm" on:click={openQuickQueueChoice}>
         <Zap size={14} /> Quick Queue
@@ -242,10 +242,13 @@
      theme override there either). Only page-specific LAYOUT rules remain
      below; all colors now come from the real site tokens in src/app.css. */
 
-  .header-guide-links {
-    display: flex;
-    gap: 0.5rem;
-  }
+  /* .page-header/.page-actions are the same global classes Manufacturing
+     (src/routes/manufacture/+page.svelte) uses for its own header actions -
+     reused directly here instead of the bespoke header-guide-links rule
+     this page used to define. The tab bar itself reverted back to this
+     page's own underline-tab style below (Manufacturing's .subtabs pill
+     look didn't render cleanly for a <button>-based switcher - see the
+     reverted attempt's own history). */
   .tab-nav {
     display: flex;
     gap: 0.5rem;
