@@ -28,6 +28,7 @@ def _load_split_functions():
 
 _ns = _load_split_functions()
 split_through_roughing_ops = _ns["_split_through_roughing_ops"]
+route_slot_chains_avoiding_tool_swaps = _ns["_route_slot_chains_avoiding_tool_swaps"]
 operation_tool_diameter_cm = _ns["_operation_tool_diameter_cm"]
 adaptive_entry_clearance_cm = _ns["_adaptive_entry_clearance_cm"]
 next_smaller_through_roughing_op = _ns["_next_smaller_through_roughing_op"]
@@ -395,6 +396,100 @@ class SplitThroughRoughingOpsTests(unittest.TestCase):
         self.assertEqual(assignments["big"], [])
         self.assertEqual(assignments["regular"], [("angad-through-shape", False)])
         self.assertEqual(assignments["small"], [])
+
+
+class RouteSlotChainsAvoidingToolSwapsTests(unittest.TestCase):
+    def test_slot_stays_on_the_active_big_tool_instead_of_swapping_down(self):
+        # Direct instruction: a slot cut that would land right after a
+        # big-tool (T2-class) operation should not force a swap down to the
+        # detail (T6-class) tool just for that one narrow feature.
+        big = _op("Shape Through Hole big endmill", "big", tool_diameter_cm=0.6)
+        regular = _op("Shape Through Hole", "regular", tool_diameter_cm=0.4)
+        # A real shape chain already forces "big" to run regardless of the slot.
+        shape_assignments = {"big": [("real-shape", False)], "regular": []}
+        # Fits both tools' real entry envelope (big: 0.6*1.5=0.9, regular: 0.4*1.5=0.6).
+        slot = _entry("slot", 1.0)
+
+        assignments = route_slot_chains_avoiding_tool_swaps([big, regular], [slot], shape_assignments)
+
+        self.assertEqual(assignments["big"], [("slot", False)])
+        self.assertEqual(assignments["regular"], [])
+
+    def test_slot_stays_on_the_active_detail_tool_instead_of_swapping_up(self):
+        # Vice versa: a slot that would otherwise land on an already-
+        # necessary detail tool should not be pulled up to the big tool
+        # just for it.
+        big = _op("Shape Through Hole big endmill", "big", tool_diameter_cm=0.6)
+        regular = _op("Shape Through Hole", "regular", tool_diameter_cm=0.4)
+        shape_assignments = {"big": [], "regular": [("real-shape", False)]}
+        slot = _entry("slot", 1.0)
+
+        assignments = route_slot_chains_avoiding_tool_swaps([big, regular], [slot], shape_assignments)
+
+        self.assertEqual(assignments["regular"], [("slot", False)])
+        self.assertEqual(assignments["big"], [])
+
+    def test_falls_back_to_the_biggest_fitting_tool_with_no_active_tier(self):
+        # A part with only slot features and no real shape work forcing
+        # any particular tool - same default _split_through_roughing_ops
+        # applies to shapes: the biggest tool that still qualifies.
+        big = _op("Shape Through Hole big endmill", "big", tool_diameter_cm=0.6)
+        regular = _op("Shape Through Hole", "regular", tool_diameter_cm=0.4)
+        shape_assignments = {"big": [], "regular": []}
+        slot = _entry("slot", 1.0)
+
+        assignments = route_slot_chains_avoiding_tool_swaps([big, regular], [slot], shape_assignments)
+
+        self.assertEqual(assignments["big"], [("slot", False)])
+        self.assertEqual(assignments["regular"], [])
+
+    def test_never_assigns_a_slot_to_an_active_tool_too_tight_to_enter_it(self):
+        # Safety over swap-avoidance: even though "big" is already active,
+        # a slot too narrow for its real entry envelope must still fall
+        # through to a tool that can actually enter it.
+        big = _op("Shape Through Hole big endmill", "big", tool_diameter_cm=0.6)
+        regular = _op("Shape Through Hole", "regular", tool_diameter_cm=0.4)
+        shape_assignments = {"big": [("real-shape", False)], "regular": []}
+        # Clears regular's threshold (0.4*1.5=0.6) but not big's (0.6*1.5=0.9).
+        tight_slot = _entry("tight-slot", 0.7)
+
+        assignments = route_slot_chains_avoiding_tool_swaps(
+            [big, regular], [tight_slot], shape_assignments
+        )
+
+        self.assertEqual(assignments["regular"], [("tight-slot", False)])
+        self.assertEqual(assignments["big"], [])
+
+    def test_falls_back_to_giving_every_op_every_slot_with_a_single_roughing_op(self):
+        only = _op("Shape Through Hole", "only", tool_diameter_cm=0.4)
+        slot = _entry("slot", 1.0)
+
+        assignments = route_slot_chains_avoiding_tool_swaps([only], [slot], {"only": []})
+
+        self.assertEqual(assignments["only"], [("slot", False)])
+
+    def test_falls_back_when_a_roughing_ops_tool_diameter_cannot_be_read(self):
+        big = _op("Shape Through Hole big endmill", "big", tool_diameter_cm=None)
+        regular = _op("Shape Through Hole", "regular", tool_diameter_cm=0.4)
+        slot = _entry("slot", 1.0)
+
+        assignments = route_slot_chains_avoiding_tool_swaps(
+            [big, regular], [slot], {"big": [], "regular": []}
+        )
+
+        self.assertEqual(assignments["big"], [("slot", False)])
+        self.assertEqual(assignments["regular"], [("slot", False)])
+
+    def test_no_slot_chains_returns_empty_assignments_for_every_op(self):
+        big = _op("Shape Through Hole big endmill", "big", tool_diameter_cm=0.6)
+        regular = _op("Shape Through Hole", "regular", tool_diameter_cm=0.4)
+
+        assignments = route_slot_chains_avoiding_tool_swaps(
+            [big, regular], [], {"big": [], "regular": []}
+        )
+
+        self.assertEqual(assignments["big"], [])
+        self.assertEqual(assignments["regular"], [])
 
 
 class LoopMinDimensionTests(unittest.TestCase):

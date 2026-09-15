@@ -726,6 +726,70 @@ def _split_through_roughing_ops(roughing_ops, shape_only):
     return assignments
 
 
+def _route_slot_chains_avoiding_tool_swaps(roughing_ops, slot_chains, shape_assignments):
+    """Routes each (seed_edge, is_reverted, min_clearance_cm) FEATURE-SLOT
+    chain (see _FEATURE_ASPECT_RATIO) in slot_chains to whichever of
+    roughing_ops should cut it, preferring whatever tool is ALREADY
+    committed to running for this part's real shape chains over the
+    "biggest tool that fits" rule _split_through_roughing_ops applies to
+    shapes.
+
+    A feature slot is narrow enough that the tool just traces it - there is
+    no interior to clear, so unlike a broad shape there is no efficiency
+    reason to prefer the biggest tool that fits. The only real cost left is
+    an avoidable ATC tool change: if a roughing tier already running for
+    this part's genuine shape features (shape_assignments - a non-empty
+    entry means Fusion already has to swap to that tool regardless of what
+    happens here) can ALSO clear this slot without leaving it too tight to
+    enter, keep the slot on that tool instead of pulling it onto whichever
+    tier the generic biggest-that-fits rule would otherwise prefer.
+
+    Direct instruction: a slot cut that would otherwise land right after a
+    big-tool (e.g. T2) operation should stay on that tool rather than
+    forcing a swap down to a detail (e.g. T6) tool just for that one
+    feature, and symmetrically a slot that would land on an already-
+    necessary detail tool should not be pulled up to the big tool just for
+    it either. Both directions only ever choose between tools that already
+    pass the exact same real entry-clearance safety check
+    _split_through_roughing_ops uses for shapes (_adaptive_entry_clearance_cm)
+    - this never assigns a slot to a tool too tight to actually enter it,
+    it only changes which of the SAFE candidates wins.
+
+    Falls back to the identical default _split_through_roughing_ops uses
+    (biggest qualifying tool, else the tightest-fitting tool of all) when no
+    already-active tier can safely take the chain - e.g. a part with only
+    slot features and no real shape work forcing any particular tool. Also
+    falls back to giving every op every slot chain when the split itself
+    can't be trusted (fewer than two roughing ops, or a real tool diameter
+    couldn't be read for one of them), same as _split_through_roughing_ops.
+    """
+    assignments = {op.operationId: [] for op in roughing_ops}
+    if not slot_chains:
+        return assignments
+
+    diameters_cm = {op.operationId: _operation_tool_diameter_cm(op) for op in roughing_ops}
+    if len(roughing_ops) < 2 or any(diameters_cm[op.operationId] is None for op in roughing_ops):
+        stripped = [(seed_edge, is_reverted) for seed_edge, is_reverted, _min_dim in slot_chains]
+        return {op.operationId: stripped for op in roughing_ops}
+
+    ordered = sorted(roughing_ops, key=lambda op: diameters_cm[op.operationId], reverse=True)
+    thresholds = [
+        _adaptive_entry_clearance_cm(op, diameters_cm[op.operationId]) for op in ordered
+    ]
+    active_ids = {op_id for op_id, chains in shape_assignments.items() if chains}
+
+    for seed_edge, is_reverted, min_dim in slot_chains:
+        qualifying = [op for op, threshold in zip(ordered, thresholds) if min_dim >= threshold]
+        target = next((op for op in qualifying if op.operationId in active_ids), None)
+        if target is None:
+            # No already-active tier can safely take it - same fallback
+            # _split_through_roughing_ops uses: the biggest qualifying
+            # tool, else the smallest-diameter op of all.
+            target = qualifying[0] if qualifying else ordered[-1]
+        assignments[target.operationId].append((seed_edge, is_reverted))
+    return assignments
+
+
 def _is_feature_slot_op(name_lower: str) -> bool:
     """True for the template's own dedicated feature-slot operation
     ("Slot Cut for Features"). Requires both "slot" and "feature" so it can
@@ -1258,7 +1322,24 @@ def _repair_missing_selections(setup) -> list[str]:
             stripped_shape_only = [(seed_edge, is_reverted) for seed_edge, is_reverted, _min_dim in shape_only]
             for op in finishing_ops:
                 through_chain_assignments[op.operationId] = stripped_shape_only
-            through_chain_assignments.update(_split_through_roughing_ops(roughing_ops, shape_only))
+            # Shapes and slots are routed separately, then merged per op:
+            # a broad shape always wants the biggest tool that can clear
+            # its interior (_split_through_roughing_ops), while a narrow
+            # feature slot has no interior to clear and should stay on
+            # whatever tool shape routing already committed to running
+            # rather than force an avoidable ATC swap - see
+            # _route_slot_chains_avoiding_tool_swaps.
+            shape_assignments = _split_through_roughing_ops(roughing_ops, shape_chains)
+            slot_assignments = _route_slot_chains_avoiding_tool_swaps(
+                roughing_ops, slot_chains, shape_assignments
+            )
+            through_chain_assignments.update(
+                {
+                    op.operationId: shape_assignments.get(op.operationId, [])
+                    + slot_assignments.get(op.operationId, [])
+                    for op in roughing_ops
+                }
+            )
 
     # Direct instruction, New Router multi-tool only: route a "decently
     # large" recognized hole to the dedicated big-hole operation's own
