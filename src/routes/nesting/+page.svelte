@@ -442,7 +442,17 @@
     const partName = firstStem.replace(/_[^_]+$/, '') || firstStem;
     try {
       await Promise.all(files.map(file => uploadPartFile(file, sheet.name, partName)));
-      const variants = await Promise.all(files.map(async file => parseGcodeDocument(await file.text(), file.name)));
+      // Real, confirmed gap: readPartGroup (used every time a stored part is
+      // re-loaded from the library) already converts metric AutoCAM output
+      // to inches before parsing - this immediate in-memory parse right
+      // after upload did not, so a raw millimeter (G22) AutoCAM file placed
+      // this same session showed wildly wrong bounds (mm values read as
+      // inches) until the next library reload silently "fixed" it, and
+      // would still fail to parse in real JProg if emitted before that
+      // (JProg's WinCNC parser has no G22 case and aborts - see
+      // gcodeUnitConvert.js's own header). Converted here too for
+      // consistency with every other ingestion path.
+      const variants = await Promise.all(files.map(async file => parseGcodeDocument(convertGcodeToInches(await file.text()).gcode, file.name)));
       const primary = variants[0], bounds = variants.reduce((largest, item) => item.bounds.width * item.bounds.height > largest.width * largest.height ? item.bounds : largest, primary.bounds);
       const key = `${sheetPartLibraryRoot(sheet.name)}/${partName}`; gcodePrograms[key] = { variants, bounds };
       if (!sheet?.program_extension && type) { await setSheetProgramType(sheet.id, type); sheet = { ...sheet, program_extension: type }; }
