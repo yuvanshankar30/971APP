@@ -1667,6 +1667,7 @@
             placeholder="Automatic"
           />
           <p class="cam-form-hint">Overrides the automatic tab count ({TAB_COUNT_MIN}-{TAB_COUNT_MAX}) for this job - leave blank to size tabs from the part automatically. Too many tabs adds real cutting time for no real stability benefit; only ask for more than the automatic default if a specific part needs it.</p>
+          <p class="cam-form-hint">Automatic tab placement is the part of this pipeline most likely to need a manual correction - check the generated CAM setup before running the job, and use this override if the automatic count or placement isn't right for this part.</p>
         </div>
         <div class="form-group">
           <div class="folder-picker-header">
