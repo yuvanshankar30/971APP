@@ -50,8 +50,7 @@ the code and what does it do."
 
 ## Database
 
-Eleven SQL files. Ten are applied; the runner-health cron migration is
-deliberately held until merge (see **Setup checklist** below).
+Eleven SQL files, all applied in production as of September 15, 2026.
 
 Three of them are hardening rather than schema:
 
@@ -72,6 +71,10 @@ Three of them are hardening rather than schema:
   auto starting regions that let vision report `auto_start_position` at all.
 - `20260829_vision_match_roster.sql` — `vision_matches.team_roster`, the six
   teams in the match cached from TBA, which constrains identity assignment.
+- `20260915_vision_function_execute_grants.sql` — removes PostgreSQL's default
+  public `EXECUTE` grant from the two Vision `SECURITY DEFINER` functions.
+  Only `service_role` may invoke `release_vision_run`; the database owner runs
+  the cron invoker.
 
 ### `migrations/20260828_vision_system.sql`
 
@@ -873,8 +876,8 @@ this establishes one.
 
 ## Setup checklist (nothing here works until these are done)
 
-1. Run all Vision migrations against Supabase in order. Seven are already
-   applied; the cron one is deliberately held back until merge:
+1. Run all Vision migrations against Supabase in order. Production has all of
+   these applied:
    - `migrations/20260828_vision_system.sql` — applied
    - `migrations/20260829_vision_notifications_release_fleet.sql` — applied
    - `migrations/20260829_vision_field_mask_goal_zones.sql` — applied
@@ -884,19 +887,17 @@ this establishes one.
    - `migrations/20260829_vision_recording_retention.sql` — applied
    - `migrations/20260829_vision_start_zones.sql` — applied
    - `migrations/20260829_vision_match_roster.sql` — applied
-   - `migrations/20260829_vision_runner_health_cron.sql` — **apply on merge,
-     not before.** Unlike the others (additive schema deployed code ignores),
-     it schedules a `pg_cron` job that calls
-     `/api/notifications/vision-stale-runners`, a route that only exists on
-     this branch; applying it early just 404s against production every 5
-     minutes.
+   - `migrations/20260829_vision_runner_health_cron.sql` — applied; schedules
+     the active five-minute runner health sweep.
+   - `migrations/20260915_vision_function_execute_grants.sql` — applied;
+     prevents browser roles from invoking privileged Vision functions as RPCs.
 2. No permission grant is needed for basic access - every approved user can
    already use Vision Scouting once the migrations run. Grant `VISION_RELEASE`
    (from the admin panel's Permissions column) only to whoever should be able
    to release results into real scouting data.
 3. Set `VISION_RUNNER_TOKEN` and `TBA_API_KEY` in the web service; generate a
    separate `VISION_QWEN_TOKEN` for the private runner-to-Qwen boundary.
-4. Deploy `vision/runner/docker-compose.yml` on DGX Spark with the pinned
+4. Deploy the checked-in bare-metal systemd units on DGX Spark with the pinned
    Qwen revision, persistent model cache, and `VISION_MODEL_PATH` pointing at
    a locally trained tracker model — no weights are committed to this repo.
 

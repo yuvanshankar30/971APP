@@ -73,14 +73,12 @@ verified in the 2026-09-13 review because `sudo -n` requires a password.
 Schedule training separately from large-model inference until memory and
 throughput are measured; see `vision/evaluation/pipeline-review.md`.
 
-### A3. Apply the cron migration **on merge**, and pick a retention window **[NEEDED]**
+### A3. ~~Apply the cron migration~~ **[DONE]**, and pick a retention window **[NEEDED]**
 
-`migrations/20260829_vision_runner_health_cron.sql` is deliberately **not**
-applied. Unlike the schema migrations (additive, and deployed code ignores
-them), it schedules a `pg_cron` job that calls
-`/api/notifications/vision-stale-runners` — a route that only exists on this
-branch. Applying it early just 404s against production every 5 minutes. Apply
-it right after PR #84 merges and deploys.
+`migrations/20260829_vision_runner_health_cron.sql` was applied on September
+15, 2026. The `vision-runner-health-5m` job is active and both reused vault
+settings are configured. `20260915_vision_function_execute_grants.sql` also
+removes public RPC access to the cron invoker and atomic release function.
 
 At the same time, decide two things the code deliberately does not guess:
 
