@@ -42,4 +42,14 @@ describe('strategy scouting overview', () => {
 
     expect(row.autoMobilityRate).toBe(1);
   });
+
+  it('includes every event team before scouts collect data', () => {
+    const rows = buildStrategyRows(
+      { match_entries: [{ team_key: 'frc971', match_key: '2026test_qm1' }] },
+      [{ key: 'frc254' }, { key: 'frc971' }, { key: 'frc1678' }]
+    );
+
+    expect(rows.map((row) => row.teamNumber)).toEqual(['254', '971', '1678']);
+    expect(rows.find((row) => row.teamKey === 'frc254')).toMatchObject({ coverage: 0, matchEntries: [] });
+  });
 });

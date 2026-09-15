@@ -4,7 +4,7 @@
   import { ChevronDown, ChevronRight, RefreshCw, Search, Star, Trash2 } from 'lucide-svelte';
   import { fetchActiveScoutingEventKey } from '$lib/scoutingEvent.js';
   import { getAuthHeader, supabase } from '$lib/supabase.js';
-  import { myRobotRating, summarizeRobotRatings } from '$lib/robotRatings.js';
+  import { myRobotRating, rankRobotTeams, summarizeRobotRatings } from '$lib/robotRatings.js';
 
   const RATING_FIELDS = [
     { key: 'overall_rating', label: 'Overall', required: true },
@@ -32,20 +32,14 @@
   let saveMessage = {}; // team_key -> string
 
   $: summaryByTeam = summarizeRobotRatings(ratings);
-  $: filteredTeams = (search.trim()
-    ? teams.filter((team) => {
+  $: rankedTeams = rankRobotTeams(teams, summaryByTeam);
+  $: ratingRankByTeam = new Map(rankedTeams.filter((team) => summaryByTeam.get(team.key)?.overallAvg != null).map((team, index) => [team.key, index + 1]));
+  $: filteredTeams = search.trim()
+    ? rankedTeams.filter((team) => {
         const query = search.trim().toLowerCase();
         return String(team.team_number).includes(query) || (team.nickname || '').toLowerCase().includes(query);
       })
-    : teams
-  ).slice().sort((a, b) => {
-    const left = summaryByTeam.get(a.key)?.overallAvg;
-    const right = summaryByTeam.get(b.key)?.overallAvg;
-    if (left == null && right == null) return a.team_number - b.team_number;
-    if (left == null) return 1;
-    if (right == null) return -1;
-    return right - left;
-  });
+    : rankedTeams;
 
   function emptyDraft(teamKey) {
     const mine = myRobotRating(ratings, teamKey, userId);
@@ -224,6 +218,7 @@
   {#if warning}<p class="text-muted">⚠ {warning}</p>{/if}
 
   <div class="search"><Search size={16} /><input class="form-input" placeholder="Filter teams..." bind:value={search} /></div>
+  <p class="sort-note">Rated teams are ranked by overall average, best to worst. Unrated teams follow in team-number order.</p>
 
   <div class="rating-list">
     {#each filteredTeams as team (team.key)}
@@ -233,6 +228,7 @@
       <section class="surface-card rating-row">
         <button class="rating-row-header" on:click={() => toggleExpanded(team)}>
           {#if isExpanded}<ChevronDown size={16} />{:else}<ChevronRight size={16} />{/if}
+          <span class="rank-label">{ratingRankByTeam.has(team.key) ? `Rank ${ratingRankByTeam.get(team.key)}` : 'Unrated'}</span>
           <span class="mono">#{team.team_number}</span>
           <span class="rating-row-name">{team.nickname || ''}</span>
           <span class="rating-row-summary">
@@ -325,6 +321,7 @@
 
 <style>
   h1, .search { display:flex; align-items:center; gap:var(--gap-2); }
+  .sort-note { margin:var(--space-2) 0 0; color:var(--text-muted); font-size:.78rem; }
   .rating-list { display:flex; flex-direction:column; gap:var(--space-2); margin-top:var(--space-3); }
   .rating-row { padding:0; overflow:hidden; }
   .rating-row-header {
@@ -332,6 +329,7 @@
     background:none; border:none; cursor:pointer; text-align:left; font:inherit; color:inherit;
   }
   .rating-row-name { flex:1; }
+  .rank-label { min-width:4.25rem; color:var(--text-muted); font-size:.7rem; font-weight:700; text-transform:uppercase; }
   .rating-row-summary { display:flex; align-items:center; gap:var(--gap-1); }
   .mine-badge { display:inline-flex; color:var(--brand-gold-strong, #b8860b); }
   .score-bar { display:inline-block; width:64px; height:6px; border-radius:3px; background:var(--surface-2); overflow:hidden; }

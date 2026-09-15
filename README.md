@@ -168,7 +168,13 @@ browser confirmation or prompt popups.
   focused team briefs without duplicating data entry. Completed Match
   Scouting reports flow into Strategy and Power Rankings and remain fully
   inspectable there; Scouting Admin also shows event-level report coverage
-  and the complete attributed submissions for auditing.
+  and the complete attributed submissions for auditing. Strategy seeds its
+  team board from the full TBA event roster, including teams with no scouting
+  observations yet, and its match view includes a clearly labeled practice
+  match when the real schedule is empty. Robot Ratings orders rated teams by
+  overall average from best to worst, followed by unrated teams. The Prediction
+  Market uses play points throughout and shares the same non-settling practice
+  match so scouts can test placing, updating, and cancelling predictions.
 - **Vision Scouting**: a real Competition-folder nav tab, open to every
   approved user like the rest of Competition (no special permission needed),
   running post-match, multi-camera ML processing at `/scouting/vision` for

@@ -4,7 +4,7 @@ import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/publi
 import { env } from '$env/dynamic/private';
 import { getSupabase } from '$lib/server/971bot.js';
 import { normalizeBetRequest } from '$lib/server/predictionMarketSchema.js';
-import { availableBalance, resolvePariMutuel } from '$lib/predictionMarket.js';
+import { STARTING_BALANCE, availableBalance, isTestMarketKey, resolvePariMutuel } from '$lib/predictionMarket.js';
 
 const SELECT_COLUMNS = 'id,event_key,match_key,created_by,side,stake,placed_at,updated_at,resolved_at,payout,winning_side';
 
@@ -74,6 +74,7 @@ async function resolveOutstandingBets(db, eventKey) {
   }
 
   for (const [matchKey, matchBets] of byMatch) {
+    if (isTestMarketKey(matchKey, eventKey)) continue;
     const match = await fetchTbaMatch(matchKey);
     // winning_alliance is '' for an unplayed match too (not just a tie) -
     // only trust it once TBA has also posted an actual play time, proof the
@@ -131,7 +132,7 @@ export async function POST({ request }) {
   const { value, error: invalid } = normalizeBetRequest(body);
   if (invalid) return json({ error: invalid }, { status: 400 });
 
-  const match = await fetchTbaMatch(value.match_key);
+  const match = isTestMarketKey(value.match_key, value.event_key) ? null : await fetchTbaMatch(value.match_key);
   if (match?.actual_time) return json({ error: 'This match has already been played.' }, { status: 409 });
   // actual_time can lag the real start by minutes (TBA posts it after the
   // match finishes and scores are entered) - a bet placed after the match
@@ -158,9 +159,11 @@ export async function POST({ request }) {
   if (existingError) return json({ error: existingError.message }, { status: 500 });
 
   const editingId = (existingBets || []).find((bet) => bet.match_key === value.match_key)?.id || null;
-  const ceiling = availableBalance(existingBets || [], actor.id, editingId);
+  const ceiling = isTestMarketKey(value.match_key, value.event_key)
+    ? STARTING_BALANCE
+    : availableBalance(existingBets || [], actor.id, editingId);
   if (value.stake > ceiling) {
-    return json({ error: `Only ${ceiling.toFixed(2)} available to wager - your balance is already committed to other pending bets.` }, { status: 400 });
+    return json({ error: `Only ${ceiling.toFixed(2)} points available - your balance is already committed to other pending predictions.` }, { status: 400 });
   }
 
   const { data, error } = await auth

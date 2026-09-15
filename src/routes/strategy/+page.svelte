@@ -6,6 +6,7 @@
   import { buildStrategyRows, strategyTotals } from '$lib/strategyScouting.js';
   import { buildPowerRankings } from '$lib/scoutingStats.js';
   import { isMatchPlayed, matchLabel, projectMatch } from '$lib/matchProjection.js';
+  import { buildTestMarketMatch } from '$lib/predictionMarket.js';
   import SeasonFilter from '$lib/components/SeasonFilter.svelte';
   import MatchScoutReport from '$lib/components/MatchScoutReport.svelte';
 
@@ -14,7 +15,9 @@
   let availableEvents = [];
   let report = null;
   let matches = [];
+  let eventTeams = [];
   let matchesWarning = '';
+  let teamsWarning = '';
   let loadedEventKey = '';
   let loading = true;
   let error = '';
@@ -23,7 +26,7 @@
   let view = 'teams'; // 'teams' | 'matches'
 
   $: resolvedEventKey = selectedEventKey || eventKey;
-  $: rows = buildStrategyRows(report?.data || {});
+  $: rows = buildStrategyRows(report?.data || {}, eventTeams);
   $: totals = strategyTotals(rows);
   $: filteredRows = rows.filter((row) => row.teamNumber.includes(teamSearch.trim()) || row.pitEntry?.robot_archetype?.toLowerCase().includes(teamSearch.trim().toLowerCase()));
   $: selectedTeam = rows.find((row) => row.teamKey === selectedTeamKey) || filteredRows[0] || null;
@@ -54,11 +57,13 @@
     loading = true;
     error = '';
     matchesWarning = '';
+    teamsWarning = '';
     try {
       const authHeaders = await getAuthHeader();
-      const [response, matchesResponse] = await Promise.all([
+      const [response, matchesResponse, teamsResponse] = await Promise.all([
         fetch(`/api/scouting-report?event_key=${encodeURIComponent(resolvedEventKey)}`, { headers: authHeaders }),
-        fetch(`/api/tba/event-matches?event_key=${encodeURIComponent(resolvedEventKey)}&comp_level=all`)
+        fetch(`/api/tba/event-matches?event_key=${encodeURIComponent(resolvedEventKey)}&comp_level=all`),
+        fetch(`/api/tba/event-teams?event_key=${encodeURIComponent(resolvedEventKey)}`)
       ]);
       const payload = await response.json().catch(() => null);
       if (!response.ok || !payload?.success) throw new Error(payload?.error || 'Could not load scouting strategy data.');
@@ -66,11 +71,18 @@
       loadedEventKey = resolvedEventKey;
       if (!selectedTeamKey && buildStrategyRows(payload.data)[0]) selectedTeamKey = buildStrategyRows(payload.data)[0].teamKey;
 
+      const teamsPayload = await teamsResponse.json().catch(() => null);
+      if (teamsResponse.ok && teamsPayload?.success) eventTeams = teamsPayload.data || [];
+      else { eventTeams = []; teamsWarning = teamsPayload?.error || 'Could not load the event roster from The Blue Alliance.'; }
+
       const matchesPayload = await matchesResponse.json().catch(() => null);
-      if (matchesResponse.ok && matchesPayload?.success) matches = matchesPayload.data || [];
-      else { matches = []; matchesWarning = matchesPayload?.error || 'Could not load the match schedule from The Blue Alliance.'; }
+      const scheduledMatches = matchesResponse.ok && matchesPayload?.success ? matchesPayload.data || [] : [];
+      matches = [buildTestMarketMatch(resolvedEventKey, eventTeams), ...scheduledMatches];
+      if (!matchesResponse.ok || !matchesPayload?.success) matchesWarning = matchesPayload?.error || 'Could not load the match schedule from The Blue Alliance.';
     } catch (cause) {
       report = null;
+      eventTeams = [];
+      matches = [];
       error = cause?.message || 'Could not load scouting strategy data.';
     } finally {
       loadedEventKey = resolvedEventKey;
@@ -135,8 +147,8 @@
           <tbody>
             {#each upcomingMatches as match (match.key)}
               {@const projection = projectMatch(match, scoutPowerByTeam)}
-              <tr>
-                <td><strong>{matchLabel(match)}</strong></td>
+              <tr class:test-match={match.is_test_market}>
+                <td><strong>{matchLabel(match)}</strong>{#if match.is_test_market}<small>Practice market</small>{/if}</td>
                 <td class="alliance-red">{match.alliances?.red?.team_keys?.map(teamNumber).join(', ')}</td>
                 <td class="alliance-blue">{match.alliances?.blue?.team_keys?.map(teamNumber).join(', ')}</td>
                 <td>
@@ -164,6 +176,7 @@
     {/if}
   </section>
   {:else}
+  {#if teamsWarning}<p class="muted matches-warning">{teamsWarning} Showing teams found in scouting data.</p>{/if}
   <section class="strategy-layout">
     <div class="strategy-board">
       <div class="section-heading">
@@ -250,6 +263,9 @@
 <style>
   .matches-board .section-heading h2 { display:flex; align-items:center; gap:var(--space-2); }
   .matches-warning { padding:0 var(--space-3); }
+  .subtabs button { min-height:44px; padding:.7rem 1.25rem; font-size:.9rem; font-weight:700; }
+  .test-match { background:color-mix(in srgb, var(--brand-gold) 9%, transparent); }
+  .test-match td small { display:block; margin-top:2px; color:var(--text-secondary); font-size:.7rem; }
   .alliance-red { color:var(--status-danger); }
   .alliance-blue { color:var(--brand-blue, #2563eb); }
   .played-row { opacity:.75; }
