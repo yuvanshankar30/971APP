@@ -140,6 +140,17 @@ export async function notifyPitAssignment({ assignmentId, userId, teamKey }) {
   });
 }
 
+export async function notifyPrescoutAssignment({ assignmentId, userId, teamKey }) {
+  if (!userId || !assignmentId) return { ok: false, reason: 'invalid-input' };
+  const teamDisplay = teamKey ? teamKey.replace(/^frc/i, '') : 'a team';
+  const text = `You were assigned to pre-scout Team ${teamDisplay}.`;
+  return dispatchNotification({
+    userId,
+    notificationKey: NOTIFICATION_KEYS.SHIFT_ASSIGNMENTS,
+    text,
+  });
+}
+
 export async function notifyPartAssignmentById(partId) {
   const supa = getSupabase();
   const { data: part } = await supa

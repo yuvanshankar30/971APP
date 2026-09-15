@@ -795,6 +795,7 @@
       <ScoutAssignmentPanel scoutingType="data" />
       <ScoutAssignmentPanel scoutingType="note" />
       <ScoutAssignmentPanel scoutingType="quick" />
+      <PitAssignmentPanel assignmentKind="prescout" initiallyOpen />
       <PitAssignmentPanel />
     </div>
 
