@@ -1442,17 +1442,28 @@ def patch_cam_template_with_tool_libraries(
         # enter, producing Fusion's valid-but-empty toolpath.
         #
         # Keep the big tier on the largest cutter and both regular/small
-        # tiers on the chosen detail cutter. DeleteToolpaths then selects
-        # exactly one operation by each operation's actual ramp envelope;
-        # regular and small are not duplicates because their template ramps
-        # differ. Single-tool jobs still use their sole cutter for all
-        # tiers, unchanged.
+        # tiers on the chosen detail cutter. The paired Shape Through
+        # Finishing Pass must use that same detail tool: a larger cutter can
+        # follow the contour but cannot physically reach narrow corners the
+        # regular roughing tier just cleared, leaving a visibly unmachined
+        # boundary. T2 remains available for bulk clearing and the explicit
+        # big-endmill tier. DeleteToolpaths then selects exactly one
+        # operation by each operation's actual ramp envelope; regular and
+        # small are not duplicates because their template ramps differ.
+        # Single-tool jobs still use their sole cutter for all tiers,
+        # unchanged.
         detail_through_roughing_templates = [
             template_elem
             for template_elem in roughing_templates
             if "shape through hole" in str(template_elem.get("description") or "").lower()
             and "big" not in str(template_elem.get("description") or "").lower()
         ]
+        detail_through_roughing_templates.extend(
+            template_elem
+            for template_elem in contour_templates
+            if " ".join(str(template_elem.get("description") or "").lower().split())
+            == "shape through finishing pass"
+        )
         # The dedicated big-hole operation's own "regular" tier (see the
         # circular_hole_detail_template clone above) - same detail cutter,
         # same reasoning: only its "big endmill" sibling clone should get

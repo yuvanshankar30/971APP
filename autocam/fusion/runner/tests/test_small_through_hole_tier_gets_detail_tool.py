@@ -88,10 +88,10 @@ class SmallThroughHoleTierGetsDetailToolTests(unittest.TestCase):
 
         self.assertEqual(self._tool_guid(root, "Shape Through Hole big endmill"), _LARGE_ENDMILL_GUID)
 
-    def test_finishing_pass_still_gets_the_largest_endmill(self):
+    def test_finishing_pass_uses_the_detail_endmill_with_its_roughing_tier(self):
         root = self._patch({_SMALL_ENDMILL_GUID, _LARGE_ENDMILL_GUID})
 
-        self.assertEqual(self._tool_guid(root, "Shape Through Finishing Pass"), _LARGE_ENDMILL_GUID)
+        self.assertEqual(self._tool_guid(root, "Shape Through Finishing Pass"), _SMALL_ENDMILL_GUID)
 
     def test_single_endmill_loaded_omits_the_atc_only_big_tier(self):
         # No actual endmill swap is planned, so only the regular/middle tier
