@@ -39,10 +39,9 @@ describe("nesting geometry", () => {
     expect(toolpathBounds(segments)).toMatchObject({ minX: 100, maxX: 101, minY: 100, maxY: 100 });
     expect(toolpathBounds(segments, { includeRapid: true })).toMatchObject({ minX: 0, maxX: 101, minY: 0, maxY: 100 });
   });
-  it("keeps rapid transit in the emission origin while excluding it from display bounds", () => {
+  it("excludes rapid transit moves from a parsed document's bounds", () => {
     const document = parseGcodeDocument("G0 X100 Y100\nG1 X101 Y100\nG0 X0 Y0");
     expect(document.bounds).toMatchObject({ minX: 100, maxX: 101 });
-    expect(document.emissionBounds).toMatchObject({ minX: 0, maxX: 101 });
   });
   it("round-trips positive sheet coordinates through the canvas view", () => {
     const view = { scale: 20, originX: 10, originY: 300 };
@@ -285,9 +284,13 @@ describe("nesting emission", () => {
       ],
       programs: { a: { source: "G0 X2 Y4\nG1 X4 Y8" } },
     });
-    // The source center is (2, 4); after a 90-degree rotation it is (-4, 2).
-    // The G59.3 translation must therefore be (14, 18), not (8, 16).
-    expect(result.text).toContain("G10 L2 P9 X[#5221+14.0000] Y[#5222+18.0000] Z[#5223] R90.0000");
+    // The leading G0 is a transit move, not part geometry, so the center
+    // must come from the cutting-only box (the same one the editor
+    // displays and spaces placements against): the single G1 segment runs
+    // (2,4) to (4,8), centered at (3, 6). After a 90-degree rotation that
+    // is (-6, 3), so the G59.3 translation must be (16, 17) - not a center
+    // that also folds in the rapid's (0,0) start point.
+    expect(result.text).toContain("G10 L2 P9 X[#5221+16.0000] Y[#5222+17.0000] Z[#5223] R90.0000");
   });
   it("only transforms XY cutting motion, not router control parameters", () => {
     const result = emitNestingGcode({

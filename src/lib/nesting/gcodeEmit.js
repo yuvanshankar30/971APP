@@ -1,6 +1,6 @@
 import { buildEmitFilename } from './emitFilename.js';
 import { holeProgramForThickness } from './holePrograms.js';
-import { gcodeBounds } from './gcodeDocument.js';
+import { gcodeDisplayBounds } from './gcodeDocument.js';
 
 const coordinatePattern = /([XYIJ])\s*(-?\d*\.?\d+)/gi;
 const terminatePattern = /^\s*(?:%|M2|M30)\b/i;
@@ -155,16 +155,23 @@ function router971Offset(placement, bounds) {
 function sourceForPlacement(placement, programs, suffix, thickness, dialect) {
   if (placement.kind === 'hole') {
     const source = suffix === 'holes' ? holeProgramForThickness(thickness, dialect) : null;
-    return source ? { source, bounds: gcodeBounds(source) } : null;
+    return source ? { source, bounds: gcodeDisplayBounds(source) } : null;
   }
   const candidate = programs[placement.part_library_path];
   if (!candidate) return null;
+  // Emission must center on the same cutting-only box the editor uses for
+  // width_in/height_in, on-screen placement, and collision checks. A
+  // leading rapid move (a tool-change/home position an AutoCAM post
+  // commonly emits before the first cut) sits outside the actual part
+  // geometry, almost always offset in X; folding that rapid into the
+  // center used here silently shifted the exported cut geometry off of
+  // its displayed, validated-as-non-overlapping position.
   if (candidate.variants) {
     const variant = candidate.variants.find(item => item.suffix === suffix);
-    return variant ? { source: variant.source, bounds: variant.emissionBounds || variant.bounds } : null;
+    return variant ? { source: variant.source, bounds: variant.bounds } : null;
   }
   const source = candidate.suffix && candidate.suffix !== suffix ? null : candidate.source || candidate;
-  return source ? { source, bounds: candidate.emissionBounds || candidate.bounds || gcodeBounds(source) } : null;
+  return source ? { source, bounds: candidate.bounds || gcodeDisplayBounds(source) } : null;
 }
 
 // Matches the original JProg tool-order dialog: T0 is not a cutting tool and

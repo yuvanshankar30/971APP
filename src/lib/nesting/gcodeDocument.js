@@ -11,10 +11,6 @@ export function gcodeSuffix(name = '') {
   return index === -1 ? '' : stem.slice(index + 1).toLowerCase();
 }
 
-export function gcodeBounds(text) {
-  return toolpathBounds(parseGcodeToolpath(text), { includeRapid: true });
-}
-
 export function gcodeDisplayBounds(text) {
   return toolpathBounds(parseGcodeToolpath(text));
 }
@@ -37,7 +33,6 @@ export function parseGcodeDocument(text, name = 'program.ngc') {
     source,
     dialect: detectDialect(text, name),
     bounds: toolpathBounds(toolpath),
-    emissionBounds: toolpathBounds(toolpath, { includeRapid: true }),
     toolpath,
     tools: [...tools].map(([number, diameter]) => ({ number, diameter })),
     layers: [...layers].map(([tool, lines]) => ({ tool, text: lines.join('\n') }))
