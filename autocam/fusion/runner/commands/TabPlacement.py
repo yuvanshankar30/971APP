@@ -95,11 +95,11 @@ DEFAULT_MAX_TABS = 20
 STOCK_BACKING_CHECK_IN = 0.2
 # Roughly one tab per this many inches of a part's own outer perimeter -
 # FRC-scale sheet parts (a few inches to a couple feet around) land in the
-# 3-8 tab range this way rather than every part getting the same flat count
+# 3-6 tab range this way rather than every part getting the same flat count
 # regardless of size. No single authoritative number exists for this; chosen
 # as the middle of commonly cited CNC sheet-tabbing guidance (roughly every
 # 4-8in of perimeter for thin plate) rather than picked arbitrarily.
-TARGET_TAB_SPACING_IN = 4.0
+TARGET_TAB_SPACING_IN = 6.0
 # How much of its OWN length a single straight side needs before it earns
 # a second (or third) tab, in the common case where nothing was excluded
 # for lack of real stock backing (see select_tab_edges' has_excluded_sides
