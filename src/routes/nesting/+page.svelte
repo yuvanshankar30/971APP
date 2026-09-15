@@ -57,10 +57,23 @@
   $: programType = sheet?.program_extension || 'ngc';
   $: dialect = dialectForProgramType(programType);
   $: defaultGroupLabel = emitCut?.name || 'default';
+  // Holes always emit as their own separate program using JProg's bundled
+  // hole tool (T1 - see holePrograms.js) regardless of whatever tools the
+  // rest of this cut uses, so a real part's tool order never actually
+  // includes or depends on it (emitNestingGcode filters each suffix's
+  // program down to only the tools present in that one suffix). Excluded
+  // from the reorderable set here for the same reason - see emitHolesInScope
+  // and the fixed "Holes / Unchangeable" row below.
   $: emitToolNumbers = dialect === 'wincnc'
-    ? [...new Set((emitSuffix === 'all' ? availableSuffixes : [emitSuffix]).flatMap(suffix => nestingEmissionTools({ placements: emitPlacements, programs: gcodePrograms, suffix, dialect, thickness: sheet?.thickness_key })))].sort((left, right) => left - right)
+    ? [...new Set((emitSuffix === 'all' ? availableSuffixes : [emitSuffix]).filter(suffix => suffix !== 'holes').flatMap(suffix => nestingEmissionTools({ placements: emitPlacements, programs: gcodePrograms, suffix, dialect, thickness: sheet?.thickness_key })))].sort((left, right) => left - right)
     : [];
   $: if (emitToolNumbers.length && !sameToolSet(emitToolOrder, emitToolNumbers)) emitToolOrder = [...emitToolNumbers];
+  // Filtered against the current tool set rather than trusted as-is -
+  // emitToolOrder can briefly carry a stale set (e.g. right after switching
+  // to "holes" alone, where emitToolNumbers is empty and the reactive
+  // block above has nothing to reset it to) between reactive updates.
+  $: emitToolOrderDisplay = emitToolOrder.filter(tool => emitToolNumbers.includes(tool));
+  $: emitHolesInScope = (emitSuffix === 'all' || emitSuffix === 'holes') && emitPlacements.some(item => item.kind === 'hole');
   $: recentPartGroups = [...partGroups]
     .sort((first, second) => String(second.updatedAt || '').localeCompare(String(first.updatedAt || '')))
     .slice(0, 5);
@@ -672,8 +685,8 @@
       <p class="hint">{programType === 'tap' ? 'WinCNC (.tap)' : '971 / LinuxCNC (.ngc)'}</p>
       {#if emitValidation.length}<div class="emit-validation"><AlertTriangle size={16}/><span>Fix {emitValidation.length} validation issue{emitValidation.length === 1 ? '' : 's'} before emitting.</span></div>{/if}
       <fieldset><legend>Program group</legend><label class="radio"><input type="radio" bind:group={emitSuffix} value="all"/> All available groups</label>{#each availableSuffixes as suffix}<label class="radio"><input type="radio" bind:group={emitSuffix} value={suffix}/> {suffix || defaultGroupLabel}</label>{/each}{#if !availableSuffixes.length}<p class="hint">Add a part or hole before emitting.</p>{/if}</fieldset>
-      {#if dialect === 'wincnc' && emitToolOrder.length > 1}
-        <fieldset class="tool-order"><legend>Tool order</legend><p class="hint">WinCNC will complete every part with each tool in this order.</p>{#each emitToolOrder as tool, index}<div class="tool-order-row"><strong>T{tool}</strong><span>{index + 1} of {emitToolOrder.length}</span><div><button type="button" class="icon-button" title={`Move T${tool} earlier`} aria-label={`Move T${tool} earlier`} disabled={index === 0} on:click={() => moveEmitTool(tool, -1)}><ArrowUp size={15}/></button><button type="button" class="icon-button" title={`Move T${tool} later`} aria-label={`Move T${tool} later`} disabled={index === emitToolOrder.length - 1} on:click={() => moveEmitTool(tool, 1)}><ArrowDown size={15}/></button></div></div>{/each}</fieldset>
+      {#if dialect === 'wincnc' && (emitToolOrderDisplay.length > 1 || emitHolesInScope)}
+        <fieldset class="tool-order"><legend>Tool order</legend><p class="hint">WinCNC will complete every part with each tool in this order.</p>{#if emitHolesInScope}<div class="tool-order-row tool-order-row-fixed"><strong>T1</strong><span>Holes / Unchangeable</span></div>{/if}{#each emitToolOrderDisplay as tool, index}<div class="tool-order-row"><strong>T{tool}</strong><span>{index + 1} of {emitToolOrderDisplay.length}</span><div><button type="button" class="icon-button" title={`Move T${tool} earlier`} aria-label={`Move T${tool} earlier`} disabled={index === 0} on:click={() => moveEmitTool(tool, -1)}><ArrowUp size={15}/></button><button type="button" class="icon-button" title={`Move T${tool} later`} aria-label={`Move T${tool} later`} disabled={index === emitToolOrderDisplay.length - 1} on:click={() => moveEmitTool(tool, 1)}><ArrowDown size={15}/></button></div></div>{/each}</fieldset>
       {/if}
       <div class="row emit-actions"><button type="button" class="btn btn-secondary" on:click={() => showEmit = false}>Cancel</button><button type="button" class="btn btn-secondary" on:click={downloadGcode} disabled={!emitPlacements.length || !availableSuffixes.length || emitValidation.length}><Download size={16}/> Download</button><button class="btn btn-primary" disabled={!emitPlacements.length || !availableSuffixes.length || emitValidation.length}><Upload size={16}/> Commit to Output</button></div>
     </form>
@@ -776,6 +789,8 @@
   .tool-order-row { display: grid; grid-template-columns: minmax(3rem, 1fr) minmax(4rem, auto) auto; align-items: center; gap: 8px; padding: 7px 8px; border: 1px solid var(--border-color, #d0d5dd); border-radius: 4px; }
   .tool-order-row span { color: var(--muted-text, #667085); font-size: .78rem; }
   .tool-order-row > div { display: flex; gap: 4px; }
+  .tool-order-row-fixed { grid-template-columns: minmax(3rem, 1fr) auto; background: var(--surface-secondary, #f2f4f7); cursor: default; }
+  .tool-order-row-fixed span { font-style: italic; }
   .workspace-body aside .placement-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .workspace-body aside .placement-actions .btn { min-width: 0; width: 100%; min-height: 38px; padding-inline: 8px; white-space: nowrap; font-size: .82rem; justify-content: center; }
   .workspace-body aside .placement-actions .btn svg { flex: 0 0 auto; }
