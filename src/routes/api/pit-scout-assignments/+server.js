@@ -2,7 +2,7 @@ import { json } from '@sveltejs/kit';
 import { createClient } from '@supabase/supabase-js';
 import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/public';
 import { getSupabase } from '$lib/server/971bot.js';
-import { notifyPitAssignment } from '$lib/server/slack_notifications.js';
+import { notifyPitAssignment, notifyScoutUnassignment } from '$lib/server/slack_notifications.js';
 
 const getClientFromRequest = (request) => {
   const auth = request?.headers?.get('authorization') || '';
@@ -300,6 +300,13 @@ export async function POST({ request }) {
       const { team_key } = body;
       if (!team_key) return json({ error: 'team_key required' }, { status: 400 });
 
+      const { data: existing } = await db
+        .from('scout_pit_assignments')
+        .select('assigned_user')
+        .eq('event_key', eventKey)
+        .eq('team_key', team_key)
+        .maybeSingle();
+
       const { error } = await db
         .from('scout_pit_assignments')
         .delete()
@@ -307,6 +314,10 @@ export async function POST({ request }) {
         .eq('team_key', team_key);
 
       if (error) return json({ error: error.message }, { status: 500 });
+
+      if (existing?.assigned_user) {
+        await notifyScoutUnassignment({ userId: existing.assigned_user, teamKey: team_key, kind: 'pit' });
+      }
       return json({ success: true });
     }
 

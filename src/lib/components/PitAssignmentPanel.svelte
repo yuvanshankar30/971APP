@@ -249,6 +249,30 @@
     );
   }
 
+  // Unlike stageTeamAssignment (a local draft, only sent on Publish), this
+  // is immediate - direct instruction: removing someone should notify them
+  // right away, not sit as an unpublished draft they never find out about.
+  async function removeAssignment(teamKey) {
+    if (!capabilities.can_edit || saving || !teamKey) return;
+    saving = true;
+    errorMsg = '';
+    try {
+      const res = await authFetch(assignmentEndpoint, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'unassign', event_key: eventKey, team_key: teamKey })
+      });
+      const data = await res.json();
+      if (!data?.success) throw new Error(data?.error || 'unknown');
+      await loadAssignments();
+      statusMsg = `Team ${displayTeam(teamKey)} unassigned.`;
+    } catch (e) {
+      errorMsg = `Remove failed: ${e.message}`;
+    } finally {
+      saving = false;
+    }
+  }
+
   async function publishAssignments() {
     if (!capabilities.can_edit || !hasDraftChanges || saving) return;
     errorMsg = '';
@@ -404,9 +428,19 @@
               <div class="scout-drop-name">{scoutDisplayName(scout)}</div>
               <div class="team-chip-list">
                 {#each Object.entries(assignments).filter(([, value]) => value?.user_id === scout.id) as [teamKey]}
-                  <button class="team-chip assigned" type="button" draggable="true" on:dragstart={(event) => startTeamDrag(event, teamKey)} on:dragend={finishTeamDrag}>
-                    {displayTeam(teamKey)}
-                  </button>
+                  <span class="team-chip-wrap">
+                    <button class="team-chip assigned" type="button" draggable="true" on:dragstart={(event) => startTeamDrag(event, teamKey)} on:dragend={finishTeamDrag}>
+                      {displayTeam(teamKey)}
+                    </button>
+                    <button
+                      class="chip-remove"
+                      type="button"
+                      title={`Remove ${displayTeam(teamKey)} - notifies ${scoutDisplayName(scout)}`}
+                      aria-label={`Remove ${displayTeam(teamKey)} from ${scoutDisplayName(scout)}`}
+                      disabled={saving}
+                      on:click={() => removeAssignment(teamKey)}
+                    >&times;</button>
+                  </span>
                 {/each}
                 {#if !Object.entries(assignments).some(([, value]) => value?.user_id === scout.id)}
                   <span class="assignment-empty">Drop a team here</span>
@@ -629,6 +663,32 @@
     align-content: flex-start;
     gap: 0.2rem;
   }
+
+  .team-chip-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 1px;
+  }
+
+  .chip-remove {
+    min-width: 1.4rem;
+    min-height: 1.9rem;
+    padding: 0 0.3rem;
+    border: 1px solid var(--accent-strong, #b8860b);
+    border-left: 0;
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    background: var(--surface-1);
+    color: var(--red-strong, #dc2626);
+    font: inherit;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .chip-remove:hover { background: var(--red-soft, rgba(239, 68, 68, 0.1)); }
+  .chip-remove:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .team-chip-wrap .team-chip { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
 
   .team-chip {
     min-width: 3rem;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { STARTING_BALANCE, availableBalance, myBetForMatch, resolvePariMutuel, summarizeStandings } from './predictionMarket.js';
+import { STARTING_BALANCE, availableBalance, myBetForMatch, poolForMatch, resolvePariMutuel, summarizeStandings } from './predictionMarket.js';
 
 describe('resolvePariMutuel', () => {
   it('pays winners their stake back plus a proportional share of the losing pool', () => {
@@ -79,5 +79,25 @@ describe('availableBalance', () => {
     expect(availableBalance(bets, 'a')).toBe(STARTING_BALANCE + 50 - 300);
     // Editing bet '2' itself shouldn't count its own stake against the ceiling.
     expect(availableBalance(bets, 'a', '2')).toBe(STARTING_BALANCE + 50);
+  });
+});
+
+describe('poolForMatch', () => {
+  it('sums stakes per side and computes the implied crowd share', () => {
+    const bets = [
+      { match_key: 'm1', side: 'red', stake: 300 },
+      { match_key: 'm1', side: 'red', stake: 100 },
+      { match_key: 'm1', side: 'blue', stake: 200 },
+      { match_key: 'm2', side: 'blue', stake: 999 } // a different match - must not leak in
+    ];
+    const pool = poolForMatch(bets, 'm1');
+    expect(pool).toMatchObject({ redPool: 400, bluePool: 200, total: 600, betCount: 3 });
+    expect(pool.redShare).toBeCloseTo(2 / 3, 5);
+    expect(pool.blueShare).toBeCloseTo(1 / 3, 5);
+  });
+
+  it('reports no share (not a divide-by-zero) when nobody has bet on the match yet', () => {
+    const pool = poolForMatch([], 'm1');
+    expect(pool).toMatchObject({ redPool: 0, bluePool: 0, total: 0, betCount: 0, redShare: null, blueShare: null });
   });
 });

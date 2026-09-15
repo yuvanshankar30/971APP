@@ -86,3 +86,22 @@ export function availableBalance(bets = [], userId, excludeBetId = null) {
   }
   return STARTING_BALANCE + settledNet - pendingStake;
 }
+
+// How much is currently staked on each side of ONE match, and what that
+// implies about the "crowd's" confidence - real signal a scout can weigh
+// before placing their own bet, the same way real prediction/betting
+// markets surface pool sizes rather than a single house-set number.
+export function poolForMatch(bets = [], matchKey) {
+  const matchBets = bets.filter((bet) => bet.match_key === matchKey);
+  const redPool = matchBets.filter((bet) => bet.side === 'red').reduce((sum, bet) => sum + Number(bet.stake || 0), 0);
+  const bluePool = matchBets.filter((bet) => bet.side === 'blue').reduce((sum, bet) => sum + Number(bet.stake || 0), 0);
+  const total = redPool + bluePool;
+  return {
+    redPool,
+    bluePool,
+    total,
+    redShare: total > 0 ? redPool / total : null,
+    blueShare: total > 0 ? bluePool / total : null,
+    betCount: matchBets.length
+  };
+}

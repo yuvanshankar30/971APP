@@ -2,7 +2,7 @@ import { json } from '@sveltejs/kit';
 import { createClient } from '@supabase/supabase-js';
 import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/public';
 import { getSupabase } from '$lib/server/971bot.js';
-import { notifyPrescoutAssignment } from '$lib/server/slack_notifications.js';
+import { notifyPrescoutAssignment, notifyScoutUnassignment } from '$lib/server/slack_notifications.js';
 
 const TABLE = 'scout_prescout_assignments';
 
@@ -207,8 +207,12 @@ export async function POST({ request }) {
     if (action === 'unassign') {
       const teamKey = normalizeTeamKey(body?.team_key);
       if (!teamKey) return json({ error: 'team_key required' }, { status: 400 });
+      const { data: existing } = await db.from(TABLE).select('assigned_user').eq('event_key', eventKey).eq('team_key', teamKey).maybeSingle();
       const { error } = await db.from(TABLE).delete().eq('event_key', eventKey).eq('team_key', teamKey);
       if (error) return json({ error: error.message }, { status: 500 });
+      if (existing?.assigned_user) {
+        await notifyScoutUnassignment({ userId: existing.assigned_user, teamKey, kind: 'prescout' });
+      }
       return json({ success: true });
     }
     return json({ error: 'Invalid action' }, { status: 400 });

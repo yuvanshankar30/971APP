@@ -292,6 +292,33 @@
     showModal = false;
   }
 
+  // Unlike saveAssignment (a local draft, only sent on Publish), this is
+  // immediate - direct instruction: removing someone should notify them
+  // right away, not sit as an unpublished draft they never find out about.
+  async function removeAssignment() {
+    if (!capabilities.can_edit || saving) return;
+    const { match_key, team_key } = modalContext;
+    if (!match_key || !team_key) return;
+    saving = true;
+    errorMsg = '';
+    try {
+      const res = await authFetch('/api/scout-assignments', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'unassign', scouting_type: scoutingType, match_key, team_key })
+      });
+      const data = await res.json();
+      if (!data?.success) throw new Error(data?.error || 'unknown');
+      await loadAssignments();
+      statusMsg = `Team ${modalContext.team_number} unassigned.`;
+      showModal = false;
+    } catch (e) {
+      errorMsg = `Remove failed: ${e.message}`;
+    } finally {
+      saving = false;
+    }
+  }
+
   function randomize() {
     if (!capabilities.can_edit) return;
 
@@ -590,6 +617,9 @@
       <div class="btn-row modal-actions">
         <button class="btn btn-primary" disabled={!selectedUserId || saving} on:click={() => saveAssignment(false)}>Stage this Match</button>
         <button class="btn btn-secondary" disabled={!selectedUserId || saving} on:click={() => saveAssignment(true)}>Stage Robot</button>
+        {#if publishedAssignments?.[modalContext.match_key]?.[modalContext.team_key]?.user_id}
+          <button class="btn btn-danger" disabled={saving} title="Removes the assignment and notifies the scout right away" on:click={removeAssignment}>Remove Assignment</button>
+        {/if}
         <button class="btn btn-outline" on:click={() => {
           if (!saving) showModal = false;
         }}>Close</button>

@@ -143,13 +143,18 @@
   .match-badge, .team-badge {
     display:inline-flex;
     align-items:center;
+    justify-content:center;
     min-height:1.7rem;
     padding:0 .55rem;
     border-radius:999px;
     white-space:nowrap;
     font-size:.78rem;
   }
-  .match-badge { background:var(--text, #201c15); color:var(--surface-1, #fff); }
+  /* Fixed width (not just padding) so "8" and "Quals 47" read as the same
+     size pill instead of the badge shrink-wrapping to whatever match label
+     happens to be longest in this list - direct feedback that a list of
+     these side by side looked visually uneven. */
+  .match-badge { min-width:5.75rem; background:var(--text, #201c15); color:var(--surface-1, #fff); }
   .team-badge { border:1px solid color-mix(in srgb, var(--accent, #b98000) 45%, var(--border)); background:color-mix(in srgb, var(--accent, #c99525) 12%, transparent); }
   .quick-stats { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); min-width:0; }
   .quick-stats > span { min-width:0; padding:0 .65rem; border-left:1px solid var(--border); }

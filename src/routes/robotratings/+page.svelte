@@ -13,6 +13,7 @@
     { key: 'driving_rating', label: 'Driving' },
     { key: 'defense_rating', label: 'Defense', optionalApplicability: true }
   ];
+  const SCALE = Array.from({ length: 10 }, (_, index) => index + 1);
 
   let eventKey = '';
   let loading = true;
@@ -64,6 +65,20 @@
     if (expandedKey === team.key) { expandedKey = ''; return; }
     expandedKey = team.key;
     if (!drafts[team.key]) drafts = { ...drafts, [team.key]: emptyDraft(team.key) };
+  }
+
+  function pickRating(teamKey, fieldKey, value) {
+    const draft = drafts[teamKey];
+    if (!draft) return;
+    const next = { ...draft, [fieldKey]: draft[fieldKey] === value ? '' : value };
+    if (fieldKey === 'defense_rating') next.defenseNotApplicable = false;
+    drafts = { ...drafts, [teamKey]: next };
+  }
+
+  function markNotApplicable(teamKey) {
+    const draft = drafts[teamKey];
+    if (!draft) return;
+    drafts = { ...drafts, [teamKey]: { ...draft, defense_rating: '', defenseNotApplicable: !draft.defenseNotApplicable } };
   }
 
   function displayName(id) {
@@ -214,13 +229,18 @@
     {#each filteredTeams as team (team.key)}
       {@const summary = summaryByTeam.get(team.key)}
       {@const isExpanded = expandedKey === team.key}
+      {@const mine = myRobotRating(ratings, team.key, userId)}
       <section class="surface-card rating-row">
         <button class="rating-row-header" on:click={() => toggleExpanded(team)}>
           {#if isExpanded}<ChevronDown size={16} />{:else}<ChevronRight size={16} />{/if}
           <span class="mono">#{team.team_number}</span>
           <span class="rating-row-name">{team.nickname || ''}</span>
           <span class="rating-row-summary">
-            <strong>{fmt(summary?.overallAvg)}</strong> avg overall
+            {#if mine}<span class="mine-badge" title="You've rated this team"><Star size={12} /></span>{/if}
+            <span class="score-bar" title={`${fmt(summary?.overallAvg)} average over ${summary?.raterCount || 0} rater${summary?.raterCount === 1 ? '' : 's'}`}>
+              <span class="score-bar-fill" style={`width:${Math.max(0, Math.min(100, ((summary?.overallAvg ?? 0) / 10) * 100))}%`}></span>
+            </span>
+            <strong class="score-value">{fmt(summary?.overallAvg)}</strong>
             <span class="text-muted">· {summary?.raterCount || 0} rater{summary?.raterCount === 1 ? '' : 's'}</span>
           </span>
         </button>
@@ -230,25 +250,27 @@
           <div class="rating-detail">
             <div class="rating-form">
               <h3>Your rating</h3>
-              <div class="rating-field-grid">
-                {#each RATING_FIELDS as field (field.key)}
-                  <label class="rating-field">
-                    {field.label}{field.required ? '' : ' (optional)'}
+              {#each RATING_FIELDS as field (field.key)}
+                <div class="rating-field">
+                  <div class="rating-field-label">
+                    <span>{field.label}{field.required ? '' : ' (optional)'}</span>
                     {#if field.optionalApplicability}
-                      <span class="rating-na">
-                        <input type="checkbox" bind:checked={draft.defenseNotApplicable} />
-                        N/A
-                      </span>
+                      <button type="button" class="na-toggle" class:chosen={draft.defenseNotApplicable} on:click={() => markNotApplicable(team.key)}>N/A</button>
                     {/if}
-                    <input
-                      class="form-input"
-                      type="number" min="1" max="10" step="1"
-                      disabled={field.optionalApplicability && draft.defenseNotApplicable}
-                      bind:value={draft[field.key]}
-                    />
-                  </label>
-                {/each}
-              </div>
+                  </div>
+                  <div class="rating-scale" class:disabled={field.optionalApplicability && draft.defenseNotApplicable}>
+                    {#each SCALE as value}
+                      <button
+                        type="button"
+                        class="scale-chip"
+                        class:chosen={draft[field.key] === value}
+                        disabled={field.optionalApplicability && draft.defenseNotApplicable}
+                        on:click={() => pickRating(team.key, field.key, value)}
+                      >{value}</button>
+                    {/each}
+                  </div>
+                </div>
+              {/each}
               <label class="rating-field full-width">
                 Notes
                 <textarea class="form-input" rows="2" bind:value={draft.notes} placeholder="General impressions..."></textarea>
@@ -258,10 +280,10 @@
                 <textarea class="form-input" rows="2" bind:value={draft.strategy_notes} placeholder="What did they do in practice matches that changes how we'd play with or against them?"></textarea>
               </label>
               <div class="rating-form-actions">
-                <button class="btn btn-primary btn-sm" disabled={saving[team.key]} on:click={() => saveRating(team)}>
+                <button class="btn btn-primary btn-sm" disabled={saving[team.key] || !draft.overall_rating} on:click={() => saveRating(team)}>
                   {saving[team.key] ? 'Saving...' : 'Save rating'}
                 </button>
-                {#if myRobotRating(ratings, team.key, userId)}
+                {#if mine}
                   <button class="btn btn-sm btn-danger" disabled={saving[team.key]} on:click={() => deleteRating(team)}><Trash2 size={14} /> Remove mine</button>
                 {/if}
                 {#if saveMessage[team.key]}<span class="text-muted">{saveMessage[team.key]}</span>{/if}
@@ -310,13 +332,31 @@
     background:none; border:none; cursor:pointer; text-align:left; font:inherit; color:inherit;
   }
   .rating-row-name { flex:1; }
-  .rating-row-summary { display:flex; align-items:baseline; gap:var(--gap-1); }
+  .rating-row-summary { display:flex; align-items:center; gap:var(--gap-1); }
+  .mine-badge { display:inline-flex; color:var(--brand-gold-strong, #b8860b); }
+  .score-bar { display:inline-block; width:64px; height:6px; border-radius:3px; background:var(--surface-2); overflow:hidden; }
+  .score-bar-fill { display:block; height:100%; background:var(--brand-gold-strong, #b8860b); }
+  .score-value { min-width:2ch; }
+
   .rating-detail { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:var(--space-4); padding:0 var(--space-3) var(--space-3); border-top:1px solid var(--border); }
-  .rating-field-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(120px, 1fr)); gap:var(--space-2); }
-  .rating-field { display:flex; flex-direction:column; gap:4px; font-size:0.85rem; }
-  .rating-field.full-width { grid-column:1 / -1; margin-top:var(--space-2); }
-  .rating-na { display:flex; align-items:center; gap:4px; font-size:0.75rem; }
-  .rating-form-actions { display:flex; align-items:center; gap:var(--gap-2); margin-top:var(--space-2); }
+  .rating-field { display:flex; flex-direction:column; gap:4px; font-size:0.85rem; margin-top:var(--space-2); }
+  .rating-field.full-width { grid-column:1 / -1; }
+  .rating-field-label { display:flex; align-items:center; justify-content:space-between; gap:var(--gap-2); }
+  .rating-scale { display:flex; gap:3px; flex-wrap:wrap; }
+  .rating-scale.disabled { opacity:.4; }
+  .scale-chip {
+    min-width:1.75rem; height:1.75rem; padding:0; border:1px solid var(--border); border-radius:var(--radius-sm);
+    background:var(--surface-1); color:var(--text); font:inherit; font-size:.8rem; font-weight:600; cursor:pointer;
+  }
+  .scale-chip:hover:not(:disabled) { border-color:var(--brand-gold-strong, #b8860b); }
+  .scale-chip.chosen { background:var(--brand-gold-strong, #b8860b); border-color:var(--brand-gold-strong, #b8860b); color:#fff; }
+  .scale-chip:disabled { cursor:not-allowed; }
+  .na-toggle {
+    padding:.1rem .5rem; border:1px solid var(--border); border-radius:999px; background:var(--surface-1);
+    color:var(--text-muted); font:inherit; font-size:.7rem; font-weight:700; cursor:pointer;
+  }
+  .na-toggle.chosen { background:var(--text-muted); color:var(--surface-1); border-color:var(--text-muted); }
+  .rating-form-actions { display:flex; align-items:center; gap:var(--gap-2); margin-top:var(--space-3); }
   .rating-entries { max-height:420px; overflow-y:auto; }
   .rating-entry { padding:var(--space-2) 0; border-bottom:1px solid var(--border); }
   .rating-entry:last-child { border-bottom:none; }

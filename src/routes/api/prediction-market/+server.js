@@ -133,6 +133,16 @@ export async function POST({ request }) {
 
   const match = await fetchTbaMatch(value.match_key);
   if (match?.actual_time) return json({ error: 'This match has already been played.' }, { status: 409 });
+  // actual_time can lag the real start by minutes (TBA posts it after the
+  // match finishes and scores are entered) - a bet placed after the match
+  // has visibly started but before that result lands would still be "free"
+  // information, not a prediction. predicted_time is TBA's live-updated
+  // estimate (drifts through a real event as the schedule slips); time is
+  // the original static schedule, used only when no better estimate exists.
+  const lockTime = match?.predicted_time ?? match?.time ?? null;
+  if (lockTime && Date.now() / 1000 >= lockTime) {
+    return json({ error: 'Betting has closed for this match - it has already started.' }, { status: 409 });
+  }
 
   const { data: existingBets, error: existingError } = await auth
     .from('prediction_market_bets')
