@@ -106,7 +106,9 @@ browser confirmation or prompt popups.
   library, thickness-specific bundled hole programs, G-code inspection,
   measurement, reusable click-to-place canvas placement,
   selection/drag/rotation/pan/zoom/undo, and suffix-grouped LinuxCNC or
-  WinCNC G-code emission. Emitted programs are stored in the Manufacturing
+  WinCNC G-code emission. Before a multi-tool WinCNC emit, the operator can
+  reorder the complete detected tool list; the output groups every part by
+  that order and records it with the emission. Emitted programs are stored in the Manufacturing
   Files bucket under `JustinProgOutput/YYYYMMDD/`, with the date folder created on
   the first emission that day and the same path committed to the public
   `yuvanshankar30/output` repository via a Supabase Edge Function. Its GitHub

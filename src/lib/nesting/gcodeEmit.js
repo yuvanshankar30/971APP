@@ -149,7 +149,30 @@ function sourceForPlacement(placement, programs, suffix, thickness, dialect) {
   return source ? { source, bounds: candidate.emissionBounds || candidate.bounds || gcodeBounds(source) } : null;
 }
 
-export function emitNestingGcode({ name, placements, programs, suffix = '', filenameSuffix = suffix, suffixCount = 1, dialect = 'linuxcnc', thickness = '0.125' }) {
+// Matches the original JProg tool-order dialog: T0 is not a cutting tool and
+// programs with no explicit T word use the legacy T1 fallback.
+export function nestingEmissionTools({ placements, programs, suffix = '', dialect = 'linuxcnc', thickness = '0.125' }) {
+  if (dialect !== 'wincnc') return [];
+  const tools = new Set();
+  for (const placement of placements || []) {
+    const program = sourceForPlacement(placement, programs, suffix, thickness, dialect);
+    if (!program) continue;
+    for (const tool of winCncToolBlocks(program.source).keys()) if (tool !== 0) tools.add(tool);
+  }
+  return [...tools].sort((left, right) => left - right);
+}
+
+function configuredWinCncToolOrder(order, detectedTools) {
+  if (!Array.isArray(order) || !order.length) return detectedTools;
+  const normalized = order.map(Number);
+  const complete = normalized.length === detectedTools.length && normalized.every(tool => detectedTools.includes(tool));
+  if (new Set(normalized).size !== normalized.length || !complete) {
+    throw new Error(`Tool order must include each detected tool exactly once: ${detectedTools.map(tool => `T${tool}`).join(', ')}`);
+  }
+  return normalized;
+}
+
+export function emitNestingGcode({ name, placements, programs, suffix = '', filenameSuffix = suffix, suffixCount = 1, dialect = 'linuxcnc', thickness = '0.125', toolOrder = [] }) {
   const selectedPrograms = [];
   for (const placement of placements) {
     const program = sourceForPlacement(placement, programs, suffix, thickness, dialect);
@@ -179,7 +202,9 @@ export function emitNestingGcode({ name, placements, programs, suffix = '', file
         byTool.get(tool).push({ ...program, source: body.join('\n') });
       }
     }
-    for (const [tool, toolPrograms] of [...byTool.entries()].sort(([left], [right]) => left - right)) {
+    const orderedTools = configuredWinCncToolOrder(toolOrder, [...byTool.keys()].sort((left, right) => left - right));
+    for (const tool of orderedTools) {
+      const toolPrograms = byTool.get(tool) || [];
       // GCodeParserWinCNC emits all parts using a tool together, with the safe
       // machine-coordinate retract/tool-change sequence before each group.
       lines.push('G53 Z', 'M5', `[Tool ${tool}]`, `T${tool}`);
@@ -191,5 +216,10 @@ export function emitNestingGcode({ name, placements, programs, suffix = '', file
   }
   if (dialect === 'linuxcnc') lines.push('M9', 'G53 G0 Z0.', 'M30', '%');
   else lines.push('G53 Z', 'M5', 'G53 P10', 'M30');
-  return { filename: buildEmitFilename(name, filenameSuffix, suffixCount, dialect === 'wincnc' ? 'tap' : 'ngc'), text: lines.join('\n') + '\n', emitted };
+  return {
+    filename: buildEmitFilename(name, filenameSuffix, suffixCount, dialect === 'wincnc' ? 'tap' : 'ngc'),
+    text: lines.join('\n') + '\n',
+    emitted,
+    toolOrder: dialect === 'wincnc' ? configuredWinCncToolOrder(toolOrder, nestingEmissionTools({ placements, programs, suffix, dialect, thickness })) : []
+  };
 }
