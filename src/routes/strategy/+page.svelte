@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte';
+  import { goto } from '$app/navigation';
   import { AlertTriangle, CalendarClock, ClipboardList, MapPinned, RefreshCw, Route, Target, Users } from 'lucide-svelte';
   import { getAuthHeader } from '$lib/supabase.js';
   import { fetchActiveScoutingEventKey, fetchAvailableScoutingEvents } from '$lib/scoutingEvent.js';
@@ -18,6 +19,7 @@
   let eventTeams = [];
   let matchesWarning = '';
   let teamsWarning = '';
+  let officialByTeam = new Map();
   let loadedEventKey = '';
   let loading = true;
   let error = '';
@@ -27,9 +29,19 @@
 
   $: resolvedEventKey = selectedEventKey || eventKey;
   $: rows = buildStrategyRows(report?.data || {}, eventTeams);
+  $: rankedRows = [...rows].sort((a, b) => {
+    const firstRank = officialByTeam.get(a.teamNumber)?.rank;
+    const secondRank = officialByTeam.get(b.teamNumber)?.rank;
+    if (firstRank == null && secondRank == null) return Number(a.teamNumber) - Number(b.teamNumber);
+    if (firstRank == null) return 1;
+    if (secondRank == null) return -1;
+    return firstRank - secondRank;
+  });
   $: totals = strategyTotals(rows);
-  $: filteredRows = rows.filter((row) => row.teamNumber.includes(teamSearch.trim()) || row.pitEntry?.robot_archetype?.toLowerCase().includes(teamSearch.trim().toLowerCase()));
+  $: filteredRows = rankedRows.filter((row) => row.teamNumber.includes(teamSearch.trim()) || row.pitEntry?.robot_archetype?.toLowerCase().includes(teamSearch.trim().toLowerCase()));
   $: selectedTeam = rows.find((row) => row.teamKey === selectedTeamKey) || filteredRows[0] || null;
+  $: activeEventLabel = availableEvents.find((option) => option.value === eventKey)?.label || eventKey || 'not set';
+  $: browseEventOptions = availableEvents.filter((option) => option.value !== eventKey);
   // Reuses the same buildPowerRankings pipeline Power Rankings itself calls,
   // fed from the report this page already loaded - no second scoring system,
   // just a projection layered on top (see matchProjection.js).
@@ -48,6 +60,11 @@
   const percent = (value) => Number.isFinite(value) ? `${Math.round(value * 100)}%` : '-';
   const text = (value) => String(value || '').trim();
 
+  function openTeamView(row) {
+    selectedTeamKey = row.teamKey;
+    goto(`/teamview?event_key=${encodeURIComponent(resolvedEventKey)}&team=${encodeURIComponent(row.teamKey)}`);
+  }
+
   async function loadStrategy() {
     if (!resolvedEventKey) {
       report = null;
@@ -60,10 +77,11 @@
     teamsWarning = '';
     try {
       const authHeaders = await getAuthHeader();
-      const [response, matchesResponse, teamsResponse] = await Promise.all([
+      const [response, matchesResponse, teamsResponse, officialResponse] = await Promise.all([
         fetch(`/api/scouting-report?event_key=${encodeURIComponent(resolvedEventKey)}`, { headers: authHeaders }),
         fetch(`/api/tba/event-matches?event_key=${encodeURIComponent(resolvedEventKey)}&comp_level=all`),
-        fetch(`/api/tba/event-teams?event_key=${encodeURIComponent(resolvedEventKey)}`)
+        fetch(`/api/tba/event-teams?event_key=${encodeURIComponent(resolvedEventKey)}`),
+        fetch(`/api/tba/event-oprs?event_key=${encodeURIComponent(resolvedEventKey)}`)
       ]);
       const payload = await response.json().catch(() => null);
       if (!response.ok || !payload?.success) throw new Error(payload?.error || 'Could not load scouting strategy data.');
@@ -79,10 +97,14 @@
       const scheduledMatches = matchesResponse.ok && matchesPayload?.success ? matchesPayload.data || [] : [];
       matches = [buildTestMarketMatch(resolvedEventKey, eventTeams), ...scheduledMatches];
       if (!matchesResponse.ok || !matchesPayload?.success) matchesWarning = matchesPayload?.error || 'Could not load the match schedule from The Blue Alliance.';
+
+      const officialPayload = await officialResponse.json().catch(() => null);
+      officialByTeam = new Map((officialPayload?.success ? officialPayload.data || [] : []).map((team) => [String(team.team), team]));
     } catch (cause) {
       report = null;
       eventTeams = [];
       matches = [];
+      officialByTeam = new Map();
       error = cause?.message || 'Could not load scouting strategy data.';
     } finally {
       loadedEventKey = resolvedEventKey;
@@ -107,7 +129,7 @@
     <p>One board for the scouting evidence behind match decisions.</p>
   </div>
   <div class="header-actions">
-    <SeasonFilter options={availableEvents} bind:value={selectedEventKey} allLabel={`Current Event (${eventKey || 'not set'})`} />
+    <SeasonFilter options={browseEventOptions} bind:value={selectedEventKey} allLabel={`Current Event (${activeEventLabel})`} />
     <button class="btn btn-outline" on:click={loadStrategy} disabled={loading || !resolvedEventKey}><RefreshCw size={16} /> Refresh</button>
   </div>
 </div>
@@ -188,10 +210,11 @@
       {:else}
         <div class="board-table-wrap">
           <table class="board-table">
-            <thead><tr><th>Team</th><th>Data matches</th><th>Reports</th><th>Fuel</th><th>Reported balls</th><th>Accuracy</th><th>Auto</th><th>Pit</th><th>Notes</th><th>Autos</th><th>Risk</th></tr></thead>
+            <thead><tr><th>Rank</th><th>Team</th><th>Data matches</th><th>Reports</th><th>Fuel</th><th>Reported balls</th><th>Accuracy</th><th>Auto</th><th>Pit</th><th>Notes</th><th>Autos</th><th>Risk</th></tr></thead>
             <tbody>
               {#each filteredRows as row}
-                <tr class:selected={selectedTeam?.teamKey === row.teamKey} on:click={() => selectedTeamKey = row.teamKey}>
+                <tr class:selected={selectedTeam?.teamKey === row.teamKey} on:click={() => openTeamView(row)}>
+                  <td><strong>{officialByTeam.get(row.teamNumber)?.rank ?? '—'}</strong></td>
                   <td><strong>{row.teamNumber}</strong>{#if row.pitEntry?.robot_archetype}<small>{row.pitEntry.robot_archetype}</small>{/if}</td>
                   <td>{row.performance.matchesScouted || '-'}</td>
                   <td>{row.matchScoutSummary.reportCount || '-'}</td>
@@ -251,7 +274,7 @@
           {#if selectedTeam.openProblems.length}<ul class="risk-list">{#each selectedTeam.openProblems as issue}<li><strong>{issue.severity || 'watch'}</strong> {issue.summary}</li>{/each}</ul>{:else}<p class="muted">No open issues.</p>{/if}
         </div>
         <div class="brief-actions">
-          <a class="btn btn-outline btn-sm" href={`/teamview?event_key=${encodeURIComponent(resolvedEventKey)}`}>Open team view</a>
+          <a class="btn btn-outline btn-sm" href={`/teamview?event_key=${encodeURIComponent(resolvedEventKey)}&team=${encodeURIComponent(selectedTeam.teamKey)}`}>Open team view</a>
           <a class="btn btn-outline btn-sm" href={`/powerrankings`}>Power rankings</a>
         </div>
       {:else}<div class="empty-state">Select a team to view its strategy brief.</div>{/if}

@@ -76,16 +76,21 @@ function eventKeyFromMatchKey(matchKey) {
 
 // Old events' scouting rows aren't deleted when a new active event is set -
 // they're just hidden by the current event-key-only query scoping. This
-// finds every distinct event_key with real historical data across all three
-// scouting tables so the UI can offer them for browsing.
-async function fetchDistinctEventKeys(db) {
-  const [pitRes, dataRes, noteRes] = await Promise.all([
+// finds every distinct event_key with real historical data across the
+// scouting tables, plus the active event even before data arrives, so the UI
+// can offer every useful event with its TBA name.
+async function fetchDistinctEventKeys(db, activeEventKey = '') {
+  const [pitRes, dataRes, noteRes, matchRes, autoRes, problemRes] = await Promise.all([
     db.from('pit_scout_entries').select('event_key'),
     db.from('scout_data_events').select('match_key'),
-    db.from('scout_notes').select('match_key')
+    db.from('scout_notes').select('match_key'),
+    db.from('match_scout_entries').select('event_key'),
+    db.from('match_scout_auto_paths').select('event_key'),
+    db.from('pit_problem_reports').select('event_key')
   ]);
 
   const keys = new Set();
+  if (activeEventKey) keys.add(activeEventKey);
   for (const row of pitRes.data || []) {
     const key = String(row?.event_key || '').trim();
     if (key) keys.add(key);
@@ -97,6 +102,12 @@ async function fetchDistinctEventKeys(db) {
   for (const row of noteRes.data || []) {
     const key = eventKeyFromMatchKey(row?.match_key);
     if (key) keys.add(key);
+  }
+  for (const result of [matchRes, autoRes, problemRes]) {
+    for (const row of result.data || []) {
+      const key = String(row?.event_key || '').trim();
+      if (key) keys.add(key);
+    }
   }
 
   return [...keys];
@@ -120,8 +131,8 @@ async function fetchEventLabel(eventKey) {
   }
 }
 
-async function fetchAvailableEvents(db) {
-  const eventKeys = await fetchDistinctEventKeys(db);
+async function fetchAvailableEvents(db, activeEventKey = '') {
+  const eventKeys = await fetchDistinctEventKeys(db, activeEventKey);
   if (!eventKeys.length) return [];
 
   // Promise.allSettled so one failed TBA lookup can't break the whole list -
@@ -145,7 +156,7 @@ export async function GET() {
 
     let availableEvents = [];
     try {
-      availableEvents = await fetchAvailableEvents(db);
+      availableEvents = await fetchAvailableEvents(db, eventKey);
     } catch {
       availableEvents = [];
     }

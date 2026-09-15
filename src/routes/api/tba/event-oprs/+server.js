@@ -37,17 +37,16 @@ export async function GET({ url }) {
       fetch(`${base}/rankings`, { headers })
     ]);
 
-    if (!oprsResp.ok) {
-      return json({ success: false, error: 'TBA upstream error ' + oprsResp.status }, { status: 502 });
+    if (!oprsResp.ok && !rankingsResp.ok) {
+      return json({ success: false, error: `TBA upstream errors ${oprsResp.status}/${rankingsResp.status}` }, { status: 502 });
     }
 
-    const oprsData = (await oprsResp.json()) || {};
+    const oprsData = oprsResp.ok ? (await oprsResp.json()) || {} : {};
     const oprs = oprsData.oprs || {};
 
-    // Rankings are a nice-to-have (rank/record) - don't fail the whole
-    // response if this one call has a transient issue; just omit those
-    // fields, same graceful-degradation spirit as the old route's error
-    // handling.
+    // Either half may exist before the other during an event. Preserve ranks
+    // when OPR has not been calculated yet, and preserve OPR during a transient
+    // rankings failure.
     let rankingRows = [];
     if (rankingsResp.ok) {
       const rankingsData = (await rankingsResp.json()) || {};
@@ -55,7 +54,8 @@ export async function GET({ url }) {
     }
     const rankingByTeamKey = new Map(rankingRows.map((r) => [r.team_key, r]));
 
-    const data = Object.keys(oprs).map((teamKey) => {
+    const teamKeys = new Set([...Object.keys(oprs), ...rankingRows.map((row) => row.team_key).filter(Boolean)]);
+    const data = [...teamKeys].map((teamKey) => {
       const teamNumber = Number(String(teamKey).replace(/^frc/i, ''));
       const ranking = rankingByTeamKey.get(teamKey);
       return {

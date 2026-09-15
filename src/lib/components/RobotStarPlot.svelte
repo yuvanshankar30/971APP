@@ -24,12 +24,14 @@
     .join(', ');
 
   $: axes = left?.starProfile || right?.starProfile || [];
-  $: description = `Event-relative robot star plot. Team ${left?.team_number}: ${profileLabel(left)}. Team ${right?.team_number}: ${profileLabel(right)}.`;
+  $: description = right
+    ? `Event-relative robot star plot. Team ${left?.team_number}: ${profileLabel(left)}. Team ${right?.team_number}: ${profileLabel(right)}.`
+    : `Event-relative robot star plot. Team ${left?.team_number}: ${profileLabel(left)}.`;
 </script>
 
 <div class="star-plot">
   <svg viewBox={`0 0 ${size} ${size}`} role="img" aria-label={description}>
-    <title>Robot star plot for teams {left?.team_number} and {right?.team_number}</title>
+    <title>{right ? `Robot star plot for teams ${left?.team_number} and ${right?.team_number}` : `Robot star plot for team ${left?.team_number}`}</title>
     {#each rings as ring}
       <polygon class="grid-ring" points={polygon(axes, ring)} />
     {/each}
@@ -56,7 +58,7 @@
   </svg>
   <div class="legend" aria-hidden="true">
     <span><i class="left-swatch"></i> Team {left?.team_number}</span>
-    <span><i class="right-swatch"></i> Team {right?.team_number}</span>
+    {#if right}<span><i class="right-swatch"></i> Team {right.team_number}</span>{/if}
   </div>
   <p>Each axis is normalized against this event's scouted field. Missing observations collapse to the center; tied fields sit at 50.</p>
 </div>
