@@ -1,9 +1,11 @@
 <script>
   import { onMount } from 'svelte';
-  import { AlertTriangle, ClipboardList, MapPinned, RefreshCw, Route, Target, Users } from 'lucide-svelte';
+  import { AlertTriangle, CalendarClock, ClipboardList, MapPinned, RefreshCw, Route, Target, Users } from 'lucide-svelte';
   import { getAuthHeader } from '$lib/supabase.js';
   import { fetchActiveScoutingEventKey, fetchAvailableScoutingEvents } from '$lib/scoutingEvent.js';
   import { buildStrategyRows, strategyTotals } from '$lib/strategyScouting.js';
+  import { buildPowerRankings } from '$lib/scoutingStats.js';
+  import { isMatchPlayed, matchLabel, projectMatch } from '$lib/matchProjection.js';
   import SeasonFilter from '$lib/components/SeasonFilter.svelte';
   import MatchScoutReport from '$lib/components/MatchScoutReport.svelte';
 
@@ -11,17 +13,33 @@
   let selectedEventKey = null;
   let availableEvents = [];
   let report = null;
+  let matches = [];
+  let matchesWarning = '';
   let loadedEventKey = '';
   let loading = true;
   let error = '';
   let teamSearch = '';
   let selectedTeamKey = '';
+  let view = 'teams'; // 'teams' | 'matches'
 
   $: resolvedEventKey = selectedEventKey || eventKey;
   $: rows = buildStrategyRows(report?.data || {});
   $: totals = strategyTotals(rows);
   $: filteredRows = rows.filter((row) => row.teamNumber.includes(teamSearch.trim()) || row.pitEntry?.robot_archetype?.toLowerCase().includes(teamSearch.trim().toLowerCase()));
   $: selectedTeam = rows.find((row) => row.teamKey === selectedTeamKey) || filteredRows[0] || null;
+  // Reuses the same buildPowerRankings pipeline Power Rankings itself calls,
+  // fed from the report this page already loaded - no second scoring system,
+  // just a projection layered on top (see matchProjection.js).
+  $: powerRankings = buildPowerRankings(
+    rows.map((row) => ({ key: row.teamKey, team_number: Number(row.teamNumber) || 0, nickname: '' })),
+    report?.data?.data_events || [],
+    report?.data?.notes || [],
+    { pitEntries: report?.data?.pit_entries || [], problemReports: report?.data?.pit_problems || [], matchEntries: report?.data?.match_entries || [] }
+  );
+  $: scoutPowerByTeam = new Map(powerRankings.map((team) => [team.key, team.scoutPower]));
+  $: upcomingMatches = matches.filter((match) => !isMatchPlayed(match));
+  $: playedMatches = matches.filter((match) => isMatchPlayed(match)).slice().reverse();
+  const teamNumber = (teamKey) => String(teamKey || '').replace(/^frc/i, '');
 
   const number = (value, digits = 1) => Number.isFinite(value) ? value.toFixed(digits) : '-';
   const percent = (value) => Number.isFinite(value) ? `${Math.round(value * 100)}%` : '-';
@@ -35,15 +53,22 @@
     }
     loading = true;
     error = '';
+    matchesWarning = '';
     try {
-      const response = await fetch(`/api/scouting-report?event_key=${encodeURIComponent(resolvedEventKey)}`, {
-        headers: await getAuthHeader()
-      });
+      const authHeaders = await getAuthHeader();
+      const [response, matchesResponse] = await Promise.all([
+        fetch(`/api/scouting-report?event_key=${encodeURIComponent(resolvedEventKey)}`, { headers: authHeaders }),
+        fetch(`/api/tba/event-matches?event_key=${encodeURIComponent(resolvedEventKey)}&comp_level=all`)
+      ]);
       const payload = await response.json().catch(() => null);
       if (!response.ok || !payload?.success) throw new Error(payload?.error || 'Could not load scouting strategy data.');
       report = payload;
       loadedEventKey = resolvedEventKey;
       if (!selectedTeamKey && buildStrategyRows(payload.data)[0]) selectedTeamKey = buildStrategyRows(payload.data)[0].teamKey;
+
+      const matchesPayload = await matchesResponse.json().catch(() => null);
+      if (matchesResponse.ok && matchesPayload?.success) matches = matchesPayload.data || [];
+      else { matches = []; matchesWarning = matchesPayload?.error || 'Could not load the match schedule from The Blue Alliance.'; }
     } catch (cause) {
       report = null;
       error = cause?.message || 'Could not load scouting strategy data.';
@@ -90,6 +115,55 @@
     <div class:at-risk={totals.openProblems > 0}><AlertTriangle size={18} /><strong>{totals.openProblems}</strong><span>Open ACE issues</span></div>
   </section>
 
+  <div class="subtabs">
+    <button class:active={view === 'teams'} on:click={() => view = 'teams'}>Teams</button>
+    <button class:active={view === 'matches'} on:click={() => view = 'matches'}>Matches</button>
+  </div>
+
+  {#if view === 'matches'}
+  <section class="strategy-board matches-board">
+    <div class="section-heading">
+      <div><h2><CalendarClock size={18} /> Match schedule</h2><p>Synced from The Blue Alliance. Win likelihood is a rough estimate from our own Scout Power, not a scored prediction - <a href="/predictions">place a prediction market bet</a> on any upcoming match.</p></div>
+    </div>
+    {#if matchesWarning}<p class="muted matches-warning">{matchesWarning}</p>{/if}
+    {#if !matches.length}
+      <div class="empty-state">No match schedule yet for this event.</div>
+    {:else}
+      <div class="board-table-wrap">
+        <table class="board-table">
+          <thead><tr><th>Match</th><th>Red</th><th>Blue</th><th>Status</th></tr></thead>
+          <tbody>
+            {#each upcomingMatches as match (match.key)}
+              {@const projection = projectMatch(match, scoutPowerByTeam)}
+              <tr>
+                <td><strong>{matchLabel(match)}</strong></td>
+                <td class="alliance-red">{match.alliances?.red?.team_keys?.map(teamNumber).join(', ')}</td>
+                <td class="alliance-blue">{match.alliances?.blue?.team_keys?.map(teamNumber).join(', ')}</td>
+                <td>
+                  {#if projection.redWinProbability == null}
+                    <span class="muted">Not enough scouting yet</span>
+                  {:else}
+                    <span class="win-bar" title={`Red projected ${Math.round(projection.redWinProbability * 100)}% / Blue projected ${Math.round((1 - projection.redWinProbability) * 100)}%`}>
+                      <span class="win-bar-red" style={`width:${Math.round(projection.redWinProbability * 100)}%`}></span>
+                    </span>
+                  {/if}
+                </td>
+              </tr>
+            {/each}
+            {#each playedMatches as match (match.key)}
+              <tr class="played-row">
+                <td><strong>{matchLabel(match)}</strong></td>
+                <td class="alliance-red" class:winner={match.winning_alliance === 'red'}>{match.alliances?.red?.team_keys?.map(teamNumber).join(', ')} <span class="muted">{match.alliances?.red?.score ?? ''}</span></td>
+                <td class="alliance-blue" class:winner={match.winning_alliance === 'blue'}>{match.alliances?.blue?.team_keys?.map(teamNumber).join(', ')} <span class="muted">{match.alliances?.blue?.score ?? ''}</span></td>
+                <td class="muted">{match.winning_alliance ? `${match.winning_alliance} won` : 'Tie'}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    {/if}
+  </section>
+  {:else}
   <section class="strategy-layout">
     <div class="strategy-board">
       <div class="section-heading">
@@ -170,9 +244,18 @@
       {:else}<div class="empty-state">Select a team to view its strategy brief.</div>{/if}
     </aside>
   </section>
+  {/if}
 {/if}
 
 <style>
+  .matches-board .section-heading h2 { display:flex; align-items:center; gap:var(--space-2); }
+  .matches-warning { padding:0 var(--space-3); }
+  .alliance-red { color:var(--status-danger); }
+  .alliance-blue { color:var(--brand-blue, #2563eb); }
+  .played-row { opacity:.75; }
+  .winner { font-weight:700; opacity:1; }
+  .win-bar { display:inline-block; width:80px; height:10px; border-radius:5px; background:var(--brand-blue, #2563eb); overflow:hidden; vertical-align:middle; }
+  .win-bar-red { display:block; height:100%; background:var(--status-danger); float:left; }
   .strategy-header { display:flex; justify-content:space-between; gap:var(--space-4); align-items:flex-end; }
   .strategy-header h1 { display:flex; align-items:center; gap:var(--space-2); margin:0; }
   .strategy-header p, .section-heading p { margin:var(--space-1) 0 0; color:var(--text-secondary); }
