@@ -13,6 +13,7 @@
   import { toastActions } from '$lib/toast.js';
   import { formatPacificDate } from '$lib/timezone.js';
   import { purchasingLineTotal } from '$lib/purchasingLineTotal.js';
+  import { purchasingDisplayName } from '$lib/purchasingDisplayName.js';
   import { goto } from '$app/navigation';
   import PartNotes from '$lib/components/PartNotes.svelte';
   // Direct instruction: the Scan button below is removed for now (its own
@@ -1171,7 +1172,7 @@
                 </td>
                 <td class="requester" data-label="Requester">
                   <div class="requester-content">
-                    <span>{(part.requester || 'Unknown').split(' ')[0]}</span>
+                    <span title={part.requester || ''}>{purchasingDisplayName(part.requester)}</span>
                     {#if isTeam9584(part.frc_team)}
                       <span class="tag team-tag tag-9584" title="Team 9584">9584</span>
                     {/if}
@@ -1227,7 +1228,7 @@
                 <td class="approved" data-label="Approval">
                   {#if part.approved}
                     <div class="approved-info">
-                      <span class="approver-name">{part.approver ? part.approver.split(' ')[0] : 'Approved'}</span>
+                      <span class="approver-name" title={part.approver || ''}>{part.approver ? purchasingDisplayName(part.approver) : 'Approved'}</span>
                     </div>
                   {:else if (part.status || '').toString().toLowerCase() === 'rejected'}
                     <button class="btn btn-rejected btn-sm" on:click={() => unrejectPart(part)} title="Click to unreject">
