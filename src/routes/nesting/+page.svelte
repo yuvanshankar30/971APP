@@ -21,14 +21,13 @@
   import { assertProgramTypeCompatible, dialectForProgramType, programTypeForName, singleProgramType } from '$lib/nesting/programType.js';
   import { placementIssueIds, placementsOverlap, validateCut } from '$lib/nesting/validation.js';
   import { convertGcodeToInches } from '$autocam/fusion/gcodeUnitConvert.js';
-  import { fetchFusionJobNcFiles } from '$lib/fusionCam.js';
 
   export let forcedScreen = null;
   export let sheetId = null;
   let canvas, ctx, canvasResizeObserver, sheets = [], sheet = null, placements = [], selectedId = null, loading = true, saving = false;
   let screen = forcedScreen || 'select', view = { scale: 28, originX: 80, originY: 520 }, drag = null, rotationDrag = null, rotationAnimationFrame = null, rotationKeyHeld = false, placing = null, activePart = null, placingWithShortcut = false;
   let undo = createUndoStack([]), gcodePrograms = {}, partGroups = [], newSheet = { name: '', width: 48, height: 30, thickness: '0.125' };
-  let showNewSheet = false, showLibrary = true, showLibraryModal = false, loadingLibraryModal = false, libraryScope = 'all', showCamJobs = false, loadingCamJobs = false, camJobs = [], camJobSearch = '', camJobDateFrom = '', camJobDateTo = '', showEmit = false, showProgram = false, committingGcode = false, deletingCut = false, activeCutId = null, pendingAutoCamFile = null, user = null, loadError = '', showOutputEditor = false;
+  let showNewSheet = false, showLibrary = true, showLibraryModal = false, loadingLibraryModal = false, libraryScope = 'all', showCamJobs = false, loadingCamJobs = false, camJobs = [], camJobSearch = '', camJobDateFrom = '', camJobDateTo = '', showEmit = false, showProgram = false, committingGcode = false, deletingCut = false, activeCutId = null, user = null, loadError = '', showOutputEditor = false;
   let sheetSearch = '', librarySearch = '', measure = [], measuring = false, emitName = '', emitSuffix = '', emitCutId = null, emitToolOrder = [], selectedProgram = null, editingCutName = false, cutName = '';
   let allPartGroups = [], libraryDateFrom = '', libraryDateTo = '', libraryRenamePath = null, libraryRenameName = '', showInactiveCuts = true, autosaveTimer = null, placementSaveQueue = Promise.resolve(), placementRevision = 0, saveStatus = 'saved';
   const CUT_COLORS = ['#f59e0b', '#22c55e', '#f43f5e', '#e879f9', '#facc15', '#2dd4bf', '#fb923c', '#a3e635'];
@@ -134,10 +133,6 @@
         user = user || { id: session.user.id };
         void loadUserFromUUID(supabase);
         if (!canUseNesting(user)) return;
-        const pendingJobId = $page.url.searchParams.get('autocamJob');
-        const pendingFile = $page.url.searchParams.get('autocamFile');
-        const pendingName = $page.url.searchParams.get('autocamName');
-        if (pendingJobId && pendingFile) pendingAutoCamFile = { jobId: pendingJobId, fileName: pendingFile, name: pendingName || 'Fusion' };
         await withTimeout(refreshSheets(), 12000, 'JProg sheets took too long to load.');
         const id = sheetId || $page.params?.sheetId;
         if (id) await openSheet(id);
@@ -185,7 +180,7 @@
     sheet = await getSheet(id); activeCutId = sheet.active_cut_id || sheet.nesting_cuts?.[0]?.id;
     const restoredHistory = restoreHistory(activeCutId, sheet.nesting_cuts?.find(c => c.id === activeCutId)?.nesting_placements || []);
     if (restoredHistory) scheduleAutosave();
-    selectedId = null; screen = 'edit'; emitName = sheet.name; await tick(); observeCanvas(); fitView(); await loadLibrary(); await loadPlacedPrograms(placements); await importPendingAutoCamFile(); await tick(); fitView(); draw(); requestAnimationFrame(() => { fitView(); draw(); });
+    selectedId = null; screen = 'edit'; emitName = sheet.name; await tick(); observeCanvas(); fitView(); await loadLibrary(); await loadPlacedPrograms(placements); await tick(); fitView(); draw(); requestAnimationFrame(() => { fitView(); draw(); });
     void loadPlacedPrograms(renderedPlacements.filter(item => !item.renderActive)).then(draw);
     if (!forcedScreen && $page.url.pathname !== `/jprog/sheets/${id}`) goto(`/jprog/sheets/${id}`, { replaceState: true, keepFocus: true, noScroll: true });
   }
@@ -364,20 +359,6 @@
       showCamJobs = false;
       toastActions.show(`Added ${partName} to this cut`);
     } catch (error) { toastActions.show(error.message || 'Could not insert CAM job'); }
-  }
-  async function importPendingAutoCamFile() {
-    const pending = pendingAutoCamFile;
-    if (!pending || !sheet?.id) return;
-    try {
-      const files = await fetchFusionJobNcFiles(pending.jobId);
-      const file = files.find((candidate) => candidate.name === pending.fileName);
-      if (!file) throw new Error('That Fusion G-code file is no longer available');
-      const { gcode } = convertGcodeToInches(atob(file.contentBase64));
-      pendingAutoCamFile = null;
-      await insertCamJob({ id: `${pending.jobId}:${file.name}`, name: pending.name, gcode, gcode_file_name: file.name });
-    } catch (error) {
-      toastActions.show(error.message || 'Could not import the selected Fusion G-code');
-    }
   }
   async function renameLibraryEntry(group) {
     const name = libraryRenameName.trim();
