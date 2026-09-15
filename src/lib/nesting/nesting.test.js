@@ -59,8 +59,10 @@ describe("nesting geometry", () => {
     );
   });
   it("uses rotation-aware bounds for sheet containment without mutating part dimensions", () => {
+    // x is negative - sheet (0,0) is the lower-right corner, matching real
+    // JProg (see sheetModel.js's own header comment).
     const item = rotatePlacement({
-      x: 1,
+      x: -3,
       y: 3,
       width_in: 3,
       height_in: 1,
@@ -69,25 +71,27 @@ describe("nesting geometry", () => {
     expect(item.width_in).toBe(3);
     expect(item.height_in).toBe(1);
     expect(sheetContains({ width_in: 4, height_in: 4 }, item)).toBe(false);
-    expect(placementContains(item, 1, 3)).toBe(true);
+    expect(placementContains(item, -3, 3)).toBe(true);
   });
   it("supports rotating in either direction without snapping the stored angle", () => {
     const item = rotatePlacement({ rotation: 0 }, -0.25);
     expect(item.rotation).toBeCloseTo(-Math.PI / 8);
   });
   it("snaps a valid edge placement inside the stock rather than rejecting it", () => {
+    // Near the LEFT edge (-48) this time, since (0,0) is the lower-right
+    // corner - mirrors the old near-right-edge case under the new convention.
     const result = clampPlacementToSheet(
       { width_in: 48, height_in: 24 },
-      { x: 47.9, y: 23.9, width_in: 2, height_in: 2, rotation: 0 },
+      { x: -0.1, y: 23.9, width_in: 2, height_in: 2, rotation: 0 },
     );
-    expect(result).toMatchObject({ x: 47, y: 23 });
+    expect(result).toMatchObject({ x: -1, y: 23 });
     expect(sheetContains({ width_in: 48, height_in: 24 }, result)).toBe(true);
   });
   it("rejects only a placement that is larger than the sheet itself", () => {
     expect(
       clampPlacementToSheet(
         { width_in: 4, height_in: 4 },
-        { x: 2, y: 2, width_in: 5, height_in: 1, rotation: 0 },
+        { x: -2, y: 2, width_in: 5, height_in: 1, rotation: 0 },
       ),
     ).toBeNull();
   });
@@ -95,7 +99,7 @@ describe("nesting geometry", () => {
     const sheet = { width_in: 48, height_in: 24 };
     expect(
       placementHasEdgeClearance(sheet, {
-        x: 0.15,
+        x: -47.85,
         y: 12,
         width_in: 0.3,
         height_in: 0.3,
@@ -104,7 +108,7 @@ describe("nesting geometry", () => {
     expect(
       placementHasEdgeClearance(
         sheet,
-        { x: 0.25, y: 12, width_in: 0.3, height_in: 0.3 },
+        { x: -47.75, y: 12, width_in: 0.3, height_in: 0.3 },
         0.05,
       ),
     ).toBe(true);

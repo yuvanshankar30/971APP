@@ -200,7 +200,10 @@
     const width = rect?.width || 900, height = rect?.height || 600;
     const padding = 64;
     const scale = Math.max(5, Math.min(500, Math.min((width - padding * 2) / Number(sheet.width_in), (height - padding * 2) / Number(sheet.height_in))));
-    view = { scale, originX: width / 2 - Number(sheet.width_in) * scale / 2, originY: height / 2 + Number(sheet.height_in) * scale / 2 }; requestAnimationFrame(draw);
+    // Sheet (0,0) is the lower-right corner (matches real JProg - see
+    // sheetModel.js), so the sheet's own center sits at x = -width_in/2, not
+    // +width_in/2.
+    view = { scale, originX: width / 2 + Number(sheet.width_in) * scale / 2, originY: height / 2 + Number(sheet.height_in) * scale / 2 }; requestAnimationFrame(draw);
   }
   async function createNewSheet() {
     if (!newSheet.name.trim()) return toastActions.show('Name the sheet first');
@@ -351,7 +354,7 @@
       const variant = await parseGcodeDocument(job.gcode, fileName);
       const key = `${sheetPartLibraryRoot(sheet.name)}/${partName}`;
       gcodePrograms[key] = { variants: [variant], bounds: variant.bounds };
-      const candidate = makePlacement({ kind: 'part', label: partName, part_library_path: key, width_in: variant.bounds.width, height_in: variant.bounds.height, x: Number(sheet.width_in) / 2, y: Number(sheet.height_in) / 2 });
+      const candidate = makePlacement({ kind: 'part', label: partName, part_library_path: key, width_in: variant.bounds.width, height_in: variant.bounds.height, x: -Number(sheet.width_in) / 2, y: Number(sheet.height_in) / 2 });
       if (!sheet?.program_extension) { await setSheetProgramType(sheet.id, extension); sheet = { ...sheet, program_extension: extension }; }
       activePart = { kind: 'part', label: partName, part_library_path: key, width_in: variant.bounds.width, height_in: variant.bounds.height };
       commit([...placements, candidate]);
@@ -468,7 +471,7 @@
     const canvasSelection = placements.find((item) => item.id === selectedId) || null;
     const rect = canvas.getBoundingClientRect(); canvas.width = rect.width * devicePixelRatio; canvas.height = rect.height * devicePixelRatio;
     ctx = canvas.getContext('2d'); ctx.scale(devicePixelRatio, devicePixelRatio); ctx.clearRect(0, 0, rect.width, rect.height);
-    const a = sheetToScreen({ x: 0, y: 0 }, view), b = sheetToScreen({ x: Number(sheet.width_in), y: Number(sheet.height_in) }, view);
+    const a = sheetToScreen({ x: 0, y: 0 }, view), b = sheetToScreen({ x: -Number(sheet.width_in), y: Number(sheet.height_in) }, view);
     ctx.strokeStyle = '#f8fafc'; ctx.lineWidth = 2; ctx.strokeRect(a.x, b.y, b.x - a.x, a.y - b.y);
     for (const p of canvasPlacements) {
       const s = sheetToScreen(p, view); ctx.save(); ctx.translate(s.x, s.y); ctx.rotate(-p.rotation);
@@ -673,7 +676,7 @@
 {:else if loadError}<main class="nesting"><h1>JProg</h1><p>{loadError}</p><p>Reload this page. If the error persists after deployment, apply <code>migrations/20260914000000_nesting_system.sql</code>.</p></main>
 {:else if !user}<main class="nesting"><h1>JProg</h1><p>Sign in to use JProg.</p></main>
 {:else if screen === 'settings'}
-  <main class="nesting"><header><div><p class="eyebrow">JProg</p><h1>Settings</h1></div><button class="btn btn-secondary" on:click={() => { screen = 'select'; goto('/jprog'); }}><FolderOpen size={16}/> JProg Home</button></header><section class="settings-panel"><h2>Coordinate system</h2><p>Sheets use positive inch dimensions. The lower-left of each sheet is X0 Y0; the canvas handles screen-space inversion internally.</p><h2>Part library</h2><p>Upload all <code>.ngc</code> or <code>.tap</code> variants for a part at once. Their final underscore suffixes become emission groups, matching JProg's suffix workflow.</p><h2>Output</h2><p>Each emission is saved in the Manufacturing Files tab under <code>JustinProgOutput/YYYYMMDD/</code>. The date folder is created automatically when the first program is emitted.</p><h2>Hole programs</h2><p>Added holes use the bundled JProg thickness program and only emit with the <code>holes</code> suffix.</p><h2>Workflow boundary</h2><p>JProg remains standalone. Emitting a program does not queue or update AutoCAM or Fusion.</p></section></main>
+  <main class="nesting"><header><div><p class="eyebrow">JProg</p><h1>Settings</h1></div><button class="btn btn-secondary" on:click={() => { screen = 'select'; goto('/jprog'); }}><FolderOpen size={16}/> JProg Home</button></header><section class="settings-panel"><h2>Coordinate system</h2><p>Sheet dimensions are entered as positive inches, but placement coordinates are not: the lower-RIGHT of each sheet is X0 Y0, matching real JProg - X runs negative to the left, Y runs positive upward. Zero your machine at the sheet's lower-right corner.</p><h2>Part library</h2><p>Upload all <code>.ngc</code> or <code>.tap</code> variants for a part at once. Their final underscore suffixes become emission groups, matching JProg's suffix workflow.</p><h2>Output</h2><p>Each emission is saved in the Manufacturing Files tab under <code>JustinProgOutput/YYYYMMDD/</code>. The date folder is created automatically when the first program is emitted.</p><h2>Hole programs</h2><p>Added holes use the bundled JProg thickness program and only emit with the <code>holes</code> suffix.</p><h2>Workflow boundary</h2><p>JProg remains standalone. Emitting a program does not queue or update AutoCAM or Fusion.</p></section></main>
 {:else if screen === 'select'}
   <main class="nesting jprog-home"><header class="jprog-home-header"><div><p class="eyebrow">Manufacturing</p><h1>JProg</h1><p class="home-subtitle">Manual sheet layout and G-code emission</p></div><div class="header-actions"><button class="btn btn-secondary" on:click={() => screen = 'settings'}><Settings size={16}/> Settings</button><button class="btn btn-primary" on:click={() => showNewSheet = true}><Plus size={16}/> New sheet</button></div></header><section class="sheet-index"><div class="sheet-index-toolbar"><div><h2>Sheets</h2><span>{sheets.length} total</span></div><label class="search"><Search size={17}/><input bind:value={sheetSearch} placeholder="Search sheets"/></label></div><div class="sheet-list">{#each visibleSheets as item}<div class="sheet-row"><button class="sheet-open" on:click={() => openSheet(item.id)}><span class="sheet-mark"><FolderOpen size={18}/></span><span class="sheet-details"><strong>{item.name}</strong><span>{item.width_in} x {item.height_in} in stock · {item.thickness_key} in thick · {item.nesting_cuts?.length || 0} cuts</span></span><span class="open-sheet">Open</span></button><button class="icon-button danger sheet-delete" title={`Delete ${item.name}`} aria-label={`Delete ${item.name}`} on:click={() => removeSheet(item)}><Trash2 size={17}/></button></div>{:else}<div class="empty-sheets"><strong>{sheetSearch ? 'No sheets match that search.' : 'No sheets yet.'}</strong><span>{sheetSearch ? 'Try a different name.' : 'Create a sheet to begin laying out parts.'}</span></div>{/each}</div></section></main>
 {:else}
