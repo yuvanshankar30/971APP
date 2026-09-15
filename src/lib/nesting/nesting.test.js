@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildEmitFilename } from "./emitFilename.js";
-import { emitNestingGcode } from "./gcodeEmit.js";
+import { emitNestingGcode, nestingEmissionTools } from "./gcodeEmit.js";
 import { parseGcodeDocument } from "./gcodeDocument.js";
 import {
   clampPlacementToSheet,
@@ -325,6 +325,25 @@ describe("nesting emission", () => {
     expect(result.text.indexOf("[Tool 1]")).toBeLessThan(result.text.indexOf("[Tool 2]"));
     expect(result.text).toContain("[Part: Tool one]");
     expect(result.text).toContain("[Part: Tool two]");
+  });
+  it("uses the configured WinCNC tool order and requires a complete order", () => {
+    const input = {
+      name: "tool-order",
+      dialect: "wincnc",
+      placements: [
+        { label: "Tool two", x: 2, y: 2, part_library_path: "two" },
+        { label: "Tool one", x: 4, y: 2, part_library_path: "one" },
+      ],
+      programs: {
+        two: { source: "G90\nT2\nG0 X0 Y0\nM5" },
+        one: { source: "G90\nT1\nG0 X0 Y0\nM5" },
+      },
+    };
+    expect(nestingEmissionTools(input)).toEqual([1, 2]);
+    const result = emitNestingGcode({ ...input, toolOrder: [2, 1] });
+    expect(result.toolOrder).toEqual([2, 1]);
+    expect(result.text.indexOf("[Tool 2]")).toBeLessThan(result.text.indexOf("[Tool 1]"));
+    expect(() => emitNestingGcode({ ...input, toolOrder: [2] })).toThrow(/each detected tool exactly once/);
   });
   it("emits the bundled hole template only in the holes group", () => {
     const result = emitNestingGcode({
