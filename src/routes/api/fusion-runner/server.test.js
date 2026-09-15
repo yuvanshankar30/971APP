@@ -196,7 +196,7 @@ describe('Fusion Runner grouping lifecycle',()=>{
  it('stores exact Fusion output artifacts without synthesizing a combined program',async()=>{
   const contentBase64=Buffer.from('N10 G90\r\nM30\r\n','utf8').toString('base64');
   mocks.from
-   .mockReturnValueOnce(chain({data:{id:'job',params:{fusionJobKind:'plate:cam',fusionPlateSnapshot:{name:'x44 stiffner'}}}}))
+  .mockReturnValueOnce(chain({data:{id:'job',params:{fusionJobKind:'plate:cam',fusionFileName:'X44 Stiffener',fusionPlateSnapshot:{name:'x44 stiffner'}}}}))
    .mockReturnValueOnce(chain({data:[{id:'job'}]}));
   const result=await call('complete',{jobId:'job',runnerId:'runner',ncFiles:[{name:'plate.nc',contentBase64}]});
   expect(result.status).toBe(200);
@@ -206,7 +206,12 @@ describe('Fusion Runner grouping lifecycle',()=>{
    fusion_nc_files:[expect.objectContaining({name:'plate.nc',contentBase64,size:14})]
   }));
   expect(mocks.storageUpload).toHaveBeenCalledWith(
-   'AutoCAM/job-plate.nc',
+   'AutoCAM/X44Stiffener(AUTOCAM).ngc',
+   expect.any(Buffer),
+   {upsert:true,contentType:'text/plain'}
+  );
+  expect(mocks.storageUpload).toHaveBeenCalledWith(
+   'Nesting Parts Library/AutoCAM/X44Stiffener(AUTOCAM)/X44Stiffener(AUTOCAM).ngc',
    expect.any(Buffer),
    {upsert:true,contentType:'text/plain'}
   );
@@ -217,7 +222,7 @@ describe('Fusion Runner grouping lifecycle',()=>{
   const side6=Buffer.from('G20\nM30\n','utf8').toString('base64');
   const side9=Buffer.from('G20\nM30\n','utf8').toString('base64');
   mocks.from
-   .mockReturnValueOnce(chain({data:{id:'tube-job',params:{fusionJobKind:'box_tube'}}}))
+   .mockReturnValueOnce(chain({data:{id:'tube-job',params:{fusionJobKind:'box_tube',fusionFileName:'Bottom Tube'}}}))
    .mockReturnValueOnce(chain({data:[{id:'tube-job'}]}));
   expect((await call('complete',{jobId:'tube-job',runnerId:'runner',ncFiles:[
    {name:'Bottom Tube-side-12.tap',contentBase64:side12},
@@ -226,10 +231,14 @@ describe('Fusion Runner grouping lifecycle',()=>{
    {name:'Bottom Tube-side-9.tap',contentBase64:side9}
   ]})).status).toBe(200);
   expect(mocks.storageUpload.mock.calls.map(([path])=>path)).toEqual([
-   'AutoCAM/tube-job/Bottom_Tube-side-12.tap',
-   'AutoCAM/tube-job/Bottom_Tube-side-3.tap',
-   'AutoCAM/tube-job/Bottom_Tube-side-6.tap',
-   'AutoCAM/tube-job/Bottom_Tube-side-9.tap'
+   'AutoCAM/tube-job/BottomTubetubeside12(AUTOCAM).tap',
+   'Nesting Parts Library/AutoCAM/BottomTubetubeside12(AUTOCAM)/BottomTubetubeside12(AUTOCAM).tap',
+   'AutoCAM/tube-job/BottomTubetubeside3(AUTOCAM).tap',
+   'Nesting Parts Library/AutoCAM/BottomTubetubeside3(AUTOCAM)/BottomTubetubeside3(AUTOCAM).tap',
+   'AutoCAM/tube-job/BottomTubetubeside6(AUTOCAM).tap',
+   'Nesting Parts Library/AutoCAM/BottomTubetubeside6(AUTOCAM)/BottomTubetubeside6(AUTOCAM).tap',
+   'AutoCAM/tube-job/BottomTubetubeside9(AUTOCAM).tap',
+   'Nesting Parts Library/AutoCAM/BottomTubetubeside9(AUTOCAM)/BottomTubetubeside9(AUTOCAM).tap'
   ]);
  });
  it('rejects a tube completion that is missing a setup program',async()=>{
@@ -244,10 +253,10 @@ describe('Fusion Runner grouping lifecycle',()=>{
  });
  it('does not mark a job complete when publishing Files/AutoCAM fails',async()=>{
   mocks.storageUpload.mockResolvedValueOnce({error:{message:'storage unavailable'}});
-  mocks.from.mockReturnValueOnce(chain({data:{id:'job',params:{fusionJobKind:'plate:cam'}}}));
+  mocks.from.mockReturnValueOnce(chain({data:{id:'job',params:{fusionJobKind:'plate:cam',fusionFileName:'Bracket'}}}));
   const result=await call('complete',{jobId:'job',runnerId:'runner',ncFiles:[{name:'plate.nc',contentBase64:'TTAw'}]});
   expect(result.status).toBe(500);
-  expect((await result.json()).error).toMatch(/Files\/AutoCAM/);
+  expect((await result.json()).error).toMatch(/AutoCAM\/Bracket\(AUTOCAM\)\.ngc/);
   expect(queries).toHaveLength(1);
  });
  it('records how far the posted program travels so a machine-limit report can be triaged',async()=>{
