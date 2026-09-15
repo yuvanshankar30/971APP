@@ -328,9 +328,49 @@ def _operation_warnings(app, cam) -> list:
     return warnings
 
 
+def _release_contour_has_selected_geometry(op) -> bool:
+    """True if a contour2d operation's own contour selection has at least
+    one edge actually chosen.
+
+    Existence in setup.operations is not the same as having something to
+    cut. Confirmed live as a second, distinct incident from the one
+    _require_release_contour was originally written for (see that
+    function's docstring): a real job's release cut (group_tabs=true)
+    survived DeleteToolpaths' cleanup and posted as "[Slot Cut for Edges]"
+    in the G-code, but with zero toolpath lines under it - its own contour
+    selection had ended up with no edges at all, and nothing checked that.
+    Fusion does not reliably surface this with isToolpathValid=False or a
+    "warning" mentioning "empty" for a contour2d operation the way it does
+    for other strategies - DeleteToolpaths.py's own repeated
+    "isToolpathValid=True but Generated toolpath is empty" incidents are
+    the same underlying Fusion quirk. The only reliable signal left is the
+    operation's own selection, read the same way
+    _require_through_hole_for_finishing_pass's _edge_tokens already reads
+    it for through-shape operations.
+
+    A selection this can't read at all is treated as empty, not as
+    "can't tell" - a release contour with unreadable geometry is exactly
+    as unsafe to ship as one confirmed empty.
+    """
+    try:
+        param = op.parameters.itemByName("contours")
+        if param is None:
+            return False
+        value = param.value
+        if not hasattr(value, "getCurveSelections"):
+            return False
+        for chain in value.getCurveSelections():
+            if list(getattr(chain, "inputGeometry", None) or []):
+                return True
+        return False
+    except Exception:
+        return False
+
+
 def _require_release_contour(cam) -> None:
     """Raise if the one operation that actually releases the part(s) from
-    stock did not survive DeleteToolpaths.
+    stock did not survive DeleteToolpaths, or survived with nothing
+    selected to cut.
 
     group_tabs=true marks exactly one contour2d operation per setup - the
     outer release cut TabPlacement.py configures manual tabs on (see that
@@ -343,6 +383,14 @@ def _require_release_contour(cam) -> None:
     is never actually cut free of its stock is not a completed job - fail
     here, immediately after DeleteToolpaths runs, instead of only ever
     finding out at the machine.
+
+    Surviving is necessary but not sufficient, though - see
+    _release_contour_has_selected_geometry's own docstring for the second,
+    distinct incident this also now catches: the operation present with
+    group_tabs=true but an empty contour selection, posting a named
+    section in the G-code with no moves under it. A setup whose only
+    release-contour candidate is empty is treated the same as a setup
+    with none at all, rather than accepted on sight.
 
     cam may be None (the CAM product failed to resolve) - nothing to
     check in that case, and camPlate.py's own machining-time computation
@@ -361,8 +409,18 @@ def _require_release_contour(cam) -> None:
                 is_release = str(group_tabs_param.expression).strip().lower() == "true"
             except Exception:
                 is_release = False
-            if is_release:
+            if not is_release:
+                continue
+            if _release_contour_has_selected_geometry(op):
                 return
+            raise RuntimeError(
+                "The release-contour operation (group_tabs=true) survived "
+                "toolpath generation but its own contour selection is "
+                "empty - it would post with no toolpath under it, and the "
+                "part(s) would never actually separate from stock. Check "
+                "the Runner's log for why TabPlacement/DeleteToolpaths "
+                "left this operation's geometry selection empty."
+            )
     raise RuntimeError(
         "No release-contour operation (group_tabs=true) survived toolpath "
         "generation - the part(s) would never actually separate from "
