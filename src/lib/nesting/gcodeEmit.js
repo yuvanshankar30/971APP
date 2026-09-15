@@ -120,9 +120,17 @@ function winCncToolBlocks(source) {
 }
 
 function router971Offset(placement, bounds) {
-  const x = placement.x - bounds.centerX;
-  const y = placement.y - bounds.centerY;
-  const rotation = (placement.rotation || 0) * 180 / Math.PI;
+  const radians = placement.rotation || 0;
+  const cosine = Math.cos(radians);
+  const sine = Math.sin(radians);
+  // The Java emitter applies G59.3 rotation around the source program's
+  // local 0,0. The web editor stores the visual center, so convert only that
+  // center point before emitting the same legacy G10/G59.3 sequence.
+  const centerX = bounds.centerX * cosine - bounds.centerY * sine;
+  const centerY = bounds.centerX * sine + bounds.centerY * cosine;
+  const x = placement.x - centerX;
+  const y = placement.y - centerY;
+  const rotation = radians * 180 / Math.PI;
   return `G10 L2 P9 X[#5221+${x.toFixed(4)}] Y[#5222+${y.toFixed(4)}] Z[#5223] R${rotation.toFixed(4)}`;
 }
 
