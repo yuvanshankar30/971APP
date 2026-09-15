@@ -10,11 +10,12 @@ function getClientFromRequest(request) {
   });
 }
 
-// Ad hoc diagnostic endpoint: send an arbitrary Slack DM to a given email,
-// using whatever SLACK_BOT_TOKEN is actually configured in this deployment's
-// environment (never touches the raw secret value directly - that's the
-// point of testing through here instead of a local script). Admin-only,
-// since this can DM any real person in the workspace.
+// Ad hoc diagnostic endpoint: send an arbitrary Slack message to a given
+// email (DM) or channel, using whatever SLACK_BOT_TOKEN is actually
+// configured in this deployment's environment (never touches the raw
+// secret value directly - that's the point of testing through here instead
+// of a local script). Admin-only, since this can post into any channel the
+// bot is a member of or DM any real person in the workspace.
 export async function POST({ request }) {
   const userSupa = getClientFromRequest(request);
   const { data: { user: authUser } } = await userSupa.auth.getUser();
@@ -26,6 +27,7 @@ export async function POST({ request }) {
 
   const body = await request.json().catch(() => ({}));
   const email = body?.email;
+  const channel = body?.channel;
   const text = body?.text;
   const identityOnly = !!body?.identity_only;
 
@@ -50,7 +52,15 @@ export async function POST({ request }) {
       });
     }
 
-    if (!email || !text) return json({ error: 'email and text required' }, { status: 400 });
+    if (!email && !channel) return json({ error: 'email or channel required (plus text)' }, { status: 400 });
+    if (!text) return json({ error: 'text required' }, { status: 400 });
+
+    // A channel target (name like "#general" or an ID) posts directly -
+    // no DM conversation to open first, unlike the email path below.
+    if (channel) {
+      const resp = await slack.chat.postMessage({ channel, text });
+      return json({ ok: !!resp.ok, ts: resp.ts, channel: resp.channel || channel, team: authCheck.team });
+    }
 
     let slackUserId = await slackUserIdForEmail(email);
     if (!slackUserId) {
