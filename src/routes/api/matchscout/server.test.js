@@ -49,6 +49,10 @@ describe('match scouting route v2', () => {
     expect((await POST({ request: request(valid) })).status).toBe(200);
     expect(writes[0]).toMatchObject({ form_version: 2, balls_scored_average: 123, ratings_unknown: ['Shot accuracy'] });
   });
+  it('saves a post-match beached observation', async () => {
+    expect((await POST({ request: request({ ...valid, beached: true }) })).status).toBe(200);
+    expect(writes[0]).toMatchObject({ beached: true });
+  });
   it('blocks mechanical breaks and dead robots before saving without an ACE summary', async () => {
     for (const extra of [{ mechanical_break: true }, { teleop_robot_status: 'dead' }]) {
       expect((await POST({ request: request({ ...valid, ...extra }) })).status).toBe(400);

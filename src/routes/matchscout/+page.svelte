@@ -52,6 +52,7 @@
   let driverSkill;
   let pitProblem = false;
   let pitProblemDetails = '';
+  let beached = false;
   let postNotes = '';
   let submitted = false;
   let editing = false;
@@ -104,7 +105,7 @@
     teleopRoles = []; teleopRolesNone = false; teleopNotes = ''; intakeSpeed = 0; intakeJammed = false;
     significantCrash = null; crashTarget = ''; crashDetails = ''; teleopRobotStatus = '';
     mechanicalBreak = null; robotDisabled = ''; card = ''; driverSkill = undefined;
-    pitProblem = false; pitProblemDetails = ''; postNotes = ''; error = '';
+    pitProblem = false; pitProblemDetails = ''; beached = false; postNotes = ''; error = '';
     savedAutoPaths = []; selectedSavedPathId = ''; pathFileMessage = '';
     selectPhase('prematch');
   }
@@ -366,6 +367,7 @@
       driverSkill = entry.driver_skill ?? undefined;
       pitProblem = Boolean(problem);
       pitProblemDetails = problem?.summary || '';
+      beached = entry.beached === true;
       postNotes = entry.post_notes || '';
       editing = true;
       showReports = false;
@@ -426,6 +428,7 @@
         // The UI says "None"; the stored vocabulary uses an empty string.
         card: card === 'none' ? '' : card,
         driver_skill: driverSkill,
+        beached,
         post_notes: postNotes,
         report_pit_problem: shouldReportPitProblem,
         pit_problem_summary: pitProblemDetails,
@@ -786,6 +789,7 @@
       {:else}
         <div class="section-heading"><div><span class="eyebrow">Post-match</span><h2>Match outcome</h2><p>Close out the report and flag anything the ACE Team needs to inspect.</p></div><Trophy size={20} /></div>
         <div class="post-grid"><fieldset><legend>Cards</legend><div class="choice-grid"><button class:chosen={card === 'none'} on:click={() => card = 'none'}>None</button><button class:chosen={card === 'yellow'} on:click={() => card = 'yellow'}>Yellow</button><button class:chosen={card === 'red'} on:click={() => card = 'red'}>Red</button></div></fieldset></div>
+        <label class="incident-toggle"><input type="checkbox" bind:checked={beached} /><span><AlertTriangle size={17} /> Robot became beached</span></label>
         <fieldset class="control-group"><legend>Mechanical break (required)</legend><div class="segmented"><button class:chosen={mechanicalBreak === false} on:click={() => mechanicalBreak = false}>No</button><button class:chosen={mechanicalBreak === true} on:click={() => mechanicalBreak = true}>Yes — ACE Team report required</button></div></fieldset>
         {#if requiresPitReport}
           <div class="required-handoff"><AlertTriangle size={17} /><span>An ACE Team report is required for a mechanical break, dead, or disabled robot.</span></div>

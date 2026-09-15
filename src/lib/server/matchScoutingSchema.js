@@ -198,6 +198,7 @@ export function normalizeMatchScoutEntry(body, actorId = null) {
       crash_or_break: currentForm ? body.mechanical_break || body.significant_crash : body?.crash_or_break === true,
       robot_disabled: currentForm && body.teleop_robot_status === 'dead' ? 'died' : oneOf(body?.robot_disabled, DISABLED_STATES),
       card: oneOf(body?.card, CARDS),
+      beached: body?.beached === true,
       driver_skill: Number.isFinite(driverSkillRaw)
         ? Math.min(5, Math.max(0, Math.round(driverSkillRaw)))
         : null,
