@@ -93,6 +93,7 @@ export function defaultHeaderTabs(navConfig = navigation) {
       { key: 'matchscout', label: 'Match Scouting' },
       { key: 'pitscout', label: 'Pit Scouting' },
       { key: 'powerrankings', label: 'Power Rankings' },
+      { key: 'predictions', label: 'Prediction Market' },
       { key: 'vision', label: 'Vision Scouting' },
       { key: 'scouting-admin', label: 'Scouting Admin' }
     ]
@@ -183,6 +184,31 @@ export function ensurePowerRankingsTab(tabs, navConfig = navigation) {
   if (containsTabKey(tabs, 'powerrankings')) return tabs;
 
   const entry = { key: 'powerrankings', label: 'Power Rankings' };
+  const folderIndex = tabs.findIndex(
+    (item) => item?.type === 'folder' && item?.label === COMPETITION_FOLDER_LABEL
+  );
+  if (folderIndex === -1) return [...tabs, { type: 'tab', ...entry }];
+
+  const folder = tabs[folderIndex];
+  const next = [...tabs];
+  next[folderIndex] = {
+    ...folder,
+    children: [...(Array.isArray(folder.children) ? folder.children : []), entry]
+  };
+  return next;
+}
+
+/**
+ * Same append-only migration as ensurePowerRankingsTab, for the Prediction
+ * Market tab: put it in someone's Competition folder without disturbing
+ * the rest of their navigation, and do nothing once it is already present.
+ */
+export function ensurePredictionMarketTab(tabs, navConfig = navigation) {
+  if (navConfig?.tabs?.predictions === false) return tabs;
+  if (!Array.isArray(tabs)) return tabs;
+  if (containsTabKey(tabs, 'predictions')) return tabs;
+
+  const entry = { key: 'predictions', label: 'Prediction Market' };
   const folderIndex = tabs.findIndex(
     (item) => item?.type === 'folder' && item?.label === COMPETITION_FOLDER_LABEL
   );
