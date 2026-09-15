@@ -306,7 +306,7 @@
   .stat-tile { display:flex; flex-direction:column; gap:4px; }
   .stat-amount { font-size:1.3rem; }
   .stat-amount.positive { color:var(--status-success, #16a34a); }
-  .stat-amount.negative { color:var(--status-danger); }
+  .stat-amount.negative { color:var(--danger, #dc3545); }
   .stat-of { font-size:.85rem; font-weight:400; }
 
   .leaderboard { margin-top:var(--space-3); }
@@ -317,7 +317,7 @@
   .rank-badge.medal[data-medal="silver"] { background:color-mix(in srgb, #a8a8a8 30%, transparent); font-weight:700; }
   .rank-badge.medal[data-medal="bronze"] { background:color-mix(in srgb, #b06a34 30%, transparent); font-weight:700; }
 
-  .alliance-red { color:var(--status-danger); }
+  .alliance-red { color:var(--danger, #dc3545); }
   .alliance-blue { color:var(--brand-blue, #2563eb); }
   .alliance-chip { font-weight:600; }
 
@@ -328,12 +328,12 @@
   .practice-note { margin:0 0 var(--space-2); color:var(--text-muted); font-size:.8rem; }
 
   .pool-bar { height:6px; border-radius:3px; background:var(--brand-blue, #2563eb); overflow:hidden; margin-bottom:var(--space-2); }
-  .pool-fill { display:block; height:100%; background:var(--status-danger); }
+  .pool-fill { display:block; height:100%; background:var(--danger, #dc3545); }
 
   .bet-row-form { display:flex; align-items:center; gap:var(--gap-2); flex-wrap:wrap; }
   .side-toggle { display:inline-flex; border-radius:var(--radius-sm); overflow:hidden; border:1px solid var(--border); }
   .side-btn { padding:.4rem .8rem; border:0; background:var(--surface-1); color:var(--text-muted); font:inherit; font-weight:600; cursor:pointer; }
-  .side-btn.side-red.chosen { background:var(--status-danger); color:#fff; }
+  .side-btn.side-red.chosen { background:var(--danger, #dc3545); color:#fff; }
   .side-btn.side-blue.chosen { background:var(--brand-blue, #2563eb); color:#fff; }
   .stake-input { display:inline-flex; align-items:center; gap:2px; border:1px solid var(--border); border-radius:var(--radius-sm); padding:0 .5rem; background:var(--surface-1); }
   .stake-input span { color:var(--text-muted); }
@@ -342,7 +342,7 @@
   .my-pick { margin:var(--space-2) 0 0; font-size:.85rem; }
 
   .positive { color:var(--status-success, #16a34a); }
-  .negative { color:var(--status-danger); }
+  .negative { color:var(--danger, #dc3545); }
 
   @media (max-width:640px) {
     .stat-row { grid-template-columns:1fr; }
