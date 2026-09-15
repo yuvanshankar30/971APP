@@ -31,19 +31,28 @@ function getServiceSupabase() {
 
 const AUTOCAM_FILES_BUCKET = 'manufacturing-drive';
 const AUTOCAM_FILES_FOLDER = 'AutoCAM';
+const JPROG_PART_LIBRARY_FOLDER = 'Nesting Parts Library/AutoCAM';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const STALE_CLAIM_MS = 15 * 60 * 1000;
 
-function autoCamArtifactPath(jobId, artifact, index, kind) {
-  // Fusion validates artifact names before this point. Keep the original
-  // program identity, while the job prefix prevents retries or same-named
-  // tube faces from overwriting another job in the shared AutoCAM folder.
-  const leafName = String(artifact.name || `program-${index + 1}.nc`)
-    .split('/').at(-1)
-    .replace(/[^A-Za-z0-9._-]/g, '_');
+function autoCamProgramName(job, artifact, index, total, kind) {
+  const fusionFileName = String(job.params?.fusionFileName || job.name || 'Fusion')
+    .split('/').at(-1).replace(/\.[^.]+$/, '')
+    .replace(/[^A-Za-z0-9_-]/g, '') || 'Fusion';
+  const extension = /\.tap$/i.test(String(artifact.name || '')) ? 'tap' : 'ngc';
+  const tubeSide = kind === 'box_tube'
+    ? String(artifact.name || '').match(/-side-(12|3|6|9)\.(?:nc|ngc|tap)$/i)?.[1]
+    : null;
+  const uniqueNumber = !tubeSide && total > 1 ? `-${index + 1}` : '';
+  const suffix = tubeSide ? `tubeside${tubeSide}` : uniqueNumber;
+  return `${fusionFileName}${suffix}(AUTOCAM).${extension}`;
+}
+
+function autoCamArtifactPath(job, artifact, index, total, kind) {
+  const fileName = autoCamProgramName(job, artifact, index, total, kind);
   return kind === 'box_tube'
-    ? `${AUTOCAM_FILES_FOLDER}/${jobId.slice(0, 8)}/${leafName}`
-    : `${AUTOCAM_FILES_FOLDER}/${jobId.slice(0, 8)}-${leafName}`;
+    ? `${AUTOCAM_FILES_FOLDER}/${job.id.slice(0, 8)}/${fileName}`
+    : `${AUTOCAM_FILES_FOLDER}/${fileName}`;
 }
 
 function validateTubeNcArtifacts(ncFiles) {
@@ -53,17 +62,25 @@ function validateTubeNcArtifacts(ncFiles) {
   }
 }
 
-async function publishNcArtifactsToAutoCamFiles(supabase, jobId, ncFiles, kind) {
+async function publishNcArtifactsToAutoCamFiles(supabase, job, ncFiles, kind) {
   if (!ncFiles?.length) return;
   for (const [index, artifact] of ncFiles.entries()) {
-    const path = autoCamArtifactPath(jobId, artifact, index, kind);
-    const { error } = await supabase.storage
+    const fileName = autoCamProgramName(job, artifact, index, ncFiles.length, kind);
+    const paths = [
+      autoCamArtifactPath(job, artifact, index, ncFiles.length, kind),
+      `${JPROG_PART_LIBRARY_FOLDER}/${fileName.replace(/\.[^.]+$/, '')}/${fileName}`
+    ];
+    const bytes = Buffer.from(artifact.contentBase64, 'base64');
+    const uploads = await Promise.all(paths.map(async (path) => {
+      const { error } = await supabase.storage
       .from(AUTOCAM_FILES_BUCKET)
-      .upload(path, Buffer.from(artifact.contentBase64, 'base64'), {
+      .upload(path, bytes, {
         upsert: true,
         contentType: 'text/plain'
       });
-    if (error) throw new Error(`Could not post ${artifact.name} to Files/AutoCAM: ${error.message}`);
+      if (error) throw new Error(`Could not post ${artifact.name} to ${path}: ${error.message}`);
+    }));
+    await Promise.all(uploads);
   }
 }
 
@@ -405,7 +422,7 @@ export async function POST({ request, url }) {
 
     if (action === 'complete') {
       const { data: currentJob, error: currentError } = await supabase
-        .from('cam_jobs').select('id, params').eq('id', jobId).eq('operation_type', 'milling').eq('claimed_by', runnerId).eq('status', 'processing').single();
+        .from('cam_jobs').select('id, name, params').eq('id', jobId).eq('operation_type', 'milling').eq('claimed_by', runnerId).eq('status', 'processing').single();
       if (currentError || !currentJob) return json({ error: 'Job was not in the processing state - not completed' }, { status: 409 });
       const kind = currentJob.params?.fusionJobKind;
       const ncFiles = kind === 'plate:arrange' ? null : validateFusionNcFiles(body?.ncFiles);
@@ -432,7 +449,7 @@ export async function POST({ request, url }) {
       // Files is the permanent operator-facing copy. Publish every exact
       // artifact before the status change, so a completed job always has its
       // separate plate or tube-face programs available in Files/AutoCAM.
-      await publishNcArtifactsToAutoCamFiles(supabase, currentJob.id, ncFiles, kind);
+      await publishNcArtifactsToAutoCamFiles(supabase, currentJob, ncFiles, kind);
       const { data, error } = await supabase
         .from('cam_jobs')
         .update({

@@ -1,5 +1,6 @@
 import { PUBLIC_SUPABASE_ANON_KEY, PUBLIC_SUPABASE_URL } from '$env/static/public';
 import { getAuthHeader } from '$lib/supabase.js';
+import { jprogOutputDateFolder } from '$lib/jprog_date.js';
 
 const OUTPUT_ROOT = 'JustinProgOutput';
 const OUTPUT_PATH = /^JustinProgOutput\/\d{8}\/[^/\\\0]+\.(?:ngc|tap)$/i;
@@ -8,10 +9,6 @@ const OUTPUT_FILENAME = /^[^/\\\0]+\.(?:ngc|tap)$/i;
 
 export function isJprogOutputPath(storagePath) {
 	return OUTPUT_PATH.test(String(storagePath || ''));
-}
-
-function utcDateFolder(date) {
-	return date.toISOString().slice(0, 10).replaceAll('-', '');
 }
 
 // Files added at the JProg root belong in the current date folder. Once an
@@ -24,7 +21,7 @@ export function jprogOutputUploadPath(currentPath, filename, date = new Date()) 
 	if (!OUTPUT_FILENAME.test(name)) {
 		throw new Error('JustinProgOutput accepts only .ngc or .tap files without path separators.');
 	}
-	const targetFolder = folder === OUTPUT_ROOT ? `${OUTPUT_ROOT}/${utcDateFolder(date)}` : folder;
+	const targetFolder = folder === OUTPUT_ROOT ? `${OUTPUT_ROOT}/${jprogOutputDateFolder(date)}` : folder;
 	return `${targetFolder}/${name}`;
 }
 

@@ -12,6 +12,10 @@ export function gcodeSuffix(name = '') {
 }
 
 export function gcodeBounds(text) {
+  return toolpathBounds(parseGcodeToolpath(text), { includeRapid: true });
+}
+
+export function gcodeDisplayBounds(text) {
   return toolpathBounds(parseGcodeToolpath(text));
 }
 
@@ -27,5 +31,15 @@ export function parseGcodeDocument(text, name = 'program.ngc') {
     layers.get(key).push(raw);
   }
   const source = String(text || ''), toolpath = parseGcodeToolpath(source);
-  return { name, suffix: gcodeSuffix(name), source, dialect: detectDialect(text, name), bounds: toolpathBounds(toolpath), toolpath, tools: [...tools].map(([number, diameter]) => ({ number, diameter })), layers: [...layers].map(([tool, lines]) => ({ tool, text: lines.join('\n') })) };
+  return {
+    name,
+    suffix: gcodeSuffix(name),
+    source,
+    dialect: detectDialect(text, name),
+    bounds: toolpathBounds(toolpath),
+    emissionBounds: toolpathBounds(toolpath, { includeRapid: true }),
+    toolpath,
+    tools: [...tools].map(([number, diameter]) => ({ number, diameter })),
+    layers: [...layers].map(([tool, lines]) => ({ tool, text: lines.join('\n') }))
+  };
 }
