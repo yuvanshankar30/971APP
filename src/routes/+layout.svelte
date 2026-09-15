@@ -6,9 +6,8 @@
   import { supabase } from '$lib/supabase.js';
   import { fetchActiveScoutingEventKey } from '$lib/scoutingEvent.js';
   import navConfig from '$lib/navigation.json';
-  import { defaultHeaderTabs, mergeDefaultHeaderTabs, ensurePowerRankingsTab, ensurePredictionMarketTab, ensureScoutingAdminTab, ensureStrategyTab, ensureGcodeConverterTab, ensureFilesTab, ensureFusionAutocamTab, promoteChildrenOfDisabledFolders } from '$lib/defaultTabs.js';
-  import { Move3d, Hammer, Wrench, Receipt, Home, Briefcase, Coins, Package, User, ChevronDown, Menu, X, Camera, CalendarDays, Cpu, FileText, Trophy, Eye, ClipboardCheck, ListChecks, Target, Folder, Search } from 'lucide-svelte';
-  import { Dice5 } from 'lucide-svelte';
+  import { defaultHeaderTabs, mergeDefaultHeaderTabs, ensurePowerRankingsTab, ensureRobotRatingsTab, ensurePredictionMarketTab, ensureScoutingAdminTab, ensureStrategyTab, ensureGcodeConverterTab, ensureFilesTab, ensureFusionAutocamTab, promoteChildrenOfDisabledFolders } from '$lib/defaultTabs.js';
+  import { Move3d, Hammer, Wrench, Receipt, Home, Briefcase, Coins, Package, User, ChevronDown, Menu, X, Camera, CalendarDays, Cpu, FileText, Trophy, Eye, ClipboardCheck, ListChecks, Target, Folder, Search, Star, Dice5 } from 'lucide-svelte';
   import { goto, afterNavigate } from '$app/navigation';
   import { page } from '$app/stores';
   import Toasts from '$lib/Toasts.svelte';
@@ -282,6 +281,7 @@
     if (compact.startsWith('matchscout')) return 'matchscout';
     if (compact.startsWith('strategy')) return 'strategy';
     if (compact.startsWith('powerranking')) return 'powerrankings';
+    if (compact.startsWith('robotrating')) return 'robotratings';
     if (compact.startsWith('prediction')) return 'predictions';
     if (compact.startsWith('vision')) return 'vision';
     if (compact.startsWith('planner')) return 'planner';
@@ -302,6 +302,7 @@
     purchasing: '/cad/purchasing',
     scouting: '/scouting',
     powerrankings: '/powerrankings',
+    robotratings: '/robotratings',
     predictions: '/predictions',
     vision: '/scouting/vision',
     docs: '/docs',
@@ -331,6 +332,7 @@
     purchasing: Receipt,
     scouting: ListChecks,
     powerrankings: Trophy,
+    robotratings: Star,
     predictions: Dice5,
     vision: Eye,
     docs: FileText,
@@ -360,6 +362,7 @@
     purchasing: 'Purchasing',
     scouting: 'Pick List',
     powerrankings: 'Power Rankings',
+    robotratings: 'Robot Ratings',
     predictions: 'Prediction Market',
     vision: 'Vision Scouting',
     docs: 'Docs',
@@ -498,10 +501,11 @@
   // Saved layouts retain personal ordering and folders, but no longer freeze
   // someone on an obsolete subset of the app's navigation.
   $: effectiveTabs = mergeDefaultHeaderTabs(customTabs, navConfig);
-  // Power Rankings and Prediction Market are appended for anyone whose saved
-  // header_tabs predates them, so a customized nav still surfaces the
-  // feature. Purely additive - see ensurePowerRankingsTab()/ensurePredictionMarketTab().
-  $: baseNavTabs = addAdminTabIfAllowed(ensureScoutingAdminTab(ensureStrategyTab(ensureFusionAutocamTab(ensureFilesTab(ensureGcodeConverterTab(ensurePredictionMarketTab(ensurePowerRankingsTab(effectiveTabs, navConfig), navConfig), navConfig), navConfig), navConfig))), canViewAdmin);
+  // Power Rankings, Robot Ratings, and Prediction Market are appended for
+  // anyone whose saved header_tabs predates them, so a customized nav still
+  // surfaces the feature. Purely additive - see ensurePowerRankingsTab()/
+  // ensureRobotRatingsTab()/ensurePredictionMarketTab().
+  $: baseNavTabs = addAdminTabIfAllowed(ensureScoutingAdminTab(ensureStrategyTab(ensureFusionAutocamTab(ensureFilesTab(ensureGcodeConverterTab(ensurePredictionMarketTab(ensureRobotRatingsTab(ensurePowerRankingsTab(effectiveTabs, navConfig), navConfig), navConfig), navConfig), navConfig), navConfig))), canViewAdmin);
   // Old accounts may still store a CAD folder containing CAD + Build. Once
   // CAD is disabled, promote Build out of that retired folder so the top bar
   // does not keep a misleading CAD shell around it.

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { defaultHeaderTabs, ensurePowerRankingsTab, ensurePredictionMarketTab, ensureScoutingAdminTab, ensureStrategyTab, ensureGcodeConverterTab, ensureFilesTab, ensureFusionAutocamTab, promoteChildrenOfDisabledFolders } from './defaultTabs.js';
+import { defaultHeaderTabs, ensurePowerRankingsTab, ensurePredictionMarketTab, ensureRobotRatingsTab, ensureScoutingAdminTab, ensureStrategyTab, ensureGcodeConverterTab, ensureFilesTab, ensureFusionAutocamTab, promoteChildrenOfDisabledFolders } from './defaultTabs.js';
 
-const enabled = { tabs: { powerrankings: true, predictions: true } };
+const enabled = { tabs: { powerrankings: true, predictions: true, robotratings: true } };
 
 function competitionChildren(tabs) {
   return tabs.find((tab) => tab.type === 'folder' && tab.label === 'Competition')?.children || [];
@@ -105,14 +105,16 @@ describe('defaultHeaderTabs', () => {
   it('orders the scouting surfaces the way the team asked for them', () => {
     // Deliberate order, not incidental: strategy leads as the board the team
     // opens to decide something, then the collection surfaces that feed it
-    // (match -> pit -> rankings -> predictions -> vision), with the admin
-    // surface last. Exactly these 7 - Pick List (the 'scouting' key) is no
-    // longer a default entry, per direct feedback naming this exact list;
-    // Prediction Market joined it right after Power Rankings since it bets
-    // on the same match schedule Strategy's Matches view now shows.
+    // (match -> pit -> rankings -> ratings -> predictions -> vision), with
+    // the admin surface last. Exactly these 8 - Pick List (the 'scouting'
+    // key) is no longer a default entry, per direct feedback naming this
+    // exact list; Robot Ratings joined right after Power Rankings since it
+    // feeds a display-only average into that same page, and Prediction
+    // Market right after that since it bets on the same match schedule
+    // Strategy's Matches view shows.
     const keys = competitionChildren(defaultHeaderTabs()).map((child) => child.key);
     expect(keys).toEqual([
-      'strategy', 'matchscout', 'pitscout', 'powerrankings', 'predictions', 'vision', 'scouting-admin'
+      'strategy', 'matchscout', 'pitscout', 'powerrankings', 'robotratings', 'predictions', 'vision', 'scouting-admin'
     ]);
   });
 
@@ -312,6 +314,31 @@ describe('ensurePowerRankingsTab', () => {
     expect(competitionChildren(ensurePowerRankingsTab(oddFolder, enabled))).toEqual([
       { key: 'powerrankings', label: 'Power Rankings' }
     ]);
+  });
+});
+
+describe('ensureRobotRatingsTab', () => {
+  // Same append-only migration contract as ensurePowerRankingsTab above.
+  it('appends to an existing Competition folder', () => {
+    const result = ensureRobotRatingsTab(savedNav(), enabled);
+    expect(competitionChildren(result).at(-1)).toEqual({ key: 'robotratings', label: 'Robot Ratings' });
+  });
+
+  it('is a no-op when the tab is already in the folder', () => {
+    const already = savedNav();
+    already[1].children.push({ key: 'robotratings', label: 'Robot Ratings' });
+    expect(ensureRobotRatingsTab(already, enabled)).toBe(already);
+  });
+
+  it('falls back to a top-level tab when there is no Competition folder', () => {
+    const flat = [{ type: 'tab', key: 'docs', label: 'Docs' }];
+    const result = ensureRobotRatingsTab(flat, enabled);
+    expect(result.at(-1)).toEqual({ type: 'tab', key: 'robotratings', label: 'Robot Ratings' });
+  });
+
+  it('stays out entirely when the tab is disabled in navigation config', () => {
+    const nav = savedNav();
+    expect(ensureRobotRatingsTab(nav, { tabs: { robotratings: false } })).toBe(nav);
   });
 });
 

@@ -6,6 +6,7 @@
   import { fetchActiveScoutingEventKey } from '$lib/scoutingEvent.js';
   import { getAuthHeader } from '$lib/supabase.js';
   import { applyPairwiseConsensus, buildPowerRankings, summarizePairwisePair } from '$lib/scoutingStats.js';
+  import { applyRobotRatings } from '$lib/robotRatings.js';
 
   let eventKey = '';
   let teams = [];
@@ -96,7 +97,7 @@
     warning = '';
     officialNote = '';
     const authHeaders = await getAuthHeader();
-    const [rosterResult, scoutResult, matchResult, notesResult, pitResult, problemResult, officialResult, comparisonResult] = await Promise.all([
+    const [rosterResult, scoutResult, matchResult, notesResult, pitResult, problemResult, officialResult, comparisonResult, ratingsResult] = await Promise.all([
       fetch(`/api/tba/event-teams?event_key=${encodeURIComponent(eventKey)}`).then((response) => response.json()).catch(() => null),
       fetch(`/datascout?all_teams=1&event_key=${encodeURIComponent(eventKey)}`, { headers: authHeaders }).then((response) => response.json()).catch(() => null),
       fetch(`/api/matchscout?event_key=${encodeURIComponent(eventKey)}`, { headers: authHeaders }).then((response) => response.json()).catch(() => null),
@@ -104,7 +105,8 @@
       fetch(`/pitscout?event_key=${encodeURIComponent(eventKey)}`, { headers: authHeaders }).then((response) => response.json()).catch(() => null),
       fetch(`/api/matchscout?resource=pit-problems&event_key=${encodeURIComponent(eventKey)}`, { headers: authHeaders }).then((response) => response.json()).catch(() => null),
       fetch(`/api/tba/event-oprs?event_key=${encodeURIComponent(eventKey)}`).then((response) => response.json()).catch(() => null),
-      fetch(`/api/scouting-comparisons?event_key=${encodeURIComponent(eventKey)}`, { headers: authHeaders }).then((response) => response.json()).catch(() => null)
+      fetch(`/api/scouting-comparisons?event_key=${encodeURIComponent(eventKey)}`, { headers: authHeaders }).then((response) => response.json()).catch(() => null),
+      fetch(`/api/scouting-robot-ratings?event_key=${encodeURIComponent(eventKey)}`, { headers: authHeaders }).then((response) => response.json()).catch(() => null)
     ]);
 
     const scoutEvents = scoutResult?.success ? scoutResult.data : [];
@@ -114,6 +116,7 @@
     const problemReports = problemResult?.success ? problemResult.data : [];
     pairwiseVotes = comparisonResult?.success ? comparisonResult.data : [];
     pairwiseVotingAvailable = !comparisonResult?.unavailable;
+    const robotRatings = ratingsResult?.success ? ratingsResult.data : [];
     if (!scoutResult?.success) warning = scoutResult?.error || 'Local scouting data is unavailable.';
     else if (scoutResult.truncated) warning = 'Only the first 50,000 scouting observations were loaded.';
     if (!matchResult?.success) warning = `${warning ? `${warning} ` : ''}${matchResult?.error || 'Match scouting reports are unavailable.'}`;
@@ -121,6 +124,7 @@
     if (!pitResult?.success) warning = `${warning ? `${warning} ` : ''}${pitResult?.error || 'Pit profiles are unavailable.'}`;
     if (!problemResult?.success) warning = `${warning ? `${warning} ` : ''}${problemResult?.error || 'Pit problem reports are unavailable.'}`;
     if (!comparisonResult?.success) warning = `${warning ? `${warning} ` : ''}${comparisonResult?.error || 'Human consensus votes are unavailable.'}`;
+    if (!ratingsResult?.success && !ratingsResult?.unavailable) warning = `${warning ? `${warning} ` : ''}${ratingsResult?.error || 'Robot ratings are unavailable.'}`;
 
     let roster = rosterResult?.success ? rosterResult.data : [];
     if (!roster.length) {
@@ -161,7 +165,7 @@
       officialNote = 'Official rank and TBA OPR are unavailable right now.';
     }
 
-    baseTeams = buildPowerRankings(roster, scoutEvents, scoutNotes, { pitEntries, problemReports, matchEntries });
+    baseTeams = applyRobotRatings(buildPowerRankings(roster, scoutEvents, scoutNotes, { pitEntries, problemReports, matchEntries }), robotRatings);
     teams = applyPairwiseConsensus(baseTeams, pairwiseVotes);
     const ranked = [...teams].sort((a, b) => (b.scoutPower ?? -1) - (a.scoutPower ?? -1));
     if (!compareLeftKey && ranked[0]) compareLeftKey = ranked[0].key;
@@ -211,6 +215,10 @@
       <p>Authenticated scouts choose between two robots. Win rate produces a separate preference rank; it never changes calculated Scout Power. A strong majority against a five-point-or-larger Scout Power gap is flagged for human review.</p>
     </div>
     <div>
+      <h3>Team Rating</h3>
+      <p>Scouts' own out-of-10 impressions (overall/offense/shuttling/driving/defense) plus notes, entered on <a href="/robotratings">Robot Ratings</a>. A display-only average of whoever has rated the team so far - it never changes calculated Scout Power.</p>
+    </div>
+    <div>
       <h3>Official Event Rank</h3>
       <p>The real qualification standing from The Blue Alliance, which FIRST computes from Ranking Points earned in qualification matches. This is the only official rank on this page.</p>
     </div>
@@ -258,6 +266,8 @@
         <b class:review={compareLeft.reviewFlag}>{compareLeft.reviewFlag ? 'Review' : '—'}</b><span>Power/consensus disagreement</span><b class:review={compareRight.reviewFlag}>{compareRight.reviewFlag ? 'Review' : '—'}</b>
         <b>{officialRank(compareLeft) ?? '—'}</b><span>Official event rank</span><b>{officialRank(compareRight) ?? '—'}</b>
         <b>{fmt(officialOpr(compareLeft))}</b><span>TBA OPR</span><b>{fmt(officialOpr(compareRight))}</b>
+        <b>{fmt(compareLeft.robotRating.overallAvg)}</b><span>Team rating (ours)</span><b>{fmt(compareRight.robotRating.overallAvg)}</b>
+        <b>{compareLeft.robotRating.raterCount}</b><span>Raters</span><b>{compareRight.robotRating.raterCount}</b>
         <b>{compareLeft.noteSummary.averageImpact ?? '—'}</b><span>Note impact</span><b>{compareRight.noteSummary.averageImpact ?? '—'}</b>
         <b>{compareLeft.noteSummary.noteCount}</b><span>Saved notes</span><b>{compareRight.noteSummary.noteCount}</b>
         <b>{fmt(compareLeft.pitSummary.pitScore)}</b><span>Pit score</span><b>{fmt(compareRight.pitSummary.pitScore)}</b>
@@ -306,6 +316,7 @@
         <th><button on:click={() => sortBy('humanRank')}>Human Rank <ArrowUpDown size={11} /></button></th>
         <th><button on:click={() => sortBy('humanWinRate')}>Win Rate <ArrowUpDown size={11} /></button></th>
         <th>Review</th>
+        <th title="Scouts' own out-of-10 impressions, averaged - see Robot Ratings"><button on:click={() => sortBy('robotRatingAvg')}>Team Rating <ArrowUpDown size={11} /></button></th>
         <th class="reference" title="Official FRC qualification rank from The Blue Alliance">Official Rank</th>
         <th class="reference" title="The Blue Alliance's Offensive Power Rating - a statistical estimate, not a rank">TBA OPR</th>
         <th>Data Matches</th><th>Match Reports</th><th>Reported Balls</th><th>Auto Points</th><th>Driver</th><th>Reliability</th><th>Pit Score</th><th>Problems</th><th>Archetype</th><th>Note Impact</th><th>Notes</th><th>Avg Fuel</th><th>Driving</th><th>Accuracy</th><th>Speed</th><th>Climb</th>
@@ -316,6 +327,7 @@
         <td>{team.humanRank ?? '—'}</td>
         <td>{fmtPercent(team.humanWinRate)}</td>
         <td>{#if team.reviewFlag}<span class="review-badge" title={`${team.consensusSummary.reviewCount} strong disagreement(s)`}><AlertTriangle size={13} /> Review</span>{:else}—{/if}</td>
+        <td><a href={`/robotratings?team=${team.key}`} title={`${team.robotRating.raterCount} rater(s)`}>{fmt(team.robotRatingAvg)}{#if team.robotRatingCount}<span class="text-muted"> ({team.robotRatingCount})</span>{/if}</a></td>
         <td class="reference">{officialRank(team) ?? '—'}</td>
         <td class="reference">{fmt(officialOpr(team))}</td>
         <td>{team.scoutSummary.matchesScouted}</td><td>{team.matchScoutSummary.reportCount}</td><td>{fmt(team.matchScoutSummary.avgBallsScored)}</td><td>{fmt(team.matchScoutSummary.avgAutoPoints)}</td><td>{fmt(team.matchScoutSummary.avgDriverSkill)}</td><td>{fmt(team.matchScoutSummary.ratingAverages.Reliability)}</td><td>{fmt(team.pitSummary.pitScore)}</td><td>{team.pitSummary.openProblemCount}</td><td>{team.pitSummary.robotArchetype || '—'}</td><td>{team.noteSummary.averageImpact ?? '—'}</td><td>{team.noteSummary.noteCount}</td><td>{fmt(team.scoutSummary.avgFuel)}</td>
