@@ -274,6 +274,28 @@ describe('power rankings', () => {
     expect(ranked.find((row) => row.key === 'frc2').scoutPower).toBeCloseTo(47.843137, 5);
   });
 
+  it('feeds pit-reported reliability (not the broader pit capability blend) and TBA OPR into Scout Power at 7.5% each', () => {
+    const teams = [{ key: 'frc1', team_number: 1 }, { key: 'frc2', team_number: 2 }];
+    // frc1: strong climb, weak reliability. frc2: no climb, strong
+    // reliability. The old 15%-weighted blended pitScore (climb-heavy)
+    // ranks frc1's pit capability well above frc2's - if Scout Power were
+    // still using that blend, frc1 would win despite its worse reliability.
+    // The new formula uses reliability alone, so frc2 (also given the
+    // higher OPR) must win instead.
+    const pitEntries = [
+      { team_key: 'frc1', climb_options: ['L3'], technical_details: { overall_reliability_rating: 1 } },
+      { team_key: 'frc2', climb_options: ['No Climb'], technical_details: { overall_reliability_rating: 10 } }
+    ];
+    const oprByTeamNumber = new Map([[1, { opr: 10 }], [2, { opr: 50 }]]);
+    const ranked = buildPowerRankings(teams, [], [], { pitEntries, oprByTeamNumber });
+    const first = ranked.find((row) => row.key === 'frc1');
+    const second = ranked.find((row) => row.key === 'frc2');
+    expect(first.pitSummary.pitScore).toBeGreaterThan(second.pitSummary.pitScore); // old blend would favor frc1
+    expect(second.scoutPower).toBeGreaterThan(first.scoutPower); // new formula correctly favors frc2 instead
+    expect(first.scoutPower).toBeCloseTo((10 + 0) / 2, 5);
+    expect(second.scoutPower).toBeCloseTo((100 + 100) / 2, 5);
+  });
+
   it('uses pit capability and unresolved problems without scoring prose or archetype labels', () => {
     const teams = [{ key: 'frc1' }, { key: 'frc2' }];
     const pitEntries = [
@@ -309,19 +331,51 @@ describe('power rankings', () => {
     expect(summary.pitScore).toBe(summary.capabilityScore);
   });
 
-  it('builds an event-relative star profile without inventing missing observations', () => {
-    const ranked = buildPowerRankings(
-      [{ key: 'frc1' }, { key: 'frc2' }],
-      [
-        event({ team_key: 'frc1', event_type: 'rank_driving', event_value: '1' }),
-        event({ team_key: 'frc2', event_type: 'rank_driving', event_value: '3' })
-      ]
+  it('caps a self-reported reliability of 10 to 7 when the team has an open ACE flag', () => {
+    const flagged = summarizePitScouting(
+      { technical_details: { overall_reliability_rating: 10 } },
+      [{ severity: 'urgent', resolved: false }]
     );
+    expect(flagged.rawReliability).toBe(10);
+    expect(flagged.reliabilityScore).toBe(70); // capped to 7, then scaled x10
+
+    const unflagged = summarizePitScouting({ technical_details: { overall_reliability_rating: 10 } }, []);
+    expect(unflagged.reliabilityScore).toBe(100); // no open flag - self-report stands
+  });
+
+  it('never raises reliability toward the cap - a lower self-report with an open flag is untouched', () => {
+    const summary = summarizePitScouting(
+      { technical_details: { overall_reliability_rating: 4 } },
+      [{ severity: 'watch', resolved: false }]
+    );
+    expect(summary.reliabilityScore).toBe(40);
+  });
+
+  it('resolves the ACE flag before capping - a resolved-only problem list leaves reliability alone', () => {
+    const summary = summarizePitScouting(
+      { technical_details: { overall_reliability_rating: 10 } },
+      [{ severity: 'urgent', resolved: true }]
+    );
+    expect(summary.reliabilityScore).toBe(100);
+  });
+
+  it('builds an event-relative star profile from match scouting and OPR, without inventing missing observations', () => {
+    const teams = [{ key: 'frc1', team_number: 1 }, { key: 'frc2', team_number: 2 }];
+    const matchEntries = [
+      { team_key: 'frc1', match_key: 'm1', driver_skill: 1 },
+      { team_key: 'frc2', match_key: 'm1', driver_skill: 3 }
+    ];
+    const oprByTeamNumber = new Map([[1, { opr: 20 }], [2, { opr: 40 }]]);
+    const ranked = buildPowerRankings(teams, [], [], { matchEntries, oprByTeamNumber });
     const first = ranked.find((row) => row.key === 'frc1').starProfile;
     const second = ranked.find((row) => row.key === 'frc2').starProfile;
     expect(first.find((axis) => axis.key === 'driving').value).toBe(0);
     expect(second.find((axis) => axis.key === 'driving').value).toBe(100);
-    expect(first.find((axis) => axis.key === 'accuracy').value).toBeNull();
+    expect(first.find((axis) => axis.key === 'opr').value).toBe(0);
+    expect(second.find((axis) => axis.key === 'opr').value).toBe(100);
+    // Nobody reported an auto estimate for either team - the axis reflects
+    // that honestly rather than defaulting to a fake middle value.
+    expect(first.find((axis) => axis.key === 'auto').value).toBeNull();
   });
 });
 

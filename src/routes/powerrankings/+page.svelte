@@ -145,9 +145,13 @@
       return;
     }
 
-    // Official rank and OPR come from The Blue Alliance and are reference
-    // columns only - they never feed buildPowerRankings(). Keyed by bare team
-    // number, which is the shape api/tba/event-oprs returns.
+    // Official rank is reference-only and never feeds buildPowerRankings().
+    // OPR is different: direct instruction folds it into Scout Power itself
+    // at 7.5% weight (see buildPowerRankings) - officialByTeam is passed
+    // straight through as oprByTeamNumber below, so this Map is the one
+    // source of truth for both the reference "Official Rank"/"TBA OPR"
+    // columns and the formula input. Keyed by bare team number, which is
+    // the shape api/tba/event-oprs returns.
     //
     // Note the endpoint's field is named `epa` for backwards compatibility
     // with the Statbotics route it replaced; the value it carries is TBA's
@@ -165,7 +169,7 @@
       officialNote = 'Official rank and TBA OPR are unavailable right now.';
     }
 
-    baseTeams = applyRobotRatings(buildPowerRankings(roster, scoutEvents, scoutNotes, { pitEntries, problemReports, matchEntries }), robotRatings);
+    baseTeams = applyRobotRatings(buildPowerRankings(roster, scoutEvents, scoutNotes, { pitEntries, problemReports, matchEntries, oprByTeamNumber: officialByTeam }), robotRatings);
     teams = applyPairwiseConsensus(baseTeams, pairwiseVotes);
     const ranked = [...teams].sort((a, b) => (b.scoutPower ?? -1) - (a.scoutPower ?? -1));
     if (!compareLeftKey && ranked[0]) compareLeftKey = ranked[0].key;
@@ -208,7 +212,7 @@
   <section class="measure-key" aria-label="What each measure means">
     <div>
       <h3>971 Scout Power</h3>
-      <p>Our own ranking, from our own scouts. 70% observed match performance, 15% explicit note impact, and 15% pit capability/reliability; missing inputs are omitted and the remaining weights rebalanced. Unresolved pit problems reduce the pit score. <strong>Not an FRC ranking</strong> - it exists to inform our picks.</p>
+      <p>Our own ranking, from our own scouts. 70% observed match performance, 15% explicit note impact, 7.5% pit-reported reliability, and 7.5% TBA OPR; missing inputs are omitted and the remaining weights rebalanced. An open ACE flag caps a team's self-reported reliability at 7 even if they claimed higher. <strong>Not an FRC ranking</strong> - it exists to inform our picks.</p>
     </div>
     <div>
       <h3>Human Consensus</h3>
@@ -258,6 +262,8 @@
       {#if voteMessage}<p class="vote-message" aria-live="polite">{voteMessage}</p>{/if}
       <div class="comparison-grid">
         <strong>#{compareLeft.team_number}</strong><span>Metric</span><strong>#{compareRight.team_number}</strong>
+        <b>{fmt(compareLeft.matchScoutSummary.avgAutoPoints)}</b><span>Auto score</span><b>{fmt(compareRight.matchScoutSummary.avgAutoPoints)}</b>
+        <b>{fmt(compareLeft.matchScoutSummary.avgBallsScored)}</b><span>Teleop score</span><b>{fmt(compareRight.matchScoutSummary.avgBallsScored)}</b>
         <b>{compareLeft.powerRank ?? '—'}</b><span>Scout power rank (971)</span><b>{compareRight.powerRank ?? '—'}</b>
         <b>{fmt(compareLeft.scoutPower)}</b><span>Scout power (971)</span><b>{fmt(compareRight.scoutPower)}</b>
         <b>{compareLeft.humanRank ?? '—'}</b><span>Human consensus rank</span><b>{compareRight.humanRank ?? '—'}</b>
@@ -271,19 +277,14 @@
         <b>{compareLeft.noteSummary.averageImpact ?? '—'}</b><span>Note impact</span><b>{compareRight.noteSummary.averageImpact ?? '—'}</b>
         <b>{compareLeft.noteSummary.noteCount}</b><span>Saved notes</span><b>{compareRight.noteSummary.noteCount}</b>
         <b>{fmt(compareLeft.pitSummary.pitScore)}</b><span>Pit score</span><b>{fmt(compareRight.pitSummary.pitScore)}</b>
+        <b>{compareLeft.pitSummary.rawReliability ?? '—'}</b><span>Pit reliability (1-10)</span><b>{compareRight.pitSummary.rawReliability ?? '—'}</b>
         <b>{compareLeft.pitSummary.robotArchetype || '—'}</b><span>Archetype</span><b>{compareRight.pitSummary.robotArchetype || '—'}</b>
         <b>{compareLeft.pitSummary.openProblemCount}</b><span>Open pit problems</span><b>{compareRight.pitSummary.openProblemCount}</b>
         <b>{compareLeft.scoutSummary.matchesScouted}</b><span>Matches scouted</span><b>{compareRight.scoutSummary.matchesScouted}</b>
         <b>{compareLeft.matchScoutSummary.reportCount}</b><span>Match reports</span><b>{compareRight.matchScoutSummary.reportCount}</b>
-        <b>{fmt(compareLeft.matchScoutSummary.avgBallsScored)}</b><span>Reported balls</span><b>{fmt(compareRight.matchScoutSummary.avgBallsScored)}</b>
-        <b>{fmt(compareLeft.matchScoutSummary.avgAutoPoints)}</b><span>Reported auto points</span><b>{fmt(compareRight.matchScoutSummary.avgAutoPoints)}</b>
         <b>{fmt(compareLeft.matchScoutSummary.avgDriverSkill)}</b><span>Driver skill</span><b>{fmt(compareRight.matchScoutSummary.avgDriverSkill)}</b>
-        <b>{fmt(compareLeft.matchScoutSummary.ratingAverages.Reliability)}</b><span>Reliability</span><b>{fmt(compareRight.matchScoutSummary.ratingAverages.Reliability)}</b>
-        <b>{fmt(compareLeft.scoutSummary.avgFuel)}</b><span>Avg fuel</span><b>{fmt(compareRight.scoutSummary.avgFuel)}</b>
-        <b>{fmt(compareLeft.scoutSummary.avgDrivingRank)}</b><span>Driving</span><b>{fmt(compareRight.scoutSummary.avgDrivingRank)}</b>
-        <b>{fmt(compareLeft.scoutSummary.avgAccuracy)}</b><span>Accuracy</span><b>{fmt(compareRight.scoutSummary.avgAccuracy)}</b>
-        <b>{fmt(compareLeft.scoutSummary.avgSpeed)}</b><span>Speed</span><b>{fmt(compareRight.scoutSummary.avgSpeed)}</b>
-        <b>{fmtPercent(compareLeft.scoutSummary.climbSuccessRate)}</b><span>Climb success</span><b>{fmtPercent(compareRight.scoutSummary.climbSuccessRate)}</b>
+        <b>{fmt(compareLeft.matchScoutSummary.ratingAverages.Reliability)}</b><span>Reliability (match reports)</span><b>{fmt(compareRight.matchScoutSummary.ratingAverages.Reliability)}</b>
+        <b>{fmtPercent(compareLeft.matchScoutSummary.shuttlingRate)}</b><span>Shuttling rate</span><b>{fmtPercent(compareRight.matchScoutSummary.shuttlingRate)}</b>
       </div>
     {/if}
   </section>
@@ -319,7 +320,7 @@
         <th title="Scouts' own out-of-10 impressions, averaged - see Robot Ratings"><button on:click={() => sortBy('robotRatingAvg')}>Team Rating <ArrowUpDown size={11} /></button></th>
         <th class="reference" title="Official FRC qualification rank from The Blue Alliance">Official Rank</th>
         <th class="reference" title="The Blue Alliance's Offensive Power Rating - a statistical estimate, not a rank">TBA OPR</th>
-        <th>Data Matches</th><th>Match Reports</th><th>Reported Balls</th><th>Auto Points</th><th>Driver</th><th>Reliability</th><th>Pit Score</th><th>Problems</th><th>Archetype</th><th>Note Impact</th><th>Notes</th><th>Avg Fuel</th><th>Driving</th><th>Accuracy</th><th>Speed</th><th>Climb</th>
+        <th>Data Matches</th><th>Match Reports</th><th>Auto Score</th><th>Teleop Score</th><th>Driver</th><th>Reliability</th><th>Shuttling</th><th>Pit Score</th><th>Pit Reliability</th><th>Problems</th><th>Archetype</th><th>Note Impact</th><th>Notes</th>
       </tr></thead>
       <tbody>{#each filteredTeams as team (team.key)}<tr>
         <td class="strong">{team.powerRank ?? '—'}</td><td class="mono">{team.team_number}</td><td>{team.nickname}</td>
@@ -330,8 +331,7 @@
         <td><a href={`/robotratings?team=${team.key}`} title={`${team.robotRating.raterCount} rater(s)`}>{fmt(team.robotRatingAvg)}{#if team.robotRatingCount}<span class="text-muted"> ({team.robotRatingCount})</span>{/if}</a></td>
         <td class="reference">{officialRank(team) ?? '—'}</td>
         <td class="reference">{fmt(officialOpr(team))}</td>
-        <td>{team.scoutSummary.matchesScouted}</td><td>{team.matchScoutSummary.reportCount}</td><td>{fmt(team.matchScoutSummary.avgBallsScored)}</td><td>{fmt(team.matchScoutSummary.avgAutoPoints)}</td><td>{fmt(team.matchScoutSummary.avgDriverSkill)}</td><td>{fmt(team.matchScoutSummary.ratingAverages.Reliability)}</td><td>{fmt(team.pitSummary.pitScore)}</td><td>{team.pitSummary.openProblemCount}</td><td>{team.pitSummary.robotArchetype || '—'}</td><td>{team.noteSummary.averageImpact ?? '—'}</td><td>{team.noteSummary.noteCount}</td><td>{fmt(team.scoutSummary.avgFuel)}</td>
-        <td>{fmt(team.scoutSummary.avgDrivingRank)}</td><td>{fmt(team.scoutSummary.avgAccuracy)}</td><td>{fmt(team.scoutSummary.avgSpeed)}</td><td>{fmtPercent(team.scoutSummary.climbSuccessRate)}</td>
+        <td>{team.scoutSummary.matchesScouted}</td><td>{team.matchScoutSummary.reportCount}</td><td>{fmt(team.matchScoutSummary.avgAutoPoints)}</td><td>{fmt(team.matchScoutSummary.avgBallsScored)}</td><td>{fmt(team.matchScoutSummary.avgDriverSkill)}</td><td>{fmt(team.matchScoutSummary.ratingAverages.Reliability)}</td><td>{fmtPercent(team.matchScoutSummary.shuttlingRate)}</td><td>{fmt(team.pitSummary.pitScore)}</td><td>{team.pitSummary.rawReliability ?? '—'}</td><td>{team.pitSummary.openProblemCount}</td><td>{team.pitSummary.robotArchetype || '—'}</td><td>{team.noteSummary.averageImpact ?? '—'}</td><td>{team.noteSummary.noteCount}</td>
       </tr>{/each}</tbody>
     </table>
   </div>
