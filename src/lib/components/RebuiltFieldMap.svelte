@@ -12,6 +12,10 @@
 
   export let alliance = 'blue';
   export let path = [];
+  // Preview-only embeds (e.g. Team View's match history) pass this so a
+  // stray tap can't start "drawing" over someone else's saved path - every
+  // existing caller omits it and keeps today's fully-interactive behavior.
+  export let readonly = false;
 
   let drawing = false;
   let hoverPoint = null;
@@ -71,6 +75,7 @@
   }
 
   function beginPath(event) {
+    if (readonly) return;
     if (event.button !== undefined && event.button !== 0) return;
     drawing = true;
     event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -130,8 +135,11 @@
 <div class="field-map">
   <div
     class="field-board"
+    class:readonly
     role="application"
-    aria-label={`Draw the optional autonomous path on an alliance-relative 2026 REBUILT field. The ${alliance} alliance wall is on the left.`}
+    aria-label={readonly
+      ? `Autonomous path on an alliance-relative 2026 REBUILT field. The ${alliance} alliance wall is on the left.`
+      : `Draw the optional autonomous path on an alliance-relative 2026 REBUILT field. The ${alliance} alliance wall is on the left.`}
     on:pointerdown={beginPath}
     on:pointermove={extendPath}
     on:pointerup={completePath}
@@ -244,6 +252,7 @@
 <style>
   .field-map { display:grid; gap:var(--space-2); }
   .field-board { position:relative; width:100%; aspect-ratio:2.053; overflow:hidden; border:1px solid var(--border); background:#5e605f; cursor:crosshair; touch-action:none; user-select:none; }
+  .field-board.readonly { cursor:default; }
   svg { display:block; width:100%; height:100%; }
   .carpet { fill:#666866; }
   .guardrail { fill:none; stroke:#202221; stroke-width:7; }

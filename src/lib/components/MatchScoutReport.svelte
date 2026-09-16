@@ -1,5 +1,6 @@
 <script>
   import { MATCH_RATING_FIELDS, MATCH_FORM_RATING_FIELDS, ACCURACY_LABELS, BPS_LABELS } from '$lib/matchScouting.js';
+  import RebuiltFieldMap from './RebuiltFieldMap.svelte';
 
   export let report;
   export let showTeam = false;
@@ -82,6 +83,11 @@
         <div><dt>Collision</dt><dd>{yesNo(report?.auto_collision)}</dd></div>
         {#if present(report?.auto_path_name) || report?.auto_path?.length}<div><dt>Path</dt><dd>{valueOrDash(report?.auto_path_name)} ({Array.isArray(report?.auto_path) ? report.auto_path.length : 0} points)</dd></div>{/if}
       </dl>
+      {#if report?.auto_path?.length}
+        <div class="auto-path-preview">
+          <RebuiltFieldMap alliance={report?.alliance === 'red' ? 'red' : 'blue'} path={report.auto_path} readonly />
+        </div>
+      {/if}
     </section>
 
     <section class="teleop">
@@ -182,6 +188,7 @@
   section { --section-color:#8b6b24; min-width:0; padding:.75rem; background:var(--surface-1, #fff); box-shadow:inset 0 3px var(--section-color); }
   section.assignment { --section-color:#687076; }
   section.auto { --section-color:#b98000; }
+  .auto-path-preview { max-width:min(320px, 100%); margin:.5rem 0 0; font-size:.7rem; }
   section.teleop { --section-color:#306fa8; }
   section.post-match { --section-color:#437d55; }
   h4 { margin:0 0 .45rem; color:var(--section-color); font-size:.73rem; letter-spacing:.055em; text-transform:uppercase; }
