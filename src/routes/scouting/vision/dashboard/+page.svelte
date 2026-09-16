@@ -100,16 +100,16 @@
           <tbody>
             {#each data.runners as runner}
               <tr>
-                <td class="mono">{runner.runner_id}</td>
-                <td>
+                <td data-label="Runner" class="mono">{runner.runner_id}</td>
+                <td data-label="Status">
                   <span class={`fleet-status ${runner.online ? 'online' : 'offline'}`}>{runner.online ? 'Online' : 'Offline'}</span>
                 </td>
-                <td class:stale={Date.now() - new Date(runner.last_seen_at).getTime() > RUNNER_STALE_WARN_MS}>{formatAge(runner.last_seen_at)}</td>
-                <td>{runner.current_run_id ? runner.current_run_id.slice(0, 8) : '—'}</td>
-                <td class="mono">{runner.model_path || '—'}</td>
-                <td class="mono">{runner.qwen_model || '—'}</td>
-                <td>{runner.runtime_metrics?.qwen?.last_latency_ms ? `${runner.runtime_metrics.qwen.last_latency_ms} ms` : '—'}</td>
-                <td class="error-cell">{runner.last_error || '—'}</td>
+                <td data-label="Last seen" class:stale={Date.now() - new Date(runner.last_seen_at).getTime() > RUNNER_STALE_WARN_MS}>{formatAge(runner.last_seen_at)}</td>
+                <td data-label="Current run">{runner.current_run_id ? runner.current_run_id.slice(0, 8) : '—'}</td>
+                <td data-label="Tracker" class="mono">{runner.model_path || '—'}</td>
+                <td data-label="Qwen" class="mono">{runner.qwen_model || '—'}</td>
+                <td data-label="Qwen latency">{runner.runtime_metrics?.qwen?.last_latency_ms ? `${runner.runtime_metrics.qwen.last_latency_ms} ms` : '—'}</td>
+                <td data-label="Last error" class="error-cell">{runner.last_error || '—'}</td>
               </tr>
             {/each}
           </tbody>
@@ -150,6 +150,16 @@
     .stat-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); }
     .stat-card { min-width:0; }
     .stat-sub { overflow-wrap:anywhere; }
+    /* The 8-column runner-fleet table becomes one card per runner - a
+       data-label attribute on each <td> supplies the printed label since
+       the real <th> row is hidden here. */
+    .table-wrap { overflow:visible; }
+    .table-wrap table thead { display:none; }
+    .table-wrap table, .table-wrap table tbody, .table-wrap table tr, .table-wrap table td { display:block; width:100%; }
+    .table-wrap table tr { border:1px solid var(--border); border-radius:var(--radius-lg); margin-bottom:var(--space-2); overflow:hidden; }
+    .table-wrap table td { border:0; border-bottom:1px solid var(--border); white-space:normal; overflow-wrap:anywhere; }
+    .table-wrap table tr td:last-child { border-bottom:0; }
+    .table-wrap table td::before { content:attr(data-label); display:block; color:var(--text-muted); font-size:.7rem; text-transform:uppercase; letter-spacing:.04em; margin-bottom:2px; }
   }
   @media (max-width:420px) {
     .stat-grid { grid-template-columns:1fr; }

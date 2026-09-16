@@ -635,7 +635,7 @@
             <p>These are the rows the atomic release will write. Previewing does not change scouting data.</p>
             <div class="table-wrap"><table><thead><tr><th>Team</th><th>Field</th><th>Value</th><th>Match</th></tr></thead><tbody>
               {#each releasePreview.rows as row}
-                <tr><td>{row.team_key.replace(/^frc/i, '')}</td><td>{row.event_type.replaceAll('_', ' ')}</td><td>{row.event_value}</td><td>{row.match_key}</td></tr>
+                <tr><td data-label="Team">{row.team_key.replace(/^frc/i, '')}</td><td data-label="Field">{row.event_type.replaceAll('_', ' ')}</td><td data-label="Value">{row.event_value}</td><td data-label="Match">{row.match_key}</td></tr>
               {/each}
             </tbody></table></div>
             {#if releasePreview.skipped_climbs?.length}<p class="readiness-warning">{releasePreview.skipped_climbs.length} climb value(s) will be skipped. Correct them before release.</p>{/if}
@@ -658,7 +658,7 @@
           {#if trackCountWarning}<p class="track-warning">{trackCountWarning}</p>{/if}
           <div class="table-wrap"><table><thead><tr><th>Team identity</th><th>Alliance</th><th>Confidence</th><th>Distance</th><th>P90 speed</th><th>Turn rate</th></tr></thead><tbody>
             {#each detail.tracks as track}<tr>
-              <td>
+              <td data-label="Team identity">
                 <div class="identity-editor">
                   {#if rosterFor(track.alliance).length}
                     <select class="form-input" bind:value={trackTeamDraft[track.id]} aria-label="Team identity">
@@ -673,8 +673,8 @@
                   <button class="btn btn-sm" on:click={() => saveTrackIdentity(track)}>Save</button>
                 </div>
               </td>
-              <td>{track.alliance || '—'}</td><td>{Math.round(track.tracking_confidence * 100)}%</td>
-              <td>{track.metrics?.distanceMeters?.toFixed?.(1) ?? '—'} m</td><td>{track.metrics?.p90SpeedMps?.toFixed?.(2) ?? '—'} m/s</td><td>{track.metrics?.p90TurnRateRadS?.toFixed?.(2) ?? '—'} rad/s</td>
+              <td data-label="Alliance">{track.alliance || '—'}</td><td data-label="Confidence">{Math.round(track.tracking_confidence * 100)}%</td>
+              <td data-label="Distance">{track.metrics?.distanceMeters?.toFixed?.(1) ?? '—'} m</td><td data-label="P90 speed">{track.metrics?.p90SpeedMps?.toFixed?.(2) ?? '—'} m/s</td><td data-label="Turn rate">{track.metrics?.p90TurnRateRadS?.toFixed?.(2) ?? '—'} rad/s</td>
             </tr>{/each}
           </tbody></table></div>
         </section>
@@ -892,5 +892,15 @@
     .run-actions { justify-content:flex-start; }
     .readiness-grid { grid-template-columns:repeat(2, minmax(0,1fr)); }
     .identity-editor { flex-direction:column; }
+    /* The release-preview and robot-tracks tables become one card per row -
+       a data-label attribute on each <td> supplies the printed label since
+       the real <th> row is hidden here. */
+    .table-wrap { overflow:visible; }
+    .table-wrap table thead { display:none; }
+    .table-wrap table, .table-wrap table tbody, .table-wrap table tr, .table-wrap table td { display:block; width:100%; }
+    .table-wrap table tr { border:1px solid var(--border); border-radius:var(--radius-lg); margin-bottom:var(--space-2); overflow:hidden; }
+    .table-wrap table td { white-space:normal; border:0; border-bottom:1px solid var(--border); }
+    .table-wrap table tr td:last-child { border-bottom:0; }
+    .table-wrap table td::before { content:attr(data-label); display:block; color:var(--text-muted); font-size:.7rem; text-transform:uppercase; letter-spacing:.04em; margin-bottom:2px; }
   }
 </style>

@@ -323,15 +323,15 @@
         <th>Data Matches</th><th>Match Reports</th><th>Auto Score</th><th>Teleop Score</th><th>Driver</th><th>Reliability</th><th>Shuttling</th><th>Pit Score</th><th>Pit Reliability</th><th>Problems</th><th>Archetype</th><th>Note Impact</th><th>Notes</th>
       </tr></thead>
       <tbody>{#each filteredTeams as team (team.key)}<tr>
-        <td class="strong">{team.powerRank ?? '—'}</td><td class="mono">{team.team_number}</td><td>{team.nickname}</td>
-        <td class="strong">{fmt(team.scoutPower)}</td>
-        <td>{team.humanRank ?? '—'}</td>
-        <td>{fmtPercent(team.humanWinRate)}</td>
-        <td>{#if team.reviewFlag}<span class="review-badge" title={`${team.consensusSummary.reviewCount} strong disagreement(s)`}><AlertTriangle size={13} /> Review</span>{:else}—{/if}</td>
-        <td><a href={`/robotratings?team=${team.key}`} title={`${team.robotRating.raterCount} rater(s)`}>{fmt(team.robotRatingAvg)}{#if team.robotRatingCount}<span class="text-muted"> ({team.robotRatingCount})</span>{/if}</a></td>
-        <td class="reference">{officialRank(team) ?? '—'}</td>
-        <td class="reference">{fmt(officialOpr(team))}</td>
-        <td>{team.scoutSummary.matchesScouted}</td><td>{team.matchScoutSummary.reportCount}</td><td>{fmt(team.matchScoutSummary.avgAutoPoints)}</td><td>{fmt(team.matchScoutSummary.avgBallsScored)}</td><td>{fmt(team.matchScoutSummary.avgDriverSkill)}</td><td>{fmt(team.matchScoutSummary.ratingAverages.Reliability)}</td><td>{fmtPercent(team.matchScoutSummary.shuttlingRate)}</td><td>{fmt(team.pitSummary.pitScore)}</td><td>{team.pitSummary.rawReliability ?? '—'}</td><td>{team.pitSummary.openProblemCount}</td><td>{team.pitSummary.robotArchetype || '—'}</td><td>{team.noteSummary.averageImpact ?? '—'}</td><td>{team.noteSummary.noteCount}</td>
+        <td data-label="#" class="strong">{team.powerRank ?? '—'}</td><td data-label="Team" class="mono">{team.team_number}</td><td data-label="Name">{team.nickname}</td>
+        <td data-label="Scout Power" class="strong">{fmt(team.scoutPower)}</td>
+        <td data-label="Human Rank">{team.humanRank ?? '—'}</td>
+        <td data-label="Win Rate">{fmtPercent(team.humanWinRate)}</td>
+        <td data-label="Review">{#if team.reviewFlag}<span class="review-badge" title={`${team.consensusSummary.reviewCount} strong disagreement(s)`}><AlertTriangle size={13} /> Review</span>{:else}—{/if}</td>
+        <td data-label="Team Rating"><a href={`/robotratings?team=${team.key}`} title={`${team.robotRating.raterCount} rater(s)`}>{fmt(team.robotRatingAvg)}{#if team.robotRatingCount}<span class="text-muted"> ({team.robotRatingCount})</span>{/if}</a></td>
+        <td data-label="Official Rank" class="reference">{officialRank(team) ?? '—'}</td>
+        <td data-label="TBA OPR" class="reference">{fmt(officialOpr(team))}</td>
+        <td data-label="Data Matches">{team.scoutSummary.matchesScouted}</td><td data-label="Match Reports">{team.matchScoutSummary.reportCount}</td><td data-label="Auto Score">{fmt(team.matchScoutSummary.avgAutoPoints)}</td><td data-label="Teleop Score">{fmt(team.matchScoutSummary.avgBallsScored)}</td><td data-label="Driver">{fmt(team.matchScoutSummary.avgDriverSkill)}</td><td data-label="Reliability">{fmt(team.matchScoutSummary.ratingAverages.Reliability)}</td><td data-label="Shuttling">{fmtPercent(team.matchScoutSummary.shuttlingRate)}</td><td data-label="Pit Score">{fmt(team.pitSummary.pitScore)}</td><td data-label="Pit Reliability">{team.pitSummary.rawReliability ?? '—'}</td><td data-label="Problems">{team.pitSummary.openProblemCount}</td><td data-label="Archetype">{team.pitSummary.robotArchetype || '—'}</td><td data-label="Note Impact">{team.noteSummary.averageImpact ?? '—'}</td><td data-label="Notes">{team.noteSummary.noteCount}</td>
       </tr>{/each}</tbody>
     </table>
   </div>
@@ -374,5 +374,19 @@
     .preference-panel { align-items:stretch; flex-direction:column; }
     .vote-buttons { display:grid; grid-template-columns:1fr 1fr; }
     .vote-message { text-align:left; }
+    /* The three-column left/label/right comparison grid becomes one value
+       per line - still reads as "value, what it is, value" in order, just
+       stacked instead of squeezed into three narrow columns. */
+    .comparison-grid { grid-template-columns:1fr; text-align:center; }
+    .comparison-grid > span { border-bottom:0; padding-bottom:0; }
+    /* The 22-column team table becomes one card per team - a data-label
+       attribute on each <td> supplies the printed label since the real
+       <th> row is hidden here. */
+    .bom-table-container { overflow-x:visible; border:0; }
+    .bom-table thead { display:none; }
+    .bom-table, .bom-table tbody, .bom-table tr, .bom-table td { display:block; width:100%; }
+    .bom-table tr { border:1px solid var(--border); border-radius:var(--radius-lg); margin-bottom:var(--space-3); overflow:hidden; }
+    .bom-table td { display:flex; justify-content:space-between; align-items:center; gap:var(--space-3); text-align:right; }
+    .bom-table td::before { content:attr(data-label); flex-shrink:0; text-align:left; color:var(--text-muted); font-family:var(--font-mono-stack); font-size:.66rem; text-transform:uppercase; letter-spacing:.08em; }
   }
 </style>
