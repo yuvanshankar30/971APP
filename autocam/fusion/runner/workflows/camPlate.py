@@ -694,6 +694,84 @@ def _adaptive_entry_clearance_cm(op, tool_diameter_cm):
         return fallback
 
 
+def _point_to_segment_distance_cm(point, seg_start, seg_end) -> float:
+    """Distance from point to the finite segment seg_start->seg_end, in cm -
+    duplicated from DeleteToolpaths.py's own function of the same name, see
+    that file's docstring for why this module duplicates rather than
+    imports."""
+    px, py = point
+    ax, ay = seg_start
+    bx, by = seg_end
+    delta_x, delta_y = bx - ax, by - ay
+    length_sq = delta_x * delta_x + delta_y * delta_y
+    if length_sq <= 1e-12:
+        return ((px - ax) ** 2 + (py - ay) ** 2) ** 0.5
+    t = max(0.0, min(1.0, ((px - ax) * delta_x + (py - ay) * delta_y) / length_sq))
+    closest_x, closest_y = ax + t * delta_x, ay + t * delta_y
+    return ((px - closest_x) ** 2 + (py - closest_y) ** 2) ** 0.5
+
+
+def _chain_min_clearance_cm(points):
+    """The tighter of a point set's convex-hull caliper width and a
+    conservative inscribed-circle estimate, in cm - None if unmeasurable.
+
+    Same reasoning as DeleteToolpaths.py's _loop_min_clearance_cm (see that
+    docstring for the confirmed-live incident this exists for): a bounding
+    box or caliper width alone overstates real interior clearance for a
+    POINTED shape like a triangular lightening pocket, so this also checks
+    a cheap, always-conservative lower bound on the shape's inscribed
+    circle (double the point set's own centroid's distance to its nearest
+    hull edge) and returns whichever of the two is smaller.
+    """
+    points = sorted(set(points))
+    if len(points) < 3:
+        return None
+
+    def _cross(origin, point_a, point_b):
+        return (
+            (point_a[0] - origin[0]) * (point_b[1] - origin[1])
+            - (point_a[1] - origin[1]) * (point_b[0] - origin[0])
+        )
+
+    lower = []
+    for point in points:
+        while len(lower) >= 2 and _cross(lower[-2], lower[-1], point) <= 0:
+            lower.pop()
+        lower.append(point)
+    upper = []
+    for point in reversed(points):
+        while len(upper) >= 2 and _cross(upper[-2], upper[-1], point) <= 0:
+            upper.pop()
+        upper.append(point)
+    hull = lower[:-1] + upper[:-1]
+    if len(hull) < 3:
+        return None
+
+    minimum_width = None
+    for index, point_a in enumerate(hull):
+        point_b = hull[(index + 1) % len(hull)]
+        delta_x = point_b[0] - point_a[0]
+        delta_y = point_b[1] - point_a[1]
+        length = (delta_x * delta_x + delta_y * delta_y) ** 0.5
+        if length <= 1e-9:
+            continue
+        normal_x, normal_y = -delta_y / length, delta_x / length
+        projections = [point[0] * normal_x + point[1] * normal_y for point in hull]
+        width = max(projections) - min(projections)
+        if minimum_width is None or width < minimum_width:
+            minimum_width = width
+    if minimum_width is None:
+        return None
+
+    centroid_x = sum(point[0] for point in hull) / len(hull)
+    centroid_y = sum(point[1] for point in hull) / len(hull)
+    inscribed_diameter = 2 * min(
+        _point_to_segment_distance_cm((centroid_x, centroid_y), hull[index], hull[(index + 1) % len(hull)])
+        for index in range(len(hull))
+    )
+    return min(minimum_width, inscribed_diameter)
+
+
 def _undersized_roughing_chain_warnings(cam) -> list:
     """A chain routed to a through-shape roughing tier whose real entry
     envelope cannot fit it - the specific gap neither of this file's other
@@ -724,15 +802,26 @@ def _undersized_roughing_chain_warnings(cam) -> list:
     location from finishing alone, reading as "covered" while the interior
     was never removed.
 
-    Reports a chain's own bounding-box minor axis against the operation's
-    real entry clearance (the exact same _adaptive_entry_clearance_cm
-    calculation DeleteToolpaths uses to route it) - a chain's true
-    narrowest passage is always at most its bounding-box minor axis, so a
-    chain flagged here is provably too tight, never a borderline maybe.
-    Warning-only and best-effort like the rest of this module's coverage
-    checks (see _coverage_warnings' own docstring for why) - a bounding-box
-    proxy is cruder than a real toolpath result, so this reports for a
-    human to check rather than failing a job outright.
+    Reports a chain's own real clearance - the tighter of its overall
+    caliper width and a conservative inscribed-circle estimate (see
+    _chain_min_clearance_cm) - against the operation's real entry clearance
+    (the exact same _adaptive_entry_clearance_cm calculation DeleteToolpaths
+    uses to route it). Confirmed live and real, not theoretical: a plain
+    axis-aligned bounding box alone (this function's own earlier
+    implementation) missed a genuine incident - a real part's triangular
+    lightening pockets measured ~1.02-1.17cm by inscribed-circle estimate
+    but ~1.30-1.62cm by bounding box/caliper width alone, so 10 of 22
+    chains on a real "big endmill" roughing operation read as wide enough
+    by the cruder measure while genuinely failing the tool's real entry
+    clearance - see DeleteToolpaths.py's _loop_min_clearance_cm docstring
+    for the same incident and the reasoning behind the inscribed-circle
+    estimate. Both measures only ever read AT MOST a chain's true narrowest
+    passage, so a chain flagged here is provably too tight, never a
+    borderline maybe. Warning-only and best-effort like the rest of this
+    module's coverage checks (see _coverage_warnings' own docstring for
+    why) - even this improved proxy is cruder than a real toolpath result,
+    so this reports for a human to check rather than failing a job
+    outright.
     """
     warnings = []
     try:
@@ -750,17 +839,22 @@ def _undersized_roughing_chain_warnings(cam) -> list:
                 if value is None or not hasattr(value, "getCurveSelections"):
                     continue
                 for chain in value.getCurveSelections():
-                    xs, ys = [], []
+                    corners = []
                     for edge in getattr(chain, "inputGeometry", None) or []:
                         try:
                             box = edge.boundingBox
-                            xs += [box.minPoint.x, box.maxPoint.x]
-                            ys += [box.minPoint.y, box.maxPoint.y]
+                            min_x, max_x = box.minPoint.x, box.maxPoint.x
+                            min_y, max_y = box.minPoint.y, box.maxPoint.y
+                            corners += [(min_x, min_y), (min_x, max_y), (max_x, min_y), (max_x, max_y)]
                         except Exception:
                             continue
-                    if not xs or not ys:
+                    if not corners:
                         continue
-                    min_span_cm = min(max(xs) - min(xs), max(ys) - min(ys))
+                    min_span_cm = _chain_min_clearance_cm(corners)
+                    if min_span_cm is None:
+                        continue
+                    xs = [corner[0] for corner in corners]
+                    ys = [corner[1] for corner in corners]
                     if min_span_cm < required_cm - 1e-6:
                         cx = (min(xs) + max(xs)) / 2 / 2.54
                         cy = (min(ys) + max(ys)) / 2 / 2.54
