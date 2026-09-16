@@ -2,6 +2,12 @@
   import { onMount } from 'svelte';
   import { supabase } from '$lib/supabase.js';
   import { isJprogOutputPath, jprogOutputUploadPath, publishJprogOutput } from '$lib/jprog_output.js';
+  import {
+    listOutputRepoEntries,
+    createOutputRepoFolder,
+    deleteOutputRepoEntry,
+    renameOutputRepoEntry
+  } from '$lib/jprog_output_manage.js';
   import { page } from '$app/stores';
   import { toastActions } from '$lib/toast.js';
   import { requestConfirmation } from '$lib/confirmation.js';
@@ -43,15 +49,47 @@
 
   const isJprogOutput = isJprogOutputPath;
 
+  // This bucket's own listing was never the source of truth for
+  // JustinProgOutput - that folder is a real GitHub repo (see
+  // OutputEditorModal.svelte, JProg's own "Output Repository" editor,
+  // which already reads/writes it live). This view showed a stale,
+  // separate Supabase Storage copy that only ever changed when something
+  // uploaded through THIS page's own upload button - a dated folder added
+  // by any other means (JProg itself, or a machine-local sync script)
+  // never appeared here at all. Every JustinProgOutput action below reads
+  // and writes the real repo directly instead.
+  const JPROG_OUTPUT_ROOT = 'JustinProgOutput';
+  function isInJprogOutputRepo(path) {
+    return path === JPROG_OUTPUT_ROOT || path.startsWith(`${JPROG_OUTPUT_ROOT}/`);
+  }
+  function githubRelativePath(path) {
+    return path === JPROG_OUTPUT_ROOT ? '' : path.slice(JPROG_OUTPUT_ROOT.length + 1);
+  }
+  // Matches this page's own isFolder() convention (id === null/undefined
+  // means folder) so the GitHub-backed listing renders through the exact
+  // same template as the Supabase-backed one.
+  function toEntryShape(githubEntry) {
+    return {
+      name: githubEntry.name,
+      id: githubEntry.type === 'dir' ? null : githubEntry.path,
+      metadata: { size: githubEntry.size }
+    };
+  }
+
   async function load() {
     loading = true;
     selectedNames = new Set();
     try {
-      const { data, error } = await supabase.storage.from(BUCKET).list(currentPath, {
-        sortBy: { column: 'name', order: 'asc' }
-      });
-      if (error) throw error;
-      entries = (data || []).filter((e) => e.name !== EMPTY_FOLDER_MARKER);
+      if (isInJprogOutputRepo(currentPath)) {
+        const githubEntries = await listOutputRepoEntries(githubRelativePath(currentPath));
+        entries = githubEntries.map(toEntryShape);
+      } else {
+        const { data, error } = await supabase.storage.from(BUCKET).list(currentPath, {
+          sortBy: { column: 'name', order: 'asc' }
+        });
+        if (error) throw error;
+        entries = (data || []).filter((e) => e.name !== EMPTY_FOLDER_MARKER);
+      }
     } catch (e) {
       toastActions.show(e.message || 'Failed to load files');
       entries = [];
@@ -112,10 +150,14 @@
       return;
     }
     try {
-      const { error } = await supabase.storage
-        .from(BUCKET)
-        .upload(joinPath(joinPath(currentPath, name), EMPTY_FOLDER_MARKER), new Blob(['']));
-      if (error) throw error;
+      if (isInJprogOutputRepo(currentPath)) {
+        await createOutputRepoFolder(githubRelativePath(joinPath(currentPath, name)));
+      } else {
+        const { error } = await supabase.storage
+          .from(BUCKET)
+          .upload(joinPath(joinPath(currentPath, name), EMPTY_FOLDER_MARKER), new Blob(['']));
+        if (error) throw error;
+      }
       newFolderName = '';
       showNewFolderInput = false;
       await load();
@@ -178,8 +220,12 @@
   async function handleDeleteFile(entry) {
     if (!await requestConfirmation({ title: 'Delete file', message: `Delete "${entry.name}"?`, confirmLabel: 'Delete', danger: true })) return;
     try {
-      const { error } = await supabase.storage.from(BUCKET).remove([joinPath(currentPath, entry.name)]);
-      if (error) throw error;
+      if (isInJprogOutputRepo(currentPath)) {
+        await deleteOutputRepoEntry(githubRelativePath(joinPath(currentPath, entry.name)));
+      } else {
+        const { error } = await supabase.storage.from(BUCKET).remove([joinPath(currentPath, entry.name)]);
+        if (error) throw error;
+      }
       await load();
       toastActions.show('File deleted');
     } catch (e) {
@@ -210,10 +256,14 @@
     if (!await requestConfirmation({ title: 'Delete folder', message: `Delete "${entry.name}" and everything inside it? This can't be undone.`, confirmLabel: 'Delete', danger: true })) return;
     try {
       const folderPath = joinPath(currentPath, entry.name);
-      const paths = await listAllPaths(folderPath);
-      if (paths.length) {
-        const { error } = await supabase.storage.from(BUCKET).remove(paths);
-        if (error) throw error;
+      if (isInJprogOutputRepo(currentPath)) {
+        await deleteOutputRepoEntry(githubRelativePath(folderPath));
+      } else {
+        const paths = await listAllPaths(folderPath);
+        if (paths.length) {
+          const { error } = await supabase.storage.from(BUCKET).remove(paths);
+          if (error) throw error;
+        }
       }
       await load();
       toastActions.show('Folder deleted');
@@ -243,18 +293,24 @@
     })) return;
     bulkDeleting = true;
     try {
-      const paths = [];
-      for (const entry of selected) {
-        const entryPath = joinPath(currentPath, entry.name);
-        if (isFolder(entry)) {
-          paths.push(...await listAllPaths(entryPath));
-        } else {
-          paths.push(entryPath);
+      if (isInJprogOutputRepo(currentPath)) {
+        for (const entry of selected) {
+          await deleteOutputRepoEntry(githubRelativePath(joinPath(currentPath, entry.name)));
         }
-      }
-      if (paths.length) {
-        const { error } = await supabase.storage.from(BUCKET).remove(paths);
-        if (error) throw error;
+      } else {
+        const paths = [];
+        for (const entry of selected) {
+          const entryPath = joinPath(currentPath, entry.name);
+          if (isFolder(entry)) {
+            paths.push(...await listAllPaths(entryPath));
+          } else {
+            paths.push(entryPath);
+          }
+        }
+        if (paths.length) {
+          const { error } = await supabase.storage.from(BUCKET).remove(paths);
+          if (error) throw error;
+        }
       }
       selectedNames = new Set();
       await load();
@@ -294,15 +350,22 @@
       return;
     }
     try {
-      const { error: moveError } = await supabase.storage
-        .from(BUCKET)
-        .move(joinPath(currentPath, entry.name), joinPath(currentPath, name));
-      if (moveError) throw moveError;
-      const destination = joinPath(currentPath, name);
-      if (isJprogOutput(destination)) {
-        const { data, error: downloadError } = await supabase.storage.from(BUCKET).download(destination);
-        if (downloadError) throw downloadError;
-        await publishJprogOutput(destination, await data.text());
+      if (isInJprogOutputRepo(currentPath)) {
+        await renameOutputRepoEntry(
+          githubRelativePath(joinPath(currentPath, entry.name)),
+          githubRelativePath(joinPath(currentPath, name))
+        );
+      } else {
+        const { error: moveError } = await supabase.storage
+          .from(BUCKET)
+          .move(joinPath(currentPath, entry.name), joinPath(currentPath, name));
+        if (moveError) throw moveError;
+        const destination = joinPath(currentPath, name);
+        if (isJprogOutput(destination)) {
+          const { data, error: downloadError } = await supabase.storage.from(BUCKET).download(destination);
+          if (downloadError) throw downloadError;
+          await publishJprogOutput(destination, await data.text());
+        }
       }
       cancelRename();
       await load();
@@ -330,11 +393,15 @@
     try {
       const oldPrefix = joinPath(currentPath, entry.name);
       const newPrefix = joinPath(currentPath, name);
-      const paths = await listAllPaths(oldPrefix);
-      for (const path of paths) {
-        const relative = path.slice(oldPrefix.length); // keeps the leading "/..."
-        const { error: moveError } = await supabase.storage.from(BUCKET).move(path, `${newPrefix}${relative}`);
-        if (moveError) throw moveError;
+      if (isInJprogOutputRepo(currentPath)) {
+        await renameOutputRepoEntry(githubRelativePath(oldPrefix), githubRelativePath(newPrefix));
+      } else {
+        const paths = await listAllPaths(oldPrefix);
+        for (const path of paths) {
+          const relative = path.slice(oldPrefix.length); // keeps the leading "/..."
+          const { error: moveError } = await supabase.storage.from(BUCKET).move(path, `${newPrefix}${relative}`);
+          if (moveError) throw moveError;
+        }
       }
       cancelRename();
       await load();
