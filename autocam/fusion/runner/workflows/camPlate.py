@@ -648,6 +648,136 @@ def _require_pocket_finishing_pass_pairing(cam) -> None:
             )
 
 
+def _operation_tool_diameter_cm(op):
+    """This operation's assigned tool diameter, in cm - None if it can't be
+    read. Duplicated from DeleteToolpaths.py's own function of the same
+    name for the same reason every other guard in this file duplicates
+    rather than imports (see _require_through_hole_for_finishing_pass's own
+    docstring) - this module loads Fusion's runtime-only adsk package at
+    import time.
+    """
+    try:
+        parameter = op.tool.parameters.itemByName("tool_diameter")
+        if parameter is None:
+            return None
+        return float(parameter.value.value)
+    except Exception:
+        return None
+
+
+# Kept identical to DeleteToolpaths.py's own constant/function of the same
+# name - see that file for the "confirmed live" incident behind the ramp-
+# diameter math (a 6mm tool's real ~0.95-tool-diameter helix needing more
+# clearance than the bare 1.5x-diameter rule assumed, routing it onto an
+# opening it could not actually enter).
+_ROUGHING_FIT_CLEARANCE_FACTOR = 1.5
+
+
+def _adaptive_entry_clearance_cm(op, tool_diameter_cm):
+    fallback = tool_diameter_cm * _ROUGHING_FIT_CLEARANCE_FACTOR
+    try:
+        ramp_type = op.parameters.itemByName("rampType")
+        if ramp_type is not None:
+            expression = str(ramp_type.expression).strip().strip("'").lower()
+            if expression and expression != "helix":
+                return fallback
+        ramp = op.parameters.itemByName("minimumRampDiameter")
+        if ramp is None:
+            ramp = op.parameters.itemByName("helicalRampDiameter")
+        if ramp is None:
+            return fallback
+        ramp_diameter_cm = float(ramp.value.value)
+        if ramp_diameter_cm <= 0:
+            return fallback
+        return tool_diameter_cm + ramp_diameter_cm
+    except Exception:
+        return fallback
+
+
+def _undersized_roughing_chain_warnings(cam) -> list:
+    """A chain routed to a through-shape roughing tier whose real entry
+    envelope cannot fit it - the specific gap neither of this file's other
+    checks can see.
+
+    Confirmed live as a real incident (this is the same failure
+    DeleteToolpaths' own _adaptive_entry_clearance_cm was written to
+    prevent at routing time - see that function's docstring in
+    DeleteToolpaths.py): DeleteToolpaths routes each chain to the largest
+    tool whose own clearance threshold it clears, but a chain can still end
+    up on a tool too big for it - a template change, a borderline width
+    measurement, or simply this check's own conservative bounding-box proxy
+    disagreeing with whatever measurement routed it. When only one chain in
+    a many-chain operation is affected, Fusion's per-operation
+    isToolpathValid/warning stay clean (the OTHER chains in that same
+    operation are genuinely fine), so nothing at the operation level ever
+    flags it - confirmed separately in this file's own history (see
+    _operation_warnings' Issue #316 reference for the same class of
+    silent-partial-failure).
+
+    This also is not the same gap _require_through_hole_for_finishing_pass
+    closes: that guard confirms a chain is SELECTED in some roughing tier,
+    which it still is here - Fusion doesn't remove a chain from a
+    selection just because it can't cut it. And it is not the same gap
+    _coverage_warnings' own loop-matching closes either: a finishing pass
+    traces a chain's boundary regardless of whether any roughing tier
+    actually cleared its interior, so a G-code loop can exist at that
+    location from finishing alone, reading as "covered" while the interior
+    was never removed.
+
+    Reports a chain's own bounding-box minor axis against the operation's
+    real entry clearance (the exact same _adaptive_entry_clearance_cm
+    calculation DeleteToolpaths uses to route it) - a chain's true
+    narrowest passage is always at most its bounding-box minor axis, so a
+    chain flagged here is provably too tight, never a borderline maybe.
+    Warning-only and best-effort like the rest of this module's coverage
+    checks (see _coverage_warnings' own docstring for why) - a bounding-box
+    proxy is cruder than a real toolpath result, so this reports for a
+    human to check rather than failing a job outright.
+    """
+    warnings = []
+    try:
+        for setup in cam.setups:
+            for op in setup.operations:
+                name_lower = str(op.name or "").lower()
+                if "through" not in name_lower or "circular" in name_lower or op.strategy in ("bore", "contour2d"):
+                    continue
+                tool_diameter_cm = _operation_tool_diameter_cm(op)
+                if not tool_diameter_cm:
+                    continue
+                required_cm = _adaptive_entry_clearance_cm(op, tool_diameter_cm)
+                param = op.parameters.itemByName("pockets")
+                value = param.value if param is not None else None
+                if value is None or not hasattr(value, "getCurveSelections"):
+                    continue
+                for chain in value.getCurveSelections():
+                    xs, ys = [], []
+                    for edge in getattr(chain, "inputGeometry", None) or []:
+                        try:
+                            box = edge.boundingBox
+                            xs += [box.minPoint.x, box.maxPoint.x]
+                            ys += [box.minPoint.y, box.maxPoint.y]
+                        except Exception:
+                            continue
+                    if not xs or not ys:
+                        continue
+                    min_span_cm = min(max(xs) - min(xs), max(ys) - min(ys))
+                    if min_span_cm < required_cm - 1e-6:
+                        cx = (min(xs) + max(xs)) / 2 / 2.54
+                        cy = (min(ys) + max(ys)) / 2 / 2.54
+                        warnings.append(
+                            "'{}' is routed a feature near ({:.3f}, {:.3f})in only {:.3f}in wide, "
+                            "narrower than this tier's own {:.3f}in tool needs to enter "
+                            "({:.3f}in real clearance required) - it will not actually be cleared. "
+                            "Check DeleteToolpaths' chain routing for why this chain wasn't sent to a "
+                            "smaller tier.".format(
+                                op.name, cx, cy, min_span_cm / 2.54, tool_diameter_cm / 2.54, required_cm / 2.54
+                            )
+                        )
+    except Exception:
+        pass
+    return warnings
+
+
 def _coverage_warnings(app, cam, nc_files) -> list:
     """Compares the posted program against the part's own CAD geometry and
     returns a warning per real problem found - an internal feature with no
@@ -1118,7 +1248,17 @@ def start(data, session):
         for warning in operation_warnings:
             app.log(f"OPERATION: {warning}")
 
-        job_warnings = coverage_warnings + operation_warnings
+        # A third, distinct gap neither check above closes: a chain still
+        # selected in a roughing tier (satisfies the pairing guards) with a
+        # G-code loop near it from finishing alone (satisfies the coverage
+        # check's loop-matching) can still never have been actually cleared,
+        # if that tier's own tool cannot physically enter it. See
+        # _undersized_roughing_chain_warnings' own docstring.
+        fit_warnings = _undersized_roughing_chain_warnings(cam)
+        for warning in fit_warnings:
+            app.log(f"TOOL FIT: {warning}")
+
+        job_warnings = coverage_warnings + operation_warnings + fit_warnings
 
         completion_data = {
             "jobId": job_id,
