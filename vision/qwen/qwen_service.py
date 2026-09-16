@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Authenticated Qwen3.8-27B BF16 inference service for DGX Spark."""
+"""Authenticated Qwen3-VL-30B-A3B-Instruct BF16 service for DGX Spark."""
 from __future__ import annotations
 
 import asyncio
@@ -15,12 +15,12 @@ import torch
 from fastapi import Depends, FastAPI, Header, HTTPException
 from PIL import Image
 from pydantic import BaseModel, Field
-from transformers import AutoProcessor, Qwen3_5ForConditionalGeneration
+from transformers import AutoProcessor, Qwen3VLMoeForConditionalGeneration
 
 from qwen_contract import SYSTEM_PROMPT, TASK_PROMPT, normalize_result, parse_json_response
 
-MODEL_NAME = os.environ.get("VISION_QWEN_MODEL", "Qwen/Qwen3.8-27B")
-MODEL_REVISION = os.environ.get("VISION_QWEN_REVISION", "1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0")
+MODEL_NAME = os.environ.get("VISION_QWEN_MODEL", "Qwen/Qwen3-VL-30B-A3B-Instruct")
+MODEL_REVISION = os.environ.get("VISION_QWEN_REVISION", "9c4b90e1e4ba969fd3b5378b57d966d725f1b86c")
 TOKEN = os.environ.get("VISION_QWEN_TOKEN", "")
 ATTENTION = os.environ.get("VISION_QWEN_ATTENTION", "sdpa")
 DEVICE_MAP = os.environ.get("VISION_QWEN_DEVICE_MAP", "cuda")
@@ -101,7 +101,7 @@ async def lifespan(_app):
     }
     if MODEL_REVISION:
         options["revision"] = MODEL_REVISION
-    state["model"] = Qwen3_5ForConditionalGeneration.from_pretrained(MODEL_NAME, **options).eval()
+    state["model"] = Qwen3VLMoeForConditionalGeneration.from_pretrained(MODEL_NAME, **options).eval()
     state["processor"] = AutoProcessor.from_pretrained(MODEL_NAME, revision=MODEL_REVISION)
     state["loaded_at"] = time.time()
     yield

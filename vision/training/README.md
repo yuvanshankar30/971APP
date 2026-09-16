@@ -42,7 +42,7 @@ and verify that no source leaks across splits:
 ```
 
 Qwen3-VL can bootstrap semantic proposals directly from any number of camera
-recordings. The default is the full BF16 `Qwen3.8-27B`
+recordings. The default is the full BF16 `Qwen3-VL-30B-A3B-Instruct`
 checkpoint and requires the DGX Spark or comparable CUDA memory:
 
 ```bash
@@ -60,6 +60,46 @@ training dataset until a human corrects it. Qwen analyzes bounded five-second
 clips rather than blindly consuming an entire match in one context.
 It loads BF16 weights without quantization; use the long-lived service under
 `vision/qwen/` for repeated production jobs so the checkpoint loads once.
+
+TBA/YouTube footage can be discovered and downloaded directly onto private
+storage without running any inbound web service. The downloader prefers 1080p
+at 30–60 fps, accepts lower resolution when that is all YouTube provides, and
+stores the full TBA score breakdown beside each recording:
+
+```bash
+.venv/bin/pip install yt-dlp
+.venv/bin/python download_tba_recordings.py 2022cc 2024cc \
+  --output /private/vision-data/tba --limit 10 --download
+```
+
+Before seed YOLO weights exist, the Spark's existing local Qwen 3.5 Ollama
+model can propose red/blue robot boxes from sampled frames. The default backend
+only accepts a loopback Ollama URL, so frames cannot be sent to a remote host:
+
+```bash
+.venv/bin/python bootstrap_qwen_yolo.py /private/vision-data/tba/*/*.mp4 \
+  --output /private/vision-data/qwen-proposals --sample-fps 1
+```
+
+Pass `--backend transformers` to use the pinned full-BF16
+`Qwen/Qwen3-VL-30B-A3B-Instruct` checkpoint instead. That path requires the
+Spark CUDA/Transformers environment and is substantially heavier; it does not
+remove the human-review requirement.
+
+Those files deliberately live under `proposed_labels`, not a training split.
+Every box remains unreviewed; a human must correct it before copying it into a
+YOLO `train`, `val`, or `test` directory.
+
+Broadcast layouts that contain picture-in-picture robot cameras should be
+cropped to the full-field panel before proposing labels. For example, a top
+panel occupying 62.5% of the frame uses `--crop 0,0,1000,625`. Record the crop
+in the proposal manifest and inspect it; broadcast layouts can change between
+matches.
+
+The acquisition and labeling workflow makes outbound HTTPS requests only for
+TBA metadata, YouTube recordings, and explicitly requested model packages. It
+does not start an inbound listener. Store the corpus outside the repository in
+a mode-0700 directory; the downloader applies that mode automatically.
 
 After reviewed seed YOLO weights exist, `bootstrap_yolo_annotate.py` provides
 the faster dense pseudo-labeling pass. The hybrid is intentional: Qwen handles

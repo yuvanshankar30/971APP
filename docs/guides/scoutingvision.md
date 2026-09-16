@@ -594,7 +594,7 @@ every observation by hand.
 ## Qwen service — `vision/qwen/`
 
 `qwen_service.py` loads the full BF16
-`Qwen/Qwen3.8-27B` checkpoint once on DGX Spark and serves
+`Qwen/Qwen3-VL-30B-A3B-Instruct` checkpoint once on DGX Spark and serves
 authenticated, single-concurrency `/analyze` requests. The runner samples
 2–8 timestamped JPEGs from each bounded clip; Qwen never receives an
 unbounded match context. `qwen_contract.py` parses and clamps its JSON before
@@ -793,7 +793,7 @@ YOLO weights the runner needs:
   identical, so a naive random split would let the model "cheat" by
   memorizing rather than generalizing — inflating held-out accuracy).
 - `bootstrap_annotate.py` — uses the full BF16
-  `Qwen/Qwen3.8-27B` checkpoint to analyze short (~5s)
+  `Qwen/Qwen3-VL-30B-A3B-Instruct` checkpoint to analyze short (~5s)
   clips across one or more synced views and
   propose grounded robot/fuel/climb/immobility events as JSON. Purely a
   labeling accelerant — output is explicitly unreviewed and never becomes a
