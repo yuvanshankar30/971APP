@@ -62,6 +62,14 @@
   $: upcomingMatches = matches.filter((match) => !isMatchPlayed(match));
   $: playedMatches = matches.filter((match) => isMatchPlayed(match)).slice().reverse();
   const teamNumber = (teamKey) => String(teamKey || '').replace(/^frc/i, '');
+  // "i more want to know upcoming matches" than Data Matches as a top-level
+  // column (see docs/plans/strategy-picklist-improvements.md section 5) -
+  // reuses upcomingMatches, which this page already loads for the Matches
+  // subtab, no new fetch.
+  const upcomingMatchCount = (teamKey) =>
+    upcomingMatches.filter((match) =>
+      (match.alliances?.red?.team_keys || []).includes(teamKey) || (match.alliances?.blue?.team_keys || []).includes(teamKey)
+    ).length;
 
   const number = (value, digits = 1) => Number.isFinite(value) ? value.toFixed(digits) : '-';
   const percent = (value) => Number.isFinite(value) ? `${Math.round(value * 100)}%` : '-';
@@ -247,18 +255,18 @@
       {:else}
         <div class="board-table-wrap">
           <table class="board-table">
-            <thead><tr><th>Rank</th><th>Team</th><th>Data matches</th><th>Reports</th><th>Fuel</th><th>Reported balls</th><th>Accuracy</th><th>Auto</th><th>Pit</th><th>Notes</th><th>Autos</th><th>Risk</th></tr></thead>
+            <thead><tr><th>Rank</th><th>Team</th><th>Reports</th><th>Upcoming</th><th>Fuel</th><th>Auto</th><th>Reported balls</th><th>Accuracy</th><th>Pit</th><th>Notes</th><th>Autos</th><th>Risk</th></tr></thead>
             <tbody>
               {#each filteredRows as row}
                 <tr class:selected={selectedTeam?.teamKey === row.teamKey} on:click={() => openTeamView(row)}>
                   <td data-label="Rank"><strong>{officialByTeam.get(row.teamNumber)?.rank ?? '—'}</strong></td>
                   <td data-label="Team"><strong>{row.teamNumber}</strong>{#if row.pitEntry?.robot_archetype}<small>{row.pitEntry.robot_archetype}</small>{/if}</td>
-                  <td data-label="Data matches">{row.performance.matchesScouted || '-'}</td>
-                  <td data-label="Reports">{row.matchScoutSummary.reportCount || '-'}</td>
+                  <td data-label="Reports">{row.matchScoutSummary.reportCount || '-'}<small>{row.performance.matchesScouted || 0} data matches</small></td>
+                  <td data-label="Upcoming">{upcomingMatchCount(row.teamKey) || '-'}</td>
                   <td data-label="Fuel">{number(row.performance.avgFuel, 0)}</td>
+                  <td data-label="Auto">{number(row.autoAverage, 0)}</td>
                   <td data-label="Reported balls">{number(row.matchScoutSummary.avgBallsScored, 0)}</td>
                   <td data-label="Accuracy">{number(row.performance.avgAccuracy)}</td>
-                  <td data-label="Auto">{number(row.autoAverage, 0)}</td>
                   <td data-label="Pit">{row.pitEntry ? 'Yes' : '-'}</td>
                   <td data-label="Notes">{row.notes.length || '-'}</td>
                   <td data-label="Autos">{row.autoPaths.length || '-'}</td>
