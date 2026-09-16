@@ -800,7 +800,7 @@
           {/each}
         </div>
         <div class="intake-observations">
-          <div class="control-group"><span class="field-label">Intake speed (optional)</span><small class="field-help">1 = slow, 3 = fast. Leave blank when not observed; click again to clear.</small><div class="rating-buttons large">{#each [1, 2, 3] as value}<button aria-pressed={intakeSpeed === value} class:chosen={intakeSpeed === value} on:click={() => intakeSpeed = intakeSpeed === value ? 0 : value}>{value}</button>{/each}</div></div>
+          <div class="control-group"><span class="field-label">Intake speed (optional)</span><br /><small class="field-help">1 = slow, 3 = fast. Leave blank when not observed; click again to clear.</small><div class="rating-buttons large">{#each [1, 2, 3] as value}<button aria-pressed={intakeSpeed === value} class:chosen={intakeSpeed === value} on:click={() => intakeSpeed = intakeSpeed === value ? 0 : value}>{value}</button>{/each}</div></div>
           <label class="incident-toggle intake-jam-toggle"><input type="checkbox" bind:checked={intakeJammed} /><span><AlertTriangle size={17} /> Intake jammed during the match</span></label>
         </div>
         <fieldset class="control-group">
@@ -897,7 +897,7 @@
   .teleop-roles { margin-bottom:var(--space-4); padding:var(--space-4); border:1px solid var(--border); background:var(--surface-2); }
   .role-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(8.5rem,1fr)); }
   .role-grid button { overflow-wrap:anywhere; white-space:normal; height:auto; }
-  .ratings-grid { display:grid; gap:var(--space-3); } .ratings-heading { display:flex; justify-content:space-between; gap:var(--gap-3); padding-bottom:var(--space-2); border-bottom:1px solid var(--border); } .ratings-heading small { color:var(--text-muted); } .rating-row { display:flex; align-items:center; justify-content:space-between; gap:var(--gap-4); padding-bottom:var(--space-3); border-bottom:1px solid var(--border); } .rating-row span { font-size:.9rem; } .rating-buttons button { width:2.25rem; padding:0; } .rating-buttons.large button { width:3rem; min-height:2.5rem; }
+  .ratings-grid { display:grid; gap:var(--space-3); } .ratings-heading { display:flex; justify-content:space-between; gap:var(--gap-3); padding-bottom:var(--space-2); border-bottom:1px solid var(--border); } .ratings-heading small { color:var(--text-muted); } .rating-row { display:flex; align-items:center; justify-content:space-between; gap:var(--gap-4); padding-bottom:var(--space-3); border-bottom:1px solid var(--border); } .rating-row span { font-size:.9rem; } .rating-buttons button { width:2.25rem; padding:0; } .rating-buttons.large button { width:3rem; height:3rem; }
   .notes-label textarea { resize:vertical; min-height:7rem; line-height:1.5; } .scouter-notes textarea { min-height:12rem; } .incident-toggle { display:flex; grid-template-columns:auto 1fr; align-items:center; color:var(--text); font-size:.9rem; } .incident-toggle span { display:flex; align-items:center; gap:var(--gap-2); } .incident-toggle :global(svg) { color:var(--red-base); }
   .pit-report-field { margin-top:var(--space-3); }
   .intake-observations { display:grid; grid-template-columns:minmax(0,1fr) minmax(16rem,1fr); gap:var(--gap-4); align-items:end; margin-top:var(--space-5); }
