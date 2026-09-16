@@ -77,8 +77,39 @@ def internal_loop_extents(body, face_picker):
 
 _COORD = re.compile(r"([XYZ])(-?\d*\.?\d+)")
 
+# Direct instruction: every aspect of AutoCAM is in inches - no metric,
+# anywhere, ever. This pipeline's Runner only ever posts G20 (inch) G-code
+# (the New Router/WinCNC dialect and JProg's own nesting output both are;
+# nothing in this project posts G21) - INCHES_TO_CM is the one real
+# conversion this whole module needs, not a per-call parameter to get wrong.
+#
+# Confirmed live as a real bug, not hypothetical: this used to be a
+# per-function mm_to_cm=0.1 default that no caller (camPlate.py's
+# _coverage_warnings) ever overrode. That silently treated every real posted
+# inch coordinate as if it were millimeters - a ~25x scale error - which is
+# exactly what made a real, fully-through-cut job (confirmed by decoding its
+# own posted G-code and finding cuts to Z-0.2075 through 0.1875in stock)
+# report as "(-0.0082in) never reaches the material bottom" plus dozens of
+# false "feature has no toolpath" warnings: every internal loop's parsed
+# extents were shrunk by the same wrong factor, so essentially nothing lined
+# up with the real CAD geometry.
+INCHES_TO_CM = 2.54
 
-def gcode_loops(text, mm_to_cm=0.1):
+
+def _is_comment_line(line):
+    """True for a whole-line comment in either bracket style this pipeline's
+    posts actually use - '(...)' (LinuxCNC/971 router) and '[...]' (WinCNC/
+    New Router, JProg's own nesting emission - see gcodeEmit.js's identical
+    dual-bracket handling). Only startswith('(') was ever checked here,
+    which let every '[...]'-commented line (an entire real dialect) fall
+    through as if it were real code - harmless for a pure comment line like
+    '[Tool 6]' with no coordinate words in it, but not a distinction this
+    module should be silently getting wrong.
+    """
+    return line.startswith("(") or line.startswith("[")
+
+
+def gcode_loops(text):
     """Every distinct cutting loop in a posted program, as XY extents in cm.
 
     A "loop" here is one run of cutting moves between rapid repositions - the
@@ -105,7 +136,7 @@ def gcode_loops(text, mm_to_cm=0.1):
     current = None
     x = y = z = None
     for line in lines:
-        if not line or line.startswith("("):
+        if not line or _is_comment_line(line):
             continue
         found = dict((axis, float(value)) for axis, value in _COORD.findall(line))
         is_rapid = line.startswith("G0") or line.startswith("G00")
@@ -133,7 +164,7 @@ def gcode_loops(text, mm_to_cm=0.1):
 
     out = []
     for loop in loops:
-        scaled = dict((key, value * mm_to_cm) for key, value in loop.items())
+        scaled = dict((key, value * INCHES_TO_CM) for key, value in loop.items())
         scaled["cx"] = (scaled["min_x"] + scaled["max_x"]) / 2
         scaled["cy"] = (scaled["min_y"] + scaled["max_y"]) / 2
         out.append(scaled)
@@ -217,7 +248,7 @@ def infer_origin(cad_loops, cut_loops, tolerance_cm=_CENTRE_MATCH_TOLERANCE_CM):
     return best_offset
 
 
-def breakthrough_check(program_text, material_bottom_z_cm, material_top_z_cm, mm_to_cm=0.1):
+def breakthrough_check(program_text, material_bottom_z_cm, material_top_z_cm):
     """Does this program's deepest cut actually pass through the material?
 
     The generalizable form of a real bug this caught by hand: an operation
@@ -235,11 +266,11 @@ def breakthrough_check(program_text, material_bottom_z_cm, material_top_z_cm, mm
     depths = []
     for line in program_text.splitlines():
         stripped = line.strip()
-        if not stripped or stripped.startswith("("):
+        if not stripped or _is_comment_line(stripped):
             continue
         for axis, value in _COORD.findall(stripped):
             if axis == "Z":
-                depths.append(float(value) * mm_to_cm)
+                depths.append(float(value) * INCHES_TO_CM)
     if not depths:
         return False, None, material_bottom_z_cm
     deepest = min(depths)
@@ -251,7 +282,7 @@ def breakthrough_check(program_text, material_bottom_z_cm, material_top_z_cm, mm
     return deepest <= required + 1e-9, deepest, required
 
 
-def cutting_points(program_text, mm_to_cm=0.1):
+def cutting_points(program_text):
     """Every XY point the tool actually visits at the program's own deepest
     cutting Z, in cm. Approach/retract/tab moves above that plane are left
     out - they don't remove material, so they can't thin a wall.
@@ -269,7 +300,7 @@ def cutting_points(program_text, mm_to_cm=0.1):
 
     points, x, y, z = [], None, None, None
     for line in lines:
-        if not line or line.startswith("("):
+        if not line or _is_comment_line(line):
             continue
         found = dict((axis, float(value)) for axis, value in _COORD.findall(line))
         is_rapid = line.startswith("G0")
@@ -279,7 +310,7 @@ def cutting_points(program_text, mm_to_cm=0.1):
         if x is None or y is None or z is None or is_rapid:
             continue
         if z <= ceiling:
-            points.append((x * mm_to_cm, y * mm_to_cm))
+            points.append((x * INCHES_TO_CM, y * INCHES_TO_CM))
     return points
 
 
