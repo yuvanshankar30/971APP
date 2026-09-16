@@ -14,25 +14,22 @@ that corrects them.
 
 ## What you are actually training
 
-**Six classes, and nothing else:**
+**Three physical-object classes:**
 
 ```
-0 robot_red          3 climb_attempt_blue
-1 robot_blue         4 climb_success_red
-2 climb_attempt_red  5 climb_success_blue
+0 robot_red
+1 robot_blue
+2 fuel
 ```
 
-**Fuel is deliberately not a class.** Game-piece detection is a classical
-HSV + contour pipeline (`detect_game_pieces` in `vision_runner.py`), tuned per
-venue through `vision_runs.config` rather than trained. Small, fast, mostly
-round objects at a distance are exactly where a detector trained on a few
-thousand frames does worst and where colour thresholding does well. Do not add
-a fuel class "since we're labeling anyway" — it would be a second, worse source
-of truth for the number that matters most, and `attribute_scores` is built
-around the classical trajectory.
+Fuel is labeled so the learned detector can eventually be fused with the
+existing HSV + contour candidates. The two signals must be deduplicated before
+tracking; neither becomes a scored event until a trajectory crosses a calibrated
+goal region. Climb attempts, climb success, defense, shooting, and immobility
+remain temporal metadata/states rather than object classes.
 
-The detector's whole job is: **find robots so they can be tracked**, and
-**flag climb attempts and successes**. Everything downstream — trajectories,
+The detector's whole job is: **find robots and fuel so they can be tracked**.
+Everything downstream — trajectories,
 attribution, mobility, auto start position, defense — is derived from those
 boxes, so box quality is the ceiling on all of it.
 
@@ -116,30 +113,18 @@ enforces the split discipline in Phase 4. Sloppy filenames silently defeat it.
 
 ## Phase 3 — labeling
 
-### The decision that actually matters: attempt vs success
+### Conservative self-labeling
 
-`robot_red`/`robot_blue` are easy — box the robot, bumper to bumper.
-`climb_attempt` vs `climb_success` is where a dataset gets ruined, because it's
-the only genuinely subjective call, and inconsistency between labelers shows up
-as a model that can't distinguish them at all.
+The seed dataset is generated locally by Qwen3-VL rather than hand-boxed.
+Only three physical classes enter YOLO. Qwen's guesses about shooting,
+defense, climbing, disability, readable team number, distance, and occlusion
+remain manifest metadata. This prevents subjective states from contaminating
+the detector vocabulary.
 
-Write down the rule **before** anyone labels, and put it in the dataset's
-README:
-
-- **`climb_attempt`** — the robot is engaged with the climbing structure and
-  visibly trying. Starts when it makes contact, not when it drives over.
-- **`climb_success`** — the end state a scout would record as a scoring climb.
-  If a human scout watching live would call it a climb, it's a success.
-- A failed climb is labeled `climb_attempt` for its whole duration and never
-  becomes a success.
-- A success is *also* an attempt beforehand. Label the attempt frames as
-  attempt and the achieved-state frames as success; don't retroactively relabel
-  the approach.
-
-If two labelers disagree on a clip, that clip is ambiguous evidence — cut it
-rather than guessing. The release pipeline treats every model output as
-advisory pending human review anyway; a model that's honestly uncertain is
-better than one confidently trained on coin flips.
+The labeler writes every normalized output to `proposed_labels`, then writes
+only detections that pass class-specific confidence, visibility, blur,
+occlusion, and geometry gates to `accepted_labels`. Ambiguous evidence is
+discarded. Empty accepted files are valid negative examples.
 
 ### Practical rules
 
@@ -152,30 +137,29 @@ better than one confidently trained on coin flips.
   They're discarded at inference anyway, so labeling them teaches nothing and
   costs time.
 - Alliance colour comes from the **bumper**, not from field side.
+- Box each physical yellow fuel ball separately. Ignore yellow tape, lights,
+  graphics, logos, and printed balls.
 
 ### Tooling
 
-CVAT is the usual choice and exports YOLO format directly. Two accelerators
-exist here, both of which produce *proposals a human must correct* — neither
-is a labeling shortcut you can skip review on:
+Run the private local 32B labeler over sampled frames. The manifest checkpoints
+after each frame and resumes by default:
 
 ```bash
-# Semantic proposals from Qwen3-VL, before any YOLO model exists.
-# Needs the DGX Spark or comparable CUDA memory.
-.venv/bin/python bootstrap_annotate.py recordings/qm1_fullfield.mov \
-  --view-names full-field --match-key 2026casf_qm1 \
-  --output labeling/qm1-qwen-review.json
+.venv/bin/python bootstrap_qwen_yolo.py recordings/*.mp4 \
+  --output labeling/qwen-v1 --sample-fps 1 \
+  --ollama-model qwen3-vl:32b-instruct
 
-# Dense box pseudo-labels, once reviewed seed weights exist.
+# Dense second-round pseudo-labels after seed weights exist.
 .venv/bin/python bootstrap_yolo_annotate.py recordings/*.mov \
   --weights vision-models/v1/weights/best.pt \
   --output labeling/round2 --accept-confidence 0.75
 ```
 
-The intended loop is: label ~5 matches by hand → train v1 → pseudo-label the
-next batch with v1 → **correct the pseudo-labels** → train v2. Correcting is
-much faster than labeling from scratch, but skipping the correction step just
-trains the model to repeat its own mistakes with more confidence.
+The intended loop is: Qwen pseudo-labels → deterministic acceptance gates →
+train v1 → require Qwen/v1 agreement for round two → train v2. These labels do
+not become human ground truth, and model mAP against them measures agreement
+with the labeling system rather than true real-world accuracy.
 
 ---
 

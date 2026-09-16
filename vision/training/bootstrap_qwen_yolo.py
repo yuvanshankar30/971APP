@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Use local Qwen3-VL grounding to create human-review-required YOLO proposals."""
+"""Use private local Qwen3-VL grounding to create gated YOLO pseudo-labels."""
 from __future__ import annotations
 
 import argparse
@@ -7,6 +7,7 @@ import base64
 import hashlib
 import json
 import os
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,17 +15,21 @@ from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 import cv2
+import numpy as np
 
-from qwen_yolo_contract import SYSTEM_PROMPT, TASK_PROMPT, normalize_result, parse_json_response, to_yolo_line
+from qwen_yolo_contract import (
+    CLASS_NAMES, FUEL_TASK_PROMPT, ROBOT_TASK_PROMPT, SYSTEM_PROMPT, TASK_PROMPT, acceptance_decision,
+    normalize_result, parse_json_response, to_yolo_line,
+)
 
 
-DEFAULT_MODEL = "Qwen/Qwen3-VL-30B-A3B-Instruct"
-DEFAULT_REVISION = "9c4b90e1e4ba969fd3b5378b57d966d725f1b86c"
+DEFAULT_MODEL = "Qwen/Qwen3-VL-32B-Instruct"
+DEFAULT_REVISION = ""
 VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm"}
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Generate unreviewed Qwen robot-box proposals")
+    parser = argparse.ArgumentParser(description="Generate conservative Qwen robot and fuel pseudo-labels")
     parser.add_argument("videos", nargs="+", help="Private local match recordings")
     parser.add_argument("--output", required=True, help="Proposal directory (never a train/val/test directory)")
     parser.add_argument("--model", default=DEFAULT_MODEL)
@@ -34,12 +39,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ollama-model", default="qwen3.5:latest")
     parser.add_argument("--sample-fps", type=float, default=1.0)
     parser.add_argument("--max-frames", type=int, default=0, help="Maximum frames per video; 0 means all")
+    parser.add_argument("--start-seconds", type=float, default=0,
+                        help="Skip this many seconds at the start of every video")
     parser.add_argument("--max-new-tokens", type=int, default=700)
+    parser.add_argument("--robot-confidence", type=float, default=0.85)
+    parser.add_argument("--fuel-confidence", type=float, default=0.92)
+    parser.add_argument("--task", choices=["all", "robots", "fuel"], default="all",
+                        help="Use focused robot/fuel prompts when the combined task is too dense")
+    parser.add_argument("--resume", action=argparse.BooleanOptionalAction, default=True,
+                        help="Resume from the checkpoint manifest (default: true)")
     parser.add_argument("--crop", help="Optional normalized x1,y1,x2,y2 crop in 0..1000")
     parser.add_argument("--attention", default="sdpa", choices=["sdpa", "flash_attention_2", "eager"])
     args = parser.parse_args()
-    if args.sample_fps <= 0 or args.max_frames < 0:
-        parser.error("--sample-fps must be positive and --max-frames cannot be negative")
+    if args.sample_fps <= 0 or args.max_frames < 0 or args.start_seconds < 0:
+        parser.error("--sample-fps must be positive; frame/start limits cannot be negative")
+    if not 0 <= args.robot_confidence <= 1 or not 0 <= args.fuel_confidence <= 1:
+        parser.error("confidence thresholds must be in 0..1")
     if args.crop:
         try:
             values = [int(value) for value in args.crop.split(",")]
@@ -55,22 +70,24 @@ def parse_args() -> argparse.Namespace:
 
 def load_transformers_model(model_name: str, revision: str, attention: str):
     import torch
-    from transformers import AutoProcessor, Qwen3VLMoeForConditionalGeneration
+    from transformers import AutoModelForImageTextToText, AutoProcessor
 
     if not torch.cuda.is_available():
         raise SystemExit("Full BF16 Qwen3-VL inference requires CUDA")
-    model = Qwen3VLMoeForConditionalGeneration.from_pretrained(
-        model_name,
-        dtype=torch.bfloat16,
-        device_map="auto",
-        revision=revision,
-        attn_implementation=attention,
-        low_cpu_mem_usage=True,
-    ).eval()
-    return model, AutoProcessor.from_pretrained(model_name, revision=revision)
+    options = {
+        "dtype": torch.bfloat16,
+        "device_map": "auto",
+        "attn_implementation": attention,
+        "low_cpu_mem_usage": True,
+    }
+    if revision:
+        options["revision"] = revision
+    model = AutoModelForImageTextToText.from_pretrained(model_name, **options).eval()
+    processor_options = {"revision": revision} if revision else {}
+    return model, AutoProcessor.from_pretrained(model_name, **processor_options)
 
 
-def analyze_transformers(model, processor, frame, max_new_tokens: int) -> str:
+def analyze_transformers(model, processor, frame, max_new_tokens: int, task_prompt: str) -> str:
     import torch
     from PIL import Image
 
@@ -79,7 +96,7 @@ def analyze_transformers(model, processor, frame, max_new_tokens: int) -> str:
         {"role": "system", "content": [{"type": "text", "text": SYSTEM_PROMPT}]},
         {"role": "user", "content": [
             {"type": "image", "image": image},
-            {"type": "text", "text": TASK_PROMPT},
+            {"type": "text", "text": task_prompt},
         ]},
     ]
     inputs = processor.apply_chat_template(
@@ -108,13 +125,13 @@ def ollama_model_digest(url: str, model_name: str) -> str | None:
     return None
 
 
-def analyze_ollama(frame, url: str, model_name: str, max_new_tokens: int) -> str:
+def analyze_ollama(frame, url: str, model_name: str, max_new_tokens: int, task_prompt: str) -> str:
     ok, encoded = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 92])
     if not ok:
         raise RuntimeError("Could not encode frame for local Qwen")
     payload = json.dumps({
         "model": model_name,
-        "prompt": f"{SYSTEM_PROMPT}\n\n{TASK_PROMPT}",
+        "prompt": f"{SYSTEM_PROMPT}\n\n{task_prompt}",
         "images": [base64.b64encode(encoded.tobytes()).decode("ascii")],
         "stream": False,
         "format": "json",
@@ -143,8 +160,79 @@ def crop_frame(frame, crop):
     ]
 
 
+def probe_video_fps(video: Path) -> float:
+    command = [
+        "ffprobe", "-v", "error", "-select_streams", "v:0",
+        "-show_entries", "stream=avg_frame_rate,r_frame_rate", "-of", "json", str(video),
+    ]
+    try:
+        payload = json.loads(subprocess.run(command, check=True, capture_output=True, text=True).stdout)
+        stream = payload["streams"][0]
+        raw = stream.get("avg_frame_rate") or stream.get("r_frame_rate")
+        numerator, denominator = (float(value) for value in raw.split("/"))
+        fps = numerator / denominator
+    except (subprocess.CalledProcessError, KeyError, IndexError, TypeError, ValueError, ZeroDivisionError) as error:
+        raise SystemExit(f"Could not read frame rate with ffprobe: {video}: {error}") from error
+    if fps <= 0:
+        raise SystemExit(f"Invalid frame rate from ffprobe: {video}: {fps}")
+    return fps
+
+
+def iter_sampled_frames(video: Path, sample_fps: float, max_frames: int, start_seconds: float = 0):
+    """Decode through FFmpeg so AV1 YouTube recordings work without OpenCV AV1."""
+    command = [
+        "ffmpeg", "-hide_banner", "-loglevel", "error",
+    ]
+    if start_seconds:
+        command.extend(["-ss", str(start_seconds)])
+    command.extend([
+        "-i", str(video),
+        "-vf", f"fps={sample_fps}",
+    ])
+    if max_frames:
+        command.extend(["-frames:v", str(max_frames)])
+    command.extend(["-q:v", "2", "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1"])
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    buffer = bytearray()
+    sample_index = 0
+    assert process.stdout is not None
+    while chunk := process.stdout.read(64 * 1024):
+        buffer.extend(chunk)
+        while True:
+            start = buffer.find(b"\xff\xd8")
+            if start < 0:
+                if len(buffer) > 1:
+                    del buffer[:-1]
+                break
+            end = buffer.find(b"\xff\xd9", start + 2)
+            if end < 0:
+                if start:
+                    del buffer[:start]
+                break
+            encoded = bytes(buffer[start:end + 2])
+            del buffer[:end + 2]
+            frame = cv2.imdecode(np.frombuffer(encoded, dtype=np.uint8), cv2.IMREAD_COLOR)
+            if frame is None:
+                raise RuntimeError(f"FFmpeg produced an undecodable JPEG for {video}")
+            timestamp_ms = round((start_seconds + sample_index / sample_fps) * 1000)
+            yield sample_index, timestamp_ms, frame
+            sample_index += 1
+    stderr = process.stderr.read().decode(errors="replace") if process.stderr else ""
+    return_code = process.wait()
+    if return_code:
+        raise RuntimeError(f"FFmpeg failed for {video}: {stderr[-2000:]}")
+
+
+def write_manifest(path: Path, manifest: dict) -> None:
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    temporary.chmod(0o600)
+    temporary.replace(path)
+
+
 def main() -> int:
     args = parse_args()
+    task_prompt = {"all": TASK_PROMPT, "robots": ROBOT_TASK_PROMPT, "fuel": FUEL_TASK_PROMPT}[args.task]
     os.umask(0o077)
     videos = [Path(raw).expanduser().resolve() for raw in args.videos]
     for video in videos:
@@ -153,11 +241,14 @@ def main() -> int:
     output = Path(args.output).expanduser().resolve()
     frame_dir = output / "frames"
     label_dir = output / "proposed_labels"
+    accepted_label_dir = output / "accepted_labels"
     frame_dir.mkdir(parents=True, exist_ok=True)
     label_dir.mkdir(parents=True, exist_ok=True)
+    accepted_label_dir.mkdir(parents=True, exist_ok=True)
     output.chmod(0o700)
     frame_dir.chmod(0o700)
     label_dir.chmod(0o700)
+    accepted_label_dir.chmod(0o700)
     model = processor = None
     ollama_url = None
     model_digest = None
@@ -166,73 +257,101 @@ def main() -> int:
     else:
         ollama_url = validate_ollama_url(args.ollama_url)
         model_digest = ollama_model_digest(ollama_url, args.ollama_model)
-    items = []
+    manifest_path = output / "pseudo-label-manifest.json"
+    manifest = {
+        "format_version": 2,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "complete": False,
+        "backend": args.backend,
+        "model": args.model if args.backend == "transformers" else args.ollama_model,
+        "model_digest": model_digest,
+        "revision": args.revision if args.backend == "transformers" else None,
+        "dtype": "bfloat16" if args.backend == "transformers" else "local-quantized",
+        "classes": list(CLASS_NAMES),
+        "crop_0_1000": args.crop,
+        "start_seconds": args.start_seconds,
+        "task": args.task,
+        "policy": {
+            "label_type": "single_model_pseudo_label",
+            "approved_as_human_ground_truth": False,
+            "training_use": "accepted_labels_only",
+            "robot_confidence": args.robot_confidence,
+            "fuel_confidence": args.fuel_confidence,
+            "requires_match_level_holdout": True,
+        },
+        "items": [],
+    }
+    if args.resume and manifest_path.exists():
+        previous = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if previous.get("model") != manifest["model"] or previous.get("classes") != manifest["classes"]:
+            raise SystemExit("Refusing to resume: model or class vocabulary changed")
+        manifest = previous
+        manifest["complete"] = False
+    items = manifest["items"]
+    completed = {(item["source_video"], item["frame_index"]) for item in items}
 
     for video in videos:
-        capture = cv2.VideoCapture(str(video))
-        fps = float(capture.get(cv2.CAP_PROP_FPS) or 0)
-        if fps <= 0:
-            raise SystemExit(f"Could not read frame rate: {video}")
-        interval = max(1, round(fps / args.sample_fps))
-        frame_index = 0
+        fps = probe_video_fps(video)
         proposed = 0
-        while True:
-            ok, frame = capture.read()
-            if not ok:
-                break
-            if frame_index % interval:
-                frame_index += 1
+        decoded = 0
+        for sample_index, timestamp_ms, frame in iter_sampled_frames(
+            video, args.sample_fps, args.max_frames, args.start_seconds,
+        ):
+            decoded += 1
+            frame_index = round(timestamp_ms * fps / 1000)
+            if (str(video), frame_index) in completed:
                 continue
             frame = crop_frame(frame, args.crop)
-            timestamp_ms = round(frame_index * 1000 / fps)
             stem = f"{source_id(video)}__{timestamp_ms:09d}ms"
             if args.backend == "transformers":
-                raw = analyze_transformers(model, processor, frame, args.max_new_tokens)
+                raw = analyze_transformers(model, processor, frame, args.max_new_tokens, task_prompt)
             else:
-                raw = analyze_ollama(frame, ollama_url, args.ollama_model, args.max_new_tokens)
+                raw = analyze_ollama(frame, ollama_url, args.ollama_model, args.max_new_tokens, task_prompt)
             parsed, error = parse_json_response(raw)
             result = None
             if not error:
                 result, error = normalize_result(parsed)
             image_path = frame_dir / f"{stem}.jpg"
             label_path = label_dir / f"{stem}.txt"
+            accepted_label_path = accepted_label_dir / f"{stem}.txt"
             cv2.imwrite(str(image_path), frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
             detections = result["detections"] if result else []
+            accepted = []
+            for detection in detections:
+                is_accepted, rejection_reasons = acceptance_decision(
+                    detection,
+                    result["image_quality"],
+                    robot_confidence=args.robot_confidence,
+                    fuel_confidence=args.fuel_confidence,
+                )
+                detection["label_status"] = "auto_accepted" if is_accepted else "rejected"
+                detection["rejection_reasons"] = rejection_reasons
+                if is_accepted:
+                    accepted.append(detection)
             label_path.write_text("\n".join(to_yolo_line(item) for item in detections) + ("\n" if detections else ""))
+            accepted_label_path.write_text("\n".join(to_yolo_line(item) for item in accepted) + ("\n" if accepted else ""))
             items.append({
                 "source_video": str(video), "frame_index": frame_index,
                 "timestamp_ms": timestamp_ms, "image": str(image_path.relative_to(output)),
                 "proposed_label": str(label_path.relative_to(output)),
+                "accepted_label": str(accepted_label_path.relative_to(output)),
                 "result": result, "parse_error": error, "raw_response": raw,
-                "review_status": "unreviewed",
+                "label_status": "auto_labeled" if accepted else "no_accepted_labels",
             })
+            manifest["updated_at"] = datetime.now(timezone.utc).isoformat()
+            write_manifest(manifest_path, manifest)
             proposed += 1
-            print(f"{video.name} {timestamp_ms}ms: {len(detections)} unreviewed boxes", flush=True)
-            frame_index += 1
-            if args.max_frames and proposed >= args.max_frames:
-                break
-        capture.release()
+            print(
+                f"{video.name} {timestamp_ms}ms: {len(accepted)}/{len(detections)} boxes accepted",
+                flush=True,
+            )
+        if decoded == 0:
+            raise RuntimeError(f"FFmpeg decoded zero sampled frames from {video}")
 
-    manifest = {
-        "format_version": 1,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "backend": args.backend,
-        "model": args.model if args.backend == "transformers" else args.ollama_model,
-        "model_digest": model_digest,
-        "revision": args.revision if args.backend == "transformers" else None,
-        "dtype": "bfloat16" if args.backend == "transformers" else "local-quantized",
-        "classes": ["robot_red", "robot_blue"],
-        "crop_0_1000": args.crop,
-        "policy": {
-            "human_review_required": True,
-            "approved_as_ground_truth": False,
-            "training_use_before_review": False,
-        },
-        "items": items,
-    }
-    manifest_path = output / "review-manifest.json"
-    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-    manifest_path.chmod(0o600)
+    manifest["complete"] = True
+    manifest["updated_at"] = datetime.now(timezone.utc).isoformat()
+    write_manifest(manifest_path, manifest)
     print(manifest_path)
     return 0
 

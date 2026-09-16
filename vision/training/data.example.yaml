@@ -1,19 +1,14 @@
-# Copy to data.yaml and replace paths with an exported, reviewed dataset.
+# Copy to data.yaml and replace paths with an exported accepted-label dataset.
 # Split entire matches/events between train/val/test; never randomly split
 # neighboring frames from the same recording across sets.
 path: /datasets/frc-vision-v1
 train: images/train
 val: images/val
 test: images/test
-# fuel_scored is NOT a class here - game-piece detection moved to a
-# classical HSV/contour pipeline (vision_runner.py's detect_game_pieces),
-# tuned via vision_runs.config instead of trained. See docs/guides/scoutingvision.md's
-# "Hybrid game-piece detection" section for why. YOLO only ever needs to
-# find robots (for tracking/attribution) and climb state.
+# Train physical objects only. Climb and robot activity are temporal states
+# derived from tracks/Qwen metadata, not separate object shapes. Runtime fuel
+# tracking can fuse this class with the existing HSV/contour candidates.
 names:
   0: robot_red
   1: robot_blue
-  2: climb_attempt_red
-  3: climb_attempt_blue
-  4: climb_success_red
-  5: climb_success_blue
+  2: fuel

@@ -8,7 +8,7 @@ deployment at this; it exists purely so someone can prove the runner<->API
 plumbing works end to end before investing in real data collection/labeling/
 training (see ../../docs/plans/scoutingvision-remaining-work.md).
 
-Verified during development: this actually runs (built a real 6-class
+Verified during development: this actually runs (built a real 3-class
 checkpoint from yolo11n.pt in a temp dir, confirmed the resulting model
 loads with the right class names AND survives a real model.track(...) call
 the same way vision_runner.py's process_view() calls it - which surfaced a
@@ -31,9 +31,7 @@ from ultralytics import YOLO
 # Must match data.example.yaml and the class-name handling in
 # vision/runner/vision_runner.py's process_view().
 CLASS_NAMES = [
-    "robot_red", "robot_blue",
-    "climb_attempt_red", "climb_attempt_blue",
-    "climb_success_red", "climb_success_blue",
+    "robot_red", "robot_blue", "fuel",
 ]
 
 
