@@ -337,8 +337,48 @@ def _loop_min_dimension_cm(edges) -> float:
     return min(width, height)
 
 
+def _point_to_segment_distance_cm(point, seg_start, seg_end) -> float:
+    """Distance from point to the finite segment seg_start->seg_end, in cm -
+    not to the segment's infinite line, so a short segment doesn't report a
+    misleadingly large distance when the perpendicular foot falls outside
+    it."""
+    px, py = point
+    ax, ay = seg_start
+    bx, by = seg_end
+    delta_x, delta_y = bx - ax, by - ay
+    length_sq = delta_x * delta_x + delta_y * delta_y
+    if length_sq <= 1e-12:
+        return ((px - ax) ** 2 + (py - ay) ** 2) ** 0.5
+    t = max(0.0, min(1.0, ((px - ax) * delta_x + (py - ay) * delta_y) / length_sq))
+    closest_x, closest_y = ax + t * delta_x, ay + t * delta_y
+    return ((px - closest_x) ** 2 + (py - closest_y) ** 2) ** 0.5
+
+
+def _hull_inscribed_diameter_estimate_cm(hull) -> float:
+    """A cheap, ALWAYS-CONSERVATIVE lower bound on a convex hull's own
+    inscribed-circle diameter: double the hull centroid's distance to its
+    nearest edge.
+
+    The true inscribed circle is centered wherever maximizes distance to
+    every edge at once (a small linear program) - the centroid is not
+    generally that point, so this can only ever read LOWER than the real
+    inscribed circle, never higher. That is the safe direction for a
+    routing decision: underestimating available room routes to a smaller
+    tool than strictly necessary (merely less efficient); overestimating it
+    is the actual failure this exists to prevent (an oversized tool that
+    cannot physically clear the interior at all).
+    """
+    centroid_x = sum(point[0] for point in hull) / len(hull)
+    centroid_y = sum(point[1] for point in hull) / len(hull)
+    return 2 * min(
+        _point_to_segment_distance_cm((centroid_x, centroid_y), hull[index], hull[(index + 1) % len(hull)])
+        for index in range(len(hull))
+    )
+
+
 def _loop_min_clearance_cm(edges) -> float:
-    """Smallest planar width of a loop's CAD footprint, in cm.
+    """The room an ADAPTIVE ROUGHING tool actually has to enter and clear
+    this loop's interior, in cm.
 
     An axis-aligned bounding box is sufficient for a rectangular feature
     aligned to the setup, but it overstates usable opening width for a
@@ -348,6 +388,26 @@ def _loop_min_clearance_cm(edges) -> float:
     the sampled convex footprint instead. Circular loops are handled by
     their dedicated operations, while endpoints plus ``pointOnEdge`` cover
     the straight and arc-sided non-circular loops routed here.
+
+    Confirmed live and real, not theoretical: caliper width ALONE still
+    overstates real interior clearance for a POINTED shape (a triangular
+    lightening pocket, a dogbone's tapered end) - a triangle's caliper
+    width equals its shortest altitude, which for an equilateral triangle
+    is roughly 1.5x its actual inscribed-circle diameter. A real part's
+    triangular lightening pockets measured ~1.02-1.17cm by inscribed-circle
+    estimate but ~1.30-1.62cm by caliper width alone - the gap was large
+    enough that 10 of 22 chains on a real "big endmill" roughing operation
+    cleared its 1.17cm entry-clearance threshold by caliper width alone
+    while genuinely failing it by the shape's real inscribed room, and
+    Fusion could not actually clear their interiors with that tool. A round
+    tool sized to the caliper width alone still cannot nestle into the
+    shape's tightest corner; this is the same failure class the ramp-
+    diameter fix in _adaptive_entry_clearance_cm exists for on the
+    tool-entry side, just on the feature-geometry side instead. So this
+    also computes a conservative estimate of the loop's own inscribed-
+    circle diameter from the SAME convex hull already built for the caliper
+    check (see _hull_inscribed_diameter_estimate_cm), and returns whichever
+    of the two is smaller - never the more permissive of the two numbers.
 
     If the CAD API cannot provide a usable footprint, retain the existing
     bounding-box fallback rather than refusing an otherwise valid job.
@@ -401,7 +461,10 @@ def _loop_min_clearance_cm(edges) -> float:
         normal_x, normal_y = -delta_y / length, delta_x / length
         projections = [point[0] * normal_x + point[1] * normal_y for point in hull]
         minimum_width = min(minimum_width, max(projections) - min(projections))
-    return minimum_width if minimum_width != float("inf") else _loop_min_dimension_cm(edges)
+    if minimum_width == float("inf"):
+        return _loop_min_dimension_cm(edges)
+
+    return min(minimum_width, _hull_inscribed_diameter_estimate_cm(hull))
 
 
 def _operation_tool_diameter_cm(op):

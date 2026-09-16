@@ -53,6 +53,13 @@ def _square_chain(cx, cy, side_cm):
     return types.SimpleNamespace(inputGeometry=[_edge(cx - half, cy - half, cx + half, cy + half)])
 
 
+def _triangle_chain(vertices):
+    # One near-zero-size "edge" per vertex so its bounding-box corners
+    # collapse to that single point - gives the corner-point-set a real
+    # triangle instead of only ever axis-aligned boxes.
+    return types.SimpleNamespace(inputGeometry=[_edge(x, y, x, y) for x, y in vertices])
+
+
 def _pockets_param(*chains):
     value = types.SimpleNamespace(getCurveSelections=lambda: list(chains))
     return types.SimpleNamespace(value=value)
@@ -158,6 +165,23 @@ class UndersizedRoughingChainWarningTests(unittest.TestCase):
         warnings = undersized_roughing_chain_warnings(cam)
         # Exactly one warning proves the 21 wide chains stayed silent and
         # only the narrow outlier tripped the check.
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("Shape Through Hole big endmill", warnings[0])
+
+    def test_catches_a_triangle_that_a_bare_bounding_box_would_miss(self):
+        # Live-confirmed bug: an equilateral triangle's caliper width (its
+        # shortest altitude) overstates real clearance vs. its inscribed
+        # circle by ~1.5x. side=2 -> altitude=sqrt(3)~=1.732,
+        # inradius diameter=2/sqrt(3)~=1.155. A tool needing 1.4cm passes
+        # by caliper width alone but must fail by the shape's real
+        # inscribed room.
+        triangle = [(0, 0), (2, 0), (1, 3 ** 0.5)]
+        # tool_diameter_cm chosen so the fallback 1.5x rule lands the
+        # required clearance at 1.4cm (between the triangle's inscribed
+        # diameter and its caliper width).
+        op = _op("Shape Through Hole big endmill", "adaptive2d", tool_diameter_cm=1.4 / 1.5, chains=[_triangle_chain(triangle)], ramp_diameter_cm=None, ramp_type=None)
+        cam = _cam(op)
+        warnings = undersized_roughing_chain_warnings(cam)
         self.assertEqual(len(warnings), 1)
         self.assertIn("Shape Through Hole big endmill", warnings[0])
 

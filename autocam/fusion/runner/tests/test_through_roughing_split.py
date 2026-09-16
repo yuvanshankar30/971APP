@@ -36,6 +36,8 @@ reroute_empty_through_roughing = _ns["_reroute_empty_through_roughing"]
 reconcile_through_roughing_coverage = _ns["_reconcile_through_roughing_coverage"]
 loop_min_dimension_cm = _ns["_loop_min_dimension_cm"]
 loop_min_clearance_cm = _ns["_loop_min_clearance_cm"]
+hull_inscribed_diameter_estimate_cm = _ns["_hull_inscribed_diameter_estimate_cm"]
+point_to_segment_distance_cm = _ns["_point_to_segment_distance_cm"]
 ROUGHING_FIT_CLEARANCE_FACTOR = _ns["_ROUGHING_FIT_CLEARANCE_FACTOR"]
 
 
@@ -536,6 +538,67 @@ class LoopMinimumClearanceTests(unittest.TestCase):
     def test_falls_back_to_bounding_box_when_only_a_line_is_readable(self):
         edge = self._edge((0, 0), (5, 2))
         self.assertAlmostEqual(loop_min_clearance_cm([edge]), 2.0)
+
+    def test_triangle_uses_inscribed_diameter_not_caliper_width(self):
+        # Live-confirmed bug: an equilateral triangle's caliper width (its
+        # shortest altitude) overstates real interior clearance by ~1.5x -
+        # a real part's triangular lightening pockets measured ~1.02-1.17cm
+        # by inscribed-circle estimate but ~1.30-1.62cm by caliper width
+        # alone, enough for 10 of 22 chains to clear a "big endmill"
+        # roughing op's threshold by caliper width while genuinely failing
+        # it by real inscribed room. side=2: altitude=sqrt(3)~=1.732,
+        # inradius=side/(2*sqrt(3))~=0.577 -> diameter~=1.155. The centroid
+        # of an equilateral triangle IS its true incenter, so the
+        # conservative centroid-based estimate is exact here, not just a
+        # lower bound.
+        vertices = [(0, 0), (2, 0), (1, 3 ** 0.5)]
+        edges = [
+            self._edge(vertices[index], vertices[(index + 1) % len(vertices)])
+            for index in range(len(vertices))
+        ]
+        self.assertAlmostEqual(loop_min_dimension_cm(edges), 3 ** 0.5)  # bounding-box height
+        self.assertAlmostEqual(loop_min_clearance_cm(edges), 2 / (3 ** 0.5), places=6)
+
+    def test_wide_rectangle_is_unaffected_by_the_inscribed_check(self):
+        # A shape with no pointed corners has caliper width == inscribed
+        # diameter (a rectangle's incircle only exists when it's a square,
+        # but the narrower axis IS the real limiting dimension either way) -
+        # confirms the new check never makes an already-correct, non-pointed
+        # answer more conservative than it needs to be.
+        edges = [
+            self._edge((0, 0), (10, 0)),
+            self._edge((10, 0), (10, 3)),
+            self._edge((10, 3), (0, 3)),
+            self._edge((0, 3), (0, 0)),
+        ]
+        self.assertAlmostEqual(loop_min_clearance_cm(edges), 3.0)
+
+
+class HullInscribedDiameterEstimateTests(unittest.TestCase):
+    def test_square_centroid_equals_true_incenter(self):
+        hull = [(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0)]
+        self.assertAlmostEqual(hull_inscribed_diameter_estimate_cm(hull), 2.0)
+
+    def test_never_exceeds_the_true_inscribed_circle(self):
+        # An off-center (non-regular) triangle's centroid is NOT its
+        # incenter, so this must read AT MOST the true inradius*2 (~1.53 for
+        # this 3-4-5 right triangle, inradius=1), never more - the safe
+        # direction per this function's own docstring.
+        hull = [(0.0, 0.0), (4.0, 0.0), (0.0, 3.0)]
+        estimate = hull_inscribed_diameter_estimate_cm(hull)
+        true_inradius = 1.0  # area=6, semiperimeter=6 -> r=area/s=1
+        self.assertLessEqual(estimate, true_inradius * 2 + 1e-9)
+
+
+class PointToSegmentDistanceTests(unittest.TestCase):
+    def test_perpendicular_foot_within_segment(self):
+        self.assertAlmostEqual(point_to_segment_distance_cm((1, 1), (0, 0), (2, 0)), 1.0)
+
+    def test_clamps_to_nearest_endpoint_beyond_the_segment(self):
+        # The point's perpendicular foot on the segment's infinite line
+        # falls past (2, 0) - distance must be to that endpoint (5.0), not
+        # the shorter perpendicular-to-infinite-line distance (4.0).
+        self.assertAlmostEqual(point_to_segment_distance_cm((5, 4), (0, 0), (2, 0)), 5.0)
 
 
 if __name__ == "__main__":
