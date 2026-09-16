@@ -97,6 +97,10 @@ frame so an interrupted run resumes without losing completed work. It records
 the immutable Ollama model digest, while the recording inventory records a
 SHA-256 for every source video.
 
+Malformed or truncated model JSON is retried once with a doubled response
+budget. On resume, failed items are archived to `retry-failures.jsonl` and
+reprocessed; successful frames remain checkpointed.
+
 Fuel uses a focused path because balls are too small for reliable full-frame
 VLM grounding. `bootstrap_fuel_candidates.py` proposes yellow circular regions,
 enlarges the strongest eight into a numbered contact sheet, and asks the same

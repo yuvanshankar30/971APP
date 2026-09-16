@@ -41,7 +41,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-frames", type=int, default=0, help="Maximum frames per video; 0 means all")
     parser.add_argument("--start-seconds", type=float, default=0,
                         help="Skip this many seconds at the start of every video")
-    parser.add_argument("--max-new-tokens", type=int, default=700)
+    parser.add_argument("--max-new-tokens", type=int, default=1400)
+    parser.add_argument("--parse-retries", type=int, default=1,
+                        help="Retry malformed/truncated JSON with a larger response budget")
     parser.add_argument("--robot-confidence", type=float, default=0.85)
     parser.add_argument("--fuel-confidence", type=float, default=0.92)
     parser.add_argument("--task", choices=["all", "robots", "fuel"], default="all",
@@ -51,7 +53,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--crop", help="Optional normalized x1,y1,x2,y2 crop in 0..1000")
     parser.add_argument("--attention", default="sdpa", choices=["sdpa", "flash_attention_2", "eager"])
     args = parser.parse_args()
-    if args.sample_fps <= 0 or args.max_frames < 0 or args.start_seconds < 0:
+    if args.sample_fps <= 0 or args.max_frames < 0 or args.start_seconds < 0 or args.parse_retries < 0:
         parser.error("--sample-fps must be positive; frame/start limits cannot be negative")
     if not 0 <= args.robot_confidence <= 1 or not 0 <= args.fuel_confidence <= 1:
         parser.error("confidence thresholds must be in 0..1")
@@ -286,6 +288,17 @@ def main() -> int:
         previous = json.loads(manifest_path.read_text(encoding="utf-8"))
         if previous.get("model") != manifest["model"] or previous.get("classes") != manifest["classes"]:
             raise SystemExit("Refusing to resume: model or class vocabulary changed")
+        failed_items = [item for item in previous.get("items", []) if item.get("parse_error") or not item.get("result")]
+        if failed_items:
+            failure_archive = output / "retry-failures.jsonl"
+            with failure_archive.open("a", encoding="utf-8") as stream:
+                for item in failed_items:
+                    stream.write(json.dumps(item) + "\n")
+            failure_archive.chmod(0o600)
+        previous["items"] = [
+            item for item in previous.get("items", [])
+            if not item.get("parse_error") and item.get("result")
+        ]
         manifest = previous
         manifest["complete"] = False
     items = manifest["items"]
@@ -304,14 +317,21 @@ def main() -> int:
                 continue
             frame = crop_frame(frame, args.crop)
             stem = f"{source_id(video)}__{timestamp_ms:09d}ms"
-            if args.backend == "transformers":
-                raw = analyze_transformers(model, processor, frame, args.max_new_tokens, task_prompt)
-            else:
-                raw = analyze_ollama(frame, ollama_url, args.ollama_model, args.max_new_tokens, task_prompt)
-            parsed, error = parse_json_response(raw)
             result = None
-            if not error:
-                result, error = normalize_result(parsed)
+            raw = ""
+            error = None
+            attempts = 0
+            for attempts in range(1, args.parse_retries + 2):
+                token_budget = args.max_new_tokens * attempts
+                if args.backend == "transformers":
+                    raw = analyze_transformers(model, processor, frame, token_budget, task_prompt)
+                else:
+                    raw = analyze_ollama(frame, ollama_url, args.ollama_model, token_budget, task_prompt)
+                parsed, error = parse_json_response(raw)
+                if not error:
+                    result, error = normalize_result(parsed)
+                if not error:
+                    break
             image_path = frame_dir / f"{stem}.jpg"
             label_path = label_dir / f"{stem}.txt"
             accepted_label_path = accepted_label_dir / f"{stem}.txt"
@@ -337,6 +357,7 @@ def main() -> int:
                 "proposed_label": str(label_path.relative_to(output)),
                 "accepted_label": str(accepted_label_path.relative_to(output)),
                 "result": result, "parse_error": error, "raw_response": raw,
+                "inference_attempts": attempts,
                 "label_status": "auto_labeled" if accepted else "no_accepted_labels",
             })
             manifest["updated_at"] = datetime.now(timezone.utc).isoformat()
