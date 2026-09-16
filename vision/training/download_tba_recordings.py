@@ -19,7 +19,9 @@ MATCH_KEY_RE = re.compile(r"^20\d{2}[a-z0-9]+_(?:qm\d+|[a-z]+\d+m\d+)$", re.I)
 YOUTUBE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{6,20}$")
 DEFAULT_PROXY = "https://spartanshub.spartanrobotics.org/api/tba/event-matches"
 FORMAT_SELECTOR = (
-    "bestvideo[height<=1080][fps<=60][ext=mp4]/"
+    "bestvideo[height<=1080][fps>=30][fps<=60][ext=mp4]/"
+    "bestvideo[height<=1080][fps>=30][fps<=60]/"
+    "best[height<=1080][fps>=30][fps<=60]/"
     "bestvideo[height<=1080][fps<=60]/best[height<=1080][fps<=60]/bestvideo/best"
 )
 
