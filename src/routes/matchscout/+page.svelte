@@ -11,6 +11,12 @@
   import { AlertTriangle, Check, ChevronRight, ClipboardCheck, MapPinned, Route, RotateCcw, Timer, Trophy } from 'lucide-svelte';
 
   const START_POSITIONS = ['left trench', 'left mound', 'center', 'right mound', 'right trench'];
+  // Same alliance-relative point each starting-position thumbnail already
+  // marks (cx=23, cy=4+index*10 on that thumbnail's own 0-100 x 0-48.5
+  // viewBox below), converted into RebuiltFieldMap's 0-100 x 0-100 percent
+  // coordinate space - lets "Begin auto" pre-place the robot at the spot
+  // already chosen instead of asking the scout to place it a second time.
+  const START_POSITION_POINTS = START_POSITIONS.map((_, index) => [23, ((4 + index * 10) / 48.5) * 100]);
   const RATING_FIELDS = [...MATCH_FORM_RATING_FIELDS, ...MATCH_OPTIONAL_RATING_FIELDS];
   const TELEOP_RATING_FIELDS = MATCH_FORM_RATING_FIELDS;
   const BALL_SOURCE_OPTIONS = AUTO_FUEL_SOURCES.map(source => [source, source]);
@@ -239,6 +245,13 @@
   async function openAutoPhase() {
     selectPhase('auto');
     await loadSavedAutoPaths();
+    // Only for a genuinely fresh entry - editing an existing report or a
+    // loaded saved-path file both populate autoPath before this ever runs,
+    // and this must never overwrite either.
+    if (!autoPath.length && startingPosition) {
+      const index = START_POSITIONS.indexOf(startingPosition);
+      if (index >= 0) autoPath = [START_POSITION_POINTS[index]];
+    }
   }
 
   function loadSelectedAutoPath() {

@@ -1,4 +1,5 @@
 <script>
+  import { onDestroy } from 'svelte';
   import {
     AUTO_FIELD,
     AUTO_ROBOT_SIZE,
@@ -17,23 +18,40 @@
   // existing caller omits it and keeps today's fully-interactive behavior.
   export let readonly = false;
 
+  // FRC autonomous periods have run 15s for many seasons; this app has no
+  // per-game timing config, and a path's points only ever came from
+  // freehand drawing speed, not real robot telemetry, so any point-to-time
+  // mapping is inherently an approximation - the elapsed-seconds readout
+  // below is explicitly labeled "approx" for that reason.
+  const AUTO_PERIOD_SECONDS = 15;
+
   let drawing = false;
   let hoverPoint = null;
   let inspectedPathIndex = 0;
   let blockedBy = null;
+  let playing = false;
+  let playbackTimer = null;
   const fieldWidth = AUTO_FIELD.width;
   const fieldHeight = AUTO_FIELD.height;
 
   $: ownColor = alliance === 'red' ? '#d12c36' : '#2468c7';
   $: opponentColor = alliance === 'red' ? '#2468c7' : '#d12c36';
-  $: pathPoints = path.map(([x, y]) => `${x * 10},${y * 4.87}`).join(' ');
   $: inspectedPathIndex = Math.min(inspectedPathIndex, Math.max(0, path.length - 1));
+  // The portion of the path "revealed" so far - during live drawing this is
+  // always the full path (inspectedPathIndex is kept pinned to the tip by
+  // beginPath/extendPath below), but once a path is complete and being
+  // reviewed/played back, scrubbing or playing steps this backward so the
+  // route draws in behind the robot instead of the whole thing being visible
+  // up front.
+  $: revealedPath = path.slice(0, inspectedPathIndex + 1);
+  $: revealedPathPoints = revealedPath.map(([x, y]) => `${x * 10},${y * 4.87}`).join(' ');
+  $: elapsedSeconds = path.length > 1 ? (inspectedPathIndex / (path.length - 1)) * AUTO_PERIOD_SECONDS : 0;
   $: inspectedPoint = path.length ? path[inspectedPathIndex] : null;
   $: previewPoint = hoverPoint || inspectedPoint;
   $: previewBounds = previewPoint ? robotBoundsAtAutoPoint(previewPoint) : null;
   $: previewCollision = previewPoint ? autoRobotCollision(previewPoint) : null;
-  $: crossingSegments = path.slice(1).flatMap((point, index) => {
-    const start = path[index];
+  $: crossingSegments = revealedPath.slice(1).flatMap((point, index) => {
+    const start = revealedPath[index];
     const startField = autoPointToField(start);
     const endField = autoPointToField(point);
     return autoCenterlineIntervals(start, point).map(([from, to]) => ({
@@ -43,11 +61,11 @@
       y2: startField.y + (endField.y - startField.y) * to
     }));
   });
-  $: crossingMarkers = path.reduce((markers, point, index) => {
+  $: crossingMarkers = revealedPath.reduce((markers, point, index) => {
     const bounds = robotBoundsAtAutoPoint(point);
     const verticalOverlap = bounds.x < fieldWidth / 2 && bounds.x + bounds.width > fieldWidth / 2;
     const horizontalOverlap = bounds.y < fieldHeight / 2 && bounds.y + bounds.height > fieldHeight / 2;
-    const previous = index ? path[index - 1] : null;
+    const previous = index ? revealedPath[index - 1] : null;
     const previousBounds = previous ? robotBoundsAtAutoPoint(previous) : null;
     const wasVertical = previousBounds && previousBounds.x < fieldWidth / 2 && previousBounds.x + previousBounds.width > fieldWidth / 2;
     const wasHorizontal = previousBounds && previousBounds.y < fieldHeight / 2 && previousBounds.y + previousBounds.height > fieldHeight / 2;
@@ -65,6 +83,28 @@
     });
     return markers;
   }, []);
+
+  function stopPlayback() {
+    playing = false;
+    if (playbackTimer) clearInterval(playbackTimer);
+    playbackTimer = null;
+  }
+
+  function togglePlayback() {
+    if (playing) { stopPlayback(); return; }
+    if (path.length < 2) return;
+    if (inspectedPathIndex >= path.length - 1) inspectedPathIndex = 0;
+    playing = true;
+    const startTime = performance.now() - (inspectedPathIndex / (path.length - 1)) * AUTO_PERIOD_SECONDS * 1000;
+    playbackTimer = setInterval(() => {
+      const elapsed = (performance.now() - startTime) / 1000;
+      const fraction = Math.min(1, elapsed / AUTO_PERIOD_SECONDS);
+      inspectedPathIndex = Math.round(fraction * (path.length - 1));
+      if (fraction >= 1) stopPlayback();
+    }, 100);
+  }
+
+  onDestroy(stopPlayback);
 
   function pointFromEvent(event) {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -208,9 +248,9 @@
       <text x="708" y="249" text-anchor="middle">hub</text>
     </g>
 
-    {#if path.length > 1}
-      <polyline class="robot-path-shadow" points={pathPoints} />
-      <polyline class="robot-path" points={pathPoints} />
+    {#if revealedPath.length > 1}
+      <polyline class="robot-path-shadow" points={revealedPathPoints} />
+      <polyline class="robot-path" points={revealedPathPoints} />
       {#each crossingSegments as segment}
         <line class="robot-path-crossing" {...segment} />
       {/each}
@@ -229,20 +269,23 @@
         <text x={previewBounds.x + previewBounds.width / 2} y={previewBounds.y + previewBounds.height / 2} text-anchor="middle">29 in</text>
       </g>
     {/if}
-    {#if path.length}
-      <circle class="path-start" cx={path[0][0] * 10} cy={path[0][1] * 4.87} r="9" />
-      <circle class="path-end" cx={path[path.length - 1][0] * 10} cy={path[path.length - 1][1] * 4.87} r="7" />
+    {#if revealedPath.length}
+      <circle class="path-start" cx={revealedPath[0][0] * 10} cy={revealedPath[0][1] * 4.87} r="9" />
+      <circle class="path-end" cx={revealedPath[revealedPath.length - 1][0] * 10} cy={revealedPath[revealedPath.length - 1][1] * 4.87} r="7" />
     {/if}
   </svg>
   </div>
   <div class="path-inspector">
     <span>Robot footprint: 29 x 29 in</span>
     {#if path.length}
+      <button type="button" class="play-button" on:click={togglePlayback} disabled={path.length < 2} aria-label={playing ? 'Pause playback' : 'Play back the route'}>
+        {playing ? '⏸' : '▶'}
+      </button>
       <label>
         Inspect route position
-        <input type="range" min="0" max={path.length - 1} step="1" bind:value={inspectedPathIndex} />
+        <input type="range" min="0" max={path.length - 1} step="1" bind:value={inspectedPathIndex} on:input={stopPlayback} />
       </label>
-      <span>{inspectedPathIndex + 1} / {path.length}</span>
+      <span>≈{elapsedSeconds.toFixed(1)}s / {AUTO_PERIOD_SECONDS}s</span>
     {/if}
     <span class="path-legend"><i class="normal"></i> Route <i class="crossing"></i> Centerline overlap</span>
   </div>
@@ -256,7 +299,7 @@
   svg { display:block; width:100%; height:100%; }
   .carpet { fill:#666866; }
   .guardrail { fill:none; stroke:#202221; stroke-width:7; }
-  .center-line { stroke:#d9dad8; stroke-width:2; opacity:.8; }
+  .center-line { stroke:#d9dad8; stroke-width:1.5; stroke-dasharray:4 5; opacity:.6; }
   .alliance-wall { stroke-width:8; }
   .starting-line { stroke-width:3; opacity:.95; }
   .bump { fill:color-mix(in srgb, var(--alliance) 80%, #222); stroke:#151515; stroke-width:3; }
@@ -271,21 +314,23 @@
   .field-labels text:nth-last-child(-n+2) { fill:#181918; font-size:11px; }
   .robot-path-shadow { fill:none; stroke:#111; stroke-width:12; stroke-linecap:round; stroke-linejoin:round; opacity:.5; }
   .robot-path { fill:none; stroke:#ffd34e; stroke-width:7; stroke-linecap:round; stroke-linejoin:round; }
-  .robot-path-crossing { stroke:#da3340; stroke-width:7; stroke-linecap:round; }
+  .robot-path-crossing { stroke:#e8828a; stroke-width:5; stroke-linecap:round; opacity:.8; }
   .path-start { fill:#fff; stroke:#151515; stroke-width:4; }
   .path-end { fill:#ffd34e; stroke:#151515; stroke-width:3; }
   .robot-footprint-preview rect { fill:#e9f0f6; fill-opacity:.22; stroke:#f5f7f4; stroke-width:2; stroke-dasharray:5 3; }
   .robot-footprint-preview text { fill:#f7f7f4; font-size:10px; font-weight:700; pointer-events:none; }
   .robot-footprint-preview.blocked rect { fill:#da3340; fill-opacity:.28; stroke:#ff6874; }
   .robot-footprint-preview.blocked text { fill:#ffccd2; }
-  .crossing-footprint rect { fill:#da3340; fill-opacity:.15; stroke:#ff6c75; stroke-width:2; stroke-dasharray:4 3; }
-  .crossing-footprint text { fill:#ffd7da; stroke:#262222; stroke-width:3; paint-order:stroke; font-size:10px; font-weight:700; }
+  .crossing-footprint rect { fill:#da3340; fill-opacity:.08; stroke:#e8828a; stroke-width:1.5; stroke-dasharray:4 3; opacity:.75; }
+  .crossing-footprint text { fill:#f0c3c6; stroke:#262222; stroke-width:3; paint-order:stroke; font-size:10px; font-weight:700; }
   .path-inspector { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-2); color:var(--text-muted); font-size:var(--font-xs); }
   .path-inspector label { display:flex; align-items:center; gap:var(--space-2); color:var(--text); }
   .path-inspector input { width:min(12rem, 36vw); accent-color:var(--brand-gold); }
   .path-legend { display:inline-flex; align-items:center; gap:5px; }
   .path-legend i { width:.7rem; height:.25rem; border-radius:2px; display:inline-block; }
   .path-legend .normal { background:#ffd34e; }
-  .path-legend .crossing { background:#da3340; margin-left:var(--space-2); }
+  .path-legend .crossing { background:#e8828a; margin-left:var(--space-2); }
+  .play-button { min-width:2rem; min-height:2rem; padding:0; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--surface-1); color:var(--text); cursor:pointer; font-size:.85rem; line-height:1; }
+  .play-button:disabled { opacity:.4; cursor:default; }
   .path-warning { color:var(--red-strong); }
 </style>
