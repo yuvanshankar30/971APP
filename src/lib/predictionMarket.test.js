@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { STARTING_BALANCE, availableBalance, myBetForMatch, resolvePariMutuel, summarizeStandings } from './predictionMarket.js';
+import { STARTING_BALANCE, availableBalance, marketSummary, myBetForMatch, resolvePariMutuel, settleMarket, summarizeStandings } from './predictionMarket.js';
 
 describe('resolvePariMutuel', () => {
   it('pays winners their stake back plus a proportional share of the losing pool', () => {
@@ -79,5 +79,29 @@ describe('availableBalance', () => {
     expect(availableBalance(bets, 'a')).toBe(STARTING_BALANCE + 50 - 300);
     // Editing bet '2' itself shouldn't count its own stake against the ceiling.
     expect(availableBalance(bets, 'a', '2')).toBe(STARTING_BALANCE + 50);
+  });
+});
+
+describe('generic markets', () => {
+  const positions = [
+    { id: 'a', market_key: 'qualification-rank-1', outcome_key: 'frc1540', created_by: 'a', stake: 75 },
+    { id: 'b', market_key: 'qualification-rank-1', outcome_key: 'frc2046', created_by: 'b', stake: 25 },
+    { id: 'c', market_key: 'match:qm1', outcome_key: 'red', created_by: 'c', stake: 100 }
+  ];
+
+  it('derives a transparent price from actual pool shares', () => {
+    const summary = marketSummary(positions, 'qualification-rank-1');
+    expect(summary.total).toBe(100);
+    expect(summary.traders).toBe(2);
+    expect(summary.outcomes).toEqual([
+      { key: 'frc1540', stake: 75, probability: 0.75 },
+      { key: 'frc2046', stake: 25, probability: 0.25 }
+    ]);
+  });
+
+  it('settles a multi-outcome market with the same pari-mutuel rules', () => {
+    const result = settleMarket(positions.slice(0, 2), 'frc1540');
+    expect(result.find((row) => row.id === 'a')).toMatchObject({ payout: 100, winning_outcome: 'frc1540' });
+    expect(result.find((row) => row.id === 'b')).toMatchObject({ payout: 0, winning_outcome: 'frc1540' });
   });
 });

@@ -8,6 +8,42 @@
 
 export const STARTING_BALANCE = 1000;
 
+// A position is deliberately generic: a market can be a match winner, the
+// eventual qualification leader, or another event question.  This keeps the
+// pricing and settlement maths identical instead of growing one-off betting
+// systems for every new prompt.
+export function marketSummary(positions = [], marketKey) {
+  const rows = positions.filter((position) => position.market_key === marketKey);
+  const total = rows.reduce((sum, position) => sum + Number(position.stake || 0), 0);
+  const byOutcome = new Map();
+  for (const position of rows) {
+    const key = position.outcome_key;
+    byOutcome.set(key, (byOutcome.get(key) || 0) + Number(position.stake || 0));
+  }
+  return {
+    total,
+    traders: new Set(rows.map((position) => position.created_by)).size,
+    outcomes: [...byOutcome.entries()].map(([key, stake]) => ({ key, stake, probability: total ? stake / total : 0 })).sort((a, b) => b.stake - a.stake)
+  };
+}
+
+export function impliedProbability(positions = [], marketKey, outcomeKey) {
+  return marketSummary(positions, marketKey).outcomes.find((outcome) => outcome.key === outcomeKey)?.probability || 0;
+}
+
+export function settleMarket(positions = [], winningOutcome) {
+  if (!winningOutcome) return positions.map((position) => ({ id: position.id, payout: position.stake, winning_outcome: null }));
+  const winners = positions.filter((position) => position.outcome_key === winningOutcome);
+  const winPool = winners.reduce((sum, position) => sum + Number(position.stake), 0);
+  const losePool = positions.filter((position) => position.outcome_key !== winningOutcome).reduce((sum, position) => sum + Number(position.stake), 0);
+  if (!winPool) return positions.map((position) => ({ id: position.id, payout: position.stake, winning_outcome: winningOutcome }));
+  return positions.map((position) => ({
+    id: position.id,
+    payout: position.outcome_key === winningOutcome ? Math.round((Number(position.stake) + (Number(position.stake) / winPool) * losePool) * 100) / 100 : 0,
+    winning_outcome: winningOutcome
+  }));
+}
+
 // Given every bet placed on ONE match and that match's resolved winning
 // side, returns each bet's payout. Pure and match-scoped - the caller is
 // responsible for grouping bets by match_key before calling this.
