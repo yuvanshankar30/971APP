@@ -743,7 +743,7 @@
       {:else}
         <div class="match-report-list">
           {#each matchReports as report (report.id)}
-            <MatchScoutReport {report} showTeam />
+            <MatchScoutReport {report} showTeam showScout />
           {/each}
         </div>
       {/if}
