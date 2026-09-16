@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/public';
 import { env } from '$env/dynamic/private';
 import { getSupabase } from '$lib/server/971bot.js';
-import { availableBalance, settleMarket } from '$lib/predictionMarket.js';
+import { availableBalance, isTestMarketKey, settleMarket } from '$lib/predictionMarket.js';
 
 const COLUMNS = 'id,event_key,market_key,market_type,outcome_key,created_by,stake,placed_at,updated_at,resolved_at,payout,winning_outcome';
 const missing = (error) => error?.code === '42P01' || error?.code === 'PGRST205' || /prediction_market_(positions|ticks).*does not exist/i.test(error?.message || '');
@@ -28,6 +28,7 @@ async function settleResolvedMarkets(db, eventKey) {
   for (const position of pending) groups.set(position.market_key, [...(groups.get(position.market_key) || []), position]);
   for (const [marketKey, positions] of groups) {
     let winner = null;
+    if (positions[0].market_type === 'practice') continue;
     if (positions[0].market_type === 'match_winner') {
       const match = await tba(`/match/${encodeURIComponent(marketKey.replace(/^match:/, ''))}/simple`);
       if (match?.actual_time && match.winning_alliance) winner = match.winning_alliance;
@@ -47,6 +48,7 @@ function validRequest(body) {
   const eventKey = String(body?.event_key || '').trim(); const marketKey = String(body?.market_key || '').trim(); const marketType = String(body?.market_type || '').trim(); const outcomeKey = String(body?.outcome_key || '').trim(); const stake = Number(body?.stake);
   if (!eventKey || !marketKey || !outcomeKey || !Number.isFinite(stake) || stake < 1 || stake > 1000) return { error: 'Choose an outcome and wager between 1 and 1,000 points.' };
   if (marketType === 'match_winner' && /^match:[\w-]+$/.test(marketKey) && ['red', 'blue'].includes(outcomeKey)) return { value: { eventKey, marketKey, marketType, outcomeKey, stake } };
+  if (marketType === 'practice' && /^match:[\w-]+$/.test(marketKey) && isTestMarketKey(marketKey, eventKey) && ['red', 'blue'].includes(outcomeKey)) return { value: { eventKey, marketKey, marketType, outcomeKey, stake } };
   if (marketType === 'qualification_rank' && marketKey === 'qualification-rank-1' && /^frc\d+$/.test(outcomeKey)) return { value: { eventKey, marketKey, marketType, outcomeKey, stake } };
   return { error: 'That market is not available.' };
 }
@@ -72,7 +74,9 @@ export async function POST({ request }) {
     const match = await tba(`/match/${encodeURIComponent(value.market_key.replace(/^match:/, ''))}/simple`);
     if (!match || match.event_key !== value.eventKey) return json({ error: 'That match is not part of this event.' }, { status: 400 });
     if (match.actual_time) return json({ error: 'This market is locked: the match has already played.' }, { status: 409 });
-  } else {
+    const lockTime = match.predicted_time ?? match.time ?? null;
+    if (lockTime && Date.now() / 1000 >= lockTime) return json({ error: 'This market is locked: the match has started.' }, { status: 409 });
+  } else if (value.market_type === 'qualification_rank') {
     const eventTeams = await tba(`/event/${encodeURIComponent(value.eventKey)}/teams/keys`);
     if (!Array.isArray(eventTeams) || !eventTeams.includes(value.outcomeKey)) return json({ error: 'Choose a team that is competing at this event.' }, { status: 400 });
   }

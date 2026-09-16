@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS public.prediction_market_positions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   event_key text NOT NULL,
   market_key text NOT NULL,
-  market_type text NOT NULL CHECK (market_type IN ('match_winner', 'qualification_rank')),
+  market_type text NOT NULL CHECK (market_type IN ('match_winner', 'qualification_rank', 'practice')),
   outcome_key text NOT NULL,
   created_by uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   stake numeric NOT NULL CHECK (stake > 0),

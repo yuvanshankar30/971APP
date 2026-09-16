@@ -7,6 +7,30 @@
 // being right often.
 
 export const STARTING_BALANCE = 1000;
+export const TEST_MARKET_SUFFIX = 'test1';
+const FALLBACK_TEST_TEAMS = ['frc971', 'frc254', 'frc1678', 'frc1323', 'frc604', 'frc581'];
+
+export function testMarketKey(eventKey) {
+  return `${String(eventKey || '').trim()}_${TEST_MARKET_SUFFIX}`;
+}
+
+export function isTestMarketKey(marketKey, eventKey = '') {
+  const key = String(marketKey || '').replace(/^match:/, '');
+  return eventKey ? key === testMarketKey(eventKey) : key.endsWith(`_${TEST_MARKET_SUFFIX}`);
+}
+
+// A permanent sandbox gives scouts something useful to practice on before
+// the schedule arrives. Its positions are visible but never settle or touch
+// the competition leaderboard/balance.
+export function buildTestMarketMatch(eventKey, eventTeams = []) {
+  const supplied = eventTeams.map((team) => typeof team === 'string' ? team : team?.key).filter(Boolean);
+  const teamKeys = [...new Set([...supplied, ...FALLBACK_TEST_TEAMS])].slice(0, 6);
+  return {
+    key: testMarketKey(eventKey), comp_level: 'test', set_number: 1, match_number: 1,
+    actual_time: null, predicted_time: null, time: null, is_test_market: true,
+    alliances: { red: { team_keys: teamKeys.slice(0, 3), score: -1 }, blue: { team_keys: teamKeys.slice(3, 6), score: -1 } }
+  };
+}
 
 // A position is deliberately generic: a market can be a match winner, the
 // eventual qualification leader, or another event question.  This keeps the
@@ -81,6 +105,7 @@ export function resolvePariMutuel(bets = [], winningSide) {
 export function summarizeStandings(bets = []) {
   const byScout = new Map();
   for (const bet of bets) {
+    if (bet.market_type === 'practice' || isTestMarketKey(bet.market_key || bet.match_key)) continue;
     const key = bet?.created_by;
     if (!key) continue;
     if (!byScout.has(key)) byScout.set(key, { userId: key, settledNet: 0, pendingStake: 0, wins: 0, losses: 0, pushes: 0, betCount: 0 });
@@ -116,6 +141,7 @@ export function availableBalance(bets = [], userId, excludeBetId = null) {
   let pendingStake = 0;
   for (const bet of bets) {
     if (bet.created_by !== userId) continue;
+    if (bet.market_type === 'practice' || isTestMarketKey(bet.market_key || bet.match_key)) continue;
     if (bet.id === excludeBetId) continue;
     if (bet.resolved_at) settledNet += Number(bet.payout ?? 0) - Number(bet.stake ?? 0);
     else pendingStake += Number(bet.stake ?? 0);
