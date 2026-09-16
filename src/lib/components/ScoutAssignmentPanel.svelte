@@ -292,6 +292,33 @@
     showModal = false;
   }
 
+  // Unlike saveAssignment (a local draft, only sent on Publish), this is
+  // immediate - direct instruction: removing someone should notify them
+  // right away, not sit as an unpublished draft they never find out about.
+  async function removeAssignment() {
+    if (!capabilities.can_edit || saving) return;
+    const { match_key, team_key } = modalContext;
+    if (!match_key || !team_key) return;
+    saving = true;
+    errorMsg = '';
+    try {
+      const res = await authFetch('/api/scout-assignments', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'unassign', scouting_type: scoutingType, match_key, team_key })
+      });
+      const data = await res.json();
+      if (!data?.success) throw new Error(data?.error || 'unknown');
+      await loadAssignments();
+      statusMsg = `Team ${modalContext.team_number} unassigned.`;
+      showModal = false;
+    } catch (e) {
+      errorMsg = `Remove failed: ${e.message}`;
+    } finally {
+      saving = false;
+    }
+  }
+
   function randomize() {
     if (!capabilities.can_edit) return;
 
@@ -543,14 +570,14 @@
         <tbody>
           {#each matches as m}
             <tr>
-              {#each m.blue as t}
-                <td class="cell blue" class:editable-cell={capabilities.can_edit} on:click={() => openAssign(m.key, t)}>
+              {#each m.blue as t, i}
+                <td data-label={`Blue ${i + 1}`} class="cell blue" class:editable-cell={capabilities.can_edit} on:click={() => openAssign(m.key, t)}>
                   <div class="team">{displayTeam(t)}</div>
                   <div class="scout">{assignments?.[m.key]?.[t]?.user_name || '-'}</div>
                 </td>
               {/each}
-              {#each m.red as t}
-                <td class="cell red" class:editable-cell={capabilities.can_edit} on:click={() => openAssign(m.key, t)}>
+              {#each m.red as t, i}
+                <td data-label={`Red ${i + 1}`} class="cell red" class:editable-cell={capabilities.can_edit} on:click={() => openAssign(m.key, t)}>
                   <div class="team">{displayTeam(t)}</div>
                   <div class="scout">{assignments?.[m.key]?.[t]?.user_name || '-'}</div>
                 </td>
@@ -590,6 +617,9 @@
       <div class="btn-row modal-actions">
         <button class="btn btn-primary" disabled={!selectedUserId || saving} on:click={() => saveAssignment(false)}>Stage this Match</button>
         <button class="btn btn-secondary" disabled={!selectedUserId || saving} on:click={() => saveAssignment(true)}>Stage Robot</button>
+        {#if publishedAssignments?.[modalContext.match_key]?.[modalContext.team_key]?.user_id}
+          <button class="btn btn-danger" disabled={saving} title="Removes the assignment and notifies the scout right away" on:click={removeAssignment}>Remove Assignment</button>
+        {/if}
         <button class="btn btn-outline" on:click={() => {
           if (!saving) showModal = false;
         }}>Close</button>
@@ -906,5 +936,47 @@
     }
 
     .scout-filter { flex-basis: auto; }
+  }
+
+  /* The 6-column Blue/Red alliance grid (each td already a min-width:70px
+     table cell, 6 of them a guaranteed 420px+ floor) becomes one card per
+     match below phone width, its six alliance slots stacked in the same
+     blue-then-red order instead of packed into columns too narrow to read.
+     A data-label attribute on each <td> (see markup) supplies "Blue 1" /
+     "Red 2" etc since the real header rows are hidden here. */
+  @media (max-width: 640px) {
+    .scroll-x { overflow-x: visible; }
+    .assignment-table thead { display: none; }
+    .assignment-table, .assignment-table tbody, .assignment-table tr, .assignment-table td {
+      display: block;
+      width: 100%;
+      min-width: 0;
+    }
+    .assignment-table tr {
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      margin-bottom: var(--space-2);
+      overflow: hidden;
+    }
+    .assignment-table td {
+      text-align: left;
+      border: 0;
+      border-bottom: 1px solid var(--border);
+      padding: var(--space-2) var(--space-3);
+    }
+    .assignment-table tr td:last-child { border-bottom: 0; }
+    .assignment-table td::before {
+      content: attr(data-label);
+      display: block;
+      color: var(--text-muted);
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 2px;
+    }
+    .assignment-table .scout {
+      margin-top: 0;
+      white-space: normal;
+    }
   }
 </style>

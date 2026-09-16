@@ -11,7 +11,7 @@
   import SeasonFilter from '$lib/components/SeasonFilter.svelte';
   import { goto } from '$app/navigation';
   import { PUBLIC_ONSHAPE_BASE_URL } from '$env/static/public';
-  import { Search, Filter, Clock, Truck, Package, Download, Zap, Wrench, FileText, Upload, ExternalLink, Pencil, Trash2, X, Users, Box, Route, CircleCheck, Layers, Folder, ListChecks, BookOpen, Scissors } from 'lucide-svelte';
+  import { Search, Filter, Clock, Truck, Package, Download, Zap, Wrench, FileText, Upload, ExternalLink, Pencil, Trash2, X, Users, Box, CircleCheck, Layers, Folder, ListChecks, BookOpen, Scissors } from 'lucide-svelte';
   import { searchFolderTree } from '$lib/fusionFolderSearch.js';
   import ROUTER_FLOW from '$lib/router_flow.json';
   import { convertGcodeToInches } from '$autocam/fusion/gcodeUnitConvert.js';
@@ -672,15 +672,6 @@
     a.download = file.name.split('/').at(-1) || 'fusion-output.nc';
     a.click();
     URL.revokeObjectURL(url);
-  }
-
-  function sendFusionGcodeToJprog(job, file) {
-    const params = new URLSearchParams({
-      autocamJob: job.id,
-      autocamFile: file.name,
-      autocamName: job.params?.fusionFileName || job.name || 'Fusion'
-    });
-    goto(`/jprog?${params.toString()}`);
   }
 
   // Downloads every G-code file a completed Fusion CAM job produced in one
@@ -3406,9 +3397,6 @@
                     <span class="file-name">{file.name}</span>
                     <button type="button" class="btn btn-secondary btn-sm" on:click={() => downloadNcFile(file)}>
                       <Download size={13} /> Install
-                    </button>
-                    <button type="button" class="btn btn-secondary btn-sm" on:click={() => sendFusionGcodeToJprog(jobDetailsModalJob, file)}>
-                      <Route size={13} /> Send to JProg
                     </button>
                   </li>
                 {/each}

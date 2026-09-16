@@ -114,9 +114,21 @@ function uncommentedCode(line) {
   return splitComment(line).code;
 }
 
+// Matches AutoCAM's own release/outer-profile operation names (see
+// DeleteToolpaths.py's _is_outer_profile - kept identical to that pattern on
+// purpose, since this is the same operation flowing through both systems).
+// Direct instruction: the cut that actually separates a part from stock
+// must always run dead last in JProg's emitted program, never grouped in
+// with the rest of its tool's ordinary work - cutting it earlier can free
+// the part (or its holding tabs) while other operations still need the
+// material secured.
+const RELEASE_CUT_NAME_PATTERN = /\b(2d\s*slot\s*cut|slot\s*cut\s*for\s*edges)\b/i;
+
 function winCncToolBlocks(source) {
   const blocks = new Map();
+  const releaseBlocks = new Map();
   let activeTool = null;
+  const releaseTriggered = new Set();
   const lines = String(source || '').split(/\r?\n/).filter(line => !terminatePattern.test(line));
   const finalStop = lines.findLastIndex(line => /\bM5\b/i.test(uncommentedCode(line)));
   const programLines = finalStop >= 0 ? lines.slice(0, finalStop) : lines;
@@ -129,12 +141,27 @@ function winCncToolBlocks(source) {
       continue;
     }
     if (activeTool === null) continue;
-    blocks.get(activeTool).push(line);
+    // Once the release cut's own name comment is seen for this tool,
+    // everything after it (within this tool) is treated as part of that
+    // release segment - AutoCAM's own template already schedules the
+    // release/outer-profile cut last within its setup, so trusting that
+    // ordering signal here is the same assumption DeleteToolpaths.py makes.
+    if (RELEASE_CUT_NAME_PATTERN.test(line)) releaseTriggered.add(activeTool);
+    if (releaseTriggered.has(activeTool)) {
+      if (!releaseBlocks.has(activeTool)) releaseBlocks.set(activeTool, []);
+      releaseBlocks.get(activeTool).push(line);
+    } else {
+      blocks.get(activeTool).push(line);
+    }
   }
+  // A tool whose every line went to its release segment leaves an empty
+  // (but present) regular entry from the T-word branch above - drop it so
+  // callers never see a phantom tool-change with nothing to cut under it.
+  for (const [tool, body] of blocks) if (!body.length) blocks.delete(tool);
   // Some valid small programs have no explicit T command. JProg's default
   // router layer is tool 1, so keep that program runnable and schedulable.
-  if (!blocks.size) blocks.set(1, programLines.filter(line => !isG53Line(line)));
-  return blocks;
+  if (!blocks.size && !releaseBlocks.size) blocks.set(1, programLines.filter(line => !isG53Line(line)));
+  return { blocks, releaseBlocks };
 }
 
 function router971Offset(placement, bounds) {
@@ -182,7 +209,7 @@ export function nestingEmissionTools({ placements, programs, suffix = '', dialec
   for (const placement of placements || []) {
     const program = sourceForPlacement(placement, programs, suffix, thickness, dialect);
     if (!program) continue;
-    for (const tool of winCncToolBlocks(program.source).keys()) if (tool !== 0) tools.add(tool);
+    for (const tool of winCncToolBlocks(program.source).blocks.keys()) if (tool !== 0) tools.add(tool);
   }
   return [...tools].sort((left, right) => left - right);
 }
@@ -221,10 +248,16 @@ export function emitNestingGcode({ name, placements, programs, suffix = '', file
     }
   } else {
     const byTool = new Map();
+    const byReleaseTool = new Map();
     for (const program of selectedPrograms) {
-      for (const [tool, body] of winCncToolBlocks(program.source)) {
+      const { blocks, releaseBlocks } = winCncToolBlocks(program.source);
+      for (const [tool, body] of blocks) {
         if (!byTool.has(tool)) byTool.set(tool, []);
         byTool.get(tool).push({ ...program, source: body.join('\n') });
+      }
+      for (const [tool, body] of releaseBlocks) {
+        if (!byReleaseTool.has(tool)) byReleaseTool.set(tool, []);
+        byReleaseTool.get(tool).push({ ...program, source: body.join('\n') });
       }
     }
     const orderedTools = configuredWinCncToolOrder(toolOrder, [...byTool.keys()].sort((left, right) => left - right));
@@ -232,6 +265,18 @@ export function emitNestingGcode({ name, placements, programs, suffix = '', file
       const toolPrograms = byTool.get(tool) || [];
       // GCodeParserWinCNC emits all parts using a tool together, with the safe
       // machine-coordinate retract/tool-change sequence before each group.
+      lines.push('G53 Z', 'M5', `[Tool ${tool}]`, `T${tool}`);
+      for (const { placement, source, bounds } of toolPrograms) {
+        emitted += 1;
+        lines.push(`[Part: ${placement.label}]`, ...transformedProgram(source, placement, bounds));
+      }
+    }
+    // Release/outer-profile cuts always run last, after every configured
+    // tool group above - see RELEASE_CUT_NAME_PATTERN's own comment. Sorted
+    // by tool number only for a stable, deterministic order among
+    // themselves; their position relative to everything else is fixed.
+    for (const tool of [...byReleaseTool.keys()].sort((left, right) => left - right)) {
+      const toolPrograms = byReleaseTool.get(tool) || [];
       lines.push('G53 Z', 'M5', `[Tool ${tool}]`, `T${tool}`);
       for (const { placement, source, bounds } of toolPrograms) {
         emitted += 1;

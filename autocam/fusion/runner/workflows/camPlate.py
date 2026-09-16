@@ -328,9 +328,49 @@ def _operation_warnings(app, cam) -> list:
     return warnings
 
 
+def _release_contour_has_selected_geometry(op) -> bool:
+    """True if a contour2d operation's own contour selection has at least
+    one edge actually chosen.
+
+    Existence in setup.operations is not the same as having something to
+    cut. Confirmed live as a second, distinct incident from the one
+    _require_release_contour was originally written for (see that
+    function's docstring): a real job's release cut (group_tabs=true)
+    survived DeleteToolpaths' cleanup and posted as "[Slot Cut for Edges]"
+    in the G-code, but with zero toolpath lines under it - its own contour
+    selection had ended up with no edges at all, and nothing checked that.
+    Fusion does not reliably surface this with isToolpathValid=False or a
+    "warning" mentioning "empty" for a contour2d operation the way it does
+    for other strategies - DeleteToolpaths.py's own repeated
+    "isToolpathValid=True but Generated toolpath is empty" incidents are
+    the same underlying Fusion quirk. The only reliable signal left is the
+    operation's own selection, read the same way
+    _require_through_hole_for_finishing_pass's _edge_tokens already reads
+    it for through-shape operations.
+
+    A selection this can't read at all is treated as empty, not as
+    "can't tell" - a release contour with unreadable geometry is exactly
+    as unsafe to ship as one confirmed empty.
+    """
+    try:
+        param = op.parameters.itemByName("contours")
+        if param is None:
+            return False
+        value = param.value
+        if not hasattr(value, "getCurveSelections"):
+            return False
+        for chain in value.getCurveSelections():
+            if list(getattr(chain, "inputGeometry", None) or []):
+                return True
+        return False
+    except Exception:
+        return False
+
+
 def _require_release_contour(cam) -> None:
     """Raise if the one operation that actually releases the part(s) from
-    stock did not survive DeleteToolpaths.
+    stock did not survive DeleteToolpaths, or survived with nothing
+    selected to cut.
 
     group_tabs=true marks exactly one contour2d operation per setup - the
     outer release cut TabPlacement.py configures manual tabs on (see that
@@ -343,6 +383,14 @@ def _require_release_contour(cam) -> None:
     is never actually cut free of its stock is not a completed job - fail
     here, immediately after DeleteToolpaths runs, instead of only ever
     finding out at the machine.
+
+    Surviving is necessary but not sufficient, though - see
+    _release_contour_has_selected_geometry's own docstring for the second,
+    distinct incident this also now catches: the operation present with
+    group_tabs=true but an empty contour selection, posting a named
+    section in the G-code with no moves under it. A setup whose only
+    release-contour candidate is empty is treated the same as a setup
+    with none at all, rather than accepted on sight.
 
     cam may be None (the CAM product failed to resolve) - nothing to
     check in that case, and camPlate.py's own machining-time computation
@@ -361,8 +409,18 @@ def _require_release_contour(cam) -> None:
                 is_release = str(group_tabs_param.expression).strip().lower() == "true"
             except Exception:
                 is_release = False
-            if is_release:
+            if not is_release:
+                continue
+            if _release_contour_has_selected_geometry(op):
                 return
+            raise RuntimeError(
+                "The release-contour operation (group_tabs=true) survived "
+                "toolpath generation but its own contour selection is "
+                "empty - it would post with no toolpath under it, and the "
+                "part(s) would never actually separate from stock. Check "
+                "the Runner's log for why TabPlacement/DeleteToolpaths "
+                "left this operation's geometry selection empty."
+            )
     raise RuntimeError(
         "No release-contour operation (group_tabs=true) survived toolpath "
         "generation - the part(s) would never actually separate from "
@@ -588,6 +646,136 @@ def _require_pocket_finishing_pass_pairing(cam) -> None:
                 "in the same setup. Check the Runner's log for a partial "
                 "chain-assignment failure in DeleteToolpaths."
             )
+
+
+def _operation_tool_diameter_cm(op):
+    """This operation's assigned tool diameter, in cm - None if it can't be
+    read. Duplicated from DeleteToolpaths.py's own function of the same
+    name for the same reason every other guard in this file duplicates
+    rather than imports (see _require_through_hole_for_finishing_pass's own
+    docstring) - this module loads Fusion's runtime-only adsk package at
+    import time.
+    """
+    try:
+        parameter = op.tool.parameters.itemByName("tool_diameter")
+        if parameter is None:
+            return None
+        return float(parameter.value.value)
+    except Exception:
+        return None
+
+
+# Kept identical to DeleteToolpaths.py's own constant/function of the same
+# name - see that file for the "confirmed live" incident behind the ramp-
+# diameter math (a 6mm tool's real ~0.95-tool-diameter helix needing more
+# clearance than the bare 1.5x-diameter rule assumed, routing it onto an
+# opening it could not actually enter).
+_ROUGHING_FIT_CLEARANCE_FACTOR = 1.5
+
+
+def _adaptive_entry_clearance_cm(op, tool_diameter_cm):
+    fallback = tool_diameter_cm * _ROUGHING_FIT_CLEARANCE_FACTOR
+    try:
+        ramp_type = op.parameters.itemByName("rampType")
+        if ramp_type is not None:
+            expression = str(ramp_type.expression).strip().strip("'").lower()
+            if expression and expression != "helix":
+                return fallback
+        ramp = op.parameters.itemByName("minimumRampDiameter")
+        if ramp is None:
+            ramp = op.parameters.itemByName("helicalRampDiameter")
+        if ramp is None:
+            return fallback
+        ramp_diameter_cm = float(ramp.value.value)
+        if ramp_diameter_cm <= 0:
+            return fallback
+        return tool_diameter_cm + ramp_diameter_cm
+    except Exception:
+        return fallback
+
+
+def _undersized_roughing_chain_warnings(cam) -> list:
+    """A chain routed to a through-shape roughing tier whose real entry
+    envelope cannot fit it - the specific gap neither of this file's other
+    checks can see.
+
+    Confirmed live as a real incident (this is the same failure
+    DeleteToolpaths' own _adaptive_entry_clearance_cm was written to
+    prevent at routing time - see that function's docstring in
+    DeleteToolpaths.py): DeleteToolpaths routes each chain to the largest
+    tool whose own clearance threshold it clears, but a chain can still end
+    up on a tool too big for it - a template change, a borderline width
+    measurement, or simply this check's own conservative bounding-box proxy
+    disagreeing with whatever measurement routed it. When only one chain in
+    a many-chain operation is affected, Fusion's per-operation
+    isToolpathValid/warning stay clean (the OTHER chains in that same
+    operation are genuinely fine), so nothing at the operation level ever
+    flags it - confirmed separately in this file's own history (see
+    _operation_warnings' Issue #316 reference for the same class of
+    silent-partial-failure).
+
+    This also is not the same gap _require_through_hole_for_finishing_pass
+    closes: that guard confirms a chain is SELECTED in some roughing tier,
+    which it still is here - Fusion doesn't remove a chain from a
+    selection just because it can't cut it. And it is not the same gap
+    _coverage_warnings' own loop-matching closes either: a finishing pass
+    traces a chain's boundary regardless of whether any roughing tier
+    actually cleared its interior, so a G-code loop can exist at that
+    location from finishing alone, reading as "covered" while the interior
+    was never removed.
+
+    Reports a chain's own bounding-box minor axis against the operation's
+    real entry clearance (the exact same _adaptive_entry_clearance_cm
+    calculation DeleteToolpaths uses to route it) - a chain's true
+    narrowest passage is always at most its bounding-box minor axis, so a
+    chain flagged here is provably too tight, never a borderline maybe.
+    Warning-only and best-effort like the rest of this module's coverage
+    checks (see _coverage_warnings' own docstring for why) - a bounding-box
+    proxy is cruder than a real toolpath result, so this reports for a
+    human to check rather than failing a job outright.
+    """
+    warnings = []
+    try:
+        for setup in cam.setups:
+            for op in setup.operations:
+                name_lower = str(op.name or "").lower()
+                if "through" not in name_lower or "circular" in name_lower or op.strategy in ("bore", "contour2d"):
+                    continue
+                tool_diameter_cm = _operation_tool_diameter_cm(op)
+                if not tool_diameter_cm:
+                    continue
+                required_cm = _adaptive_entry_clearance_cm(op, tool_diameter_cm)
+                param = op.parameters.itemByName("pockets")
+                value = param.value if param is not None else None
+                if value is None or not hasattr(value, "getCurveSelections"):
+                    continue
+                for chain in value.getCurveSelections():
+                    xs, ys = [], []
+                    for edge in getattr(chain, "inputGeometry", None) or []:
+                        try:
+                            box = edge.boundingBox
+                            xs += [box.minPoint.x, box.maxPoint.x]
+                            ys += [box.minPoint.y, box.maxPoint.y]
+                        except Exception:
+                            continue
+                    if not xs or not ys:
+                        continue
+                    min_span_cm = min(max(xs) - min(xs), max(ys) - min(ys))
+                    if min_span_cm < required_cm - 1e-6:
+                        cx = (min(xs) + max(xs)) / 2 / 2.54
+                        cy = (min(ys) + max(ys)) / 2 / 2.54
+                        warnings.append(
+                            "'{}' is routed a feature near ({:.3f}, {:.3f})in only {:.3f}in wide, "
+                            "narrower than this tier's own {:.3f}in tool needs to enter "
+                            "({:.3f}in real clearance required) - it will not actually be cleared. "
+                            "Check DeleteToolpaths' chain routing for why this chain wasn't sent to a "
+                            "smaller tier.".format(
+                                op.name, cx, cy, min_span_cm / 2.54, tool_diameter_cm / 2.54, required_cm / 2.54
+                            )
+                        )
+    except Exception:
+        pass
+    return warnings
 
 
 def _coverage_warnings(app, cam, nc_files) -> list:
@@ -1060,7 +1248,17 @@ def start(data, session):
         for warning in operation_warnings:
             app.log(f"OPERATION: {warning}")
 
-        job_warnings = coverage_warnings + operation_warnings
+        # A third, distinct gap neither check above closes: a chain still
+        # selected in a roughing tier (satisfies the pairing guards) with a
+        # G-code loop near it from finishing alone (satisfies the coverage
+        # check's loop-matching) can still never have been actually cleared,
+        # if that tier's own tool cannot physically enter it. See
+        # _undersized_roughing_chain_warnings' own docstring.
+        fit_warnings = _undersized_roughing_chain_warnings(cam)
+        for warning in fit_warnings:
+            app.log(f"TOOL FIT: {warning}")
+
+        job_warnings = coverage_warnings + operation_warnings + fit_warnings
 
         completion_data = {
             "jobId": job_id,

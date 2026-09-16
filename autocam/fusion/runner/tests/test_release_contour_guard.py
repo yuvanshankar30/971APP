@@ -1,11 +1,24 @@
-"""_require_release_contour is the safety net for the exact incident PR
-#500 fixed: TabPlacement's manual tab positions left the one group_tabs=true
-contour2d operation (the release cut) with an invalid toolpath,
-DeleteToolpaths silently deleted it, and the job still reported "completed"
-with zero warnings - a real job posted G-code with every hole machined and
-no release contour at all. This guard raises immediately after
-DeleteToolpaths runs if that operation didn't survive, so a similar
-regression fails a job loudly instead of shipping bad G-code silently.
+"""_require_release_contour is the safety net for two distinct incidents.
+
+PR #500's incident: TabPlacement's manual tab positions left the one
+group_tabs=true contour2d operation (the release cut) with an invalid
+toolpath, DeleteToolpaths silently deleted it, and the job still reported
+"completed" with zero warnings - a real job posted G-code with every hole
+machined and no release contour at all.
+
+A second, distinct incident this guard was later extended to also catch:
+the release-contour operation survived DeleteToolpaths (it's still in
+setup.operations, group_tabs=true) but its own contour selection ended up
+with zero edges - it posted as a named section in the G-code
+("[Slot Cut for Edges]") with no toolpath lines under it at all. Presence
+in setup.operations isn't the same as having something to cut, and Fusion
+doesn't reliably flag an empty contour2d selection as isToolpathValid=False
+or with an "empty" warning the way it does for other strategies.
+
+This guard raises immediately after DeleteToolpaths runs if the release
+contour either didn't survive or survived with nothing selected, so a
+similar regression fails a job loudly instead of shipping bad G-code
+silently.
 
 camPlate.py imports Fusion's runtime-only modules at import time, so the
 function under test is loaded in isolation rather than by importing the
@@ -19,7 +32,7 @@ import unittest
 
 def _load_require_release_contour():
     source = (Path(__file__).parents[1] / "workflows/camPlate.py").read_text()
-    start = source.index("def _require_release_contour")
+    start = source.index("def _release_contour_has_selected_geometry")
     end = source.index("def _coverage_warnings")
     namespace = {}
     exec(compile(source[start:end], "camPlate_require_release_contour", "exec"), namespace)
@@ -33,10 +46,27 @@ def _param(expression):
     return types.SimpleNamespace(expression=expression)
 
 
-def _op(strategy, group_tabs_expression=None):
+def _chain(edges):
+    return types.SimpleNamespace(inputGeometry=edges)
+
+
+def _contours_param(chains):
+    return types.SimpleNamespace(value=types.SimpleNamespace(getCurveSelections=lambda: chains))
+
+
+# One real edge selected by default - every existing test below represents
+# "the real release cut", which must have real geometry unless a test is
+# specifically exercising the empty-selection incident, in which case it
+# passes contours_chains=[] or a chain with no edges explicitly.
+_DEFAULT_CHAINS = [_chain(["edge1"])]
+
+
+def _op(strategy, group_tabs_expression=None, contours_chains=_DEFAULT_CHAINS):
     params = {}
     if group_tabs_expression is not None:
         params["group_tabs"] = _param(group_tabs_expression)
+    if contours_chains is not None:
+        params["contours"] = _contours_param(contours_chains)
     return types.SimpleNamespace(
         strategy=strategy,
         parameters=types.SimpleNamespace(itemByName=lambda name: params.get(name)),
@@ -74,6 +104,39 @@ class RequireReleaseContourTests(unittest.TestCase):
         # must not be mistaken for a missing release contour by itself.
         cam = _cam(_op("drill"), _op("contour2d", "true"))
         require_release_contour(cam)  # must not raise
+
+    def test_raises_when_the_release_contour_survived_with_no_chains_selected(self):
+        # The second incident: group_tabs=true, still in setup.operations,
+        # but its own contour selection has zero chains - it would post
+        # "[Slot Cut for Edges]" (or whatever the template names it) with
+        # no toolpath lines under it at all.
+        cam = _cam(_op("contour2d", "true", contours_chains=[]))
+        with self.assertRaises(RuntimeError) as ctx:
+            require_release_contour(cam)
+        self.assertIn("empty", str(ctx.exception))
+
+    def test_raises_when_the_release_contour_survived_with_a_chain_that_has_no_edges(self):
+        # A chain object can exist without ever having a real edge in it -
+        # same empty-selection incident, one level deeper.
+        cam = _cam(_op("contour2d", "true", contours_chains=[_chain([])]))
+        with self.assertRaises(RuntimeError) as ctx:
+            require_release_contour(cam)
+        self.assertIn("empty", str(ctx.exception))
+
+    def test_raises_when_the_contours_parameter_cannot_be_read(self):
+        # An unreadable selection is treated as empty, not as "can't tell" -
+        # a release contour this guard can't verify is exactly as unsafe to
+        # ship as one confirmed empty.
+        op = types.SimpleNamespace(
+            strategy="contour2d",
+            parameters=types.SimpleNamespace(
+                itemByName=lambda name: _param("true") if name == "group_tabs" else None
+            ),
+        )
+        cam = _cam(op)
+        with self.assertRaises(RuntimeError) as ctx:
+            require_release_contour(cam)
+        self.assertIn("empty", str(ctx.exception))
 
     def test_does_nothing_when_cam_is_none(self):
         # Resolving the CAM product itself can fail (see camPlate.py's own

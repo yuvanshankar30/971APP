@@ -1,9 +1,15 @@
 <script>
   import { onMount } from 'svelte';
+  import { page } from '$app/stores';
   import { supabase, getAuthHeader } from '$lib/supabase.js';
   import { fetchActiveScoutingEventKey, fetchAvailableScoutingEvents } from '$lib/scoutingEvent.js';
   import { formatPacificDateTimeWithZone } from '$lib/timezone.js';
+  import { buildPowerRankings } from '$lib/scoutingStats.js';
+  import { applyRobotRatings, myRobotRating } from '$lib/robotRatings.js';
+  import { bestTeamPhoto, matchVideoUrl, mediaImageUrl } from '$lib/tbaMedia.js';
   import SeasonFilter from '$lib/components/SeasonFilter.svelte';
+  import MatchScoutReport from '$lib/components/MatchScoutReport.svelte';
+  import RobotStarPlot from '$lib/components/RobotStarPlot.svelte';
 
   const SCOPE_OPTIONS = [
     { value: 'total', label: 'Total' },
@@ -53,6 +59,8 @@
   $: resolvedEventKey = selectedEventKey || eventKey;
 
   let teams = [];
+  let eventTeams = [];
+  let eventMatches = [];
   let teamNames = {};
   let teamSearch = '';
   let selectedTeam = '';
@@ -60,6 +68,14 @@
   let teamEvents = [];
   let pitEntry = null;
   let teamNotes = [];
+  let matchEntries = [];
+  let savedAutoPaths = [];
+  let robotRatings = [];
+  let selectedProfile = null;
+  let officialTeam = null;
+  let tbaPhoto = null;
+  let userId = null;
+  let requestedTeamKey = '';
   let viewFilterScope = 'total';
 
   const displayTeam = (t) => String(t || '').replace(/^frc/i, '');
@@ -121,12 +137,17 @@
   async function loadTeams() {
     if (!resolvedEventKey) {
       teams = [];
+      eventTeams = [];
+      eventMatches = [];
       teamNames = {};
       return;
     }
 
+    eventTeams = [];
+    eventMatches = [];
+
     const [eventRes, eventTeamsRes, dataListRes, noteListRes, pitListRes] = await Promise.all([
-      fetch(`/api/tba/event-matches?event_key=${encodeURIComponent(resolvedEventKey)}&comp_level=qm`).catch(() => null),
+      fetch(`/api/tba/event-matches?event_key=${encodeURIComponent(resolvedEventKey)}&comp_level=all`).catch(() => null),
       fetch(`/api/tba/event-teams?event_key=${encodeURIComponent(resolvedEventKey)}`).catch(() => null),
       authFetch(`/datascout?list_teams=1&event_key=${encodeURIComponent(resolvedEventKey)}`).catch(() => null),
       authFetch(`/notescout?list_teams=1&event_key=${encodeURIComponent(resolvedEventKey)}`).catch(() => null),
@@ -142,6 +163,7 @@
 
     if (eventRes?.ok) {
       const eventData = await eventRes.json().catch(() => null);
+      eventMatches = eventData?.data || [];
       for (const m of eventData?.data || []) {
         for (const t of m?.alliances?.red?.team_keys || []) addTeam(t);
         for (const t of m?.alliances?.blue?.team_keys || []) addTeam(t);
@@ -151,6 +173,7 @@
     let nextNames = {};
     if (eventTeamsRes?.ok) {
       const teamData = await eventTeamsRes.json().catch(() => null);
+      eventTeams = teamData?.data || [];
       for (const row of teamData?.data || []) {
         const key = normalizeTeamKey(row.key);
         const nickname = String(row.nickname || row.name || '').trim();
@@ -186,21 +209,48 @@
     apiNote = '';
 
     try {
-      const [eventsRes, pitRes, notesRes] = await Promise.all([
-        authFetch(`/datascout?team_key=${encodeURIComponent(selectedTeam)}&event_key=${encodeURIComponent(resolvedEventKey)}`),
-        authFetch(`/pitscout?event_key=${encodeURIComponent(resolvedEventKey)}&team_key=${encodeURIComponent(selectedTeam)}`),
-        authFetch(`/notescout?team_key=${encodeURIComponent(selectedTeam)}&event_key=${encodeURIComponent(resolvedEventKey)}`)
+      const [reportRes, ratingsRes, officialRes, mediaRes] = await Promise.all([
+        authFetch(`/api/scouting-report?event_key=${encodeURIComponent(resolvedEventKey)}`),
+        authFetch(`/api/scouting-robot-ratings?event_key=${encodeURIComponent(resolvedEventKey)}`),
+        fetch(`/api/tba/event-oprs?event_key=${encodeURIComponent(resolvedEventKey)}`),
+        fetch(`/api/tba/team-media?event_key=${encodeURIComponent(resolvedEventKey)}&team_key=${encodeURIComponent(selectedTeam)}`)
       ]);
 
-      const [eventsData, pitData, notesData] = await Promise.all([
-        eventsRes.json().catch(() => null),
-        pitRes.json().catch(() => null),
-        notesRes.json().catch(() => null)
+      const [reportPayload, ratingsPayload, officialPayload, mediaPayload] = await Promise.all([
+        reportRes.json().catch(() => null),
+        ratingsRes.json().catch(() => null),
+        officialRes.json().catch(() => null),
+        mediaRes.json().catch(() => null)
       ]);
 
-      teamEvents = eventsData?.success ? eventsData.data || [] : [];
-      pitEntry = pitData?.success ? pitData.data || null : null;
-      teamNotes = notesData?.success ? notesData.data || [] : [];
+      if (!reportRes.ok || !reportPayload?.success) throw new Error(reportPayload?.error || 'Could not load the team scouting report.');
+      const scouting = reportPayload.data || {};
+      teamEvents = (scouting.data_events || []).filter((row) => row.team_key === selectedTeam);
+      pitEntry = (scouting.pit_entries || []).find((row) => row.team_key === selectedTeam) || null;
+      teamNotes = (scouting.notes || []).filter((row) => row.team_key === selectedTeam);
+      matchEntries = (scouting.match_entries || []).filter((row) => row.team_key === selectedTeam);
+      savedAutoPaths = (scouting.auto_paths || []).filter((row) => row.team_key === selectedTeam);
+      robotRatings = ratingsPayload?.success ? ratingsPayload.data || [] : [];
+
+      const officialRows = officialPayload?.success ? officialPayload.data || [] : [];
+      const officialByNumber = new Map(officialRows.map((row) => [Number(row.team), { ...row, opr: row.epa ?? null }]));
+      officialTeam = officialByNumber.get(Number(displayTeam(selectedTeam))) || null;
+      const roster = eventTeams.length
+        ? eventTeams
+        : teams.map((key) => ({ key, team_number: Number(displayTeam(key)), nickname: teamNames[key] || '' }));
+      const profiles = applyRobotRatings(buildPowerRankings(
+        roster,
+        scouting.data_events || [],
+        scouting.notes || [],
+        {
+          pitEntries: scouting.pit_entries || [],
+          problemReports: scouting.pit_problems || [],
+          matchEntries: scouting.match_entries || [],
+          oprByTeamNumber: officialByNumber
+        }
+      ), robotRatings);
+      selectedProfile = profiles.find((row) => row.key === selectedTeam) || null;
+      tbaPhoto = bestTeamPhoto(mediaPayload?.success ? mediaPayload.data || [] : []);
       viewFilterScope = 'total';
     } catch (e) {
       apiNote = e.message || 'Failed to load team details.';
@@ -214,6 +264,12 @@
     teamEvents = [];
     pitEntry = null;
     teamNotes = [];
+    matchEntries = [];
+    savedAutoPaths = [];
+    robotRatings = [];
+    selectedProfile = null;
+    officialTeam = null;
+    tbaPhoto = null;
     viewFilterScope = 'total';
   }
 
@@ -231,7 +287,10 @@
         apiNote = 'No scouting event is configured.';
         return;
       }
+      const nextTeam = requestedTeamKey || selectedTeam;
+      requestedTeamKey = '';
       await loadTeams();
+      if (nextTeam) await openTeam(nextTeam);
     } catch (e) {
       apiNote = e.message || 'Failed to load team view.';
     } finally {
@@ -288,10 +347,31 @@
     return teamNames[normalizeTeamKey(teamKey)] || `Team ${displayTeam(teamKey)}`;
   }
 
+  function allianceForTeam(match) {
+    return (match?.alliances?.red?.team_keys || []).includes(selectedTeam) ? 'red' : 'blue';
+  }
+
+  function matchResult(match) {
+    const alliance = allianceForTeam(match);
+    const ours = match?.alliances?.[alliance]?.score;
+    const theirs = match?.alliances?.[alliance === 'red' ? 'blue' : 'red']?.score;
+    if (!Number.isFinite(ours) || ours < 0 || !Number.isFinite(theirs) || theirs < 0) return 'Score unavailable';
+    return `${ours}-${theirs} · ${ours === theirs ? 'Tie' : ours > theirs ? 'Win' : 'Loss'}`;
+  }
+
   $: searchDigits = String(teamSearch || '').replace(/\D/g, '');
   $: filteredTeams = teams.filter((t) => !searchDigits || displayTeam(t).includes(searchDigits));
   $: selectedTeamNumber = selectedTeam ? displayTeam(selectedTeam) : '';
   $: selectedTeamName = selectedTeam ? teamDisplayName(selectedTeam) : '';
+  $: activeEventLabel = availableEvents.find((option) => option.value === eventKey)?.label || eventKey || 'none set';
+  $: browseEventOptions = availableEvents.filter((option) => option.value !== eventKey);
+  $: selectedRobotRatings = robotRatings.filter((rating) => rating.team_key === selectedTeam);
+  $: myRating = myRobotRating(robotRatings, selectedTeam, userId);
+  $: playedTeamMatches = eventMatches
+    .filter((match) => match.actual_time && [...(match.alliances?.red?.team_keys || []), ...(match.alliances?.blue?.team_keys || [])].includes(selectedTeam))
+    .slice()
+    .reverse();
+  $: tbaPhotoUrl = mediaImageUrl(tbaPhoto);
   $: viewMatchKeys = [...new Set(teamEvents.map((e) => e.match_key).filter(Boolean))].sort((a, b) => (parseInt(a.split('_').pop().replace(/\D/g, ''), 10) || 0) - (parseInt(b.split('_').pop().replace(/\D/g, ''), 10) || 0));
   $: primaryPhoto = pitEntry?.photo_paths?.[0] || '';
   $: pitAutoOptions = normalizeAutoOptions(pitEntry?.auto_options || []);
@@ -481,8 +561,13 @@
   $: climbTotal = viewStats ? viewStats.climb.none + viewStats.climb.L1 + viewStats.climb.L2 + viewStats.climb.L3 + viewStats.climb.failed : 0;
   $: roleTotal = viewStats ? viewStats.role.Scoring + viewStats.role.Shuttling + viewStats.role.Defense + viewStats.role['Counter Defense'] + viewStats.role.Dead : 0;
 
-  onMount(() => {
-    loadEventOptions();
+  onMount(async () => {
+    requestedTeamKey = normalizeTeamKey($page.url.searchParams.get('team'));
+    const requestedEventKey = String($page.url.searchParams.get('event_key') || '').trim();
+    const { data } = await supabase.auth.getUser();
+    userId = data?.user?.id || null;
+    await loadEventOptions();
+    if (requestedEventKey && requestedEventKey !== eventKey) selectedEventKey = requestedEventKey;
   });
 
   // Re-load the team list whenever the resolved (browsed) event changes -
@@ -508,9 +593,9 @@
   </div>
   <div class="page-actions">
     <SeasonFilter
-      options={availableEvents}
+      options={browseEventOptions}
       bind:value={selectedEventKey}
-      allLabel={`Current Event (${eventKey || 'none set'})`}
+      allLabel={`Current Event (${activeEventLabel})`}
     />
     {#if selectedTeam}
       <button class="btn btn-secondary" on:click={clearSelection}>&larr; Back</button>
@@ -548,6 +633,12 @@
         <span class="team-name-primary">{selectedTeamName}</span>
         <sub class="team-name-sub">{selectedTeamNumber}</sub>
       </div>
+      <div class="team-rank-strip">
+        <span><small>Event rank</small><strong>{officialTeam?.rank ? `#${officialTeam.rank}` : '—'}</strong></span>
+        <span><small>Record</small><strong>{officialTeam ? `${officialTeam.wins}-${officialTeam.losses}-${officialTeam.ties}` : '—'}</strong></span>
+        <span><small>971 power rank</small><strong>{selectedProfile?.powerRank ? `#${selectedProfile.powerRank}` : '—'}</strong></span>
+        <span><small>Scout power</small><strong>{selectedProfile?.scoutPower == null ? '—' : selectedProfile.scoutPower.toFixed(1)}</strong></span>
+      </div>
       <div class="filters-row">
         <select class="form-select" bind:value={viewFilterScope}>
           {#each SCOPE_OPTIONS as option}<option value={option.value}>{option.label}</option>{/each}
@@ -583,10 +674,46 @@
           {/if}
         {/if}
       </div>
+      <div class="pit-auto-group">
+        <div class="pit-auto-heading">Saved autonomous paths ({savedAutoPaths.length})</div>
+        {#if savedAutoPaths.length}
+          <div class="pit-auto-list">
+            {#each savedAutoPaths as path (path.id)}
+              <div class="pit-auto-card"><div class="pit-auto-name">{path.name}</div><div class="pit-auto-description">{path.alliance || 'Alliance not recorded'} · {path.path?.length || 0} path points</div></div>
+            {/each}
+          </div>
+        {:else}<div class="empty compact-empty">No saved autonomous paths.</div>{/if}
+      </div>
     </div>
     <div class="card image-box">
-      {#if primaryPhoto}<img class="team-image" src={photoUrl(primaryPhoto)} alt="Pit view" />{:else}<div class="image-empty">No Photo</div>{/if}
+      {#if tbaPhotoUrl}
+        <img class="team-image" src={tbaPhotoUrl} alt={`Team ${selectedTeamNumber} robot from The Blue Alliance`} />
+        {#if tbaPhoto?.view_url}<a class="photo-credit" href={tbaPhoto.view_url} target="_blank" rel="noreferrer">View source on The Blue Alliance</a>{:else}<span class="photo-credit">Photo from The Blue Alliance</span>{/if}
+      {:else if primaryPhoto}
+        <img class="team-image" src={photoUrl(primaryPhoto)} alt={`Team ${selectedTeamNumber} pit scouting`} />
+        <span class="photo-credit">Pit scouting photo</span>
+      {:else}<div class="image-empty">No robot photo available</div>{/if}
     </div>
+  </div>
+
+  <div class="team-overview-grid">
+    <section class="card rating-overview">
+      <div><h3>Scout ratings</h3><p>{selectedRobotRatings.length} rating{selectedRobotRatings.length === 1 ? '' : 's'} submitted</p></div>
+      <div class="rating-summary-grid">
+        <span><small>Overall average</small><strong>{selectedProfile?.robotRating?.overallAvg == null ? '—' : selectedProfile.robotRating.overallAvg.toFixed(1)}</strong></span>
+        <span><small>Your rating</small><strong>{myRating?.overall_rating ?? 'Not rated'}</strong></span>
+        <span><small>Offense</small><strong>{selectedProfile?.robotRating?.offenseAvg == null ? '—' : selectedProfile.robotRating.offenseAvg.toFixed(1)}</strong></span>
+        <span><small>Driving</small><strong>{selectedProfile?.robotRating?.drivingAvg == null ? '—' : selectedProfile.robotRating.drivingAvg.toFixed(1)}</strong></span>
+        <span><small>Defense</small><strong>{selectedProfile?.robotRating?.defenseAvg == null ? '—' : selectedProfile.robotRating.defenseAvg.toFixed(1)}</strong></span>
+        <span><small>Shuttling</small><strong>{selectedProfile?.robotRating?.shuttlingAvg == null ? '—' : selectedProfile.robotRating.shuttlingAvg.toFixed(1)}</strong></span>
+      </div>
+      {#if myRating?.notes}<p class="my-rating-note"><strong>Your note:</strong> {myRating.notes}</p>{/if}
+      <a class="btn btn-secondary btn-sm" href={`/robotratings?team=${encodeURIComponent(selectedTeam)}`}>{myRating ? 'Edit my rating' : 'Rate this robot'}</a>
+    </section>
+    <section class="card star-overview">
+      <h3>Event-relative profile</h3>
+      {#if selectedProfile}<RobotStarPlot left={selectedProfile} />{:else}<div class="empty">Not enough scouting data for a profile.</div>{/if}
+    </section>
   </div>
 
   <div class="main-split">
@@ -674,6 +801,30 @@
       {/if}
     </div>
   </div>
+
+  <section class="card match-history-card">
+    <div class="section-title-row"><div><h3>Previous matches</h3><p>Official scores and recordings from The Blue Alliance.</p></div><strong>{playedTeamMatches.length}</strong></div>
+    {#if playedTeamMatches.length}
+      <div class="match-history-list">
+        {#each playedTeamMatches as match (match.key)}
+          {@const alliance = allianceForTeam(match)}
+          <div class="match-history-row">
+            <div><strong>{match.key.split('_').at(-1).toUpperCase()}</strong><span class:alliance-red={alliance === 'red'} class:alliance-blue={alliance === 'blue'}>{alliance} alliance</span></div>
+            <span>{match.alliances?.[alliance]?.team_keys?.map(displayTeam).join(', ')}</span>
+            <strong>{matchResult(match)}</strong>
+            <a class="btn btn-secondary btn-sm" href={matchVideoUrl(match)} target="_blank" rel="noreferrer">{match.videos?.length ? 'Watch video' : 'Open on TBA'}</a>
+          </div>
+        {/each}
+      </div>
+    {:else}<div class="empty">No completed matches are posted for this team yet.</div>{/if}
+  </section>
+
+  <section class="card manual-reports-card">
+    <div class="section-title-row"><div><h3>Manual match reports</h3><p>Every submitted report for Team {selectedTeamNumber} at this event.</p></div><strong>{matchEntries.length}</strong></div>
+    {#if matchEntries.length}
+      {#each matchEntries as report (report.id)}<MatchScoutReport {report} />{/each}
+    {:else}<div class="empty">No manual match reports yet.</div>{/if}
+  </section>
 {/if}
 
 <style>
@@ -692,11 +843,16 @@
   .team-meta-box { display: grid; gap: var(--gap-3); }
   .team-name-box { font-size: var(--font-xl); font-weight: 800; line-height: 1.2; display: inline-flex; align-items: baseline; gap: 0.5rem; }
   .team-name-sub { color: var(--text-muted); font-size: 0.9rem; }
+  .team-rank-strip { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); border:1px solid var(--border); border-radius:var(--radius-sm); overflow:hidden; }
+  .team-rank-strip span { display:grid; gap:2px; padding:var(--space-2); border-right:1px solid var(--border); }
+  .team-rank-strip span:last-child { border-right:0; }
+  .team-rank-strip small, .rating-summary-grid small { color:var(--text-muted); font-size:.66rem; text-transform:uppercase; }
   .filters-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--gap-2); max-width: 260px; }
-  .image-box { display: grid; align-items: center; justify-items: center; min-height: 170px; }
-  .team-image, .image-empty { width: 100%; height: 170px; border-radius: var(--radius-sm); border: 1px solid var(--border); }
+  .image-box { display: grid; align-content:start; justify-items:center; gap:var(--space-2); min-height:240px; }
+  .team-image, .image-empty { width: 100%; height:240px; border-radius: var(--radius-sm); border: 1px solid var(--border); }
   .team-image { object-fit: cover; }
   .image-empty { display: grid; place-items: center; color: var(--text-muted); font-size: var(--font-sm); background: var(--surface-1); }
+  .photo-credit { color:var(--text-muted); font-size:.72rem; }
   .pit-fields { display: grid; gap: var(--gap-1); margin-top: var(--space-2); font-size: var(--font-sm); }
   .pit-long-answer { white-space: pre-wrap; line-height: 1.4; }
   .pit-auto-group { display: grid; gap: var(--gap-2); margin-top: var(--space-2); }
@@ -705,6 +861,17 @@
   .pit-auto-card { display: grid; gap: 0.25rem; min-width: 0; padding: var(--space-2); border: 1px solid color-mix(in srgb, var(--border) 85%, transparent); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--surface-1) 92%, transparent); }
   .pit-auto-name { font-size: var(--font-sm); font-weight: 700; line-height: 1.2; }
   .pit-auto-description { font-size: var(--font-xs); color: var(--text-muted); line-height: 1.35; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+  .compact-empty { padding:var(--space-2); }
+  .team-overview-grid { display:grid; grid-template-columns:minmax(0, .85fr) minmax(320px, 1.15fr); gap:var(--gap-3); margin:var(--space-3) 0; }
+  .rating-overview { display:grid; align-content:start; gap:var(--space-3); }
+  .rating-overview h3, .star-overview h3, .section-title-row h3 { margin:0; }
+  .rating-overview p, .section-title-row p { margin:3px 0 0; color:var(--text-muted); font-size:.8rem; }
+  .rating-summary-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); border:1px solid var(--border); border-radius:var(--radius-sm); overflow:hidden; }
+  .rating-summary-grid span { display:grid; gap:3px; padding:var(--space-2); border-right:1px solid var(--border); border-bottom:1px solid var(--border); }
+  .rating-summary-grid span:nth-child(2n) { border-right:0; }
+  .rating-summary-grid span:nth-last-child(-n + 2) { border-bottom:0; }
+  .my-rating-note { padding:var(--space-2); border-left:3px solid var(--accent); background:var(--surface-2); }
+  .star-overview { display:grid; align-content:start; }
   .main-split { display: grid; grid-template-columns: minmax(0, 7fr) minmax(300px, 3fr); gap: var(--gap-3); }
   .data-panel { display: grid; gap: var(--gap-3); }
   .stat-block, .breakdown-block { border: none; border-radius: var(--radius-md); padding: var(--space-1) 0; display: grid; gap: var(--gap-3); }
@@ -744,12 +911,26 @@
   .notes-title { margin: 0 0 var(--space-2); }
   .note-row { border: none; border-radius: var(--radius-sm); padding: var(--space-2); margin-bottom: var(--space-2); background: color-mix(in srgb, var(--surface-1) 90%, transparent); }
   .note-meta { font-size: var(--font-xs); color: var(--text-muted); margin-bottom: var(--space-1); }
+  .match-history-card, .manual-reports-card { margin-top:var(--space-3); }
+  .section-title-row { display:flex; justify-content:space-between; align-items:center; gap:var(--gap-3); margin-bottom:var(--space-3); }
+  .section-title-row > strong { display:grid; place-items:center; min-width:2rem; height:2rem; border-radius:999px; background:var(--surface-2); }
+  .match-history-list { display:grid; gap:1px; background:var(--border); border:1px solid var(--border); }
+  .match-history-row { display:grid; grid-template-columns:minmax(8rem, .7fr) minmax(12rem, 1fr) minmax(8rem, .7fr) auto; align-items:center; gap:var(--gap-3); padding:var(--space-2) var(--space-3); background:var(--surface-1); }
+  .match-history-row > div { display:flex; gap:var(--gap-2); align-items:center; }
+  .match-history-row > div span { font-size:.72rem; font-weight:700; text-transform:capitalize; }
+  .alliance-red { color:var(--status-danger); }
+  .alliance-blue { color:var(--brand-blue, #2563eb); }
   @media (max-width: 980px) {
-    .team-top, .main-split { grid-template-columns: 1fr; }
+    .team-top, .team-overview-grid, .main-split { grid-template-columns: 1fr; }
     .trend-grid { grid-template-columns: 1fr; }
+    .match-history-row { grid-template-columns:1fr 1fr; }
   }
   @media (max-width: 640px) {
     .break-row { grid-template-columns: 90px minmax(0, 1fr); }
     .team-name-box { flex-direction: column; align-items: flex-start; gap: 0; }
+    .team-rank-strip { grid-template-columns:repeat(2, 1fr); }
+    .team-rank-strip span:nth-child(2) { border-right:0; }
+    .team-rank-strip span:nth-child(-n + 2) { border-bottom:1px solid var(--border); }
+    .match-history-row { grid-template-columns:1fr; }
   }
 </style>

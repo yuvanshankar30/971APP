@@ -151,6 +151,31 @@ export async function notifyPrescoutAssignment({ assignmentId, userId, teamKey }
   });
 }
 
+// Direct instruction: removing someone from a scouting assignment should
+// actively tell them, not just silently drop the row - the whole point is
+// that they'd otherwise show up expecting a shift that no longer exists.
+// kind selects the message shape: 'match' (a specific match+team, data/note/
+// quick scouting), 'pit', or 'prescout' (team-only, no match).
+export async function notifyScoutUnassignment({ userId, teamKey, matchKey = null, scoutingType = null, kind = 'match' }) {
+  if (!userId) return { ok: false, reason: 'invalid-input' };
+  const teamDisplay = teamKey ? teamKey.replace(/^frc/i, '') : 'a team';
+  let text;
+  if (kind === 'pit') {
+    text = `You were unassigned from pit scouting Team ${teamDisplay}.`;
+  } else if (kind === 'prescout') {
+    text = `You were unassigned from pre-scouting Team ${teamDisplay}.`;
+  } else {
+    const typeLabel = scoutingType === 'note' ? 'note' : scoutingType === 'quick' ? 'quick' : 'data';
+    const label = formatMatchLabel(matchKey);
+    text = `You were unassigned from ${typeLabel} scouting for ${label} (Team ${teamDisplay}).`;
+  }
+  return dispatchNotification({
+    userId,
+    notificationKey: NOTIFICATION_KEYS.SHIFT_ASSIGNMENTS,
+    text
+  });
+}
+
 export async function notifyPartAssignmentById(partId) {
   const supa = getSupabase();
   const { data: part } = await supa

@@ -1,11 +1,13 @@
 <script>
   import { onMount } from 'svelte';
+  import { goto } from '$app/navigation';
   import { AlertTriangle, CalendarClock, ClipboardList, MapPinned, RefreshCw, Route, Target, Users } from 'lucide-svelte';
   import { getAuthHeader } from '$lib/supabase.js';
   import { fetchActiveScoutingEventKey, fetchAvailableScoutingEvents } from '$lib/scoutingEvent.js';
   import { buildStrategyRows, strategyTotals } from '$lib/strategyScouting.js';
   import { buildPowerRankings } from '$lib/scoutingStats.js';
   import { isMatchPlayed, matchLabel, projectMatch } from '$lib/matchProjection.js';
+  import { buildTestMarketMatch } from '$lib/predictionMarket.js';
   import SeasonFilter from '$lib/components/SeasonFilter.svelte';
   import MatchScoutReport from '$lib/components/MatchScoutReport.svelte';
 
@@ -14,7 +16,10 @@
   let availableEvents = [];
   let report = null;
   let matches = [];
+  let eventTeams = [];
   let matchesWarning = '';
+  let teamsWarning = '';
+  let officialByTeam = new Map();
   let loadedEventKey = '';
   let loading = true;
   let error = '';
@@ -23,10 +28,20 @@
   let view = 'teams'; // 'teams' | 'matches'
 
   $: resolvedEventKey = selectedEventKey || eventKey;
-  $: rows = buildStrategyRows(report?.data || {});
+  $: rows = buildStrategyRows(report?.data || {}, eventTeams);
+  $: rankedRows = [...rows].sort((a, b) => {
+    const firstRank = officialByTeam.get(a.teamNumber)?.rank;
+    const secondRank = officialByTeam.get(b.teamNumber)?.rank;
+    if (firstRank == null && secondRank == null) return Number(a.teamNumber) - Number(b.teamNumber);
+    if (firstRank == null) return 1;
+    if (secondRank == null) return -1;
+    return firstRank - secondRank;
+  });
   $: totals = strategyTotals(rows);
-  $: filteredRows = rows.filter((row) => row.teamNumber.includes(teamSearch.trim()) || row.pitEntry?.robot_archetype?.toLowerCase().includes(teamSearch.trim().toLowerCase()));
+  $: filteredRows = rankedRows.filter((row) => row.teamNumber.includes(teamSearch.trim()) || row.pitEntry?.robot_archetype?.toLowerCase().includes(teamSearch.trim().toLowerCase()));
   $: selectedTeam = rows.find((row) => row.teamKey === selectedTeamKey) || filteredRows[0] || null;
+  $: activeEventLabel = availableEvents.find((option) => option.value === eventKey)?.label || eventKey || 'not set';
+  $: browseEventOptions = availableEvents.filter((option) => option.value !== eventKey);
   // Reuses the same buildPowerRankings pipeline Power Rankings itself calls,
   // fed from the report this page already loaded - no second scoring system,
   // just a projection layered on top (see matchProjection.js).
@@ -45,6 +60,11 @@
   const percent = (value) => Number.isFinite(value) ? `${Math.round(value * 100)}%` : '-';
   const text = (value) => String(value || '').trim();
 
+  function openTeamView(row) {
+    selectedTeamKey = row.teamKey;
+    goto(`/teamview?event_key=${encodeURIComponent(resolvedEventKey)}&team=${encodeURIComponent(row.teamKey)}`);
+  }
+
   async function loadStrategy() {
     if (!resolvedEventKey) {
       report = null;
@@ -54,11 +74,14 @@
     loading = true;
     error = '';
     matchesWarning = '';
+    teamsWarning = '';
     try {
       const authHeaders = await getAuthHeader();
-      const [response, matchesResponse] = await Promise.all([
+      const [response, matchesResponse, teamsResponse, officialResponse] = await Promise.all([
         fetch(`/api/scouting-report?event_key=${encodeURIComponent(resolvedEventKey)}`, { headers: authHeaders }),
-        fetch(`/api/tba/event-matches?event_key=${encodeURIComponent(resolvedEventKey)}&comp_level=all`)
+        fetch(`/api/tba/event-matches?event_key=${encodeURIComponent(resolvedEventKey)}&comp_level=all`),
+        fetch(`/api/tba/event-teams?event_key=${encodeURIComponent(resolvedEventKey)}`),
+        fetch(`/api/tba/event-oprs?event_key=${encodeURIComponent(resolvedEventKey)}`)
       ]);
       const payload = await response.json().catch(() => null);
       if (!response.ok || !payload?.success) throw new Error(payload?.error || 'Could not load scouting strategy data.');
@@ -66,11 +89,22 @@
       loadedEventKey = resolvedEventKey;
       if (!selectedTeamKey && buildStrategyRows(payload.data)[0]) selectedTeamKey = buildStrategyRows(payload.data)[0].teamKey;
 
+      const teamsPayload = await teamsResponse.json().catch(() => null);
+      if (teamsResponse.ok && teamsPayload?.success) eventTeams = teamsPayload.data || [];
+      else { eventTeams = []; teamsWarning = teamsPayload?.error || 'Could not load the event roster from The Blue Alliance.'; }
+
       const matchesPayload = await matchesResponse.json().catch(() => null);
-      if (matchesResponse.ok && matchesPayload?.success) matches = matchesPayload.data || [];
-      else { matches = []; matchesWarning = matchesPayload?.error || 'Could not load the match schedule from The Blue Alliance.'; }
+      const scheduledMatches = matchesResponse.ok && matchesPayload?.success ? matchesPayload.data || [] : [];
+      matches = [buildTestMarketMatch(resolvedEventKey, eventTeams), ...scheduledMatches];
+      if (!matchesResponse.ok || !matchesPayload?.success) matchesWarning = matchesPayload?.error || 'Could not load the match schedule from The Blue Alliance.';
+
+      const officialPayload = await officialResponse.json().catch(() => null);
+      officialByTeam = new Map((officialPayload?.success ? officialPayload.data || [] : []).map((team) => [String(team.team), team]));
     } catch (cause) {
       report = null;
+      eventTeams = [];
+      matches = [];
+      officialByTeam = new Map();
       error = cause?.message || 'Could not load scouting strategy data.';
     } finally {
       loadedEventKey = resolvedEventKey;
@@ -95,7 +129,7 @@
     <p>One board for the scouting evidence behind match decisions.</p>
   </div>
   <div class="header-actions">
-    <SeasonFilter options={availableEvents} bind:value={selectedEventKey} allLabel={`Current Event (${eventKey || 'not set'})`} />
+    <SeasonFilter options={browseEventOptions} bind:value={selectedEventKey} allLabel={`Current Event (${activeEventLabel})`} />
     <button class="btn btn-outline" on:click={loadStrategy} disabled={loading || !resolvedEventKey}><RefreshCw size={16} /> Refresh</button>
   </div>
 </div>
@@ -135,11 +169,11 @@
           <tbody>
             {#each upcomingMatches as match (match.key)}
               {@const projection = projectMatch(match, scoutPowerByTeam)}
-              <tr>
-                <td><strong>{matchLabel(match)}</strong></td>
-                <td class="alliance-red">{match.alliances?.red?.team_keys?.map(teamNumber).join(', ')}</td>
-                <td class="alliance-blue">{match.alliances?.blue?.team_keys?.map(teamNumber).join(', ')}</td>
-                <td>
+              <tr class:test-match={match.is_test_market}>
+                <td data-label="Match"><strong>{matchLabel(match)}</strong>{#if match.is_test_market}<small>Practice market</small>{/if}</td>
+                <td data-label="Red" class="alliance-red">{match.alliances?.red?.team_keys?.map(teamNumber).join(', ')}</td>
+                <td data-label="Blue" class="alliance-blue">{match.alliances?.blue?.team_keys?.map(teamNumber).join(', ')}</td>
+                <td data-label="Status">
                   {#if projection.redWinProbability == null}
                     <span class="muted">Not enough scouting yet</span>
                   {:else}
@@ -152,10 +186,10 @@
             {/each}
             {#each playedMatches as match (match.key)}
               <tr class="played-row">
-                <td><strong>{matchLabel(match)}</strong></td>
-                <td class="alliance-red" class:winner={match.winning_alliance === 'red'}>{match.alliances?.red?.team_keys?.map(teamNumber).join(', ')} <span class="muted">{match.alliances?.red?.score ?? ''}</span></td>
-                <td class="alliance-blue" class:winner={match.winning_alliance === 'blue'}>{match.alliances?.blue?.team_keys?.map(teamNumber).join(', ')} <span class="muted">{match.alliances?.blue?.score ?? ''}</span></td>
-                <td class="muted">{match.winning_alliance ? `${match.winning_alliance} won` : 'Tie'}</td>
+                <td data-label="Match"><strong>{matchLabel(match)}</strong></td>
+                <td data-label="Red" class="alliance-red" class:winner={match.winning_alliance === 'red'}>{match.alliances?.red?.team_keys?.map(teamNumber).join(', ')} <span class="muted">{match.alliances?.red?.score ?? ''}</span></td>
+                <td data-label="Blue" class="alliance-blue" class:winner={match.winning_alliance === 'blue'}>{match.alliances?.blue?.team_keys?.map(teamNumber).join(', ')} <span class="muted">{match.alliances?.blue?.score ?? ''}</span></td>
+                <td data-label="Status" class="muted">{match.winning_alliance ? `${match.winning_alliance} won` : 'Tie'}</td>
               </tr>
             {/each}
           </tbody>
@@ -164,6 +198,7 @@
     {/if}
   </section>
   {:else}
+  {#if teamsWarning}<p class="muted matches-warning">{teamsWarning} Showing teams found in scouting data.</p>{/if}
   <section class="strategy-layout">
     <div class="strategy-board">
       <div class="section-heading">
@@ -175,21 +210,22 @@
       {:else}
         <div class="board-table-wrap">
           <table class="board-table">
-            <thead><tr><th>Team</th><th>Data matches</th><th>Reports</th><th>Fuel</th><th>Reported balls</th><th>Accuracy</th><th>Auto</th><th>Pit</th><th>Notes</th><th>Autos</th><th>Risk</th></tr></thead>
+            <thead><tr><th>Rank</th><th>Team</th><th>Data matches</th><th>Reports</th><th>Fuel</th><th>Reported balls</th><th>Accuracy</th><th>Auto</th><th>Pit</th><th>Notes</th><th>Autos</th><th>Risk</th></tr></thead>
             <tbody>
               {#each filteredRows as row}
-                <tr class:selected={selectedTeam?.teamKey === row.teamKey} on:click={() => selectedTeamKey = row.teamKey}>
-                  <td><strong>{row.teamNumber}</strong>{#if row.pitEntry?.robot_archetype}<small>{row.pitEntry.robot_archetype}</small>{/if}</td>
-                  <td>{row.performance.matchesScouted || '-'}</td>
-                  <td>{row.matchScoutSummary.reportCount || '-'}</td>
-                  <td>{number(row.performance.avgFuel, 0)}</td>
-                  <td>{number(row.matchScoutSummary.avgBallsScored, 0)}</td>
-                  <td>{number(row.performance.avgAccuracy)}</td>
-                  <td>{number(row.autoAverage, 0)}</td>
-                  <td>{row.pitEntry ? 'Yes' : '-'}</td>
-                  <td>{row.notes.length || '-'}</td>
-                  <td>{row.autoPaths.length || '-'}</td>
-                  <td>{row.openProblems.length ? `${row.openProblems.length} open` : 'Clear'}</td>
+                <tr class:selected={selectedTeam?.teamKey === row.teamKey} on:click={() => openTeamView(row)}>
+                  <td data-label="Rank"><strong>{officialByTeam.get(row.teamNumber)?.rank ?? '—'}</strong></td>
+                  <td data-label="Team"><strong>{row.teamNumber}</strong>{#if row.pitEntry?.robot_archetype}<small>{row.pitEntry.robot_archetype}</small>{/if}</td>
+                  <td data-label="Data matches">{row.performance.matchesScouted || '-'}</td>
+                  <td data-label="Reports">{row.matchScoutSummary.reportCount || '-'}</td>
+                  <td data-label="Fuel">{number(row.performance.avgFuel, 0)}</td>
+                  <td data-label="Reported balls">{number(row.matchScoutSummary.avgBallsScored, 0)}</td>
+                  <td data-label="Accuracy">{number(row.performance.avgAccuracy)}</td>
+                  <td data-label="Auto">{number(row.autoAverage, 0)}</td>
+                  <td data-label="Pit">{row.pitEntry ? 'Yes' : '-'}</td>
+                  <td data-label="Notes">{row.notes.length || '-'}</td>
+                  <td data-label="Autos">{row.autoPaths.length || '-'}</td>
+                  <td data-label="Risk">{row.openProblems.length ? `${row.openProblems.length} open` : 'Clear'}</td>
                 </tr>
               {/each}
             </tbody>
@@ -238,7 +274,7 @@
           {#if selectedTeam.openProblems.length}<ul class="risk-list">{#each selectedTeam.openProblems as issue}<li><strong>{issue.severity || 'watch'}</strong> {issue.summary}</li>{/each}</ul>{:else}<p class="muted">No open issues.</p>{/if}
         </div>
         <div class="brief-actions">
-          <a class="btn btn-outline btn-sm" href={`/teamview?event_key=${encodeURIComponent(resolvedEventKey)}`}>Open team view</a>
+          <a class="btn btn-outline btn-sm" href={`/teamview?event_key=${encodeURIComponent(resolvedEventKey)}&team=${encodeURIComponent(selectedTeam.teamKey)}`}>Open team view</a>
           <a class="btn btn-outline btn-sm" href={`/powerrankings`}>Power rankings</a>
         </div>
       {:else}<div class="empty-state">Select a team to view its strategy brief.</div>{/if}
@@ -250,12 +286,15 @@
 <style>
   .matches-board .section-heading h2 { display:flex; align-items:center; gap:var(--space-2); }
   .matches-warning { padding:0 var(--space-3); }
-  .alliance-red { color:var(--status-danger); }
+  .subtabs button { min-height:44px; padding:.7rem 1.25rem; font-size:.9rem; font-weight:700; }
+  .test-match { background:color-mix(in srgb, var(--accent) 9%, transparent); }
+  .test-match td small { display:block; margin-top:2px; color:var(--text-secondary); font-size:.7rem; }
+  .alliance-red { color:var(--danger, #dc3545); }
   .alliance-blue { color:var(--brand-blue, #2563eb); }
   .played-row { opacity:.75; }
   .winner { font-weight:700; opacity:1; }
   .win-bar { display:inline-block; width:80px; height:10px; border-radius:5px; background:var(--brand-blue, #2563eb); overflow:hidden; vertical-align:middle; }
-  .win-bar-red { display:block; height:100%; background:var(--status-danger); float:left; }
+  .win-bar-red { display:block; height:100%; background:var(--danger, #dc3545); float:left; }
   .strategy-header { display:flex; justify-content:space-between; gap:var(--space-4); align-items:flex-end; }
   .strategy-header h1 { display:flex; align-items:center; gap:var(--space-2); margin:0; }
   .strategy-header p, .section-heading p { margin:var(--space-1) 0 0; color:var(--text-secondary); }
@@ -263,10 +302,10 @@
   .summary-grid { display:grid; grid-template-columns:repeat(5, minmax(0, 1fr)); border:1px solid var(--border); margin-top:var(--space-4); }
   .summary-grid > div { min-height:92px; padding:var(--space-3); border-right:1px solid var(--border); display:grid; grid-template-columns:auto 1fr; gap:0 var(--space-2); align-content:center; }
   .summary-grid > div:last-child { border-right:0; }
-  .summary-grid svg { color:var(--brand-gold); grid-row:span 2; align-self:center; }
+  .summary-grid svg { color:var(--accent); grid-row:span 2; align-self:center; }
   .summary-grid strong { font-size:1.35rem; line-height:1.1; }
   .summary-grid span { color:var(--text-secondary); font-size:.82rem; }
-  .summary-grid .at-risk svg, .summary-grid .at-risk strong { color:var(--status-danger); }
+  .summary-grid .at-risk svg, .summary-grid .at-risk strong { color:var(--danger, #dc3545); }
   .strategy-layout { display:grid; grid-template-columns:minmax(0, 1.7fr) minmax(290px, .8fr); gap:var(--space-4); margin-top:var(--space-4); align-items:start; }
   .strategy-board, .team-brief { border:1px solid var(--border); background:var(--surface-1); }
   .section-heading, .brief-title { display:flex; justify-content:space-between; gap:var(--space-3); align-items:center; padding:var(--space-3); border-bottom:1px solid var(--border); }
@@ -274,13 +313,13 @@
   .team-search { width:min(260px, 100%); }
   .board-table-wrap { overflow:auto; }
   .board-table { width:100%; border-collapse:collapse; font-size:.9rem; }
-  th { background:var(--surface-muted); color:var(--text-secondary); font-size:.72rem; letter-spacing:.04em; text-align:left; text-transform:uppercase; white-space:nowrap; }
+  th { background:var(--surface-2); color:var(--text-secondary); font-size:.72rem; letter-spacing:.04em; text-align:left; text-transform:uppercase; white-space:nowrap; }
   th, td { padding:.7rem var(--space-2); border-bottom:1px solid var(--border); }
   tbody tr { cursor:pointer; }
   tbody tr:hover, tbody tr.selected { background:var(--brand-gold-soft); }
   td small { display:block; color:var(--text-secondary); margin-top:2px; }
   .coverage { white-space:nowrap; color:var(--text-secondary); font-size:.8rem; }
-  .coverage.status-risk { color:var(--status-danger); font-weight:700; }
+  .coverage.status-risk { color:var(--danger, #dc3545); font-weight:700; }
   .metric-grid { display:grid; grid-template-columns:repeat(2, 1fr); border-bottom:1px solid var(--border); }
   .metric-grid div { padding:var(--space-3); border-right:1px solid var(--border); border-bottom:1px solid var(--border); display:grid; gap:var(--space-1); }
   .metric-grid div:nth-child(2n) { border-right:0; }
@@ -292,10 +331,30 @@
   .detail-copy { margin-top:var(--space-2) !important; color:var(--text-secondary); }
   ul { margin:0; padding-left:1.1rem; display:grid; gap:.35rem; }
   li span { color:var(--text-secondary); font-size:.8rem; text-transform:capitalize; }
-  .risk-list strong { color:var(--status-danger); text-transform:capitalize; }
+  .risk-list strong { color:var(--danger, #dc3545); text-transform:capitalize; }
   .brief-actions { display:flex; gap:var(--space-2); padding:var(--space-3); flex-wrap:wrap; }
   .empty-state, .notice { border:1px solid var(--border); padding:var(--space-4); margin-top:var(--space-4); color:var(--text-secondary); }
-  .notice-error { border-color:var(--status-danger); color:var(--status-danger); }
+  .notice-error { border-color:var(--danger, #dc3545); color:var(--danger, #dc3545); }
   @media (max-width:900px) { .summary-grid { grid-template-columns:repeat(3, 1fr); } .summary-grid > div:nth-child(3) { border-right:0; } .strategy-layout { grid-template-columns:1fr; } }
-  @media (max-width:620px) { .strategy-header, .section-heading { align-items:stretch; flex-direction:column; } .header-actions > * { flex:1; } .summary-grid { grid-template-columns:repeat(2, 1fr); } .summary-grid > div { border-bottom:1px solid var(--border); } .summary-grid > div:nth-child(2n) { border-right:0; } .team-search { width:100%; } }
+  @media (max-width:620px) {
+    .strategy-header, .section-heading { align-items:stretch; flex-direction:column; }
+    .header-actions > * { flex:1; }
+    .summary-grid { grid-template-columns:repeat(2, 1fr); }
+    .summary-grid > div { border-bottom:1px solid var(--border); }
+    .summary-grid > div:nth-child(2n) { border-right:0; }
+    .team-search { width:100%; }
+    .metric-grid { grid-template-columns:1fr; }
+    .metric-grid div, .metric-grid div:nth-child(2n) { border-right:0; }
+    /* Both board-table uses (match schedule, team board) become a stacked
+       card per row instead of a table too wide to fit - a data-label
+       attribute on each <td> (see markup) supplies the printed label since
+       the real <th> row is hidden here. */
+    .board-table-wrap { overflow:visible; }
+    .board-table thead { display:none; }
+    .board-table, .board-table tbody, .board-table tr, .board-table td { display:block; width:100%; }
+    .board-table tr { border:1px solid var(--border); border-radius:var(--radius-sm); margin-bottom:var(--space-3); overflow:hidden; }
+    .board-table td { display:flex; justify-content:space-between; align-items:center; gap:var(--space-3); text-align:right; }
+    .board-table td::before { content:attr(data-label); flex-shrink:0; text-align:left; color:var(--text-secondary); font-size:.72rem; text-transform:uppercase; letter-spacing:.04em; }
+    .win-bar { width:min(140px, 45vw); }
+  }
 </style>

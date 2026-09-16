@@ -39,7 +39,7 @@ export function isMatchPlayed(match) {
 }
 
 export function matchLabel(match) {
-  const level = { qm: 'Qual', ef: 'Octofinal', qf: 'Quarterfinal', sf: 'Semifinal', f: 'Final', pm: 'Practice' }[String(match?.comp_level || '').toLowerCase()] || 'Match';
+  const level = { qm: 'Qual', ef: 'Octofinal', qf: 'Quarterfinal', sf: 'Semifinal', f: 'Final', pm: 'Practice', test: 'Test match' }[String(match?.comp_level || '').toLowerCase()] || 'Match';
   const set = match?.set_number > 1 || match?.comp_level === 'sf' ? `${match.set_number}-` : '';
   return `${level} ${set}${match?.match_number ?? ''}`.trim();
 }

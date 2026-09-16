@@ -29,7 +29,7 @@ function groupByTeam(rows) {
 // One decision-oriented row per team. This deliberately references raw report
 // rows rather than creating a second persistence layer, so strategy always
 // reflects the observations scouts actually collected.
-export function buildStrategyRows(data = {}) {
+export function buildStrategyRows(data = {}, eventTeams = []) {
   const byEvents = groupByTeam(data.data_events);
   const byMatches = groupByTeam(data.match_entries);
   const byPit = groupByTeam(data.pit_entries);
@@ -37,6 +37,7 @@ export function buildStrategyRows(data = {}) {
   const byAutos = groupByTeam(data.auto_paths);
   const byProblems = groupByTeam(data.pit_problems);
   const keys = new Set([
+    ...(eventTeams || []).map((team) => team?.key).filter(Boolean),
     ...byEvents.keys(), ...byMatches.keys(), ...byPit.keys(), ...byNotes.keys(), ...byAutos.keys(), ...byProblems.keys()
   ]);
 

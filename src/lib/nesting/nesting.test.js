@@ -375,6 +375,86 @@ describe("nesting emission", () => {
     expect(result.text.indexOf("[Tool 2]")).toBeLessThan(result.text.indexOf("[Tool 1]"));
     expect(() => emitNestingGcode({ ...input, toolOrder: [2] })).toThrow(/each detected tool exactly once/);
   });
+  it("always runs the release/slot cut last, even when its tool is ordered first", () => {
+    const result = emitNestingGcode({
+      name: "release-last",
+      dialect: "wincnc",
+      toolOrder: [6, 2],
+      placements: [{ label: "Bracket", x: 2, y: 2, part_library_path: "bracket" }],
+      programs: {
+        // S-speed lines are not coordinate motion, so transformedProgram
+        // passes them through unchanged - safe unique markers to locate
+        // each segment by, unlike the G0 X/Y lines around them (rotated/
+        // translated into placement coordinates by the time they're
+        // emitted, so their literal source text won't appear verbatim).
+        bracket: {
+          source: [
+            "G90",
+            "T6",
+            "[.3 Circular Through Hole]",
+            "S1111",
+            "G0 X0 Y0",
+            "[Slot Cut for Edges]",
+            "S2222",
+            "G0 X1 Y1",
+            "T2",
+            "[Shape Through Hole]",
+            "S3333",
+            "G0 X2 Y2",
+            "M5",
+          ].join("\n"),
+        },
+      },
+    });
+    const releaseIndex = result.text.indexOf("[Slot Cut for Edges]");
+    const t6Index = result.text.indexOf("[Tool 6]");
+    const t2Index = result.text.indexOf("[Tool 2]");
+    expect(releaseIndex).toBeGreaterThan(-1);
+    // Both the ordinary T6 work and the ordinary T2 work (run before the
+    // release segment despite T6 being configured first) must precede it.
+    expect(t6Index).toBeLessThan(releaseIndex);
+    expect(t2Index).toBeLessThan(releaseIndex);
+    // The release segment gets its own tool section - a second "[Tool 6]"
+    // header, after the T2 group, immediately preceding the release line.
+    const secondT6Index = result.text.indexOf("[Tool 6]", t6Index + 1);
+    expect(secondT6Index).toBeGreaterThan(t2Index);
+    expect(result.text.indexOf("S2222")).toBeGreaterThan(secondT6Index);
+    // The ordinary T6 hole work still ran in its own (first) T6 section,
+    // not deferred alongside the release cut.
+    expect(result.text.indexOf("S1111")).toBeLessThan(secondT6Index);
+    expect(result.text.indexOf("S3333")).toBeLessThan(secondT6Index);
+  });
+
+  it("keeps a release-only tool out of the reorderable tool list", () => {
+    const input = {
+      name: "release-only-tool",
+      dialect: "wincnc",
+      placements: [{ label: "Bracket", x: 2, y: 2, part_library_path: "bracket" }],
+      programs: {
+        bracket: {
+          source: ["G90", "T6", "G0 X0 Y0", "T2", "[Slot Cut for Edges]", "G0 X1 Y1", "M5"].join("\n"),
+        },
+      },
+    };
+    // T2 here is entirely the release cut - nothing ordinary uses it, so it
+    // must not appear as a user-reorderable tool.
+    expect(nestingEmissionTools(input)).toEqual([6]);
+    const result = emitNestingGcode(input);
+    expect(result.toolOrder).toEqual([6]);
+    expect(result.text.indexOf("[Tool 6]")).toBeLessThan(result.text.indexOf("[Slot Cut for Edges]"));
+  });
+
+  it("still runs a program with no release cut exactly as before", () => {
+    const result = emitNestingGcode({
+      name: "no-release",
+      dialect: "wincnc",
+      placements: [{ label: "Plain", x: 2, y: 2, part_library_path: "plain" }],
+      programs: { plain: { source: "G90\nT1\nG0 X0 Y0\nM5" } },
+    });
+    expect(result.text).toContain("[Tool 1]");
+    expect(result.text).not.toContain("Slot Cut");
+  });
+
   it("emits the bundled hole template only in the holes group", () => {
     const result = emitNestingGcode({
       name: "nest",

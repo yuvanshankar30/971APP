@@ -168,7 +168,21 @@ browser confirmation or prompt popups.
   focused team briefs without duplicating data entry. Completed Match
   Scouting reports flow into Strategy and Power Rankings and remain fully
   inspectable there; Scouting Admin also shows event-level report coverage
-  and the complete attributed submissions for auditing.
+  and the complete attributed submissions for auditing. Strategy orders its
+  team board by the live official TBA event rank when available, and selecting
+  a row opens that robot directly in the full Team View. Team View accepts
+  event/team deep links and combines TBA robot media, official rank and record,
+  971 Scout Power, the event-relative star plot, the current scout's rating,
+  pit details, saved autos, performance trends, notes, every manual match
+  report, and completed-match video/TBA links. Strategy seeds its
+  team board from the full TBA event roster, including teams with no scouting
+  observations yet, and its match view includes a clearly labeled practice
+  match when the real schedule is empty. Robot Ratings orders rated teams by
+  overall average from best to worst, followed by unrated teams. The Prediction
+  Market uses play points throughout and shares the same non-settling practice
+  match so scouts can test placing, updating, and cancelling predictions. The
+  event picker always includes the active event and resolves keys such as
+  `2026cc` to their TBA name (for example, Chezy Champs) when available.
 - **Vision Scouting**: a real Competition-folder nav tab, open to every
   approved user like the rest of Competition (no special permission needed),
   running post-match, multi-camera ML processing at `/scouting/vision` for
@@ -318,6 +332,9 @@ browser confirmation or prompt popups.
   reports retain their original fields. Match scouts can reopen their submitted
   answers immediately or find their own active-event reports in **My reports**,
   search by team or match, and save corrections to the existing report.
+  Match report lists use compact cards that surface auto points, balls scored,
+  robot status, and incidents while collapsed; opening a card shows a dense,
+  color-coded breakdown so multiple matches for one robot stay easy to scan.
   **Compare** in My reports opens labeled blue/manual and orange/vision charts
   for the same event, match, and team. Scouts can select a vision run, refresh
   results, and filter reviewed observations or include provisional candidates.

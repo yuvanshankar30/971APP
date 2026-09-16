@@ -2,7 +2,7 @@ import { json } from '@sveltejs/kit';
 import { createClient } from '@supabase/supabase-js';
 import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/public';
 import { getSupabase } from '$lib/server/971bot.js';
-import { notifyScoutAssignment } from '$lib/server/slack_notifications.js';
+import { notifyScoutAssignment, notifyScoutUnassignment } from '$lib/server/slack_notifications.js';
 
 const SCOUTING_TYPES = new Set(['data', 'note', 'quick']);
 // Assignment publishing is ready to fan out to Slack, but DMs remain disabled
@@ -176,6 +176,13 @@ async function listEligibleUsersForType(db, scoutingType) {
     assign-single: { scouting_type, match_key, team_key, user_id }
     assign-robot:  { scouting_type, team_key, user_id }
     bulk-assign:   { scouting_type, items:[{match_key, team_key, user_id}...] }
+    unassign:      { scouting_type, match_key, team_key } - removes the row
+                   entirely (not a null assigned_user) and, if it had an
+                   assignee, sends them a Slack DM saying so, unconditionally
+                   (not gated by SCOUT_ASSIGNMENT_SLACK_DMS_ENABLED - that
+                   flag is specifically about the paused assignment-DM
+                   rollout, and does not cover this newer, separately
+                   requested notification).
     complete:      { scouting_type, match_key, team_key, user_id }
 */
 
@@ -414,6 +421,42 @@ export async function POST({ request }) {
             scoutingType: scouting_type
           });
         }
+      }
+      return json({ success: true });
+    }
+
+    if (action === 'unassign') {
+      const { match_key, team_key } = body;
+      if (!match_key || !team_key) {
+        return json({ error: 'match_key, team_key required' }, { status: 400 });
+      }
+
+      const { data: existing, error: existingError } = await db
+        .from('scout_match_assignments')
+        .select('id, assigned_user')
+        .eq('scouting_type', scouting_type)
+        .eq('match_key', match_key)
+        .eq('team_key', team_key)
+        .maybeSingle();
+      if (existingError) return json({ error: existingError.message }, { status: 500 });
+      if (!existing) return json({ success: true }); // already unassigned - nothing to do
+
+      const { error } = await db
+        .from('scout_match_assignments')
+        .delete()
+        .eq('scouting_type', scouting_type)
+        .eq('match_key', match_key)
+        .eq('team_key', team_key);
+      if (error) return json({ error: error.message }, { status: 500 });
+
+      if (existing.assigned_user) {
+        await notifyScoutUnassignment({
+          userId: existing.assigned_user,
+          matchKey: match_key,
+          teamKey: team_key,
+          scoutingType: scouting_type,
+          kind: 'match'
+        });
       }
       return json({ success: true });
     }

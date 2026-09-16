@@ -61,6 +61,10 @@ export function summarizeMatchScoutEntries(entries) {
     .map((row) => row?.auto_moved)
     .filter((value) => value === 'ran' || value === 'did-not-run' || typeof value === 'boolean');
 
+  const shuttlingReports = rows.filter((row) =>
+    (Array.isArray(row?.teleop_roles) ? row.teleop_roles : []).some((role) => String(role || '').trim().toLowerCase() === 'shuttling')
+  ).length;
+
   return {
     reportCount: rows.length,
     matchesScouted: new Set(rows.map((row) => row.match_key)).size,
@@ -77,7 +81,11 @@ export function summarizeMatchScoutEntries(entries) {
       ? rows.filter((row) => row?.crash_or_break === true || row?.intake_jammed === true || ['disabled', 'died'].includes(row?.robot_disabled)).length / rows.length
       : null,
     roleCounts: countListValues(rows, 'teleop_roles'),
-    ballSourceCounts: countListValues(rows, 'ball_sources')
+    ballSourceCounts: countListValues(rows, 'ball_sources'),
+    // Fraction of this team's reports where a scout marked them as shuttling
+    // (a teleop_roles entry, case-insensitive) - the Head to Head star plot's
+    // "Shuttling" axis.
+    shuttlingRate: rows.length ? shuttlingReports / rows.length : null
   };
 }
 
@@ -232,13 +240,18 @@ function weightedScore(parts) {
   return usable.reduce((sum, part) => sum + part.value * part.weight, 0) / weight;
 }
 
+// Direct feedback: the old Fuel/Driving/Accuracy/Speed/Climb/Pit axes came
+// from scoutSummary (Quick Scout tap events), which this season's scouts
+// don't actually populate - every one of those axes silently rendered as
+// "not observed" for every team. These six instead come from the match
+// scouting reports and pit/TBA data that are actually being collected.
 export const STAR_PROFILE_AXES = Object.freeze([
-  { key: 'fuel', label: 'Fuel', source: (row) => row.scoutSummary.avgFuel },
-  { key: 'driving', label: 'Driving', source: (row) => row.scoutSummary.avgDrivingRank },
-  { key: 'accuracy', label: 'Accuracy', source: (row) => row.scoutSummary.avgAccuracy },
-  { key: 'speed', label: 'Speed', source: (row) => row.scoutSummary.avgSpeed },
-  { key: 'climb', label: 'Climb', source: (row) => row.scoutSummary.avgClimbLevel },
-  { key: 'pit', label: 'Pit', source: (row) => row.pitSummary.pitScore }
+  { key: 'auto', label: 'Auto', source: (row) => row.matchScoutSummary.avgAutoPoints },
+  { key: 'teleop', label: 'Teleop', source: (row) => row.matchScoutSummary.avgBallsScored },
+  { key: 'shuttling', label: 'Shuttling', source: (row) => row.matchScoutSummary.shuttlingRate },
+  { key: 'driving', label: 'Driving', source: (row) => row.matchScoutSummary.avgDriverSkill },
+  { key: 'pit', label: 'Pit', source: (row) => row.pitSummary.pitScore },
+  { key: 'opr', label: 'OPR', source: (row) => row.rawOpr }
 ]);
 
 function attachStarProfiles(rows) {
@@ -398,6 +411,12 @@ const PIT_CLIMB_SCORE = Object.freeze({
 });
 const PIT_PROBLEM_PENALTY = Object.freeze({ watch: 8, urgent: 20 });
 
+// Direct instruction: a team that self-reports a perfect reliability but has
+// an open ACE flag shouldn't keep that perfect number - the flag is itself
+// evidence they're less reliable than they think. Cap rather than zero it
+// out, since an ACE flag doesn't mean the robot is always broken.
+export const RELIABILITY_ACE_FLAG_CAP = 7;
+
 // Pit claims are useful pre-match evidence, but deliberately remain a small
 // part of Scout Power. Capability fields are scored; archetype and prose are
 // surfaced for humans without pretending categories or sentences are numbers.
@@ -406,14 +425,17 @@ export function summarizePitScouting(entry, problems = [], normalizedBps = null)
   const climbScore = climbs.length
     ? Math.max(...climbs.map((value) => PIT_CLIMB_SCORE[value] ?? 0))
     : null;
-  const reliability = Number(entry?.technical_details?.overall_reliability_rating);
-  const reliabilityScore = reliability >= 1 && reliability <= 10 ? reliability * 10 : null;
   const openProblems = (problems || []).filter((problem) => !problem?.resolved);
   const urgentProblems = openProblems.filter((problem) => problem?.severity === 'urgent').length;
   const problemPenalty = Math.min(60, openProblems.reduce(
     (sum, problem) => sum + (PIT_PROBLEM_PENALTY[problem?.severity] || PIT_PROBLEM_PENALTY.watch),
     0
   ));
+  const rawReliability = Number(entry?.technical_details?.overall_reliability_rating);
+  const reliability = Number.isFinite(rawReliability) && openProblems.length
+    ? Math.min(rawReliability, RELIABILITY_ACE_FLAG_CAP)
+    : rawReliability;
+  const reliabilityScore = reliability >= 1 && reliability <= 10 ? reliability * 10 : null;
   const capabilityScore = weightedScore([
     { value: climbScore, weight: 0.45 },
     { value: normalizedBps, weight: 0.35 },
@@ -428,6 +450,7 @@ export function summarizePitScouting(entry, problems = [], normalizedBps = null)
     capabilityScore,
     climbScore,
     reliabilityScore,
+    rawReliability: Number.isFinite(rawReliability) ? rawReliability : null,
     estimatedBps: parseNumeric(entry?.estimated_bps),
     openProblemCount: openProblems.length,
     urgentProblemCount: urgentProblems,
@@ -476,6 +499,11 @@ export function buildPowerRankings(teams, events, notes = [], pitInputs = {}) {
     problemsByTeam.get(problem.team_key).push(problem);
   }
   const bpsValues = [...pitByTeam.values()].map((entry) => parseNumeric(entry?.estimated_bps));
+  // TBA OPR - opt-in, reference data by default (see the call site). Passed
+  // as the same Map<team_number, {rank, opr}> the page already builds for
+  // its own reference column, so nothing needs reshaping to feed it in here.
+  const oprByTeamNumber = pitInputs.oprByTeamNumber instanceof Map ? pitInputs.oprByTeamNumber : new Map();
+  const oprValues = rows.map((row) => oprByTeamNumber.get(row.team_number)?.opr ?? null);
   const ranked = rows.map((row) => {
     const summary = row.scoutSummary;
     const matchSummary = row.matchScoutSummary;
@@ -500,17 +528,28 @@ export function buildPowerRankings(teams, events, notes = [], pitInputs = {}) {
       problemsByTeam.get(row.key) || [],
       normalize(rawBps, bpsValues)
     );
+    const rawOpr = oprByTeamNumber.get(row.team_number)?.opr ?? null;
+    const oprScore = normalize(rawOpr, oprValues);
+    // Direct instruction: 70% observed match performance, 15% explicit note
+    // impact, 7.5% pit-reported reliability specifically (not the broader
+    // pit capability/climb/BPS blend - that stays a display-only metric via
+    // pitSummary.pitScore), and 7.5% TBA OPR. OPR was previously reference-
+    // only and never fed into this score; now it does, at a deliberately
+    // small weight next to our own scouts' direct observations.
     const scoutPower = weightedScore([
       { value: performanceScore, weight: 0.7 },
       { value: noteSummary.impactScore, weight: 0.15 },
-      { value: pitSummary.pitScore, weight: 0.15 }
+      { value: pitSummary.reliabilityScore, weight: 0.075 },
+      { value: oprScore, weight: 0.075 }
     ]);
     return {
       ...row,
       scoutPower,
       performanceScore,
       noteSummary,
-      pitSummary
+      pitSummary,
+      rawOpr,
+      oprScore
     };
   });
 
