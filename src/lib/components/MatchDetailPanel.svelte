@@ -8,6 +8,8 @@
   export let match = null;
   export let eventKey = '';
   export let scoutPowerByTeam = new Map();
+  export let projectedScoreByTeam = new Map();
+  export let breakdownByTeam = new Map();
 
   const dispatch = createEventDispatcher();
   const teamNumber = (teamKey) => String(teamKey || '').replace(/^frc/i, '');
@@ -22,7 +24,7 @@
   // request resolved) can never overwrite the currently-open match's video.
   let loadedForKey = '';
 
-  $: projection = match ? projectMatch(match, scoutPowerByTeam) : { redWinProbability: null };
+  $: projection = match ? projectMatch(match, scoutPowerByTeam, projectedScoreByTeam) : { redWinProbability: null };
   $: played = match ? isMatchPlayed(match) : false;
   $: fallbackVideoUrl = match ? matchVideoUrl(match) : '';
   $: fallbackVideoLabel = match?.videos?.some((video) => video?.type === 'youtube') ? 'YouTube' : 'TBA';
@@ -88,7 +90,10 @@
               {#if played}<span class="alliance-score">{match.alliances?.red?.score ?? ''}</span>{/if}
             </div>
             {#each match.alliances?.red?.team_keys || [] as teamKey}
-              <a class="team-link" href={teamHref(teamKey)}>{teamNumber(teamKey)}</a>
+              <a class="team-link" href={teamHref(teamKey)}>
+                {teamNumber(teamKey)}
+                {#if breakdownByTeam.get(teamKey)}<span class="breakdown-dot" title={breakdownByTeam.get(teamKey)}></span>{/if}
+              </a>
             {/each}
           </div>
           <div class="alliance-column alliance-blue" class:winner={match.winning_alliance === 'blue'}>
@@ -97,10 +102,17 @@
               {#if played}<span class="alliance-score">{match.alliances?.blue?.score ?? ''}</span>{/if}
             </div>
             {#each match.alliances?.blue?.team_keys || [] as teamKey}
-              <a class="team-link" href={teamHref(teamKey)}>{teamNumber(teamKey)}</a>
+              <a class="team-link" href={teamHref(teamKey)}>
+                {teamNumber(teamKey)}
+                {#if breakdownByTeam.get(teamKey)}<span class="breakdown-dot" title={breakdownByTeam.get(teamKey)}></span>{/if}
+              </a>
             {/each}
           </div>
         </div>
+
+        {#if projection.redProjectedScore != null || projection.blueProjectedScore != null}
+          <div class="match-detail-predicted muted">Predicted score: {Number.isFinite(projection.redProjectedScore) ? projection.redProjectedScore.toFixed(0) : '-'} - {Number.isFinite(projection.blueProjectedScore) ? projection.blueProjectedScore.toFixed(0) : '-'}</div>
+        {/if}
 
         <div class="match-detail-status muted">
           {#if played}
@@ -147,6 +159,8 @@
   .alliance-score { color: var(--text-muted); }
   .team-link { padding: var(--space-1) var(--space-2); border-radius: var(--radius-xs); font-weight: 600; text-decoration: none; color: var(--text); background: var(--surface-1); }
   .team-link:hover { text-decoration: underline; }
+  .breakdown-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--chart-danger); margin-left: 3px; vertical-align: middle; }
+  .match-detail-predicted { margin-top: var(--space-2); }
   .match-detail-status { margin-top: var(--space-3); }
   .match-detail-video { margin-top: var(--space-3); display: grid; gap: var(--space-2); }
   .match-detail-video h4 { margin: 0; }
