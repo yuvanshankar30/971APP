@@ -32,8 +32,8 @@
   let files = [];
   let modelName = 'frc-vision-hybrid';
   let modelVersion = 'qwen3.8-27b-bf16+yolo-v1';
-  let qwenModel = 'Qwen/Qwen3.8-27B';
-  let qwenRevision = '1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0';
+  let qwenModel = 'Qwen/Qwen3-VL-30B-A3B-Instruct';
+  let qwenRevision = '9c4b90e1e4ba969fd3b5378b57d966d725f1b86c';
   // Must match VALID_CLIMB_POS in api/vision - anything else is refused at
   // release rather than corrupting power-ranking aggregation.
   const CLIMB_LEVELS = ['L1', 'L2', 'L3', 'Failed', 'N/A'];

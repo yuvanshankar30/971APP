@@ -21,10 +21,10 @@ therefore unverified. No weights or recordings were found in the repository.
 | Ball detection | OpenCV HSV threshold, contour area and circularity | Lighting, yellow background objects, small balls, blur, and touching/overlapping balls can defeat it |
 | Ball association | `fuel_tracking.PieceTracker`, constant-velocity prediction and globally distance-ordered greedy pairs | Not a full assignment solver; dense streams/crossings can still switch IDs |
 | Score proposals | Observed 2D goal entry, origin-to-robot matching in pixel space | A projected hub-region entry does not prove a score; first detection need not be the launch point |
-| Semantic clip proposals | `Qwen/Qwen3.8-27B`, pinned revision, BF16, Transformers `.generate()` behind FastAPI/Uvicorn | Not vLLM, not a per-frame ball detector, and no measured production throughput |
+| Semantic clip proposals | `Qwen/Qwen3-VL-30B-A3B-Instruct`, pinned revision, BF16, Transformers `.generate()` behind FastAPI/Uvicorn | Not vLLM, not a per-frame ball detector, and no measured production throughput |
 
-The [pinned Qwen config](https://huggingface.co/Qwen/Qwen3.8-27B/raw/1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0/config.json)
-declares `Qwen3_5ForConditionalGeneration`. Its architectural class name is not
+The [pinned Qwen config](https://huggingface.co/Qwen/Qwen3-VL-30B-A3B-Instruct/raw/9c4b90e1e4ba969fd3b5378b57d966d725f1b86c/config.json)
+declares `Qwen3VLMoeForConditionalGeneration`. Its architectural class name is not
 the public checkpoint name. Training annotation now matches the service's
 class, Transformers dependency range, and explicit CUDA placement.
 
@@ -132,7 +132,7 @@ runner's current dtype/revision checks: the service health, observation
 provenance, and acceptance workflow must change together.
 
 Current inference is native Transformers behind Uvicorn. The
-[Qwen model card](https://huggingface.co/Qwen/Qwen3.8-27B) lists vLLM and
+[Qwen model card](https://huggingface.co/Qwen/Qwen3-VL-30B-A3B-Instruct) lists vLLM and
 SGLang compatibility, but that does not establish our Spark driver/kernel
 compatibility or measured speed. Do not install a new engine on speculation.
 Benchmark a bare-metal supported engine in a separate local-only deployment,

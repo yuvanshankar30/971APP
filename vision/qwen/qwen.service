@@ -1,7 +1,7 @@
 # Bare-metal alternative to Docker Compose on DGX Spark. Install this before
 # vision-runner.service and point both units at /opt/vision-runner/.env.
 [Unit]
-Description=Qwen3.8-27B BF16 service (spartanshub Vision)
+Description=Qwen3-VL-30B-A3B-Instruct BF16 service (spartanshub Vision)
 After=network-online.target
 Wants=network-online.target
 

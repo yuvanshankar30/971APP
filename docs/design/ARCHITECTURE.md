@@ -44,7 +44,7 @@ flowchart TB
     subgraph Vision["Vision Scouting GPU worker (NVIDIA DGX Spark)"]
         direction TB
         VisionRunner["vision_runner.py<br/>dense YOLO/ByteTrack tracking"]
-        Qwen["qwen_service.py<br/>Qwen3.8-27B BF16 (Hugging Face)"]
+        Qwen["qwen_service.py<br/>Qwen3-VL-30B-A3B-Instruct BF16 (Hugging Face)"]
     end
 
     App <--> |"authenticated Vision Runner APIs"| VisionRunner
@@ -103,7 +103,7 @@ flowchart TB
 | 3D / CAD | `occt-import-js` (STEP parsing, WASM) + `three.js` |
 | CAM (non-Fusion) | Pure JS, no external CAM software, no DXF |
 | CAM (Fusion) | Python add-in inside a real Fusion 360 install, job-queue driven |
-| Vision inference | Qwen3.8-27B BF16 on NVIDIA DGX Spark, separate from web deploy |
+| Vision inference | Qwen3-VL-30B-A3B-Instruct BF16 on NVIDIA DGX Spark, separate from web deploy |
 | Messaging | Slack (`@slack/web-api`) |
 | External CAD/data sources | Onshape API, The Blue Alliance API |
 | Monitoring | Sentry |
