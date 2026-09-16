@@ -106,6 +106,45 @@
     { pitEntries: report?.data?.pit_entries || [], problemReports: report?.data?.pit_problems || [], matchEntries: report?.data?.match_entries || [] }
   );
   $: scoutPowerByTeam = new Map(powerRankings.map((team) => [team.key, team.scoutPower]));
+  // A rough per-team predicted-score contribution for the Statbotics-style
+  // match view's predicted-score bar - not a calibrated scoring model (see
+  // matchProjection.js), just auto + teleop scouted averages summed per
+  // alliance so the bar means *something* relative rather than nothing.
+  $: projectedScoreByTeam = new Map(rows.map((row) => [
+    row.teamKey,
+    (row.autoAverage ?? 0) + (row.matchScoutSummary.avgBallsScored ?? 0)
+  ]));
+  // Per-team breakdown markers ("ACE-like markings"): a match_entries row
+  // already records teleop_robot_status (dead/stopped/brownout/active/
+  // unknown) and beached per (match, team) - reused as-is, no new schema or
+  // fetch, just indexed for O(1) lookup per match row.
+  $: breakdownByMatchTeam = (() => {
+    const byMatch = new Map();
+    for (const entry of report?.data?.match_entries || []) {
+      if (!entry?.match_key || !entry?.team_key) continue;
+      if (!byMatch.has(entry.match_key)) byMatch.set(entry.match_key, new Map());
+      byMatch.get(entry.match_key).set(entry.team_key, entry);
+    }
+    return byMatch;
+  })();
+  function teamBreakdown(matchKey, teamKey) {
+    const entry = breakdownByMatchTeam.get(matchKey)?.get(teamKey);
+    if (!entry) return null;
+    if (entry.beached) return 'Beached';
+    if (['dead', 'stopped', 'brownout'].includes(entry.teleop_robot_status)) {
+      return entry.teleop_robot_status === 'dead' ? 'Dead'
+        : entry.teleop_robot_status === 'brownout' ? 'Brownout'
+        : 'Stopped';
+    }
+    return null;
+  }
+  $: selectedMatchBreakdown = selectedMatchForDetail
+    ? new Map(
+        [...(selectedMatchForDetail.alliances?.red?.team_keys || []), ...(selectedMatchForDetail.alliances?.blue?.team_keys || [])]
+          .map((teamKey) => [teamKey, teamBreakdown(selectedMatchForDetail.key, teamKey)])
+          .filter(([, label]) => label)
+      )
+    : new Map();
   $: upcomingMatches = matches.filter((match) => !isMatchPlayed(match));
   $: playedMatches = matches.filter((match) => isMatchPlayed(match)).slice().reverse();
   const teamNumber = (teamKey) => String(teamKey || '').replace(/^frc/i, '');
@@ -270,27 +309,43 @@
       <div class="empty-state">No match schedule yet for this event.</div>
     {:else}
       <div class="board-table-wrap">
-        <table class="board-table">
-          <thead><tr><th>Match</th><th>Red</th><th>Blue</th><th>Status</th></tr></thead>
+        <table class="board-table statbotics-table">
+          <thead><tr><th>Match</th><th>Red</th><th>Blue</th><th>Predicted</th><th>Win %</th><th>Score</th></tr></thead>
           <tbody>
-            {#each upcomingMatches as match (match.key)}
-              {@const projection = projectMatch(match, scoutPowerByTeam)}
-              <tr class:test-match={match.is_test_market} class:our-team-match={matchHasOurTeam(match)}>
+            {#each [...upcomingMatches, ...playedMatches] as match (match.key)}
+              {@const projection = projectMatch(match, scoutPowerByTeam, projectedScoreByTeam)}
+              {@const played = isMatchPlayed(match)}
+              <tr class:test-match={match.is_test_market} class:our-team-match={matchHasOurTeam(match)} class:played-row={played}>
                 <td data-label="Match">
                   <button type="button" class="match-link" on:click={() => openMatchDetail(match)}>{matchLabel(match)}</button>
                   {#if match.is_test_market}<small>Practice market</small>{/if}
                 </td>
-                <td data-label="Red" class="alliance-red">
+                <td data-label="Red" class="alliance-red" class:winner={match.winning_alliance === 'red'}>
                   {#each match.alliances?.red?.team_keys || [] as teamKey}
-                    <a class="team-number-link" class:our-team={teamKey === OUR_TEAM_KEY} href={teamHref(teamKey)}>{teamNumber(teamKey)}</a>
+                    {@const breakdown = teamBreakdown(match.key, teamKey)}
+                    <a class="team-number-link" class:our-team={teamKey === OUR_TEAM_KEY} href={teamHref(teamKey)}>
+                      {teamNumber(teamKey)}
+                      {#if breakdown}<span class="breakdown-dot" title={`${teamNumber(teamKey)}: ${breakdown}`}></span>{/if}
+                    </a>
                   {/each}
                 </td>
-                <td data-label="Blue" class="alliance-blue">
+                <td data-label="Blue" class="alliance-blue" class:winner={match.winning_alliance === 'blue'}>
                   {#each match.alliances?.blue?.team_keys || [] as teamKey}
-                    <a class="team-number-link" class:our-team={teamKey === OUR_TEAM_KEY} href={teamHref(teamKey)}>{teamNumber(teamKey)}</a>
+                    {@const breakdown = teamBreakdown(match.key, teamKey)}
+                    <a class="team-number-link" class:our-team={teamKey === OUR_TEAM_KEY} href={teamHref(teamKey)}>
+                      {teamNumber(teamKey)}
+                      {#if breakdown}<span class="breakdown-dot" title={`${teamNumber(teamKey)}: ${breakdown}`}></span>{/if}
+                    </a>
                   {/each}
                 </td>
-                <td data-label="Status">
+                <td data-label="Predicted">
+                  {#if projection.redProjectedScore == null && projection.blueProjectedScore == null}
+                    <span class="muted">-</span>
+                  {:else}
+                    <span class="predicted-score">{number(projection.redProjectedScore, 0)} - {number(projection.blueProjectedScore, 0)}</span>
+                  {/if}
+                </td>
+                <td data-label="Win %">
                   {#if projection.redWinProbability == null}
                     <span class="muted">Not enough scouting yet</span>
                   {:else}
@@ -299,26 +354,10 @@
                     </span>
                   {/if}
                 </td>
-              </tr>
-            {/each}
-            {#each playedMatches as match (match.key)}
-              <tr class="played-row" class:our-team-match={matchHasOurTeam(match)}>
-                <td data-label="Match">
-                  <button type="button" class="match-link" on:click={() => openMatchDetail(match)}>{matchLabel(match)}</button>
+                <td data-label="Score" class="muted">
+                  {#if !played}<span class="muted">Upcoming</span>
+                  {:else}{match.alliances?.red?.score ?? '?'} - {match.alliances?.blue?.score ?? '?'}{/if}
                 </td>
-                <td data-label="Red" class="alliance-red" class:winner={match.winning_alliance === 'red'}>
-                  {#each match.alliances?.red?.team_keys || [] as teamKey}
-                    <a class="team-number-link" class:our-team={teamKey === OUR_TEAM_KEY} href={teamHref(teamKey)}>{teamNumber(teamKey)}</a>
-                  {/each}
-                  <span class="muted">{match.alliances?.red?.score ?? ''}</span>
-                </td>
-                <td data-label="Blue" class="alliance-blue" class:winner={match.winning_alliance === 'blue'}>
-                  {#each match.alliances?.blue?.team_keys || [] as teamKey}
-                    <a class="team-number-link" class:our-team={teamKey === OUR_TEAM_KEY} href={teamHref(teamKey)}>{teamNumber(teamKey)}</a>
-                  {/each}
-                  <span class="muted">{match.alliances?.blue?.score ?? ''}</span>
-                </td>
-                <td data-label="Status" class="muted">{match.winning_alliance ? `${match.winning_alliance} won` : 'Tie'}</td>
               </tr>
             {/each}
           </tbody>
@@ -430,7 +469,7 @@
   {/if}
 {/if}
 
-<MatchDetailPanel match={selectedMatchForDetail} eventKey={resolvedEventKey} {scoutPowerByTeam} on:close={closeMatchDetail} />
+<MatchDetailPanel match={selectedMatchForDetail} eventKey={resolvedEventKey} {scoutPowerByTeam} {projectedScoreByTeam} breakdownByTeam={selectedMatchBreakdown} on:close={closeMatchDetail} />
 
 <style>
   .matches-board .section-heading h2 { display:flex; align-items:center; gap:var(--space-2); }
@@ -450,6 +489,8 @@
   .winner { font-weight:700; opacity:1; }
   .win-bar { display:inline-block; width:80px; height:10px; border-radius:5px; background:var(--brand-blue, #2563eb); overflow:hidden; vertical-align:middle; }
   .win-bar-red { display:block; height:100%; background:var(--danger, #dc3545); float:left; }
+  .breakdown-dot { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--danger, #dc3545); margin-left:3px; vertical-align:middle; }
+  .predicted-score { font-variant-numeric:tabular-nums; color:var(--text-secondary); }
   .strategy-header { display:flex; justify-content:space-between; gap:var(--space-4); align-items:flex-end; }
   .strategy-header h1 { display:flex; align-items:center; gap:var(--space-2); margin:0; }
   .strategy-header p, .section-heading p { margin:var(--space-1) 0 0; color:var(--text-secondary); }
