@@ -3,174 +3,87 @@ import { createClient } from '@supabase/supabase-js';
 import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/public';
 import { env } from '$env/dynamic/private';
 import { getSupabase } from '$lib/server/971bot.js';
-import { normalizeBetRequest } from '$lib/server/predictionMarketSchema.js';
-import { STARTING_BALANCE, availableBalance, isTestMarketKey, resolvePariMutuel } from '$lib/predictionMarket.js';
+import { availableBalance, isTestMarketKey, settleMarket } from '$lib/predictionMarket.js';
 
-const SELECT_COLUMNS = 'id,event_key,match_key,created_by,side,stake,placed_at,updated_at,resolved_at,payout,winning_side';
-
-function requestClient(request) {
-  return createClient(PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY, {
-    global: { headers: { Authorization: request.headers.get('authorization') || '' } }
-  });
+const COLUMNS = 'id,event_key,market_key,market_type,outcome_key,created_by,stake,placed_at,updated_at,resolved_at,payout,winning_outcome';
+const missing = (error) => error?.code === '42P01' || error?.code === 'PGRST205' || /prediction_market_(positions|ticks).*does not exist/i.test(error?.message || '');
+function requestClient(request) { return createClient(PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY, { global: { headers: { Authorization: request.headers.get('authorization') || '' } } }); }
+function dbFor(fallback) { try { return getSupabase(); } catch { return fallback; } }
+async function actorFor(client) { const { data } = await client.auth.getUser(); return data?.user || null; }
+async function tba(path) {
+  const key = env.TBA_API_KEY || env.VITE_TBA_API_KEY || env.PUBLIC_TBA_API_KEY;
+  if (!key) return null;
+  const response = await fetch(`https://www.thebluealliance.com/api/v3${path}`, { headers: { 'X-TBA-Auth-Key': key } }).catch(() => null);
+  return response?.ok ? response.json() : null;
 }
-
-// Resolving a match's bets has to update every bettor's row, not just the
-// caller's own - RLS only ever lets an authenticated user touch their own
-// bet, by design (see the migration). The service-role client bypasses RLS
-// for exactly this. When no service key is configured, falling back to the
-// per-request client still lets each user's own bets resolve as they load
-// this page themselves - a slower, eventually-consistent path, not a broken
-// one.
-function getDbClient(fallbackClient) {
-  try {
-    return getSupabase();
-  } catch {
-    return fallbackClient;
-  }
+const pools = (rows) => rows.reduce((result, row) => ({ ...result, [row.outcome_key]: Number(result[row.outcome_key] || 0) + Number(row.stake || 0) }), {});
+async function snapshot(db, eventKey, marketKey) {
+  const { data } = await db.from('prediction_market_positions').select('outcome_key,stake').eq('event_key', eventKey).eq('market_key', marketKey).is('resolved_at', null);
+  await db.from('prediction_market_ticks').insert({ event_key: eventKey, market_key: marketKey, pools: pools(data || []) });
 }
-
-function isMissingBetsTable(error) {
-  return error?.code === '42P01'
-    || error?.code === 'PGRST205'
-    || /(relation|table).*prediction_market_bets.*(does not exist|schema cache)|prediction_market_bets.*(does not exist|schema cache)/i.test(error?.message || '');
-}
-
-async function actorFor(client) {
-  const { data } = await client.auth.getUser();
-  return data?.user || null;
-}
-
-async function fetchTbaMatch(matchKey) {
-  const authKey = env.TBA_API_KEY || env.VITE_TBA_API_KEY || env.PUBLIC_TBA_API_KEY;
-  if (!authKey) return null;
-  try {
-    const response = await fetch(`https://www.thebluealliance.com/api/v3/match/${encodeURIComponent(matchKey)}/simple`, {
-      headers: { 'X-TBA-Auth-Key': authKey }
-    });
-    if (!response.ok) return null;
-    return await response.json();
-  } catch {
-    return null;
-  }
-}
-
-// Resolves every outstanding bet whose match TBA now reports a result for.
-// Idempotent - the `.is('resolved_at', null)` guard on each update means a
-// second concurrent pass (another scout loading this same endpoint at the
-// same moment) simply updates zero rows for anything already resolved,
-// rather than double-paying anyone.
-async function resolveOutstandingBets(db, eventKey) {
-  const { data: pending, error } = await db
-    .from('prediction_market_bets')
-    .select(SELECT_COLUMNS)
-    .eq('event_key', eventKey)
-    .is('resolved_at', null);
-  if (error || !pending?.length) return;
-
-  const byMatch = new Map();
-  for (const bet of pending) {
-    if (!byMatch.has(bet.match_key)) byMatch.set(bet.match_key, []);
-    byMatch.get(bet.match_key).push(bet);
-  }
-
-  for (const [matchKey, matchBets] of byMatch) {
-    if (isTestMarketKey(matchKey, eventKey)) continue;
-    const match = await fetchTbaMatch(matchKey);
-    // winning_alliance is '' for an unplayed match too (not just a tie) -
-    // only trust it once TBA has also posted an actual play time, proof the
-    // match really happened.
-    if (!match?.actual_time) continue;
-    const resolutions = resolvePariMutuel(matchBets, match.winning_alliance);
-    for (const resolution of resolutions) {
-      await db
-        .from('prediction_market_bets')
-        .update({ resolved_at: new Date().toISOString(), payout: resolution.payout, winning_side: resolution.winning_side })
-        .eq('id', resolution.id)
-        .is('resolved_at', null);
+async function settleResolvedMarkets(db, eventKey) {
+  const { data: pending } = await db.from('prediction_market_positions').select(COLUMNS).eq('event_key', eventKey).is('resolved_at', null);
+  if (!pending?.length) return;
+  const groups = new Map();
+  for (const position of pending) groups.set(position.market_key, [...(groups.get(position.market_key) || []), position]);
+  for (const [marketKey, positions] of groups) {
+    let winner = null;
+    if (positions[0].market_type === 'practice') continue;
+    if (positions[0].market_type === 'match_winner') {
+      const match = await tba(`/match/${encodeURIComponent(marketKey.replace(/^match:/, ''))}/simple`);
+      if (match?.actual_time && match.winning_alliance) winner = match.winning_alliance;
+    } else if (marketKey === 'qualification-rank-1') {
+      const matches = await tba(`/event/${encodeURIComponent(eventKey)}/matches/simple`);
+      if (Array.isArray(matches) && matches.filter((match) => match.comp_level === 'qm').every((match) => match.actual_time)) {
+        const rankings = await tba(`/event/${encodeURIComponent(eventKey)}/rankings`);
+        winner = rankings?.rankings?.[0]?.team_key || null;
+      }
     }
+    if (!winner) continue;
+    for (const result of settleMarket(positions, winner)) await db.from('prediction_market_positions').update({ resolved_at: new Date().toISOString(), payout: result.payout, winning_outcome: winner }).eq('id', result.id).is('resolved_at', null);
+    await snapshot(db, eventKey, marketKey);
   }
+}
+function validRequest(body) {
+  const eventKey = String(body?.event_key || '').trim(); const marketKey = String(body?.market_key || '').trim(); const marketType = String(body?.market_type || '').trim(); const outcomeKey = String(body?.outcome_key || '').trim(); const stake = Number(body?.stake);
+  if (!eventKey || !marketKey || !outcomeKey || !Number.isFinite(stake) || stake < 1 || stake > 1000) return { error: 'Choose an outcome and wager between 1 and 1,000 points.' };
+  if (marketType === 'match_winner' && /^match:[\w-]+$/.test(marketKey) && ['red', 'blue'].includes(outcomeKey)) return { value: { eventKey, marketKey, marketType, outcomeKey, stake } };
+  if (marketType === 'practice' && /^match:[\w-]+$/.test(marketKey) && isTestMarketKey(marketKey, eventKey) && ['red', 'blue'].includes(outcomeKey)) return { value: { eventKey, marketKey, marketType, outcomeKey, stake } };
+  if (marketType === 'qualification_rank' && marketKey === 'qualification-rank-1' && /^frc\d+$/.test(outcomeKey)) return { value: { eventKey, marketKey, marketType, outcomeKey, stake } };
+  return { error: 'That market is not available.' };
 }
 
 export async function GET({ request, url }) {
-  const auth = requestClient(request);
-  const actor = await actorFor(auth);
-  if (!actor) return json({ error: 'Unauthorized' }, { status: 401 });
-
-  const eventKey = String(url.searchParams.get('event_key') || '').trim();
-  if (!eventKey) return json({ error: 'event_key is required' }, { status: 400 });
-
-  const db = getDbClient(auth);
-  await resolveOutstandingBets(db, eventKey);
-
-  const { data, error } = await auth
-    .from('prediction_market_bets')
-    .select(SELECT_COLUMNS)
-    .eq('event_key', eventKey)
-    .order('placed_at', { ascending: false });
-  if (error && isMissingBetsTable(error)) return json({ success: true, data: [], unavailable: true });
-  if (error) return json({ error: error.message }, { status: 500 });
-  return json({ success: true, data: data || [] });
+  const auth = requestClient(request); const actor = await actorFor(auth); if (!actor) return json({ error: 'Unauthorized' }, { status: 401 });
+  const eventKey = String(url.searchParams.get('event_key') || '').trim(); if (!eventKey) return json({ error: 'event_key is required' }, { status: 400 });
+  const db = dbFor(auth); await settleResolvedMarkets(db, eventKey);
+  const { data: positions, error } = await auth.from('prediction_market_positions').select(COLUMNS).eq('event_key', eventKey).order('updated_at', { ascending: false });
+  if (missing(error)) return json({ success: true, data: { positions: [], ticks: [] }, unavailable: true }); if (error) return json({ error: error.message }, { status: 500 });
+  const { data: ticks } = await auth.from('prediction_market_ticks').select('event_key,market_key,captured_at,pools').eq('event_key', eventKey).order('captured_at', { ascending: true });
+  return json({ success: true, data: { positions: positions || [], ticks: ticks || [] } });
 }
-
 export async function POST({ request }) {
-  const auth = requestClient(request);
-  const actor = await actorFor(auth);
-  if (!actor) return json({ error: 'Unauthorized' }, { status: 401 });
-
+  const auth = requestClient(request); const actor = await actorFor(auth); if (!actor) return json({ error: 'Unauthorized' }, { status: 401 });
   const body = await request.json().catch(() => null);
-
   if (body?.action === 'cancel') {
-    const id = String(body?.id || '').trim();
-    if (!id) return json({ error: 'id is required' }, { status: 400 });
-    const { error } = await auth.from('prediction_market_bets').delete().eq('id', id).eq('created_by', actor.id).is('resolved_at', null);
-    if (error) return json({ error: error.message }, { status: 500 });
-    return json({ success: true });
+    const { error } = await auth.from('prediction_market_positions').delete().eq('id', String(body.id || '')).eq('created_by', actor.id).is('resolved_at', null);
+    if (error) return json({ error: error.message }, { status: 500 }); return json({ success: true });
   }
-
-  if (body?.action !== 'bet') return json({ error: 'Invalid action' }, { status: 400 });
-
-  const { value, error: invalid } = normalizeBetRequest(body);
-  if (invalid) return json({ error: invalid }, { status: 400 });
-
-  const match = isTestMarketKey(value.match_key, value.event_key) ? null : await fetchTbaMatch(value.match_key);
-  if (match?.actual_time) return json({ error: 'This match has already been played.' }, { status: 409 });
-  // actual_time can lag the real start by minutes (TBA posts it after the
-  // match finishes and scores are entered) - a bet placed after the match
-  // has visibly started but before that result lands would still be "free"
-  // information, not a prediction. predicted_time is TBA's live-updated
-  // estimate (drifts through a real event as the schedule slips); time is
-  // the original static schedule, used only when no better estimate exists.
-  const lockTime = match?.predicted_time ?? match?.time ?? null;
-  if (lockTime && Date.now() / 1000 >= lockTime) {
-    return json({ error: 'Betting has closed for this match - it has already started.' }, { status: 409 });
+  const { value, error: invalid } = validRequest(body); if (invalid) return json({ error: invalid }, { status: 400 });
+  if (value.market_type === 'match_winner') {
+    const match = await tba(`/match/${encodeURIComponent(value.market_key.replace(/^match:/, ''))}/simple`);
+    if (!match || match.event_key !== value.eventKey) return json({ error: 'That match is not part of this event.' }, { status: 400 });
+    if (match.actual_time) return json({ error: 'This market is locked: the match has already played.' }, { status: 409 });
+    const lockTime = match.predicted_time ?? match.time ?? null;
+    if (lockTime && Date.now() / 1000 >= lockTime) return json({ error: 'This market is locked: the match has started.' }, { status: 409 });
+  } else if (value.market_type === 'qualification_rank') {
+    const eventTeams = await tba(`/event/${encodeURIComponent(value.eventKey)}/teams/keys`);
+    if (!Array.isArray(eventTeams) || !eventTeams.includes(value.outcomeKey)) return json({ error: 'Choose a team that is competing at this event.' }, { status: 400 });
   }
-
-  const { data: existingBets, error: existingError } = await auth
-    .from('prediction_market_bets')
-    .select(SELECT_COLUMNS)
-    .eq('event_key', value.event_key)
-    .eq('created_by', actor.id);
-  if (existingError && isMissingBetsTable(existingError)) {
-    return json({
-      error: 'The prediction market is unavailable until its migration is applied.',
-      code: 'PREDICTION_MARKET_UNAVAILABLE'
-    }, { status: 503 });
-  }
-  if (existingError) return json({ error: existingError.message }, { status: 500 });
-
-  const editingId = (existingBets || []).find((bet) => bet.match_key === value.match_key)?.id || null;
-  const ceiling = isTestMarketKey(value.match_key, value.event_key)
-    ? STARTING_BALANCE
-    : availableBalance(existingBets || [], actor.id, editingId);
-  if (value.stake > ceiling) {
-    return json({ error: `Only ${ceiling.toFixed(2)} points available - your balance is already committed to other pending predictions.` }, { status: 400 });
-  }
-
-  const { data, error } = await auth
-    .from('prediction_market_bets')
-    .upsert({ ...value, created_by: actor.id, updated_at: new Date().toISOString(), resolved_at: null, payout: null, winning_side: null }, { onConflict: 'event_key,match_key,created_by' })
-    .select(SELECT_COLUMNS)
-    .single();
-  if (error) return json({ error: error.message }, { status: 500 });
-  return json({ success: true, data });
+  const { data: existing, error: readError } = await auth.from('prediction_market_positions').select(COLUMNS).eq('event_key', value.eventKey).eq('created_by', actor.id);
+  if (missing(readError)) return json({ error: 'Apply the prediction-market v2 migration first.', code: 'PREDICTION_MARKET_UNAVAILABLE' }, { status: 503 }); if (readError) return json({ error: readError.message }, { status: 500 });
+  const edited = (existing || []).find((row) => row.market_key === value.marketKey);
+  if (value.stake > availableBalance(existing || [], actor.id, edited?.id)) return json({ error: 'That wager exceeds your available balance.' }, { status: 400 });
+  const { data, error } = await auth.from('prediction_market_positions').upsert({ event_key: value.eventKey, market_key: value.marketKey, market_type: value.marketType, outcome_key: value.outcomeKey, stake: value.stake, created_by: actor.id, updated_at: new Date().toISOString(), resolved_at: null, payout: null, winning_outcome: null }, { onConflict: 'event_key,market_key,created_by' }).select(COLUMNS).single();
+  if (error) return json({ error: error.message }, { status: 500 }); await snapshot(dbFor(auth), value.eventKey, value.marketKey); return json({ success: true, data });
 }

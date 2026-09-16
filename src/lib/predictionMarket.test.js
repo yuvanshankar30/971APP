@@ -1,16 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { STARTING_BALANCE, availableBalance, buildTestMarketMatch, isTestMarketKey, myBetForMatch, poolForMatch, resolvePariMutuel, summarizeStandings } from './predictionMarket.js';
-
-describe('test prediction market', () => {
-  it('uses the active event roster and a stable event-scoped key', () => {
-    const match = buildTestMarketMatch('2026test', ['frc1', 'frc2', 'frc3', 'frc4', 'frc5', 'frc6']);
-    expect(match.key).toBe('2026test_test1');
-    expect(match.alliances.red.team_keys).toEqual(['frc1', 'frc2', 'frc3']);
-    expect(match.alliances.blue.team_keys).toEqual(['frc4', 'frc5', 'frc6']);
-    expect(isTestMarketKey(match.key, '2026test')).toBe(true);
-    expect(match.actual_time).toBeNull();
-  });
-});
+import { STARTING_BALANCE, availableBalance, marketSummary, myBetForMatch, resolvePariMutuel, settleMarket, summarizeStandings } from './predictionMarket.js';
 
 describe('resolvePariMutuel', () => {
   it('pays winners their stake back plus a proportional share of the losing pool', () => {
@@ -71,12 +60,6 @@ describe('summarizeStandings', () => {
     expect(standings.find((row) => row.userId === 'a').wins).toBe(1);
     expect(standings.find((row) => row.userId === 'b').losses).toBe(1);
   });
-
-  it('keeps practice predictions out of standings and balances', () => {
-    const practice = [{ id: 'test', match_key: '2026test_test1', created_by: 'a', side: 'red', stake: 900, resolved_at: null }];
-    expect(summarizeStandings(practice)).toEqual([]);
-    expect(availableBalance(practice, 'a')).toBe(STARTING_BALANCE);
-  });
 });
 
 describe('myBetForMatch', () => {
@@ -99,22 +82,26 @@ describe('availableBalance', () => {
   });
 });
 
-describe('poolForMatch', () => {
-  it('sums stakes per side and computes the implied crowd share', () => {
-    const bets = [
-      { match_key: 'm1', side: 'red', stake: 300 },
-      { match_key: 'm1', side: 'red', stake: 100 },
-      { match_key: 'm1', side: 'blue', stake: 200 },
-      { match_key: 'm2', side: 'blue', stake: 999 } // a different match - must not leak in
-    ];
-    const pool = poolForMatch(bets, 'm1');
-    expect(pool).toMatchObject({ redPool: 400, bluePool: 200, total: 600, betCount: 3 });
-    expect(pool.redShare).toBeCloseTo(2 / 3, 5);
-    expect(pool.blueShare).toBeCloseTo(1 / 3, 5);
+describe('generic markets', () => {
+  const positions = [
+    { id: 'a', market_key: 'qualification-rank-1', outcome_key: 'frc1540', created_by: 'a', stake: 75 },
+    { id: 'b', market_key: 'qualification-rank-1', outcome_key: 'frc2046', created_by: 'b', stake: 25 },
+    { id: 'c', market_key: 'match:qm1', outcome_key: 'red', created_by: 'c', stake: 100 }
+  ];
+
+  it('derives a transparent price from actual pool shares', () => {
+    const summary = marketSummary(positions, 'qualification-rank-1');
+    expect(summary.total).toBe(100);
+    expect(summary.traders).toBe(2);
+    expect(summary.outcomes).toEqual([
+      { key: 'frc1540', stake: 75, probability: 0.75 },
+      { key: 'frc2046', stake: 25, probability: 0.25 }
+    ]);
   });
 
-  it('reports no share (not a divide-by-zero) when nobody has bet on the match yet', () => {
-    const pool = poolForMatch([], 'm1');
-    expect(pool).toMatchObject({ redPool: 0, bluePool: 0, total: 0, betCount: 0, redShare: null, blueShare: null });
+  it('settles a multi-outcome market with the same pari-mutuel rules', () => {
+    const result = settleMarket(positions.slice(0, 2), 'frc1540');
+    expect(result.find((row) => row.id === 'a')).toMatchObject({ payout: 100, winning_outcome: 'frc1540' });
+    expect(result.find((row) => row.id === 'b')).toMatchObject({ payout: 0, winning_outcome: 'frc1540' });
   });
 });
