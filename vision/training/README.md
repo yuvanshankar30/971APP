@@ -88,7 +88,10 @@ remove the human-review requirement.
 
 Those files deliberately live under `proposed_labels`, not a training split.
 Every box remains unreviewed; a human must correct it before copying it into a
-YOLO `train`, `val`, or `test` directory.
+YOLO `train`, `val`, or `test` directory. The manifest records the immutable
+Ollama model digest, and the recording inventory records a SHA-256 for every
+source video, so a reviewed label set can be reproduced even if a local model
+tag or YouTube upload later changes.
 
 Broadcast layouts that contain picture-in-picture robot cameras should be
 cropped to the full-field panel before proposing labels. For example, a top

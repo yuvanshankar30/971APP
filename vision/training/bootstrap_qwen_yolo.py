@@ -99,6 +99,15 @@ def validate_ollama_url(raw_url: str) -> str:
     return raw_url.rstrip("/")
 
 
+def ollama_model_digest(url: str, model_name: str) -> str | None:
+    with urlopen(f"{url}/api/tags", timeout=10) as response:
+        payload = json.load(response)
+    for model in payload.get("models") or []:
+        if model.get("name") == model_name or model.get("model") == model_name:
+            return str(model.get("digest") or "") or None
+    return None
+
+
 def analyze_ollama(frame, url: str, model_name: str, max_new_tokens: int) -> str:
     ok, encoded = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 92])
     if not ok:
@@ -151,10 +160,12 @@ def main() -> int:
     label_dir.chmod(0o700)
     model = processor = None
     ollama_url = None
+    model_digest = None
     if args.backend == "transformers":
         model, processor = load_transformers_model(args.model, args.revision, args.attention)
     else:
         ollama_url = validate_ollama_url(args.ollama_url)
+        model_digest = ollama_model_digest(ollama_url, args.ollama_model)
     items = []
 
     for video in videos:
@@ -207,6 +218,7 @@ def main() -> int:
         "created_at": datetime.now(timezone.utc).isoformat(),
         "backend": args.backend,
         "model": args.model if args.backend == "transformers" else args.ollama_model,
+        "model_digest": model_digest,
         "revision": args.revision if args.backend == "transformers" else None,
         "dtype": "bfloat16" if args.backend == "transformers" else "local-quantized",
         "classes": ["robot_red", "robot_blue"],

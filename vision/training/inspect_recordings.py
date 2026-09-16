@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -23,6 +24,14 @@ def rate_to_float(raw: str | None) -> float:
         return 0.0
 
 
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(4 * 1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def inspect(path: Path) -> dict:
     result = subprocess.run([
         "ffprobe", "-v", "error", "-select_streams", "v:0",
@@ -36,6 +45,7 @@ def inspect(path: Path) -> dict:
     return {
         "path": str(path),
         "bytes": path.stat().st_size,
+        "sha256": sha256(path),
         "codec": stream.get("codec_name"),
         "width": int(stream.get("width") or 0),
         "height": height,
