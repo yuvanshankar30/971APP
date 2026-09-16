@@ -212,7 +212,7 @@
      rendered unstyled in normal document flow at the bottom of the page
      instead of as a centered fixed overlay). */
   .scrim { position: fixed; inset: 0; background: #10182899; display: grid; place-items: center; z-index: 10; }
-  .modal { position: relative; background: var(--card-bg, #fff); padding: 22px; display: grid; gap: 14px; border-radius: 8px; max-height: calc(100vh - 32px); overflow: auto; }
+  .modal { position: relative; background: var(--surface-1); padding: 22px; display: grid; gap: 14px; border-radius: 8px; max-height: calc(100vh - 32px); overflow: auto; }
   .modal h2 { margin: 0; }
   .modal-close { position: absolute; right: 12px; top: 12px; border: 0; background: none; color: inherit; cursor: pointer; }
   .output-editor-modal { width: min(760px, 90vw); height: 70vh; display: flex; flex-direction: column; }
