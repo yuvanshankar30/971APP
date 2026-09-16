@@ -1,71 +1,45 @@
-// A friendly, play-money prediction market: scouts wager on which alliance
+// A friendly, play-points prediction market: scouts wager on which alliance
 // wins an upcoming match. No house edge - winners split the losing side's
 // stakes proportionally (pari-mutuel), same mechanic real horse-racing pools
 // use, chosen specifically because it needs no pre-set odds/win probability
 // to be fair. Ranks "who has the best judgement" by ending balance, which is
-// the whole point: it rewards being right and sizing bets well, not just
+// the whole point: it rewards being right and sizing predictions well, not just
 // being right often.
 
 export const STARTING_BALANCE = 1000;
 export const TEST_MARKET_SUFFIX = 'test1';
+
 const FALLBACK_TEST_TEAMS = ['frc971', 'frc254', 'frc1678', 'frc1323', 'frc604', 'frc581'];
 
 export function testMarketKey(eventKey) {
   return `${String(eventKey || '').trim()}_${TEST_MARKET_SUFFIX}`;
 }
 
-export function isTestMarketKey(marketKey, eventKey = '') {
-  const key = String(marketKey || '').replace(/^match:/, '');
+export function isTestMarketKey(matchKey, eventKey = '') {
+  const key = String(matchKey || '');
   return eventKey ? key === testMarketKey(eventKey) : key.endsWith(`_${TEST_MARKET_SUFFIX}`);
 }
 
-// A permanent sandbox gives scouts something useful to practice on before
-// the schedule arrives. Its positions are visible but never settle or touch
-// the competition leaderboard/balance.
+// A permanent practice row lets scouts exercise placing, updating, and
+// cancelling predictions before TBA publishes an event schedule. It never
+// resolves, so practice activity cannot change the ranked point balance.
 export function buildTestMarketMatch(eventKey, eventTeams = []) {
   const supplied = eventTeams.map((team) => typeof team === 'string' ? team : team?.key).filter(Boolean);
   const teamKeys = [...new Set([...supplied, ...FALLBACK_TEST_TEAMS])].slice(0, 6);
   return {
-    key: testMarketKey(eventKey), comp_level: 'test', set_number: 1, match_number: 1,
-    actual_time: null, predicted_time: null, time: null, is_test_market: true,
-    alliances: { red: { team_keys: teamKeys.slice(0, 3), score: -1 }, blue: { team_keys: teamKeys.slice(3, 6), score: -1 } }
+    key: testMarketKey(eventKey),
+    comp_level: 'test',
+    set_number: 1,
+    match_number: 1,
+    actual_time: null,
+    predicted_time: null,
+    time: null,
+    is_test_market: true,
+    alliances: {
+      red: { team_keys: teamKeys.slice(0, 3), score: -1 },
+      blue: { team_keys: teamKeys.slice(3, 6), score: -1 }
+    }
   };
-}
-
-// A position is deliberately generic: a market can be a match winner, the
-// eventual qualification leader, or another event question.  This keeps the
-// pricing and settlement maths identical instead of growing one-off betting
-// systems for every new prompt.
-export function marketSummary(positions = [], marketKey) {
-  const rows = positions.filter((position) => position.market_key === marketKey);
-  const total = rows.reduce((sum, position) => sum + Number(position.stake || 0), 0);
-  const byOutcome = new Map();
-  for (const position of rows) {
-    const key = position.outcome_key;
-    byOutcome.set(key, (byOutcome.get(key) || 0) + Number(position.stake || 0));
-  }
-  return {
-    total,
-    traders: new Set(rows.map((position) => position.created_by)).size,
-    outcomes: [...byOutcome.entries()].map(([key, stake]) => ({ key, stake, probability: total ? stake / total : 0 })).sort((a, b) => b.stake - a.stake)
-  };
-}
-
-export function impliedProbability(positions = [], marketKey, outcomeKey) {
-  return marketSummary(positions, marketKey).outcomes.find((outcome) => outcome.key === outcomeKey)?.probability || 0;
-}
-
-export function settleMarket(positions = [], winningOutcome) {
-  if (!winningOutcome) return positions.map((position) => ({ id: position.id, payout: position.stake, winning_outcome: null }));
-  const winners = positions.filter((position) => position.outcome_key === winningOutcome);
-  const winPool = winners.reduce((sum, position) => sum + Number(position.stake), 0);
-  const losePool = positions.filter((position) => position.outcome_key !== winningOutcome).reduce((sum, position) => sum + Number(position.stake), 0);
-  if (!winPool) return positions.map((position) => ({ id: position.id, payout: position.stake, winning_outcome: winningOutcome }));
-  return positions.map((position) => ({
-    id: position.id,
-    payout: position.outcome_key === winningOutcome ? Math.round((Number(position.stake) + (Number(position.stake) / winPool) * losePool) * 100) / 100 : 0,
-    winning_outcome: winningOutcome
-  }));
 }
 
 // Given every bet placed on ONE match and that match's resolved winning
@@ -105,7 +79,7 @@ export function resolvePariMutuel(bets = [], winningSide) {
 export function summarizeStandings(bets = []) {
   const byScout = new Map();
   for (const bet of bets) {
-    if (bet.market_type === 'practice' || isTestMarketKey(bet.market_key || bet.match_key)) continue;
+    if (isTestMarketKey(bet?.match_key)) continue;
     const key = bet?.created_by;
     if (!key) continue;
     if (!byScout.has(key)) byScout.set(key, { userId: key, settledNet: 0, pendingStake: 0, wins: 0, losses: 0, pushes: 0, betCount: 0 });
@@ -132,7 +106,7 @@ export function myBetForMatch(bets = [], matchKey, userId) {
   return bets.find((bet) => bet.match_key === matchKey && bet.created_by === userId) || null;
 }
 
-// A scout's current spendable balance for placing a NEW bet: starting money,
+// A scout's current spendable balance for placing a NEW bet: starting points,
 // plus/minus every settled result, minus whatever they already have locked
 // up in bets that have not resolved yet (excluding one bet being edited, so
 // raising or lowering an existing wager checks against the right ceiling).
@@ -141,10 +115,29 @@ export function availableBalance(bets = [], userId, excludeBetId = null) {
   let pendingStake = 0;
   for (const bet of bets) {
     if (bet.created_by !== userId) continue;
-    if (bet.market_type === 'practice' || isTestMarketKey(bet.market_key || bet.match_key)) continue;
+    if (isTestMarketKey(bet.match_key)) continue;
     if (bet.id === excludeBetId) continue;
     if (bet.resolved_at) settledNet += Number(bet.payout ?? 0) - Number(bet.stake ?? 0);
     else pendingStake += Number(bet.stake ?? 0);
   }
   return STARTING_BALANCE + settledNet - pendingStake;
+}
+
+// How much is currently staked on each side of ONE match, and what that
+// implies about the "crowd's" confidence - real signal a scout can weigh
+// before placing their own bet, the same way real prediction/betting
+// markets surface pool sizes rather than a single house-set number.
+export function poolForMatch(bets = [], matchKey) {
+  const matchBets = bets.filter((bet) => bet.match_key === matchKey);
+  const redPool = matchBets.filter((bet) => bet.side === 'red').reduce((sum, bet) => sum + Number(bet.stake || 0), 0);
+  const bluePool = matchBets.filter((bet) => bet.side === 'blue').reduce((sum, bet) => sum + Number(bet.stake || 0), 0);
+  const total = redPool + bluePool;
+  return {
+    redPool,
+    bluePool,
+    total,
+    redShare: total > 0 ? redPool / total : null,
+    blueShare: total > 0 ? bluePool / total : null,
+    betCount: matchBets.length
+  };
 }
