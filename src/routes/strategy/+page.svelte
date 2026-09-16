@@ -8,8 +8,15 @@
   import { buildPowerRankings } from '$lib/scoutingStats.js';
   import { isMatchPlayed, matchLabel, projectMatch } from '$lib/matchProjection.js';
   import { buildTestMarketMatch } from '$lib/predictionMarket.js';
+  import { FRC_TEAMS } from '$lib/permissions.js';
   import SeasonFilter from '$lib/components/SeasonFilter.svelte';
   import MatchScoutReport from '$lib/components/MatchScoutReport.svelte';
+  import MatchDetailPanel from '$lib/components/MatchDetailPanel.svelte';
+
+  const OUR_TEAM_KEY = `frc${FRC_TEAMS.TEAM_971}`;
+  const matchHasOurTeam = (match) =>
+    (match?.alliances?.red?.team_keys || []).includes(OUR_TEAM_KEY) ||
+    (match?.alliances?.blue?.team_keys || []).includes(OUR_TEAM_KEY);
 
   let eventKey = '';
   let selectedEventKey = null;
@@ -62,8 +69,15 @@
 
   function openTeamView(row) {
     selectedTeamKey = row.teamKey;
-    goto(`/teamview?event_key=${encodeURIComponent(resolvedEventKey)}&team=${encodeURIComponent(row.teamKey)}`);
+    goto(`/teamview?event_key=${encodeURIComponent(resolvedEventKey)}&team=${encodeURIComponent(row.teamKey)}&from=${encodeURIComponent('/strategy')}&fromLabel=${encodeURIComponent('Strategy')}`);
   }
+
+  const teamHref = (teamKey) =>
+    `/teamview?event_key=${encodeURIComponent(resolvedEventKey)}&team=${encodeURIComponent(teamKey)}&from=${encodeURIComponent('/strategy')}&fromLabel=${encodeURIComponent('Strategy')}`;
+
+  let selectedMatchForDetail = null;
+  const openMatchDetail = (match) => { selectedMatchForDetail = match; };
+  const closeMatchDetail = () => { selectedMatchForDetail = null; };
 
   async function loadStrategy() {
     if (!resolvedEventKey) {
@@ -169,10 +183,21 @@
           <tbody>
             {#each upcomingMatches as match (match.key)}
               {@const projection = projectMatch(match, scoutPowerByTeam)}
-              <tr class:test-match={match.is_test_market}>
-                <td data-label="Match"><strong>{matchLabel(match)}</strong>{#if match.is_test_market}<small>Practice market</small>{/if}</td>
-                <td data-label="Red" class="alliance-red">{match.alliances?.red?.team_keys?.map(teamNumber).join(', ')}</td>
-                <td data-label="Blue" class="alliance-blue">{match.alliances?.blue?.team_keys?.map(teamNumber).join(', ')}</td>
+              <tr class:test-match={match.is_test_market} class:our-team-match={matchHasOurTeam(match)}>
+                <td data-label="Match">
+                  <button type="button" class="match-link" on:click={() => openMatchDetail(match)}>{matchLabel(match)}</button>
+                  {#if match.is_test_market}<small>Practice market</small>{/if}
+                </td>
+                <td data-label="Red" class="alliance-red">
+                  {#each match.alliances?.red?.team_keys || [] as teamKey}
+                    <a class="team-number-link" class:our-team={teamKey === OUR_TEAM_KEY} href={teamHref(teamKey)}>{teamNumber(teamKey)}</a>
+                  {/each}
+                </td>
+                <td data-label="Blue" class="alliance-blue">
+                  {#each match.alliances?.blue?.team_keys || [] as teamKey}
+                    <a class="team-number-link" class:our-team={teamKey === OUR_TEAM_KEY} href={teamHref(teamKey)}>{teamNumber(teamKey)}</a>
+                  {/each}
+                </td>
                 <td data-label="Status">
                   {#if projection.redWinProbability == null}
                     <span class="muted">Not enough scouting yet</span>
@@ -185,10 +210,22 @@
               </tr>
             {/each}
             {#each playedMatches as match (match.key)}
-              <tr class="played-row">
-                <td data-label="Match"><strong>{matchLabel(match)}</strong></td>
-                <td data-label="Red" class="alliance-red" class:winner={match.winning_alliance === 'red'}>{match.alliances?.red?.team_keys?.map(teamNumber).join(', ')} <span class="muted">{match.alliances?.red?.score ?? ''}</span></td>
-                <td data-label="Blue" class="alliance-blue" class:winner={match.winning_alliance === 'blue'}>{match.alliances?.blue?.team_keys?.map(teamNumber).join(', ')} <span class="muted">{match.alliances?.blue?.score ?? ''}</span></td>
+              <tr class="played-row" class:our-team-match={matchHasOurTeam(match)}>
+                <td data-label="Match">
+                  <button type="button" class="match-link" on:click={() => openMatchDetail(match)}>{matchLabel(match)}</button>
+                </td>
+                <td data-label="Red" class="alliance-red" class:winner={match.winning_alliance === 'red'}>
+                  {#each match.alliances?.red?.team_keys || [] as teamKey}
+                    <a class="team-number-link" class:our-team={teamKey === OUR_TEAM_KEY} href={teamHref(teamKey)}>{teamNumber(teamKey)}</a>
+                  {/each}
+                  <span class="muted">{match.alliances?.red?.score ?? ''}</span>
+                </td>
+                <td data-label="Blue" class="alliance-blue" class:winner={match.winning_alliance === 'blue'}>
+                  {#each match.alliances?.blue?.team_keys || [] as teamKey}
+                    <a class="team-number-link" class:our-team={teamKey === OUR_TEAM_KEY} href={teamHref(teamKey)}>{teamNumber(teamKey)}</a>
+                  {/each}
+                  <span class="muted">{match.alliances?.blue?.score ?? ''}</span>
+                </td>
                 <td data-label="Status" class="muted">{match.winning_alliance ? `${match.winning_alliance} won` : 'Tie'}</td>
               </tr>
             {/each}
@@ -274,7 +311,7 @@
           {#if selectedTeam.openProblems.length}<ul class="risk-list">{#each selectedTeam.openProblems as issue}<li><strong>{issue.severity || 'watch'}</strong> {issue.summary}</li>{/each}</ul>{:else}<p class="muted">No open issues.</p>{/if}
         </div>
         <div class="brief-actions">
-          <a class="btn btn-outline btn-sm" href={`/teamview?event_key=${encodeURIComponent(resolvedEventKey)}&team=${encodeURIComponent(selectedTeam.teamKey)}`}>Open team view</a>
+          <a class="btn btn-outline btn-sm" href={`/teamview?event_key=${encodeURIComponent(resolvedEventKey)}&team=${encodeURIComponent(selectedTeam.teamKey)}&from=${encodeURIComponent('/strategy')}&fromLabel=${encodeURIComponent('Strategy')}`}>Open team view</a>
           <a class="btn btn-outline btn-sm" href={`/powerrankings`}>Power rankings</a>
         </div>
       {:else}<div class="empty-state">Select a team to view its strategy brief.</div>{/if}
@@ -283,9 +320,17 @@
   {/if}
 {/if}
 
+<MatchDetailPanel match={selectedMatchForDetail} eventKey={resolvedEventKey} {scoutPowerByTeam} on:close={closeMatchDetail} />
+
 <style>
   .matches-board .section-heading h2 { display:flex; align-items:center; gap:var(--space-2); }
   .matches-warning { padding:0 var(--space-3); }
+  .our-team-match { background: color-mix(in srgb, var(--chart-success) 10%, transparent); }
+  .match-link { background:none; border:none; padding:0; font:inherit; font-weight:700; color:var(--text); cursor:pointer; text-decoration:underline; text-decoration-color:transparent; }
+  .match-link:hover { text-decoration-color:currentColor; }
+  .team-number-link { display:inline-block; margin:0 var(--space-1) 0 0; padding:2px 6px; border-radius:var(--radius-xs); color:var(--text); text-decoration:none; font-weight:600; }
+  .team-number-link:hover { text-decoration:underline; }
+  .team-number-link.our-team { background: color-mix(in srgb, var(--chart-success) 20%, transparent); }
   .subtabs button { min-height:44px; padding:.7rem 1.25rem; font-size:.9rem; font-weight:700; }
   .test-match { background:color-mix(in srgb, var(--accent) 9%, transparent); }
   .test-match td small { display:block; margin-top:2px; color:var(--text-secondary); font-size:.7rem; }

@@ -88,7 +88,18 @@ export async function GET({ request, url }) {
     });
   }
 
-  const id = url.searchParams.get('id');
+  let id = url.searchParams.get('id');
+  const lookupEventKey = url.searchParams.get('event_key');
+  const lookupMatchKey = url.searchParams.get('match_key');
+  if (!id && lookupEventKey && lookupMatchKey) {
+    // A caller (e.g. the Strategy match detail panel) that only knows the
+    // TBA event/match key, not this table's own id - resolve it here so it
+    // can reuse the exact same single-match response built below instead of
+    // fetching the unfiltered "list every vision_matches row" branch.
+    const { data: lookup } = await client.from('vision_matches').select('id').eq('event_key', lookupEventKey).eq('match_key', lookupMatchKey).maybeSingle();
+    if (!lookup) return json({ success: true, data: null });
+    id = lookup.id;
+  }
   if (!id) {
     const { data, error } = await client.from('vision_matches').select('*, vision_views(count), vision_runs(id,status,model_name,model_version,created_at)').order('created_at', { ascending: false });
     if (error) return json({ error: error.message }, { status: 403 });

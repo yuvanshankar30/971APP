@@ -77,6 +77,14 @@
   let userId = null;
   let requestedTeamKey = '';
   let viewFilterScope = 'total';
+  // Where to send someone who wants OUT of Team View entirely, as opposed to
+  // clearSelection() below (which only clears the picked team and drops them
+  // back at this page's own search picker - not the same as leaving the
+  // page). Team View is only ever reached via a link from elsewhere, never a
+  // top-nav tab, so without this a visitor's only way out is the generic
+  // hamburger/top nav - easy to miss and it forgets what they came from.
+  let returnTo = '';
+  let returnLabel = '';
 
   const displayTeam = (t) => String(t || '').replace(/^frc/i, '');
   const isTeleop = (p) => p === 'teleop' || p === 'endgame';
@@ -564,6 +572,13 @@
   onMount(async () => {
     requestedTeamKey = normalizeTeamKey($page.url.searchParams.get('team'));
     const requestedEventKey = String($page.url.searchParams.get('event_key') || '').trim();
+    const requestedReturnTo = String($page.url.searchParams.get('from') || '').trim();
+    // Only ever follow an internal, same-origin path - a `from` value could
+    // otherwise be an open-redirect vector if someone crafted the URL.
+    // `//host/...` also starts with "/" but browsers treat it as a
+    // scheme-relative link to a different origin, so that's excluded too.
+    returnTo = requestedReturnTo.startsWith('/') && !requestedReturnTo.startsWith('//') ? requestedReturnTo : '';
+    returnLabel = returnTo ? String($page.url.searchParams.get('fromLabel') || 'Back').trim() : '';
     const { data } = await supabase.auth.getUser();
     userId = data?.user?.id || null;
     await loadEventOptions();
@@ -583,6 +598,9 @@
 
 <div class="page-header card">
   <div class="teamview-header-copy">
+    {#if returnTo}
+      <a class="teamview-exit-link" href={returnTo}>&larr; Back to {returnLabel}</a>
+    {/if}
     <h2 class="teamview-title">Team View</h2>
     {#if resolvedEventKey}
       <div class="form-label">Event: {resolvedEventKey}</div>
@@ -598,7 +616,7 @@
       allLabel={`Current Event (${activeEventLabel})`}
     />
     {#if selectedTeam}
-      <button class="btn btn-secondary" on:click={clearSelection}>&larr; Back</button>
+      <button class="btn btn-secondary" on:click={clearSelection}>&larr; Search another team</button>
     {/if}
     <button class="btn btn-secondary" on:click={loadPage} disabled={loading}>Refresh</button>
   </div>
@@ -830,6 +848,8 @@
 <style>
   .teamview-header-copy { display: grid; gap: var(--gap-1); }
   .teamview-title { margin: 0; }
+  .teamview-exit-link { font-size: var(--font-sm); font-weight: 600; color: var(--text-muted); text-decoration: none; }
+  .teamview-exit-link:hover { color: var(--text); text-decoration: underline; }
   .picker-card { max-width: 760px; margin: 0 auto; display: grid; gap: var(--gap-3); }
   .picker-title { margin: 0; }
   .team-list { display: grid; gap: var(--gap-2); max-height: 540px; overflow: auto; }
