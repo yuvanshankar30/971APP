@@ -345,7 +345,15 @@
   .negative { color:var(--danger, #dc3545); }
 
   @media (max-width:640px) {
-    .stat-row { grid-template-columns:1fr; }
+    /* Keep the three stat tiles in one compact row instead of stacking them
+       full-width - each is a single short number, and three short numbers
+       stacked into three full-height cards was pure wasted scroll for the
+       same information a tight row already shows. */
+    .stat-row { gap:var(--space-2); }
+    .stat-tile { padding:var(--space-2); gap:1px; }
+    .stat-tile .text-muted { font-size:.68rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .stat-amount { font-size:1rem; }
+    .stat-of { font-size:.72rem; }
     .candy-banner { flex-wrap:wrap; }
     .candy-balance { text-align:left; }
     /* The leaderboard and settled-bets tables become one card per row - a
@@ -356,5 +364,20 @@
     .bom-table tr { border:1px solid var(--border); border-radius:var(--radius-lg); margin-bottom:var(--space-2); overflow:hidden; }
     .bom-table td { display:flex; justify-content:space-between; align-items:center; gap:var(--space-3); text-align:right; }
     .bom-table td::before { content:attr(data-label); flex-shrink:0; text-align:left; color:var(--text-muted); font-family:var(--font-mono-stack); font-size:.66rem; text-transform:uppercase; letter-spacing:.08em; }
+    /* The leaderboard specifically: two lines per scout (rank/name/balance,
+       then record + pending as small muted secondary text) instead of five
+       stacked label/value rows - rank was called out as taking too much
+       space, and this is the same data at a fifth the height. flex-basis:
+       100% on Record is what forces Record+Pending onto their own line
+       while Rank/Scout/Balance share the first. */
+    .leaderboard .bom-table tr { display:flex; flex-wrap:wrap; align-items:baseline; column-gap:var(--space-2); padding:var(--space-2) var(--space-3); }
+    .leaderboard .bom-table td { padding:0; }
+    .leaderboard .bom-table td::before { display:none; }
+    .leaderboard .bom-table td[data-label="#"] { order:1; }
+    .leaderboard .bom-table td[data-label="Scout"] { order:2; flex:1; min-width:0; justify-content:flex-start; text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .leaderboard .bom-table td[data-label="Balance"] { order:3; }
+    .leaderboard .bom-table td[data-label="Record"] { order:4; flex-basis:100%; justify-content:flex-start; font-size:.72rem; color:var(--text-muted); }
+    .leaderboard .bom-table td[data-label="Pending"] { order:5; font-size:.72rem; color:var(--text-muted); }
+    .leaderboard .bom-table td[data-label="Pending"]::before { content:"Pending: "; display:inline; font-size:inherit; text-transform:none; letter-spacing:normal; color:inherit; }
   }
 </style>
