@@ -62,6 +62,8 @@
   let eventTeams = [];
   let eventMatches = [];
   let teamNames = {};
+  let crossEventMatches = [];
+  let crossEventMatchesNote = '';
   let teamSearch = '';
   let selectedTeam = '';
 
@@ -265,6 +267,29 @@
     } finally {
       loadingTeamData = false;
     }
+    void loadCrossEventMatches(selectedTeam, resolvedEventKey);
+  }
+
+  // Cross-event match history - kept separate from the main openTeam load
+  // so a TBA hiccup here never blocks the rest of the team view, and scoped
+  // to the current event's season year so it's one fast TBA call rather
+  // than a fetch per historical event.
+  async function loadCrossEventMatches(teamKey, eventKey) {
+    crossEventMatches = [];
+    crossEventMatchesNote = '';
+    if (!teamKey || !eventKey) return;
+    try {
+      const year = eventKey.slice(0, 4);
+      const response = await fetch(`/api/tba/team-matches?team_key=${encodeURIComponent(teamKey)}&year=${encodeURIComponent(year)}`);
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.success) throw new Error(payload?.error || 'Could not load cross-event match history.');
+      crossEventMatches = (payload.data || [])
+        .filter((match) => match.event_key !== eventKey && match.actual_time)
+        .slice()
+        .reverse();
+    } catch (e) {
+      crossEventMatchesNote = e.message || 'Could not load cross-event match history.';
+    }
   }
 
   function clearSelection() {
@@ -279,6 +304,8 @@
     officialTeam = null;
     tbaPhoto = null;
     viewFilterScope = 'total';
+    crossEventMatches = [];
+    crossEventMatchesNote = '';
   }
 
   async function loadEventOptions() {
@@ -835,6 +862,24 @@
         {/each}
       </div>
     {:else}<div class="empty">No completed matches are posted for this team yet.</div>{/if}
+  </section>
+
+  <section class="card match-history-card">
+    <div class="section-title-row"><div><h3>Match history at other events</h3><p>This season's matches from The Blue Alliance, outside the currently viewed event.</p></div><strong>{crossEventMatches.length}</strong></div>
+    {#if crossEventMatchesNote}<div class="empty">{crossEventMatchesNote}</div>
+    {:else if crossEventMatches.length}
+      <div class="match-history-list">
+        {#each crossEventMatches as match (match.key)}
+          {@const alliance = allianceForTeam(match)}
+          <div class="match-history-row">
+            <div><strong>{match.event_key}</strong> <span>{match.key.split('_').at(-1).toUpperCase()}</span><span class:alliance-red={alliance === 'red'} class:alliance-blue={alliance === 'blue'}>{alliance} alliance</span></div>
+            <span>{match.alliances?.[alliance]?.team_keys?.map(displayTeam).join(', ')}</span>
+            <strong>{matchResult(match)}</strong>
+            <a class="btn btn-secondary btn-sm" href={matchVideoUrl(match)} target="_blank" rel="noreferrer">{match.videos?.length ? 'Watch video' : 'Open on TBA'}</a>
+          </div>
+        {/each}
+      </div>
+    {:else}<div class="empty">No other-event matches found for this team this season yet.</div>{/if}
   </section>
 
   <section class="card manual-reports-card">
