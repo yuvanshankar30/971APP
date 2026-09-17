@@ -204,6 +204,7 @@ def start(data, session):
         face_program_names = handleTube(
             template_path,
             program_base_name="Tube{}Job{}".format(box_tube_id, job_id),
+            machine_name=machine_name,
         )
 
         cam_product = app.activeDocument.products.itemByProductType("CAMProductType")
