@@ -17,6 +17,7 @@ describe('JProg output curl installer', () => {
     expect(script).toContain('org.spartanshub.jprog-output-sync');
     expect(script).toContain('StartInterval');
     expect(script).toContain('WatchPaths');
+    expect(script).toContain('systemctl --user enable --now');
     expect(script).toContain('git pull --rebase --autostash');
     expect(script).not.toContain('__JPROG_OUTPUT_HUB_ORIGIN__');
   });
