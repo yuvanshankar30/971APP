@@ -63,6 +63,17 @@ class MachiningTimeTests(unittest.TestCase):
         cam = Cam([Obj(isSuppressed=False, isToolpathValid=True)], error=RuntimeError("Fusion failed"))
         self.assertIsNone(machining_time.total_machining_time(cam, Collection))
 
+    def test_returns_none_for_infinite_or_nan_result_instead_of_raising(self):
+        # Real, confirmed live bug: Fusion's own estimate can come back
+        # inf/nan (e.g. an operation with an effectively-zero feed rate)
+        # without raising. The caller serializes this straight into a job's
+        # completion payload; Python's json module happily writes inf/nan as
+        # bare NaN/Infinity tokens, which the server's strict JSON.parse()
+        # then rejects, failing a job that otherwise posted correctly.
+        for bad_seconds in (float("inf"), float("-inf"), float("nan")):
+            cam = Cam([Obj(isSuppressed=False, isToolpathValid=True)], seconds=bad_seconds)
+            self.assertIsNone(machining_time.total_machining_time(cam, Collection))
+
 
 if __name__ == "__main__":
     unittest.main()
