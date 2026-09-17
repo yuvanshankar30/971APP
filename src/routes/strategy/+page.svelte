@@ -1,11 +1,12 @@
 <script>
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
+  import { dndzone } from 'svelte-dnd-action';
   import { AlertTriangle, CalendarClock, ClipboardList, MapPinned, RefreshCw, Route, Target, Users } from 'lucide-svelte';
   import { getAuthHeader } from '$lib/supabase.js';
   import { fetchActiveScoutingEventKey, fetchAvailableScoutingEvents } from '$lib/scoutingEvent.js';
   import { buildStrategyRows, strategyTotals } from '$lib/strategyScouting.js';
-  import { buildPowerRankings } from '$lib/scoutingStats.js';
+  import { buildPowerRankings, DEFAULT_SCOUT_POWER_WEIGHTS } from '$lib/scoutingStats.js';
   import { isMatchPlayed, matchLabel, projectMatch } from '$lib/matchProjection.js';
   import { buildTestMarketMatch } from '$lib/predictionMarket.js';
   import { FRC_TEAMS } from '$lib/permissions.js';
@@ -32,7 +33,29 @@
   let error = '';
   let teamSearch = '';
   let selectedTeamKey = '';
-  let view = 'teams'; // 'teams' | 'matches'
+  let view = 'teams'; // 'teams' | 'matches' | 'picklist'
+  let sortColumn = null;
+  let sortDir = 'asc';
+  let sendingToPicklist = false;
+  let sendToPicklistError = '';
+  let sendToPicklistNotice = '';
+
+  // Picklist tab (section 3 of docs/plans/strategy-picklist-improvements.md):
+  // a human drag-reorder list (backed by the existing scouting_picklist
+  // table/API) alongside a read-only, slider-weighted auto rank built from
+  // the same buildPowerRankings pipeline the rest of this page already uses.
+  let picklistEntries = [];
+  let picklistLoading = false;
+  let picklistError = '';
+  let loadedPicklistEventKey = '';
+  let dragOrderSnapshot = null;
+  let flagsByEntryId = new Map();
+  let sliderWeights = {
+    performance: DEFAULT_SCOUT_POWER_WEIGHTS.performance * 100,
+    notes: DEFAULT_SCOUT_POWER_WEIGHTS.notes * 100,
+    reliability: DEFAULT_SCOUT_POWER_WEIGHTS.reliability * 100,
+    opr: DEFAULT_SCOUT_POWER_WEIGHTS.opr * 100
+  };
 
   $: resolvedEventKey = selectedEventKey || eventKey;
   $: rows = buildStrategyRows(report?.data || {}, eventTeams);
@@ -46,6 +69,48 @@
   });
   $: totals = strategyTotals(rows);
   $: filteredRows = rankedRows.filter((row) => row.teamNumber.includes(teamSearch.trim()) || row.pitEntry?.robot_archetype?.toLowerCase().includes(teamSearch.trim().toLowerCase()));
+  // Column headers double as a sortable pre-picklist: sorting the team board
+  // and sending that order to the shared pick list is meant to be a faster
+  // starting point than building a pick list from a blank list.
+  const columnAccessors = {
+    rank: (row) => officialByTeam.get(row.teamNumber)?.rank ?? null,
+    team: (row) => Number(row.teamNumber) || 0,
+    reports: (row) => row.matchScoutSummary.reportCount ?? 0,
+    upcoming: (row) => upcomingMatchCount(row.teamKey),
+    fuel: (row) => row.performance.avgFuel,
+    balls: (row) => row.matchScoutSummary.avgBallsScored,
+    accuracy: (row) => row.performance.avgAccuracy,
+    auto: (row) => row.autoAverage,
+    pit: (row) => (row.pitEntry ? 1 : 0),
+    notes: (row) => row.notes.length,
+    autos: (row) => row.autoPaths.length,
+    risk: (row) => row.openProblems.length
+  };
+  function compareSortValues(first, second, direction) {
+    const firstMissing = first == null;
+    const secondMissing = second == null;
+    if (firstMissing && secondMissing) return 0;
+    if (firstMissing) return 1;
+    if (secondMissing) return -1;
+    const comparison = first - second;
+    return direction === 'asc' ? comparison : -comparison;
+  }
+  $: sortedRows = sortColumn
+    ? [...filteredRows].sort((first, second) => compareSortValues(
+        columnAccessors[sortColumn](first),
+        columnAccessors[sortColumn](second),
+        sortDir
+      ))
+    : filteredRows;
+  function toggleSort(column) {
+    if (sortColumn === column) {
+      sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      sortColumn = column;
+      sortDir = column === 'rank' ? 'asc' : 'desc';
+    }
+  }
+  const sortIndicator = (column) => (sortColumn === column ? (sortDir === 'asc' ? '▲' : '▼') : '');
   $: selectedTeam = rows.find((row) => row.teamKey === selectedTeamKey) || filteredRows[0] || null;
   $: activeEventLabel = availableEvents.find((option) => option.value === eventKey)?.label || eventKey || 'not set';
   $: browseEventOptions = availableEvents.filter((option) => option.value !== eventKey);
@@ -59,6 +124,67 @@
     { pitEntries: report?.data?.pit_entries || [], problemReports: report?.data?.pit_problems || [], matchEntries: report?.data?.match_entries || [] }
   );
   $: scoutPowerByTeam = new Map(powerRankings.map((team) => [team.key, team.scoutPower]));
+  // Auto (slider-weighted) picklist: same buildPowerRankings pipeline as
+  // powerRankings above, just recombined with whatever weights the sliders
+  // are currently set to instead of the hardcoded defaults - the per-team
+  // components themselves are never recomputed, only how they're blended.
+  $: normalizedSliderWeights = (() => {
+    const total = sliderWeights.performance + sliderWeights.notes + sliderWeights.reliability + sliderWeights.opr;
+    if (!total) return DEFAULT_SCOUT_POWER_WEIGHTS;
+    return {
+      performance: sliderWeights.performance / total,
+      notes: sliderWeights.notes / total,
+      reliability: sliderWeights.reliability / total,
+      opr: sliderWeights.opr / total
+    };
+  })();
+  $: autoRankedRows = buildPowerRankings(
+    rows.map((row) => ({ key: row.teamKey, team_number: Number(row.teamNumber) || 0, nickname: '' })),
+    report?.data?.data_events || [],
+    report?.data?.notes || [],
+    { pitEntries: report?.data?.pit_entries || [], problemReports: report?.data?.pit_problems || [], matchEntries: report?.data?.match_entries || [] },
+    normalizedSliderWeights
+  ).slice().sort((a, b) => (b.scoutPower ?? -1) - (a.scoutPower ?? -1));
+  $: if (view === 'picklist' && resolvedEventKey && resolvedEventKey !== loadedPicklistEventKey && !picklistLoading) void loadPicklist();
+  // A rough per-team predicted-score contribution for the Statbotics-style
+  // match view's predicted-score bar - not a calibrated scoring model (see
+  // matchProjection.js), just auto + teleop scouted averages summed per
+  // alliance so the bar means *something* relative rather than nothing.
+  $: projectedScoreByTeam = new Map(rows.map((row) => [
+    row.teamKey,
+    (row.autoAverage ?? 0) + (row.matchScoutSummary.avgBallsScored ?? 0)
+  ]));
+  // Per-team breakdown markers ("ACE-like markings"): a match_entries row
+  // already records teleop_robot_status (dead/stopped/brownout/active/
+  // unknown) and beached per (match, team) - reused as-is, no new schema or
+  // fetch, just indexed for O(1) lookup per match row.
+  $: breakdownByMatchTeam = (() => {
+    const byMatch = new Map();
+    for (const entry of report?.data?.match_entries || []) {
+      if (!entry?.match_key || !entry?.team_key) continue;
+      if (!byMatch.has(entry.match_key)) byMatch.set(entry.match_key, new Map());
+      byMatch.get(entry.match_key).set(entry.team_key, entry);
+    }
+    return byMatch;
+  })();
+  function teamBreakdown(matchKey, teamKey) {
+    const entry = breakdownByMatchTeam.get(matchKey)?.get(teamKey);
+    if (!entry) return null;
+    if (entry.beached) return 'Beached';
+    if (['dead', 'stopped', 'brownout'].includes(entry.teleop_robot_status)) {
+      return entry.teleop_robot_status === 'dead' ? 'Dead'
+        : entry.teleop_robot_status === 'brownout' ? 'Brownout'
+        : 'Stopped';
+    }
+    return null;
+  }
+  $: selectedMatchBreakdown = selectedMatchForDetail
+    ? new Map(
+        [...(selectedMatchForDetail.alliances?.red?.team_keys || []), ...(selectedMatchForDetail.alliances?.blue?.team_keys || [])]
+          .map((teamKey) => [teamKey, teamBreakdown(selectedMatchForDetail.key, teamKey)])
+          .filter(([, label]) => label)
+      )
+    : new Map();
   $: upcomingMatches = matches.filter((match) => !isMatchPlayed(match));
   $: playedMatches = matches.filter((match) => isMatchPlayed(match)).slice().reverse();
   const teamNumber = (teamKey) => String(teamKey || '').replace(/^frc/i, '');
@@ -83,9 +209,199 @@
   const teamHref = (teamKey) =>
     `/teamview?event_key=${encodeURIComponent(resolvedEventKey)}&team=${encodeURIComponent(teamKey)}&from=${encodeURIComponent('/strategy')}&fromLabel=${encodeURIComponent('Strategy')}`;
 
+  // Hands the currently sorted team board off to the shared pick list as a
+  // starting point - adds any team not already on the list (a 409 there just
+  // means another scout already added it, not an error) then reorders the
+  // whole list to match what's on screen right now.
+  async function sendToPicklist() {
+    if (!resolvedEventKey || !sortedRows.length) return;
+    sendingToPicklist = true;
+    sendToPicklistError = '';
+    sendToPicklistNotice = '';
+    try {
+      const authHeaders = await getAuthHeader();
+      const headers = { 'Content-Type': 'application/json', ...authHeaders };
+      const existingResponse = await fetch(`/api/scouting-picklist?event_key=${encodeURIComponent(resolvedEventKey)}`, { headers: authHeaders });
+      const existingPayload = await existingResponse.json().catch(() => null);
+      if (!existingResponse.ok || !existingPayload?.success) throw new Error(existingPayload?.error || 'Could not read the current pick list.');
+      const idByTeamKey = new Map((existingPayload.data || []).map((entry) => [entry.team_key, entry.id]));
+
+      for (const row of sortedRows) {
+        if (idByTeamKey.has(row.teamKey)) continue;
+        const addResponse = await fetch('/api/scouting-picklist', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ action: 'add', event_key: resolvedEventKey, team_key: row.teamKey, team_number: row.teamNumber })
+        });
+        const addPayload = await addResponse.json().catch(() => null);
+        if (addResponse.ok && addPayload?.success) idByTeamKey.set(row.teamKey, addPayload.data.id);
+        else if (addResponse.status !== 409) throw new Error(addPayload?.error || `Could not add team ${row.teamNumber} to the pick list.`);
+      }
+
+      const orderedIds = sortedRows.map((row) => idByTeamKey.get(row.teamKey)).filter(Boolean);
+      const reorderResponse = await fetch('/api/scouting-picklist', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ action: 'reorder', event_key: resolvedEventKey, ordered_ids: orderedIds })
+      });
+      const reorderPayload = await reorderResponse.json().catch(() => null);
+      if (!reorderResponse.ok || !reorderPayload?.success) throw new Error(reorderPayload?.error || 'Could not reorder the pick list.');
+      sendToPicklistNotice = `Sent ${orderedIds.length} teams to the pick list in this order.`;
+    } catch (cause) {
+      sendToPicklistError = cause?.message || 'Could not send teams to the pick list.';
+    } finally {
+      sendingToPicklist = false;
+    }
+  }
+
   let selectedMatchForDetail = null;
   const openMatchDetail = (match) => { selectedMatchForDetail = match; };
   const closeMatchDetail = () => { selectedMatchForDetail = null; };
+
+  function teamSummaryPayload(teamKey) {
+    const row = rows.find((item) => item.teamKey === teamKey);
+    if (!row) return { teamNumber: teamNumber(teamKey) };
+    return {
+      teamNumber: row.teamNumber,
+      scoutPower: scoutPowerByTeam.get(teamKey) ?? null,
+      avgFuel: row.performance.avgFuel,
+      avgBallsScored: row.matchScoutSummary.avgBallsScored,
+      openProblems: row.openProblems.length
+    };
+  }
+
+  async function loadPicklist() {
+    if (!resolvedEventKey) { picklistEntries = []; return; }
+    picklistLoading = true;
+    picklistError = '';
+    try {
+      const response = await fetch(`/api/scouting-picklist?event_key=${encodeURIComponent(resolvedEventKey)}`);
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.success) throw new Error(payload?.error || 'Could not load the pick list.');
+      picklistEntries = payload.data || [];
+      loadedPicklistEventKey = resolvedEventKey;
+      // Doc's own open question, resolved: an empty pick list seeds itself
+      // from the auto rank's current order as a starting point; after that
+      // the two lists are independent (this only fires while empty).
+      if (!picklistEntries.length && autoRankedRows.length) await seedPicklistFromAutoRank();
+    } catch (cause) {
+      picklistError = cause?.message || 'Could not load the pick list.';
+    } finally {
+      picklistLoading = false;
+    }
+  }
+
+  async function seedPicklistFromAutoRank() {
+    if (!resolvedEventKey || !autoRankedRows.length) return;
+    picklistLoading = true;
+    picklistError = '';
+    try {
+      const headers = { 'Content-Type': 'application/json', ...(await getAuthHeader()) };
+      for (const team of autoRankedRows) {
+        const addResponse = await fetch('/api/scouting-picklist', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ action: 'add', event_key: resolvedEventKey, team_key: team.key, team_number: team.team_number })
+        });
+        if (!addResponse.ok && addResponse.status !== 409) {
+          const addPayload = await addResponse.json().catch(() => null);
+          throw new Error(addPayload?.error || `Could not add team ${team.team_number} to the pick list.`);
+        }
+      }
+      const listResponse = await fetch(`/api/scouting-picklist?event_key=${encodeURIComponent(resolvedEventKey)}`);
+      const listPayload = await listResponse.json().catch(() => null);
+      if (!listResponse.ok || !listPayload?.success) throw new Error(listPayload?.error || 'Could not reload the pick list.');
+      const idByTeamKey = new Map((listPayload.data || []).map((entry) => [entry.team_key, entry.id]));
+      const orderedIds = autoRankedRows.map((team) => idByTeamKey.get(team.key)).filter(Boolean);
+      const reorderResponse = await fetch('/api/scouting-picklist', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ action: 'reorder', event_key: resolvedEventKey, ordered_ids: orderedIds })
+      });
+      const reorderPayload = await reorderResponse.json().catch(() => null);
+      if (!reorderResponse.ok || !reorderPayload?.success) throw new Error(reorderPayload?.error || 'Could not order the pick list.');
+      const entryById = new Map((listPayload.data || []).map((entry) => [entry.id, entry]));
+      picklistEntries = orderedIds.map((id) => entryById.get(id)).filter(Boolean);
+      loadedPicklistEventKey = resolvedEventKey;
+    } catch (cause) {
+      picklistError = cause?.message || 'Could not seed the pick list from the auto rank.';
+    } finally {
+      picklistLoading = false;
+    }
+  }
+
+  async function removeFromPicklist(id) {
+    picklistEntries = picklistEntries.filter((entry) => entry.id !== id);
+    try {
+      const headers = { 'Content-Type': 'application/json', ...(await getAuthHeader()) };
+      await fetch('/api/scouting-picklist', { method: 'POST', headers, body: JSON.stringify({ action: 'remove', id }) });
+    } catch (cause) {
+      picklistError = cause?.message || 'Could not remove that team from the pick list.';
+    }
+  }
+
+  function handlePicklistConsider(e) {
+    if (dragOrderSnapshot === null) dragOrderSnapshot = picklistEntries.map((entry) => entry.id);
+    picklistEntries = e.detail.items;
+  }
+
+  async function handlePicklistFinalize(e) {
+    const finalItems = e.detail.items;
+    const movedId = e.detail.info?.id;
+    const previousOrder = dragOrderSnapshot;
+    dragOrderSnapshot = null;
+    picklistEntries = finalItems;
+
+    try {
+      const headers = { 'Content-Type': 'application/json', ...(await getAuthHeader()) };
+      const response = await fetch('/api/scouting-picklist', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ action: 'reorder', event_key: resolvedEventKey, ordered_ids: finalItems.map((entry) => entry.id) })
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.success) throw new Error(payload?.error || 'Could not save the new order.');
+    } catch (cause) {
+      picklistError = cause?.message || 'Could not save the new order.';
+    }
+
+    if (movedId && previousOrder) {
+      const fromIndex = previousOrder.indexOf(movedId);
+      const toIndex = finalItems.findIndex((entry) => entry.id === movedId);
+      if (fromIndex !== toIndex) void flagPicklistMove(movedId, fromIndex, toIndex, finalItems);
+    }
+  }
+
+  // Advisory-only - a 503 (not configured) or any other failure here just
+  // means no flag shows up, never an error surfaced to the scout.
+  async function flagPicklistMove(movedId, fromIndex, toIndex, items) {
+    const movedEntry = items.find((entry) => entry.id === movedId);
+    if (!movedEntry) return;
+    const neighborEntries = items.filter((entry, index) => entry.id !== movedId && Math.abs(index - toIndex) <= 2);
+    try {
+      const headers = { 'Content-Type': 'application/json', ...(await getAuthHeader()) };
+      const response = await fetch('/api/scouting-picklist/flag-move', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          movedTeam: teamSummaryPayload(movedEntry.team_key),
+          fromIndex: fromIndex + 1,
+          toIndex: toIndex + 1,
+          neighbors: neighborEntries.map((entry) => teamSummaryPayload(entry.team_key))
+        })
+      });
+      const payload = await response.json().catch(() => null);
+      if (response.ok && payload?.success && payload.flagged) {
+        flagsByEntryId = new Map(flagsByEntryId).set(movedId, payload.reason || 'Flagged - review this move.');
+      } else {
+        const next = new Map(flagsByEntryId);
+        next.delete(movedId);
+        flagsByEntryId = next;
+      }
+    } catch {
+      // Flagging unavailable this time - not an error.
+    }
+  }
 
   async function loadStrategy() {
     if (!resolvedEventKey) {
@@ -174,9 +490,54 @@
   <div class="subtabs">
     <button class:active={view === 'teams'} on:click={() => view = 'teams'}>Teams</button>
     <button class:active={view === 'matches'} on:click={() => view = 'matches'}>Matches</button>
+    <button class:active={view === 'picklist'} on:click={() => view = 'picklist'}>Picklist</button>
   </div>
 
-  {#if view === 'matches'}
+  {#if view === 'picklist'}
+  <section class="strategy-layout picklist-layout">
+    <div class="strategy-board">
+      <div class="section-heading">
+        <div><h2>Human picklist</h2><p>Drag to reorder. Moves get reviewed against scouting data - flags are advisory, never blocking.</p></div>
+        <button class="btn btn-outline btn-sm" on:click={seedPicklistFromAutoRank} disabled={picklistLoading || !autoRankedRows.length}>Reseed from auto rank</button>
+      </div>
+      {#if picklistError}<p class="notice notice-error">{picklistError}</p>{/if}
+      {#if picklistLoading && !picklistEntries.length}
+        <div class="empty-state">Loading pick list...</div>
+      {:else if !picklistEntries.length}
+        <div class="empty-state">No teams on the pick list yet for this event.</div>
+      {:else}
+        <ul class="picklist-list" use:dndzone={{ items: picklistEntries, flipDurationMs: 150 }} on:consider={handlePicklistConsider} on:finalize={handlePicklistFinalize}>
+          {#each picklistEntries as entry, index (entry.id)}
+            <li class="picklist-row">
+              <span class="picklist-rank">{index + 1}</span>
+              <a class="team-number-link" href={teamHref(entry.team_key)}>{entry.team_number}</a>
+              {#if entry.nickname}<span class="muted">{entry.nickname}</span>{/if}
+              {#if flagsByEntryId.get(entry.id)}
+                <span class="flag-chip" title={flagsByEntryId.get(entry.id)}><AlertTriangle size={14} /> {flagsByEntryId.get(entry.id)}</span>
+              {/if}
+              <button class="btn btn-outline btn-sm" on:click={() => removeFromPicklist(entry.id)}>Remove</button>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </div>
+
+    <aside class="team-brief picklist-auto">
+      <div class="brief-title"><div><span class="eyebrow">Auto rank</span><h2>Slider-weighted</h2></div></div>
+      <div class="slider-group">
+        <label>Performance <span>{Math.round(normalizedSliderWeights.performance * 100)}%</span><input type="range" min="0" max="100" step="1" bind:value={sliderWeights.performance} /></label>
+        <label>Notes impact <span>{Math.round(normalizedSliderWeights.notes * 100)}%</span><input type="range" min="0" max="100" step="1" bind:value={sliderWeights.notes} /></label>
+        <label>Reliability <span>{Math.round(normalizedSliderWeights.reliability * 100)}%</span><input type="range" min="0" max="100" step="1" bind:value={sliderWeights.reliability} /></label>
+        <label>OPR <span>{Math.round(normalizedSliderWeights.opr * 100)}%</span><input type="range" min="0" max="100" step="1" bind:value={sliderWeights.opr} /></label>
+      </div>
+      <ol class="auto-rank-list">
+        {#each autoRankedRows as team (team.key)}
+          <li><a class="team-number-link" href={teamHref(team.key)}>{team.team_number}</a><span class="muted">{number(team.scoutPower)}</span></li>
+        {/each}
+      </ol>
+    </aside>
+  </section>
+  {:else if view === 'matches'}
   <section class="strategy-board matches-board">
     <div class="section-heading">
       <div><h2><CalendarClock size={18} /> Match schedule</h2><p>Synced from The Blue Alliance. Win likelihood is a rough estimate from our own Scout Power, not a scored prediction - <a href="/predictions">place a prediction market bet</a> on any upcoming match.</p></div>
@@ -186,27 +547,43 @@
       <div class="empty-state">No match schedule yet for this event.</div>
     {:else}
       <div class="board-table-wrap">
-        <table class="board-table">
-          <thead><tr><th>Match</th><th>Red</th><th>Blue</th><th>Status</th></tr></thead>
+        <table class="board-table statbotics-table">
+          <thead><tr><th>Match</th><th>Red</th><th>Blue</th><th>Predicted</th><th>Win %</th><th>Score</th></tr></thead>
           <tbody>
-            {#each upcomingMatches as match (match.key)}
-              {@const projection = projectMatch(match, scoutPowerByTeam)}
-              <tr class:test-match={match.is_test_market} class:our-team-match={matchHasOurTeam(match)}>
+            {#each [...upcomingMatches, ...playedMatches] as match (match.key)}
+              {@const projection = projectMatch(match, scoutPowerByTeam, projectedScoreByTeam)}
+              {@const played = isMatchPlayed(match)}
+              <tr class:test-match={match.is_test_market} class:our-team-match={matchHasOurTeam(match)} class:played-row={played}>
                 <td data-label="Match">
                   <button type="button" class="match-link" on:click={() => openMatchDetail(match)}>{matchLabel(match)}</button>
                   {#if match.is_test_market}<small>Practice market</small>{/if}
                 </td>
-                <td data-label="Red" class="alliance-red">
+                <td data-label="Red" class="alliance-red" class:winner={match.winning_alliance === 'red'}>
                   {#each match.alliances?.red?.team_keys || [] as teamKey}
-                    <a class="team-number-link" class:our-team={teamKey === OUR_TEAM_KEY} href={teamHref(teamKey)}>{teamNumber(teamKey)}</a>
+                    {@const breakdown = teamBreakdown(match.key, teamKey)}
+                    <a class="team-number-link" class:our-team={teamKey === OUR_TEAM_KEY} href={teamHref(teamKey)}>
+                      {teamNumber(teamKey)}
+                      {#if breakdown}<span class="breakdown-dot" title={`${teamNumber(teamKey)}: ${breakdown}`}></span>{/if}
+                    </a>
                   {/each}
                 </td>
-                <td data-label="Blue" class="alliance-blue">
+                <td data-label="Blue" class="alliance-blue" class:winner={match.winning_alliance === 'blue'}>
                   {#each match.alliances?.blue?.team_keys || [] as teamKey}
-                    <a class="team-number-link" class:our-team={teamKey === OUR_TEAM_KEY} href={teamHref(teamKey)}>{teamNumber(teamKey)}</a>
+                    {@const breakdown = teamBreakdown(match.key, teamKey)}
+                    <a class="team-number-link" class:our-team={teamKey === OUR_TEAM_KEY} href={teamHref(teamKey)}>
+                      {teamNumber(teamKey)}
+                      {#if breakdown}<span class="breakdown-dot" title={`${teamNumber(teamKey)}: ${breakdown}`}></span>{/if}
+                    </a>
                   {/each}
                 </td>
-                <td data-label="Status">
+                <td data-label="Predicted">
+                  {#if projection.redProjectedScore == null && projection.blueProjectedScore == null}
+                    <span class="muted">-</span>
+                  {:else}
+                    <span class="predicted-score">{number(projection.redProjectedScore, 0)} - {number(projection.blueProjectedScore, 0)}</span>
+                  {/if}
+                </td>
+                <td data-label="Win %">
                   {#if projection.redWinProbability == null}
                     <span class="muted">Not enough scouting yet</span>
                   {:else}
@@ -215,26 +592,10 @@
                     </span>
                   {/if}
                 </td>
-              </tr>
-            {/each}
-            {#each playedMatches as match (match.key)}
-              <tr class="played-row" class:our-team-match={matchHasOurTeam(match)}>
-                <td data-label="Match">
-                  <button type="button" class="match-link" on:click={() => openMatchDetail(match)}>{matchLabel(match)}</button>
+                <td data-label="Score" class="muted">
+                  {#if !played}<span class="muted">Upcoming</span>
+                  {:else}{match.alliances?.red?.score ?? '?'} - {match.alliances?.blue?.score ?? '?'}{/if}
                 </td>
-                <td data-label="Red" class="alliance-red" class:winner={match.winning_alliance === 'red'}>
-                  {#each match.alliances?.red?.team_keys || [] as teamKey}
-                    <a class="team-number-link" class:our-team={teamKey === OUR_TEAM_KEY} href={teamHref(teamKey)}>{teamNumber(teamKey)}</a>
-                  {/each}
-                  <span class="muted">{match.alliances?.red?.score ?? ''}</span>
-                </td>
-                <td data-label="Blue" class="alliance-blue" class:winner={match.winning_alliance === 'blue'}>
-                  {#each match.alliances?.blue?.team_keys || [] as teamKey}
-                    <a class="team-number-link" class:our-team={teamKey === OUR_TEAM_KEY} href={teamHref(teamKey)}>{teamNumber(teamKey)}</a>
-                  {/each}
-                  <span class="muted">{match.alliances?.blue?.score ?? ''}</span>
-                </td>
-                <td data-label="Status" class="muted">{match.winning_alliance ? `${match.winning_alliance} won` : 'Tie'}</td>
               </tr>
             {/each}
           </tbody>
@@ -247,17 +608,35 @@
   <section class="strategy-layout">
     <div class="strategy-board">
       <div class="section-heading">
-        <div><h2>Team board</h2><p>Comparable observations from every scouting surface.</p></div>
-        <input class="form-input team-search" bind:value={teamSearch} placeholder="Filter team or archetype" aria-label="Filter strategy teams" />
+        <div><h2>Team board</h2><p>Comparable observations from every scouting surface. Sort a column, then send that order to the pick list as a starting point.</p></div>
+        <div class="team-board-actions">
+          <input class="form-input team-search" bind:value={teamSearch} placeholder="Filter team or archetype" aria-label="Filter strategy teams" />
+          <button class="btn btn-outline btn-sm" on:click={sendToPicklist} disabled={sendingToPicklist || !sortedRows.length}>{sendingToPicklist ? 'Sending…' : 'Send to Picklist'}</button>
+        </div>
       </div>
-      {#if !filteredRows.length}
+      {#if sendToPicklistError}<p class="notice notice-error">{sendToPicklistError}</p>{/if}
+      {#if sendToPicklistNotice}<p class="muted matches-warning">{sendToPicklistNotice}</p>{/if}
+      {#if !sortedRows.length}
         <div class="empty-state">No scouting evidence matches this filter yet.</div>
       {:else}
         <div class="board-table-wrap">
           <table class="board-table">
-            <thead><tr><th>Rank</th><th>Team</th><th>Reports</th><th>Upcoming</th><th>Fuel</th><th>Auto</th><th>Reported balls</th><th>Accuracy</th><th>Pit</th><th>Notes</th><th>Autos</th><th>Risk</th></tr></thead>
+            <thead><tr>
+              <th><button type="button" class="sort-btn" on:click={() => toggleSort('rank')}>Rank {sortIndicator('rank')}</button></th>
+              <th><button type="button" class="sort-btn" on:click={() => toggleSort('team')}>Team {sortIndicator('team')}</button></th>
+              <th><button type="button" class="sort-btn" on:click={() => toggleSort('reports')}>Reports {sortIndicator('reports')}</button></th>
+              <th><button type="button" class="sort-btn" on:click={() => toggleSort('upcoming')}>Upcoming {sortIndicator('upcoming')}</button></th>
+              <th><button type="button" class="sort-btn" on:click={() => toggleSort('fuel')}>Fuel {sortIndicator('fuel')}</button></th>
+              <th><button type="button" class="sort-btn" on:click={() => toggleSort('auto')}>Auto {sortIndicator('auto')}</button></th>
+              <th><button type="button" class="sort-btn" on:click={() => toggleSort('balls')}>Reported balls {sortIndicator('balls')}</button></th>
+              <th><button type="button" class="sort-btn" on:click={() => toggleSort('accuracy')}>Accuracy {sortIndicator('accuracy')}</button></th>
+              <th><button type="button" class="sort-btn" on:click={() => toggleSort('pit')}>Pit {sortIndicator('pit')}</button></th>
+              <th><button type="button" class="sort-btn" on:click={() => toggleSort('notes')}>Notes {sortIndicator('notes')}</button></th>
+              <th><button type="button" class="sort-btn" on:click={() => toggleSort('autos')}>Autos {sortIndicator('autos')}</button></th>
+              <th><button type="button" class="sort-btn" on:click={() => toggleSort('risk')}>Risk {sortIndicator('risk')}</button></th>
+            </tr></thead>
             <tbody>
-              {#each filteredRows as row}
+              {#each sortedRows as row}
                 <tr class:selected={selectedTeam?.teamKey === row.teamKey} on:click={() => openTeamView(row)}>
                   <td data-label="Rank"><strong>{officialByTeam.get(row.teamNumber)?.rank ?? '—'}</strong></td>
                   <td data-label="Team"><strong>{row.teamNumber}</strong>{#if row.pitEntry?.robot_archetype}<small>{row.pitEntry.robot_archetype}</small>{/if}</td>
@@ -328,7 +707,7 @@
   {/if}
 {/if}
 
-<MatchDetailPanel match={selectedMatchForDetail} eventKey={resolvedEventKey} {scoutPowerByTeam} on:close={closeMatchDetail} />
+<MatchDetailPanel match={selectedMatchForDetail} eventKey={resolvedEventKey} {scoutPowerByTeam} {projectedScoreByTeam} breakdownByTeam={selectedMatchBreakdown} on:close={closeMatchDetail} />
 
 <style>
   .matches-board .section-heading h2 { display:flex; align-items:center; gap:var(--space-2); }
@@ -348,6 +727,8 @@
   .winner { font-weight:700; opacity:1; }
   .win-bar { display:inline-block; width:80px; height:10px; border-radius:5px; background:var(--brand-blue, #2563eb); overflow:hidden; vertical-align:middle; }
   .win-bar-red { display:block; height:100%; background:var(--danger, #dc3545); float:left; }
+  .breakdown-dot { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--danger, #dc3545); margin-left:3px; vertical-align:middle; }
+  .predicted-score { font-variant-numeric:tabular-nums; color:var(--text-secondary); }
   .strategy-header { display:flex; justify-content:space-between; gap:var(--space-4); align-items:flex-end; }
   .strategy-header h1 { display:flex; align-items:center; gap:var(--space-2); margin:0; }
   .strategy-header p, .section-heading p { margin:var(--space-1) 0 0; color:var(--text-secondary); }
@@ -364,6 +745,9 @@
   .section-heading, .brief-title { display:flex; justify-content:space-between; gap:var(--space-3); align-items:center; padding:var(--space-3); border-bottom:1px solid var(--border); }
   h2, h3 { margin:0; }
   .team-search { width:min(260px, 100%); }
+  .team-board-actions { display:flex; gap:var(--space-2); align-items:center; flex-wrap:wrap; }
+  .sort-btn { background:none; border:none; padding:0; margin:0; font:inherit; color:inherit; text-transform:inherit; letter-spacing:inherit; cursor:pointer; white-space:nowrap; }
+  .sort-btn:hover { text-decoration:underline; }
   .board-table-wrap { overflow:auto; }
   .board-table { width:100%; border-collapse:collapse; font-size:.9rem; }
   th { background:var(--surface-2); color:var(--text-secondary); font-size:.72rem; letter-spacing:.04em; text-align:left; text-transform:uppercase; white-space:nowrap; }
@@ -386,6 +770,15 @@
   li span { color:var(--text-secondary); font-size:.8rem; text-transform:capitalize; }
   .risk-list strong { color:var(--danger, #dc3545); text-transform:capitalize; }
   .brief-actions { display:flex; gap:var(--space-2); padding:var(--space-3); flex-wrap:wrap; }
+  .picklist-list { list-style:none; margin:0; padding:var(--space-2); display:grid; gap:var(--space-2); }
+  .picklist-row { display:flex; align-items:center; gap:var(--space-2); padding:var(--space-2) var(--space-3); border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--surface-1); cursor:grab; }
+  .picklist-rank { font-weight:700; color:var(--text-secondary); min-width:1.5em; }
+  .flag-chip { display:inline-flex; align-items:center; gap:4px; margin-left:auto; padding:2px 8px; border-radius:999px; background:color-mix(in srgb, var(--danger, #dc3545) 15%, transparent); color:var(--danger, #dc3545); font-size:.78rem; max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .picklist-auto .slider-group { padding:var(--space-3); border-bottom:1px solid var(--border); display:grid; gap:var(--space-3); }
+  .slider-group label { display:grid; grid-template-columns:1fr auto; gap:0 var(--space-2); font-size:.82rem; color:var(--text-secondary); }
+  .slider-group input[type="range"] { grid-column:1 / -1; width:100%; }
+  .auto-rank-list { list-style:decimal inside; margin:0; padding:var(--space-3); display:grid; gap:var(--space-2); }
+  .auto-rank-list li { display:flex; align-items:center; justify-content:space-between; gap:var(--space-2); }
   .empty-state, .notice { border:1px solid var(--border); padding:var(--space-4); margin-top:var(--space-4); color:var(--text-secondary); }
   .notice-error { border-color:var(--danger, #dc3545); color:var(--danger, #dc3545); }
   @media (max-width:900px) { .summary-grid { grid-template-columns:repeat(3, 1fr); } .summary-grid > div:nth-child(3) { border-right:0; } .strategy-layout { grid-template-columns:1fr; } }
