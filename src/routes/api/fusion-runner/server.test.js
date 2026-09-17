@@ -225,10 +225,10 @@ describe('Fusion Runner grouping lifecycle',()=>{
    .mockReturnValueOnce(chain({data:{id:'tube-job',params:{fusionJobKind:'box_tube',fusionFileName:'Bottom Tube'}}}))
    .mockReturnValueOnce(chain({data:[{id:'tube-job'}]}));
   expect((await call('complete',{jobId:'tube-job',runnerId:'runner',ncFiles:[
-   {name:'Bottom Tube-side-12.tap',contentBase64:side12},
-   {name:'Bottom Tube-side-3.tap',contentBase64:side3},
-   {name:'Bottom Tube-side-6.tap',contentBase64:side6},
-   {name:'Bottom Tube-side-9.tap',contentBase64:side9}
+   {name:'Bottom Tube-side-12-AUTOCAM.tap',contentBase64:side12},
+   {name:'Bottom Tube-side-3-AUTOCAM.tap',contentBase64:side3},
+   {name:'Bottom Tube-side-6-AUTOCAM.tap',contentBase64:side6},
+   {name:'Bottom Tube-side-9-AUTOCAM.tap',contentBase64:side9}
   ]})).status).toBe(200);
   expect(mocks.storageUpload.mock.calls.map(([path])=>path)).toEqual([
    'AutoCAM/tube-job/BottomTubetubeside12(AUTOCAM).tap',
@@ -240,6 +240,23 @@ describe('Fusion Runner grouping lifecycle',()=>{
    'AutoCAM/tube-job/BottomTubetubeside9(AUTOCAM).tap',
    'Nesting Parts Library/AutoCAM/BottomTubetubeside9(AUTOCAM)/BottomTubetubeside9(AUTOCAM).tap'
   ]);
+ });
+ it('still recognizes tube side files posted before the -AUTOCAM filename suffix existed',async()=>{
+  // Backward compatibility: any job queued/claimed before this filename
+  // change deployed posts the old "-side-N.tap" form (no -AUTOCAM before
+  // the extension) - it must keep completing, not start failing with
+  // "must post exactly four per-setup NC files".
+  const program=Buffer.from('G20\nM30\n','utf8').toString('base64');
+  mocks.from
+   .mockReturnValueOnce(chain({data:{id:'tube-job',params:{fusionJobKind:'box_tube',fusionFileName:'Bottom Tube'}}}))
+   .mockReturnValueOnce(chain({data:[{id:'tube-job'}]}));
+  const result=await call('complete',{jobId:'tube-job',runnerId:'runner',ncFiles:[
+   {name:'Bottom Tube-side-12.tap',contentBase64:program},
+   {name:'Bottom Tube-side-3.tap',contentBase64:program},
+   {name:'Bottom Tube-side-6.tap',contentBase64:program},
+   {name:'Bottom Tube-side-9.tap',contentBase64:program}
+  ]});
+  expect(result.status).toBe(200);
  });
  it('rejects a tube completion that is missing a setup program',async()=>{
   mocks.from.mockReturnValueOnce(chain({data:{id:'tube-job',params:{fusionJobKind:'box_tube'}}}));
