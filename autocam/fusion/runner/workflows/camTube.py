@@ -137,6 +137,17 @@ def start(data, session):
             raise ValueError("Payload missing required 'box_tube_id'")
         box_tube_id = str(box_tube_id)
 
+        # The shared Send to Fusion AutoCAM dialog provides the same saved
+        # document controls for plates and tube stock. Honor them here too;
+        # older queued jobs retain the readable-but-unique default. Computed
+        # early (not just at save time below) so the posted G-code file
+        # names can use it too - direct instruction: operators reading
+        # "Tubefd64420a-454a-48f1-8839-d18a-side-12.tap" off a real job had
+        # no idea what tube or side that was; the readable Fusion file name
+        # already disambiguates jobs from each other on its own.
+        custom_name = _get(payload, "fusion_file_name")
+        doc_name = re.sub(r"\s+", "", str(custom_name)) if custom_name else f"Tube{box_tube_id}Job{job_id}"
+
         # Download STEP file - URL already resolved server-side, see
         # _download_box_tube_file's docstring.
         step_file_url = _get(payload, "step_file_url")
@@ -203,7 +214,7 @@ def start(data, session):
         box_tube_id = str(_get(payload, "box_tube_id", default="cam_tube"))
         face_program_names = handleTube(
             template_path,
-            program_base_name="Tube{}Job{}".format(box_tube_id, job_id),
+            program_base_name=doc_name,
             machine_name=machine_name,
         )
 
@@ -222,11 +233,8 @@ def start(data, session):
         except Exception:
             app.log("Failed to compute machining time:\n{}".format(traceback.format_exc()))
 
-        # The shared Send to Fusion AutoCAM dialog provides the same saved
-        # document controls for plates and tube stock. Honor them here too;
-        # older queued jobs retain the readable-but-unique default.
-        custom_name = _get(payload, "fusion_file_name")
-        doc_name = re.sub(r"\s+", "", str(custom_name)) if custom_name else f"Tube{box_tube_id}Job{job_id}"
+        # doc_name/custom_name already computed above, alongside box_tube_id -
+        # the posted G-code file names need it too now.
         folder_path = _get(payload, "fusion_folder_path") or FUSION_DROP_FOLDER_PATH
 
         # Save failure is a job failure. Reporting completed CAM while its

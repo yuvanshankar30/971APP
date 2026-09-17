@@ -26,7 +26,12 @@ class TubeFaceProgramTests(unittest.TestCase):
     def test_each_face_gets_a_stable_program_name(self):
         self.assertEqual(
             [tube_face_program_name("Tube42", clock) for clock in TUBE_FACE_CLOCKS],
-            ["Tube42-side-12", "Tube42-side-3", "Tube42-side-6", "Tube42-side-9"],
+            [
+                "Tube42-side-12-AUTOCAM",
+                "Tube42-side-3-AUTOCAM",
+                "Tube42-side-6-AUTOCAM",
+                "Tube42-side-9-AUTOCAM",
+            ],
         )
 
     def test_long_job_names_keep_a_unique_face_suffix_inside_fusions_limit(self):
@@ -36,10 +41,10 @@ class TubeFaceProgramTests(unittest.TestCase):
         self.assertEqual(
             names,
             [
-                long_name[:32] + "-side-12",
-                long_name[:33] + "-side-3",
-                long_name[:33] + "-side-6",
-                long_name[:33] + "-side-9",
+                long_name[:24] + "-side-12-AUTOCAM",
+                long_name[:25] + "-side-3-AUTOCAM",
+                long_name[:25] + "-side-6-AUTOCAM",
+                long_name[:25] + "-side-9-AUTOCAM",
             ],
         )
         self.assertEqual(len(set(names)), 4)
