@@ -36,6 +36,7 @@
 		"lucide-svelte": "^0.515.0",
 		"marked": "^18.0.10",
 		"occt-import-js": "^0.0.23",
+		"svelte-dnd-action": "^0.9.79",
 		"three": "^0.184.0",
 		"wx-svelte-gantt": "^2.6.1"
 	}

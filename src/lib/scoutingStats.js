@@ -460,10 +460,17 @@ export function summarizePitScouting(entry, problems = [], normalizedBps = null)
   };
 }
 
+// The top-level combination buildPowerRankings blends performance/notes/
+// reliability/OPR with - broken out so a caller (the Picklist tab's
+// slider-weighted auto-rank) can recombine the same per-team numbers with
+// different emphasis without duplicating how each number itself is derived.
+export const SCOUT_POWER_WEIGHT_KEYS = Object.freeze(['performance', 'notes', 'reliability', 'opr']);
+export const DEFAULT_SCOUT_POWER_WEIGHTS = Object.freeze({ performance: 0.7, notes: 0.15, reliability: 0.075, opr: 0.075 });
+
 // Produces event-relative rankings from the team's own scouting observations.
 // Missing dimensions are omitted and the remaining weights are normalized,
 // never converted to fake zeroes.
-export function buildPowerRankings(teams, events, notes = [], pitInputs = {}) {
+export function buildPowerRankings(teams, events, notes = [], pitInputs = {}, scoutPowerWeights = DEFAULT_SCOUT_POWER_WEIGHTS) {
   const eventsByTeam = new Map();
   for (const row of events || []) {
     if (!row?.team_key) continue;
@@ -530,17 +537,20 @@ export function buildPowerRankings(teams, events, notes = [], pitInputs = {}) {
     );
     const rawOpr = oprByTeamNumber.get(row.team_number)?.opr ?? null;
     const oprScore = normalize(rawOpr, oprValues);
-    // Direct instruction: 70% observed match performance, 15% explicit note
+    // Default weights: 70% observed match performance, 15% explicit note
     // impact, 7.5% pit-reported reliability specifically (not the broader
     // pit capability/climb/BPS blend - that stays a display-only metric via
     // pitSummary.pitScore), and 7.5% TBA OPR. OPR was previously reference-
     // only and never fed into this score; now it does, at a deliberately
-    // small weight next to our own scouts' direct observations.
+    // small weight next to our own scouts' direct observations. Callers (the
+    // Picklist tab's sliders) can override any of these four via
+    // scoutPowerWeights - the components themselves never change, only how
+    // they're combined.
     const scoutPower = weightedScore([
-      { value: performanceScore, weight: 0.7 },
-      { value: noteSummary.impactScore, weight: 0.15 },
-      { value: pitSummary.reliabilityScore, weight: 0.075 },
-      { value: oprScore, weight: 0.075 }
+      { value: performanceScore, weight: scoutPowerWeights.performance ?? DEFAULT_SCOUT_POWER_WEIGHTS.performance },
+      { value: noteSummary.impactScore, weight: scoutPowerWeights.notes ?? DEFAULT_SCOUT_POWER_WEIGHTS.notes },
+      { value: pitSummary.reliabilityScore, weight: scoutPowerWeights.reliability ?? DEFAULT_SCOUT_POWER_WEIGHTS.reliability },
+      { value: oprScore, weight: scoutPowerWeights.opr ?? DEFAULT_SCOUT_POWER_WEIGHTS.opr }
     ]);
     return {
       ...row,
