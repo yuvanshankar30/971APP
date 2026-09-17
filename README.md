@@ -129,8 +129,9 @@ browser confirmation or prompt popups.
   A sheet can contain multiple named cuts: every cut remains visible in its own
   canvas color, while editing and G-code emission apply only to the selected
   cut and its holes.
-  Operators can install the separate shared repository to `~/Desktop/Output`
-  with `/install/jprog-output`; its local LaunchAgent sorts new G-code,
+  Operators can install the separate shared repository through a Desktop
+  `Output` link with `/install/jprog-output` (or `/install/jprog-output/windows`
+  on Windows); its per-user sync service sorts new G-code,
   commits/pushes local changes, and pulls Output Editor changes automatically.
   See `jprog/SHARED_OUTPUT_FOLDER.md` for the one-command setup and
   operator details.
