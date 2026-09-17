@@ -40,6 +40,14 @@ function safePath(path: unknown, { allowRoot = false } = {}) {
   return trimmed;
 }
 
+// Root-level entries define the repository's shared structure. In
+// particular, JustinProgOutput is the handoff root consumed by JProg and
+// the Files tab, so client-side button hiding alone is not enough to keep a
+// direct request from renaming or deleting it.
+function isRootEntry(path: string) {
+  return !path.includes('/');
+}
+
 function encodePath(path: string) {
   return path.split('/').filter(Boolean).map(encodeURIComponent).join('/');
 }
@@ -121,6 +129,23 @@ Deno.serve(async (request) => {
       });
     }
 
+    if (action === 'download') {
+      const path = safePath(body.path);
+      const res = await fetch(contentsUrl(path), { headers });
+      if (!res.ok) return githubFailure(res, 'Could not find that file to download.');
+      const info = await res.json();
+      if (Array.isArray(info)) return response({ error: `${path} is a folder.` }, 400);
+      // Contents only inlines base64 below roughly 1 MB. The matching Git
+      // Blobs endpoint keeps downloads working for larger router programs.
+      let content = info.content;
+      if (!content) {
+        const blobRes = await fetch(`${apiRoot}/git/blobs/${info.sha}`, { headers });
+        if (!blobRes.ok) return githubFailure(blobRes, 'Could not read that file.');
+        content = (await blobRes.json()).content;
+      }
+      return response({ name: path.split('/').pop(), content });
+    }
+
     if (action === 'upload') {
       const path = safePath(body.path);
       const content = body.content;
@@ -159,6 +184,9 @@ Deno.serve(async (request) => {
 
     if (action === 'delete') {
       const path = safePath(body.path);
+      if (isRootEntry(path)) {
+        return response({ error: 'Root-level output repository entries cannot be renamed or removed.' }, 403);
+      }
       const existing = await fetch(contentsUrl(path), { headers });
       if (!existing.ok) return githubFailure(existing, 'Could not find that item to delete.');
       const info = await existing.json();
@@ -190,6 +218,9 @@ Deno.serve(async (request) => {
     if (action === 'rename') {
       const fromPath = safePath(body.fromPath);
       const toPath = safePath(body.toPath);
+      if (isRootEntry(fromPath) || isRootEntry(toPath)) {
+        return response({ error: 'Root-level output repository entries cannot be renamed or removed.' }, 403);
+      }
       const existing = await fetch(contentsUrl(fromPath), { headers });
       if (!existing.ok) return githubFailure(existing, 'Could not find that item to rename.');
       const info = await existing.json();
