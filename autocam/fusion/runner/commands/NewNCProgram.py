@@ -7,6 +7,16 @@ import shutil
 import time
 
 
+# Direct instruction: NC programs post here, not to FINAL_PATH - Desktop is
+# where the operator actually looks for the file. FINAL_PATH (temp/final/)
+# stays the real write target for collect_nc_artifacts()'s upload pipeline
+# (see export()'s post-process step below, which copies the same file
+# there right after posting) - that directory gets shutil.rmtree()'d by
+# every caller (camPlate.py etc.) right after collecting artifacts, so it
+# was never a place a person should be looking for their G-code anyway.
+DESKTOP_OUTPUT_PATH = os.path.expanduser("~/Desktop/Output")
+
+
 def _safe_program_name(name, fallback="Program"):
     """A program name safe to use as a filename on any host.
 
@@ -235,10 +245,14 @@ def export(name, post_processor_path, setup_program_names=None):
         ncProgramInput.displayName = f"{app.activeDocument.name} AUTOCAM"
         ncProgram = cam.ncPrograms.add(ncProgramInput)
 
-        ncProgram.postConfiguration = _resolve_post_configuration(cam, absolutePath)
+        post_configuration = _resolve_post_configuration(cam, absolutePath)
+        ncProgram.postConfiguration = post_configuration
         _set_nc_program_parameter(ncProgram, "nc_program_name", program_name)
         _set_nc_program_parameter(ncProgram, "nc_program_filename", program_name)
-        _set_nc_program_parameter(ncProgram, "nc_program_output_folder", folder_path)
+        # Direct instruction: this is where the operator actually looks for
+        # the file, not FINAL_PATH (see DESKTOP_OUTPUT_PATH's own comment).
+        os.makedirs(DESKTOP_OUTPUT_PATH, exist_ok=True)
+        _set_nc_program_parameter(ncProgram, "nc_program_output_folder", DESKTOP_OUTPUT_PATH)
         _set_nc_program_parameter(ncProgram, "nc_program_openInEditor", False)
         # Direct instruction: the whole point of posting through NCProgram
         # instead of the old ad-hoc call is that Fusion keeps this entry in
@@ -276,6 +290,19 @@ def export(name, post_processor_path, setup_program_names=None):
         # still fails that is a genuine failure and has to surface as one,
         # rather than a job reporting success with G-code missing from it.
         _post_process_with_retry(app, ncProgram, options)
+
+        # The real write happened at DESKTOP_OUTPUT_PATH (above), but
+        # collect_nc_artifacts() (called by every workflow that calls
+        # export() - camPlate.py etc.) still reads from FINAL_PATH/name,
+        # then shutil.rmtree()s it - mirror the file there so that upload
+        # pipeline keeps working unchanged. PostConfiguration.extension
+        # already carries its own leading dot (confirmed live).
+        source_file = os.path.join(DESKTOP_OUTPUT_PATH, f"{program_name}{post_configuration.extension}")
+        if not os.path.isfile(source_file):
+            raise FileNotFoundError(
+                f"NCProgram.postProcess() reported success but {source_file} does not exist"
+            )
+        shutil.copy2(source_file, os.path.join(folder_path, os.path.basename(source_file)))
         posted_program_names.append(program_name)
 
     return posted_program_names
