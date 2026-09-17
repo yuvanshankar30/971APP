@@ -1,5 +1,6 @@
 """Shared, testable wrapper around Fusion's CAM machining-time API."""
 
+import math
 from typing import Callable, Optional
 
 
@@ -40,6 +41,17 @@ def total_machining_time(
             rapid_feed_cm_per_sec,
             tool_change_seconds,
         )
-        return float(result.machiningTime)
+        machining_time = float(result.machiningTime)
     except (AttributeError, TypeError, ValueError, RuntimeError):
         return None
+
+    # Real, confirmed live bug: Fusion's own estimate can come back inf/nan
+    # for certain operations (e.g. one with an effectively-zero feed rate)
+    # without raising - the caller then serializes this straight into the
+    # job's completion payload. Python's json module writes those as the
+    # bare tokens NaN/Infinity, which is valid for it but not for strict
+    # JSON - the server's request.json() (JSON.parse()) rejects the whole
+    # body with "Invalid JSON body", failing a job that otherwise posted
+    # correctly. Same convention as every other failure to get a usable
+    # estimate: return None rather than a value that isn't trustworthy.
+    return machining_time if math.isfinite(machining_time) else None
