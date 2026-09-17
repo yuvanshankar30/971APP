@@ -49,6 +49,11 @@ _CUTOFF_END_PULLBACK_MM = 0.16 * 25.4
 # Two hole sizes on one wall can differ by only 0.005in (0.196in vs 0.201in on
 # a real tube), so distinct diameters are compared far tighter than that.
 _HOLE_DIAMETER_TOLERANCE_CM = 0.001
+# Floating-point slack for "does this WCS origin clear the tube body" (see
+# _body_clearance) - a real clearing candidate's minimum can come back
+# something like -1e-13 from floating-point round-off alone, not a genuine
+# violation.
+_BODY_CLEARANCE_TOLERANCE_CM = 1e-6
 
 
 def _normalized(vector):
@@ -527,31 +532,22 @@ def _dot(a, b):
 
 
 def _wcs_frame(setup):
-    """The WCS Fusion actually computed, as plain (origin, x, y) tuples."""
+    """The WCS Fusion actually computed, as plain (origin, x, y, z) tuples."""
     adsk.doEvents()
-    origin, x_axis, y_axis, _z_axis = setup.workCoordinateSystem.getAsCoordinateSystem()
-    return _vec(origin), _vec(x_axis), _vec(y_axis)
+    origin, x_axis, y_axis, z_axis = setup.workCoordinateSystem.getAsCoordinateSystem()
+    return _vec(origin), _vec(x_axis), _vec(y_axis), _vec(z_axis)
 
 
-def _bind_setup_to_face(setup, body, face, tube_axis, work_offset):
-    """Bind the real tube body, face-local WCS, and work offset after template changes.
-
-    Matches the reviewed manual tube setup: origin on the machined face's
+def _bind_reviewed_wcs(setup, face, tube_axis):
+    """The reviewed manual tube setup's WCS: origin on the machined face's
     corner at the tube's +tube_axis end, X and Y both pointing away from the
     stock (see TubeWcsMath). The axes are checked against the WCS Fusion
     actually computed instead of trusting which way an edge selection points,
     and the origin corner is found by trying each top corner rather than
-    assuming Fusion's corner numbering. Tube setups only - plates never
-    reach this function.
+    assuming Fusion's corner numbering. Used on every machine except New
+    Router - see _bind_new_router_wcs for that one's own convention.
     """
     parameters = setup.parameters
-    setup.stockMode = adsk.cam.SetupStockModes.RelativeBoxStock
-    parameters.itemByName("job_stockOffsetMode").expression = "'all'"
-    parameters.itemByName("job_stockOffsetSides").expression = "0 mm"
-    parameters.itemByName("job_stockOffsetTop").expression = "0 mm"
-    parameters.itemByName("job_model").value.value = [body]
-    parameters.itemByName("job_workOffset").expression = work_offset
-
     want_x, want_y = tube_wcs_axes(_vec(_face_normal(face)), _vec(tube_axis))
     axis_x, axis_y = _axes_for_face(face, tube_axis)
     parameters.itemByName("wcs_orientation_mode").value.value = "axesXY"
@@ -561,12 +557,12 @@ def _bind_setup_to_face(setup, body, face, tube_axis, work_offset):
     flip_y = parameters.itemByName("wcs_orientation_flipY").value
     flip_x.value = _dot(_vec(_edge_vector(axis_x)), want_x) < 0
     flip_y.value = _dot(_vec(_edge_vector(axis_y)), want_y) < 0
-    _, got_x, got_y = _wcs_frame(setup)
+    _, got_x, got_y, _ = _wcs_frame(setup)
     if _dot(got_x, want_x) < 0:
         flip_x.value = not flip_x.value
     if _dot(got_y, want_y) < 0:
         flip_y.value = not flip_y.value
-    _, got_x, got_y = _wcs_frame(setup)
+    _, got_x, got_y, _ = _wcs_frame(setup)
     if _dot(got_x, want_x) < _PARALLEL_TOLERANCE or _dot(got_y, want_y) < _PARALLEL_TOLERANCE:
         raise RuntimeError("Tube WCS did not resolve to X and Y pointing away from the stock")
 
@@ -577,6 +573,103 @@ def _bind_setup_to_face(setup, body, face, tube_axis, work_offset):
         box_point.value = label
         origins[label] = _wcs_frame(setup)[0]
     box_point.value = pick_origin_corner(origins, want_x, want_y)
+
+
+def _body_clearance(body, origin, x_axis, y_axis):
+    """(min X clearance, min Y clearance) of every vertex of ``body``
+    relative to ``origin`` in the given WCS axes. A candidate origin
+    clears the body on an axis when this is >= 0 - the whole part sits
+    "into" the stock from this corner, not just this corner's neighbors in
+    the box-point set.
+
+    Checking the real body instead of comparing box-point candidates
+    against each other matters here: confirmed live (Fusion MCP) that the
+    two disagree, and that clearing the body is not by itself enough to
+    pick a unique corner - the reviewed setup's own stock box is wider
+    than the tube's actual cross-section, so more than one top corner can
+    clear the body on both axes at once. The candidate with the smallest
+    (tightest) clearance - not merely a non-negative one - is the corner
+    actually on the tube, confirmed against a real tube body.
+    """
+    min_x = min_y = None
+    for vertex in body.vertices:
+        point = vertex.geometry
+        offset = (point.x - origin[0], point.y - origin[1], point.z - origin[2])
+        x_clearance = _dot(offset, x_axis)
+        y_clearance = _dot(offset, y_axis)
+        min_x = x_clearance if min_x is None else min(min_x, x_clearance)
+        min_y = y_clearance if min_y is None else min(min_y, y_clearance)
+    return min_x, min_y
+
+
+def _bind_new_router_wcs(setup, body, face, tube_axis):
+    """New Router's own WCS convention for a tube setup - direct instruction,
+    confirmed live against a real tube body via the Fusion MCP and distinct
+    from _bind_reviewed_wcs above:
+
+    - Z is the machined face's own outward normal (mode "Z axis/plane & Y
+      axis" - Z is specified directly here, unlike the reviewed setup where
+      it's whatever axesXY leaves implicit).
+    - Y runs along the tube pointing INTO the part - away from the origin
+      end, the opposite sense of the reviewed setup's X, which points
+      TOWARD the origin end.
+    - X is left for Fusion to derive from Z and Y.
+    - Origin is the top corner where the whole tube sits at X >= 0 and
+      Y >= 0 with the least slack on either axis (see _body_clearance) -
+      verified against the real body, not a corner-to-corner comparison of
+      the box-point candidates, which can leave more than one candidate
+      passing at once.
+    """
+    parameters = setup.parameters
+    long_edge, _transverse_edge = _axes_for_face(face, tube_axis)
+    axis = _vec(tube_axis)
+    want_y = (-axis[0], -axis[1], -axis[2])
+    parameters.itemByName("wcs_orientation_mode").value.value = "axesZY"
+    parameters.itemByName("wcs_orientation_axisZ").value.value = [face]
+    parameters.itemByName("wcs_orientation_axisY").value.value = [long_edge]
+    flip_y = parameters.itemByName("wcs_orientation_flipY").value
+    flip_y.value = _dot(_vec(_edge_vector(long_edge)), want_y) < 0
+    _, _got_x, got_y, got_z = _wcs_frame(setup)
+    if _dot(got_y, want_y) < 0:
+        flip_y.value = not flip_y.value
+    _, got_x, got_y, got_z = _wcs_frame(setup)
+    want_z = _vec(_face_normal(face))
+    if _dot(got_y, want_y) < _PARALLEL_TOLERANCE or _dot(got_z, want_z) < _PARALLEL_TOLERANCE:
+        raise RuntimeError(
+            "New Router tube WCS did not resolve to Y pointing into the part and Z away from the stock"
+        )
+
+    parameters.itemByName("wcs_origin_mode").value.value = "modelPoint"
+    box_point = parameters.itemByName("wcs_origin_boxPoint").value
+    candidates = []
+    for label in _TOP_CORNERS:
+        box_point.value = label
+        origin = _wcs_frame(setup)[0]
+        min_x, min_y = _body_clearance(body, origin, got_x, got_y)
+        if min_x >= -_BODY_CLEARANCE_TOLERANCE_CM and min_y >= -_BODY_CLEARANCE_TOLERANCE_CM:
+            candidates.append((min_x + min_y, label))
+    if not candidates:
+        raise RuntimeError("No top corner had the whole tube at X >= 0 and Y >= 0")
+    candidates.sort()
+    box_point.value = candidates[0][1]
+
+
+def _bind_setup_to_face(setup, body, face, tube_axis, work_offset, machine_name):
+    """Bind the real tube body, face-local WCS, and work offset after
+    template changes. Tube setups only - plates never reach this function.
+    """
+    parameters = setup.parameters
+    setup.stockMode = adsk.cam.SetupStockModes.RelativeBoxStock
+    parameters.itemByName("job_stockOffsetMode").expression = "'all'"
+    parameters.itemByName("job_stockOffsetSides").expression = "0 mm"
+    parameters.itemByName("job_stockOffsetTop").expression = "0 mm"
+    parameters.itemByName("job_model").value.value = [body]
+    parameters.itemByName("job_workOffset").expression = work_offset
+
+    if str(machine_name or "").strip().lower() == "new router":
+        _bind_new_router_wcs(setup, body, face, tube_axis)
+    else:
+        _bind_reviewed_wcs(setup, face, tube_axis)
 
 
 def _cap_other_way_feedrate(setup):
@@ -611,11 +704,11 @@ def _cap_other_way_feedrate(setup):
     return capped
 
 
-def _make_setup(cam, body, face, selection_face, clock, tube_axis, template, wall_thickness_in, work_offset):
+def _make_setup(cam, body, face, selection_face, clock, tube_axis, template, wall_thickness_in, work_offset, machine_name):
     setup_input = cam.setups.createInput(0)
     setup_input.name = tube_face_setup_name(clock)
     setup = cam.setups.add(setup_input)
-    _bind_setup_to_face(setup, body, face, tube_axis, work_offset)
+    _bind_setup_to_face(setup, body, face, tube_axis, work_offset, machine_name)
     setup.createFromCAMTemplate2(template)
     # createFromCAMTemplate2 returns before Fusion has fully attached the
     # copied operations to this setup's CAM model tree.  A selection applied
@@ -627,7 +720,7 @@ def _make_setup(cam, body, face, selection_face, clock, tube_axis, template, wal
     # A template can carry its own setup context. Reapply our occurrence body
     # and face-local WCS after the import so every selection below resolves in
     # this setup's actual CAM model tree, never in the template's old model.
-    _bind_setup_to_face(setup, body, face, tube_axis, work_offset)
+    _bind_setup_to_face(setup, body, face, tube_axis, work_offset, machine_name)
     adsk.doEvents()
     cutoff_chain = _far_end_cutoff_chain(body, face, tube_axis)
     _configure_face_operations(setup, selection_face, wall_thickness_in, cutoff_chain)
@@ -697,7 +790,7 @@ def handleTube(template_filename, program_base_name="tube", machine_name=None):
     tube_axis = _long_axis(body)
     names = []
     for clock, face, selection_face, wall_thickness_in in _ordered_wall_faces(body):
-        _make_setup(cam, body, face, selection_face, clock, tube_axis, template, wall_thickness_in, work_offset)
+        _make_setup(cam, body, face, selection_face, clock, tube_axis, template, wall_thickness_in, work_offset, machine_name)
         names.append(tube_face_program_name(program_base_name, clock))
     # Defensive invariant, not just a byproduct of the loop above: a tube is
     # always exactly four indexed setups, never fewer. Catches a future

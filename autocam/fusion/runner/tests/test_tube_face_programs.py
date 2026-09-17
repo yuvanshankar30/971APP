@@ -74,7 +74,7 @@ class TubeFaceProgramTests(unittest.TestCase):
     def test_tube_waits_for_template_operations_before_rebinding_geometry(self):
         handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
         template_index = handler.index("setup.createFromCAMTemplate2(template)")
-        bind_index = handler.index("_bind_setup_to_face(setup, body, face, tube_axis, work_offset)", template_index)
+        bind_index = handler.index("_bind_setup_to_face(setup, body, face, tube_axis, work_offset, machine_name)", template_index)
         configure_index = handler.index("_configure_face_operations(setup, selection_face, wall_thickness_in, cutoff_chain)", template_index)
         self.assertLess(template_index, configure_index)
         self.assertLess(template_index, bind_index)
