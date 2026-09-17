@@ -132,7 +132,7 @@ browser confirmation or prompt popups.
   Operators can install the separate shared repository to `~/Desktop/Output`
   with `/install/jprog-output`; its local LaunchAgent sorts new G-code,
   commits/pushes local changes, and pulls Output Editor changes automatically.
-  See `docs/guides/JPROG_OUTPUT_FOLDER_SETUP.md` for the one-command setup and
+  See `jprog/SHARED_OUTPUT_FOLDER.md` for the one-command setup and
   operator details.
 - **JustinProgOutput contract**: `JustinProgOutput` is the canonical output root
   in both the `manufacturing-drive` Storage bucket and the public
