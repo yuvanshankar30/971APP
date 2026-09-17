@@ -129,11 +129,16 @@ browser confirmation or prompt popups.
   A sheet can contain multiple named cuts: every cut remains visible in its own
   canvas color, while editing and G-code emission apply only to the selected
   cut and its holes.
+  Operators can install the separate shared repository to `~/Desktop/Output`
+  with `/install/jprog-output`; its local LaunchAgent sorts new G-code,
+  commits/pushes local changes, and pulls Output Editor changes automatically.
+  See `docs/guides/JPROG_OUTPUT_FOLDER_SETUP.md` for the one-command setup and
+  operator details.
 - **JustinProgOutput contract**: `JustinProgOutput` is the canonical output root
   in both the `manufacturing-drive` Storage bucket and the public
   `yuvanshankar30/output` repository. Every emitted or manually uploaded
   `.ngc`/`.tap` file is stored as `JustinProgOutput/YYYYMMDD/filename`, using
-  the UTC calendar date. Root uploads are routed into the current date folder;
+  the Pacific calendar date. Root uploads are routed into the current date folder;
   uploads inside an existing date folder remain there. The Supabase
   `jprog-output` Edge Function authenticates the caller, validates the path and
   content size, then creates or updates the matching GitHub Contents API path
