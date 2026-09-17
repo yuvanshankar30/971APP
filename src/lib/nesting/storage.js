@@ -58,17 +58,18 @@ export async function listAllPartsLibrary() {
   return files.flat();
 }
 
-// Completed Fusion jobs are published into Files / AutoCAM. Keep this
-// traversal here so JProg can list both legacy flat uploads and the current
-// per-job folders without duplicating storage traversal in the editor.
+// Completed Fusion jobs are published into Files / AutoCAM. Plate (and other
+// non-tube) jobs post flat, directly under AutoCAM/ - box-tube jobs post
+// into their own per-job subfolder instead (AutoCAM/<jobId8>/..., see
+// autoCamArtifactPath in /api/fusion-runner/+server.js). Direct instruction:
+// JProg's sheets are flat stock, so tube face programs never belong in its
+// Upload AutoCAM list - only walking the flat files here, never recursing
+// into a subfolder, is what keeps them out.
 export async function listAutoCamPrograms() {
   const rootEntries = await listDirectory(AUTOCAM_ROOT);
-  const nested = await Promise.all(rootEntries.map(async (entry) => {
-    const path = `${AUTOCAM_ROOT}/${entry.name}`;
-    if (entry.id !== null) return [{ ...entry, path }];
-    return (await listDirectory(path)).filter((file) => file.id !== null).map((file) => ({ ...file, path: `${path}/${file.name}` }));
-  }));
-  return nested.flat();
+  return rootEntries
+    .filter((entry) => entry.id !== null)
+    .map((file) => ({ ...file, path: `${AUTOCAM_ROOT}/${file.name}` }));
 }
 
 // Keep old saved placements renderable after the library became sheet-scoped.
