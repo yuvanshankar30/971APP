@@ -6,7 +6,8 @@
     listOutputRepoEntries,
     createOutputRepoFolder,
     deleteOutputRepoEntry,
-    renameOutputRepoEntry
+    renameOutputRepoEntry,
+    downloadOutputRepoFile
   } from '$lib/jprog_output_manage.js';
   // Same component, same GitHub repo, as JProg's own "Output Editor" button
   // (src/routes/nesting/+page.svelte) - reused as-is rather than
@@ -211,6 +212,10 @@
   // click (which the previous new-tab-based approach ran into).
   async function handleDownload(entry) {
     try {
+      if (isInJprogOutputRepo(currentPath)) {
+        await downloadOutputRepoFile(githubRelativePath(joinPath(currentPath, entry.name)));
+        return;
+      }
       const { data, error } = await supabase.storage
         .from(BUCKET)
         .createSignedUrl(joinPath(currentPath, entry.name), 300);

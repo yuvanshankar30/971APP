@@ -1,7 +1,7 @@
 <script>
   import { createEventDispatcher } from 'svelte';
-  import { Folder, FolderPlus, File, Trash2, Pencil, ChevronRight, X, RefreshCw, ExternalLink, Upload, Check } from 'lucide-svelte';
-  import { listOutputRepoEntries, createOutputRepoFolder, deleteOutputRepoEntry, renameOutputRepoEntry, uploadOutputRepoFile } from '$lib/jprog_output_manage.js';
+  import { Folder, FolderPlus, File, Trash2, Pencil, ChevronRight, X, RefreshCw, ExternalLink, Upload, Download, Check } from 'lucide-svelte';
+  import { listOutputRepoEntries, createOutputRepoFolder, deleteOutputRepoEntry, renameOutputRepoEntry, uploadOutputRepoFile, downloadOutputRepoFile } from '$lib/jprog_output_manage.js';
   import { requestConfirmation } from '$lib/confirmation.js';
   import { toastActions } from '$lib/toast.js';
 
@@ -22,6 +22,13 @@
     label: part,
     path: all.slice(0, index + 1).join('/')
   }))];
+
+  // The output repo's top level is its shared structure. In particular,
+  // JustinProgOutput is the stable handoff root used by JProg and the Files
+  // tab, so it must never be renamed or removed from either editor.
+  function isProtectedRootEntry(entry) {
+    return !path && !entry.path.includes('/');
+  }
 
   async function load(nextPath = path) {
     loading = true;
@@ -97,6 +104,17 @@
       toastActions.show(`Deleted ${entry.name}`);
     } catch (error) {
       toastActions.show(error.message || 'Could not delete that item');
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function downloadEntry(entry) {
+    busy = true;
+    try {
+      await downloadOutputRepoFile(entry.path);
+    } catch (error) {
+      toastActions.show(error.message || 'Could not download that file');
     } finally {
       busy = false;
     }
@@ -194,8 +212,13 @@
               {:else}
                 <span class="output-editor-entry-name">{entry.name}</span>
               {/if}
-              <button type="button" class="icon-button" title={`Rename ${entry.name}`} on:click={() => startRename(entry)} disabled={busy}><Pencil size={15} /></button>
-              <button type="button" class="icon-button danger" title={`Delete ${entry.name}`} on:click={() => removeEntry(entry)} disabled={busy}><Trash2 size={15} /></button>
+              {#if entry.type !== 'dir'}
+                <button type="button" class="icon-button" title={`Download ${entry.name}`} on:click={() => downloadEntry(entry)} disabled={busy}><Download size={15} /></button>
+              {/if}
+              {#if !isProtectedRootEntry(entry)}
+                <button type="button" class="icon-button" title={`Rename ${entry.name}`} on:click={() => startRename(entry)} disabled={busy}><Pencil size={15} /></button>
+                <button type="button" class="icon-button danger" title={`Delete ${entry.name}`} on:click={() => removeEntry(entry)} disabled={busy}><Trash2 size={15} /></button>
+              {/if}
             {/if}
           </div>
         {/each}
