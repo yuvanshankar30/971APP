@@ -132,7 +132,8 @@ function winCncToolBlocks(source) {
   const lines = String(source || '').split(/\r?\n/).filter(line => !terminatePattern.test(line));
   const finalStop = lines.findLastIndex(line => /\bM5\b/i.test(uncommentedCode(line)));
   const programLines = finalStop >= 0 ? lines.slice(0, finalStop) : lines;
-  for (const line of programLines) {
+  for (let index = 0; index < programLines.length; index += 1) {
+    const line = programLines[index];
     const code = uncommentedCode(line);
     const toolMatch = code.match(/\bT(\d+)\b/i);
     if (toolMatch) {
@@ -141,12 +142,19 @@ function winCncToolBlocks(source) {
       continue;
     }
     if (activeTool === null) continue;
-    // Once the release cut's own name comment is seen for this tool,
-    // everything after it (within this tool) is treated as part of that
-    // release segment - AutoCAM's own template already schedules the
-    // release/outer-profile cut last within its setup, so trusting that
-    // ordering signal here is the same assumption DeleteToolpaths.py makes.
-    if (RELEASE_CUT_NAME_PATTERN.test(line)) releaseTriggered.add(activeTool);
+    // AutoCAM normally writes an operation label after its T-word, but its
+    // slot-cut post can put the label immediately *before* that T-word. Bind
+    // the release marker to that next declaration when present; otherwise it
+    // belongs to the currently active tool. This keeps the label and every
+    // following slot move together in the final release group.
+    if (RELEASE_CUT_NAME_PATTERN.test(line)) {
+      const nextTool = uncommentedCode(programLines[index + 1] || '').match(/^\s*T(\d+)\b/i);
+      const releaseTool = nextTool ? Number(nextTool[1]) : activeTool;
+      releaseTriggered.add(releaseTool);
+      if (!releaseBlocks.has(releaseTool)) releaseBlocks.set(releaseTool, []);
+      releaseBlocks.get(releaseTool).push(line);
+      continue;
+    }
     if (releaseTriggered.has(activeTool)) {
       if (!releaseBlocks.has(activeTool)) releaseBlocks.set(activeTool, []);
       releaseBlocks.get(activeTool).push(line);

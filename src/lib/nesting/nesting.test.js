@@ -425,6 +425,36 @@ describe("nesting emission", () => {
     expect(result.text.indexOf("S3333")).toBeLessThan(secondT6Index);
   });
 
+  it("keeps the complete slot operation when the marker precedes its T-word", () => {
+    const result = emitNestingGcode({
+      name: "autocam-slot",
+      dialect: "wincnc",
+      placements: [{ label: "AutoCAM part", x: 2, y: 2, part_library_path: "part" }],
+      programs: {
+        part: {
+          source: [
+            "G90",
+            "T6",
+            "[Shape Through Hole]",
+            "G0 X0 Y0",
+            "M5",
+            "[Slot Cut for Edges]",
+            "T2",
+            "S14553",
+            "G0 X1 Y1",
+            "G1 X2 Y1",
+            "M5",
+            "G53 P10",
+          ].join("\n"),
+        },
+      },
+    });
+    const slotIndex = result.text.indexOf("[Slot Cut for Edges]");
+    expect(slotIndex).toBeGreaterThan(result.text.indexOf("[Tool 6]"));
+    expect(result.text.lastIndexOf("[Tool 2]", slotIndex)).toBeGreaterThan(-1);
+    expect(result.text.slice(slotIndex)).toContain("G1 X2.5000 Y2.0000");
+  });
+
   it("keeps a release-only tool out of the reorderable tool list", () => {
     const input = {
       name: "release-only-tool",
