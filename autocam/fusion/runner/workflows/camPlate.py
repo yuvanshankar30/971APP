@@ -474,7 +474,12 @@ def _require_approved_release_cut_tool(cam) -> None:
             if not is_release:
                 continue
             try:
-                tool_number = op.tool.number
+                # adsk.cam.Tool has no .number property at all (confirmed
+                # live against a real open document: AttributeError) - the
+                # real NC tool number is a parameter on the tool itself,
+                # read the same way _operation_tool_diameter_cm already
+                # reads op.tool.parameters.itemByName("tool_diameter").
+                tool_number = int(str(op.tool.parameters.itemByName("tool_number").expression).strip())
             except Exception:
                 continue
             if tool_number not in _APPROVED_RELEASE_CUT_TOOL_NUMBERS:

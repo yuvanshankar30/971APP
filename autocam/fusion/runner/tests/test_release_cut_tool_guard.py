@@ -10,6 +10,12 @@ _find_matching_tool) - a library where that entry carries a different NC
 number silently posts the wrong physical tool. Direct instruction: only
 Tool 6 is approved for release/slot cuts.
 
+The tool-number mock shape here (tool.parameters.itemByName("tool_number").
+expression, not tool.number) is confirmed against a real live Fusion
+document via the Fusion MCP - adsk.cam.Tool has no .number property at
+all (AttributeError), which the first version of this guard got wrong and
+would have silently no-op'd on every real operation in production.
+
 camPlate.py imports Fusion's runtime-only modules at import time, so the
 function under test is loaded in isolation rather than by importing the
 whole module - same pattern as test_release_contour_guard.py.
@@ -36,6 +42,14 @@ def _param(expression):
     return types.SimpleNamespace(expression=expression)
 
 
+def _tool(tool_number):
+    return types.SimpleNamespace(
+        parameters=types.SimpleNamespace(
+            itemByName=lambda key: _param(str(tool_number)) if key == "tool_number" else None
+        )
+    )
+
+
 def _op(strategy, group_tabs_expression=None, tool_number=6, name="Slot Cut for Edges"):
     params = {}
     if group_tabs_expression is not None:
@@ -44,7 +58,7 @@ def _op(strategy, group_tabs_expression=None, tool_number=6, name="Slot Cut for 
         strategy=strategy,
         name=name,
         parameters=types.SimpleNamespace(itemByName=lambda key: params.get(key)),
-        tool=types.SimpleNamespace(number=tool_number),
+        tool=_tool(tool_number),
     )
 
 
@@ -90,9 +104,9 @@ class RequireApprovedReleaseCutToolTests(unittest.TestCase):
         # Best-effort, like _require_release_contour's own group_tabs read
         # guard - a Fusion API failure reading the tool must not itself
         # crash this check.
-        class _RaisingTool:
+        class _RaisingParam:
             @property
-            def number(self):
+            def expression(self):
                 raise RuntimeError("simulated Fusion API failure")
 
         op = types.SimpleNamespace(
@@ -101,7 +115,23 @@ class RequireApprovedReleaseCutToolTests(unittest.TestCase):
             parameters=types.SimpleNamespace(
                 itemByName=lambda key: _param("true") if key == "group_tabs" else None
             ),
-            tool=_RaisingTool(),
+            tool=types.SimpleNamespace(
+                parameters=types.SimpleNamespace(
+                    itemByName=lambda key: _RaisingParam() if key == "tool_number" else None
+                )
+            ),
+        )
+        cam = _cam(op)
+        require_approved_release_cut_tool(cam)  # must not raise
+
+    def test_a_non_numeric_tool_number_expression_is_treated_as_unverifiable_and_skipped(self):
+        op = types.SimpleNamespace(
+            strategy="contour2d",
+            name="Slot Cut for Edges",
+            parameters=types.SimpleNamespace(
+                itemByName=lambda key: _param("true") if key == "group_tabs" else None
+            ),
+            tool=_tool("not-a-number"),
         )
         cam = _cam(op)
         require_approved_release_cut_tool(cam)  # must not raise
