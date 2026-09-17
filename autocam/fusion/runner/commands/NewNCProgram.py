@@ -14,7 +14,26 @@ import time
 # there right after posting) - that directory gets shutil.rmtree()'d by
 # every caller (camPlate.py etc.) right after collecting artifacts, so it
 # was never a place a person should be looking for their G-code anyway.
+#
+# This is never a plain local folder: ~/Desktop/Output is a symlink into
+# the shared SpartansHub JProgOutput repository (synced across machines by
+# its own tooling), confirmed live via the Fusion MCP. A machine where that
+# symlink was never set up must fail loudly, not silently get its own
+# os.makedirs()'d local folder that looks like it worked but never syncs
+# to anyone else - see _require_shared_output_folder.
 DESKTOP_OUTPUT_PATH = os.path.expanduser("~/Desktop/Output")
+
+
+def _require_shared_output_folder(path):
+    if not os.path.islink(path):
+        raise RuntimeError(
+            f"{path} is not the shared Output symlink (expected a symlink into "
+            "the SpartansHub JProgOutput repository) - run this machine's Output "
+            "folder setup before posting NC programs, rather than silently "
+            "writing to a local-only folder that never syncs to anyone else."
+        )
+    if not os.path.isdir(path):
+        raise RuntimeError(f"{path} is a symlink but its target does not exist or is not a folder")
 
 
 def _safe_program_name(name, fallback="Program"):
@@ -251,7 +270,7 @@ def export(name, post_processor_path, setup_program_names=None):
         _set_nc_program_parameter(ncProgram, "nc_program_filename", program_name)
         # Direct instruction: this is where the operator actually looks for
         # the file, not FINAL_PATH (see DESKTOP_OUTPUT_PATH's own comment).
-        os.makedirs(DESKTOP_OUTPUT_PATH, exist_ok=True)
+        _require_shared_output_folder(DESKTOP_OUTPUT_PATH)
         _set_nc_program_parameter(ncProgram, "nc_program_output_folder", DESKTOP_OUTPUT_PATH)
         _set_nc_program_parameter(ncProgram, "nc_program_openInEditor", False)
         # Direct instruction: the whole point of posting through NCProgram
