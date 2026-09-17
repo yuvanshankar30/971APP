@@ -74,7 +74,7 @@ class TubeFaceProgramTests(unittest.TestCase):
     def test_tube_waits_for_template_operations_before_rebinding_geometry(self):
         handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
         template_index = handler.index("setup.createFromCAMTemplate2(template)")
-        bind_index = handler.index("_bind_setup_to_face(setup, body, face, tube_axis)", template_index)
+        bind_index = handler.index("_bind_setup_to_face(setup, body, face, tube_axis, work_offset)", template_index)
         configure_index = handler.index("_configure_face_operations(setup, selection_face, wall_thickness_in, cutoff_chain)", template_index)
         self.assertLess(template_index, configure_index)
         self.assertLess(template_index, bind_index)
@@ -202,10 +202,35 @@ class TubeFaceProgramTests(unittest.TestCase):
         self.assertIn("selection.startExtensionLength = -_CUTOFF_END_PULLBACK_MM", chain)
         self.assertIn("selection.endExtensionLength = -_CUTOFF_END_PULLBACK_MM", chain)
 
-    def test_tube_setups_post_on_g55(self):
+    def test_tube_setups_post_work_offset_from_machine(self):
         handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
-        self.assertIn('_TUBE_WORK_OFFSET = "2"', handler)
-        self.assertIn('parameters.itemByName("job_workOffset").expression = _TUBE_WORK_OFFSET', handler)
+        self.assertIn(
+            'parameters.itemByName("job_workOffset").expression = work_offset',
+            handler,
+        )
+
+    def test_tube_work_offset_is_g55_except_on_new_router(self):
+        # Old Router (UNC/971) holds tube stock in a dedicated fixture with
+        # its offset permanently set as G55 in the controller, kept separate
+        # from the plate jobs' G54. New Router has no such fixture - direct
+        # instruction: the operator zeros the stock fresh on the machine's
+        # default work offset each time there, exactly like a plate job, so
+        # New Router tube jobs must post on that same default offset instead.
+        source = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
+        start = source.index('_TUBE_WORK_OFFSET_G55 = "2"')
+        def_start = source.index("def _tube_work_offset", start)
+        end = source.index("\n\n\n", def_start)
+        namespace = {}
+        exec(compile(source[start:end], "HandleTube_tube_work_offset", "exec"), namespace)
+        tube_work_offset = namespace["_tube_work_offset"]
+
+        self.assertEqual(tube_work_offset("New Router"), "1")
+        self.assertEqual(tube_work_offset("new router"), "1")
+        self.assertEqual(tube_work_offset("  New Router  "), "1")
+        self.assertEqual(tube_work_offset("UNC Router"), "2")
+        self.assertEqual(tube_work_offset("Haas TL-1"), "2")
+        self.assertEqual(tube_work_offset(None), "2")
+        self.assertEqual(tube_work_offset(""), "2")
 
     def test_tube_wcs_origin_is_resolved_from_fusion_not_a_hardcoded_corner(self):
         handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
@@ -220,7 +245,7 @@ class TubeFaceProgramTests(unittest.TestCase):
         # queue's orientation choice no longer reaches the tube WCS at all.
         handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
         workflow = (RUNNER_DIR / "workflows" / "camTube.py").read_text()
-        self.assertIn('def handleTube(template_filename, program_base_name="tube"):', handler)
+        self.assertIn('def handleTube(template_filename, program_base_name="tube", machine_name=None):', handler)
         self.assertNotIn("horizontal", handler)
         self.assertNotIn('_get(payload, "orientation")', workflow)
         self.assertIn("return long_edge, transverse_edge", handler)
