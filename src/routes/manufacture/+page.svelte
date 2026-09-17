@@ -1410,12 +1410,14 @@
     if (!Number.isInteger(quantity) || quantity < 1) return showToastMessage('Quantity must be a whole number greater than zero', 'error');
     const machine = fusionQueueMachines.find((candidate) => String(candidate.id) === String(fusionQueueMachineId));
     if (!machine || !(fusionQueueKind === 'tube' ? machine.can_run_box_tubes : machine.can_run_plates)) return showToastMessage('Choose a compatible router', 'error');
-    const selectedCategory = fusionQueueCategories.find((candidate) => String(candidate.id) === String(fusionQueueCategoryId));
-    const selectedMaterialName = String(selectedCategory?.cam_materials?.name || '').trim().toLowerCase();
-    const isAluminum6061 = ['aluminum 6061', 'aluminium 6061', '6061 aluminum', '6061 aluminium'].includes(selectedMaterialName);
-    const requestedAutoMultiTool = fusionQueueKind === 'plate' && isNewRouter(fusionQueueMachineId) && !fusionQueueSingleToolMode;
-    if (requestedAutoMultiTool && !isAluminum6061) return showToastMessage('Automatic tool swaps are available only for Aluminum 6061', 'error');
-    const isAutoMultiTool = fusionQueueKind === 'plate' && isNewRouter(fusionQueueMachineId) && isAluminum6061 && !fusionQueueSingleToolMode;
+    // Direct instruction: tool swapping is no longer restricted to Aluminum
+    // 6061 - the shop manually adjusts feed rate at the router for whatever
+    // material is actually loaded, so every New Router plate job can use
+    // Auto multi-tool regardless of material (templateTools.py's
+    // _choose_preset already accepts a tool's generic "Default preset" for
+    // any material, not only Aluminum 6061 - see PartsTab.svelte's own
+    // canUseAutoMultiTool, which already dropped this same restriction).
+    const isAutoMultiTool = fusionQueueKind === 'plate' && isNewRouter(fusionQueueMachineId) && !fusionQueueSingleToolMode;
     if (!isAutoMultiTool && !fusionQueueTools(fusionQueueMachineId).some((tool) => String(tool.id) === String(fusionQueueToolId))) return showToastMessage('Choose a tool installed on this router', 'error');
     if (fusionQueueKind === 'plate' && !fusionQueueCategoryId) return showToastMessage('Choose a material and thickness', 'error');
     if (fusionQueueKind === 'tube' && !fusionQueueMaterials.some((material) => String(material.id) === String(fusionQueueMaterialId) && /alumin(?:um|ium)/i.test(material.name || ''))) return showToastMessage('Choose an aluminum material for tube stock', 'error');
