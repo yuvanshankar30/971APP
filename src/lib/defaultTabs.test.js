@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { defaultHeaderTabs, ensurePowerRankingsTab, ensurePredictionMarketTab, ensureRobotRatingsTab, ensureScoutingAdminTab, ensureStrategyTab, ensureGcodeConverterTab, ensureFilesTab, ensureFusionAutocamTab, promoteChildrenOfDisabledFolders } from './defaultTabs.js';
+import { defaultHeaderTabs, ensurePowerRankingsTab, ensurePredictionMarketTab, ensureRobotRatingsTab, ensureScoutingAdminTab, ensureStrategyTab, ensureDriveTeamTab, ensureGcodeConverterTab, ensureFilesTab, ensureFusionAutocamTab, promoteChildrenOfDisabledFolders } from './defaultTabs.js';
 
 const enabled = { tabs: { powerrankings: true, predictions: true, robotratings: true } };
 
@@ -106,15 +106,17 @@ describe('defaultHeaderTabs', () => {
     // Deliberate order, not incidental: strategy leads as the board the team
     // opens to decide something, then the collection surfaces that feed it
     // (match -> pit -> rankings -> ratings -> predictions -> vision), with
-    // the admin surface last. Exactly these 8 - Pick List (the 'scouting'
+    // the admin surface last. Exactly these 9 - Pick List (the 'scouting'
     // key) is no longer a default entry, per direct feedback naming this
     // exact list; Robot Ratings joined right after Power Rankings since it
     // feeds a display-only average into that same page, and Prediction
     // Market right after that since it bets on the same match schedule
-    // Strategy's Matches view shows.
+    // Strategy's Matches view shows. Drive Team sits right after Strategy -
+    // both read the live match schedule, Drive Team is just the field-facing
+    // view of it.
     const keys = competitionChildren(defaultHeaderTabs()).map((child) => child.key);
     expect(keys).toEqual([
-      'strategy', 'matchscout', 'pitscout', 'powerrankings', 'robotratings', 'predictions', 'vision', 'scouting-admin'
+      'strategy', 'driveteam', 'matchscout', 'pitscout', 'powerrankings', 'robotratings', 'predictions', 'vision', 'scouting-admin'
     ]);
   });
 
@@ -244,6 +246,19 @@ describe('ensureStrategyTab', () => {
     expect(competitionChildren(result).map((item) => item.key)).toEqual(['matchscout', 'strategy', 'vision']);
     expect(competitionChildren(result)[1].label).toBe('Strategy');
     expect(competitionChildren(tabs)[1].key).toBe('datascout');
+  });
+});
+
+describe('ensureDriveTeamTab', () => {
+  it('appends Drive Team to an existing Competition folder', () => {
+    const result = ensureDriveTeamTab(savedNav());
+    expect(competitionChildren(result).at(-1)).toEqual({ key: 'driveteam', label: 'Drive Team' });
+  });
+
+  it('does not add a duplicate Drive Team item', () => {
+    const nav = savedNav();
+    nav[1].children.push({ key: 'driveteam', label: 'Drive Team' });
+    expect(ensureDriveTeamTab(nav)).toBe(nav);
   });
 });
 

@@ -90,6 +90,7 @@ export function defaultHeaderTabs(navConfig = navigation) {
       // Strategy leads: it is the board the team actually opens to decide
       // something, and it reads from every other surface below it.
       { key: 'strategy', label: 'Strategy' },
+      { key: 'driveteam', label: 'Drive Team' },
       { key: 'matchscout', label: 'Match Scouting' },
       { key: 'pitscout', label: 'Pit Scouting' },
       { key: 'powerrankings', label: 'Power Rankings' },
@@ -336,6 +337,25 @@ export function ensureFusionAutocamTab(tabs, navConfig = navigation) {
 
 // Scouting Admin is filtered by the layout based on the signed-in user's role.
 // Adding it here also lets an authorized user with a saved/custom header see it.
+export function ensureDriveTeamTab(tabs) {
+  if (!Array.isArray(tabs)) return tabs;
+  if (containsTabKey(tabs, 'driveteam')) return tabs;
+
+  const entry = { key: 'driveteam', label: 'Drive Team' };
+  const folderIndex = tabs.findIndex(
+    (item) => item?.type === 'folder' && item?.label === COMPETITION_FOLDER_LABEL
+  );
+  if (folderIndex === -1) return [...tabs, { type: 'tab', ...entry }];
+
+  const folder = tabs[folderIndex];
+  const next = [...tabs];
+  next[folderIndex] = {
+    ...folder,
+    children: [...(Array.isArray(folder.children) ? folder.children : []), entry]
+  };
+  return next;
+}
+
 export function ensureScoutingAdminTab(tabs) {
   if (!Array.isArray(tabs)) return tabs;
   if (containsTabKey(tabs, 'scouting-admin')) return tabs;
