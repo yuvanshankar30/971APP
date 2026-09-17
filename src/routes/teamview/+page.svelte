@@ -6,10 +6,12 @@
   import { formatPacificDateTimeWithZone } from '$lib/timezone.js';
   import { buildPowerRankings } from '$lib/scoutingStats.js';
   import { applyRobotRatings, myRobotRating } from '$lib/robotRatings.js';
-  import { bestTeamPhoto, matchVideoUrl, mediaImageUrl } from '$lib/tbaMedia.js';
+  import { bestTeamPhoto, mediaImageUrl } from '$lib/tbaMedia.js';
   import SeasonFilter from '$lib/components/SeasonFilter.svelte';
   import MatchScoutReport from '$lib/components/MatchScoutReport.svelte';
   import RobotStarPlot from '$lib/components/RobotStarPlot.svelte';
+  import AutoPathPreviewModal from '$lib/components/AutoPathPreviewModal.svelte';
+  import MatchVideoModal from '$lib/components/MatchVideoModal.svelte';
 
   const SCOPE_OPTIONS = [
     { value: 'total', label: 'Total' },
@@ -78,6 +80,9 @@
   let tbaPhoto = null;
   let userId = null;
   let requestedTeamKey = '';
+  let deletingMyRating = false;
+  let selectedAutoPath = null;
+  let selectedVideoMatch = null;
   let viewFilterScope = 'total';
   // Where to send someone who wants OUT of Team View entirely, as opposed to
   // clearSelection() below (which only clears the picked team and drops them
@@ -268,6 +273,28 @@
       loadingTeamData = false;
     }
     void loadCrossEventMatches(selectedTeam, resolvedEventKey);
+  }
+
+  async function deleteMyRating() {
+    if (!myRating) return;
+    deletingMyRating = true;
+    try {
+      const authHeaders = await getAuthHeader();
+      const response = await fetch('/api/scouting-robot-ratings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify({ action: 'delete', id: myRating.id })
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok || !result?.success) throw new Error(result?.error || 'Could not remove your rating.');
+      const ratingsRes = await authFetch(`/api/scouting-robot-ratings?event_key=${encodeURIComponent(resolvedEventKey)}`);
+      const ratingsPayload = await ratingsRes.json().catch(() => null);
+      robotRatings = ratingsPayload?.success ? ratingsPayload.data || [] : robotRatings.filter((r) => r.id !== myRating.id);
+    } catch (e) {
+      apiNote = e.message || 'Could not remove your rating.';
+    } finally {
+      deletingMyRating = false;
+    }
   }
 
   // Cross-event match history - kept separate from the main openTeam load
@@ -598,6 +625,14 @@
 
   onMount(async () => {
     requestedTeamKey = normalizeTeamKey($page.url.searchParams.get('team'));
+    // Land directly on the requested team's own view instead of flashing the
+    // generic "Search Teams" picker first - a direct link (e.g. from
+    // Strategy) already knows which team it wants, so show that team's shell
+    // immediately (fields fill in as openTeam's fetches resolve) rather than
+    // making the visitor wait through loadTeams() before anything specific
+    // to their team appears. openTeam() re-sets this to the same value once
+    // it actually starts loading, so this is purely a same-tick head start.
+    if (requestedTeamKey) selectedTeam = requestedTeamKey;
     const requestedEventKey = String($page.url.searchParams.get('event_key') || '').trim();
     const requestedReturnTo = String($page.url.searchParams.get('from') || '').trim();
     // Only ever follow an internal, same-origin path - a `from` value could
@@ -724,7 +759,10 @@
         {#if savedAutoPaths.length}
           <div class="pit-auto-list">
             {#each savedAutoPaths as path (path.id)}
-              <div class="pit-auto-card"><div class="pit-auto-name">{path.name}</div><div class="pit-auto-description">{path.alliance || 'Alliance not recorded'} · {path.path?.length || 0} path points</div></div>
+              <button type="button" class="pit-auto-card pit-auto-card-button" on:click={() => selectedAutoPath = path}>
+                <div class="pit-auto-name">{path.name}</div>
+                <div class="pit-auto-description">{path.alliance || 'Alliance not recorded'} · {path.path?.length || 0} path points</div>
+              </button>
             {/each}
           </div>
         {:else}<div class="empty compact-empty">No saved autonomous paths.</div>{/if}
@@ -753,7 +791,12 @@
         <span><small>Shuttling</small><strong>{selectedProfile?.robotRating?.shuttlingAvg == null ? '—' : selectedProfile.robotRating.shuttlingAvg.toFixed(1)}</strong></span>
       </div>
       {#if myRating?.notes}<p class="my-rating-note"><strong>Your note:</strong> {myRating.notes}</p>{/if}
-      <a class="btn btn-secondary btn-sm" href={`/robotratings?team=${encodeURIComponent(selectedTeam)}`}>{myRating ? 'Edit my rating' : 'Rate this robot'}</a>
+      <div class="rating-overview-actions">
+        <a class="btn btn-secondary btn-sm" href={`/robotratings?team=${encodeURIComponent(selectedTeam)}`}>{myRating ? 'Edit my rating' : 'Rate this robot'}</a>
+        {#if myRating}
+          <button class="btn btn-outline btn-sm" type="button" disabled={deletingMyRating} on:click={deleteMyRating}>{deletingMyRating ? 'Removing…' : 'Remove my rating'}</button>
+        {/if}
+      </div>
     </section>
     <section class="card star-overview">
       <h3>Event-relative profile</h3>
@@ -857,7 +900,7 @@
             <div><strong>{match.key.split('_').at(-1).toUpperCase()}</strong><span class:alliance-red={alliance === 'red'} class:alliance-blue={alliance === 'blue'}>{alliance} alliance</span></div>
             <span>{match.alliances?.[alliance]?.team_keys?.map(displayTeam).join(', ')}</span>
             <strong>{matchResult(match)}</strong>
-            <a class="btn btn-secondary btn-sm" href={matchVideoUrl(match)} target="_blank" rel="noreferrer">{match.videos?.length ? 'Watch video' : 'Open on TBA'}</a>
+            <button type="button" class="btn btn-secondary btn-sm" on:click={() => selectedVideoMatch = match}>{match.videos?.length ? 'Watch video' : 'Open on TBA'}</button>
           </div>
         {/each}
       </div>
@@ -875,7 +918,7 @@
             <div><strong>{match.event_key}</strong> <span>{match.key.split('_').at(-1).toUpperCase()}</span><span class:alliance-red={alliance === 'red'} class:alliance-blue={alliance === 'blue'}>{alliance} alliance</span></div>
             <span>{match.alliances?.[alliance]?.team_keys?.map(displayTeam).join(', ')}</span>
             <strong>{matchResult(match)}</strong>
-            <a class="btn btn-secondary btn-sm" href={matchVideoUrl(match)} target="_blank" rel="noreferrer">{match.videos?.length ? 'Watch video' : 'Open on TBA'}</a>
+            <button type="button" class="btn btn-secondary btn-sm" on:click={() => selectedVideoMatch = match}>{match.videos?.length ? 'Watch video' : 'Open on TBA'}</button>
           </div>
         {/each}
       </div>
@@ -889,6 +932,9 @@
     {:else}<div class="empty">No manual match reports yet.</div>{/if}
   </section>
 {/if}
+
+<AutoPathPreviewModal path={selectedAutoPath} on:close={() => selectedAutoPath = null} />
+<MatchVideoModal match={selectedVideoMatch} on:close={() => selectedVideoMatch = null} />
 
 <style>
   .teamview-header-copy { display: grid; gap: var(--gap-1); }
@@ -924,11 +970,14 @@
   .pit-auto-heading { font-size: var(--font-xs); font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); }
   .pit-auto-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: var(--gap-2); }
   .pit-auto-card { display: grid; gap: 0.25rem; min-width: 0; padding: var(--space-2); border: 1px solid color-mix(in srgb, var(--border) 85%, transparent); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--surface-1) 92%, transparent); }
+  .pit-auto-card-button { width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer; }
+  .pit-auto-card-button:hover { border-color: var(--brand-gold-strong, #b8860b); }
   .pit-auto-name { font-size: var(--font-sm); font-weight: 700; line-height: 1.2; }
   .pit-auto-description { font-size: var(--font-xs); color: var(--text-muted); line-height: 1.35; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
   .compact-empty { padding:var(--space-2); }
   .team-overview-grid { display:grid; grid-template-columns:minmax(0, .85fr) minmax(320px, 1.15fr); gap:var(--gap-3); margin:var(--space-3) 0; }
   .rating-overview { display:grid; align-content:start; gap:var(--space-3); }
+  .rating-overview-actions { display:flex; gap:var(--space-2); flex-wrap:wrap; }
   .rating-overview h3, .star-overview h3, .section-title-row h3 { margin:0; }
   .rating-overview p, .section-title-row p { margin:3px 0 0; color:var(--text-muted); font-size:.8rem; }
   .rating-summary-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); border:1px solid var(--border); border-radius:var(--radius-sm); overflow:hidden; }

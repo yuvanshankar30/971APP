@@ -236,6 +236,17 @@ function getBasicAuth() {
   return { 'Authorization': `Basic ${cred}` };
 }
 
+// Temporary: the team does not currently have a working Onshape API key to
+// rotate in (see the comment above this function). Rather than let every
+// CAD page action either fail on a confusing upstream 401 or - worse -
+// succeed using whatever old/leaked key still sits in the PUBLIC_ fallback,
+// this flips a hard, explicit switch that fails fast with a distinct reason
+// the client can detect and show as "temporarily unavailable". Nothing else
+// in this file changes for when a real key is ready - just flip this back
+// to false (or delete the check) once ONSHAPE_ACCESS_KEY/SECRET_KEY are
+// real, rotated, working credentials.
+const ONSHAPE_TEMPORARILY_DISABLED = true;
+
 /* ── Helper to get element type ─────────────────────────────── */
 async function getElementType(documentId, wvm, wvmId, elementId) {
     try {
@@ -566,6 +577,10 @@ async function handlePartTranslation(documentId, wvm, wvmId, elementId, partId, 
 }
 
 export async function GET({ url }) {
+    if (ONSHAPE_TEMPORARILY_DISABLED) {
+        return json({ error: 'Onshape sync is temporarily unavailable.', onshapeUnavailable: true }, { status: 503 });
+    }
+
     const action = url.searchParams.get('action');
     const documentId = url.searchParams.get('documentId');
     const workspaceId = url.searchParams.get('workspaceId');

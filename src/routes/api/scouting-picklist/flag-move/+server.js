@@ -3,6 +3,12 @@ import { createClient } from '@supabase/supabase-js';
 import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/public';
 import { env } from '$env/dynamic/private';
 
+// Temporary: no working OpenAI key yet. Explicit rather than relying only on
+// env.OPENAI_API_KEY being unset, so this stays off even if some placeholder
+// value gets set before a real key is ready. Flip back to false (or delete
+// this check) once a real OPENAI_API_KEY is configured.
+const AI_FLAGGING_TEMPORARILY_DISABLED = true;
+
 // Advisory-only AI review of a human pick-list drag-reorder move (Picklist
 // tab, section 3A of docs/plans/strategy-picklist-improvements.md). Same
 // OpenAI Responses API shape as the one other LLM integration in this repo
@@ -38,7 +44,9 @@ function summarizeTeam(team) {
 }
 
 export async function POST({ request }) {
-  if (!env.OPENAI_API_KEY) return json({ success: false, error: 'AI flagging is not configured yet.' }, { status: 503 });
+  if (AI_FLAGGING_TEMPORARILY_DISABLED || !env.OPENAI_API_KEY) {
+    return json({ success: false, error: 'AI flagging is not configured yet.' }, { status: 503 });
+  }
 
   const authSupa = getClientFromRequest(request);
   const { data: auth } = await authSupa.auth.getUser();
