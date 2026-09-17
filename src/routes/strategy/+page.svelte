@@ -75,8 +75,8 @@
   const columnAccessors = {
     rank: (row) => officialByTeam.get(row.teamNumber)?.rank ?? null,
     team: (row) => Number(row.teamNumber) || 0,
-    dataMatches: (row) => row.performance.matchesScouted ?? 0,
     reports: (row) => row.matchScoutSummary.reportCount ?? 0,
+    upcoming: (row) => upcomingMatchCount(row.teamKey),
     fuel: (row) => row.performance.avgFuel,
     balls: (row) => row.matchScoutSummary.avgBallsScored,
     accuracy: (row) => row.performance.avgAccuracy,
@@ -188,6 +188,14 @@
   $: upcomingMatches = matches.filter((match) => !isMatchPlayed(match));
   $: playedMatches = matches.filter((match) => isMatchPlayed(match)).slice().reverse();
   const teamNumber = (teamKey) => String(teamKey || '').replace(/^frc/i, '');
+  // "i more want to know upcoming matches" than Data Matches as a top-level
+  // column (see docs/plans/strategy-picklist-improvements.md section 5) -
+  // reuses upcomingMatches, which this page already loads for the Matches
+  // subtab, no new fetch.
+  const upcomingMatchCount = (teamKey) =>
+    upcomingMatches.filter((match) =>
+      (match.alliances?.red?.team_keys || []).includes(teamKey) || (match.alliances?.blue?.team_keys || []).includes(teamKey)
+    ).length;
 
   const number = (value, digits = 1) => Number.isFinite(value) ? value.toFixed(digits) : '-';
   const percent = (value) => Number.isFinite(value) ? `${Math.round(value * 100)}%` : '-';
@@ -616,12 +624,12 @@
             <thead><tr>
               <th><button type="button" class="sort-btn" on:click={() => toggleSort('rank')}>Rank {sortIndicator('rank')}</button></th>
               <th><button type="button" class="sort-btn" on:click={() => toggleSort('team')}>Team {sortIndicator('team')}</button></th>
-              <th><button type="button" class="sort-btn" on:click={() => toggleSort('dataMatches')}>Data matches {sortIndicator('dataMatches')}</button></th>
               <th><button type="button" class="sort-btn" on:click={() => toggleSort('reports')}>Reports {sortIndicator('reports')}</button></th>
+              <th><button type="button" class="sort-btn" on:click={() => toggleSort('upcoming')}>Upcoming {sortIndicator('upcoming')}</button></th>
               <th><button type="button" class="sort-btn" on:click={() => toggleSort('fuel')}>Fuel {sortIndicator('fuel')}</button></th>
+              <th><button type="button" class="sort-btn" on:click={() => toggleSort('auto')}>Auto {sortIndicator('auto')}</button></th>
               <th><button type="button" class="sort-btn" on:click={() => toggleSort('balls')}>Reported balls {sortIndicator('balls')}</button></th>
               <th><button type="button" class="sort-btn" on:click={() => toggleSort('accuracy')}>Accuracy {sortIndicator('accuracy')}</button></th>
-              <th><button type="button" class="sort-btn" on:click={() => toggleSort('auto')}>Auto {sortIndicator('auto')}</button></th>
               <th><button type="button" class="sort-btn" on:click={() => toggleSort('pit')}>Pit {sortIndicator('pit')}</button></th>
               <th><button type="button" class="sort-btn" on:click={() => toggleSort('notes')}>Notes {sortIndicator('notes')}</button></th>
               <th><button type="button" class="sort-btn" on:click={() => toggleSort('autos')}>Autos {sortIndicator('autos')}</button></th>
@@ -632,12 +640,12 @@
                 <tr class:selected={selectedTeam?.teamKey === row.teamKey} on:click={() => openTeamView(row)}>
                   <td data-label="Rank"><strong>{officialByTeam.get(row.teamNumber)?.rank ?? '—'}</strong></td>
                   <td data-label="Team"><strong>{row.teamNumber}</strong>{#if row.pitEntry?.robot_archetype}<small>{row.pitEntry.robot_archetype}</small>{/if}</td>
-                  <td data-label="Data matches">{row.performance.matchesScouted || '-'}</td>
-                  <td data-label="Reports">{row.matchScoutSummary.reportCount || '-'}</td>
+                  <td data-label="Reports">{row.matchScoutSummary.reportCount || '-'}<small>{row.performance.matchesScouted || 0} data matches</small></td>
+                  <td data-label="Upcoming">{upcomingMatchCount(row.teamKey) || '-'}</td>
                   <td data-label="Fuel">{number(row.performance.avgFuel, 0)}</td>
+                  <td data-label="Auto">{number(row.autoAverage, 0)}</td>
                   <td data-label="Reported balls">{number(row.matchScoutSummary.avgBallsScored, 0)}</td>
                   <td data-label="Accuracy">{number(row.performance.avgAccuracy)}</td>
-                  <td data-label="Auto">{number(row.autoAverage, 0)}</td>
                   <td data-label="Pit">{row.pitEntry ? 'Yes' : '-'}</td>
                   <td data-label="Notes">{row.notes.length || '-'}</td>
                   <td data-label="Autos">{row.autoPaths.length || '-'}</td>
