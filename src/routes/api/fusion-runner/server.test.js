@@ -352,3 +352,23 @@ describe('Fusion Runner plate growth',()=>{
   expect(queries[1].update).toHaveBeenCalledWith({length:34,width:100});
  });
 });
+describe('Fusion Runner completion upload body size',()=>{
+ // adapter-node's BODY_SIZE_LIMIT enforcement makes request.json() reject
+ // with a SvelteKitError carrying status 413 once a tube job's multi-file
+ // base64 completion payload exceeds the limit - real, confirmed root
+ // cause of "Invalid JSON body" 400s that were actually oversized bodies,
+ // not malformed JSON (see cloudbuild.yaml's BODY_SIZE_LIMIT comment).
+ it('reports a 413 distinctly instead of the generic invalid-JSON message when the body exceeds the size limit',async()=>{
+  const oversized={status:413,message:'Payload Too Large'};
+  const request={json:()=>Promise.reject(oversized)};
+  const result=await POST({url:new URL('http://localhost/api/fusion-runner?action=complete'),request});
+  expect(result.status).toBe(413);
+  expect(await result.json()).toEqual({error:'Request body too large'});
+ });
+ it('still reports the generic invalid-JSON message for an actual JSON syntax error',async()=>{
+  const request={json:()=>Promise.reject(new SyntaxError('Unexpected end of JSON input'))};
+  const result=await POST({url:new URL('http://localhost/api/fusion-runner?action=complete'),request});
+  expect(result.status).toBe(400);
+  expect(await result.json()).toEqual({error:'Invalid JSON body'});
+ });
+});

@@ -185,7 +185,17 @@ steps:
       # origin there would silently break every AutoCAM generation on this
       # deployment. Reuses the same real public URL already baked into the
       # client bundle as PUBLIC_APP_ORIGIN/PUBLIC_SITE_URL above.
-      - '--set-env-vars=ORIGIN=${_PUBLIC_APP_ORIGIN},SUPABASE_URL=${_PUBLIC_SUPABASE_URL},SENTRY_DSN=${_PUBLIC_SENTRY_DSN},DRIVE_API=${_DRIVE_API},DRIVE_UPLOAD_API=${_DRIVE_UPLOAD_API},DRIVE_SCOPE=${_DRIVE_SCOPE},DRIVE_PRACTICE_CATEGORY=${_DRIVE_PRACTICE_CATEGORY},SLACK_ALERT_CHANNEL_ID=${_SLACK_ALERT_CHANNEL_ID}'
+      # adapter-node defaults BODY_SIZE_LIMIT to 512K - real, confirmed root
+      # cause of intermittent "Invalid JSON body" 400s on Fusion runner tube
+      # job completion uploads (POST /api/fusion-runner?action=complete):
+      # a tube job's completion payload embeds base64 G-code for every
+      # posted face program, which routinely exceeds 512K for multi-wall
+      # jobs. SvelteKit's request body stream errors past the limit,
+      # request.json() throws, and that route's bare catch{} reports it as
+      # a generic JSON parse failure - the CAM/G-code generation itself had
+      # already succeeded. 30M leaves headroom under Cloud Run's own hard
+      # 32MB request limit.
+      - '--set-env-vars=ORIGIN=${_PUBLIC_APP_ORIGIN},SUPABASE_URL=${_PUBLIC_SUPABASE_URL},SENTRY_DSN=${_PUBLIC_SENTRY_DSN},DRIVE_API=${_DRIVE_API},DRIVE_UPLOAD_API=${_DRIVE_UPLOAD_API},DRIVE_SCOPE=${_DRIVE_SCOPE},DRIVE_PRACTICE_CATEGORY=${_DRIVE_PRACTICE_CATEGORY},SLACK_ALERT_CHANNEL_ID=${_SLACK_ALERT_CHANNEL_ID},BODY_SIZE_LIMIT=30M'
 
 images:
   - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE_NAME}:$BUILD_ID'

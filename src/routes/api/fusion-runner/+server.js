@@ -193,7 +193,17 @@ export async function POST({ request, url }) {
   let body;
   try {
     body = await request.json();
-  } catch {
+  } catch (err) {
+    // A body over adapter-node's BODY_SIZE_LIMIT (see cloudbuild.yaml) makes
+    // the underlying request stream error with a 413 the moment
+    // request.json() tries to read it - real, confirmed root cause of tube
+    // job completion uploads (large multi-file base64 G-code payloads)
+    // intermittently failing. Report that distinctly instead of collapsing
+    // it into the same generic message as an actual malformed-JSON body,
+    // which made a body-too-large condition indistinguishable from one.
+    if (err?.status === 413) {
+      return json({ error: 'Request body too large' }, { status: 413 });
+    }
     return json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
