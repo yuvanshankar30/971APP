@@ -91,6 +91,7 @@ export function defaultHeaderTabs(navConfig = navigation) {
       // something, and it reads from every other surface below it.
       { key: 'strategy', label: 'Strategy' },
       { key: 'driveteam', label: 'Drive Team' },
+      { key: 'picklist', label: 'Picklist' },
       { key: 'matchscout', label: 'Match Scouting' },
       { key: 'pitscout', label: 'Pit Scouting' },
       { key: 'powerrankings', label: 'Power Rankings' },
@@ -342,6 +343,25 @@ export function ensureDriveTeamTab(tabs) {
   if (containsTabKey(tabs, 'driveteam')) return tabs;
 
   const entry = { key: 'driveteam', label: 'Drive Team' };
+  const folderIndex = tabs.findIndex(
+    (item) => item?.type === 'folder' && item?.label === COMPETITION_FOLDER_LABEL
+  );
+  if (folderIndex === -1) return [...tabs, { type: 'tab', ...entry }];
+
+  const folder = tabs[folderIndex];
+  const next = [...tabs];
+  next[folderIndex] = {
+    ...folder,
+    children: [...(Array.isArray(folder.children) ? folder.children : []), entry]
+  };
+  return next;
+}
+
+export function ensurePicklistTab(tabs) {
+  if (!Array.isArray(tabs)) return tabs;
+  if (containsTabKey(tabs, 'picklist')) return tabs;
+
+  const entry = { key: 'picklist', label: 'Picklist' };
   const folderIndex = tabs.findIndex(
     (item) => item?.type === 'folder' && item?.label === COMPETITION_FOLDER_LABEL
   );

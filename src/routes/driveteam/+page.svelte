@@ -64,13 +64,36 @@
     return `${minutes}m`;
   }
 
+  // A clearly-labeled synthetic match (comp_level 'test', same convention
+  // Strategy's Matches subtab uses for its practice prediction market) with
+  // a real predicted_time a few minutes out, so the countdown/queue-position/
+  // downtime math has something to render against - including in production,
+  // before a real event's schedule exists yet.
+  function buildDriveTeamTestMatch() {
+    const now = Math.floor(Date.now() / 1000);
+    const startsIn = 5 * 60;
+    return {
+      key: 'test_driveteam_1',
+      comp_level: 'test',
+      set_number: 1,
+      match_number: 1,
+      time: now + startsIn,
+      predicted_time: now + startsIn,
+      actual_time: null,
+      alliances: {
+        red: { team_keys: [OUR_TEAM_KEY, 'frc254', 'frc118'], score: -1 },
+        blue: { team_keys: ['frc1114', 'frc2056', 'frc330'], score: -1 }
+      }
+    };
+  }
+
   async function loadMatches() {
     if (!eventKey) { loading = false; return; }
     try {
       const response = await fetch(`/api/tba/event-matches?event_key=${encodeURIComponent(eventKey)}&comp_level=all`);
       const payload = await response.json().catch(() => null);
       if (!response.ok || !payload?.success) throw new Error(payload?.error || 'Could not load the match schedule.');
-      matches = payload.data || [];
+      matches = [buildDriveTeamTestMatch(), ...(payload.data || [])];
       error = '';
       lastLoadedAt = Date.now();
     } catch (cause) {

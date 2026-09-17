@@ -6,6 +6,11 @@ import { rankPurchasingPhotoCandidates } from '$lib/purchasingPhotoMatch.js';
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
+// Temporary: no working OpenAI key yet. Explicit rather than relying only on
+// env.OPENAI_API_KEY being unset - flip back to false (or delete this check)
+// once a real OPENAI_API_KEY is configured.
+const AI_PHOTO_ID_TEMPORARILY_DISABLED = true;
+
 function clientFor(request) {
   return createClient(PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY, {
     global: { headers: { Authorization: request.headers.get('authorization') || '' } }
@@ -54,7 +59,9 @@ export async function POST({ request, fetch }) {
   }
   const encoded = imageDataUrl.slice(imageDataUrl.indexOf(',') + 1);
   if ((encoded.length * 3) / 4 > MAX_IMAGE_BYTES) return json({ error: 'Keep the photo under 5 MB.' }, { status: 413 });
-  if (!env.OPENAI_API_KEY) return json({ error: 'Photo receiving is not configured yet.' }, { status: 503 });
+  if (AI_PHOTO_ID_TEMPORARILY_DISABLED || !env.OPENAI_API_KEY) {
+    return json({ error: 'Photo receiving is not configured yet.' }, { status: 503 });
+  }
 
   const visionResponse = await fetch('https://api.openai.com/v1/responses', {
     method: 'POST',
