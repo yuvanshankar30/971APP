@@ -17,14 +17,38 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 import urllib.parse
-import urllib.request
 import zipfile
 
 manifest_url, destination = sys.argv[1:]
-with urllib.request.urlopen(manifest_url, timeout=30) as response:
-    manifest = json.load(response)
+
+def curl_fetch(url, timeout, extra_args=()):
+    """Fetches over HTTPS via curl rather than urllib.request.
+
+    Real, confirmed report: on a stock macOS install of Python from
+    python.org (not Homebrew, not the system interpreter), urllib's own
+    bundled OpenSSL has no CA trust store configured until the reader runs
+    that interpreter's separate "Install Certificates.command" - something
+    nothing here tells them to do, and something they have no reason to
+    expect a curl-fetched installer script to require. Every such install
+    failed immediately with "CERTIFICATE_VERIFY_FAILED: unable to get
+    local issuer certificate" on urllib's very first HTTPS request. curl
+    itself already succeeded fetching this very script one line above (it
+    uses macOS's own trust store, entirely independent of this Python
+    interpreter's), so it does the rest of the downloading too.
+    """
+    result = subprocess.run(
+        ["curl", "-sSL", "--max-time", str(timeout), *extra_args, url],
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        detail = result.stderr.decode("utf-8", "replace").strip()
+        raise RuntimeError(f"Could not reach {url}: curl exited {result.returncode} ({detail or 'no output'})")
+    return result.stdout
+
+manifest = json.loads(curl_fetch(manifest_url, 30))
 
 expected = str(manifest.get("sha256") or "").strip().lower()
 download_url = urllib.parse.urljoin(manifest_url, str(manifest.get("downloadUrl") or ""))
@@ -32,14 +56,14 @@ if not re.fullmatch(r"[0-9a-f]{64}", expected) or not download_url:
     raise RuntimeError("Runner download manifest is incomplete")
 
 archive_path = os.path.join(destination, "runner.zip")
+curl_fetch(download_url, 60, extra_args=["-o", archive_path])
 digest = hashlib.sha256()
-with urllib.request.urlopen(download_url, timeout=60) as response, open(archive_path, "wb") as archive_file:
+with open(archive_path, "rb") as archive_file:
     while True:
-        chunk = response.read(1024 * 1024)
+        chunk = archive_file.read(1024 * 1024)
         if not chunk:
             break
         digest.update(chunk)
-        archive_file.write(chunk)
 if digest.hexdigest() != expected:
     raise RuntimeError("Runner download checksum mismatch; refusing to install")
 

@@ -36,8 +36,6 @@ import socket
 import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
 import webbrowser
 
 SOURCE_DIR = os.path.dirname(os.path.realpath(__file__))
@@ -127,23 +125,53 @@ def install_requests(addin_dir: str) -> None:
 
 
 def post_json(url, payload, timeout=15):
-    request = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
+    """POSTs JSON via curl rather than urllib.request.
+
+    Real, confirmed report: on a stock macOS install of Python from
+    python.org (not Homebrew, not the system interpreter), urllib's own
+    bundled OpenSSL has no CA trust store configured until the reader runs
+    that interpreter's separate "Install Certificates.command" - nothing
+    here tells them to do that, and they have no reason to expect this
+    setup step needs it. install-runner.sh's own bootstrap hit the exact
+    same failure mode fetching the runner archive and was fixed the same
+    way - curl uses macOS's own trust store, entirely independent of
+    whichever Python interpreter happens to be running this.
+
+    -sSL (no -f/--fail): a non-2xx response still has to reach the status
+    handling below to report Spartans Hub's own JSON error detail, which
+    -f would suppress along with the exit code.
+    """
+    result = subprocess.run(
+        [
+            "curl", "-sSL", "--max-time", str(timeout),
+            "-X", "POST",
+            "-H", "Content-Type: application/json",
+            "-d", json.dumps(payload),
+            "-w", "\n%{http_code}",
+            url,
+        ],
+        capture_output=True,
     )
+    if result.returncode != 0:
+        detail = result.stderr.decode("utf-8", "replace").strip()
+        raise RuntimeError(f"Could not reach Spartans Hub: curl exited {result.returncode} ({detail or 'no output'})")
+
+    output = result.stdout.decode("utf-8", "replace")
+    body_text, _, status_text = output.rpartition("\n")
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            return response.status, json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        try:
-            detail = json.loads(exc.read().decode("utf-8")).get("error", str(exc))
-        except (ValueError, UnicodeDecodeError):
-            detail = str(exc)
-        raise RuntimeError(f"Spartans Hub rejected setup: {detail}") from exc
-    except (urllib.error.URLError, TimeoutError, ValueError) as exc:
-        raise RuntimeError(f"Could not reach Spartans Hub: {exc}") from exc
+        status = int(status_text)
+    except ValueError:
+        raise RuntimeError(f"Could not reach Spartans Hub: unexpected response {output!r}")
+
+    try:
+        body = json.loads(body_text)
+    except ValueError:
+        body = None
+
+    if status >= 400:
+        detail = body.get("error", body_text) if isinstance(body, dict) else (body_text or f"HTTP {status}")
+        raise RuntimeError(f"Spartans Hub rejected setup: {detail}")
+    return status, body
 
 
 def pair_runner(base_url, runner_name):

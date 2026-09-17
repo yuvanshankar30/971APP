@@ -3,6 +3,7 @@ from pathlib import Path
 from unittest.mock import patch
 import json
 import os
+import subprocess
 import tempfile
 import unittest
 
@@ -71,20 +72,11 @@ class SetupUpdateTests(unittest.TestCase):
             self.assertTrue(Path(directory, ".overridepath").is_file())
 
 
-def _fake_response(payload):
-    class _Response:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc):
-            return False
-
-        def read(self):
-            return json.dumps(payload).encode("utf-8")
-
-        status = 200
-
-    return _Response()
+def _fake_curl_response(payload, status=200):
+    # Matches post_json's own curl invocation: -w "\n%{http_code}" appends
+    # the status code after the response body on its own line.
+    stdout = (json.dumps(payload) + "\n" + str(status)).encode("utf-8")
+    return subprocess.CompletedProcess(args=["curl"], returncode=0, stdout=stdout, stderr=b"")
 
 
 class BrowserPairingTests(unittest.TestCase):
@@ -94,14 +86,16 @@ class BrowserPairingTests(unittest.TestCase):
             "pollSecret": "secret",
             "configureUrl": "https://example.test/install/fusion-runner/setup?session=111",
         }
-        pending = _fake_response({"status": "pending"})
-        pending.status = 202
         with patch.object(
-            setup.urllib.request,
-            "urlopen",
-            side_effect=[_fake_response(started), pending, _fake_response({
-                "status": "complete", "token": "frt_machine", "machineId": "machine-id"
-            })],
+            setup.subprocess,
+            "run",
+            side_effect=[
+                _fake_curl_response(started),
+                _fake_curl_response({"status": "pending"}, status=202),
+                _fake_curl_response({
+                    "status": "complete", "token": "frt_machine", "machineId": "machine-id"
+                }),
+            ],
         ), patch.object(setup.webbrowser, "open", return_value=True) as browser, patch.object(
             setup.time, "sleep"
         ) as sleep:
