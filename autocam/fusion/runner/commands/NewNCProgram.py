@@ -173,10 +173,24 @@ def export(name, post_processor_path, setup_program_names=None):
     ui = None
     app = adsk.core.Application.get()
     ui = app.userInterface
-    design = app.activeProduct
 
-    # Ensure we are in the CAM workspace
-    cam = adsk.cam.CAM.cast(design)
+    # Real, confirmed live crash: app.activeProduct returns whatever
+    # workspace happens to have UI focus, not necessarily the CAM product -
+    # a Save As (save_new_document runs immediately before every caller's
+    # own export() call) commonly switches Fusion's active workspace back
+    # to Design, so cam = adsk.cam.CAM.cast(app.activeProduct) silently
+    # resolved to None and cam.setups raised AttributeError. Resolved the
+    # same robust way camPlate.py's own validators already do, straight
+    # from the document's products collection rather than "whatever is
+    # active" - not dependent on which tab happens to be focused.
+    cam_product = app.activeDocument.products.itemByProductType("CAMProductType")
+    cam = adsk.cam.CAM.cast(cam_product) if cam_product else None
+    if not cam:
+        raise RuntimeError(
+            "No active CAM product to export from - the document may have "
+            "lost its CAM context (e.g. Save As switching Fusion's active "
+            "workspace back to Design)."
+        )
     allSetups = cam.setups
     if not post_processor_path or not os.path.isfile(post_processor_path):
         raise ValueError(f"Fusion post processor is unavailable: {post_processor_path}")
