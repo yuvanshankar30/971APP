@@ -21,14 +21,30 @@ export function allianceStrength(teamKeys = [], scoutPowerByTeam = new Map()) {
   }, 0);
 }
 
-export function projectMatch(match, scoutPowerByTeam = new Map()) {
+// A rough predicted score for one alliance: the sum of each team's average
+// scouted match points (auto + teleop balls), where known. Same "assume
+// average" honesty rule as allianceStrength would apply, but here there's
+// no meaningful "average points" to assume for an un-scouted team, so it's
+// simply left out of the sum - a predicted score built from 2 of 3 teams is
+// still informative, whereas inventing a fake baseline points value would
+// not be.
+export function allianceProjectedScore(teamKeys = [], projectedScoreByTeam = new Map()) {
+  const known = teamKeys.map((key) => projectedScoreByTeam.get(key)).filter(Number.isFinite);
+  return known.length ? known.reduce((sum, value) => sum + value, 0) : null;
+}
+
+export function projectMatch(match, scoutPowerByTeam = new Map(), projectedScoreByTeam = new Map()) {
   const redKeys = match?.alliances?.red?.team_keys || [];
   const blueKeys = match?.alliances?.blue?.team_keys || [];
   const redStrength = allianceStrength(redKeys, scoutPowerByTeam);
   const blueStrength = allianceStrength(blueKeys, scoutPowerByTeam);
-  if (redStrength == null || blueStrength == null) return { redStrength, blueStrength, redWinProbability: null };
+  const redProjectedScore = allianceProjectedScore(redKeys, projectedScoreByTeam);
+  const blueProjectedScore = allianceProjectedScore(blueKeys, projectedScoreByTeam);
+  if (redStrength == null || blueStrength == null) {
+    return { redStrength, blueStrength, redWinProbability: null, redProjectedScore, blueProjectedScore };
+  }
   const redWinProbability = 1 / (1 + Math.pow(10, (blueStrength - redStrength) / STRENGTH_SPREAD));
-  return { redStrength, blueStrength, redWinProbability };
+  return { redStrength, blueStrength, redWinProbability, redProjectedScore, blueProjectedScore };
 }
 
 // TBA marks a match as actually played by having an actual_time; winning_alliance

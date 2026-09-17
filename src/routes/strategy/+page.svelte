@@ -34,6 +34,11 @@
   let teamSearch = '';
   let selectedTeamKey = '';
   let view = 'teams'; // 'teams' | 'matches' | 'picklist'
+  let sortColumn = null;
+  let sortDir = 'asc';
+  let sendingToPicklist = false;
+  let sendToPicklistError = '';
+  let sendToPicklistNotice = '';
 
   // Picklist tab (section 3 of docs/plans/strategy-picklist-improvements.md):
   // a human drag-reorder list (backed by the existing scouting_picklist
@@ -64,6 +69,48 @@
   });
   $: totals = strategyTotals(rows);
   $: filteredRows = rankedRows.filter((row) => row.teamNumber.includes(teamSearch.trim()) || row.pitEntry?.robot_archetype?.toLowerCase().includes(teamSearch.trim().toLowerCase()));
+  // Column headers double as a sortable pre-picklist: sorting the team board
+  // and sending that order to the shared pick list is meant to be a faster
+  // starting point than building a pick list from a blank list.
+  const columnAccessors = {
+    rank: (row) => officialByTeam.get(row.teamNumber)?.rank ?? null,
+    team: (row) => Number(row.teamNumber) || 0,
+    dataMatches: (row) => row.performance.matchesScouted ?? 0,
+    reports: (row) => row.matchScoutSummary.reportCount ?? 0,
+    fuel: (row) => row.performance.avgFuel,
+    balls: (row) => row.matchScoutSummary.avgBallsScored,
+    accuracy: (row) => row.performance.avgAccuracy,
+    auto: (row) => row.autoAverage,
+    pit: (row) => (row.pitEntry ? 1 : 0),
+    notes: (row) => row.notes.length,
+    autos: (row) => row.autoPaths.length,
+    risk: (row) => row.openProblems.length
+  };
+  function compareSortValues(first, second, direction) {
+    const firstMissing = first == null;
+    const secondMissing = second == null;
+    if (firstMissing && secondMissing) return 0;
+    if (firstMissing) return 1;
+    if (secondMissing) return -1;
+    const comparison = first - second;
+    return direction === 'asc' ? comparison : -comparison;
+  }
+  $: sortedRows = sortColumn
+    ? [...filteredRows].sort((first, second) => compareSortValues(
+        columnAccessors[sortColumn](first),
+        columnAccessors[sortColumn](second),
+        sortDir
+      ))
+    : filteredRows;
+  function toggleSort(column) {
+    if (sortColumn === column) {
+      sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      sortColumn = column;
+      sortDir = column === 'rank' ? 'asc' : 'desc';
+    }
+  }
+  const sortIndicator = (column) => (sortColumn === column ? (sortDir === 'asc' ? '▲' : '▼') : '');
   $: selectedTeam = rows.find((row) => row.teamKey === selectedTeamKey) || filteredRows[0] || null;
   $: activeEventLabel = availableEvents.find((option) => option.value === eventKey)?.label || eventKey || 'not set';
   $: browseEventOptions = availableEvents.filter((option) => option.value !== eventKey);
@@ -99,6 +146,45 @@
     normalizedSliderWeights
   ).slice().sort((a, b) => (b.scoutPower ?? -1) - (a.scoutPower ?? -1));
   $: if (view === 'picklist' && resolvedEventKey && resolvedEventKey !== loadedPicklistEventKey && !picklistLoading) void loadPicklist();
+  // A rough per-team predicted-score contribution for the Statbotics-style
+  // match view's predicted-score bar - not a calibrated scoring model (see
+  // matchProjection.js), just auto + teleop scouted averages summed per
+  // alliance so the bar means *something* relative rather than nothing.
+  $: projectedScoreByTeam = new Map(rows.map((row) => [
+    row.teamKey,
+    (row.autoAverage ?? 0) + (row.matchScoutSummary.avgBallsScored ?? 0)
+  ]));
+  // Per-team breakdown markers ("ACE-like markings"): a match_entries row
+  // already records teleop_robot_status (dead/stopped/brownout/active/
+  // unknown) and beached per (match, team) - reused as-is, no new schema or
+  // fetch, just indexed for O(1) lookup per match row.
+  $: breakdownByMatchTeam = (() => {
+    const byMatch = new Map();
+    for (const entry of report?.data?.match_entries || []) {
+      if (!entry?.match_key || !entry?.team_key) continue;
+      if (!byMatch.has(entry.match_key)) byMatch.set(entry.match_key, new Map());
+      byMatch.get(entry.match_key).set(entry.team_key, entry);
+    }
+    return byMatch;
+  })();
+  function teamBreakdown(matchKey, teamKey) {
+    const entry = breakdownByMatchTeam.get(matchKey)?.get(teamKey);
+    if (!entry) return null;
+    if (entry.beached) return 'Beached';
+    if (['dead', 'stopped', 'brownout'].includes(entry.teleop_robot_status)) {
+      return entry.teleop_robot_status === 'dead' ? 'Dead'
+        : entry.teleop_robot_status === 'brownout' ? 'Brownout'
+        : 'Stopped';
+    }
+    return null;
+  }
+  $: selectedMatchBreakdown = selectedMatchForDetail
+    ? new Map(
+        [...(selectedMatchForDetail.alliances?.red?.team_keys || []), ...(selectedMatchForDetail.alliances?.blue?.team_keys || [])]
+          .map((teamKey) => [teamKey, teamBreakdown(selectedMatchForDetail.key, teamKey)])
+          .filter(([, label]) => label)
+      )
+    : new Map();
   $: upcomingMatches = matches.filter((match) => !isMatchPlayed(match));
   $: playedMatches = matches.filter((match) => isMatchPlayed(match)).slice().reverse();
   const teamNumber = (teamKey) => String(teamKey || '').replace(/^frc/i, '');
@@ -114,6 +200,51 @@
 
   const teamHref = (teamKey) =>
     `/teamview?event_key=${encodeURIComponent(resolvedEventKey)}&team=${encodeURIComponent(teamKey)}&from=${encodeURIComponent('/strategy')}&fromLabel=${encodeURIComponent('Strategy')}`;
+
+  // Hands the currently sorted team board off to the shared pick list as a
+  // starting point - adds any team not already on the list (a 409 there just
+  // means another scout already added it, not an error) then reorders the
+  // whole list to match what's on screen right now.
+  async function sendToPicklist() {
+    if (!resolvedEventKey || !sortedRows.length) return;
+    sendingToPicklist = true;
+    sendToPicklistError = '';
+    sendToPicklistNotice = '';
+    try {
+      const authHeaders = await getAuthHeader();
+      const headers = { 'Content-Type': 'application/json', ...authHeaders };
+      const existingResponse = await fetch(`/api/scouting-picklist?event_key=${encodeURIComponent(resolvedEventKey)}`, { headers: authHeaders });
+      const existingPayload = await existingResponse.json().catch(() => null);
+      if (!existingResponse.ok || !existingPayload?.success) throw new Error(existingPayload?.error || 'Could not read the current pick list.');
+      const idByTeamKey = new Map((existingPayload.data || []).map((entry) => [entry.team_key, entry.id]));
+
+      for (const row of sortedRows) {
+        if (idByTeamKey.has(row.teamKey)) continue;
+        const addResponse = await fetch('/api/scouting-picklist', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ action: 'add', event_key: resolvedEventKey, team_key: row.teamKey, team_number: row.teamNumber })
+        });
+        const addPayload = await addResponse.json().catch(() => null);
+        if (addResponse.ok && addPayload?.success) idByTeamKey.set(row.teamKey, addPayload.data.id);
+        else if (addResponse.status !== 409) throw new Error(addPayload?.error || `Could not add team ${row.teamNumber} to the pick list.`);
+      }
+
+      const orderedIds = sortedRows.map((row) => idByTeamKey.get(row.teamKey)).filter(Boolean);
+      const reorderResponse = await fetch('/api/scouting-picklist', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ action: 'reorder', event_key: resolvedEventKey, ordered_ids: orderedIds })
+      });
+      const reorderPayload = await reorderResponse.json().catch(() => null);
+      if (!reorderResponse.ok || !reorderPayload?.success) throw new Error(reorderPayload?.error || 'Could not reorder the pick list.');
+      sendToPicklistNotice = `Sent ${orderedIds.length} teams to the pick list in this order.`;
+    } catch (cause) {
+      sendToPicklistError = cause?.message || 'Could not send teams to the pick list.';
+    } finally {
+      sendingToPicklist = false;
+    }
+  }
 
   let selectedMatchForDetail = null;
   const openMatchDetail = (match) => { selectedMatchForDetail = match; };
@@ -408,27 +539,43 @@
       <div class="empty-state">No match schedule yet for this event.</div>
     {:else}
       <div class="board-table-wrap">
-        <table class="board-table">
-          <thead><tr><th>Match</th><th>Red</th><th>Blue</th><th>Status</th></tr></thead>
+        <table class="board-table statbotics-table">
+          <thead><tr><th>Match</th><th>Red</th><th>Blue</th><th>Predicted</th><th>Win %</th><th>Score</th></tr></thead>
           <tbody>
-            {#each upcomingMatches as match (match.key)}
-              {@const projection = projectMatch(match, scoutPowerByTeam)}
-              <tr class:test-match={match.is_test_market} class:our-team-match={matchHasOurTeam(match)}>
+            {#each [...upcomingMatches, ...playedMatches] as match (match.key)}
+              {@const projection = projectMatch(match, scoutPowerByTeam, projectedScoreByTeam)}
+              {@const played = isMatchPlayed(match)}
+              <tr class:test-match={match.is_test_market} class:our-team-match={matchHasOurTeam(match)} class:played-row={played}>
                 <td data-label="Match">
                   <button type="button" class="match-link" on:click={() => openMatchDetail(match)}>{matchLabel(match)}</button>
                   {#if match.is_test_market}<small>Practice market</small>{/if}
                 </td>
-                <td data-label="Red" class="alliance-red">
+                <td data-label="Red" class="alliance-red" class:winner={match.winning_alliance === 'red'}>
                   {#each match.alliances?.red?.team_keys || [] as teamKey}
-                    <a class="team-number-link" class:our-team={teamKey === OUR_TEAM_KEY} href={teamHref(teamKey)}>{teamNumber(teamKey)}</a>
+                    {@const breakdown = teamBreakdown(match.key, teamKey)}
+                    <a class="team-number-link" class:our-team={teamKey === OUR_TEAM_KEY} href={teamHref(teamKey)}>
+                      {teamNumber(teamKey)}
+                      {#if breakdown}<span class="breakdown-dot" title={`${teamNumber(teamKey)}: ${breakdown}`}></span>{/if}
+                    </a>
                   {/each}
                 </td>
-                <td data-label="Blue" class="alliance-blue">
+                <td data-label="Blue" class="alliance-blue" class:winner={match.winning_alliance === 'blue'}>
                   {#each match.alliances?.blue?.team_keys || [] as teamKey}
-                    <a class="team-number-link" class:our-team={teamKey === OUR_TEAM_KEY} href={teamHref(teamKey)}>{teamNumber(teamKey)}</a>
+                    {@const breakdown = teamBreakdown(match.key, teamKey)}
+                    <a class="team-number-link" class:our-team={teamKey === OUR_TEAM_KEY} href={teamHref(teamKey)}>
+                      {teamNumber(teamKey)}
+                      {#if breakdown}<span class="breakdown-dot" title={`${teamNumber(teamKey)}: ${breakdown}`}></span>{/if}
+                    </a>
                   {/each}
                 </td>
-                <td data-label="Status">
+                <td data-label="Predicted">
+                  {#if projection.redProjectedScore == null && projection.blueProjectedScore == null}
+                    <span class="muted">-</span>
+                  {:else}
+                    <span class="predicted-score">{number(projection.redProjectedScore, 0)} - {number(projection.blueProjectedScore, 0)}</span>
+                  {/if}
+                </td>
+                <td data-label="Win %">
                   {#if projection.redWinProbability == null}
                     <span class="muted">Not enough scouting yet</span>
                   {:else}
@@ -437,26 +584,10 @@
                     </span>
                   {/if}
                 </td>
-              </tr>
-            {/each}
-            {#each playedMatches as match (match.key)}
-              <tr class="played-row" class:our-team-match={matchHasOurTeam(match)}>
-                <td data-label="Match">
-                  <button type="button" class="match-link" on:click={() => openMatchDetail(match)}>{matchLabel(match)}</button>
+                <td data-label="Score" class="muted">
+                  {#if !played}<span class="muted">Upcoming</span>
+                  {:else}{match.alliances?.red?.score ?? '?'} - {match.alliances?.blue?.score ?? '?'}{/if}
                 </td>
-                <td data-label="Red" class="alliance-red" class:winner={match.winning_alliance === 'red'}>
-                  {#each match.alliances?.red?.team_keys || [] as teamKey}
-                    <a class="team-number-link" class:our-team={teamKey === OUR_TEAM_KEY} href={teamHref(teamKey)}>{teamNumber(teamKey)}</a>
-                  {/each}
-                  <span class="muted">{match.alliances?.red?.score ?? ''}</span>
-                </td>
-                <td data-label="Blue" class="alliance-blue" class:winner={match.winning_alliance === 'blue'}>
-                  {#each match.alliances?.blue?.team_keys || [] as teamKey}
-                    <a class="team-number-link" class:our-team={teamKey === OUR_TEAM_KEY} href={teamHref(teamKey)}>{teamNumber(teamKey)}</a>
-                  {/each}
-                  <span class="muted">{match.alliances?.blue?.score ?? ''}</span>
-                </td>
-                <td data-label="Status" class="muted">{match.winning_alliance ? `${match.winning_alliance} won` : 'Tie'}</td>
               </tr>
             {/each}
           </tbody>
@@ -469,17 +600,35 @@
   <section class="strategy-layout">
     <div class="strategy-board">
       <div class="section-heading">
-        <div><h2>Team board</h2><p>Comparable observations from every scouting surface.</p></div>
-        <input class="form-input team-search" bind:value={teamSearch} placeholder="Filter team or archetype" aria-label="Filter strategy teams" />
+        <div><h2>Team board</h2><p>Comparable observations from every scouting surface. Sort a column, then send that order to the pick list as a starting point.</p></div>
+        <div class="team-board-actions">
+          <input class="form-input team-search" bind:value={teamSearch} placeholder="Filter team or archetype" aria-label="Filter strategy teams" />
+          <button class="btn btn-outline btn-sm" on:click={sendToPicklist} disabled={sendingToPicklist || !sortedRows.length}>{sendingToPicklist ? 'Sending…' : 'Send to Picklist'}</button>
+        </div>
       </div>
-      {#if !filteredRows.length}
+      {#if sendToPicklistError}<p class="notice notice-error">{sendToPicklistError}</p>{/if}
+      {#if sendToPicklistNotice}<p class="muted matches-warning">{sendToPicklistNotice}</p>{/if}
+      {#if !sortedRows.length}
         <div class="empty-state">No scouting evidence matches this filter yet.</div>
       {:else}
         <div class="board-table-wrap">
           <table class="board-table">
-            <thead><tr><th>Rank</th><th>Team</th><th>Data matches</th><th>Reports</th><th>Fuel</th><th>Reported balls</th><th>Accuracy</th><th>Auto</th><th>Pit</th><th>Notes</th><th>Autos</th><th>Risk</th></tr></thead>
+            <thead><tr>
+              <th><button type="button" class="sort-btn" on:click={() => toggleSort('rank')}>Rank {sortIndicator('rank')}</button></th>
+              <th><button type="button" class="sort-btn" on:click={() => toggleSort('team')}>Team {sortIndicator('team')}</button></th>
+              <th><button type="button" class="sort-btn" on:click={() => toggleSort('dataMatches')}>Data matches {sortIndicator('dataMatches')}</button></th>
+              <th><button type="button" class="sort-btn" on:click={() => toggleSort('reports')}>Reports {sortIndicator('reports')}</button></th>
+              <th><button type="button" class="sort-btn" on:click={() => toggleSort('fuel')}>Fuel {sortIndicator('fuel')}</button></th>
+              <th><button type="button" class="sort-btn" on:click={() => toggleSort('balls')}>Reported balls {sortIndicator('balls')}</button></th>
+              <th><button type="button" class="sort-btn" on:click={() => toggleSort('accuracy')}>Accuracy {sortIndicator('accuracy')}</button></th>
+              <th><button type="button" class="sort-btn" on:click={() => toggleSort('auto')}>Auto {sortIndicator('auto')}</button></th>
+              <th><button type="button" class="sort-btn" on:click={() => toggleSort('pit')}>Pit {sortIndicator('pit')}</button></th>
+              <th><button type="button" class="sort-btn" on:click={() => toggleSort('notes')}>Notes {sortIndicator('notes')}</button></th>
+              <th><button type="button" class="sort-btn" on:click={() => toggleSort('autos')}>Autos {sortIndicator('autos')}</button></th>
+              <th><button type="button" class="sort-btn" on:click={() => toggleSort('risk')}>Risk {sortIndicator('risk')}</button></th>
+            </tr></thead>
             <tbody>
-              {#each filteredRows as row}
+              {#each sortedRows as row}
                 <tr class:selected={selectedTeam?.teamKey === row.teamKey} on:click={() => openTeamView(row)}>
                   <td data-label="Rank"><strong>{officialByTeam.get(row.teamNumber)?.rank ?? '—'}</strong></td>
                   <td data-label="Team"><strong>{row.teamNumber}</strong>{#if row.pitEntry?.robot_archetype}<small>{row.pitEntry.robot_archetype}</small>{/if}</td>
@@ -550,7 +699,7 @@
   {/if}
 {/if}
 
-<MatchDetailPanel match={selectedMatchForDetail} eventKey={resolvedEventKey} {scoutPowerByTeam} on:close={closeMatchDetail} />
+<MatchDetailPanel match={selectedMatchForDetail} eventKey={resolvedEventKey} {scoutPowerByTeam} {projectedScoreByTeam} breakdownByTeam={selectedMatchBreakdown} on:close={closeMatchDetail} />
 
 <style>
   .matches-board .section-heading h2 { display:flex; align-items:center; gap:var(--space-2); }
@@ -570,6 +719,8 @@
   .winner { font-weight:700; opacity:1; }
   .win-bar { display:inline-block; width:80px; height:10px; border-radius:5px; background:var(--brand-blue, #2563eb); overflow:hidden; vertical-align:middle; }
   .win-bar-red { display:block; height:100%; background:var(--danger, #dc3545); float:left; }
+  .breakdown-dot { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--danger, #dc3545); margin-left:3px; vertical-align:middle; }
+  .predicted-score { font-variant-numeric:tabular-nums; color:var(--text-secondary); }
   .strategy-header { display:flex; justify-content:space-between; gap:var(--space-4); align-items:flex-end; }
   .strategy-header h1 { display:flex; align-items:center; gap:var(--space-2); margin:0; }
   .strategy-header p, .section-heading p { margin:var(--space-1) 0 0; color:var(--text-secondary); }
@@ -586,6 +737,9 @@
   .section-heading, .brief-title { display:flex; justify-content:space-between; gap:var(--space-3); align-items:center; padding:var(--space-3); border-bottom:1px solid var(--border); }
   h2, h3 { margin:0; }
   .team-search { width:min(260px, 100%); }
+  .team-board-actions { display:flex; gap:var(--space-2); align-items:center; flex-wrap:wrap; }
+  .sort-btn { background:none; border:none; padding:0; margin:0; font:inherit; color:inherit; text-transform:inherit; letter-spacing:inherit; cursor:pointer; white-space:nowrap; }
+  .sort-btn:hover { text-decoration:underline; }
   .board-table-wrap { overflow:auto; }
   .board-table { width:100%; border-collapse:collapse; font-size:.9rem; }
   th { background:var(--surface-2); color:var(--text-secondary); font-size:.72rem; letter-spacing:.04em; text-align:left; text-transform:uppercase; white-space:nowrap; }
