@@ -49,11 +49,6 @@ _CUTOFF_END_PULLBACK_MM = 0.16 * 25.4
 # Two hole sizes on one wall can differ by only 0.005in (0.196in vs 0.201in on
 # a real tube), so distinct diameters are compared far tighter than that.
 _HOLE_DIAMETER_TOLERANCE_CM = 0.001
-# Floating-point slack for "does this WCS origin clear the tube body" (see
-# _body_clearance) - a real clearing candidate's minimum can come back
-# something like -1e-13 from floating-point round-off alone, not a genuine
-# violation.
-_BODY_CLEARANCE_TOLERANCE_CM = 1e-6
 
 
 def _normalized(vector):
@@ -575,34 +570,11 @@ def _bind_reviewed_wcs(setup, face, tube_axis):
     box_point.value = pick_origin_corner(origins, want_x, want_y)
 
 
-def _body_clearance(body, origin, x_axis, y_axis):
-    """(min X clearance, min Y clearance) of every vertex of ``body``
-    relative to ``origin`` in the given WCS axes. A candidate origin
-    clears the body on an axis when this is >= 0 - the whole part sits
-    "into" the stock from this corner, not just this corner's neighbors in
-    the box-point set.
-
-    Checking the real body instead of comparing box-point candidates
-    against each other matters here: confirmed live (Fusion MCP) that the
-    two disagree, and that clearing the body is not by itself enough to
-    pick a unique corner - the reviewed setup's own stock box is wider
-    than the tube's actual cross-section, so more than one top corner can
-    clear the body on both axes at once. The candidate with the smallest
-    (tightest) clearance - not merely a non-negative one - is the corner
-    actually on the tube, confirmed against a real tube body.
-    """
-    min_x = min_y = None
-    for vertex in body.vertices:
-        point = vertex.geometry
-        offset = (point.x - origin[0], point.y - origin[1], point.z - origin[2])
-        x_clearance = _dot(offset, x_axis)
-        y_clearance = _dot(offset, y_axis)
-        min_x = x_clearance if min_x is None else min(min_x, x_clearance)
-        min_y = y_clearance if min_y is None else min(min_y, y_clearance)
-    return min_x, min_y
+def _cross(a, b):
+    return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
 
 
-def _bind_new_router_wcs(setup, body, face, tube_axis):
+def _bind_new_router_wcs(setup, face, tube_axis):
     """New Router's own WCS convention for a tube setup - direct instruction,
     confirmed live against a real tube body via the Fusion MCP and distinct
     from _bind_reviewed_wcs above:
@@ -614,44 +586,47 @@ def _bind_new_router_wcs(setup, body, face, tube_axis):
       end, the opposite sense of the reviewed setup's X, which points
       TOWARD the origin end.
     - X is left for Fusion to derive from Z and Y.
-    - Origin is the top corner where the whole tube sits at X >= 0 and
-      Y >= 0 with the least slack on either axis (see _body_clearance) -
-      verified against the real body, not a corner-to-corner comparison of
-      the box-point candidates, which can leave more than one candidate
-      passing at once.
+
+    The origin corner is picked the same way _bind_reviewed_wcs already
+    does - pick_origin_corner() against an analytically-derived (x, y) pair,
+    not the resolved WCS axes read back from Fusion. Confirmed live this
+    matters: picking against the resolved Y (which points INTO the part,
+    the opposite sense from the reviewed setup's X) silently disagreed with
+    a real, confirmed-correct corner on two of the four indexed walls - the
+    origin's own end-of-tube position is a fact about the *unflipped* tube
+    axis (which end of the physical part the origin sits on), independent
+    of which way flip_y later points the Y arrow itself. want_x is the same
+    right-handed cross product Fusion itself resolves X as, so it lines up
+    with whichever transverse direction Fusion actually derived.
     """
     parameters = setup.parameters
     long_edge, _transverse_edge = _axes_for_face(face, tube_axis)
     axis = _vec(tube_axis)
-    want_y = (-axis[0], -axis[1], -axis[2])
+    want_y_axis = (-axis[0], -axis[1], -axis[2])
     parameters.itemByName("wcs_orientation_mode").value.value = "axesZY"
     parameters.itemByName("wcs_orientation_axisZ").value.value = [face]
     parameters.itemByName("wcs_orientation_axisY").value.value = [long_edge]
     flip_y = parameters.itemByName("wcs_orientation_flipY").value
-    flip_y.value = _dot(_vec(_edge_vector(long_edge)), want_y) < 0
+    flip_y.value = _dot(_vec(_edge_vector(long_edge)), want_y_axis) < 0
     _, _got_x, got_y, got_z = _wcs_frame(setup)
-    if _dot(got_y, want_y) < 0:
+    if _dot(got_y, want_y_axis) < 0:
         flip_y.value = not flip_y.value
     _, got_x, got_y, got_z = _wcs_frame(setup)
     want_z = _vec(_face_normal(face))
-    if _dot(got_y, want_y) < _PARALLEL_TOLERANCE or _dot(got_z, want_z) < _PARALLEL_TOLERANCE:
+    if _dot(got_y, want_y_axis) < _PARALLEL_TOLERANCE or _dot(got_z, want_z) < _PARALLEL_TOLERANCE:
         raise RuntimeError(
             "New Router tube WCS did not resolve to Y pointing into the part and Z away from the stock"
         )
 
     parameters.itemByName("wcs_origin_mode").value.value = "modelPoint"
     box_point = parameters.itemByName("wcs_origin_boxPoint").value
-    candidates = []
+    want_x_origin = _cross(want_y_axis, want_z)
+    want_y_origin = axis
+    origins = {}
     for label in _TOP_CORNERS:
         box_point.value = label
-        origin = _wcs_frame(setup)[0]
-        min_x, min_y = _body_clearance(body, origin, got_x, got_y)
-        if min_x >= -_BODY_CLEARANCE_TOLERANCE_CM and min_y >= -_BODY_CLEARANCE_TOLERANCE_CM:
-            candidates.append((min_x + min_y, label))
-    if not candidates:
-        raise RuntimeError("No top corner had the whole tube at X >= 0 and Y >= 0")
-    candidates.sort()
-    box_point.value = candidates[0][1]
+        origins[label] = _wcs_frame(setup)[0]
+    box_point.value = pick_origin_corner(origins, want_x_origin, want_y_origin)
 
 
 def _bind_setup_to_face(setup, body, face, tube_axis, work_offset, machine_name):
@@ -667,7 +642,7 @@ def _bind_setup_to_face(setup, body, face, tube_axis, work_offset, machine_name)
     parameters.itemByName("job_workOffset").expression = work_offset
 
     if str(machine_name or "").strip().lower() == "new router":
-        _bind_new_router_wcs(setup, body, face, tube_axis)
+        _bind_new_router_wcs(setup, face, tube_axis)
     else:
         _bind_reviewed_wcs(setup, face, tube_axis)
 
