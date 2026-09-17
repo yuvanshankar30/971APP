@@ -124,6 +124,9 @@ browser confirmation or prompt popups.
   part rotation alongside quarter-turn shortcuts.
   A sheet is locked to either LinuxCNC `.ngc` or WinCNC `.tap` programs on its
   first upload, and emission uses that one corresponding program type.
+  For WinCNC plate programs, the release/slot cut that separates a part
+  from stock must use Tool 6; AutoCAM rejects another assigned release tool
+  before posting, and JProg rejects it again before emission.
   Its part programs are isolated in Manufacturing Files under `Nesting Parts
   Library/<sheet name>/`.
   A sheet can contain multiple named cuts: every cut remains visible in its own

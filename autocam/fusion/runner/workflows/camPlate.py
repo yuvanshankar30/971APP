@@ -429,6 +429,65 @@ def _require_release_contour(cam) -> None:
     )
 
 
+_APPROVED_RELEASE_CUT_TOOL_NUMBERS = (6,)
+
+
+def _require_approved_release_cut_tool(cam) -> None:
+    """Raise if the release-contour operation (group_tabs=true, posted in
+    G-code as "2D Slot Cut" / "Slot Cut for Edges") is assigned any tool
+    other than Tool 6.
+
+    Direct operator report, with a real posted G-code snippet: a plate job's
+    release cut posted under "[Tool 2]" / T2 - Tool 2 must never cut a
+    release contour. Direct instruction: only Tool 6 is approved for now.
+    The template's own tool is "971 Main Bit" (NC number 1 in the template
+    XML itself), but _index_tools/_find_matching_tool in templateTools.py
+    resolves the actual posted tool from whatever the job's own tool
+    library maps that description (or, on a diameter-only fallback match,
+    its type and diameter) to - a library where that entry is assigned a
+    different NC number silently posts the wrong physical tool, with
+    nothing catching it before the machine does. Checked the same way and
+    at the same point as _require_release_contour (identifying the
+    operation via group_tabs, not by operation name, since DeleteToolpaths
+    only leaves the survivors to check) - this is the earliest possible
+    point to catch it, before the file is ever posted or uploaded. JProg's
+    own emission path (gcodeEmit.js) carries the same check as a second,
+    independent line of defense for any file that reaches it despite this
+    one, but should never actually need to.
+
+    cam may be None (the CAM product failed to resolve) - nothing to check
+    in that case, same as _require_release_contour.
+    """
+    if cam is None:
+        return
+    for setup in cam.setups:
+        for op in setup.operations:
+            if op.strategy != "contour2d":
+                continue
+            group_tabs_param = op.parameters.itemByName("group_tabs")
+            if group_tabs_param is None:
+                continue
+            try:
+                is_release = str(group_tabs_param.expression).strip().lower() == "true"
+            except Exception:
+                is_release = False
+            if not is_release:
+                continue
+            try:
+                tool_number = op.tool.number
+            except Exception:
+                continue
+            if tool_number not in _APPROVED_RELEASE_CUT_TOOL_NUMBERS:
+                raise RuntimeError(
+                    "The release-contour operation ('{}') is assigned Tool {} - "
+                    "only Tool 6 is approved to cut a release/slot cut. Check "
+                    "the tool library used for this job: whatever tool matched "
+                    "the template's '971 Main Bit' entry (or, on a diameter "
+                    "fallback, its type and diameter) is assigned the wrong "
+                    "NC number there.".format(op.name, tool_number)
+                )
+
+
 def _require_through_hole_for_finishing_pass(cam) -> None:
     """Raise if a setup has a Shape Through Finishing Pass with no matching
     Shape Through Hole roughing operation, or vice versa - the pairing is
@@ -1250,6 +1309,7 @@ def start(data, session):
             app.log("Failed to resolve the CAM product after DeleteToolpaths:\n{}".format(traceback.format_exc()))
 
         _require_release_contour(cam)
+        _require_approved_release_cut_tool(cam)
         _require_through_hole_for_finishing_pass(cam)
         _require_pocket_finishing_pass_pairing(cam)
 

@@ -434,12 +434,12 @@ describe("nesting emission", () => {
         part: {
           source: [
             "G90",
-            "T6",
+            "T1",
             "[Shape Through Hole]",
             "G0 X0 Y0",
             "M5",
             "[Slot Cut for Edges]",
-            "T2",
+            "T6",
             "S14553",
             "G0 X1 Y1",
             "G1 X2 Y1",
@@ -450,8 +450,8 @@ describe("nesting emission", () => {
       },
     });
     const slotIndex = result.text.indexOf("[Slot Cut for Edges]");
-    expect(slotIndex).toBeGreaterThan(result.text.indexOf("[Tool 6]"));
-    expect(result.text.lastIndexOf("[Tool 2]", slotIndex)).toBeGreaterThan(-1);
+    expect(slotIndex).toBeGreaterThan(result.text.indexOf("[Tool 1]"));
+    expect(result.text.lastIndexOf("[Tool 6]", slotIndex)).toBeGreaterThan(-1);
     expect(result.text.slice(slotIndex)).toContain("G1 X2.5000 Y2.0000");
   });
 
@@ -462,16 +462,35 @@ describe("nesting emission", () => {
       placements: [{ label: "Bracket", x: 2, y: 2, part_library_path: "bracket" }],
       programs: {
         bracket: {
+          source: ["G90", "T1", "G0 X0 Y0", "T6", "[Slot Cut for Edges]", "G0 X1 Y1", "M5"].join("\n"),
+        },
+      },
+    };
+    // T6 here is entirely the release cut - nothing ordinary uses it, so it
+    // must not appear as a user-reorderable tool.
+    expect(nestingEmissionTools(input)).toEqual([1]);
+    const result = emitNestingGcode(input);
+    expect(result.toolOrder).toEqual([1]);
+    expect(result.text.indexOf("[Tool 1]")).toBeLessThan(result.text.indexOf("[Slot Cut for Edges]"));
+  });
+
+  it("refuses to emit a release/slot cut assigned any tool other than Tool 6", () => {
+    // Direct operator report, with a real posted G-code snippet: a plate
+    // part's release cut ran under "[Tool 2]" / T2. Only Tool 6 is approved
+    // to cut a release/slot cut - this must fail emission loudly, before
+    // JProg ever writes a file a router would run, rather than shipping an
+    // unapproved tool to the machine.
+    const input = {
+      name: "wrong-release-tool",
+      dialect: "wincnc",
+      placements: [{ label: "FrontSupportPlate-AUTOCAM", x: 2, y: 2, part_library_path: "plate" }],
+      programs: {
+        plate: {
           source: ["G90", "T6", "G0 X0 Y0", "T2", "[Slot Cut for Edges]", "G0 X1 Y1", "M5"].join("\n"),
         },
       },
     };
-    // T2 here is entirely the release cut - nothing ordinary uses it, so it
-    // must not appear as a user-reorderable tool.
-    expect(nestingEmissionTools(input)).toEqual([6]);
-    const result = emitNestingGcode(input);
-    expect(result.toolOrder).toEqual([6]);
-    expect(result.text.indexOf("[Tool 6]")).toBeLessThan(result.text.indexOf("[Slot Cut for Edges]"));
+    expect(() => emitNestingGcode(input)).toThrow(/Tool 2.*only Tool 6/s);
   });
 
   it("still runs a program with no release cut exactly as before", () => {
