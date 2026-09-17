@@ -70,11 +70,22 @@ if ! git -C "$OUTPUT_DIR" config user.name >/dev/null; then
   git -C "$OUTPUT_DIR" config user.email "$login@users.noreply.github.com"
 fi
 
+# This installer deliberately reuses the shared repository's sync behavior
+# rather than maintaining a second implementation. Refuse to install if an
+# unexpected upstream script no longer provides the two guarantees operators
+# rely on: remote-first syncing and Git rename detection.
+for required_sync_behavior in "git pull --rebase --autostash" "git diff --cached --name-status -M"; do
+  if ! grep -Fq "$required_sync_behavior" "$OUTPUT_DIR/sort_and_push.sh"; then
+    echo "The shared output repository is missing required sync behavior; refusing to install an incomplete local service." >&2
+    exit 1
+  fi
+done
+
 # The canonical repository keeps its sync script unchanged. Make a local,
 # user-specific runner with only its checkout location substituted, so every
 # workstation can use the same repository without committing machine paths.
 awk -v repo_dir="$OUTPUT_DIR" '
-  /^REPO_DIR="\/Users\/yuvan\/Output"$/ {
+  /^REPO_DIR=/ {
     print "REPO_DIR=\"" repo_dir "\""
     next
   }
