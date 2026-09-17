@@ -6,14 +6,18 @@ Install the team’s shared CNC output folder on a Mac with:
 sh -c "$(curl -fsSL https://spartanshub.spartanrobotics.org/install/jprog-output)"
 ```
 
-The installer clones the separate
+The installer opens GitHub sign-in when needed, clones the separate
 [`yuvanshankar30/output`](https://github.com/yuvanshankar30/output) repository
-to `~/Desktop/Output` and opens GitHub sign-in when needed. To use a different
-location, set `JPROG_OUTPUT_DIR` before running the command.
+into the user’s Application Support folder, then creates `~/Desktop/Output` as
+a symlink to that complete checkout. Finder displays the Desktop link with its
+alias-style arrow; that arrow means shortcut, not network sharing. Git and the
+installed sync service provide the sharing. To put the Desktop link elsewhere,
+set `JPROG_OUTPUT_DIR` before running the command.
 
 ## What Gets Installed
 
-- The shared output repository at `~/Desktop/Output`.
+- A complete shared output repository checkout, exposed on the Desktop as
+  `~/Desktop/Output`. Opening it shows every repository file and folder.
 - A private, user-path-aware copy of the repository’s existing
   `sort_and_push.sh`. The shared repository’s code and layout are not changed;
   the installer only substitutes the local checkout path in the installed copy.

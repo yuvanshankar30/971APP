@@ -10,8 +10,10 @@ describe('JProg output curl installer', () => {
     expect(response.headers.get('cache-control')).toBe('no-store');
     expect(script).toMatch(/^#!\/bin\/sh/);
     expect(script).toContain("HUB_URL=${JPROG_OUTPUT_HUB_URL:-'https://hub.example'}");
-    expect(script).toContain('OUTPUT_DIR=${JPROG_OUTPUT_DIR:-"$HOME/Desktop/Output"}');
+    expect(script).toContain('DESKTOP_OUTPUT_DIR=${JPROG_OUTPUT_DIR:-"$HOME/Desktop/Output"}');
+    expect(script).toContain('REPO_DIR="$SUPPORT_DIR/repository"');
     expect(script).toContain('https://github.com/yuvanshankar30/output.git');
+    expect(script).toContain('ln -s "$REPO_DIR" "$DESKTOP_OUTPUT_DIR"');
     expect(script).toContain('org.spartanshub.jprog-output-sync');
     expect(script).toContain('StartInterval');
     expect(script).toContain('WatchPaths');
