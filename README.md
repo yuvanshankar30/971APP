@@ -195,8 +195,13 @@ browser confirmation or prompt popups.
 - **Vision Scouting**: a real Competition-folder nav tab, open to every
   approved user like the rest of Competition (no special permission needed),
   running post-match, multi-camera ML processing at `/scouting/vision` for
-  robot trajectories/mobility, fuel, and climbing, with a calibrated
-  red/blue field-occupancy heatmap that fills as trajectory results arrive.
+  robot trajectories/mobility, fuel, and climbing. Match Scouting can explicitly
+  load reviewed vision evidence for its selected match and team to fill blank
+  starting position, auto movement, calibrated auto path, teleop fuel count,
+  and stopped status; every suggestion stays editable, while preload, points,
+  ratings, roles, crashes, intake, cards, and mechanical calls remain scout
+  judgement. A calibrated red/blue field-occupancy heatmap fills as trajectory
+  results arrive.
   Generic robot-only YOLO weights are supported: a conservative second stage
   reads the lower bumper band for alliance colour and rejects unclear crops;
   roster-constrained bumper-number reads remain review-required before a

@@ -79,6 +79,10 @@
   let saving = false;
   let startPhotos = {};
   let startPhotoError = '';
+  let visionSuggestions = null;
+  let visionSuggestionsLoading = false;
+  let visionSuggestionsError = '';
+  let visionSuggestionNotice = '';
   let error = '';
   $: if (!scoutName && $userProfile?.full_name && !$userProfile.full_name.includes('@')) scoutName = $userProfile.full_name;
 
@@ -117,6 +121,7 @@
     mechanicalBreak = null; robotDisabled = ''; card = ''; driverSkill = undefined;
     pitProblem = false; pitProblemDetails = ''; beached = false; postNotes = ''; error = '';
     savedAutoPaths = []; selectedSavedPathId = ''; pathFileMessage = '';
+    visionSuggestions = null; visionSuggestionsError = ''; visionSuggestionNotice = '';
     selectPhase('prematch');
   }
 
@@ -216,8 +221,46 @@
 
   function normalizeRobotNumber(event) {
     robotNumber = String(event.currentTarget?.value || '').replace(/\D/g, '').slice(0, 6);
+    visionSuggestions = null;
+    visionSuggestionsError = '';
+    visionSuggestionNotice = '';
     savedAutoPaths = [];
     selectedSavedPathId = '';
+  }
+
+  async function loadVisionSuggestions() {
+    visionSuggestionsError = '';
+    visionSuggestionNotice = '';
+    if (!eventKey || !matchNumber.trim() || !robotNumber.trim()) {
+      visionSuggestionsError = 'Choose a match and robot first.';
+      return;
+    }
+    visionSuggestionsLoading = true;
+    try {
+      const params = new URLSearchParams({ event_key: eventKey, match_key: matchNumber.trim(), team_key: robotNumber.trim() });
+      const response = await fetch(`/api/matchscout/vision-suggestions?${params}`, { headers: await getAuthHeader() });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.success) throw new Error(payload?.error || 'Could not load vision suggestions.');
+      visionSuggestions = payload.data;
+    } catch (exception) {
+      visionSuggestions = null;
+      visionSuggestionsError = exception.message;
+    } finally {
+      visionSuggestionsLoading = false;
+    }
+  }
+
+  function applyVisionSuggestions() {
+    const fields = visionSuggestions?.fields || {};
+    const applied = [];
+    // A scout's existing choice outranks vision. This action only fills blank
+    // fields, and every result remains editable in its normal control.
+    if (!startingPosition && fields.startingPosition) { startingPosition = fields.startingPosition; applied.push('starting position'); }
+    if (!autoMoved && fields.autoMoved) { autoMoved = fields.autoMoved; applied.push('auto movement'); }
+    if (!autoPath.length && Array.isArray(fields.autoPath)) { autoPath = fields.autoPath.map(point => [...point]); autoPathName = fields.autoPathName || 'Vision-reviewed auto path'; applied.push('auto path'); }
+    if (!ballsScored && fields.ballsScored) { ballsScored = fields.ballsScored; applied.push('teleop balls'); }
+    if (!teleopRobotStatus && fields.teleopRobotStatus) { teleopRobotStatus = fields.teleopRobotStatus; applied.push('robot status'); }
+    visionSuggestionNotice = applied.length ? `Applied ${applied.join(', ')}. Review or edit every value before saving.` : 'Your existing answers were kept; there were no blank suggested fields to fill.';
   }
 
   async function loadSavedAutoPaths() {
@@ -629,6 +672,30 @@
           </label>
           <fieldset><legend>Alliance</legend><div class="segmented"><button class:chosen={alliance === 'red'} class="red-choice" on:click={() => alliance = 'red'}>Red</button><button class:chosen={alliance === 'blue'} class="blue-choice" on:click={() => alliance = 'blue'}>Blue</button></div></fieldset>
         </div>
+        <section class="vision-suggestions" aria-live="polite">
+          <div>
+            <span class="field-label">Vision scouting</span>
+            <strong>Reviewed objective suggestions</strong>
+            <small>Only accepted or corrected evidence is used. Preload, ratings, points, roles, crashes, intake, and cards still need a scout.</small>
+          </div>
+          <button class="btn btn-secondary" disabled={visionSuggestionsLoading || !eventKey || !matchNumber.trim() || !robotNumber.trim()} on:click={loadVisionSuggestions}>
+            {visionSuggestionsLoading ? 'Checking vision…' : 'Check reviewed vision'}
+          </button>
+          {#if visionSuggestions?.run}
+            {#if Object.keys(visionSuggestions.fields || {}).length}
+              <div class="vision-suggestion-result">
+                <span>Run {visionSuggestions.run.model_name || 'vision'} found {visionSuggestions.evidence.reviewed_observations || 0} reviewed event{visionSuggestions.evidence.reviewed_observations === 1 ? '' : 's'}.</span>
+                <button class="btn btn-primary" on:click={applyVisionSuggestions}>Apply blank fields</button>
+              </div>
+            {:else}
+              <small>No usable reviewed evidence for this team yet.</small>
+            {/if}
+          {:else if visionSuggestions}
+            <small>No completed vision run is available for this match yet.</small>
+          {/if}
+          {#if visionSuggestionNotice}<small class="vision-suggestion-notice">{visionSuggestionNotice}</small>{/if}
+          {#if visionSuggestionsError}<small class="submit-error">{visionSuggestionsError}</small>{/if}
+        </section>
         <fieldset class="control-group"><legend>Preload (required)</legend><div class="segmented"><button class:chosen={preload === true} on:click={() => preload = true}>Has preload</button><button class:chosen={preload === false} on:click={() => preload = false}>No preload</button></div></fieldset>
         <div class="start-position-block">
           <span class="field-label">Starting position</span>
@@ -851,6 +918,12 @@
   .report-history { padding:var(--space-4); margin-bottom:var(--space-4); }
   .report-row { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:var(--space-2); padding:var(--space-2) 0; }
 
+  .vision-suggestions { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:var(--space-3); margin-top:var(--space-4); padding:var(--space-3) var(--space-4); border:1px solid var(--blue-base); border-left-width:3px; background:var(--blue-soft); }
+  .vision-suggestions > div:first-child { display:grid; gap:2px; }
+  .vision-suggestions strong { font-size:.9rem; }
+  .vision-suggestions small { color:var(--text-muted); font-size:.75rem; line-height:1.35; }
+  .vision-suggestion-result { grid-column:1 / -1; display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:var(--space-2); color:var(--text-muted); font-size:.8rem; }
+  .vision-suggestion-notice { grid-column:1 / -1; color:var(--text); }
   .start-position-card { display:flex; flex-direction:column; gap:.4rem; align-items:center; }
   .start-position-card img, .start-position-card svg { width:100%; max-width:230px; height:130px; object-fit:cover; }
   .submit-error { margin:var(--space-2) 0 0; color:var(--danger); font-size:.85rem; }
@@ -987,6 +1060,7 @@
     .stage-nav button { min-height:3.5rem; }
     .match-workspace { padding:var(--space-4); }
     .assignment-grid { grid-template-columns:1fr; }
+    .vision-suggestions { grid-template-columns:1fr; align-items:start; }
     .start-position-block { padding:var(--space-3); }
     .position-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
     .auto-layout,.intake-observations { grid-template-columns:1fr; }
