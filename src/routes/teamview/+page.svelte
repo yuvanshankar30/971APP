@@ -7,6 +7,7 @@
   import { buildPowerRankings } from '$lib/scoutingStats.js';
   import { applyRobotRatings, myRobotRating } from '$lib/robotRatings.js';
   import { bestTeamPhoto, matchVideoUrl, mediaImageUrl } from '$lib/tbaMedia.js';
+  import { autoPointToField } from '$lib/matchScouting.js';
   import SeasonFilter from '$lib/components/SeasonFilter.svelte';
   import MatchScoutReport from '$lib/components/MatchScoutReport.svelte';
   import RobotStarPlot from '$lib/components/RobotStarPlot.svelte';
@@ -359,6 +360,26 @@
     return `${ours}-${theirs} · ${ours === theirs ? 'Tie' : ours > theirs ? 'Win' : 'Loss'}`;
   }
 
+  function matchScheduleTime(match) {
+    const seconds = Number(match?.predicted_time || match?.time || match?.actual_time || 0);
+    return seconds > 0 ? seconds * 1000 : null;
+  }
+
+  function matchScheduleLabel(match) {
+    const instant = matchScheduleTime(match);
+    return instant ? formatPacificDateTimeWithZone(instant) : 'Time not posted';
+  }
+
+  function autoPathPoints(path) {
+    return (Array.isArray(path) ? path : [])
+      .filter((point) => Array.isArray(point) && point.length >= 2 && Number.isFinite(Number(point[0])) && Number.isFinite(Number(point[1])))
+      .map((point) => {
+        const field = autoPointToField(point);
+        return `${field.x.toFixed(1)},${field.y.toFixed(1)}`;
+      })
+      .join(' ');
+  }
+
   $: searchDigits = String(teamSearch || '').replace(/\D/g, '');
   $: filteredTeams = teams.filter((t) => !searchDigits || displayTeam(t).includes(searchDigits));
   $: selectedTeamNumber = selectedTeam ? displayTeam(selectedTeam) : '';
@@ -371,6 +392,10 @@
     .filter((match) => match.actual_time && [...(match.alliances?.red?.team_keys || []), ...(match.alliances?.blue?.team_keys || [])].includes(selectedTeam))
     .slice()
     .reverse();
+  $: upcomingTeamMatches = eventMatches
+    .filter((match) => !match.actual_time && [...(match.alliances?.red?.team_keys || []), ...(match.alliances?.blue?.team_keys || [])].includes(selectedTeam))
+    .slice()
+    .sort((a, b) => (matchScheduleTime(a) || Number.MAX_SAFE_INTEGER) - (matchScheduleTime(b) || Number.MAX_SAFE_INTEGER));
   $: tbaPhotoUrl = mediaImageUrl(tbaPhoto);
   $: viewMatchKeys = [...new Set(teamEvents.map((e) => e.match_key).filter(Boolean))].sort((a, b) => (parseInt(a.split('_').pop().replace(/\D/g, ''), 10) || 0) - (parseInt(b.split('_').pop().replace(/\D/g, ''), 10) || 0));
   $: primaryPhoto = pitEntry?.photo_paths?.[0] || '';
@@ -634,10 +659,11 @@
         <sub class="team-name-sub">{selectedTeamNumber}</sub>
       </div>
       <div class="team-rank-strip">
+        <span><small>Auto points</small><strong>{selectedProfile?.matchScoutSummary?.avgAutoPoints == null ? '—' : selectedProfile.matchScoutSummary.avgAutoPoints.toFixed(1)}</strong></span>
+        <span><small>Teleop points</small><strong>{selectedProfile?.matchScoutSummary?.avgBallsScored == null ? '—' : selectedProfile.matchScoutSummary.avgBallsScored.toFixed(1)}</strong></span>
+        <span><small>Scout rating</small><strong>{selectedProfile?.robotRating?.overallAvg == null ? '—' : selectedProfile.robotRating.overallAvg.toFixed(1)}</strong></span>
         <span><small>Event rank</small><strong>{officialTeam?.rank ? `#${officialTeam.rank}` : '—'}</strong></span>
         <span><small>Record</small><strong>{officialTeam ? `${officialTeam.wins}-${officialTeam.losses}-${officialTeam.ties}` : '—'}</strong></span>
-        <span><small>971 power rank</small><strong>{selectedProfile?.powerRank ? `#${selectedProfile.powerRank}` : '—'}</strong></span>
-        <span><small>Scout power</small><strong>{selectedProfile?.scoutPower == null ? '—' : selectedProfile.scoutPower.toFixed(1)}</strong></span>
       </div>
       <div class="filters-row">
         <select class="form-select" bind:value={viewFilterScope}>
@@ -651,7 +677,7 @@
           <div class="pit-fields">
             <div><strong>Drivebase:</strong> {pitEntry.drivebase_type || '-'}</div>
             <div><strong>Shooter:</strong> {pitEntry.shooter_type || '-'}</div>
-            <div><strong>Hopper:</strong> {pitEntry.hopper_type || '-'}</div>
+            <div><strong>Indexer:</strong> {pitEntry.hopper_type || '-'}</div>
             <div><strong>HP Balls In Auto:</strong> {pitEntry.human_player_balls_in_auto || '-'}</div>
             <div><strong>Estimated BPS:</strong> {formatEstimatedBps(pitEntry.estimated_bps)}</div>
             <div><strong>Climb Options:</strong> {pitClimbOptions.length ? pitClimbOptions.join(', ') : '-'}</div>
@@ -674,12 +700,26 @@
           {/if}
         {/if}
       </div>
+      {#if pitEntry?.scout_name || pitEntry?.technical_details?.pit_contact_phone}
+        <div class="pit-contact">
+          <strong>Pit contact</strong>
+          <span>{pitEntry.scout_name || 'Name not recorded'}{#if pitEntry?.technical_details?.pit_contact_phone} · <a href={`tel:${pitEntry.technical_details.pit_contact_phone}`}>{pitEntry.technical_details.pit_contact_phone}</a>{/if}</span>
+        </div>
+      {/if}
       <div class="pit-auto-group">
         <div class="pit-auto-heading">Saved autonomous paths ({savedAutoPaths.length})</div>
         {#if savedAutoPaths.length}
-          <div class="pit-auto-list">
+          <div class="pit-auto-list drawn-auto-list">
             {#each savedAutoPaths as path (path.id)}
-              <div class="pit-auto-card"><div class="pit-auto-name">{path.name}</div><div class="pit-auto-description">{path.alliance || 'Alliance not recorded'} · {path.path?.length || 0} path points</div></div>
+              <article class="pit-auto-card drawn-auto-card">
+                <svg viewBox="0 0 1000 487" class="drawn-auto-map" role="img" aria-label={`${path.name} autonomous path`}>
+                  <rect x="8" y="8" width="984" height="471" class="auto-carpet" />
+                  <line x1="500" y1="8" x2="500" y2="479" class="auto-centerline" />
+                  <rect x="246" y="198" width="92" height="92" class="auto-hub" /><rect x="662" y="198" width="92" height="92" class="auto-hub" />
+                  {#if autoPathPoints(path.path)}<polyline points={autoPathPoints(path.path)} class:blue-route={path.alliance === 'blue'} class="auto-route" />{/if}
+                </svg>
+                <div class="pit-auto-name">{path.name}</div><div class="pit-auto-description">{path.alliance || 'Alliance not recorded'} · {path.path?.length || 0} path points</div>
+              </article>
             {/each}
           </div>
         {:else}<div class="empty compact-empty">No saved autonomous paths.</div>{/if}
@@ -695,6 +735,22 @@
       {:else}<div class="image-empty">No robot photo available</div>{/if}
     </div>
   </div>
+
+  <section class="card upcoming-team-matches">
+    <div><h3>Upcoming matches</h3><p>Times are Blue Alliance estimates and can move.</p></div>
+    {#if upcomingTeamMatches.length}
+      <div class="upcoming-match-list">
+        {#each upcomingTeamMatches as match (match.key)}
+          {@const alliance = allianceForTeam(match)}
+          <div class:alliance-red={alliance === 'red'} class:alliance-blue={alliance === 'blue'} class="upcoming-match-row">
+            <strong>{match.key.split('_').at(-1).toUpperCase()}</strong>
+            <span>{matchScheduleLabel(match)}</span>
+            <span>{alliance} alliance · {(match.alliances?.[alliance]?.team_keys || []).map(displayTeam).join(', ')}</span>
+          </div>
+        {/each}
+      </div>
+    {:else}<p class="empty compact-empty">No upcoming scheduled matches for this team.</p>{/if}
+  </section>
 
   <div class="team-overview-grid">
     <section class="card rating-overview">
@@ -843,7 +899,7 @@
   .team-meta-box { display: grid; gap: var(--gap-3); }
   .team-name-box { font-size: var(--font-xl); font-weight: 800; line-height: 1.2; display: inline-flex; align-items: baseline; gap: 0.5rem; }
   .team-name-sub { color: var(--text-muted); font-size: 0.9rem; }
-  .team-rank-strip { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); border:1px solid var(--border); border-radius:var(--radius-sm); overflow:hidden; }
+  .team-rank-strip { display:grid; grid-template-columns:repeat(5, minmax(0, 1fr)); border:1px solid var(--border); border-radius:var(--radius-sm); overflow:hidden; }
   .team-rank-strip span { display:grid; gap:2px; padding:var(--space-2); border-right:1px solid var(--border); }
   .team-rank-strip span:last-child { border-right:0; }
   .team-rank-strip small, .rating-summary-grid small { color:var(--text-muted); font-size:.66rem; text-transform:uppercase; }
@@ -859,6 +915,22 @@
   .pit-auto-heading { font-size: var(--font-xs); font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); }
   .pit-auto-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: var(--gap-2); }
   .pit-auto-card { display: grid; gap: 0.25rem; min-width: 0; padding: var(--space-2); border: 1px solid color-mix(in srgb, var(--border) 85%, transparent); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--surface-1) 92%, transparent); }
+  .drawn-auto-card { grid-template-columns:minmax(0, 1fr); }
+  .drawn-auto-map { width:100%; aspect-ratio:2.05; border-radius:var(--radius-sm); background:#60645f; }
+  .auto-carpet { fill:#636661; stroke:#292b28; stroke-width:7; }
+  .auto-centerline { stroke:#d9dad8; stroke-width:2; }
+  .auto-hub { fill:#b9bab8; stroke:#171817; stroke-width:5; }
+  .auto-route { fill:none; stroke:#d12c36; stroke-width:10; stroke-linejoin:round; stroke-linecap:round; }
+  .auto-route.blue-route { stroke:#2468c7; }
+  .upcoming-team-matches { margin:var(--space-3) 0; padding:var(--space-3); }
+  .upcoming-team-matches > div:first-child { display:flex; justify-content:space-between; gap:var(--gap-2); align-items:baseline; }
+  .upcoming-team-matches h3, .upcoming-team-matches p { margin:0; }
+  .upcoming-team-matches p { color:var(--text-muted); font-size:.82rem; }
+  .upcoming-match-list { display:grid; grid-template-columns:repeat(auto-fit, minmax(17rem, 1fr)); gap:var(--gap-2); margin-top:var(--space-3); }
+  .upcoming-match-row { display:grid; grid-template-columns:auto 1fr; gap:.15rem var(--gap-2); padding:var(--space-2); border:1px solid var(--border); border-left:4px solid currentColor; border-radius:var(--radius-sm); }
+  .upcoming-match-row span:last-child { grid-column:1 / -1; color:var(--text-muted); font-size:.82rem; }
+  .pit-contact { display:flex; justify-content:space-between; gap:var(--gap-2); align-items:baseline; padding:var(--space-2); border-top:1px solid var(--border); font-size:.82rem; }
+  .pit-contact span { color:var(--text-muted); }
   .pit-auto-name { font-size: var(--font-sm); font-weight: 700; line-height: 1.2; }
   .pit-auto-description { font-size: var(--font-xs); color: var(--text-muted); line-height: 1.35; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
   .compact-empty { padding:var(--space-2); }

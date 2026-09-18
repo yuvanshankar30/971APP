@@ -1,7 +1,7 @@
 import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { createClient } from '@supabase/supabase-js';
-import { summarizeVision, trajectoryMetrics, reconcileWithReference, reconcileVisionSources } from '$lib/visionAnalytics.js';
+import { summarizeVision, trajectoryMetrics, reconcileWithReference, reconcileVisionSources, visionAutoPath } from '$lib/visionAnalytics.js';
 import { fetchTbaMatchReference } from '$lib/server/vision_reference.js';
 import { notifyVisionRunFailed, notifyVisionCriticalDiscrepancy } from '$lib/server/slack_notifications.js';
 
@@ -95,8 +95,10 @@ export async function POST({ request }) {
       ...track,
       vision_run_id: run.id,
       metrics: {
-        ...(track.metrics || trajectoryMetrics(track.trajectory)),
-        autoStartZone: auto_start_zone || null
+        ...trajectoryMetrics(track.trajectory),
+        ...(track.metrics || {}),
+        autoStartZone: auto_start_zone || null,
+        autoPathCandidate: visionAutoPath(track, { autoEndMs: Number(run.config?.auto_end_ms) || undefined })
       }
     }));
     const trackKeys = (body.tracks || []).map((track) => track.track_key || null);

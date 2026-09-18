@@ -188,6 +188,10 @@ browser confirmation or prompt popups.
   running post-match, multi-camera ML processing at `/scouting/vision` for
   robot trajectories/mobility, fuel, and climbing, with a calibrated
   red/blue field-occupancy heatmap that fills as trajectory results arrive.
+  Generic robot-only YOLO weights are supported: a conservative second stage
+  reads the lower bumper band for alliance colour and rejects unclear crops;
+  roster-constrained bumper-number reads remain review-required before a
+  track is attached to a team.
   A full BF16 Qwen3-VL-30B-A3B-Instruct service on NVIDIA DGX Spark proposes semantic
   events from bounded multi-camera clips; a
   separate versioned YOLO/ByteTrack runner supplies dense tracking and

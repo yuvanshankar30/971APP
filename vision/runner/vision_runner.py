@@ -30,6 +30,8 @@ from ultralytics import YOLO
 
 from apriltag_calibration import probe_recording
 from fuel_tracking import PieceTracker, goal_entry, nearest_pixel_track
+from bumper_alliance import infer_bumper_alliance
+from team_identity import CropCollector, resolve_identities
 
 API = os.environ["VISION_API_URL"].rstrip("/") + "/api/vision-runner"
 TOKEN = os.environ["VISION_RUNNER_TOKEN"]
@@ -659,7 +661,7 @@ def resolve_view_calibration(view, config, video_path, solver=None):
     return (solver or autocalibrate_view)(view, config, video_path)
 
 
-def process_view(model, view, config, video_path):
+def process_view(model, view, config, video_path, team_roster=None):
     tracks = {}
     identity_map = config.get("identity_map", {})
     confidence_floor = float(config.get("confidence_floor", 0.35))
@@ -671,6 +673,11 @@ def process_view(model, view, config, video_path):
     start_zones = view.get("start_zones") or []
     auto_end_ms = int(config.get("auto_end_ms", 15_000))
     field_mask_polygon = view.get("field_mask")
+    identity_enabled = bool(config.get("team_identity_enabled", False))
+    identity_crops = CropCollector(
+        max_per_track=max(1, min(5, int(config.get("team_identity_crops_per_track", 3)))),
+        min_frame_gap=max(1, int(config.get("team_identity_min_frame_gap", 30))),
+    ) if identity_enabled else None
 
     capture = cv2.VideoCapture(str(video_path))
     fps = float(view.get("frame_rate") or capture.get(cv2.CAP_PROP_FPS) or 30)
@@ -737,8 +744,17 @@ def process_view(model, view, config, video_path):
                 if mask is not None and mask[min(int(center[1]), mask.shape[0] - 1), min(int(center[0]), mask.shape[1] - 1)] == 0:
                     continue  # outside the calibrated field ROI - audience/background, discard
 
-                if class_name in ("robot_red", "robot_blue") and box.id is not None:
-                    alliance = class_name.removeprefix("robot_")
+                if class_name in ("robot_red", "robot_blue", "robot") and box.id is not None:
+                    # The generic public detector supplies only ``robot``.
+                    # Derive alliance separately from its lower bumper band;
+                    # do not make a track when that evidence is unclear.
+                    if class_name == "robot":
+                        alliance, alliance_evidence = infer_bumper_alliance(frame, coords)
+                        if alliance is None:
+                            continue
+                    else:
+                        alliance = class_name.removeprefix("robot_")
+                        alliance_evidence = {"source": "detector_class"}
                     histogram = bumper_histogram(frame, coords)
                     raw_tracker_id = int(box.id.item())
                     canonical_id = reid.resolve(raw_tracker_id, frame_index, center, histogram, alliance)
@@ -757,6 +773,7 @@ def process_view(model, view, config, video_path):
                         "ended_ms": timestamp_ms, "identity_confidence": 1 if identity_map.get(key) else 0,
                         "tracking_confidence": confidence, "trajectory": []
                     })
+                    track["alliance_evidence"] = alliance_evidence
                     track["needs_review"] = not bool(identity_map.get(key))
                     track["ended_ms"] = timestamp_ms
                     # First pixel centre seen during auto, kept for start-zone
@@ -767,6 +784,8 @@ def process_view(model, view, config, video_path):
                         track["auto_start_pixel"] = center
                     track["tracking_confidence"] = min(track["tracking_confidence"], confidence)
                     track["trajectory"].append({"t": timestamp_ms, "x": x, "y": y, "pixel_x": center[0], "pixel_y": center[1], "confidence": confidence, "calibrated": calibrated})
+                    if identity_crops and not identity_map.get(key):
+                        identity_crops.offer(key, alliance, frame_index, timestamp_ms, frame, coords)
 
                     previous_state = robot_state.get(canonical_id)
                     velocity = (
@@ -803,6 +822,14 @@ def process_view(model, view, config, video_path):
         piece_tracker.update(timestamp_ms, pixel_pieces)
 
     finished_tracks = list(tracks.values())
+    if identity_crops and (team_roster or {}).get("red") and (team_roster or {}).get("blue"):
+        resolve_identities(
+            finished_tracks, identity_crops, team_roster, QWEN_URL, QWEN_TOKEN,
+            timeout=int(config.get("team_identity_timeout_seconds", 180)),
+            min_reads=max(1, int(config.get("team_identity_min_reads", 3))),
+            min_confidence=float(config.get("team_identity_min_confidence", .65)),
+            min_share=float(config.get("team_identity_min_share", .70)),
+        )
     for track in finished_tracks:
         track["auto_start_zone"] = resolve_auto_start_zone(
             track.pop("auto_start_pixel", None), start_zones, frame_shape,
@@ -828,7 +855,10 @@ def run_job(model, run):
             path = directory / f"view-{index}.mp4"
             heartbeat(current_run_id=run["id"])
             download(view["signed_url"], path)
-            tracks, observations = process_view(model, view, run.get("config") or {}, path)
+            tracks, observations = process_view(
+                model, view, run.get("config") or {}, path,
+                (run.get("vision_matches") or {}).get("team_roster") or {},
+            )
             heartbeat(current_run_id=run["id"])
             qwen_observations, qwen_clips = analyze_view_with_qwen(
                 view, run.get("config") or {}, path,

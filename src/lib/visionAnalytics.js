@@ -77,6 +77,114 @@ export function fuseObservations(observations, { dedupeWindowMs = 350 } = {}) {
 // phase and its derived auto/teleop split would disagree.
 export const DEFAULT_AUTO_END_MS = 15_000;
 
+// 2026 REBUILT field dimensions. Vision homographies use WPILib's fixed field
+// frame in metres; the manual auto editor stores alliance-relative percentages.
+export const AUTO_FIELD_METERS = Object.freeze({ length: 16.54175, width: 8.0518 });
+
+const pointSegmentDistance = (point, start, end) => {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  if (dx === 0 && dy === 0) return Math.hypot(point.x - start.x, point.y - start.y);
+  const amount = Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / (dx * dx + dy * dy)));
+  return Math.hypot(point.x - (start.x + amount * dx), point.y - (start.y + amount * dy));
+};
+
+function simplifyTrajectory(points, tolerance) {
+  if (points.length <= 2) return points;
+  let furthestDistance = 0;
+  let furthestIndex = 0;
+  for (let index = 1; index < points.length - 1; index += 1) {
+    const distance = pointSegmentDistance(points[index], points[0], points.at(-1));
+    if (distance > furthestDistance) {
+      furthestDistance = distance;
+      furthestIndex = index;
+    }
+  }
+  if (furthestDistance <= tolerance) return [points[0], points.at(-1)];
+  return [
+    ...simplifyTrajectory(points.slice(0, furthestIndex + 1), tolerance).slice(0, -1),
+    ...simplifyTrajectory(points.slice(furthestIndex), tolerance)
+  ];
+}
+
+/**
+ * Convert one calibrated robot track into the same 0-100, alliance-relative
+ * path consumed by RebuiltFieldMap and match_scout_auto_paths.
+ *
+ * The detector/tracker supplies the geometry; this function deliberately does
+ * no generative drawing. It refuses to emit a production candidate when team
+ * identity, calibration, auto coverage, continuity, or plausible motion is
+ * missing, while returning diagnostics that tell a reviewer what failed.
+ */
+export function visionAutoPath(track, {
+  autoEndMs = DEFAULT_AUTO_END_MS,
+  minConfidence = 0.6,
+  minSamples = 8,
+  minCoverageMs = 8_000,
+  maxGapMs = 1_500,
+  maxSpeedMps = 8,
+  simplifyToleranceM = 0.12,
+  fieldLengthM = AUTO_FIELD_METERS.length,
+  fieldWidthM = AUTO_FIELD_METERS.width
+} = {}) {
+  const alliance = String(track?.alliance || '').toLowerCase();
+  const reasons = [];
+  if (!track?.team_key) reasons.push('unresolved_team_identity');
+  if (!['red', 'blue'].includes(alliance)) reasons.push('unknown_alliance');
+
+  const autoPoints = (track?.trajectory || [])
+    .filter((point) => finite(point?.t) && point.t >= 0 && point.t <= autoEndMs)
+    .sort((a, b) => a.t - b.t);
+  const points = autoPoints.filter((point) =>
+    point.calibrated === true && finite(point.x) && finite(point.y) && Number(point.confidence ?? 1) >= minConfidence
+  );
+  if (autoPoints.length && !points.length) reasons.push('uncalibrated_field_coordinates');
+  if (points.length < minSamples) reasons.push('insufficient_samples');
+
+  const coverageMs = points.length > 1 ? points.at(-1).t - points[0].t : 0;
+  if (coverageMs < minCoverageMs) reasons.push('insufficient_auto_coverage');
+  let largestGapMs = 0;
+  let fastestMps = 0;
+  for (let index = 1; index < points.length; index += 1) {
+    const elapsedMs = points[index].t - points[index - 1].t;
+    largestGapMs = Math.max(largestGapMs, elapsedMs);
+    if (elapsedMs > 0) {
+      fastestMps = Math.max(fastestMps, Math.hypot(points[index].x - points[index - 1].x, points[index].y - points[index - 1].y) / (elapsedMs / 1000));
+    }
+  }
+  if (largestGapMs > maxGapMs) reasons.push('tracking_gap');
+  if (fastestMps > maxSpeedMps) reasons.push('implausible_jump');
+
+  const fieldMarginM = 0.5;
+  if (points.some((point) => point.x < -fieldMarginM || point.x > fieldLengthM + fieldMarginM || point.y < -fieldMarginM || point.y > fieldWidthM + fieldMarginM)) {
+    reasons.push('outside_field');
+  }
+
+  const simplified = simplifyTrajectory(points, simplifyToleranceM);
+  const path = simplified.map((point) => {
+    let x = Math.max(0, Math.min(100, point.x / fieldLengthM * 100));
+    let y = Math.max(0, Math.min(100, point.y / fieldWidthM * 100));
+    // WPILib's field origin is at the blue wall. Rotate red 180 degrees so
+    // both alliances see their own wall on the editor's left.
+    if (alliance === 'red') {
+      x = 100 - x;
+      y = 100 - y;
+    }
+    return [Number(x.toFixed(3)), Number(y.toFixed(3))];
+  });
+
+  return {
+    viable: reasons.length === 0,
+    reasons: [...new Set(reasons)],
+    path,
+    sampleCount: points.length,
+    sourceSampleCount: autoPoints.length,
+    coverageMs,
+    largestGapMs,
+    fastestMps: Number(fastestMps.toFixed(3))
+  };
+}
+
 // How far a robot must travel during auto before it counts as having moved.
 // Deliberately generous: tracker jitter on a stationary robot is on the order
 // of a bounding-box wobble, and calling a working robot "dead" is a much worse

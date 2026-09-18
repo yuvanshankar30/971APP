@@ -6,6 +6,7 @@ import asyncio
 import base64
 import hmac
 import io
+import json
 import math
 import os
 import time
@@ -13,11 +14,18 @@ from contextlib import asynccontextmanager
 
 import torch
 from fastapi import Depends, FastAPI, Header, HTTPException
-from PIL import Image
+from PIL import Image, ImageDraw
 from pydantic import BaseModel, Field
 from transformers import AutoProcessor, Qwen3VLMoeForConditionalGeneration
 
 from qwen_contract import SYSTEM_PROMPT, TASK_PROMPT, normalize_result, parse_json_response
+from team_identity_contract import (
+    SYSTEM_PROMPT as IDENTITY_SYSTEM_PROMPT,
+    TASK_PROMPT as IDENTITY_TASK_PROMPT,
+    normalize_reads,
+    parse_json_response as parse_identity_json,
+)
+from fewshot_robot_contract import PROMPT as FEWSHOT_ROBOT_PROMPT, parse as parse_fewshot_robot, normalize as normalize_fewshot_robot
 
 MODEL_NAME = os.environ.get("VISION_QWEN_MODEL", "Qwen/Qwen3-VL-30B-A3B-Instruct")
 MODEL_REVISION = os.environ.get("VISION_QWEN_REVISION", "9c4b90e1e4ba969fd3b5378b57d966d725f1b86c")
@@ -48,6 +56,25 @@ class AnalyzeRequest(BaseModel):
     clip_start_ms: int = Field(ge=0)
     clip_end_ms: int = Field(gt=0)
     frames: list[FrameInput]
+
+
+class TeamNumberCrop(BaseModel):
+    crop_id: str = Field(min_length=1, max_length=200)
+    track_key: str = Field(min_length=1, max_length=200)
+    alliance: str = Field(pattern="^(red|blue)$")
+    candidate_team_keys: list[str] = Field(min_length=1, max_length=3)
+    jpeg_base64: str
+
+
+class TeamNumberRequest(BaseModel):
+    crops: list[TeamNumberCrop] = Field(min_length=1, max_length=MAX_IMAGES)
+
+class RobotExample(FrameInput):
+    boxes: list[dict] = Field(default_factory=list, max_length=12)
+
+class FewShotRobotRequest(BaseModel):
+    examples: list[RobotExample] = Field(min_length=1, max_length=6)
+    target: FrameInput
 
 
 def decode_frame(frame: FrameInput):
@@ -169,3 +196,91 @@ async def analyze(payload: AnalyzeRequest):
         except Exception as error:
             state["failures"] += 1
             raise HTTPException(status_code=500, detail=str(error)) from error
+
+
+@app.post("/read-team-numbers", dependencies=[Depends(verify_token)])
+async def read_team_numbers(payload: TeamNumberRequest):
+    """Read only roster-constrained bumper numbers from in-memory robot crops.
+
+    This is loopback-authenticated like /analyze; no crop is persisted by this
+    service. A rejected/malformed response returns 422 so the runner leaves
+    the associated robot unidentified instead of guessing.
+    """
+    images = [decode_frame(crop) for crop in payload.crops]
+    permitted = {crop.crop_id: set(crop.candidate_team_keys) for crop in payload.crops}
+    content = []
+    for crop, image in zip(payload.crops, images):
+        candidates = ", ".join(crop.candidate_team_keys)
+        content.extend([
+            {"type": "text", "text": f"crop_id={crop.crop_id}; alliance={crop.alliance}; permitted teams={candidates}"},
+            {"type": "image", "image": image},
+        ])
+    content.append({"type": "text", "text": IDENTITY_TASK_PROMPT})
+    messages = [
+        {"role": "system", "content": [{"type": "text", "text": IDENTITY_SYSTEM_PROMPT}]},
+        {"role": "user", "content": content},
+    ]
+    started = time.perf_counter()
+    async with inference_lock:
+        try:
+            inputs = state["processor"].apply_chat_template(
+                messages, tokenize=True, add_generation_prompt=True,
+                return_dict=True, return_tensors="pt", enable_thinking=False,
+            ).to(state["model"].device)
+            with torch.inference_mode():
+                generated = state["model"].generate(**inputs, max_new_tokens=500, do_sample=False)
+            trimmed = generated[:, inputs["input_ids"].shape[-1]:]
+            raw = state["processor"].batch_decode(trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
+            parsed, error = parse_identity_json(raw)
+            reads = None
+            if not error:
+                reads, error = normalize_reads(parsed, permitted)
+            if error:
+                raise HTTPException(status_code=422, detail={"error": error, "raw_response": raw})
+            state["requests"] += 1
+            state["last_latency_ms"] = round((time.perf_counter() - started) * 1000)
+            return {"model": MODEL_NAME, "revision": MODEL_REVISION, "latency_ms": state["last_latency_ms"],
+                    "reads": reads, "raw_response": raw}
+        except HTTPException:
+            state["failures"] += 1
+            raise
+        except Exception as error:
+            state["failures"] += 1
+            raise HTTPException(status_code=500, detail=str(error)) from error
+
+@app.post("/annotate-robots", dependencies=[Depends(verify_token)])
+async def annotate_robots(payload: FewShotRobotRequest):
+    """Few-shot private robot annotation; responses remain proposals only."""
+    examples = [(example, decode_frame(example)) for example in payload.examples]
+    target = decode_frame(payload.target)
+    content = []
+    for example, image in examples:
+        # Render the exact human boxes into the example image as well as text.
+        # This gives the model an unambiguous visual convention for both color
+        # and geometry without changing the unannotated target image.
+        image = image.copy(); draw = ImageDraw.Draw(image)
+        for box in example.boxes:
+            try:
+                x1,y1,x2,y2 = [float(value) / 1000 for value in box["box"]]
+                color = "#ff4050" if box.get("alliance") == "red" else "#36a8ff"
+                draw.rectangle((x1*image.width,y1*image.height,x2*image.width,y2*image.height), outline=color, width=max(3, image.width//300))
+            except Exception:
+                continue
+        labels = json.dumps(example.boxes, separators=(",", ":"))
+        content.extend([{"type":"text","text":f"LABELED EXAMPLE. Boxes use 0..1000 coordinates: {labels}"},{"type":"image","image":image}])
+    content.extend([{"type":"text","text":"TARGET IMAGE: annotate this image only."},{"type":"image","image":target},{"type":"text","text":FEWSHOT_ROBOT_PROMPT}])
+    started=time.perf_counter()
+    async with inference_lock:
+        try:
+            inputs=state["processor"].apply_chat_template([{"role":"user","content":content}],tokenize=True,add_generation_prompt=True,return_dict=True,return_tensors="pt",enable_thinking=False).to(state["model"].device)
+            with torch.inference_mode(): generated=state["model"].generate(**inputs,max_new_tokens=700,do_sample=False)
+            raw=state["processor"].batch_decode(generated[:,inputs["input_ids"].shape[-1]:],skip_special_tokens=True,clean_up_tokenization_spaces=False)[0]
+            parsed,error=parse_fewshot_robot(raw); boxes=None
+            if not error: boxes,error=normalize_fewshot_robot(parsed)
+            if error: raise HTTPException(status_code=422,detail={"error":error,"raw_response":raw})
+            state["requests"]+=1; state["last_latency_ms"]=round((time.perf_counter()-started)*1000)
+            return {"boxes":boxes,"latency_ms":state["last_latency_ms"],"raw_response":raw}
+        except HTTPException:
+            state["failures"]+=1; raise
+        except Exception as error:
+            state["failures"]+=1; raise HTTPException(status_code=500,detail=str(error)) from error

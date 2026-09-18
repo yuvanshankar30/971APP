@@ -52,13 +52,38 @@
     { pitEntries: report?.data?.pit_entries || [], problemReports: report?.data?.pit_problems || [], matchEntries: report?.data?.match_entries || [] }
   );
   $: scoutPowerByTeam = new Map(powerRankings.map((team) => [team.key, team.scoutPower]));
-  $: upcomingMatches = matches.filter((match) => !isMatchPlayed(match));
-  $: playedMatches = matches.filter((match) => isMatchPlayed(match)).slice().reverse();
+  $: scheduledMatches = matches
+    .filter((match) => !match.is_test_market)
+    .slice()
+    .sort((a, b) => Number(a.predicted_time || a.time || 0) - Number(b.predicted_time || b.time || 0));
+  $: upcomingMatches = scheduledMatches
+    .filter((match) => !isMatchPlayed(match) && [...(match.alliances?.red?.team_keys || []), ...(match.alliances?.blue?.team_keys || [])].includes('frc971'))
+    // Keep the next match nearest the tab controls when the list grows upward.
+    .slice()
+    .reverse();
+  $: playedMatches = scheduledMatches.filter((match) => isMatchPlayed(match) && [...(match.alliances?.red?.team_keys || []), ...(match.alliances?.blue?.team_keys || [])].includes('frc971')).slice().reverse();
   const teamNumber = (teamKey) => String(teamKey || '').replace(/^frc/i, '');
 
   const number = (value, digits = 1) => Number.isFinite(value) ? value.toFixed(digits) : '-';
   const percent = (value) => Number.isFinite(value) ? `${Math.round(value * 100)}%` : '-';
   const text = (value) => String(value || '').trim();
+
+  function allianceTeamLabel(teamKey) {
+    const team = eventTeams.find((row) => row.key === teamKey || `frc${row.team_number}` === teamKey);
+    const name = String(team?.nickname || team?.name || '').trim();
+    return name ? `${teamNumber(teamKey)} ${name}` : teamNumber(teamKey);
+  }
+
+  function estimatedMatchTime(match) {
+    const seconds = Number(match?.predicted_time || match?.time || 0);
+    return seconds > 0 ? new Intl.DateTimeFormat(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' }).format(new Date(seconds * 1000)) : 'Time not posted';
+  }
+
+  function matchesAway(match) {
+    const target = scheduledMatches.findIndex((candidate) => candidate.key === match.key);
+    const firstUpcoming = scheduledMatches.findIndex((candidate) => !isMatchPlayed(candidate));
+    return target >= 0 && firstUpcoming >= 0 ? Math.max(0, target - firstUpcoming) : null;
+  }
 
   function openTeamView(row) {
     selectedTeamKey = row.teamKey;
@@ -157,22 +182,24 @@
   {#if view === 'matches'}
   <section class="strategy-board matches-board">
     <div class="section-heading">
-      <div><h2><CalendarClock size={18} /> Match schedule</h2><p>Synced from The Blue Alliance. Win likelihood is a rough estimate from our own Scout Power, not a scored prediction - <a href="/predictions">place a prediction market bet</a> on any upcoming match.</p></div>
+      <div><h2><CalendarClock size={18} /> 971 match schedule</h2><p>Only matches containing 971. Times are Blue Alliance estimates; the nearest upcoming match stays at the top.</p></div>
     </div>
     {#if matchesWarning}<p class="muted matches-warning">{matchesWarning}</p>{/if}
     {#if !matches.length}
-      <div class="empty-state">No match schedule yet for this event.</div>
+      <div class="empty-state">No upcoming 971 matches are on this event schedule yet.</div>
     {:else}
       <div class="board-table-wrap">
         <table class="board-table">
-          <thead><tr><th>Match</th><th>Red</th><th>Blue</th><th>Status</th></tr></thead>
+          <thead><tr><th>Match</th><th>Est. time</th><th>Red</th><th>Blue</th><th>Status</th></tr></thead>
           <tbody>
             {#each upcomingMatches as match (match.key)}
               {@const projection = projectMatch(match, scoutPowerByTeam)}
+              {@const away = matchesAway(match)}
               <tr class:test-match={match.is_test_market}>
-                <td><strong>{matchLabel(match)}</strong>{#if match.is_test_market}<small>Practice market</small>{/if}</td>
-                <td class="alliance-red">{match.alliances?.red?.team_keys?.map(teamNumber).join(', ')}</td>
-                <td class="alliance-blue">{match.alliances?.blue?.team_keys?.map(teamNumber).join(', ')}</td>
+                <td><strong>{matchLabel(match)}</strong>{#if away != null}<small class:soon={away <= 4}>{away === 0 ? 'Up next' : `${away} match${away === 1 ? '' : 'es'} away`}</small>{/if}</td>
+                <td>{estimatedMatchTime(match)}</td>
+                <td class="alliance-red">{match.alliances?.red?.team_keys?.map(allianceTeamLabel).join(', ')}</td>
+                <td class="alliance-blue">{match.alliances?.blue?.team_keys?.map(allianceTeamLabel).join(', ')}</td>
                 <td>
                   {#if projection.redWinProbability == null}
                     <span class="muted">Not enough scouting yet</span>
@@ -187,6 +214,7 @@
             {#each playedMatches as match (match.key)}
               <tr class="played-row">
                 <td><strong>{matchLabel(match)}</strong></td>
+                <td>{estimatedMatchTime(match)}</td>
                 <td class="alliance-red" class:winner={match.winning_alliance === 'red'}>{match.alliances?.red?.team_keys?.map(teamNumber).join(', ')} <span class="muted">{match.alliances?.red?.score ?? ''}</span></td>
                 <td class="alliance-blue" class:winner={match.winning_alliance === 'blue'}>{match.alliances?.blue?.team_keys?.map(teamNumber).join(', ')} <span class="muted">{match.alliances?.blue?.score ?? ''}</span></td>
                 <td class="muted">{match.winning_alliance ? `${match.winning_alliance} won` : 'Tie'}</td>
@@ -289,6 +317,7 @@
   .subtabs button { min-height:44px; padding:.7rem 1.25rem; font-size:.9rem; font-weight:700; }
   .test-match { background:color-mix(in srgb, var(--accent) 9%, transparent); }
   .test-match td small { display:block; margin-top:2px; color:var(--text-secondary); font-size:.7rem; }
+  .test-match td small.soon, td small.soon { color:var(--danger, #dc3545); font-weight:800; }
   .alliance-red { color:var(--danger, #dc3545); }
   .alliance-blue { color:var(--brand-blue, #2563eb); }
   .played-row { opacity:.75; }

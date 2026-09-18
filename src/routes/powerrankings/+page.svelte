@@ -284,7 +284,6 @@
         <b>{compareLeft.matchScoutSummary.reportCount}</b><span>Match reports</span><b>{compareRight.matchScoutSummary.reportCount}</b>
         <b>{fmt(compareLeft.matchScoutSummary.avgDriverSkill)}</b><span>Driver skill</span><b>{fmt(compareRight.matchScoutSummary.avgDriverSkill)}</b>
         <b>{fmt(compareLeft.matchScoutSummary.ratingAverages.Reliability)}</b><span>Reliability (match reports)</span><b>{fmt(compareRight.matchScoutSummary.ratingAverages.Reliability)}</b>
-        <b>{fmtPercent(compareLeft.matchScoutSummary.shuttlingRate)}</b><span>Shuttling rate</span><b>{fmtPercent(compareRight.matchScoutSummary.shuttlingRate)}</b>
       </div>
     {/if}
   </section>
@@ -320,7 +319,7 @@
         <th title="Scouts' own out-of-10 impressions, averaged - see Robot Ratings"><button on:click={() => sortBy('robotRatingAvg')}>Team Rating <ArrowUpDown size={11} /></button></th>
         <th class="reference" title="Official FRC qualification rank from The Blue Alliance">Official Rank</th>
         <th class="reference" title="The Blue Alliance's Offensive Power Rating - a statistical estimate, not a rank">TBA OPR</th>
-        <th>Data Matches</th><th>Match Reports</th><th>Auto Score</th><th>Teleop Score</th><th>Driver</th><th>Reliability</th><th>Shuttling</th><th>Pit Score</th><th>Pit Reliability</th><th>Problems</th><th>Archetype</th><th>Note Impact</th><th>Notes</th>
+        <th>Data Matches</th><th>Match Reports</th><th>Auto Score</th><th>Teleop Score</th><th>Driver</th><th>Reliability</th><th>Pit Score</th><th>Pit Reliability</th><th>Problems</th><th>Archetype</th><th>Note Impact</th><th>Notes</th>
       </tr></thead>
       <tbody>{#each filteredTeams as team (team.key)}<tr>
         <td class="strong">{team.powerRank ?? '—'}</td><td class="mono">{team.team_number}</td><td>{team.nickname}</td>
@@ -331,7 +330,7 @@
         <td><a href={`/robotratings?team=${team.key}`} title={`${team.robotRating.raterCount} rater(s)`}>{fmt(team.robotRatingAvg)}{#if team.robotRatingCount}<span class="text-muted"> ({team.robotRatingCount})</span>{/if}</a></td>
         <td class="reference">{officialRank(team) ?? '—'}</td>
         <td class="reference">{fmt(officialOpr(team))}</td>
-        <td>{team.scoutSummary.matchesScouted}</td><td>{team.matchScoutSummary.reportCount}</td><td>{fmt(team.matchScoutSummary.avgAutoPoints)}</td><td>{fmt(team.matchScoutSummary.avgBallsScored)}</td><td>{fmt(team.matchScoutSummary.avgDriverSkill)}</td><td>{fmt(team.matchScoutSummary.ratingAverages.Reliability)}</td><td>{fmtPercent(team.matchScoutSummary.shuttlingRate)}</td><td>{fmt(team.pitSummary.pitScore)}</td><td>{team.pitSummary.rawReliability ?? '—'}</td><td>{team.pitSummary.openProblemCount}</td><td>{team.pitSummary.robotArchetype || '—'}</td><td>{team.noteSummary.averageImpact ?? '—'}</td><td>{team.noteSummary.noteCount}</td>
+        <td>{team.scoutSummary.matchesScouted}</td><td>{team.matchScoutSummary.reportCount}</td><td>{fmt(team.matchScoutSummary.avgAutoPoints)}</td><td>{fmt(team.matchScoutSummary.avgBallsScored)}</td><td>{fmt(team.matchScoutSummary.avgDriverSkill)}</td><td>{fmt(team.matchScoutSummary.ratingAverages.Reliability)}</td><td>{fmt(team.pitSummary.pitScore)}</td><td>{team.pitSummary.rawReliability ?? '—'}</td><td>{team.pitSummary.openProblemCount}</td><td>{team.pitSummary.robotArchetype || '—'}</td><td>{team.noteSummary.averageImpact ?? '—'}</td><td>{team.noteSummary.noteCount}</td>
       </tr>{/each}</tbody>
     </table>
   </div>
