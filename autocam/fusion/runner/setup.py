@@ -211,11 +211,21 @@ def write_env(addin_dir: str) -> None:
     runner_id = socket.gethostname() or "fusion-runner"
     credentials = pair_runner(base_url, runner_id)
 
+    # Direct instruction, after live-testing: a fresh install used to only
+    # ever get its own brand-new self-registered machine id, which is never
+    # a real router (those are named "New Router"/"UNC Router", not a
+    # hostname) - meaning no queued job for a real machine could ever reach
+    # it. The setup API now returns every already-enabled real machine's id
+    # alongside the self-registered one; write all of them so this Runner
+    # can claim real CAM work immediately, the same as every other
+    # teammate's install.
+    machine_ids = credentials.get("machineIds") or [credentials["machineId"]]
+
     with open(env_file, "w") as f:
         f.write(f'API_KEY="{credentials["token"]}"\n')
         f.write(f'BASE_URL="{base_url}"\n')
         f.write(f'RUNNER_ID="{runner_id}"\n')
-        f.write(f'RUNNER_MACHINE_ID="{credentials["machineId"]}"\n')
+        f.write(f'RUNNER_MACHINE_ID="{",".join(machine_ids)}"\n')
     print(f"Wrote {env_file}")
 
 

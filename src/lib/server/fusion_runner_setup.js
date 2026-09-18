@@ -95,10 +95,27 @@ export async function pollFusionRunnerSetup(supabase, sessionId, pollSecret) {
   if (!result?.token || !result?.machine_id) {
     throw new FusionRunnerSetupError('Setup session is no longer available', 409);
   }
+  // Direct instruction, after live-testing: the Runner is pure CAM (opens
+  // a STEP file, generates toolpaths, uploads G-code artifacts) - it never
+  // operates a physical machine, so a fresh install has no reason to poll
+  // for only its own self-registered machine. Every already-enabled real
+  // machine (New Router, UNC Router, ...) goes into machineIds too, so a
+  // teammate's laptop can claim and CAM-process real jobs for a shared
+  // router immediately after pairing, not just once an admin manually
+  // reconfigures .env by hand. A brand-new, not-yet-enabled self-registered
+  // machine is deliberately excluded from this list (it isn't a real
+  // router yet), but its own id is always included below regardless.
+  const { data: enabledMachines, error: machinesError } = await supabase
+    .from('cam_machines')
+    .select('id')
+    .eq('enabled', true);
+  if (machinesError) throw new FusionRunnerSetupError(machinesError.message);
+  const machineIds = [...new Set([result.machine_id, ...(enabledMachines || []).map((m) => m.id)])];
   return {
     status: 'complete',
     runnerName: result.runner_name,
     machineId: result.machine_id,
+    machineIds,
     token: result.token
   };
 }

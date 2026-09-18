@@ -118,6 +118,30 @@ class BrowserPairingTests(unittest.TestCase):
         self.assertIn('API_KEY="frt_machine"', contents)
         self.assertIn('RUNNER_MACHINE_ID="machine-id"', contents)
 
+    def test_write_env_polls_every_enabled_machine_not_just_its_own(self):
+        # Real, confirmed live regression: a fresh install used to only ever
+        # get its own brand-new self-registered machine id, which is never a
+        # real router (those are named "New Router"/"UNC Router", not a
+        # hostname) - so a queued job for a real machine could never reach
+        # it. The setup API now also returns every already-enabled real
+        # machine's id as machineIds; write_env must fold all of them into
+        # one comma-separated RUNNER_MACHINE_ID (config.py already splits on
+        # commas), not just the self-registered one.
+        credentials = {
+            "token": "frt_machine",
+            "machineId": "self-registered-id",
+            "machineIds": ["self-registered-id", "new-router-id", "unc-router-id"],
+        }
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            setup, "pair_runner", return_value=credentials
+        ), patch.object(setup.socket, "gethostname", return_value="router-host"):
+            setup.write_env(directory)
+            contents = Path(directory, ".env").read_text()
+
+        self.assertIn(
+            'RUNNER_MACHINE_ID="self-registered-id,new-router-id,unc-router-id"', contents
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
