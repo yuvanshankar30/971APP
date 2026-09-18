@@ -79,6 +79,10 @@ class OnShapeAPI {
         try {
             const response = await fetch(`${this.apiRoute}?action=document-info&documentId=${documentId}`);
 
+            if (response.status === 503) {
+                throw new Error('Onshape sync is temporarily unavailable.');
+            }
+
             // Onshape API limit exceeded — start a cooldown and stop retrying.
             if (response.status === 402) {
                 rateLimitedUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS;
@@ -110,6 +114,10 @@ class OnShapeAPI {
             });
 
             const response = await fetch(`${this.apiRoute}?${params}`);
+
+            if (response.status === 503) {
+                throw new Error('Onshape sync is temporarily unavailable.');
+            }
 
             if (response.status === 402) {
                 rateLimitedUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS;
@@ -145,6 +153,9 @@ class OnShapeAPI {
 
             clearTimeout(timeoutId);
 
+            if (response.status === 503) {
+                throw new Error('Onshape sync is temporarily unavailable.');
+            }
             if (response.status === 402) {
                 rateLimitedUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS;
                 throw new Error('Onshape API limit exceeded (402)');
@@ -178,6 +189,9 @@ class OnShapeAPI {
 
             const response = await fetch(`${this.apiRoute}?${params}`);
 
+            if (response.status === 503) {
+                throw new Error('Onshape sync is temporarily unavailable.');
+            }
             if (response.status === 402) {
                 rateLimitedUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS;
                 throw new Error('Onshape API limit exceeded (402)');
@@ -223,6 +237,9 @@ class OnShapeAPI {
 
             clearTimeout(timeoutId);
 
+            if (response.status === 503) {
+                throw new Error('Onshape sync is temporarily unavailable.');
+            }
             if (response.status === 402) {
                 rateLimitedUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS;
                 throw new Error('Onshape API limit exceeded (402)');

@@ -106,13 +106,15 @@ describe('Fusion plate payloads',()=>{
    multi_tool_mode:true, tool_items:[{tool_guid:'endmill-guid'}]
   });
  });
- it('rejects multi-tool mode away from New Router or Aluminum 6061',async()=>{
+ it('rejects multi-tool mode off New Router, but allows any material on it',async()=>{
   const wrongMachine=job(); wrongMachine.params.multiToolMode=true; wrongMachine.cam_machines={name:'UNC Router'};
   wrongMachine.params.fusionPlateSnapshot.material='Aluminum 6061';
   await expect(buildJobPayload(db(),wrongMachine)).rejects.toThrow(/only on New Router/);
-  const wrongMaterial=job(); wrongMaterial.params.multiToolMode=true; wrongMaterial.cam_machines={name:'New Router'};
-  wrongMaterial.params.fusionPlateSnapshot.material='SRPP';
-  await expect(buildJobPayload(db(),wrongMaterial)).rejects.toThrow(/only for Aluminum 6061/);
+  // Direct instruction: every material uses Aluminum 6061's tool properties,
+  // so Auto multi-tool on New Router is no longer restricted by material.
+  const nonAluminum=job(); nonAluminum.params.multiToolMode=true; nonAluminum.cam_machines={name:'New Router'};
+  nonAluminum.params.fusionPlateSnapshot.material='SRPP';
+  await expect(buildJobPayload(db(),nonAluminum)).resolves.toMatchObject({multi_tool_mode:true});
  });
  it('rejects contradictory single-tool and multi-tool modes',async()=>{
   const value=job(); value.params.singleToolMode=true; value.params.multiToolMode=true;

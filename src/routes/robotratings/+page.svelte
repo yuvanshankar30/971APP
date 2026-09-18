@@ -328,7 +328,7 @@
     display:flex; align-items:center; gap:var(--gap-2); width:100%; padding:var(--space-3);
     background:none; border:none; cursor:pointer; text-align:left; font:inherit; color:inherit;
   }
-  .rating-row-name { flex:1; }
+  .rating-row-name { flex:1; min-width:0; }
   .rank-label { min-width:4.25rem; color:var(--text-muted); font-size:.7rem; font-weight:700; text-transform:uppercase; }
   .rating-row-summary { display:flex; align-items:center; gap:var(--gap-1); }
   .mine-badge { display:inline-flex; color:var(--brand-gold-strong, #b8860b); }

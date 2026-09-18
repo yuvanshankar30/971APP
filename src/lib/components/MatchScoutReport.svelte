@@ -1,8 +1,15 @@
 <script>
   import { MATCH_RATING_FIELDS, MATCH_FORM_RATING_FIELDS, ACCURACY_LABELS, BPS_LABELS } from '$lib/matchScouting.js';
+  import RebuiltFieldMap from './RebuiltFieldMap.svelte';
 
   export let report;
   export let showTeam = false;
+  // Scoping this to an explicit prop rather than just deleting the
+  // display:none below - Strategy/Power Rankings deliberately hide the
+  // scout name below 1050px to make room for quick-stats, and that's not
+  // what was asked to change. Scouting Admin's whole point is knowing who
+  // submitted a report, so it opts in to keeping that visible everywhere.
+  export let showScout = false;
 
   const present = (value) => value !== null && value !== undefined && String(value).trim() !== '';
   const valueOrDash = (value) => present(value) ? value : '-';
@@ -48,7 +55,7 @@
         <small>Incidents</small><b>{incidentLabels.length ? incidentLabels.join(', ') : 'Clear'}</b>
       </span>
     </span>
-    <span class="report-meta">
+    <span class="report-meta" class:force-visible={showScout}>
       <span>{report?.scout_name || report?.created_by || 'Unknown scout'}</span>
       <time datetime={reportTime || undefined} title={dateValue(reportTime)}>{dateValue(reportTime, true)}</time>
     </span>
@@ -76,6 +83,11 @@
         <div><dt>Collision</dt><dd>{yesNo(report?.auto_collision)}</dd></div>
         {#if present(report?.auto_path_name) || report?.auto_path?.length}<div><dt>Path</dt><dd>{valueOrDash(report?.auto_path_name)} ({Array.isArray(report?.auto_path) ? report.auto_path.length : 0} points)</dd></div>{/if}
       </dl>
+      {#if report?.auto_path?.length}
+        <div class="auto-path-preview">
+          <RebuiltFieldMap alliance={report?.alliance === 'red' ? 'red' : 'blue'} path={report.auto_path} readonly />
+        </div>
+      {/if}
     </section>
 
     <section class="teleop">
@@ -176,6 +188,7 @@
   section { --section-color:#8b6b24; min-width:0; padding:.75rem; background:var(--surface-1, #fff); box-shadow:inset 0 3px var(--section-color); }
   section.assignment { --section-color:#687076; }
   section.auto { --section-color:#b98000; }
+  .auto-path-preview { max-width:min(320px, 100%); margin:.5rem 0 0; font-size:.7rem; }
   section.teleop { --section-color:#306fa8; }
   section.post-match { --section-color:#437d55; }
   h4 { margin:0 0 .45rem; color:var(--section-color); font-size:.73rem; letter-spacing:.055em; text-transform:uppercase; }
@@ -191,6 +204,14 @@
     summary { grid-template-columns:minmax(8rem, .7fr) minmax(20rem, 2fr); }
     .report-meta { display:none; }
     .report-body { grid-template-columns:repeat(2, minmax(0, 1fr)); }
+  }
+  /* showScout's whole point is staying visible at any width - restore the
+     column .report-meta was hidden by removing above (:has() rather than a
+     showScout-specific class on <summary>, since that element has no prop
+     access of its own). */
+  @media (max-width:1050px) {
+    summary:has(.report-meta.force-visible) { grid-template-columns:minmax(8rem, .7fr) minmax(18rem, 2fr) minmax(7rem, .5fr); }
+    .report-meta.force-visible { display:flex; }
   }
   @media (max-width:680px) {
     summary { grid-template-columns:1fr; gap:.45rem; padding:.7rem var(--space-3); }

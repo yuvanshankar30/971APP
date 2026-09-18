@@ -743,7 +743,7 @@
       {:else}
         <div class="match-report-list">
           {#each matchReports as report (report.id)}
-            <MatchScoutReport {report} showTeam />
+            <MatchScoutReport {report} showTeam showScout />
           {/each}
         </div>
       {/if}
@@ -771,11 +771,11 @@
               <tbody>
                 {#each missedMatches as m}
                   <tr>
-                    <td>#{m.match_number}</td>
-                    <td>{m.data_missed_count}</td>
-                    <td>{m.note_missed_count}</td>
-                    <td>{m.quick_missed_count}</td>
-                    <td>
+                    <td data-label="Match">#{m.match_number}</td>
+                    <td data-label="Data Misses">{m.data_missed_count}</td>
+                    <td data-label="Note Misses">{m.note_missed_count}</td>
+                    <td data-label="Quick Misses">{m.quick_missed_count}</td>
+                    <td data-label="Missed Assignments">
                       <div class="missed-list">
                         {#each m.missed_assignments as a}
                           <div>{a.scouting_type} - {String(a.team_key || '').replace(/^frc/i, '')} - {a.user_name || a.assigned_user}</div>
@@ -876,15 +876,15 @@
                 {:else}
                   {#each smartFuelModel.by_scout as row}
                     <tr>
-                      <td>{row.scout_name || row.scout_id}</td>
-                      <td>{row.adjustment_factor}</td>
-                      <td>{row.balanced_ball_count || 0}</td>
-                      <td>{row.shooting_seconds || 0}</td>
-                      <td>{row.estimated_bps || 0}</td>
-                      <td>{row.residual_rmse}</td>
-                      <td>{row.residual_mae}</td>
-                      <td>{row.residual_bias}</td>
-                      <td>{row.sample_matches}</td>
+                      <td data-label="Scout">{row.scout_name || row.scout_id}</td>
+                      <td data-label="Adjustment Factor">{row.adjustment_factor}</td>
+                      <td data-label="Balanced Ball Count">{row.balanced_ball_count || 0}</td>
+                      <td data-label="Shooting Time (s)">{row.shooting_seconds || 0}</td>
+                      <td data-label="Estimated BPS">{row.estimated_bps || 0}</td>
+                      <td data-label="Residual RMSE">{row.residual_rmse}</td>
+                      <td data-label="Residual MAE">{row.residual_mae}</td>
+                      <td data-label="Residual Bias">{row.residual_bias}</td>
+                      <td data-label="Sample Matches">{row.sample_matches}</td>
                     </tr>
                   {/each}
                 {/if}
@@ -946,10 +946,10 @@
                 {:else}
                   {#each quickScoutModel.by_team as row}
                     <tr>
-                      <td>{String(row.team_key || '').replace(/^frc/i, '')}</td>
-                      <td>{row.avg_percent_of_alliance_score}%</td>
-                      <td>{row.avg_contribution_points}</td>
-                      <td>{row.matches_scored}</td>
+                      <td data-label="Team">{String(row.team_key || '').replace(/^frc/i, '')}</td>
+                      <td data-label="Avg % of Alliance Score">{row.avg_percent_of_alliance_score}%</td>
+                      <td data-label="Avg Contribution (pts)">{row.avg_contribution_points}</td>
+                      <td data-label="Matches Scored">{row.matches_scored}</td>
                     </tr>
                   {/each}
                 {/if}
@@ -989,14 +989,14 @@
                 {:else}
                   {#each filteredUsers as row}
                     <tr>
-                      <td>
+                      <td data-label="Name">
                         <label class="sr-only" for={`scout-name-${row.id}`}>Name for {row.email}</label>
                         <input id={`scout-name-${row.id}`} class="form-input" maxlength="120" placeholder="Enter actual full name" bind:value={nameDrafts[row.id]} />
                         <small>{scoutDisplayName(row)}</small>
                         <button class="btn btn-sm" disabled={savingNameId !== null || !nameDrafts[row.id]?.trim() || nameDrafts[row.id] === row.full_name} on:click={() => saveScoutName(row)}>Save name</button>
                       </td>
-                      <td>{row.email || '-'}</td>
-                      <td class="role-cell">
+                      <td data-label="Email">{row.email || '-'}</td>
+                      <td data-label="Competition Role" class="role-cell">
                         <select
                           class="form-select assignment-select competition-role-select"
                           data-filled={drafts[row.id].competition_role ? 'true' : 'false'}
@@ -1009,7 +1009,7 @@
                           {/each}
                         </select>
                       </td>
-                      <td class="team-cell">
+                      <td data-label="FRC Team" class="team-cell">
                         <select
                           class="form-select assignment-select team-assignment-select"
                           data-filled={drafts[row.id].frc_team ? 'true' : 'false'}
@@ -1385,5 +1385,34 @@
     .role-assignment-table td:nth-child(4) {
       min-width: 160px;
     }
+  }
+
+  /* All four .table uses on this page (missed matches, fuel calibration,
+     quick scout attribution, competition roles) become one card per row
+     below phone width - a data-label attribute on each <td> supplies the
+     printed label since the real <th> row is hidden here. Label-above-value
+     (not inline space-between) because several cells hold more than one
+     element (an input + button, a <select>), which space-between would
+     otherwise spread apart oddly. The 768px min-width rule above is a
+     no-op once cells are display:block/width:100% here, so nothing to
+     override for it. */
+  @media (max-width: 640px) {
+    .table-container { overflow-x: visible; }
+    .table thead { display: none; }
+    .table, .table tbody, .table tr, .table td { display: block; width: 100%; }
+    .table tr { border: 1px solid var(--border); border-radius: var(--radius-lg); margin-bottom: var(--space-3); padding: var(--space-2) var(--space-3); }
+    .table td { border: 0; border-bottom: 1px solid var(--border); padding: var(--space-2) 0; }
+    .table td:last-child { border-bottom: 0; }
+    .table td::before {
+      content: attr(data-label);
+      display: block;
+      color: var(--text-muted);
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 2px;
+    }
+    .table td.empty::before { content: none; }
+    .table td select, .table td input.form-input { width: 100%; }
   }
 </style>

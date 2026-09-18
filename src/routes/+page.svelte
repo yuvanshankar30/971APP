@@ -7,6 +7,7 @@
   import { FRC_TEAMS, hasPermission } from '$lib/permissions.js';
   import { theme, setTheme } from '$lib/stores/theme.js';
   import { loginScreenStyle, setLoginScreenStyle } from '$lib/stores/loginScreenPref.js';
+  import { fetchActiveScoutingEventKey } from '$lib/scoutingEvent.js';
   
   let user = null;
   let authUser = null;
@@ -155,6 +156,14 @@
   let nextScoutAssignment = null; // { scouting_type, match_key, team_key }
   let showScoutAlert = true;
 
+  // Pre-scouting assignment state - teams assigned to this user to research
+  // ahead of the event (see /scouting-admin's PitAssignmentPanel,
+  // assignmentKind="prescout"). Unlike match scouting assignments, these are
+  // team-based, not match-based, so they get their own list rather than
+  // merging into myScoutAssignments/compareScoutAssignmentMatches.
+  let myPrescoutAssignments = [];
+  let prescoutEventKey = '';
+
   // Data assignments used to open /datascout. That page is gone, so they go
   // to Quick Scout instead - it is the surviving surface that writes to the
   // same /datascout endpoint, so the assignment still gets recorded.
@@ -213,6 +222,24 @@
     }catch(e){ /* ignore */ }
   }
 
+  async function loadPrescoutAssignments(){
+    if(!user?.id) return;
+    try {
+      const eventKey = await fetchActiveScoutingEventKey();
+      if (!eventKey) { myPrescoutAssignments = []; return; }
+      const authHeaders = await getAuthHeader();
+      const res = await fetch(`/api/prescout-assignments?event_key=${encodeURIComponent(eventKey)}`, {
+        headers: authHeaders
+      });
+      const js = await res.json();
+      const rows = Array.isArray(js?.data) ? js.data : [];
+      prescoutEventKey = eventKey;
+      myPrescoutAssignments = rows
+        .filter(r => r.assigned_user === user.id && !r.completed_at)
+        .sort((a, b) => Number(String(a.team_key).replace(/^frc/i,'')) - Number(String(b.team_key).replace(/^frc/i,'')));
+    }catch(e){ /* ignore */ }
+  }
+
   onMount(() => {
     const unsub = userStore.subscribe((v) => { user = v; });
     const unsubAuthUser = authUserStore.subscribe((v) => { authUser = v; });
@@ -239,6 +266,7 @@
   $: if (user && !scoutingLoaded) {
     scoutingLoaded = true;
     loadScoutAssignments();
+    loadPrescoutAssignments();
   }
 
   // Keep this browser's login-screen cache in sync with the account's saved
@@ -515,6 +543,23 @@
                       <a class="assignment-card" href={`/${scoutAssignmentRoute(assignment.scouting_type)}`}>
                         <h5>{assignment.scouting_type} scouting - Match #{assignment.match_key.split('_').pop()}</h5>
                         <p class="muted">Team {String(assignment.team_key || '').replace(/^frc/i, '')}</p>
+                      </a>
+                    {/each}
+                  </div>
+                {/if}
+
+                {#if myPrescoutAssignments.length > 0}
+                  <div class="assignment-heading" style="margin-top:1rem;">
+                    <div>
+                      <h4>Your Pre-Scouting Assignments</h4>
+                      <p class="muted">Teams assigned to you to research before they arrive at the event.</p>
+                    </div>
+                  </div>
+                  <div class="card-grid">
+                    {#each myPrescoutAssignments.slice(0, 8) as assignment}
+                      <a class="assignment-card" href={`/teamview?team=${encodeURIComponent(String(assignment.team_key || '').replace(/^frc/i, ''))}&event_key=${encodeURIComponent(prescoutEventKey)}&from=/&fromLabel=Home`}>
+                        <h5>Team {String(assignment.team_key || '').replace(/^frc/i, '')}</h5>
+                        <p class="muted">Pre-scouting</p>
                       </a>
                     {/each}
                   </div>

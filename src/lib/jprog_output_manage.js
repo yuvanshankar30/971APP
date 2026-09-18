@@ -49,3 +49,25 @@ export async function uploadOutputRepoFile(path, file) {
 	const content = await readFileAsBase64(file);
 	await callManageFunction({ action: 'upload', path, content });
 }
+
+function base64ToBlob(base64) {
+	const binary = atob(base64.replace(/\n/g, ''));
+	const bytes = new Uint8Array(binary.length);
+	for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+	return new Blob([bytes]);
+}
+
+// Output files exist in the GitHub repository, not in Supabase Storage.
+// Save the fetched contents through a blob URL so the download stays in the
+// current tab and retains the repository filename.
+export async function downloadOutputRepoFile(path) {
+	const { name, content } = await callManageFunction({ action: 'download', path });
+	const blobUrl = URL.createObjectURL(base64ToBlob(content));
+	const link = document.createElement('a');
+	link.href = blobUrl;
+	link.download = name || path.split('/').pop();
+	document.body.appendChild(link);
+	link.click();
+	link.remove();
+	URL.revokeObjectURL(blobUrl);
+}

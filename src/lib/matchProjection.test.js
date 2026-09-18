@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { allianceStrength, isMatchPlayed, matchLabel, projectMatch } from './matchProjection.js';
+import { allianceProjectedScore, allianceStrength, isMatchPlayed, matchLabel, projectMatch } from './matchProjection.js';
 
 describe('allianceStrength', () => {
   it('sums known team power and defaults an unscouted team to average (50)', () => {
@@ -30,6 +30,17 @@ describe('projectMatch', () => {
   it('projects nothing when an alliance has no scouted teams at all', () => {
     const unknownMatch = { alliances: { red: { team_keys: ['frc1'] }, blue: { team_keys: ['frc999'] } } };
     expect(projectMatch(unknownMatch, new Map([['frc1', 80]])).redWinProbability).toBeNull();
+  });
+});
+
+describe('allianceProjectedScore', () => {
+  it('sums known teams and omits unscouted ones rather than assuming an average', () => {
+    const projectedScores = new Map([['frc1', 40], ['frc2', 30]]);
+    expect(allianceProjectedScore(['frc1', 'frc2', 'frc3'], projectedScores)).toBe(70);
+  });
+
+  it('returns null when no team in the alliance has a projected score', () => {
+    expect(allianceProjectedScore(['frc9', 'frc8'], new Map())).toBeNull();
   });
 });
 

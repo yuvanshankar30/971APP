@@ -174,7 +174,7 @@ left for an operator to review so its CAM work cannot be duplicated.
 | `AutoArrange.py` | 2D nesting solver |
 | `GroupingValidation.py` | Rejects incomplete or inconsistent nesting results |
 | `SetupGenerator.py` | CAM setup creation |
-| `NewNCProgram.py` | G-code export |
+| `NewNCProgram.py` | G-code export - posts through Fusion's NCProgram API so each setup's program is written to disk *and* kept as a persistent entry (named `<document name> AUTOCAM`) under the document's own "NC Programs" browser folder, not just as a file in `FINAL_PATH`/Output. The post itself still has to be resolved from Fusion's local post library by matching its bundled `.cps`'s own `description =` string (see `_resolve_post_configuration`) - there's no API to hand it an arbitrary local file path directly. |
 | `NcArtifacts.py` | Exact-byte NC artifact collection and checksums |
 | `Orientation.py` | Auto-orient parts (largest face up) |
 | `HandleTube.py` | Box-tube setups: WCS, G55, hole/shape rebinding, tube cutoff (see [`docs/tubestock-cam.md`](docs/tubestock-cam.md)) |

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   summarizeTeamEvents, summarizeTeamPerformance, buildPowerRankings,
   fuelCountFromEvents, deriveMatchTeamRow, summarizeScoutNotes, summarizePitScouting,
-  applyPairwiseConsensus, summarizePairwisePair, summarizeMatchScoutEntries
+  applyPairwiseConsensus, matchRankingsToPairwiseVotes, summarizePairwisePair, summarizeMatchScoutEntries
 } from './scoutingStats.js';
 
 function event(overrides) {
@@ -394,6 +394,28 @@ describe('human pairwise consensus', () => {
     ], 'frc2', 'frc1');
     expect(summary).toMatchObject({ voteCount: 2, firstWins: 1, secondWins: 1, leaderKey: null });
     expect(summary.firstShare).toBe(0.5);
+  });
+
+  it('derives all direct comparisons from a shared best-to-worst match ranking', () => {
+    const votes = matchRankingsToPairwiseVotes([
+      { match_key: '2026test_qm1', ranked_team_keys: ['frc4414', 'frc254', 'frc2910'] }
+    ]);
+    expect(votes).toEqual([
+      expect.objectContaining({ team_a_key: 'frc4414', team_b_key: 'frc254', winner_team_key: 'frc4414' }),
+      expect.objectContaining({ team_a_key: 'frc4414', team_b_key: 'frc2910', winner_team_key: 'frc4414' }),
+      expect.objectContaining({ team_a_key: 'frc254', team_b_key: 'frc2910', winner_team_key: 'frc254' })
+    ]);
+  });
+
+  it('uses indirect match evidence in the human consensus order', () => {
+    const votes = matchRankingsToPairwiseVotes([
+      { ranked_team_keys: ['frc2', 'frc3'] },
+      { ranked_team_keys: ['frc1', 'frc2'] }
+    ]);
+    const consensus = applyPairwiseConsensus(teams, votes);
+    expect(consensus.find((team) => team.key === 'frc1').humanRank).toBe(1);
+    expect(consensus.find((team) => team.key === 'frc2').humanRank).toBe(2);
+    expect(consensus.find((team) => team.key === 'frc3').humanRank).toBe(3);
   });
 
   it('creates a separate human rank without altering calculated Scout Power', () => {

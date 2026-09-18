@@ -68,11 +68,19 @@ describe('Fusion Runner browser setup', () => {
 
     const complete = { ...activeSession, completed_at: '2026-09-10T12:00:00.000Z', machine_id: 'machine-id' };
     const completeSupabase = {
-      from: vi.fn(() => chain({ data: complete, error: null })),
+      // A completed poll also looks up every already-enabled real machine
+      // (see pollFusionRunnerSetup's own comment) so a fresh install can
+      // claim real CAM work immediately - table-routed since this query
+      // and the session lookup above it both go through the same
+      // supabase.from() mock.
+      from: vi.fn((table) => table === 'cam_machines'
+        ? { select: () => ({ eq: async () => ({ data: [{ id: 'machine-id' }, { id: 'other-machine-id' }], error: null }) }) }
+        : chain({ data: complete, error: null })),
       rpc: vi.fn(async () => ({ data: [{ runner_name: 'router-host', machine_id: 'machine-id', token: 'frt_machine' }], error: null }))
     };
     await expect(pollFusionRunnerSetup(completeSupabase, activeSession.id, 'poll-secret')).resolves.toEqual({
-      status: 'complete', runnerName: 'router-host', machineId: 'machine-id', token: 'frt_machine'
+      status: 'complete', runnerName: 'router-host', machineId: 'machine-id',
+      machineIds: ['machine-id', 'other-machine-id'], token: 'frt_machine'
     });
   });
 

@@ -90,7 +90,10 @@ export function defaultHeaderTabs(navConfig = navigation) {
       // Strategy leads: it is the board the team actually opens to decide
       // something, and it reads from every other surface below it.
       { key: 'strategy', label: 'Strategy' },
+      { key: 'driveteam', label: 'Drive Team' },
+      { key: 'picklist', label: 'Picklist' },
       { key: 'matchscout', label: 'Match Scouting' },
+      { key: 'matchrankings', label: 'Match Rankings' },
       { key: 'pitscout', label: 'Pit Scouting' },
       { key: 'powerrankings', label: 'Power Rankings' },
       { key: 'robotratings', label: 'Robot Ratings' },
@@ -196,6 +199,29 @@ export function ensurePowerRankingsTab(tabs, navConfig = navigation) {
     ...folder,
     children: [...(Array.isArray(folder.children) ? folder.children : []), entry]
   };
+  return next;
+}
+
+// The post-match ordering board is separate from the Power Rankings readout:
+// one gathers the shared field observation, the other explains its aggregate
+// result. Existing custom headers must receive it without losing their order.
+export function ensureMatchRankingsTab(tabs, navConfig = navigation) {
+  if (navConfig?.tabs?.matchrankings === false) return tabs;
+  if (!Array.isArray(tabs)) return tabs;
+  if (containsTabKey(tabs, 'matchrankings')) return tabs;
+
+  const entry = { key: 'matchrankings', label: 'Match Rankings' };
+  const folderIndex = tabs.findIndex(
+    (item) => item?.type === 'folder' && item?.label === COMPETITION_FOLDER_LABEL
+  );
+  if (folderIndex === -1) return [...tabs, { type: 'tab', ...entry }];
+
+  const folder = tabs[folderIndex];
+  const next = [...tabs];
+  const children = [...(Array.isArray(folder.children) ? folder.children : [])];
+  const matchScoutIndex = children.findIndex((item) => item?.key === 'matchscout');
+  children.splice(matchScoutIndex >= 0 ? matchScoutIndex + 1 : children.length, 0, entry);
+  next[folderIndex] = { ...folder, children };
   return next;
 }
 
@@ -336,6 +362,44 @@ export function ensureFusionAutocamTab(tabs, navConfig = navigation) {
 
 // Scouting Admin is filtered by the layout based on the signed-in user's role.
 // Adding it here also lets an authorized user with a saved/custom header see it.
+export function ensureDriveTeamTab(tabs) {
+  if (!Array.isArray(tabs)) return tabs;
+  if (containsTabKey(tabs, 'driveteam')) return tabs;
+
+  const entry = { key: 'driveteam', label: 'Drive Team' };
+  const folderIndex = tabs.findIndex(
+    (item) => item?.type === 'folder' && item?.label === COMPETITION_FOLDER_LABEL
+  );
+  if (folderIndex === -1) return [...tabs, { type: 'tab', ...entry }];
+
+  const folder = tabs[folderIndex];
+  const next = [...tabs];
+  next[folderIndex] = {
+    ...folder,
+    children: [...(Array.isArray(folder.children) ? folder.children : []), entry]
+  };
+  return next;
+}
+
+export function ensurePicklistTab(tabs) {
+  if (!Array.isArray(tabs)) return tabs;
+  if (containsTabKey(tabs, 'picklist')) return tabs;
+
+  const entry = { key: 'picklist', label: 'Picklist' };
+  const folderIndex = tabs.findIndex(
+    (item) => item?.type === 'folder' && item?.label === COMPETITION_FOLDER_LABEL
+  );
+  if (folderIndex === -1) return [...tabs, { type: 'tab', ...entry }];
+
+  const folder = tabs[folderIndex];
+  const next = [...tabs];
+  next[folderIndex] = {
+    ...folder,
+    children: [...(Array.isArray(folder.children) ? folder.children : []), entry]
+  };
+  return next;
+}
+
 export function ensureScoutingAdminTab(tabs) {
   if (!Array.isArray(tabs)) return tabs;
   if (containsTabKey(tabs, 'scouting-admin')) return tabs;

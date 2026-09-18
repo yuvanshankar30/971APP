@@ -29,5 +29,5 @@ def tube_face_program_name(base_name, clock):
     """Filename stem for one face; Fusion's post processor adds .ngc/.nc."""
     tube_face_label(clock)  # validates clock
     base = str(base_name or "tube").strip() or "tube"
-    suffix = "-side-{}".format(clock)
+    suffix = "-side-{}-AUTOCAM".format(clock)
     return "{}{}".format(base[:FUSION_PROGRAM_NAME_MAX_LENGTH - len(suffix)], suffix)

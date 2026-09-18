@@ -124,16 +124,25 @@ browser confirmation or prompt popups.
   part rotation alongside quarter-turn shortcuts.
   A sheet is locked to either LinuxCNC `.ngc` or WinCNC `.tap` programs on its
   first upload, and emission uses that one corresponding program type.
+  For WinCNC plate programs, the release/slot cut that separates a part
+  from stock must use Tool 6; AutoCAM rejects another assigned release tool
+  before posting, and JProg rejects it again before emission.
   Its part programs are isolated in Manufacturing Files under `Nesting Parts
   Library/<sheet name>/`.
   A sheet can contain multiple named cuts: every cut remains visible in its own
   canvas color, while editing and G-code emission apply only to the selected
   cut and its holes.
+  Operators can install the separate shared repository through a Desktop
+  `Output` link with `/install/jprog-output` (or `/install/jprog-output/windows`
+  on Windows); its per-user sync service sorts new G-code,
+  commits/pushes local changes, and pulls Output Editor changes automatically.
+  See `jprog/SHARED_OUTPUT_FOLDER.md` for the one-command setup and
+  operator details.
 - **JustinProgOutput contract**: `JustinProgOutput` is the canonical output root
   in both the `manufacturing-drive` Storage bucket and the public
   `yuvanshankar30/output` repository. Every emitted or manually uploaded
   `.ngc`/`.tap` file is stored as `JustinProgOutput/YYYYMMDD/filename`, using
-  the UTC calendar date. Root uploads are routed into the current date folder;
+  the Pacific calendar date. Root uploads are routed into the current date folder;
   uploads inside an existing date folder remain there. The Supabase
   `jprog-output` Edge Function authenticates the caller, validates the path and
   content size, then creates or updates the matching GitHub Contents API path
@@ -357,21 +366,29 @@ browser confirmation or prompt popups.
   user, including in local development; write attribution always comes from
   the verified session rather than a caller-provided user ID. Public,
   event-scoped read views remain available where documented.
-- **Power Rankings** (`powerrankings/`): the last item in the Competition nav
-  folder - its own page rather than a mode of the Pick List workspace, so it
-  never gets confused with that page's comparison table. An event-relative
-  ranking built only from combined local scout observations.
+- **Match Rankings** (`matchrankings/`): a shared post-match ordering board
+  in Competition. It loads the six teams from each The Blue Alliance match,
+  lets the scouting group save and later revise one best-to-worst order per
+  match, and turns each order into higher-over-lower evidence for the separate
+  Human Rank shown in Power Rankings. This connects robots indirectly across
+  matches while leaving calculated Scout Power unchanged.
+- **Power Rankings** (`powerrankings/`): the Competition ranking readout - its
+  own page rather than a mode of the Pick List workspace, so it never gets
+  confused with that page's comparison table. An event-relative ranking built
+  from combined local scout observations.
 
   It shows **four deliberately distinct measures**, and the page says so in
   as many words, because conflating them would misrepresent an official FRC
   standing:
   - **971 Scout Power** - our own ranking from our own scouts. The primary
     column, and *not* an FRC ranking; it exists to inform our picks.
-  - **Human Consensus** - a separate preference rank produced by authenticated
-    scouts choosing between two robots. Each scout gets one current vote per
-    event/team pair; changing the choice updates it. These votes never alter
-    Scout Power. A two-thirds-or-stronger majority that opposes a calculated
-    Scout Power gap of at least five points flags both robots for human review.
+  - **Human Consensus** - a separate preference rank produced by the shared
+    post-match order plus authenticated head-to-head choices. Each saved match
+    order contributes its higher-over-lower robot comparisons, which carries
+    ordering across matches; each scout's direct choice remains one current
+    vote per event/team pair. Neither signal alters Scout Power. A
+    two-thirds-or-stronger majority that opposes a calculated Scout Power gap
+    of at least five points flags both robots for human review.
   - **Official Event Rank** - the real qualification standing from The Blue
     Alliance, which FIRST computes from Ranking Points earned in qualification
     matches. The only official rank on the page.

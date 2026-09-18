@@ -1887,15 +1887,25 @@ textarea:focus,
     padding: var(--space-2);
   }
   
-  /* Stack page headers on mobile */
+  /* Stack page headers on mobile - tightened further (smaller padding,
+     smaller title, a shorter subtitle) so the header itself doesn't cost
+     a full screen's worth of scroll before any real content shows. */
   .page-header {
     flex-direction: column;
     align-items: flex-start;
-    gap: var(--gap-3);
+    gap: var(--gap-2);
+    padding: var(--space-3);
+    margin-bottom: var(--space-3);
   }
-  
+
   .page-header h1 {
-    font-size: var(--font-xl);
+    font-size: var(--font-lg);
+  }
+
+  .header-content p {
+    margin-top: 2px;
+    font-size: 0.7rem;
+    line-height: 1.3;
   }
   
   .page-actions {

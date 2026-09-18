@@ -41,7 +41,7 @@ function autoCamProgramName(job, artifact, index, total, kind) {
     .replace(/[^A-Za-z0-9_-]/g, '') || 'Fusion';
   const extension = /\.tap$/i.test(String(artifact.name || '')) ? 'tap' : 'ngc';
   const tubeSide = kind === 'box_tube'
-    ? String(artifact.name || '').match(/-side-(12|3|6|9)\.(?:nc|ngc|tap)$/i)?.[1]
+    ? String(artifact.name || '').match(/-side-(12|3|6|9)(?:-AUTOCAM)?\.(?:nc|ngc|tap)$/i)?.[1]
     : null;
   const uniqueNumber = !tubeSide && total > 1 ? `-${index + 1}` : '';
   const suffix = tubeSide ? `tubeside${tubeSide}` : uniqueNumber;
@@ -56,7 +56,7 @@ function autoCamArtifactPath(job, artifact, index, total, kind) {
 }
 
 function validateTubeNcArtifacts(ncFiles) {
-  const sides = ncFiles.map((artifact) => String(artifact.name).match(/-side-(12|3|6|9)\.(?:nc|ngc|tap)$/i)?.[1]);
+  const sides = ncFiles.map((artifact) => String(artifact.name).match(/-side-(12|3|6|9)(?:-AUTOCAM)?\.(?:nc|ngc|tap)$/i)?.[1]);
   if (ncFiles.length !== 4 || new Set(sides).size !== 4 || sides.some((side) => !side)) {
     throw new Error('Box-tube CAM must post exactly four per-setup NC files: Side 12, Side 3, Side 6, and Side 9');
   }
@@ -193,7 +193,17 @@ export async function POST({ request, url }) {
   let body;
   try {
     body = await request.json();
-  } catch {
+  } catch (err) {
+    // A body over adapter-node's BODY_SIZE_LIMIT (see cloudbuild.yaml) makes
+    // the underlying request stream error with a 413 the moment
+    // request.json() tries to read it - real, confirmed root cause of tube
+    // job completion uploads (large multi-file base64 G-code payloads)
+    // intermittently failing. Report that distinctly instead of collapsing
+    // it into the same generic message as an actual malformed-JSON body,
+    // which made a body-too-large condition indistinguishable from one.
+    if (err?.status === 413) {
+      return json({ error: 'Request body too large' }, { status: 413 });
+    }
     return json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 

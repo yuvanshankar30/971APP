@@ -429,6 +429,70 @@ def _require_release_contour(cam) -> None:
     )
 
 
+_APPROVED_RELEASE_CUT_TOOL_NUMBERS = (6,)
+
+
+def _require_approved_release_cut_tool(cam) -> None:
+    """Raise if the release-contour operation (group_tabs=true, posted in
+    G-code as "2D Slot Cut" / "Slot Cut for Edges") is assigned any tool
+    other than Tool 6.
+
+    Direct operator report, with a real posted G-code snippet: a plate job's
+    release cut posted under "[Tool 2]" / T2 - Tool 2 must never cut a
+    release contour. Direct instruction: only Tool 6 is approved for now.
+    The template's own tool is "971 Main Bit" (NC number 1 in the template
+    XML itself), but _index_tools/_find_matching_tool in templateTools.py
+    resolves the actual posted tool from whatever the job's own tool
+    library maps that description (or, on a diameter-only fallback match,
+    its type and diameter) to - a library where that entry is assigned a
+    different NC number silently posts the wrong physical tool, with
+    nothing catching it before the machine does. Checked the same way and
+    at the same point as _require_release_contour (identifying the
+    operation via group_tabs, not by operation name, since DeleteToolpaths
+    only leaves the survivors to check) - this is the earliest possible
+    point to catch it, before the file is ever posted or uploaded. JProg's
+    own emission path (gcodeEmit.js) carries the same check as a second,
+    independent line of defense for any file that reaches it despite this
+    one, but should never actually need to.
+
+    cam may be None (the CAM product failed to resolve) - nothing to check
+    in that case, same as _require_release_contour.
+    """
+    if cam is None:
+        return
+    for setup in cam.setups:
+        for op in setup.operations:
+            if op.strategy != "contour2d":
+                continue
+            group_tabs_param = op.parameters.itemByName("group_tabs")
+            if group_tabs_param is None:
+                continue
+            try:
+                is_release = str(group_tabs_param.expression).strip().lower() == "true"
+            except Exception:
+                is_release = False
+            if not is_release:
+                continue
+            try:
+                # adsk.cam.Tool has no .number property at all (confirmed
+                # live against a real open document: AttributeError) - the
+                # real NC tool number is a parameter on the tool itself,
+                # read the same way _operation_tool_diameter_cm already
+                # reads op.tool.parameters.itemByName("tool_diameter").
+                tool_number = int(str(op.tool.parameters.itemByName("tool_number").expression).strip())
+            except Exception:
+                continue
+            if tool_number not in _APPROVED_RELEASE_CUT_TOOL_NUMBERS:
+                raise RuntimeError(
+                    "The release-contour operation ('{}') is assigned Tool {} - "
+                    "only Tool 6 is approved to cut a release/slot cut. Check "
+                    "the tool library used for this job: whatever tool matched "
+                    "the template's '971 Main Bit' entry (or, on a diameter "
+                    "fallback, its type and diameter) is assigned the wrong "
+                    "NC number there.".format(op.name, tool_number)
+                )
+
+
 def _require_through_hole_for_finishing_pass(cam) -> None:
     """Raise if a setup has a Shape Through Finishing Pass with no matching
     Shape Through Hole roughing operation, or vice versa - the pairing is
@@ -646,6 +710,230 @@ def _require_pocket_finishing_pass_pairing(cam) -> None:
                 "in the same setup. Check the Runner's log for a partial "
                 "chain-assignment failure in DeleteToolpaths."
             )
+
+
+def _operation_tool_diameter_cm(op):
+    """This operation's assigned tool diameter, in cm - None if it can't be
+    read. Duplicated from DeleteToolpaths.py's own function of the same
+    name for the same reason every other guard in this file duplicates
+    rather than imports (see _require_through_hole_for_finishing_pass's own
+    docstring) - this module loads Fusion's runtime-only adsk package at
+    import time.
+    """
+    try:
+        parameter = op.tool.parameters.itemByName("tool_diameter")
+        if parameter is None:
+            return None
+        return float(parameter.value.value)
+    except Exception:
+        return None
+
+
+# Kept identical to DeleteToolpaths.py's own constant/function of the same
+# name - see that file for the "confirmed live" incident behind the ramp-
+# diameter math (a 6mm tool's real ~0.95-tool-diameter helix needing more
+# clearance than the bare 1.5x-diameter rule assumed, routing it onto an
+# opening it could not actually enter).
+_ROUGHING_FIT_CLEARANCE_FACTOR = 1.5
+
+
+def _adaptive_entry_clearance_cm(op, tool_diameter_cm):
+    fallback = tool_diameter_cm * _ROUGHING_FIT_CLEARANCE_FACTOR
+    try:
+        ramp_type = op.parameters.itemByName("rampType")
+        if ramp_type is not None:
+            expression = str(ramp_type.expression).strip().strip("'").lower()
+            if expression and expression != "helix":
+                return fallback
+        ramp = op.parameters.itemByName("minimumRampDiameter")
+        if ramp is None:
+            ramp = op.parameters.itemByName("helicalRampDiameter")
+        if ramp is None:
+            return fallback
+        ramp_diameter_cm = float(ramp.value.value)
+        if ramp_diameter_cm <= 0:
+            return fallback
+        return tool_diameter_cm + ramp_diameter_cm
+    except Exception:
+        return fallback
+
+
+def _point_to_segment_distance_cm(point, seg_start, seg_end) -> float:
+    """Distance from point to the finite segment seg_start->seg_end, in cm -
+    duplicated from DeleteToolpaths.py's own function of the same name, see
+    that file's docstring for why this module duplicates rather than
+    imports."""
+    px, py = point
+    ax, ay = seg_start
+    bx, by = seg_end
+    delta_x, delta_y = bx - ax, by - ay
+    length_sq = delta_x * delta_x + delta_y * delta_y
+    if length_sq <= 1e-12:
+        return ((px - ax) ** 2 + (py - ay) ** 2) ** 0.5
+    t = max(0.0, min(1.0, ((px - ax) * delta_x + (py - ay) * delta_y) / length_sq))
+    closest_x, closest_y = ax + t * delta_x, ay + t * delta_y
+    return ((px - closest_x) ** 2 + (py - closest_y) ** 2) ** 0.5
+
+
+def _chain_min_clearance_cm(points):
+    """The tighter of a point set's convex-hull caliper width and a
+    conservative inscribed-circle estimate, in cm - None if unmeasurable.
+
+    Same reasoning as DeleteToolpaths.py's _loop_min_clearance_cm (see that
+    docstring for the confirmed-live incident this exists for): a bounding
+    box or caliper width alone overstates real interior clearance for a
+    POINTED shape like a triangular lightening pocket, so this also checks
+    a cheap, always-conservative lower bound on the shape's inscribed
+    circle (double the point set's own centroid's distance to its nearest
+    hull edge) and returns whichever of the two is smaller.
+    """
+    points = sorted(set(points))
+    if len(points) < 3:
+        return None
+
+    def _cross(origin, point_a, point_b):
+        return (
+            (point_a[0] - origin[0]) * (point_b[1] - origin[1])
+            - (point_a[1] - origin[1]) * (point_b[0] - origin[0])
+        )
+
+    lower = []
+    for point in points:
+        while len(lower) >= 2 and _cross(lower[-2], lower[-1], point) <= 0:
+            lower.pop()
+        lower.append(point)
+    upper = []
+    for point in reversed(points):
+        while len(upper) >= 2 and _cross(upper[-2], upper[-1], point) <= 0:
+            upper.pop()
+        upper.append(point)
+    hull = lower[:-1] + upper[:-1]
+    if len(hull) < 3:
+        return None
+
+    minimum_width = None
+    for index, point_a in enumerate(hull):
+        point_b = hull[(index + 1) % len(hull)]
+        delta_x = point_b[0] - point_a[0]
+        delta_y = point_b[1] - point_a[1]
+        length = (delta_x * delta_x + delta_y * delta_y) ** 0.5
+        if length <= 1e-9:
+            continue
+        normal_x, normal_y = -delta_y / length, delta_x / length
+        projections = [point[0] * normal_x + point[1] * normal_y for point in hull]
+        width = max(projections) - min(projections)
+        if minimum_width is None or width < minimum_width:
+            minimum_width = width
+    if minimum_width is None:
+        return None
+
+    centroid_x = sum(point[0] for point in hull) / len(hull)
+    centroid_y = sum(point[1] for point in hull) / len(hull)
+    inscribed_diameter = 2 * min(
+        _point_to_segment_distance_cm((centroid_x, centroid_y), hull[index], hull[(index + 1) % len(hull)])
+        for index in range(len(hull))
+    )
+    return min(minimum_width, inscribed_diameter)
+
+
+def _undersized_roughing_chain_warnings(cam) -> list:
+    """A chain routed to a through-shape roughing tier whose real entry
+    envelope cannot fit it - the specific gap neither of this file's other
+    checks can see.
+
+    Confirmed live as a real incident (this is the same failure
+    DeleteToolpaths' own _adaptive_entry_clearance_cm was written to
+    prevent at routing time - see that function's docstring in
+    DeleteToolpaths.py): DeleteToolpaths routes each chain to the largest
+    tool whose own clearance threshold it clears, but a chain can still end
+    up on a tool too big for it - a template change, a borderline width
+    measurement, or simply this check's own conservative bounding-box proxy
+    disagreeing with whatever measurement routed it. When only one chain in
+    a many-chain operation is affected, Fusion's per-operation
+    isToolpathValid/warning stay clean (the OTHER chains in that same
+    operation are genuinely fine), so nothing at the operation level ever
+    flags it - confirmed separately in this file's own history (see
+    _operation_warnings' Issue #316 reference for the same class of
+    silent-partial-failure).
+
+    This also is not the same gap _require_through_hole_for_finishing_pass
+    closes: that guard confirms a chain is SELECTED in some roughing tier,
+    which it still is here - Fusion doesn't remove a chain from a
+    selection just because it can't cut it. And it is not the same gap
+    _coverage_warnings' own loop-matching closes either: a finishing pass
+    traces a chain's boundary regardless of whether any roughing tier
+    actually cleared its interior, so a G-code loop can exist at that
+    location from finishing alone, reading as "covered" while the interior
+    was never removed.
+
+    Reports a chain's own real clearance - the tighter of its overall
+    caliper width and a conservative inscribed-circle estimate (see
+    _chain_min_clearance_cm) - against the operation's real entry clearance
+    (the exact same _adaptive_entry_clearance_cm calculation DeleteToolpaths
+    uses to route it). Confirmed live and real, not theoretical: a plain
+    axis-aligned bounding box alone (this function's own earlier
+    implementation) missed a genuine incident - a real part's triangular
+    lightening pockets measured ~1.02-1.17cm by inscribed-circle estimate
+    but ~1.30-1.62cm by bounding box/caliper width alone, so 10 of 22
+    chains on a real "big endmill" roughing operation read as wide enough
+    by the cruder measure while genuinely failing the tool's real entry
+    clearance - see DeleteToolpaths.py's _loop_min_clearance_cm docstring
+    for the same incident and the reasoning behind the inscribed-circle
+    estimate. Both measures only ever read AT MOST a chain's true narrowest
+    passage, so a chain flagged here is provably too tight, never a
+    borderline maybe. Warning-only and best-effort like the rest of this
+    module's coverage checks (see _coverage_warnings' own docstring for
+    why) - even this improved proxy is cruder than a real toolpath result,
+    so this reports for a human to check rather than failing a job
+    outright.
+    """
+    warnings = []
+    try:
+        for setup in cam.setups:
+            for op in setup.operations:
+                name_lower = str(op.name or "").lower()
+                if "through" not in name_lower or "circular" in name_lower or op.strategy in ("bore", "contour2d"):
+                    continue
+                tool_diameter_cm = _operation_tool_diameter_cm(op)
+                if not tool_diameter_cm:
+                    continue
+                required_cm = _adaptive_entry_clearance_cm(op, tool_diameter_cm)
+                param = op.parameters.itemByName("pockets")
+                value = param.value if param is not None else None
+                if value is None or not hasattr(value, "getCurveSelections"):
+                    continue
+                for chain in value.getCurveSelections():
+                    corners = []
+                    for edge in getattr(chain, "inputGeometry", None) or []:
+                        try:
+                            box = edge.boundingBox
+                            min_x, max_x = box.minPoint.x, box.maxPoint.x
+                            min_y, max_y = box.minPoint.y, box.maxPoint.y
+                            corners += [(min_x, min_y), (min_x, max_y), (max_x, min_y), (max_x, max_y)]
+                        except Exception:
+                            continue
+                    if not corners:
+                        continue
+                    min_span_cm = _chain_min_clearance_cm(corners)
+                    if min_span_cm is None:
+                        continue
+                    xs = [corner[0] for corner in corners]
+                    ys = [corner[1] for corner in corners]
+                    if min_span_cm < required_cm - 1e-6:
+                        cx = (min(xs) + max(xs)) / 2 / 2.54
+                        cy = (min(ys) + max(ys)) / 2 / 2.54
+                        warnings.append(
+                            "'{}' is routed a feature near ({:.3f}, {:.3f})in only {:.3f}in wide, "
+                            "narrower than this tier's own {:.3f}in tool needs to enter "
+                            "({:.3f}in real clearance required) - it will not actually be cleared. "
+                            "Check DeleteToolpaths' chain routing for why this chain wasn't sent to a "
+                            "smaller tier.".format(
+                                op.name, cx, cy, min_span_cm / 2.54, tool_diameter_cm / 2.54, required_cm / 2.54
+                            )
+                        )
+    except Exception:
+        pass
+    return warnings
 
 
 def _coverage_warnings(app, cam, nc_files) -> list:
@@ -1026,6 +1314,7 @@ def start(data, session):
             app.log("Failed to resolve the CAM product after DeleteToolpaths:\n{}".format(traceback.format_exc()))
 
         _require_release_contour(cam)
+        _require_approved_release_cut_tool(cam)
         _require_through_hole_for_finishing_pass(cam)
         _require_pocket_finishing_pass_pairing(cam)
 
@@ -1118,7 +1407,17 @@ def start(data, session):
         for warning in operation_warnings:
             app.log(f"OPERATION: {warning}")
 
-        job_warnings = coverage_warnings + operation_warnings
+        # A third, distinct gap neither check above closes: a chain still
+        # selected in a roughing tier (satisfies the pairing guards) with a
+        # G-code loop near it from finishing alone (satisfies the coverage
+        # check's loop-matching) can still never have been actually cleared,
+        # if that tier's own tool cannot physically enter it. See
+        # _undersized_roughing_chain_warnings' own docstring.
+        fit_warnings = _undersized_roughing_chain_warnings(cam)
+        for warning in fit_warnings:
+            app.log(f"TOOL FIT: {warning}")
+
+        job_warnings = coverage_warnings + operation_warnings + fit_warnings
 
         completion_data = {
             "jobId": job_id,

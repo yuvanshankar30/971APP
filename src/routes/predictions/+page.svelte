@@ -206,11 +206,11 @@
         <tbody>
           {#each standings as row, index (row.userId)}
             <tr class:leader={index === 0} class:me={row.userId === userId}>
-              <td class="mono"><span class="rank-badge" class:medal={index < 3} data-medal={RANK_MEDAL[index]}>{index + 1}</span></td>
-              <td>{displayName(row.userId)}{#if index === 0}<Candy size={14} class="candy-inline" />{/if}</td>
-              <td class="strong">{points(row.balance)}</td>
-              <td>{row.wins}-{row.losses}{row.pushes ? ` (${row.pushes} push)` : ''}</td>
-              <td class="text-muted">{row.pendingStake ? points(row.pendingStake) : '—'}</td>
+              <td data-label="#" class="mono"><span class="rank-badge" class:medal={index < 3} data-medal={RANK_MEDAL[index]}>{index + 1}</span></td>
+              <td data-label="Scout">{displayName(row.userId)}{#if index === 0}<Candy size={14} class="candy-inline" />{/if}</td>
+              <td data-label="Balance" class="strong">{points(row.balance)}</td>
+              <td data-label="Record">{row.wins}-{row.losses}{row.pushes ? ` (${row.pushes} push)` : ''}</td>
+              <td data-label="Pending" class="text-muted">{row.pendingStake ? points(row.pendingStake) : '—'}</td>
             </tr>
           {/each}
         </tbody>
@@ -272,11 +272,11 @@
         <tbody>
           {#each myResolvedBets as bet (bet.id)}
             <tr>
-              <td>{matchLabelFor(bet.match_key)}</td>
-              <td class:alliance-red={bet.side === 'red'} class:alliance-blue={bet.side === 'blue'}>{bet.side}</td>
-              <td>{points(bet.stake)}</td>
-              <td>{points(bet.payout ?? 0)}</td>
-              <td class:positive={bet.payout > bet.stake} class:negative={bet.payout < bet.stake}>{points((bet.payout ?? 0) - bet.stake)}</td>
+              <td data-label="Match">{matchLabelFor(bet.match_key)}</td>
+              <td data-label="Pick" class:alliance-red={bet.side === 'red'} class:alliance-blue={bet.side === 'blue'}>{bet.side}</td>
+              <td data-label="Stake">{points(bet.stake)}</td>
+              <td data-label="Payout">{points(bet.payout ?? 0)}</td>
+              <td data-label="Net" class:positive={bet.payout > bet.stake} class:negative={bet.payout < bet.stake}>{points((bet.payout ?? 0) - bet.stake)}</td>
             </tr>
           {/each}
         </tbody>
@@ -345,8 +345,39 @@
   .negative { color:var(--danger, #dc3545); }
 
   @media (max-width:640px) {
-    .stat-row { grid-template-columns:1fr; }
+    /* Keep the three stat tiles in one compact row instead of stacking them
+       full-width - each is a single short number, and three short numbers
+       stacked into three full-height cards was pure wasted scroll for the
+       same information a tight row already shows. */
+    .stat-row { gap:var(--space-2); }
+    .stat-tile { padding:var(--space-2); gap:1px; }
+    .stat-tile .text-muted { font-size:.68rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .stat-amount { font-size:1rem; }
+    .stat-of { font-size:.72rem; }
     .candy-banner { flex-wrap:wrap; }
     .candy-balance { text-align:left; }
+    /* The leaderboard and settled-bets tables become one card per row - a
+       data-label attribute on each <td> supplies the printed label since
+       the real <th> row is hidden here. */
+    .bom-table thead { display:none; }
+    .bom-table, .bom-table tbody, .bom-table tr, .bom-table td { display:block; width:100%; }
+    .bom-table tr { border:1px solid var(--border); border-radius:var(--radius-lg); margin-bottom:var(--space-2); overflow:hidden; }
+    .bom-table td { display:flex; justify-content:space-between; align-items:center; gap:var(--space-3); text-align:right; }
+    .bom-table td::before { content:attr(data-label); flex-shrink:0; text-align:left; color:var(--text-muted); font-family:var(--font-mono-stack); font-size:.66rem; text-transform:uppercase; letter-spacing:.08em; }
+    /* The leaderboard specifically: two lines per scout (rank/name/balance,
+       then record + pending as small muted secondary text) instead of five
+       stacked label/value rows - rank was called out as taking too much
+       space, and this is the same data at a fifth the height. flex-basis:
+       100% on Record is what forces Record+Pending onto their own line
+       while Rank/Scout/Balance share the first. */
+    .leaderboard .bom-table tr { display:flex; flex-wrap:wrap; align-items:baseline; column-gap:var(--space-2); padding:var(--space-2) var(--space-3); }
+    .leaderboard .bom-table td { padding:0; }
+    .leaderboard .bom-table td::before { display:none; }
+    .leaderboard .bom-table td[data-label="#"] { order:1; }
+    .leaderboard .bom-table td[data-label="Scout"] { order:2; flex:1; min-width:0; justify-content:flex-start; text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .leaderboard .bom-table td[data-label="Balance"] { order:3; }
+    .leaderboard .bom-table td[data-label="Record"] { order:4; flex-basis:100%; justify-content:flex-start; font-size:.72rem; color:var(--text-muted); }
+    .leaderboard .bom-table td[data-label="Pending"] { order:5; font-size:.72rem; color:var(--text-muted); }
+    .leaderboard .bom-table td[data-label="Pending"]::before { content:"Pending: "; display:inline; font-size:inherit; text-transform:none; letter-spacing:normal; color:inherit; }
   }
 </style>

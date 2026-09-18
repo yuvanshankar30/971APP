@@ -18,11 +18,11 @@ export async function listPartsLibrary(sheetName) {
   return listPartLibraryAtPath(base);
 }
 
-async function listDirectory(path) {
+async function listDirectory(path, limit = 200) {
   const { data, error } = await supabase.storage
     .from(BUCKET)
     .list(path, {
-      limit: 200,
+      limit,
       sortBy: { column: "updated_at", order: "desc" },
     });
   if (error) throw error;
@@ -58,17 +58,30 @@ export async function listAllPartsLibrary() {
   return files.flat();
 }
 
-// Completed Fusion jobs are published into Files / AutoCAM. Keep this
-// traversal here so JProg can list both legacy flat uploads and the current
-// per-job folders without duplicating storage traversal in the editor.
+// Completed Fusion jobs are published into Files / AutoCAM. Plate (and other
+// non-tube) jobs post flat, directly under AutoCAM/ - box-tube jobs post
+// into their own per-job subfolder instead (AutoCAM/<jobId8>/..., see
+// autoCamArtifactPath in /api/fusion-runner/+server.js). Direct instruction:
+// JProg's sheets are flat stock, so tube face programs never belong in its
+// Upload AutoCAM list - only walking the flat files here, never recursing
+// into a subfolder, is what keeps them out.
+//
+// Direct operator report: the most recently posted job wasn't showing up
+// at the top of this list. Root-caused to a documented Supabase Storage
+// bug (supabase/storage-js#19) - .list()'s limit can be applied against
+// some internal "natural" order before sortBy takes effect, so passing
+// both together does not reliably return the newest entries first (or
+// even at all, once AutoCAM/ - files and tube-job subfolders combined -
+// has enough entries to exceed a small limit). A direct SQL check against
+// storage.objects confirmed the underlying data itself was never wrong.
+// Fetching a generous limit and re-sorting by updated_at here ourselves,
+// rather than trusting the API's own sortBy, sidesteps that bug entirely.
 export async function listAutoCamPrograms() {
-  const rootEntries = await listDirectory(AUTOCAM_ROOT);
-  const nested = await Promise.all(rootEntries.map(async (entry) => {
-    const path = `${AUTOCAM_ROOT}/${entry.name}`;
-    if (entry.id !== null) return [{ ...entry, path }];
-    return (await listDirectory(path)).filter((file) => file.id !== null).map((file) => ({ ...file, path: `${path}/${file.name}` }));
-  }));
-  return nested.flat();
+  const rootEntries = await listDirectory(AUTOCAM_ROOT, 1000);
+  return rootEntries
+    .filter((entry) => entry.id !== null)
+    .sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0))
+    .map((file) => ({ ...file, path: `${AUTOCAM_ROOT}/${file.name}` }));
 }
 
 // Keep old saved placements renderable after the library became sheet-scoped.

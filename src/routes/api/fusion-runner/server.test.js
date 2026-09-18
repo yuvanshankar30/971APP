@@ -225,10 +225,10 @@ describe('Fusion Runner grouping lifecycle',()=>{
    .mockReturnValueOnce(chain({data:{id:'tube-job',params:{fusionJobKind:'box_tube',fusionFileName:'Bottom Tube'}}}))
    .mockReturnValueOnce(chain({data:[{id:'tube-job'}]}));
   expect((await call('complete',{jobId:'tube-job',runnerId:'runner',ncFiles:[
-   {name:'Bottom Tube-side-12.tap',contentBase64:side12},
-   {name:'Bottom Tube-side-3.tap',contentBase64:side3},
-   {name:'Bottom Tube-side-6.tap',contentBase64:side6},
-   {name:'Bottom Tube-side-9.tap',contentBase64:side9}
+   {name:'Bottom Tube-side-12-AUTOCAM.tap',contentBase64:side12},
+   {name:'Bottom Tube-side-3-AUTOCAM.tap',contentBase64:side3},
+   {name:'Bottom Tube-side-6-AUTOCAM.tap',contentBase64:side6},
+   {name:'Bottom Tube-side-9-AUTOCAM.tap',contentBase64:side9}
   ]})).status).toBe(200);
   expect(mocks.storageUpload.mock.calls.map(([path])=>path)).toEqual([
    'AutoCAM/tube-job/BottomTubetubeside12(AUTOCAM).tap',
@@ -240,6 +240,23 @@ describe('Fusion Runner grouping lifecycle',()=>{
    'AutoCAM/tube-job/BottomTubetubeside9(AUTOCAM).tap',
    'Nesting Parts Library/AutoCAM/BottomTubetubeside9(AUTOCAM)/BottomTubetubeside9(AUTOCAM).tap'
   ]);
+ });
+ it('still recognizes tube side files posted before the -AUTOCAM filename suffix existed',async()=>{
+  // Backward compatibility: any job queued/claimed before this filename
+  // change deployed posts the old "-side-N.tap" form (no -AUTOCAM before
+  // the extension) - it must keep completing, not start failing with
+  // "must post exactly four per-setup NC files".
+  const program=Buffer.from('G20\nM30\n','utf8').toString('base64');
+  mocks.from
+   .mockReturnValueOnce(chain({data:{id:'tube-job',params:{fusionJobKind:'box_tube',fusionFileName:'Bottom Tube'}}}))
+   .mockReturnValueOnce(chain({data:[{id:'tube-job'}]}));
+  const result=await call('complete',{jobId:'tube-job',runnerId:'runner',ncFiles:[
+   {name:'Bottom Tube-side-12.tap',contentBase64:program},
+   {name:'Bottom Tube-side-3.tap',contentBase64:program},
+   {name:'Bottom Tube-side-6.tap',contentBase64:program},
+   {name:'Bottom Tube-side-9.tap',contentBase64:program}
+  ]});
+  expect(result.status).toBe(200);
  });
  it('rejects a tube completion that is missing a setup program',async()=>{
   mocks.from.mockReturnValueOnce(chain({data:{id:'tube-job',params:{fusionJobKind:'box_tube'}}}));
@@ -350,5 +367,25 @@ describe('Fusion Runner plate growth',()=>{
   const result=await call('grow-plate',{plateId,length:34,width:34});
   expect(await result.json()).toEqual({success:true,grown:true,length:34,width:100});
   expect(queries[1].update).toHaveBeenCalledWith({length:34,width:100});
+ });
+});
+describe('Fusion Runner completion upload body size',()=>{
+ // adapter-node's BODY_SIZE_LIMIT enforcement makes request.json() reject
+ // with a SvelteKitError carrying status 413 once a tube job's multi-file
+ // base64 completion payload exceeds the limit - real, confirmed root
+ // cause of "Invalid JSON body" 400s that were actually oversized bodies,
+ // not malformed JSON (see cloudbuild.yaml's BODY_SIZE_LIMIT comment).
+ it('reports a 413 distinctly instead of the generic invalid-JSON message when the body exceeds the size limit',async()=>{
+  const oversized={status:413,message:'Payload Too Large'};
+  const request={json:()=>Promise.reject(oversized)};
+  const result=await POST({url:new URL('http://localhost/api/fusion-runner?action=complete'),request});
+  expect(result.status).toBe(413);
+  expect(await result.json()).toEqual({error:'Request body too large'});
+ });
+ it('still reports the generic invalid-JSON message for an actual JSON syntax error',async()=>{
+  const request={json:()=>Promise.reject(new SyntaxError('Unexpected end of JSON input'))};
+  const result=await POST({url:new URL('http://localhost/api/fusion-runner?action=complete'),request});
+  expect(result.status).toBe(400);
+  expect(await result.json()).toEqual({error:'Invalid JSON body'});
  });
 });

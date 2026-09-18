@@ -558,6 +558,24 @@ def _tool_nc_number(tool: dict) -> Optional[int]:
         return None
 
 
+# Matches the release/slot cut template's own description across every
+# plate template this shop uses ("Slot Cut for Edges" on the new router
+# template, "2D Slot Cut" / "2D Slot Cut (2)" on the older ones) - kept in
+# sync with gcodeEmit.js's RELEASE_CUT_NAME_PATTERN and camPlate.py's own
+# group_tabs-based identification of the same operation on the posted side.
+_RELEASE_CUT_TEMPLATE_DESCRIPTION_RE = re.compile(r"\b(2d\s*slot\s*cut|slot\s*cut\s*for\s*edges)\b", re.IGNORECASE)
+# Direct instruction: only Tool 6 is approved to cut a release/slot cut.
+_REQUIRED_RELEASE_CUT_TOOL_NUMBER = 6
+
+
+def _tool_with_nc_number(indexes: list[dict], number: int) -> Optional[Tuple[dict, dict]]:
+    for idx in indexes:
+        for tool in idx["tools"]:
+            if _tool_nc_number(tool) == number:
+                return tool, idx
+    return None
+
+
 def _is_sized_description(tool: dict) -> bool:
     return "sized" in str(tool.get("description") or "").lower()
 
@@ -1151,9 +1169,18 @@ def patch_cam_template_with_tool_libraries(
         raise ValueError("tool_library_paths must not be empty")
 
     indexes: list[dict] = []
+    # The release/slot cut's tool is a fixed machine constant (Tool 6 lives
+    # permanently in the shop's ATC), not a per-job cutting-tool choice - it
+    # must resolve independently of filter_guids, which represents only the
+    # tools an operator selected for this part's own geometry and would
+    # otherwise silently exclude Tool 6 from a job that never had reason to
+    # select it. Built from the same already-loaded libraries below rather
+    # than re-reading each path a second time.
+    unfiltered_indexes: list[dict] = []
     for path in tool_library_paths:
         lib = load_tool_library_json(path)
         indexes.append(_index_tools(lib, filter_guids=filter_guids))
+        unfiltered_indexes.append(_index_tools(lib))
 
     # Multi-tool mode is an optimization, never permission to use a cutter
     # without reviewed material-specific feeds/speeds. Filter before both the
@@ -1247,6 +1274,40 @@ def patch_cam_template_with_tool_libraries(
         for template_elem in contour_templates
         if template_elem is not suppress_template
     ]
+    # Direct operator report, with a real posted G-code snippet: the release/
+    # slot cut posted under "[Tool 2]" / T2 because it fell through to the
+    # same largest-endmill/description-matching assignment every other
+    # contour2d template gets below - whichever tool that resolved to in
+    # this job's own tool library, not necessarily Tool 6. Handled first,
+    # before either of those general-purpose paths ever sees it, and marked
+    # in handled_templates so neither one can re-assign it afterward.
+    release_cut_templates = [
+        template_elem
+        for template_elem in contour_templates
+        if _RELEASE_CUT_TEMPLATE_DESCRIPTION_RE.search(str(template_elem.get("description") or ""))
+    ]
+    if release_cut_templates:
+        release_cut_match = _tool_with_nc_number(unfiltered_indexes, _REQUIRED_RELEASE_CUT_TOOL_NUMBER)
+        if release_cut_match is None:
+            raise ValueError(
+                f"No Tool {_REQUIRED_RELEASE_CUT_TOOL_NUMBER} is loaded in this job's tool "
+                "library - the release/slot cut is only ever allowed to run on Tool "
+                f"{_REQUIRED_RELEASE_CUT_TOOL_NUMBER}, and cannot be posted without it."
+            )
+        release_cut_tool, release_cut_idx = release_cut_match
+        for template_elem in release_cut_templates:
+            tool_elem = template_elem.find(_q("tool"))
+            if tool_elem is None:
+                continue
+            _apply_tool_to_elem(
+                template_elem,
+                tool_elem,
+                release_cut_tool,
+                tool_library_version=release_cut_idx.get("version"),
+                material_name=material_name,
+            )
+            handled_templates.add(id(template_elem))
+            replaced += 1
     # The bulk-clearing operations that dominate real machining time
     # (confirmed live: ~93% of total feed time on a real job). Their real
     # exported template signature calls for the same small "971 Main Bit"
@@ -1532,9 +1593,19 @@ def patch_cam_template_with_tool_libraries(
         # regular/big split.
         if circular_hole_detail_template is not None:
             detail_through_roughing_templates.append(circular_hole_detail_template)
+        # Real, confirmed bug caught before merge: this loop applies its
+        # tool unconditionally, with no handled_templates check at all -
+        # the release/slot cut's forced Tool 6 assignment above got
+        # silently overwritten back to largest_endmill the moment this ran,
+        # since it was still sitting in contour_templates and nothing here
+        # excluded it. handled_templates is what every other assignment
+        # pass in this function already checks; this is the one exception,
+        # so the exclusion has to happen here at the list-comprehension
+        # level instead.
         other_templates = [
             template_elem for template_elem in contour_templates + roughing_templates
             if template_elem not in detail_through_roughing_templates
+            and id(template_elem) not in handled_templates
         ]
         for templates, (tool, idx) in (
             (detail_through_roughing_templates, detail_endmill or largest_endmill),

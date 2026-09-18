@@ -106,13 +106,14 @@ export async function buildJobPayload(supabase, job) {
       if (snapshot.grouping_mode === 'single' && snapshot.assignments.length !== 1) throw new Error('Single-part CAM must contain exactly one part type');
       if (snapshot.grouping_mode === 'grouped' && snapshot.assignments.length < 2) throw new Error('Grouped CAM must contain at least two part types');
       const normalizedMachine = String(job.cam_machines?.name || '').trim().toLowerCase();
-      const normalizedMaterial = String(snapshot.material || '').trim().toLowerCase();
       if (multi_tool_mode && normalizedMachine !== 'new router') {
         throw new Error('Automatic tool swaps are available only on New Router');
       }
-      if (multi_tool_mode && !['aluminum 6061', 'aluminium 6061', '6061 aluminum', '6061 aluminium'].includes(normalizedMaterial)) {
-        throw new Error('Automatic tool swaps are available only for Aluminum 6061');
-      }
+      // Direct instruction: every material uses Aluminum 6061's tool
+      // properties (feed rate, spindle rate, tool configuration) - Auto
+      // multi-tool no longer needs a material-specific check here, matching
+      // templateTools.py's _choose_preset() falling back to Aluminum 6061
+      // presets for any material that has no reviewed presets of its own.
     }
     const seen = new Set();
     const validatedAssignments = [];

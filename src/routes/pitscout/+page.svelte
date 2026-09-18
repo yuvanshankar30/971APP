@@ -1121,14 +1121,14 @@
     {/if}
 
     {#if selectedTeamProblems.length}
-      <section class="problem-queue" aria-label="Open problems flagged by match scouts">
+      <section class="team-problem-queue" aria-label="Open problems flagged by match scouts">
         <h4>Flagged by match scouts</h4>
         {#each selectedTeamProblems as report}
           <article class="problem-item" class:urgent={report.severity === 'urgent'}>
             <div class="problem-body">
               <p class="problem-summary">{report.summary}</p>
               {#if report.detail}<p class="problem-detail">{report.detail}</p>{/if}
-              <p class="problem-meta">
+              <p class="team-problem-meta">
                 {report.source}{report.match_key ? ` · match ${report.match_key}` : ''}
                 {report.severity === 'urgent' ? ' · urgent' : ''}
               </p>
@@ -1877,6 +1877,7 @@
   .problems-layout {
     display: grid;
     grid-template-columns: minmax(0, 1.5fr) minmax(280px, 0.75fr);
+    align-items: start;
     gap: 1rem;
     max-width: 1100px;
     margin: 0 auto;
@@ -2050,7 +2051,7 @@
   }
   .problem-flag.urgent { font-weight: 700; }
 
-  .problem-queue {
+  .team-problem-queue {
     display: grid;
     gap: var(--gap-2);
     padding: var(--space-3);
@@ -2060,14 +2061,14 @@
     border-radius: var(--radius-md);
     background: var(--surface-2);
   }
-  .problem-queue h4 { margin: 0; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
+  .team-problem-queue h4 { margin: 0; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
   .problem-item { display: flex; gap: var(--gap-3); align-items: flex-start; justify-content: space-between; }
   .problem-item + .problem-item { border-top: 1px solid var(--border); padding-top: var(--space-2); }
   .problem-body { min-width: 0; }
   .problem-summary { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
   .problem-item.urgent .problem-summary { color: var(--danger); }
   .problem-detail { margin: 2px 0 0; color: var(--text-muted); font-size: 0.85rem; overflow-wrap: anywhere; }
-  .problem-meta { margin: 2px 0 0; color: var(--text-muted); font-size: 0.75rem; }
+  .team-problem-meta { margin: 2px 0 0; color: var(--text-muted); font-size: 0.75rem; }
 
   /* Topic rail: horizontal on a phone (thumb-reachable, scrolls), a fixed
      column on a laptop. Deliberately not cards - it is a wayfinding control,

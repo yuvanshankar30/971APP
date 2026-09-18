@@ -10,6 +10,7 @@ export async function createSheet(values) {
   return { ...sheet, active_cut_id: cut.id, nesting_cuts: [cut] };
 }
 export async function getSheet(id) { const { data, error } = await supabase.from('nesting_sheets').select('*, nesting_cuts!nesting_cuts_sheet_id_fkey(*, nesting_placements(*))').eq('id', id).single(); fail(error); return data; }
+export async function updateSheet(sheetId, values) { const { data, error } = await supabase.from('nesting_sheets').update({ ...values, updated_at: new Date().toISOString() }).eq('id', sheetId).select().single(); fail(error); return data; }
 export async function deleteSheet(sheetId) { const { error } = await supabase.from('nesting_sheets').delete().eq('id', sheetId); fail(error); }
 export async function savePlacements(cutId, placements) {
   const { error: removeError } = await supabase.from('nesting_placements').delete().eq('cut_id', cutId); fail(removeError);

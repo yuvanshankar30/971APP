@@ -1,7 +1,7 @@
 <script>
   import { createEventDispatcher } from 'svelte';
-  import { Folder, FolderPlus, File, Trash2, Pencil, ChevronRight, X, RefreshCw, ExternalLink, Upload, Check } from 'lucide-svelte';
-  import { listOutputRepoEntries, createOutputRepoFolder, deleteOutputRepoEntry, renameOutputRepoEntry, uploadOutputRepoFile } from '$lib/jprog_output_manage.js';
+  import { Folder, FolderPlus, File, Trash2, Pencil, ChevronRight, X, RefreshCw, ExternalLink, Upload, Download, Check } from 'lucide-svelte';
+  import { listOutputRepoEntries, createOutputRepoFolder, deleteOutputRepoEntry, renameOutputRepoEntry, uploadOutputRepoFile, downloadOutputRepoFile } from '$lib/jprog_output_manage.js';
   import { requestConfirmation } from '$lib/confirmation.js';
   import { toastActions } from '$lib/toast.js';
 
@@ -22,6 +22,13 @@
     label: part,
     path: all.slice(0, index + 1).join('/')
   }))];
+
+  // The output repo's top level is its shared structure. In particular,
+  // JustinProgOutput is the stable handoff root used by JProg and the Files
+  // tab, so it must never be renamed or removed from either editor.
+  function isProtectedRootEntry(entry) {
+    return !path && !entry.path.includes('/');
+  }
 
   async function load(nextPath = path) {
     loading = true;
@@ -97,6 +104,17 @@
       toastActions.show(`Deleted ${entry.name}`);
     } catch (error) {
       toastActions.show(error.message || 'Could not delete that item');
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function downloadEntry(entry) {
+    busy = true;
+    try {
+      await downloadOutputRepoFile(entry.path);
+    } catch (error) {
+      toastActions.show(error.message || 'Could not download that file');
     } finally {
       busy = false;
     }
@@ -194,8 +212,13 @@
               {:else}
                 <span class="output-editor-entry-name">{entry.name}</span>
               {/if}
-              <button type="button" class="icon-button" title={`Rename ${entry.name}`} on:click={() => startRename(entry)} disabled={busy}><Pencil size={15} /></button>
-              <button type="button" class="icon-button danger" title={`Delete ${entry.name}`} on:click={() => removeEntry(entry)} disabled={busy}><Trash2 size={15} /></button>
+              {#if entry.type !== 'dir'}
+                <button type="button" class="icon-button" title={`Download ${entry.name}`} on:click={() => downloadEntry(entry)} disabled={busy}><Download size={15} /></button>
+              {/if}
+              {#if !isProtectedRootEntry(entry)}
+                <button type="button" class="icon-button" title={`Rename ${entry.name}`} on:click={() => startRename(entry)} disabled={busy}><Pencil size={15} /></button>
+                <button type="button" class="icon-button danger" title={`Delete ${entry.name}`} on:click={() => removeEntry(entry)} disabled={busy}><Trash2 size={15} /></button>
+              {/if}
             {/if}
           </div>
         {/each}
@@ -212,7 +235,7 @@
      rendered unstyled in normal document flow at the bottom of the page
      instead of as a centered fixed overlay). */
   .scrim { position: fixed; inset: 0; background: #10182899; display: grid; place-items: center; z-index: 10; }
-  .modal { position: relative; background: var(--card-bg, #fff); padding: 22px; display: grid; gap: 14px; border-radius: 8px; max-height: calc(100vh - 32px); overflow: auto; }
+  .modal { position: relative; background: var(--surface-1); padding: 22px; display: grid; gap: 14px; border-radius: 8px; max-height: calc(100vh - 32px); overflow: auto; }
   .modal h2 { margin: 0; }
   .modal-close { position: absolute; right: 12px; top: 12px; border: 0; background: none; color: inherit; cursor: pointer; }
   .output-editor-modal { width: min(760px, 90vw); height: 70vh; display: flex; flex-direction: column; }
