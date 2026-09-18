@@ -9,6 +9,8 @@
   import { buildStrategyRows, strategyTotals } from '$lib/strategyScouting.js';
   import { buildPowerRankings } from '$lib/scoutingStats.js';
   import { isMatchPlayed, matchLabel, projectMatch } from '$lib/matchProjection.js';
+  import { formatPacificTimeWithZone } from '$lib/timezone.js';
+  import { buildStrategySchedule } from '$lib/strategySchedule.js';
   import { buildTestMarketMatch } from '$lib/predictionMarket.js';
   import { FRC_TEAMS } from '$lib/permissions.js';
   import SeasonFilter from '$lib/components/SeasonFilter.svelte';
@@ -145,21 +147,24 @@
           .filter(([, label]) => label)
       )
     : new Map();
-  $: ourMatches = matches.filter((match) => matchHasOurTeam(match));
-  // The strategy schedule is an at-a-glance 971 board. It deliberately omits
-  // other teams' matches so the next assignment is never buried in a full
-  // event schedule.
-  $: upcomingMatches = ourMatches.filter((match) => !isMatchPlayed(match)).slice().reverse();
-  $: playedMatches = ourMatches.filter((match) => isMatchPlayed(match)).slice().reverse();
+  // The schedule is 971-only. Its future rows intentionally render last
+  // match first, while matches-away still uses chronological order.
+  $: strategySchedule = buildStrategySchedule(matches, OUR_TEAM_KEY);
+  $: upcomingMatches = strategySchedule.upcoming;
+  $: playedMatches = strategySchedule.played;
   const teamNumber = (teamKey) => String(teamKey || '').replace(/^frc/i, '');
   // "i more want to know upcoming matches" than Data Matches as a top-level
   // column (see docs/plans/strategy-picklist-improvements.md section 5) -
   // reuses upcomingMatches, which this page already loads for the Matches
   // subtab, no new fetch.
   const upcomingMatchCount = (teamKey) =>
-    upcomingMatches.filter((match) =>
+    strategySchedule.realUpcoming.filter((match) =>
       (match.alliances?.red?.team_keys || []).includes(teamKey) || (match.alliances?.blue?.team_keys || []).includes(teamKey)
     ).length;
+
+  function estimatedMatchTime(seconds) {
+    return Number.isFinite(Number(seconds)) ? formatPacificTimeWithZone(new Date(Number(seconds) * 1000)) : 'TBA';
+  }
 
   const number = (value, digits = 1) => Number.isFinite(value) ? value.toFixed(digits) : '-';
   const percent = (value) => Number.isFinite(value) ? `${Math.round(value * 100)}%` : '-';
@@ -333,15 +338,22 @@
     {:else}
       <div class="board-table-wrap">
         <table class="board-table statbotics-table">
-          <thead><tr><th>Match</th><th>Red</th><th>Blue</th><th>Predicted</th><th>Win %</th><th>Score</th></tr></thead>
+          <thead><tr><th>Match</th><th>971</th><th>Est. time</th><th>Away</th><th>Red</th><th>Blue</th><th>Predicted</th><th>Win %</th><th>Score</th></tr></thead>
           <tbody>
-            {#each [...upcomingMatches, ...playedMatches] as match (match.key)}
+            {#each [...upcomingMatches, ...playedMatches] as scheduleEntry (scheduleEntry.match.key)}
+              {@const match = scheduleEntry.match}
               {@const projection = projectMatch(match, scoutPowerByTeam, projectedScoreByTeam)}
               {@const played = isMatchPlayed(match)}
               <tr class:test-match={match.is_test_market} class:our-team-match={matchHasOurTeam(match)} class:played-row={played}>
                 <td data-label="Match">
                   <button type="button" class="match-link" on:click={() => openMatchDetail(match)}>{matchLabel(match)}</button>
                   {#if match.is_test_market}<small>Practice market</small>{/if}
+                </td>
+                <td data-label="971 alliance"><span class="alliance-badge" class:red={scheduleEntry.alliance === 'red'} class:blue={scheduleEntry.alliance === 'blue'}>{scheduleEntry.alliance || '—'}</span></td>
+                <td data-label="Estimated time" class="estimated-time">{estimatedMatchTime(scheduleEntry.estimatedTime)}</td>
+                <td data-label="Matches away">
+                  {#if scheduleEntry.matchesAway == null}<span class="muted">—</span>
+                  {:else}<span class:urgent-away={scheduleEntry.matchesAway <= 4} class="matches-away">{scheduleEntry.matchesAway === 0 ? 'Next' : `${scheduleEntry.matchesAway} away`}</span>{/if}
                 </td>
                 <td data-label="Red" class="alliance-red" class:winner={match.winning_alliance === 'red'}>
                   {#each match.alliances?.red?.team_keys || [] as teamKey}
@@ -494,6 +506,12 @@
   .matches-board .section-heading h2 { display:flex; align-items:center; gap:var(--space-2); }
   .matches-warning { padding:0 var(--space-3); }
   .our-team-match { background: color-mix(in srgb, var(--chart-success) 10%, transparent); }
+  .alliance-badge { display:inline-flex; min-width:3.8rem; justify-content:center; padding:3px 7px; border-radius:999px; text-transform:uppercase; font-size:.7rem; font-weight:800; letter-spacing:.04em; background:var(--surface-2); color:var(--text-secondary); }
+  .alliance-badge.red { color:var(--danger, #dc3545); background:color-mix(in srgb, var(--danger, #dc3545) 13%, transparent); }
+  .alliance-badge.blue { color:var(--brand-blue, #2563eb); background:color-mix(in srgb, var(--brand-blue, #2563eb) 13%, transparent); }
+  .estimated-time { white-space:nowrap; font-variant-numeric:tabular-nums; }
+  .matches-away { font-weight:700; white-space:nowrap; }
+  .matches-away.urgent-away { color:var(--danger, #dc3545); }
   .match-link { background:none; border:none; padding:0; font:inherit; font-weight:700; color:var(--text); cursor:pointer; text-decoration:underline; text-decoration-color:transparent; }
   .match-link:hover { text-decoration-color:currentColor; }
   .team-number-link { display:inline-block; margin:0 var(--space-1) 0 0; padding:2px 6px; border-radius:var(--radius-xs); color:var(--text); text-decoration:none; font-weight:600; }

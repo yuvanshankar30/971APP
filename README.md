@@ -185,7 +185,9 @@ browser confirmation or prompt popups.
   pit details, saved autos, performance trends, notes, every manual match
   report, and completed-match video/TBA links. Strategy seeds its
   team board from the full TBA event roster, including teams with no scouting
-  observations yet, and its match view includes a clearly labeled practice
+  observations yet, and its 971-only match schedule shows 971's alliance,
+  Pacific estimated time, and chronological matches-away urgency while rendering
+  the latest match closest to the top; it includes a clearly labeled practice
   match when the real schedule is empty. Robot Ratings orders rated teams by
   overall average from best to worst, followed by unrated teams. The Prediction
   Market uses play points throughout and shares the same non-settling practice
