@@ -362,21 +362,29 @@ browser confirmation or prompt popups.
   user, including in local development; write attribution always comes from
   the verified session rather than a caller-provided user ID. Public,
   event-scoped read views remain available where documented.
-- **Power Rankings** (`powerrankings/`): the last item in the Competition nav
-  folder - its own page rather than a mode of the Pick List workspace, so it
-  never gets confused with that page's comparison table. An event-relative
-  ranking built only from combined local scout observations.
+- **Match Rankings** (`matchrankings/`): a shared post-match ordering board
+  in Competition. It loads the six teams from each The Blue Alliance match,
+  lets the scouting group save and later revise one best-to-worst order per
+  match, and turns each order into higher-over-lower evidence for the separate
+  Human Rank shown in Power Rankings. This connects robots indirectly across
+  matches while leaving calculated Scout Power unchanged.
+- **Power Rankings** (`powerrankings/`): the Competition ranking readout - its
+  own page rather than a mode of the Pick List workspace, so it never gets
+  confused with that page's comparison table. An event-relative ranking built
+  from combined local scout observations.
 
   It shows **four deliberately distinct measures**, and the page says so in
   as many words, because conflating them would misrepresent an official FRC
   standing:
   - **971 Scout Power** - our own ranking from our own scouts. The primary
     column, and *not* an FRC ranking; it exists to inform our picks.
-  - **Human Consensus** - a separate preference rank produced by authenticated
-    scouts choosing between two robots. Each scout gets one current vote per
-    event/team pair; changing the choice updates it. These votes never alter
-    Scout Power. A two-thirds-or-stronger majority that opposes a calculated
-    Scout Power gap of at least five points flags both robots for human review.
+  - **Human Consensus** - a separate preference rank produced by the shared
+    post-match order plus authenticated head-to-head choices. Each saved match
+    order contributes its higher-over-lower robot comparisons, which carries
+    ordering across matches; each scout's direct choice remains one current
+    vote per event/team pair. Neither signal alters Scout Power. A
+    two-thirds-or-stronger majority that opposes a calculated Scout Power gap
+    of at least five points flags both robots for human review.
   - **Official Event Rank** - the real qualification standing from The Blue
     Alliance, which FIRST computes from Ranking Points earned in qualification
     matches. The only official rank on the page.

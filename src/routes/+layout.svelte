@@ -6,7 +6,7 @@
   import { supabase } from '$lib/supabase.js';
   import { fetchActiveScoutingEventKey } from '$lib/scoutingEvent.js';
   import navConfig from '$lib/navigation.json';
-  import { defaultHeaderTabs, mergeDefaultHeaderTabs, ensurePowerRankingsTab, ensureRobotRatingsTab, ensurePredictionMarketTab, ensureScoutingAdminTab, ensureStrategyTab, ensureDriveTeamTab, ensurePicklistTab, ensureGcodeConverterTab, ensureFilesTab, ensureFusionAutocamTab, promoteChildrenOfDisabledFolders } from '$lib/defaultTabs.js';
+  import { defaultHeaderTabs, mergeDefaultHeaderTabs, ensurePowerRankingsTab, ensureMatchRankingsTab, ensureRobotRatingsTab, ensurePredictionMarketTab, ensureScoutingAdminTab, ensureStrategyTab, ensureDriveTeamTab, ensurePicklistTab, ensureGcodeConverterTab, ensureFilesTab, ensureFusionAutocamTab, promoteChildrenOfDisabledFolders } from '$lib/defaultTabs.js';
   import { Move3d, Hammer, Wrench, Receipt, Home, Briefcase, Coins, Package, User, ChevronDown, Menu, X, Camera, CalendarDays, Cpu, FileText, Trophy, Eye, ClipboardCheck, ListChecks, Target, Folder, Search, Star, Dice5, Zap } from 'lucide-svelte';
   import { goto, afterNavigate } from '$app/navigation';
   import { page } from '$app/stores';
@@ -304,6 +304,7 @@
     purchasing: '/cad/purchasing',
     scouting: '/scouting',
     powerrankings: '/powerrankings',
+    matchrankings: '/matchrankings',
     robotratings: '/robotratings',
     predictions: '/predictions',
     vision: '/scouting/vision',
@@ -336,6 +337,7 @@
     purchasing: Receipt,
     scouting: ListChecks,
     powerrankings: Trophy,
+    matchrankings: ListChecks,
     robotratings: Star,
     predictions: Dice5,
     vision: Eye,
@@ -368,6 +370,7 @@
     purchasing: 'Purchasing',
     scouting: 'Pick List',
     powerrankings: 'Power Rankings',
+    matchrankings: 'Match Rankings',
     robotratings: 'Robot Ratings',
     predictions: 'Prediction Market',
     vision: 'Vision Scouting',
@@ -509,11 +512,39 @@
   // Saved layouts retain personal ordering and folders, but no longer freeze
   // someone on an obsolete subset of the app's navigation.
   $: effectiveTabs = mergeDefaultHeaderTabs(customTabs, navConfig);
-  // Power Rankings, Robot Ratings, and Prediction Market are appended for
+  // Power Rankings, Match Rankings, Robot Ratings, and Prediction Market are appended for
   // anyone whose saved header_tabs predates them, so a customized nav still
   // surfaces the feature. Purely additive - see ensurePowerRankingsTab()/
-  // ensureRobotRatingsTab()/ensurePredictionMarketTab().
-  $: baseNavTabs = addAdminTabIfAllowed(ensureScoutingAdminTab(ensurePicklistTab(ensureDriveTeamTab(ensureStrategyTab(ensureFusionAutocamTab(ensureFilesTab(ensureGcodeConverterTab(ensurePredictionMarketTab(ensureRobotRatingsTab(ensurePowerRankingsTab(effectiveTabs, navConfig), navConfig), navConfig), navConfig), navConfig), navConfig))))), canViewAdmin);
+  // ensureMatchRankingsTab()/ensureRobotRatingsTab()/ensurePredictionMarketTab().
+  $: baseNavTabs = addAdminTabIfAllowed(
+    ensureScoutingAdminTab(
+      ensurePicklistTab(
+        ensureDriveTeamTab(
+          ensureStrategyTab(
+            ensureFusionAutocamTab(
+              ensureFilesTab(
+                ensureGcodeConverterTab(
+                  ensurePredictionMarketTab(
+                    ensureRobotRatingsTab(
+                      ensureMatchRankingsTab(
+                        ensurePowerRankingsTab(effectiveTabs, navConfig),
+                        navConfig
+                      ),
+                      navConfig
+                    ),
+                    navConfig
+                  ),
+                  navConfig
+                ),
+                navConfig
+              )
+            )
+          )
+        )
+      )
+    ),
+    canViewAdmin
+  );
   // Old accounts may still store a CAD folder containing CAD + Build. Once
   // CAD is disabled, promote Build out of that retired folder so the top bar
   // does not keep a misleading CAD shell around it.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { defaultHeaderTabs, ensurePowerRankingsTab, ensurePredictionMarketTab, ensureRobotRatingsTab, ensureScoutingAdminTab, ensureStrategyTab, ensureDriveTeamTab, ensurePicklistTab, ensureGcodeConverterTab, ensureFilesTab, ensureFusionAutocamTab, promoteChildrenOfDisabledFolders } from './defaultTabs.js';
+import { defaultHeaderTabs, ensureMatchRankingsTab, ensurePowerRankingsTab, ensurePredictionMarketTab, ensureRobotRatingsTab, ensureScoutingAdminTab, ensureStrategyTab, ensureDriveTeamTab, ensurePicklistTab, ensureGcodeConverterTab, ensureFilesTab, ensureFusionAutocamTab, promoteChildrenOfDisabledFolders } from './defaultTabs.js';
 
 const enabled = { tabs: { powerrankings: true, predictions: true, robotratings: true } };
 
@@ -106,7 +106,7 @@ describe('defaultHeaderTabs', () => {
     // Deliberate order, not incidental: strategy leads as the board the team
     // opens to decide something, then the collection surfaces that feed it
     // (match -> pit -> rankings -> ratings -> predictions -> vision), with
-    // the admin surface last. Exactly these 10 - Pick List (the 'scouting'
+    // the admin surface last. Exactly these 11 - Pick List (the 'scouting'
     // key) is no longer a default entry, per direct feedback naming this
     // exact list; Robot Ratings joined right after Power Rankings since it
     // feeds a display-only average into that same page, and Prediction
@@ -118,7 +118,7 @@ describe('defaultHeaderTabs', () => {
     // sub-view of the Teams/Matches board.
     const keys = competitionChildren(defaultHeaderTabs()).map((child) => child.key);
     expect(keys).toEqual([
-      'strategy', 'driveteam', 'picklist', 'matchscout', 'pitscout', 'powerrankings', 'robotratings', 'predictions', 'vision', 'scouting-admin'
+      'strategy', 'driveteam', 'picklist', 'matchscout', 'matchrankings', 'pitscout', 'powerrankings', 'robotratings', 'predictions', 'vision', 'scouting-admin'
     ]);
   });
 
@@ -344,6 +344,27 @@ describe('ensurePowerRankingsTab', () => {
     expect(competitionChildren(ensurePowerRankingsTab(oddFolder, enabled))).toEqual([
       { key: 'powerrankings', label: 'Power Rankings' }
     ]);
+  });
+});
+
+describe('ensureMatchRankingsTab', () => {
+  it('places the shared match-ordering board after Match Scouting when present', () => {
+    const nav = [{ type: 'folder', label: 'Competition', children: [
+      { key: 'strategy', label: 'Strategy' },
+      { key: 'matchscout', label: 'Match Scouting' },
+      { key: 'pitscout', label: 'Pit Scouting' }
+    ] }];
+    const result = ensureMatchRankingsTab(nav, { tabs: { matchrankings: true } });
+    expect(competitionChildren(result).map((item) => item.key)).toEqual([
+      'strategy', 'matchscout', 'matchrankings', 'pitscout'
+    ]);
+  });
+
+  it('does not add a duplicate or override a disabled tab', () => {
+    const nav = savedNav();
+    nav[1].children.push({ key: 'matchrankings', label: 'Match Rankings' });
+    expect(ensureMatchRankingsTab(nav, { tabs: { matchrankings: true } })).toBe(nav);
+    expect(ensureMatchRankingsTab(savedNav(), { tabs: { matchrankings: false } })).toEqual(savedNav());
   });
 });
 

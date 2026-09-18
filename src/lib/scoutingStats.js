@@ -301,6 +301,31 @@ export function summarizePairwisePair(votes, firstKey, secondKey) {
   };
 }
 
+// Turn each shared match order into its implied direct observations. For
+// example, `A > B > C` contributes A>B, A>C, and B>C. The existing
+// consensus rank can then connect results across matches without pretending
+// that the calculated Scout Power formula is human judgment.
+export function matchRankingsToPairwiseVotes(rankings) {
+  const votes = [];
+  for (const ranking of rankings || []) {
+    const teams = Array.isArray(ranking?.ranked_team_keys) ? ranking.ranked_team_keys : [];
+    const uniqueTeams = [...new Set(teams.filter(Boolean))];
+    if (uniqueTeams.length !== teams.length || uniqueTeams.length < 2) continue;
+    for (let higher = 0; higher < uniqueTeams.length - 1; higher += 1) {
+      for (let lower = higher + 1; lower < uniqueTeams.length; lower += 1) {
+        votes.push({
+          team_a_key: uniqueTeams[higher],
+          team_b_key: uniqueTeams[lower],
+          winner_team_key: uniqueTeams[higher],
+          match_key: ranking.match_key || null,
+          source: 'match-ranking'
+        });
+      }
+    }
+  }
+  return votes;
+}
+
 // Human preference is intentionally parallel to calculated Scout Power. It
 // creates a consensus rank and review signal but never modifies scoutPower or
 // powerRank, preserving the provenance of both measures.

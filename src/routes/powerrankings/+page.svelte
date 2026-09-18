@@ -1,17 +1,18 @@
 <script>
   import { onMount } from 'svelte';
-  import { AlertTriangle, ArrowUpDown, RefreshCw, Search, Swords, Trophy, Vote } from 'lucide-svelte';
+  import { AlertTriangle, ArrowUpDown, ListOrdered, RefreshCw, Search, Swords, Trophy, Vote } from 'lucide-svelte';
   import RobotStarPlot from '$lib/components/RobotStarPlot.svelte';
   import MatchScoutReport from '$lib/components/MatchScoutReport.svelte';
   import { fetchActiveScoutingEventKey } from '$lib/scoutingEvent.js';
   import { getAuthHeader } from '$lib/supabase.js';
-  import { applyPairwiseConsensus, buildPowerRankings, summarizePairwisePair } from '$lib/scoutingStats.js';
+  import { applyPairwiseConsensus, buildPowerRankings, matchRankingsToPairwiseVotes, summarizePairwisePair } from '$lib/scoutingStats.js';
   import { applyRobotRatings } from '$lib/robotRatings.js';
 
   let eventKey = '';
   let teams = [];
   let baseTeams = [];
   let pairwiseVotes = [];
+  let matchRankings = [];
   let loading = true;
   let error = '';
   let warning = '';
@@ -81,7 +82,7 @@
       const refreshed = await fetch(`/api/scouting-comparisons?event_key=${encodeURIComponent(eventKey)}`, { headers: authHeaders }).then((res) => res.json());
       if (!refreshed?.success) throw new Error(refreshed?.error || 'Vote saved, but consensus could not refresh.');
       pairwiseVotes = refreshed.data || [];
-      teams = applyPairwiseConsensus(baseTeams, pairwiseVotes);
+      teams = applyPairwiseConsensus(baseTeams, [...pairwiseVotes, ...matchRankingsToPairwiseVotes(matchRankings)]);
       voteMessage = `Preference saved for team ${Number(String(winnerTeamKey).replace(/^frc/i, ''))}.`;
     } catch (cause) {
       voteMessage = cause?.message || 'Could not save comparison.';
@@ -97,7 +98,7 @@
     warning = '';
     officialNote = '';
     const authHeaders = await getAuthHeader();
-    const [rosterResult, scoutResult, matchResult, notesResult, pitResult, problemResult, officialResult, comparisonResult, ratingsResult] = await Promise.all([
+    const [rosterResult, scoutResult, matchResult, notesResult, pitResult, problemResult, officialResult, comparisonResult, ratingsResult, rankingsResult] = await Promise.all([
       fetch(`/api/tba/event-teams?event_key=${encodeURIComponent(eventKey)}`).then((response) => response.json()).catch(() => null),
       fetch(`/datascout?all_teams=1&event_key=${encodeURIComponent(eventKey)}`, { headers: authHeaders }).then((response) => response.json()).catch(() => null),
       fetch(`/api/matchscout?event_key=${encodeURIComponent(eventKey)}`, { headers: authHeaders }).then((response) => response.json()).catch(() => null),
@@ -106,7 +107,8 @@
       fetch(`/api/matchscout?resource=pit-problems&event_key=${encodeURIComponent(eventKey)}`, { headers: authHeaders }).then((response) => response.json()).catch(() => null),
       fetch(`/api/tba/event-oprs?event_key=${encodeURIComponent(eventKey)}`).then((response) => response.json()).catch(() => null),
       fetch(`/api/scouting-comparisons?event_key=${encodeURIComponent(eventKey)}`, { headers: authHeaders }).then((response) => response.json()).catch(() => null),
-      fetch(`/api/scouting-robot-ratings?event_key=${encodeURIComponent(eventKey)}`, { headers: authHeaders }).then((response) => response.json()).catch(() => null)
+      fetch(`/api/scouting-robot-ratings?event_key=${encodeURIComponent(eventKey)}`, { headers: authHeaders }).then((response) => response.json()).catch(() => null),
+      fetch(`/api/scouting-match-rankings?event_key=${encodeURIComponent(eventKey)}`, { headers: authHeaders }).then((response) => response.json()).catch(() => null)
     ]);
 
     const scoutEvents = scoutResult?.success ? scoutResult.data : [];
@@ -115,6 +117,7 @@
     const pitEntries = pitResult?.success ? pitResult.data : [];
     const problemReports = problemResult?.success ? problemResult.data : [];
     pairwiseVotes = comparisonResult?.success ? comparisonResult.data : [];
+    matchRankings = rankingsResult?.success ? rankingsResult.data : [];
     pairwiseVotingAvailable = !comparisonResult?.unavailable;
     const robotRatings = ratingsResult?.success ? ratingsResult.data : [];
     if (!scoutResult?.success) warning = scoutResult?.error || 'Local scouting data is unavailable.';
@@ -125,12 +128,14 @@
     if (!problemResult?.success) warning = `${warning ? `${warning} ` : ''}${problemResult?.error || 'Pit problem reports are unavailable.'}`;
     if (!comparisonResult?.success) warning = `${warning ? `${warning} ` : ''}${comparisonResult?.error || 'Human consensus votes are unavailable.'}`;
     if (!ratingsResult?.success && !ratingsResult?.unavailable) warning = `${warning ? `${warning} ` : ''}${ratingsResult?.error || 'Robot ratings are unavailable.'}`;
+    if (!rankingsResult?.success && !rankingsResult?.unavailable) warning = `${warning ? `${warning} ` : ''}${rankingsResult?.error || 'Match ranking evidence is unavailable.'}`;
 
     let roster = rosterResult?.success ? rosterResult.data : [];
     if (!roster.length) {
       const keys = [...new Set([
         ...[...scoutEvents, ...matchEntries, ...scoutNotes, ...pitEntries, ...problemReports].map((row) => row.team_key),
-        ...pairwiseVotes.flatMap((row) => [row.team_a_key, row.team_b_key])
+        ...pairwiseVotes.flatMap((row) => [row.team_a_key, row.team_b_key]),
+        ...matchRankings.flatMap((row) => row.ranked_team_keys || [])
       ].filter(Boolean))];
       roster = keys.map((key) => ({
         key,
@@ -170,7 +175,7 @@
     }
 
     baseTeams = applyRobotRatings(buildPowerRankings(roster, scoutEvents, scoutNotes, { pitEntries, problemReports, matchEntries, oprByTeamNumber: officialByTeam }), robotRatings);
-    teams = applyPairwiseConsensus(baseTeams, pairwiseVotes);
+    teams = applyPairwiseConsensus(baseTeams, [...pairwiseVotes, ...matchRankingsToPairwiseVotes(matchRankings)]);
     const ranked = [...teams].sort((a, b) => (b.scoutPower ?? -1) - (a.scoutPower ?? -1));
     if (!compareLeftKey && ranked[0]) compareLeftKey = ranked[0].key;
     if (!compareRightKey && ranked[1]) compareRightKey = ranked[1].key;
@@ -192,7 +197,7 @@
 <div class="page-header">
   <div class="header-content">
     <h1><Trophy size={22} /> Power Rankings</h1>
-    <p>Calculated scouting power and human comparison consensus{eventKey ? ` for ${eventKey}` : ''}, with official TBA data kept as reference.</p>
+    <p>Calculated scouting power and human consensus from post-match rankings and comparisons{eventKey ? ` for ${eventKey}` : ''}, with official TBA data kept as reference.</p>
   </div>
   {#if eventKey}
     <button class="btn btn-sm" on:click={loadRankings} disabled={loading}><RefreshCw size={14} /> Refresh</button>
@@ -216,7 +221,7 @@
     </div>
     <div>
       <h3>Human Consensus</h3>
-      <p>Authenticated scouts choose between two robots. Win rate produces a separate preference rank; it never changes calculated Scout Power. A strong majority against a five-point-or-larger Scout Power gap is flagged for human review.</p>
+      <p>Shared post-match robot orders and authenticated head-to-head choices produce a separate preference rank; links across matches reveal indirect ordering. It never changes calculated Scout Power. A strong majority against a five-point-or-larger Scout Power gap is flagged for human review.</p>
     </div>
     <div>
       <h3>Team Rating</h3>
@@ -230,6 +235,11 @@
       <h3>TBA OPR</h3>
       <p>Offensive Power Rating: a least-squares estimate of a team's contribution to alliance score, calculated by The Blue Alliance from match results. A statistical estimate, <strong>not an official rank</strong>.</p>
     </div>
+  </section>
+
+  <section class="match-ranking-link">
+    <div><h2><ListOrdered size={18} /> Match ranking evidence</h2><p>{matchRankings.length} shared match ranking{matchRankings.length === 1 ? '' : 's'} currently inform Human Rank.</p></div>
+    <a class="btn btn-outline btn-sm" href="/matchrankings">Rank a match</a>
   </section>
 
   <section class="surface-card comparison-card">
@@ -340,6 +350,9 @@
 <style>
   h1, h2, .search { display:flex; align-items:center; gap:var(--gap-2); }
   .comparison-card { padding:var(--space-4); margin:var(--space-4) 0; }
+  .match-ranking-link { display:flex; align-items:center; justify-content:space-between; gap:var(--gap-4); padding:var(--space-3) 0; border-bottom:1px solid var(--border); }
+  .match-ranking-link h2 { margin:0; font-size:1rem; }
+  .match-ranking-link p { margin:var(--space-1) 0 0; color:var(--text-muted); font-size:.82rem; }
   .comparison-card h2 { margin-top:0; font-size:1rem; }
   .ranking-reports { margin:var(--space-4) 0; }
   .ranking-reports h2, .ranking-reports h3 { font-size:1rem; }
@@ -371,7 +384,7 @@
   @media (max-width:640px) {
     .comparison-selectors { grid-template-columns:1fr; }
     .comparison-selectors > span { text-align:center; padding:0; }
-    .preference-panel { align-items:stretch; flex-direction:column; }
+    .preference-panel, .match-ranking-link { align-items:stretch; flex-direction:column; }
     .vote-buttons { display:grid; grid-template-columns:1fr 1fr; }
     .vote-message { text-align:left; }
     /* The three-column left/label/right comparison grid becomes one value
