@@ -24,6 +24,8 @@ runner token.
   distance gate. Only an observed outside-to-inside goal transition produces
   a candidate; this is not proof that a ball scored and always needs review.
 
+- **Motion evidence**: calibrated, continuously visible trajectories flag a robot that stays under 0.12 m/s for at least 50 seconds as a `dead` candidate. High-speed direction reversals are collision candidates. Neither proves a mechanical state or contact, so both are review-required and never release automatically.
+
 YOLO is already required for robot detection (training base: `yolo11n.pt`,
 six custom robot/climb classes). There are no production weights committed.
 HSV is an unvalidated baseline, not inherently better than YOLO for balls.
