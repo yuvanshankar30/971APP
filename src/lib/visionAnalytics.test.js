@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { autoStartPosition, deadAuto, fuseObservations, reconcileVisionSources, reconcileWithReference, summarizeVision, trajectoryMetrics } from './visionAnalytics.js';
+import { AUTO_FIELD_METERS, autoStartPosition, deadAuto, fuseObservations, reconcileVisionSources, reconcileWithReference, summarizeVision, trajectoryMetrics, visionAutoPath } from './visionAnalytics.js';
 
 describe('vision analytics', () => {
   it('derives real-coordinate mobility metrics', () => {
@@ -121,5 +121,55 @@ describe('auto-phase derivations', () => {
   it('ignores tracks with no resolved team, as everything else does', () => {
     const orphan = { view_id: 'view-1', team_key: null, trajectory: [{ t: 500, x: 4, y: 2 }, { t: 6000, x: 4, y: 2 }], metrics: { autoStartZone: 'center' } };
     expect(summarizeVision([], [orphan]).teams).toEqual({});
+  });
+});
+
+describe('vision auto paths', () => {
+  const denseTrack = (alliance = 'blue') => ({
+    team_key: 'frc971', alliance,
+    trajectory: Array.from({ length: 13 }, (_, index) => ({
+      t: index * 1000,
+      x: 1 + index * 0.25,
+      y: 2 + (index > 5 ? 1 : 0),
+      confidence: 0.9,
+      calibrated: true
+    }))
+  });
+
+  it('converts a calibrated track into the manual editor path format', () => {
+    const candidate = visionAutoPath(denseTrack());
+    expect(candidate.viable).toBe(true);
+    expect(candidate.path.length).toBeGreaterThanOrEqual(3);
+    expect(candidate.path[0]).toEqual([
+      Number((1 / AUTO_FIELD_METERS.length * 100).toFixed(3)),
+      Number((2 / AUTO_FIELD_METERS.width * 100).toFixed(3))
+    ]);
+  });
+
+  it('rotates red paths into the alliance-relative editor orientation', () => {
+    const blue = visionAutoPath(denseTrack('blue'));
+    const red = visionAutoPath(denseTrack('red'));
+    expect(red.path[0][0]).toBeCloseTo(100 - blue.path[0][0], 3);
+    expect(red.path[0][1]).toBeCloseTo(100 - blue.path[0][1], 3);
+  });
+
+  it('refuses to publish sparse, uncalibrated, or unidentified tracks', () => {
+    const candidate = visionAutoPath({ alliance: 'blue', trajectory: [
+      { t: 0, x: 100, y: 200, confidence: 0.9, calibrated: false },
+      { t: 12000, x: 200, y: 300, confidence: 0.9, calibrated: false }
+    ] });
+    expect(candidate.viable).toBe(false);
+    expect(candidate.reasons).toEqual(expect.arrayContaining([
+      'unresolved_team_identity', 'uncalibrated_field_coordinates', 'insufficient_samples', 'insufficient_auto_coverage'
+    ]));
+    expect(candidate.path).toEqual([]);
+  });
+
+  it('rejects identity swaps that appear as impossible robot motion', () => {
+    const track = denseTrack();
+    track.trajectory[6].x = 15;
+    const candidate = visionAutoPath(track);
+    expect(candidate.viable).toBe(false);
+    expect(candidate.reasons).toContain('implausible_jump');
   });
 });

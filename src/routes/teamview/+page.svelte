@@ -714,10 +714,11 @@
         <sub class="team-name-sub">{selectedTeamNumber}</sub>
       </div>
       <div class="team-rank-strip">
+        <span><small>Auto points</small><strong>{selectedProfile?.matchScoutSummary?.avgAutoPoints == null ? '—' : selectedProfile.matchScoutSummary.avgAutoPoints.toFixed(1)}</strong></span>
+        <span><small>Teleop points</small><strong>{selectedProfile?.matchScoutSummary?.avgBallsScored == null ? '—' : selectedProfile.matchScoutSummary.avgBallsScored.toFixed(1)}</strong></span>
+        <span><small>Scout rating</small><strong>{selectedProfile?.robotRating?.overallAvg == null ? '—' : selectedProfile.robotRating.overallAvg.toFixed(1)}</strong></span>
         <span><small>Event rank</small><strong>{officialTeam?.rank ? `#${officialTeam.rank}` : '—'}</strong></span>
         <span><small>Record</small><strong>{officialTeam ? `${officialTeam.wins}-${officialTeam.losses}-${officialTeam.ties}` : '—'}</strong></span>
-        <span><small>971 power rank</small><strong>{selectedProfile?.powerRank ? `#${selectedProfile.powerRank}` : '—'}</strong></span>
-        <span><small>Scout power</small><strong>{selectedProfile?.scoutPower == null ? '—' : selectedProfile.scoutPower.toFixed(1)}</strong></span>
       </div>
       <div class="filters-row">
         <select class="form-select" bind:value={viewFilterScope}>
@@ -731,7 +732,7 @@
           <div class="pit-fields">
             <div><strong>Drivebase:</strong> {pitEntry.drivebase_type || '-'}</div>
             <div><strong>Shooter:</strong> {pitEntry.shooter_type || '-'}</div>
-            <div><strong>Hopper:</strong> {pitEntry.hopper_type || '-'}</div>
+            <div><strong>Indexer:</strong> {pitEntry.hopper_type || '-'}</div>
             <div><strong>HP Balls In Auto:</strong> {pitEntry.human_player_balls_in_auto || '-'}</div>
             <div><strong>Estimated BPS:</strong> {formatEstimatedBps(pitEntry.estimated_bps)}</div>
             <div><strong>Climb Options:</strong> {pitClimbOptions.length ? pitClimbOptions.join(', ') : '-'}</div>
@@ -754,6 +755,9 @@
           {/if}
         {/if}
       </div>
+      {#if pitEntry?.scout_name || pitEntry?.technical_details?.pit_contact_phone}
+        <div class="pit-contact"><strong>Pit contact</strong><span>{pitEntry.scout_name || 'Name not recorded'}{#if pitEntry?.technical_details?.pit_contact_phone} · <a href={`tel:${pitEntry.technical_details.pit_contact_phone}`}>{pitEntry.technical_details.pit_contact_phone}</a>{/if}</span></div>
+      {/if}
       <div class="pit-auto-group">
         <div class="pit-auto-heading">Saved autonomous paths ({savedAutoPaths.length})</div>
         {#if savedAutoPaths.length}
@@ -954,7 +958,7 @@
   .team-meta-box { display: grid; gap: var(--gap-3); }
   .team-name-box { font-size: var(--font-xl); font-weight: 800; line-height: 1.2; display: inline-flex; align-items: baseline; gap: 0.5rem; }
   .team-name-sub { color: var(--text-muted); font-size: 0.9rem; }
-  .team-rank-strip { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); border:1px solid var(--border); border-radius:var(--radius-sm); overflow:hidden; }
+  .team-rank-strip { display:grid; grid-template-columns:repeat(5, minmax(0, 1fr)); border:1px solid var(--border); border-radius:var(--radius-sm); overflow:hidden; }
   .team-rank-strip span { display:grid; gap:2px; padding:var(--space-2); border-right:1px solid var(--border); }
   .team-rank-strip span:last-child { border-right:0; }
   .team-rank-strip small, .rating-summary-grid small { color:var(--text-muted); font-size:.66rem; text-transform:uppercase; }
@@ -972,6 +976,8 @@
   .pit-auto-card { display: grid; gap: 0.25rem; min-width: 0; padding: var(--space-2); border: 1px solid color-mix(in srgb, var(--border) 85%, transparent); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--surface-1) 92%, transparent); }
   .pit-auto-card-button { width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer; }
   .pit-auto-card-button:hover { border-color: var(--brand-gold-strong, #b8860b); }
+  .pit-contact { display:flex; justify-content:space-between; gap:var(--gap-2); align-items:baseline; padding:var(--space-2); border-top:1px solid var(--border); font-size:.82rem; }
+  .pit-contact span { color:var(--text-muted); }
   .pit-auto-name { font-size: var(--font-sm); font-weight: 700; line-height: 1.2; }
   .pit-auto-description { font-size: var(--font-xs); color: var(--text-muted); line-height: 1.35; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
   .compact-empty { padding:var(--space-2); }

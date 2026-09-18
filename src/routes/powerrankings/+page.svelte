@@ -294,7 +294,6 @@
         <b>{compareLeft.matchScoutSummary.reportCount}</b><span>Match reports</span><b>{compareRight.matchScoutSummary.reportCount}</b>
         <b>{fmt(compareLeft.matchScoutSummary.avgDriverSkill)}</b><span>Driver skill</span><b>{fmt(compareRight.matchScoutSummary.avgDriverSkill)}</b>
         <b>{fmt(compareLeft.matchScoutSummary.ratingAverages.Reliability)}</b><span>Reliability (match reports)</span><b>{fmt(compareRight.matchScoutSummary.ratingAverages.Reliability)}</b>
-        <b>{fmtPercent(compareLeft.matchScoutSummary.shuttlingRate)}</b><span>Shuttling rate</span><b>{fmtPercent(compareRight.matchScoutSummary.shuttlingRate)}</b>
       </div>
     {/if}
   </section>
@@ -330,7 +329,7 @@
         <th title="Scouts' own out-of-10 impressions, averaged - see Robot Ratings"><button on:click={() => sortBy('robotRatingAvg')}>Team Rating <ArrowUpDown size={11} /></button></th>
         <th class="reference" title="Official FRC qualification rank from The Blue Alliance">Official Rank</th>
         <th class="reference" title="The Blue Alliance's Offensive Power Rating - a statistical estimate, not a rank">TBA OPR</th>
-        <th>Data Matches</th><th>Match Reports</th><th>Auto Score</th><th>Teleop Score</th><th>Driver</th><th>Reliability</th><th>Shuttling</th><th>Pit Score</th><th>Pit Reliability</th><th>Problems</th><th>Archetype</th><th>Note Impact</th><th>Notes</th>
+        <th>Data Matches</th><th>Match Reports</th><th>Auto Score</th><th>Teleop Score</th><th>Driver</th><th>Reliability</th><th>Pit Score</th><th>Pit Reliability</th><th>Problems</th><th>Archetype</th><th>Note Impact</th><th>Notes</th>
       </tr></thead>
       <tbody>{#each filteredTeams as team (team.key)}<tr>
         <td data-label="#" class="strong">{team.powerRank ?? '—'}</td><td data-label="Team" class="mono">{team.team_number}</td><td data-label="Name">{team.nickname}</td>
@@ -341,7 +340,7 @@
         <td data-label="Team Rating"><a href={`/robotratings?team=${team.key}`} title={`${team.robotRating.raterCount} rater(s)`}>{fmt(team.robotRatingAvg)}{#if team.robotRatingCount}<span class="text-muted"> ({team.robotRatingCount})</span>{/if}</a></td>
         <td data-label="Official Rank" class="reference">{officialRank(team) ?? '—'}</td>
         <td data-label="TBA OPR" class="reference">{fmt(officialOpr(team))}</td>
-        <td data-label="Data Matches">{team.scoutSummary.matchesScouted}</td><td data-label="Match Reports">{team.matchScoutSummary.reportCount}</td><td data-label="Auto Score">{fmt(team.matchScoutSummary.avgAutoPoints)}</td><td data-label="Teleop Score">{fmt(team.matchScoutSummary.avgBallsScored)}</td><td data-label="Driver">{fmt(team.matchScoutSummary.avgDriverSkill)}</td><td data-label="Reliability">{fmt(team.matchScoutSummary.ratingAverages.Reliability)}</td><td data-label="Shuttling">{fmtPercent(team.matchScoutSummary.shuttlingRate)}</td><td data-label="Pit Score">{fmt(team.pitSummary.pitScore)}</td><td data-label="Pit Reliability">{team.pitSummary.rawReliability ?? '—'}</td><td data-label="Problems">{team.pitSummary.openProblemCount}</td><td data-label="Archetype">{team.pitSummary.robotArchetype || '—'}</td><td data-label="Note Impact">{team.noteSummary.averageImpact ?? '—'}</td><td data-label="Notes">{team.noteSummary.noteCount}</td>
+        <td data-label="Data Matches">{team.scoutSummary.matchesScouted}</td><td data-label="Match Reports">{team.matchScoutSummary.reportCount}</td><td data-label="Auto Score">{fmt(team.matchScoutSummary.avgAutoPoints)}</td><td data-label="Teleop Score">{fmt(team.matchScoutSummary.avgBallsScored)}</td><td data-label="Driver">{fmt(team.matchScoutSummary.avgDriverSkill)}</td><td data-label="Reliability">{fmt(team.matchScoutSummary.ratingAverages.Reliability)}</td><td data-label="Pit Score">{fmt(team.pitSummary.pitScore)}</td><td data-label="Pit Reliability">{team.pitSummary.rawReliability ?? '—'}</td><td data-label="Problems">{team.pitSummary.openProblemCount}</td><td data-label="Archetype">{team.pitSummary.robotArchetype || '—'}</td><td data-label="Note Impact">{team.noteSummary.averageImpact ?? '—'}</td><td data-label="Notes">{team.noteSummary.noteCount}</td>
       </tr>{/each}</tbody>
     </table>
   </div>

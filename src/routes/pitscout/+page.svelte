@@ -8,7 +8,7 @@
 
   const DRIVEBASE_OPTIONS = ['Mechanum', 'Swerve', 'Tank'];
   const SHOOTER_OPTIONS = ['Single Fixed', 'Multi Fixed', 'Wide', 'Turret', 'Double Turret'];
-  const HOPPER_OPTIONS = ['Spindexer', 'Dye Rotor', 'Belted'];
+  const HOPPER_OPTIONS = ['Spindexer', 'Dye Rotor', 'Belted', 'Floor roller', 'Passive roller', 'Other'];
   const HUMAN_PLAYER_AUTO_OPTIONS = ['0-10', '10-20', '20+'];
   const ROBOT_ARCHETYPES = ['Shooter', 'Shuttler', 'Defender', 'Climber', 'Hybrid', 'Support / Feeder', 'Unknown'];
   const NO_CLIMB_OPTION = 'No Climb';
@@ -17,7 +17,7 @@
   const MAX_AUTO_NAME_LENGTH = 60;
   const MAX_AUTO_DESCRIPTION_LENGTH = 220;
   const MAX_BREAKING_COMPONENT_LENGTH = 240;
-  const ESTIMATED_BPS_SLIDER_MAX = 5;
+  const ESTIMATED_BPS_SLIDER_MAX = 30;
   const PIT_STATUS = Object.freeze({
     pending: { label: 'Pending', className: 'status-pending', sort: 0 },
     needs_photo: { label: 'Needs photo', className: 'status-needs-photo', sort: 1 },
@@ -121,6 +121,7 @@
     programming_language: [],
     uses_wpilib: '',
     software_other: '',
+    pit_contact_phone: '',
     grip_tape: '',
     swerve_module: '',
     hopper_wall_reinforcement: '',
@@ -244,7 +245,7 @@
   }
 
   $: coreAnswers = {
-    scout_name,
+    scout_name, pit_contact_phone: technical_details.pit_contact_phone,
     drivebase_type, shooter_type, hopper_type,
     estimated_bps, likely_breaking_component
   };
@@ -1187,6 +1188,11 @@
         </datalist>
         <small class="form-help">Suggestions appear as you type from previous pit contacts. You can always enter someone new for follow-up questions.</small>
       </div>
+      <div class="form-group">
+        <label class="form-label" for="pitContactPhone">Pit contact phone</label>
+        <input id="pitContactPhone" class="form-input" type="tel" inputmode="tel" maxlength="32" autocomplete="tel" placeholder="Optional: (555) 555-5555" bind:value={technical_details.pit_contact_phone} />
+        <small class="form-help">Saved with this team’s private pit profile for follow-up questions.</small>
+      </div>
     {/if}
 
     <div class="form-group">
@@ -1210,7 +1216,7 @@
     </div>
 
     <div class="form-group">
-      <label class="form-label" for="hopperSelect">Hopper Type</label>
+      <label class="form-label" for="hopperSelect">Indexer Type</label>
       <select id="hopperSelect" class="form-select" bind:value={hopper_type}>
         <option value="">-- Select --</option>
         {#each HOPPER_OPTIONS as option}

@@ -26,11 +26,17 @@ def parse_args():
     parser.add_argument("--device", default=None, help="Ultralytics device, such as 0, cpu, or mps")
     parser.add_argument("--match-key", help="Optional match key shared by all supplied views")
     parser.add_argument("--include-empty", action="store_true")
+    parser.add_argument("--accepted-only", action="store_true",
+                        help="Export only frames where every detected object passed --accept-confidence")
+    parser.add_argument("--max-frames", type=int, default=0,
+                        help="Stop after this many exported frames across all sources (0 means unlimited)")
     args = parser.parse_args()
     if not 0 <= args.review_confidence <= args.accept_confidence <= 1:
         parser.error("confidence thresholds must satisfy 0 <= review <= accept <= 1")
     if args.sample_fps <= 0:
         parser.error("--sample-fps must be positive")
+    if args.max_frames < 0:
+        parser.error("--max-frames cannot be negative")
     return args
 
 
@@ -58,6 +64,7 @@ def main():
     sources = []
     totals = Counter()
 
+    stop = False
     for raw_video in args.videos:
         video = Path(raw_video).resolve()
         if not video.is_file() or video.suffix.lower() not in VIDEO_SUFFIXES:
@@ -65,22 +72,28 @@ def main():
         capture = cv2.VideoCapture(str(video))
         fps = float(capture.get(cv2.CAP_PROP_FPS) or 0)
         frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-        capture.release()
         if fps <= 0:
             raise SystemExit(f"Could not read frame rate: {video}")
         sample_every = max(1, round(fps / args.sample_fps))
         source_id = safe_source_id(video)
+        source_match_key = args.match_key or video.parent.name
         source_counts = Counter()
-        options = {
-            "source": str(video), "stream": True, "persist": True,
-            "verbose": False, "conf": args.review_confidence, "imgsz": args.imgsz,
-        }
+        options = {"verbose": False, "conf": args.review_confidence, "imgsz": args.imgsz}
         if args.device is not None:
             options["device"] = args.device
 
-        for frame_index, result in enumerate(model.track(**options)):
+        # Decode every frame but invoke the GPU only for the requested sample
+        # rate. Calling predict(source=video, stream=True) would infer every
+        # 60fps frame and turn a 1,000-frame job into tens of thousands.
+        frame_index = -1
+        while True:
+            ok, frame = capture.read()
+            if not ok:
+                break
+            frame_index += 1
             if frame_index % sample_every:
                 continue
+            result = model.predict(source=frame, **options)[0]
             timestamp_ms = round(frame_index * 1000 / fps)
             stem = f"{source_id}__{timestamp_ms:09d}ms"
             accepted = []
@@ -105,16 +118,19 @@ def main():
                         accepted.append(yolo_line(class_id, candidate["xywhn"]))
 
             needs_review = any(item["status"] == "needs_review" for item in candidates)
+            if args.accepted_only and needs_review:
+                source_counts["frames_rejected_uncertain"] += 1
+                continue
             if not (accepted or candidates or args.include_empty):
                 continue
             image_path = image_dir / f"{stem}.jpg"
             label_path = label_dir / f"{stem}.txt"
-            if not cv2.imwrite(str(image_path), result.orig_img, [cv2.IMWRITE_JPEG_QUALITY, 92]):
+            if not cv2.imwrite(str(image_path), frame, [cv2.IMWRITE_JPEG_QUALITY, 92]):
                 raise RuntimeError(f"Could not write {image_path}")
             label_path.write_text("\n".join(accepted) + ("\n" if accepted else ""), encoding="utf-8")
             review_items.append({
                 "priority": "review" if needs_review else "spot_check",
-                "match_key": args.match_key, "source_video": str(video),
+                "match_key": source_match_key, "source_video": str(video),
                 "source_id": source_id, "frame_index": frame_index,
                 "timestamp_ms": timestamp_ms,
                 "image": str(image_path.relative_to(output)),
@@ -122,13 +138,19 @@ def main():
                 "predictions": candidates,
             })
             source_counts["frames_exported"] += 1
+            if args.max_frames and totals["frames_exported"] + source_counts["frames_exported"] >= args.max_frames:
+                stop = True
+                break
+        capture.release()
 
         totals.update(source_counts)
         sources.append({
-            "video": str(video), "source_id": source_id, "fps": fps,
+            "video": str(video), "source_id": source_id, "match_key": source_match_key, "fps": fps,
             "frame_count": frame_count, "counts": dict(source_counts),
         })
         print(f"{video.name}: {source_counts['frames_exported']} frames, {source_counts['needs_review']} uncertain objects")
+        if stop:
+            break
 
     review_items.sort(key=lambda item: (
         item["priority"] != "review",

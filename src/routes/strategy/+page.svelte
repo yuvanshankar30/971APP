@@ -145,8 +145,12 @@
           .filter(([, label]) => label)
       )
     : new Map();
-  $: upcomingMatches = matches.filter((match) => !isMatchPlayed(match));
-  $: playedMatches = matches.filter((match) => isMatchPlayed(match)).slice().reverse();
+  $: ourMatches = matches.filter((match) => matchHasOurTeam(match));
+  // The strategy schedule is an at-a-glance 971 board. It deliberately omits
+  // other teams' matches so the next assignment is never buried in a full
+  // event schedule.
+  $: upcomingMatches = ourMatches.filter((match) => !isMatchPlayed(match)).slice().reverse();
+  $: playedMatches = ourMatches.filter((match) => isMatchPlayed(match)).slice().reverse();
   const teamNumber = (teamKey) => String(teamKey || '').replace(/^frc/i, '');
   // "i more want to know upcoming matches" than Data Matches as a top-level
   // column (see docs/plans/strategy-picklist-improvements.md section 5) -

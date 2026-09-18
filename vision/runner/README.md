@@ -198,8 +198,11 @@ must point at real trained weights (also not built yet - see
 `../training/create_placeholder_model.py` for a non-functional stand-in
 that at least exercises the claim/heartbeat/complete plumbing).
 
-The supplied weights must define `robot_red`, `robot_blue`, `climb_attempt`,
-and `climb_success` classes (alliance suffixes supported for action classes).
+The supplied weights may define `robot_red` and `robot_blue`, or a generic
+`robot` class. For generic detections, the runner classifies only the lower
+bumper band as red or blue and rejects ambiguous/occluded evidence; it never
+guesses an alliance. It also supports `climb_attempt` and `climb_success`
+classes (alliance suffixes supported for action classes).
 **Do not train a `fuel_scored` class** - fuel detection is the classical CV
 pipeline above, tuned via `vision_runs.config` (`hsv_lower`/`hsv_upper`/
 `min_piece_area`/`min_circularity`), not trained weights; any `fuel_scored`

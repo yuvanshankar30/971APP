@@ -65,7 +65,8 @@ const TECHNICAL_TEXT_FIELDS = new Set([
   'mostly_used_wire_gauge',
   'drivebase_tube_thickness',
   'roller_hub_material',
-  'software_other'
+  'software_other',
+  'pit_contact_phone'
 ]);
 
 const TECHNICAL_NUMBER_FIELDS = new Set([
