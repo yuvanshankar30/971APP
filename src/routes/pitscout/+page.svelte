@@ -5,6 +5,7 @@
   import { isQueueableFailure, submitOrQueue } from '$lib/offlineQueue.js';
   import SeasonFilter from '$lib/components/SeasonFilter.svelte';
   import OfflineSyncBadge from '$lib/components/OfflineSyncBadge.svelte';
+  import RebuiltFieldMap from '$lib/components/RebuiltFieldMap.svelte';
 
   const DRIVEBASE_OPTIONS = ['Mechanum', 'Swerve', 'Tank'];
   const SHOOTER_OPTIONS = ['Single Fixed', 'Multi Fixed', 'Wide', 'Turret', 'Double Turret'];
@@ -24,7 +25,6 @@
     completed: { label: 'Completed', className: 'status-complete', sort: 2 }
   });
   const YES_NO_OPTIONS = ['Yes', 'No'];
-  const INTAKE_STYLE_OPTIONS = ['Slapdown Intake', 'Linkage Intake', 'Other'];
   const MAIN_BREAKER_OPTIONS = ['Bussmann', 'OptiFuse', 'Other'];
   const SB_CONNECTOR_OPTIONS = ['SB60', 'SB40', 'Other'];
   const WIRE_INSULATION_OPTIONS = ['Silicone', 'Other'];
@@ -78,7 +78,6 @@
   };
   const TECHNICAL_SINGLE_FIELD_OPTIONS = {
     use_net: YES_NO_OPTIONS,
-    intake_style: INTAKE_STYLE_OPTIONS,
     main_breaker_brand: MAIN_BREAKER_OPTIONS,
     sb_connector: SB_CONNECTOR_OPTIONS,
     main_breaker_shroud: YES_NO_OPTIONS,
@@ -265,7 +264,8 @@
     if (!Array.isArray(input)) return [];
     return input.slice(0, MAX_AUTO_OPTIONS).map((option) => ({
       name: String(option?.name || '').trim().slice(0, MAX_AUTO_NAME_LENGTH),
-      description: String(option?.description || '').trim().slice(0, MAX_AUTO_DESCRIPTION_LENGTH)
+      description: String(option?.description || '').trim().slice(0, MAX_AUTO_DESCRIPTION_LENGTH),
+      path: Array.isArray(option?.path) ? option.path.filter((point) => Array.isArray(point) && point.length >= 2 && Number.isFinite(Number(point[0])) && Number.isFinite(Number(point[1]))).slice(0, 500).map(([x, y]) => [Math.max(0, Math.min(100, Number(x))), Math.max(0, Math.min(100, Number(y)))]) : []
     }));
   }
 
@@ -315,6 +315,7 @@
     normalized.drivebase_tube_thickness = String(source.drivebase_tube_thickness || '').trim().slice(0, 80);
     normalized.roller_hub_material = String(source.roller_hub_material || '').trim().slice(0, 80);
     normalized.software_other = String(source.software_other || '').trim().slice(0, 240);
+    normalized.intake_style = String(source.intake_style || '').trim().slice(0, 80);
 
     normalized.ground_roller_motor_count = normalizeTechnicalNumber(source.ground_roller_motor_count, { integer: true });
     normalized.bumper_length = normalizeTechnicalNumber(source.bumper_length);
@@ -455,7 +456,7 @@
     shooter_type = entry?.shooter_type || '';
     hopper_type = entry?.hopper_type || '';
     human_player_balls_in_auto = entry?.human_player_balls_in_auto || '';
-    robot_archetype = ROBOT_ARCHETYPES.includes(entry?.robot_archetype) ? entry.robot_archetype : '';
+    robot_archetype = String(entry?.robot_archetype || '').slice(0, 80);
     additional_notes = String(entry?.additional_notes || '');
     likely_breaking_component = entry?.likely_breaking_component || '';
     estimated_bps = hasEstimatedBps(entry?.estimated_bps) ? Number(entry.estimated_bps) : undefined;
@@ -725,7 +726,7 @@
 
   function addAutoOption() {
     if (autoOptions.length >= MAX_AUTO_OPTIONS) return;
-    autoOptions = [...autoOptions, { name: '', description: '' }];
+    autoOptions = [...autoOptions, { name: '', description: '', path: [] }];
   }
 
   function updateAutoOption(idx, field, value) {
@@ -1229,11 +1230,8 @@
 
     {#if pitSchema.robot_archetype}
       <div class="form-group">
-        <label class="form-label" for="robotArchetypeSelect">Robot Archetype</label>
-        <select id="robotArchetypeSelect" class="form-select" bind:value={robot_archetype}>
-          <option value="">-- Select --</option>
-          {#each ROBOT_ARCHETYPES as option}<option value={option}>{option}</option>{/each}
-        </select>
+        <label class="form-label" for="robotArchetypeInput">Robot Archetype</label>
+        <input id="robotArchetypeInput" class="form-input" maxlength="80" placeholder="e.g. shooter, shuttler, hybrid" bind:value={robot_archetype} />
       </div>
     {/if}
 
@@ -1252,23 +1250,12 @@
 
         <div class="field-grid">
           <div class="form-group">
-            <label class="form-label" for="useNetSelect">Do they use a net?</label>
-            <select id="useNetSelect" class="form-select" bind:value={technical_details.use_net}>
-              <option value="">-- Select --</option>
-              {#each YES_NO_OPTIONS as option}
-                <option value={option}>{option}</option>
-              {/each}
-            </select>
+            <label class="form-checkbox" for="useNetInput"><input id="useNetInput" type="checkbox" checked={technical_details.use_net === 'Yes'} on:change={(event) => technical_details = { ...technical_details, use_net: event.currentTarget.checked ? 'Yes' : 'No' }} /><span>Do they use a net?</span></label>
           </div>
 
           <div class="form-group">
-            <label class="form-label" for="intakeStyleSelect">Ground intake style</label>
-            <select id="intakeStyleSelect" class="form-select" bind:value={technical_details.intake_style}>
-              <option value="">-- Select --</option>
-              {#each INTAKE_STYLE_OPTIONS as option}
-                <option value={option}>{option}</option>
-              {/each}
-            </select>
+            <label class="form-label" for="intakeStyleInput">Ground intake style</label>
+            <input id="intakeStyleInput" class="form-input" maxlength="80" placeholder="Describe the intake" bind:value={technical_details.intake_style} />
           </div>
 
           <div class="form-group">
@@ -1756,6 +1743,9 @@
                   value={option.description}
                   on:input={(event) => updateAutoOption(idx, 'description', event.currentTarget.value)}
                 />
+                <div class="pit-auto-route-heading"><span>Mirrored auto path</span><div><button class="btn btn-outline btn-sm" type="button" on:click={() => updateAutoOption(idx, 'name', 'Trench auto')}>Trench</button><button class="btn btn-outline btn-sm" type="button" on:click={() => updateAutoOption(idx, 'name', 'Bump auto')}>Bump</button></div></div>
+                <RebuiltFieldMap alliance="blue" bind:path={autoOptions[idx].path} />
+                <small class="form-help">Draw once in this mirrored field view; pit scouting does not need an alliance selection.</small>
               </div>
             {/each}
           </div>

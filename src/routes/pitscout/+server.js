@@ -11,7 +11,6 @@ const ROBOT_ARCHETYPES = ['Shooter', 'Shuttler', 'Defender', 'Climber', 'Hybrid'
 
 const TECHNICAL_DETAIL_OPTIONS = {
   use_net: ['Yes', 'No'],
-  intake_style: ['Slapdown Intake', 'Linkage Intake', 'Other'],
   main_breaker_brand: ['Bussmann', 'OptiFuse', 'Other'],
   sb_connector: ['SB60', 'SB40', 'Other'],
   main_breaker_shroud: ['Yes', 'No'],
@@ -66,7 +65,8 @@ const TECHNICAL_TEXT_FIELDS = new Set([
   'drivebase_tube_thickness',
   'roller_hub_material',
   'software_other',
-  'pit_contact_phone'
+  'pit_contact_phone',
+  'intake_style'
 ]);
 
 const TECHNICAL_NUMBER_FIELDS = new Set([
@@ -128,10 +128,18 @@ function sanitizeAutoOptions(input) {
     const description = String(value?.description || '').trim().slice(0, 220);
     if (!name || !description) continue;
 
+    const path = Array.isArray(value?.path)
+      ? value.path.slice(0, 500).flatMap((point) => {
+          if (!Array.isArray(point) || point.length < 2) return [];
+          const x = Number(point[0]); const y = Number(point[1]);
+          return Number.isFinite(x) && Number.isFinite(y) ? [[Math.max(0, Math.min(100, x)), Math.max(0, Math.min(100, y))]] : [];
+        })
+      : [];
+
     const key = `${name.toLowerCase()}::${description.toLowerCase()}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    clean.push({ name, description });
+    clean.push({ name, description, path });
 
     if (clean.length >= 8) break;
   }
@@ -232,7 +240,7 @@ export async function POST({ request }) {
     const hopper_type = body?.hopper_type || null;
     const human_player_balls_in_auto = body?.human_player_balls_in_auto || null;
     const scout_name = sanitizeLongText(body?.scout_name, 120);
-    const robot_archetype = ROBOT_ARCHETYPES.includes(body?.robot_archetype) ? body.robot_archetype : null;
+    const robot_archetype = sanitizeLongText(body?.robot_archetype, 80);
     const additional_notes = sanitizeLongText(body?.additional_notes, 4000);
     const likely_breaking_component = sanitizeLongText(body?.likely_breaking_component);
     const estimated_bps = sanitizeEstimatedBps(body?.estimated_bps);
