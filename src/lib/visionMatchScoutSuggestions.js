@@ -20,8 +20,8 @@ function strongestTrack(tracks) {
 /**
  * Converts human-reviewed, team-attributed vision evidence into the subset of
  * Match Scouting fields the system can actually observe. This deliberately
- * excludes subjective ratings, preload, crashes, intake, cards, and points:
- * those require a scout's judgement or are not measured in this form.
+ * excludes subjective ratings, preload, intake, cards, and points. Collision
+ * candidates are still review-gated before they can suggest a crash.
  */
 export function buildVisionMatchScoutSuggestions({ run = {}, teamKey, tracks = [], observations = [] } = {}) {
   const autoEndMs = number(run.config?.auto_end_ms) ?? DEFAULT_AUTO_END_MS;
@@ -62,8 +62,16 @@ export function buildVisionMatchScoutSuggestions({ run = {}, teamKey, tracks = [
 
   const disabled = fused.filter(row => row.observation_type === 'disabled' && !phaseIsAuto(row, autoEndMs));
   if (disabled.length) {
-    fields.teleopRobotStatus = 'stopped';
+    fields.teleopRobotStatus = disabled.some(row => row.value?.status === 'dead') ? 'dead' : 'stopped';
     evidence.disabled_events = disabled.length;
+  }
+
+  const collisions = fused.filter(row => row.observation_type === 'collision' && !phaseIsAuto(row, autoEndMs));
+  if (collisions.length) {
+    fields.significantCrash = true;
+    fields.crashTarget = 'other';
+    fields.crashDetails = 'Vision-reviewed abrupt collision and reversal; verify the contact target.';
+    evidence.collision_events = collisions.length;
   }
 
   return {
@@ -71,7 +79,7 @@ export function buildVisionMatchScoutSuggestions({ run = {}, teamKey, tracks = [
     evidence,
     reviewed: Boolean(fused.length || teamTracks.length),
     unavailable: [
-      'preload', 'autoPoints', 'teleopRoles', 'ratings', 'significantCrash',
+      'preload', 'autoPoints', 'teleopRoles', 'ratings',
       'intakeSpeed', 'intakeJammed', 'mechanicalBreak', 'cards', 'driverSkill'
     ]
   };

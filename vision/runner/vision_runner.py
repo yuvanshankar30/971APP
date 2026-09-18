@@ -32,6 +32,7 @@ from apriltag_calibration import probe_recording
 from fuel_tracking import PieceTracker, goal_entry, nearest_pixel_track
 from bumper_alliance import infer_bumper_alliance
 from team_identity import CropCollector, resolve_identities
+from motion_events import track_motion_candidates
 
 API = os.environ["VISION_API_URL"].rstrip("/") + "/api/vision-runner"
 TOKEN = os.environ["VISION_RUNNER_TOKEN"]
@@ -836,7 +837,8 @@ def process_view(model, view, config, video_path, team_roster=None):
         )
     climb_observations = attribute_climbs(climb_detections, finished_tracks, view, config)
     fuel_observations = attribute_scores(piece_tracker.all_trajectories(), finished_tracks, goal_zones, frame_shape or (1, 1), view["id"], float(config.get("fuel_attribution_distance_px", 120)))
-    return finished_tracks, climb_observations + fuel_observations
+    motion_observations = [candidate for track in finished_tracks for candidate in track_motion_candidates(track, view["id"], config)]
+    return finished_tracks, climb_observations + fuel_observations + motion_observations
 
 
 def run_job(model, run):

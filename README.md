@@ -200,8 +200,10 @@ browser confirmation or prompt popups.
   robot trajectories/mobility, fuel, and climbing. Match Scouting can explicitly
   load reviewed vision evidence for its selected match and team to fill blank
   starting position, auto movement, calibrated auto path, teleop fuel count,
-  and stopped status; every suggestion stays editable, while preload, points,
-  ratings, roles, crashes, intake, cards, and mechanical calls remain scout
+  and stopped status. Reviewed continuous calibrated tracking can also suggest
+  `dead` after 50 seconds stationary, while a reviewer can accept a high-speed
+  reversal as a crash candidate; every suggestion stays editable. Preload,
+  points, ratings, roles, intake, cards, and mechanical calls remain scout
   judgement. A calibrated red/blue field-occupancy heatmap fills as trajectory
   results arrive.
   Generic robot-only YOLO weights are supported: a conservative second stage

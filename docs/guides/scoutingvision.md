@@ -86,8 +86,10 @@ Seven tables, all with RLS enabled:
 | `vision_views` | One row per uploaded camera recording for a match: storage path, camera position, frame rate/dimensions, sync offset, homography + calibration points. |
 | `vision_runs` | One row per model-processing attempt on a match. Immutable `model_name`/`model_version`/`config`; `status`: `queued → claimed → processing → complete/failed/cancelled`. |
 | `vision_tracks` | Per-robot trajectory output from one run: alliance, start/end ms, identity + tracking confidence, raw `trajectory` points, derived `metrics` (see analytics below), `needs_review` flag. |
-| `vision_observations` | Discrete detected events (`fuel_attempt`, `fuel_scored`, `climb_attempt`, `climb_success`, `mobility`, `disabled`, `identity`) with a JSON `value`, confidence, and `evidence` for audit. `climb_*` evidence is a YOLO frame/box; `fuel_scored` evidence is the classical-CV goal zone label + trajectory length (see **Hybrid game-piece detection** below - fuel isn't a YOLO detection). |
+| `vision_observations` | Discrete detected events (`fuel_attempt`, `fuel_scored`, `climb_attempt`, `climb_success`, `mobility`, `disabled`, `collision`, `identity`) with a JSON `value`, confidence, and `evidence` for audit. `climb_*` evidence is a YOLO frame/box; `fuel_scored` evidence is the classical-CV goal zone label + trajectory length (see **Hybrid game-piece detection** below - fuel isn't a YOLO detection). |
 | `vision_discrepancies` | Vision-vs-TBA mismatches queued for human review, with severity (`info`/`warning`/`critical`) and a resolution workflow. |
+
+Motion-derived `disabled` observations use `value.status = "dead"` only when a calibrated track remains continuously visible and below 0.12 m/s for at least 50 seconds after auto. A gap larger than 1.5 seconds resets the timer. A `collision` observation represents a high-speed abrupt reversal; it is a review candidate, not proof of bumper contact. Both are inserted as unreviewed and only affect Match Scouting after acceptance or correction.
 | `vision_reference_snapshots` | The TBA match breakdown captured at analysis time, so later re-review doesn't depend on TBA's API still returning the same shape. |
 
 Also creates a private `vision-recordings` storage bucket (`public: false`).

@@ -43,6 +43,19 @@ describe('reviewed vision match-scout suggestions', () => {
     expect(result.fields.autoMoved).toBe('ran');
   });
 
+  it('suggests dead and a crash only after their trajectory evidence is reviewed', () => {
+    const result = buildVisionMatchScoutSuggestions({
+      teamKey: 'frc971', tracks: [], observations: [
+        observation({ id: 'dead', observation_type: 'disabled', value: { status: 'dead' }, started_ms: 70_000 }),
+        observation({ id: 'collision', observation_type: 'collision', value: { kind: 'abrupt_reverse' }, started_ms: 80_000 })
+      ]
+    });
+    expect(result.fields.teleopRobotStatus).toBe('dead');
+    expect(result.fields.significantCrash).toBe(true);
+    expect(result.fields.crashTarget).toBe('other');
+    expect(result.unavailable).not.toContain('significantCrash');
+  });
+
   it('does not turn auto fuel into points or teleop balls', () => {
     const result = buildVisionMatchScoutSuggestions({
       teamKey: 'frc971', tracks: [], observations: [observation({ phase: 'auto', started_ms: 5000, value: { count: 7 } })]

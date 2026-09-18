@@ -258,6 +258,7 @@
     if (!startingPosition && fields.startingPosition) { startingPosition = fields.startingPosition; applied.push('starting position'); }
     if (!autoMoved && fields.autoMoved) { autoMoved = fields.autoMoved; applied.push('auto movement'); }
     if (!autoPath.length && Array.isArray(fields.autoPath)) { autoPath = fields.autoPath.map(point => [...point]); autoPathName = fields.autoPathName || 'Vision-reviewed auto path'; applied.push('auto path'); }
+    if (significantCrash === null && fields.significantCrash === true) { significantCrash = true; crashTarget = fields.crashTarget || 'other'; crashDetails = fields.crashDetails || 'Vision-reviewed abrupt collision; verify the contact target.'; applied.push('significant crash'); }
     if (!ballsScored && fields.ballsScored) { ballsScored = fields.ballsScored; applied.push('teleop balls'); }
     if (!teleopRobotStatus && fields.teleopRobotStatus) { teleopRobotStatus = fields.teleopRobotStatus; applied.push('robot status'); }
     visionSuggestionNotice = applied.length ? `Applied ${applied.join(', ')}. Review or edit every value before saving.` : 'Your existing answers were kept; there were no blank suggested fields to fill.';
@@ -676,7 +677,7 @@
           <div>
             <span class="field-label">Vision scouting</span>
             <strong>Reviewed objective suggestions</strong>
-            <small>Only accepted or corrected evidence is used. Preload, ratings, points, roles, crashes, intake, and cards still need a scout.</small>
+            <small>Only accepted or corrected evidence is used. Preload, ratings, points, roles, intake, and cards still need a scout. A hard-collision candidate must be reviewed before it is suggested.</small>
           </div>
           <button class="btn btn-secondary" disabled={visionSuggestionsLoading || !eventKey || !matchNumber.trim() || !robotNumber.trim()} on:click={loadVisionSuggestions}>
             {visionSuggestionsLoading ? 'Checking vision…' : 'Check reviewed vision'}
