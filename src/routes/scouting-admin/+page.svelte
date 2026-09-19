@@ -509,6 +509,36 @@
     }
   }
 
+  async function removeMatchReport(report) {
+    if (!report?.id) return;
+    const teamNumber = String(report.team_key || '').replace(/^frc/i, '');
+    const matchLabel = String(report.match_key || '').split('_').at(-1) || report.match_key;
+    if (!await requestConfirmation({
+      title: 'Remove match report',
+      message: `Permanently remove ${report.scout_name || 'this scout'}'s report for Team ${teamNumber}, match ${matchLabel}? This cannot be undone.`,
+      confirmLabel: 'Remove report',
+      danger: true
+    })) {
+      return;
+    }
+
+    errorMsg = '';
+    successMsg = '';
+    try {
+      const res = await authFetch('/api/matchscout', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'delete-entry', id: report.id })
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) throw new Error(data?.error || `Failed to remove the report (${res.status})`);
+      matchReports = matchReports.filter((entry) => entry.id !== report.id);
+      successMsg = `Removed ${report.scout_name || 'the'} report for Team ${teamNumber}, match ${matchLabel}.`;
+    } catch (e) {
+      errorMsg = e.message || 'Failed to remove the report.';
+    }
+  }
+
   async function loadAvailableEvents() {
     availableEvents = await fetchAvailableScoutingEvents();
   }
@@ -754,7 +784,7 @@
       {:else}
         <div class="match-report-list">
           {#each matchReports as report (report.id)}
-            <MatchScoutReport {report} showTeam showScout />
+            <MatchScoutReport {report} showTeam showScout onRemove={removeMatchReport} />
           {/each}
         </div>
       {/if}
