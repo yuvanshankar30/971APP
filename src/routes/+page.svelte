@@ -1574,16 +1574,15 @@
     align-items: stretch;
     gap: var(--space-5);
     margin-top: var(--space-3);
-    /* Fixed height, not "as tall as 11 tabs need" - the list scrolls
-       internally instead of pushing the page past the viewport (see the
-       page-wide no-scroll constraint on .dashboard-container below). */
-    height: 232px;
   }
 
+  /* All 11 tabs stay visible with no internal scrollbar of their own -
+     hiding nav items behind a scroll a visitor might never notice is worse
+     than the list just being what it is. Kept short per-item instead
+     (compact padding/font below) so the whole thing still stays modest. */
   .quick-nav {
     display: flex;
     flex-direction: column;
-    overflow-y: auto;
     border: 1px solid var(--border);
     background: var(--surface-1);
   }
@@ -1594,7 +1593,7 @@
     text-transform: uppercase;
     letter-spacing: 0.08em;
     color: var(--text-muted);
-    padding: var(--space-3) var(--space-4) var(--space-2);
+    padding: var(--space-2) var(--space-4) 6px;
     border-bottom: 1px solid var(--border);
   }
 
@@ -1602,14 +1601,15 @@
     display: block;
     width: 100%;
     text-align: left;
-    padding: var(--space-3) var(--space-4);
+    padding: 7px var(--space-4);
     border: none;
     border-left: 3px solid transparent;
     border-bottom: 1px solid var(--border);
     background: none;
     color: var(--text-secondary);
     font: inherit;
-    font-size: 0.85rem;
+    font-size: 0.8rem;
+    line-height: 1.3;
     cursor: pointer;
     transition: border-color 0.1s ease, background-color 0.1s ease, color 0.1s ease;
   }
