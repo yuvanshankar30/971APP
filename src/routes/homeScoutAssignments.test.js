@@ -19,7 +19,7 @@ describe('Home scouting assignment history', () => {
   });
 
   it('shows the active TBA match and both alliances', () => {
-    expect(source).toContain('selectCurrentEventMatch(payload.data || [])');
+    expect(source).toContain('selectCurrentEventMatch(matches)');
     expect(source).toContain("currentMatchState === 'current' ? 'Current match'");
     expect(source).toContain('currentEventMatch.alliances?.red?.team_keys');
     expect(source).toContain('currentEventMatch.alliances?.blue?.team_keys');

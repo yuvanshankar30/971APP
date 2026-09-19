@@ -3573,12 +3573,17 @@
   .cad-download-btn:hover { background: var(--surface-2, #f3f4f6); }
 
   .manufacture-page-container {
-    /* No cap of its own - the page shell already sets the shared width.
-       This used to be 1400px, narrower than the 1440px shell around it,
-       which made manufacture the tightest tab in the app and is why long
-       part names ran out of room first. */
-    width: 100%;
-    margin: 0 auto;
+    /* Full-bleed breakout: the global <main> this sits in (see
+       +layout.svelte's main.container.page-container) is itself centered
+       and capped at --page-max-width, which made this the tightest,
+       most-columns-per-row page in the app run out of room first -
+       long part names, a wide status/workflow/machine table, all fighting
+       for the same 1440-1800px shell every other route shares. This
+       escapes it, same technique as the homepage's own breakout. */
+    width: 100vw;
+    margin-left: calc(50% - 50vw);
+    margin-right: calc(50% - 50vw);
+    padding: 0 var(--space-4);
   }
 
   .select-col {
@@ -4099,6 +4104,8 @@
 
   @media (max-width: 768px) {
     .manufacture-page-container {
+      width: auto;
+      margin: 0;
       padding: 0;
     }
 
