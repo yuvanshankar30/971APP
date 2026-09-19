@@ -6,8 +6,8 @@
   import { supabase } from '$lib/supabase.js';
   import { fetchActiveScoutingEventKey } from '$lib/scoutingEvent.js';
   import navConfig from '$lib/navigation.json';
-  import { defaultHeaderTabs, mergeDefaultHeaderTabs, ensurePowerRankingsTab, ensureMatchRankingsTab, ensureRobotRatingsTab, ensurePredictionMarketTab, ensureScoutingAdminTab, ensureStrategyTab, ensureDriveTeamTab, ensurePicklistTab, ensureGcodeConverterTab, ensureFilesTab, ensureFusionAutocamTab, promoteChildrenOfDisabledFolders } from '$lib/defaultTabs.js';
-  import { Move3d, Hammer, Wrench, Receipt, Home, Briefcase, Coins, Package, User, ChevronDown, Menu, X, Camera, CalendarDays, Cpu, FileText, Trophy, Eye, ClipboardCheck, ListChecks, Target, Folder, Search, Star, Dice5, Zap } from 'lucide-svelte';
+  import { defaultHeaderTabs, mergeDefaultHeaderTabs, ensurePowerRankingsTab, ensureMatchRankingsTab, ensureRobotRatingsTab, ensurePredictionMarketTab, ensureBlueAllianceTab, ensureScoutingAdminTab, ensureStrategyTab, ensureDriveTeamTab, ensurePicklistTab, ensureGcodeConverterTab, ensureFilesTab, ensureFusionAutocamTab, promoteChildrenOfDisabledFolders } from '$lib/defaultTabs.js';
+  import { Move3d, Hammer, Wrench, Receipt, Home, Briefcase, Coins, Package, User, ChevronDown, Menu, X, Camera, CalendarDays, Cpu, FileText, Trophy, Eye, ClipboardCheck, ListChecks, Target, Folder, Search, Star, Dice5, Zap, Radar } from 'lucide-svelte';
   import { goto, afterNavigate } from '$app/navigation';
   import { page } from '$app/stores';
   import Toasts from '$lib/Toasts.svelte';
@@ -318,6 +318,7 @@
     strategy: '/strategy',
     driveteam: '/driveteam',
     picklist: '/picklist',
+    bluealliance: '/bluealliance',
     'scouting-admin': '/scouting-admin',
     'cots-stocking': '/cots-stocking',
     'fusion-autocam': '/autocam/fusion',
@@ -351,6 +352,7 @@
     strategy: Target,
     driveteam: Zap,
     picklist: ListChecks,
+    bluealliance: Radar,
     'scouting-admin': Briefcase,
     'cots-stocking': Package,
     'fusion-autocam': Cpu,
@@ -384,6 +386,7 @@
     strategy: 'Strategy',
     driveteam: 'Drive Team',
     picklist: 'Picklist',
+    bluealliance: 'Blue Alliance',
     'scouting-admin': 'Scouting Admin',
     'cots-stocking': 'COTS Stocking',
     'fusion-autocam': 'Fusion AutoCAM',
@@ -518,16 +521,19 @@
   // ensureMatchRankingsTab()/ensureRobotRatingsTab()/ensurePredictionMarketTab().
   $: baseNavTabs = addAdminTabIfAllowed(
     ensureScoutingAdminTab(
-      ensurePicklistTab(
-        ensureDriveTeamTab(
-          ensureStrategyTab(
-            ensureFusionAutocamTab(
-              ensureFilesTab(
-                ensureGcodeConverterTab(
-                  ensurePredictionMarketTab(
-                    ensureRobotRatingsTab(
-                      ensureMatchRankingsTab(
-                        ensurePowerRankingsTab(effectiveTabs, navConfig),
+      ensureBlueAllianceTab(
+        ensurePicklistTab(
+          ensureDriveTeamTab(
+            ensureStrategyTab(
+              ensureFusionAutocamTab(
+                ensureFilesTab(
+                  ensureGcodeConverterTab(
+                    ensurePredictionMarketTab(
+                      ensureRobotRatingsTab(
+                        ensureMatchRankingsTab(
+                          ensurePowerRankingsTab(effectiveTabs, navConfig),
+                          navConfig
+                        ),
                         navConfig
                       ),
                       navConfig
@@ -540,7 +546,8 @@
               )
             )
           )
-        )
+        ),
+        navConfig
       )
     ),
     canViewAdmin

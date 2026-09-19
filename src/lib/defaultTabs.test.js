@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { defaultHeaderTabs, ensureMatchRankingsTab, ensurePowerRankingsTab, ensurePredictionMarketTab, ensureRobotRatingsTab, ensureScoutingAdminTab, ensureStrategyTab, ensureDriveTeamTab, ensurePicklistTab, ensureGcodeConverterTab, ensureFilesTab, ensureFusionAutocamTab, promoteChildrenOfDisabledFolders } from './defaultTabs.js';
+import { defaultHeaderTabs, ensureMatchRankingsTab, ensurePowerRankingsTab, ensurePredictionMarketTab, ensureBlueAllianceTab, ensureRobotRatingsTab, ensureScoutingAdminTab, ensureStrategyTab, ensureDriveTeamTab, ensurePicklistTab, ensureGcodeConverterTab, ensureFilesTab, ensureFusionAutocamTab, promoteChildrenOfDisabledFolders } from './defaultTabs.js';
 
 const enabled = { tabs: { powerrankings: true, predictions: true, robotratings: true } };
 
@@ -113,7 +113,7 @@ describe('defaultHeaderTabs', () => {
     // ('picklist') that replaced it in the menu.
     const keys = competitionChildren(defaultHeaderTabs()).map((child) => child.key);
     expect(keys).toEqual([
-      'strategy', 'driveteam', 'matchscout', 'pitscout', 'picklist', 'matchrankings', 'powerrankings', 'robotratings', 'vision', 'predictions', 'scouting-admin'
+      'strategy', 'driveteam', 'matchscout', 'pitscout', 'picklist', 'matchrankings', 'powerrankings', 'robotratings', 'vision', 'predictions', 'bluealliance', 'scouting-admin'
     ]);
   });
 
@@ -410,6 +410,32 @@ describe('ensurePredictionMarketTab', () => {
   it('stays out entirely when the tab is disabled in navigation config', () => {
     const nav = savedNav();
     expect(ensurePredictionMarketTab(nav, { tabs: { predictions: false } })).toBe(nav);
+  });
+});
+
+describe('ensureBlueAllianceTab', () => {
+  // Same append-only migration contract as ensurePowerRankingsTab above -
+  // a saved custom nav from before this draft tab existed still gets it.
+  it('appends to an existing Competition folder', () => {
+    const result = ensureBlueAllianceTab(savedNav(), enabled);
+    expect(competitionChildren(result).at(-1)).toEqual({ key: 'bluealliance', label: 'Blue Alliance' });
+  });
+
+  it('is a no-op when the tab is already in the folder', () => {
+    const already = savedNav();
+    already[1].children.push({ key: 'bluealliance', label: 'Blue Alliance' });
+    expect(ensureBlueAllianceTab(already, enabled)).toBe(already);
+  });
+
+  it('falls back to a top-level tab when there is no Competition folder', () => {
+    const flat = [{ type: 'tab', key: 'docs', label: 'Docs' }];
+    const result = ensureBlueAllianceTab(flat, enabled);
+    expect(result.at(-1)).toEqual({ type: 'tab', key: 'bluealliance', label: 'Blue Alliance' });
+  });
+
+  it('stays out entirely when the tab is disabled in navigation config', () => {
+    const nav = savedNav();
+    expect(ensureBlueAllianceTab(nav, { tabs: { bluealliance: false } })).toBe(nav);
   });
 });
 import { describe, expect, it } from 'vitest';
