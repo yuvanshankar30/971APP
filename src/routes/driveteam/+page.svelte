@@ -4,6 +4,7 @@
   import { fetchActiveScoutingEventKey } from '$lib/scoutingEvent.js';
   import { FRC_TEAMS } from '$lib/permissions.js';
   import { isMatchPlayed, matchLabel } from '$lib/matchProjection.js';
+  import { teamMatchResult } from '$lib/driveTeamMatches.js';
   import { fetchWithCache } from '$lib/offlineCache.js';
 
   // Built from Slack feedback (Andre Fong, drive team): "like next matches
@@ -93,6 +94,10 @@
   $: ourUpcoming = ourMatches.filter((match) => !isMatchPlayed(match));
   $: ourPlayed = ourMatches.filter((match) => isMatchPlayed(match));
   $: lastPlayedOurs = ourPlayed[ourPlayed.length - 1] || null;
+  $: playedWithResults = [...ourPlayed].reverse().map((match) => ({
+    match,
+    result: teamMatchResult(match, OUR_TEAM_KEY)
+  }));
 
   // Overall (every team's) match order doubles as queue position: how many
   // matches are left to run before ours, counting from whichever match was
@@ -202,17 +207,25 @@
       </section>
     {/if}
 
-    {#if lastPlayedOurs}
+    {#if playedWithResults.length}
       <section class="dt-last">
-        <h3>Last match</h3>
-        <div class="dt-row">
-          <div class="dt-row-main"><strong>{matchLabel(lastPlayedOurs)}</strong></div>
-          <div class="dt-row-meta">
-            {#if lastPlayedOurs.alliances?.red?.score != null}
-              <span>{lastPlayedOurs.alliances.red.score} - {lastPlayedOurs.alliances.blue.score}</span>
-            {/if}
+        <h3>Past matches</h3>
+        {#each playedWithResults as item (item.match.key)}
+          <div class="dt-row">
+            <div class="dt-row-main">
+              <strong>{matchLabel(item.match)}</strong>
+              <span class="dt-row-alliance" class:alliance-red={item.result.alliance === 'red'} class:alliance-blue={item.result.alliance === 'blue'}>{item.result.alliance}</span>
+            </div>
+            <div class="dt-row-result">
+              <span class="dt-result" class:result-win={item.result.outcome === 'win'} class:result-loss={item.result.outcome === 'loss'} class:result-tie={item.result.outcome === 'tie'}>
+                {item.result.outcome === 'win' ? 'Win' : item.result.outcome === 'loss' ? 'Loss' : item.result.outcome === 'tie' ? 'Tie' : 'Result pending'}
+              </span>
+              {#if item.result.ourScore != null}
+                <span class="dt-score">{item.result.ourScore}–{item.result.opponentScore}</span>
+              {/if}
+            </div>
           </div>
-        </div>
+        {/each}
       </section>
     {/if}
   {/if}
@@ -252,6 +265,12 @@
   .dt-row-meta { display: flex; gap: var(--space-3); color: var(--text-secondary); font-size: .82rem; flex-wrap: wrap; }
   .dt-row-meta span { display: inline-flex; align-items: center; gap: 4px; }
   .dt-downtime { font-weight: 600; }
+  .dt-row-result { display: flex; align-items: center; gap: var(--space-2); }
+  .dt-result { border-radius: 999px; padding: 3px 9px; background: var(--surface-2); color: var(--text-secondary); font-size: .78rem; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; }
+  .dt-result.result-win { background: color-mix(in srgb, var(--success, #198754) 15%, transparent); color: var(--success, #198754); }
+  .dt-result.result-loss { background: color-mix(in srgb, var(--danger, #dc3545) 15%, transparent); color: var(--danger, #dc3545); }
+  .dt-result.result-tie { background: color-mix(in srgb, var(--warning, #b7791f) 15%, transparent); color: var(--warning, #b7791f); }
+  .dt-score { min-width: 4.5rem; text-align: right; font-weight: 800; font-variant-numeric: tabular-nums; }
 
   @media (max-width: 480px) {
     .dt-countdown { font-size: 2.4rem; }

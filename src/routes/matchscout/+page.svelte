@@ -60,6 +60,7 @@
   let postNotes = '';
   let submitted = false;
   let queuedOffline = false;
+  let aceNotificationWarning = '';
   let editing = false;
   let showReports = false;
   let myReports = [];
@@ -108,6 +109,7 @@
     phase = nextPhase;
     submitted = false;
     queuedOffline = false;
+    aceNotificationWarning = '';
   }
 
   function nextAssignment() {
@@ -482,6 +484,9 @@
         }
       });
       queuedOffline = result.queued;
+      aceNotificationWarning = !result.queued && shouldReportPitProblem && result.data?.ace_notification?.ok === false
+        ? 'The ACE issue was saved, but Slack could not deliver it. Save this report again to retry the channel alert.'
+        : '';
       submitted = true;
       editing = true;
       if (!queuedOffline) {
@@ -596,6 +601,7 @@
           {:else}
             <p>Saved. Here is how you rated them.</p>
           {/if}
+          {#if aceNotificationWarning}<p class="submit-error" role="alert">{aceNotificationWarning}</p>{/if}
 
           {#if ratedCount}
             <figure class="rating-star">

@@ -4,6 +4,7 @@ let actor;
 let writes;
 let entries;
 let filters;
+const { notifyAcePitProblem } = vi.hoisted(() => ({ notifyAcePitProblem: vi.fn() }));
 const chain = (table) => {
   let data = table === 'scouting_settings' ? { start_position_photos: { 'red:center': 'match-starts/photo.jpg' } }
     : table === 'user_profiles' ? [{ id: 'scout', full_name: 'Account Name' }]
@@ -11,6 +12,9 @@ const chain = (table) => {
   const query = {
     select: () => query, eq: (field, value) => { filters.push({ table, field, value }); if (Array.isArray(data)) data = data.filter(row => row[field] === undefined || row[field] === value); return query; }, in: () => query, order: () => query,
     upsert: value => { writes.push(value); data = value; return query; },
+    insert: value => { writes.push(value); data = { id: 'problem-1', ...value }; return query; },
+    update: value => { writes.push(value); data = { ...(data || {}), ...value }; return query; },
+    limit: () => query,
     single: async () => ({ data, error: null }), maybeSingle: async () => ({ data, error: null }),
     then: resolve => Promise.resolve({ data, error: null }).then(resolve)
   };
@@ -23,6 +27,7 @@ const client = {
 vi.mock('@supabase/supabase-js', () => ({ createClient: () => client }));
 vi.mock('$lib/server/971bot.js', () => ({ getSupabase: () => client }));
 vi.mock('$lib/server/auto_path_drive_export.js', () => ({ exportAutoPathImageToDrive: vi.fn() }));
+vi.mock('$lib/server/ace_pit_notifications.js', () => ({ notifyAcePitProblem }));
 const { GET, POST } = await import('./+server.js');
 const request = body => ({ headers: { get: () => 'Bearer test' }, json: async () => body });
 const valid = {
@@ -34,7 +39,13 @@ const valid = {
 };
 
 describe('match scouting route v2', () => {
-  beforeEach(() => { actor = { id: 'scout' }; writes = []; entries = []; filters = []; });
+  beforeEach(() => {
+    actor = { id: 'scout', email: 'scout@example.test' };
+    writes = [];
+    entries = [];
+    filters = [];
+    notifyAcePitProblem.mockReset().mockResolvedValue({ ok: true, channel: 'CACE', ts: '123.4' });
+  });
   it('requires authentication for photos and reports', async () => {
     actor = null;
     expect((await GET({ request: request(), url: new URL('https://test/api/matchscout?resource=start-photos') })).status).toBe(401);
@@ -58,6 +69,27 @@ describe('match scouting route v2', () => {
       expect((await POST({ request: request({ ...valid, ...extra }) })).status).toBe(400);
     }
     expect(writes).toEqual([]);
+  });
+  it('sends a saved mechanical issue to the ACE pit Slack channel and records its delivery', async () => {
+    const response = await POST({ request: request({
+      ...valid,
+      mechanical_break: true,
+      report_pit_problem: true,
+      pit_problem_summary: 'Left gearbox failed',
+      pit_problem_detail: 'Robot stopped during teleop'
+    }) });
+    expect(response.status).toBe(200);
+    expect((await response.clone().json()).ace_notification).toEqual({ ok: true, channel: 'CACE', ts: '123.4' });
+    expect(notifyAcePitProblem).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'problem-1',
+      event_key: '2026test',
+      team_key: 'frc971',
+      summary: 'Left gearbox failed'
+    }), 'Actual Scout');
+    expect(writes).toContainEqual(expect.objectContaining({
+      slack_channel: 'CACE',
+      slack_ts: '123.4'
+    }));
   });
   it('limits My reports to the verified scout, ignoring caller-supplied ownership', async () => {
     entries = [{ id: 'own', created_by: 'scout' }, { id: 'other', created_by: 'another-scout' }];
