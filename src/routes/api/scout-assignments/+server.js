@@ -54,8 +54,13 @@ function computeScoutingAccess(profile, rosterKeys) {
   const hasDataMemberKey = keys.has('data scout member') || hasDataLeadKey;
   const hasNoteMemberKey = keys.has('note scout member') || hasDataMemberKey || hasNoteLeadKey;
 
-  const canEditData = isAdmin || isCompetitionLead || perms.has('DATA_SCOUT_ADMIN') || hasDataLeadKey;
-  const canEditNote = isAdmin || isCompetitionLead || perms.has('NOTE_SCOUT_ADMIN') || hasNoteLeadKey;
+  // VIEW_ADMIN_PANEL (any team lead, general_role 'lead') already gets into
+  // the Scouting Admin page itself - direct instruction: everyone who can
+  // see this panel should be able to publish from it, not land in a
+  // confusing view-only state just because they hold no scouting-specific
+  // roster key of their own.
+  const canEditData = isAdmin || isCompetitionLead || perms.has('DATA_SCOUT_ADMIN') || perms.has('VIEW_ADMIN_PANEL') || hasDataLeadKey;
+  const canEditNote = isAdmin || isCompetitionLead || perms.has('NOTE_SCOUT_ADMIN') || perms.has('VIEW_ADMIN_PANEL') || hasNoteLeadKey;
   // Quick Scout is a lighter-weight mode of the same data-scouting role, not a
   // separate team function - reuse Data Scout's eligibility/roster keys
   // rather than inventing a new roster key. Easy to split out later if that
