@@ -168,6 +168,8 @@ browser confirmation or prompt popups.
   The signed-in home dashboard balances direct links to Manufacturing,
   Purchasing, and Scouting, while keeping each scout's personal assignment
   queue available without filling the page with duplicate scouting tools.
+  It polls The Blue Alliance for the configured competition every minute and
+  shows the current/up-next match number plus both alliances' team numbers.
   The **Strategy** view (`/strategy`) leads the Competition folder as the
   decision board, and replaced the Data Scouting page outright - that page is
   gone, though `/datascout` remains as the endpoint that reads and writes
@@ -354,6 +356,13 @@ browser confirmation or prompt popups.
   reports retain their original fields. Match scouts can reopen their submitted
   answers immediately or find their own active-event reports in **My reports**,
   search by team or match, and save corrections to the existing report.
+  Scouts can choose the competition key (for example `2026cc`) before entering
+  a report; team suggestions, saved auto paths, submissions, and report history
+  follow that selection, with the active event as the default. Submitting a
+  report marks the matching Home assignment done, while completed assignment
+  cards remain visible below open work and can reopen Match Scouting for edits.
+  A database trigger provides the same completion sync for stale clients, and
+  the backfill preserves existing assignment rows while marking prior reports done.
   Match report lists use compact cards that surface auto points, balls scored,
   robot status, and incidents while collapsed; opening a card shows a dense,
   color-coded breakdown so multiple matches for one robot stay easy to scan.

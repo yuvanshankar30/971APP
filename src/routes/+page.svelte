@@ -8,6 +8,7 @@
   import { theme, setTheme } from '$lib/stores/theme.js';
   import { loginScreenStyle, setLoginScreenStyle } from '$lib/stores/loginScreenPref.js';
   import { fetchActiveScoutingEventKey } from '$lib/scoutingEvent.js';
+  import { displayTeamNumber, matchDisplayName, selectCurrentEventMatch } from '$lib/currentEventMatch.js';
   
   let user = null;
   let authUser = null;
@@ -182,14 +183,26 @@
   // "2026cc_qm14"), so this is the only way to know which side a "data"
   // assignment's robot is on without asking the scout to look it up by hand.
   let matchAllianceByKey = {};
+  let homeEventKey = '';
+  let currentEventMatch = null;
+  let currentMatchState = 'unavailable';
+  let currentMatchLoading = false;
+  let currentMatchError = '';
 
   async function loadMatchAlliances() {
+    currentMatchLoading = true;
+    currentMatchError = '';
     try {
       const eventKey = await fetchActiveScoutingEventKey();
-      if (!eventKey) return;
+      homeEventKey = eventKey || '';
+      if (!eventKey) {
+        currentEventMatch = null;
+        currentMatchState = 'unavailable';
+        return;
+      }
       const res = await fetch(`/api/tba/event-matches?event_key=${encodeURIComponent(eventKey)}&comp_level=all`);
       const payload = await res.json();
-      if (!payload?.success) return;
+      if (!res.ok || !payload?.success) throw new Error(payload?.error || 'TBA schedule unavailable');
       const next = {};
       for (const match of payload.data || []) {
         next[match.key] = {};
@@ -197,7 +210,14 @@
         for (const teamKey of match.alliances?.blue?.team_keys || []) next[match.key][teamKey] = 'blue';
       }
       matchAllianceByKey = next;
-    } catch { /* alliance is a nice-to-have autofill, not worth surfacing an error for */ }
+      const current = selectCurrentEventMatch(payload.data || []);
+      currentEventMatch = current.match;
+      currentMatchState = current.state;
+    } catch (error) {
+      currentMatchError = error?.message || 'TBA schedule unavailable';
+    } finally {
+      currentMatchLoading = false;
+    }
   }
 
   // Match Scouting's own match_key convention is the bare qualification
@@ -205,14 +225,23 @@
   // directly from its "Match #" input. Strips the event prefix and comp-
   // level letters (qm/qf/sf/f) down to just that number.
   function bareMatchNumber(matchKey) {
-    return String(matchKey || '').split('_').pop().replace(/^[a-z]+/i, '');
+    const suffix = String(matchKey || '').split('_').pop();
+    return /^qm\d+$/i.test(suffix) ? suffix.replace(/^qm/i, '') : suffix;
+  }
+
+  function assignmentEventKey(matchKey) {
+    return String(matchKey || '').split('_')[0];
   }
 
   function scoutAssignmentHref(assignment) {
     if (assignment?.scouting_type !== 'data') return `/${scoutAssignmentRoute(assignment?.scouting_type)}`;
     const teamNumber = String(assignment?.team_key || '').replace(/^frc/i, '');
     const alliance = matchAllianceByKey[assignment?.match_key]?.[assignment?.team_key] || '';
-    const params = new URLSearchParams({ match: bareMatchNumber(assignment?.match_key), team: teamNumber });
+    const params = new URLSearchParams({
+      event_key: assignmentEventKey(assignment?.match_key),
+      match: bareMatchNumber(assignment?.match_key),
+      team: teamNumber
+    });
     if (alliance) params.set('alliance', alliance);
     return `/matchscout?${params.toString()}`;
   }
@@ -309,7 +338,8 @@
         };
       }
     }, 5000);
-    return () => { clearTimeout(profileWaitTimer); unsub?.(); unsubAuthUser?.(); unsubReady?.(); uninit?.(); };
+    const currentMatchTimer = setInterval(() => { if (user) loadMatchAlliances(); }, 60_000);
+    return () => { clearTimeout(profileWaitTimer); clearInterval(currentMatchTimer); unsub?.(); unsubAuthUser?.(); unsubReady?.(); uninit?.(); };
   });
 
   $: if (user) profileWaitExpired = false;
@@ -546,6 +576,26 @@
             {#if section.key === 'workspace'}
               <div class="dashboard-actions">
                 <h3>Team Workspace</h3>
+                {#if currentMatchLoading && !currentEventMatch}
+                  <div class="current-match-card current-match-loading">Loading the {homeEventKey || 'active event'} field...</div>
+                {:else if currentEventMatch}
+                  <div class="current-match-card" class:live={currentMatchState === 'current'}>
+                    <div class="current-match-heading">
+                      <div>
+                        <span class="current-match-eyebrow">{homeEventKey}</span>
+                        <h4>{currentMatchState === 'current' ? 'Current match' : currentMatchState === 'upcoming' ? 'Up next' : 'Latest match'}</h4>
+                      </div>
+                      <strong>{matchDisplayName(currentEventMatch)}</strong>
+                    </div>
+                    <div class="current-match-alliances">
+                      <div class="current-alliance red"><span>Red</span>{#each currentEventMatch.alliances?.red?.team_keys || [] as teamKey}<b>{displayTeamNumber(teamKey)}</b>{/each}</div>
+                      <div class="current-alliance blue"><span>Blue</span>{#each currentEventMatch.alliances?.blue?.team_keys || [] as teamKey}<b>{displayTeamNumber(teamKey)}</b>{/each}</div>
+                    </div>
+                    {#if currentMatchState === 'complete'}<small>TBA reports this event’s published matches complete.</small>{/if}
+                  </div>
+                {:else if currentMatchError}
+                  <div class="current-match-card current-match-loading">Current match unavailable: {currentMatchError}</div>
+                {/if}
                 <div class="workspace-grid">
                   <a href="/manufacture" class="workspace-card">
                     <Factory size={24} />
@@ -591,12 +641,12 @@
                   <p class="muted">No open scouting assignments right now.</p>
                 {:else}
                   <div class="card-grid">
-                    {#each myScoutAssignments.slice(0, 8) as assignment}
+                    {#each myScoutAssignments as assignment}
                       <a class="assignment-card" class:completed={!!assignment.completed_at} href={scoutAssignmentHref(assignment)}>
                         <h5>{assignment.scouting_type} scouting - Match #{assignment.match_key.split('_').pop()}</h5>
                         <p class="muted">Team {String(assignment.team_key || '').replace(/^frc/i, '')}</p>
                         {#if assignment.completed_at}
-                          <span class="completed-badge"><CheckCircle size={12} /> Completed{assignment.scouting_type === 'data' ? ' - tap to edit' : ''}</span>
+                          <span class="completed-badge"><CheckCircle size={12} /> Done{assignment.scouting_type === 'data' ? ' — tap to edit' : ''}</span>
                         {/if}
                       </a>
                     {/each}
@@ -1421,6 +1471,30 @@
     font-size: var(--font-xl);
   }
 
+  .current-match-card {
+    display: grid;
+    gap: var(--space-3);
+    margin-bottom: var(--space-4);
+    padding: var(--space-4) var(--space-5);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--brand-gold-strong);
+    border-radius: var(--home-radius, var(--radius-lg));
+    background: var(--surface-1);
+  }
+  .current-match-card.live { border-left-color: var(--success, #2e7d32); }
+  .current-match-loading { color: var(--text-muted); }
+  .current-match-heading { display:flex; align-items:center; justify-content:space-between; gap:var(--space-3); }
+  .current-match-heading h4 { margin:.15rem 0 0; color:var(--secondary); }
+  .current-match-heading strong { font-size:var(--font-lg); }
+  .current-match-eyebrow { color:var(--text-muted); font-size:var(--font-xs); font-family:var(--font-mono-stack); text-transform:uppercase; }
+  .current-match-alliances { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--gap-3); }
+  .current-alliance { display:flex; align-items:center; gap:var(--space-2); padding:var(--space-3); border-radius:var(--radius-sm); }
+  .current-alliance span { margin-right:auto; font-weight:700; text-transform:uppercase; font-size:var(--font-xs); }
+  .current-alliance b { min-width:2.7rem; text-align:center; }
+  .current-alliance.red { background:var(--red-soft); color:var(--red-strong); }
+  .current-alliance.blue { background:var(--blue-soft, #e8f1ff); color:var(--blue-strong, #174ea6); }
+  .current-match-card small { color:var(--text-muted); }
+
   .workspace-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1531,6 +1605,7 @@
     .user-welcome { padding: var(--space-6); }
     .user-welcome h2 { font-size: var(--font-md); margin-bottom: var(--space-3); }
     .workspace-grid, .action-grid { grid-template-columns: 1fr; gap: var(--gap-3); }
+    .current-match-alliances { grid-template-columns: 1fr; }
     .workspace-card, .action-card { padding: var(--space-4); }
     .pending-notice {
       flex-direction: column;
