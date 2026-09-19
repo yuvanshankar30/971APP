@@ -48,6 +48,17 @@
   let savingManualTeam = false;
   let removingManualTeam = null;
 
+  // Which assignment board is showing - a picker instead of five stacked
+  // accordions the admin had to scroll past and open one at a time.
+  const ASSIGNMENT_TABS = [
+    { key: 'data', label: 'Data Scout' },
+    { key: 'note', label: 'Note Scout' },
+    { key: 'quick', label: 'Quick Scout' },
+    { key: 'prescout', label: 'Prescout' },
+    { key: 'pit', label: 'Pit Scout' }
+  ];
+  let activeAssignmentTab = 'data';
+
   let metrics = {
     pit: { percent: 0, scouted_teams: 0, pending_teams: 0, needs_photo_teams: 0, completed_teams: 0, total_teams: 0 },
     data: { assigned_percent: 0, scouted_percent: 0, missed_shift_percent: 0, missed_shifts: 0, assigned_matches: 0, scouted_matches: 0, total_matches: 0 },
@@ -792,11 +803,23 @@
     </div>
 
     <div class="assignment-section">
-      <ScoutAssignmentPanel scoutingType="data" />
-      <ScoutAssignmentPanel scoutingType="note" />
-      <ScoutAssignmentPanel scoutingType="quick" />
-      <PitAssignmentPanel assignmentKind="prescout" />
-      <PitAssignmentPanel />
+      <div class="assignment-tab-picker" role="tablist" aria-label="Assignment board">
+        {#each ASSIGNMENT_TABS as tab (tab.key)}
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeAssignmentTab === tab.key}
+            class="assignment-tab-btn"
+            class:active={activeAssignmentTab === tab.key}
+            on:click={() => (activeAssignmentTab = tab.key)}
+          >{tab.label}</button>
+        {/each}
+      </div>
+      <ScoutAssignmentPanel scoutingType="data" open={activeAssignmentTab === 'data'} />
+      <ScoutAssignmentPanel scoutingType="note" open={activeAssignmentTab === 'note'} />
+      <ScoutAssignmentPanel scoutingType="quick" open={activeAssignmentTab === 'quick'} />
+      <PitAssignmentPanel assignmentKind="prescout" open={activeAssignmentTab === 'prescout'} />
+      <PitAssignmentPanel open={activeAssignmentTab === 'pit'} />
     </div>
 
     <details class="role-accordion">
@@ -1232,6 +1255,33 @@
     display: flex;
     flex-direction: column;
     gap: var(--gap-3);
+  }
+  .assignment-tab-picker {
+    display: flex;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+  }
+  .assignment-tab-btn {
+    flex: 1 1 0;
+    min-width: 0;
+    border: 0;
+    border-right: 1px solid var(--border);
+    background: var(--surface-1);
+    color: var(--text-muted);
+    font: inherit;
+    font-weight: 600;
+    font-size: var(--font-sm);
+    padding: var(--space-2) var(--space-2);
+    text-align: center;
+    cursor: pointer;
+  }
+  .assignment-tab-btn:last-child { border-right: 0; }
+  .assignment-tab-btn:hover { background: var(--surface-2); color: var(--text); }
+  .assignment-tab-btn.active { background: var(--accent-subtle); color: var(--accent-strong); }
+  @media (max-width: 640px) {
+    .assignment-tab-picker { flex-wrap: wrap; }
+    .assignment-tab-btn { flex: 1 1 33%; border-bottom: 1px solid var(--border); }
   }
 
   /* Competition roles accordion */

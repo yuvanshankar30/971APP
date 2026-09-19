@@ -10,9 +10,10 @@
   userStore.subscribe((v) => (user = v));
 
   export let scoutingType = 'data'; // 'data' | 'note' | 'quick'
-  export let initiallyOpen = false;
+  export let open = false;
 
-  let panelOpen = initiallyOpen;
+  let panelOpen = open;
+  $: panelOpen = open;
   let matches = []; // { key, red:[], blue:[] }
   let eventKey = '';
   let publishedAssignments = {}; // match_key -> team_key -> { user_id, user_name }

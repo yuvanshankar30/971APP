@@ -6,7 +6,7 @@
   import { fetchActiveScoutingEventKey } from '$lib/scoutingEvent.js';
 
   export let assignmentKind = 'pit';
-  export let initiallyOpen = false;
+  export let open = false;
 
   $: isPrescout = assignmentKind === 'prescout';
   $: assignmentEndpoint = isPrescout ? '/api/prescout-assignments' : '/api/pit-scout-assignments';
@@ -17,7 +17,8 @@
   let user;
   userStore.subscribe((v) => (user = v));
 
-  let panelOpen = initiallyOpen;
+  let panelOpen = open;
+  $: panelOpen = open;
   let eventTeams = []; // [{key, team_number, nickname}]
   let eventKey = '';
   let publishedAssignments = {}; // team_key -> { user_id, user_name }
