@@ -78,8 +78,8 @@
   // is still one click away (the panel's own "Open" button), just no
   // longer the click on the tab itself.
   const QUICK_TABS = [
-    { key: 'strategy', label: 'Strategy', href: '/strategy', blurb: 'Alliance selection notes and match strategy, built from every other scouting surface below it.' },
-    { key: 'driveteam', label: 'Drive Team', href: '/driveteam', blurb: 'The field-facing view of the live match schedule - what Drive Team needs to know before each match.' },
+    { key: 'strategy', label: 'Strategy', href: '/strategy', blurb: "What's happening on the field right now, for alliance-selection awareness." },
+    { key: 'driveteam', label: 'Drive Team', href: '/driveteam', blurb: 'Your own next match - what Drive Team needs to know before it plays.' },
     { key: 'matchscout', label: 'Match Scouting', href: '/matchscout', blurb: 'File a match report for your assigned robot, or edit one you already submitted.' },
     { key: 'pitscout', label: 'Pit Scouting', href: '/pitscout', blurb: "Record a team's robot capabilities, drivebase, and technical details during pit walks." },
     { key: 'myscout', label: 'My Scout', href: '/myscout', blurb: 'Every match and pit report you have personally submitted for the active competition.' },
@@ -92,6 +92,10 @@
   ];
   let activeQuickTab = null;
   $: activeQuickTabInfo = QUICK_TABS.find((tab) => tab.key === activeQuickTab) || null;
+  // Each tab's preview shows something specific to it, not the same
+  // "here's a match" card everywhere - built entirely from state this page
+  // already loads, no new fetches.
+  $: nextDataAssignment = incompleteScoutAssignments.find(a => a.scouting_type === 'data') || null;
 
   $: canViewAdmin = can('VIEW_ADMIN_PANEL');
   $: customSectionKeys = sanitizeSectionKeys(user?.dashboard_sections);
@@ -620,26 +624,6 @@
             {#if section.key === 'workspace'}
               <div class="dashboard-actions">
                 <h3>Team Workspace</h3>
-                {#if currentMatchLoading && !currentEventMatch}
-                  <div class="current-match-card current-match-loading">Loading the {homeEventKey || 'active event'} field...</div>
-                {:else if currentEventMatch}
-                  <div class="current-match-card" class:live={currentMatchState === 'current'}>
-                    <div class="current-match-heading">
-                      <div>
-                        <span class="current-match-eyebrow">{homeEventKey}</span>
-                        <h4>{currentMatchState === 'current' ? 'Current match' : currentMatchState === 'upcoming' ? 'Up next' : 'Latest match'}</h4>
-                      </div>
-                      <strong>{matchDisplayName(currentEventMatch)}</strong>
-                    </div>
-                    <div class="current-match-alliances">
-                      <div class="current-alliance red"><span>Red</span>{#each currentEventMatch.alliances?.red?.team_keys || [] as teamKey}<b>{displayTeamNumber(teamKey)}</b>{/each}</div>
-                      <div class="current-alliance blue"><span>Blue</span>{#each currentEventMatch.alliances?.blue?.team_keys || [] as teamKey}<b>{displayTeamNumber(teamKey)}</b>{/each}</div>
-                    </div>
-                    {#if currentMatchState === 'complete'}<small>TBA reports this event’s published matches complete.</small>{/if}
-                  </div>
-                {:else if currentMatchError}
-                  <div class="current-match-card current-match-loading">Current match unavailable: {currentMatchError}</div>
-                {/if}
                 <div class="workspace-grid">
                   <a href="/manufacture" class="workspace-card">
                     <Factory size={24} />
@@ -774,16 +758,39 @@
           {#if activeQuickTabInfo}
             <div>
               <span class="quick-preview-label">{activeQuickTabInfo.label}</span>
-              {#if (activeQuickTabInfo.key === 'driveteam' || activeQuickTabInfo.key === 'strategy') && myTeamNextMatch}
+              {#if activeQuickTabInfo.key === 'driveteam' && myTeamNextMatch}
                 <p class="quick-preview-match-heading">
-                  {myTeamNextMatchState === 'current' ? 'Current match' : myTeamNextMatchState === 'upcoming' ? 'Up next' : 'Latest match'}: {matchDisplayName(myTeamNextMatch)}
+                  Your team - {myTeamNextMatchState === 'current' ? 'current match' : myTeamNextMatchState === 'upcoming' ? 'up next' : 'latest match'}: {matchDisplayName(myTeamNextMatch)}
                 </p>
                 <div class="quick-preview-alliances">
                   <div class="current-alliance red"><span>Red</span>{#each myTeamNextMatch.alliances?.red?.team_keys || [] as teamKey}<b>{displayTeamNumber(teamKey)}</b>{/each}</div>
                   <div class="current-alliance blue"><span>Blue</span>{#each myTeamNextMatch.alliances?.blue?.team_keys || [] as teamKey}<b>{displayTeamNumber(teamKey)}</b>{/each}</div>
                 </div>
-              {:else if (activeQuickTabInfo.key === 'driveteam' || activeQuickTabInfo.key === 'strategy') && !myTeamNextMatch}
+              {:else if activeQuickTabInfo.key === 'driveteam' && !myTeamNextMatch}
                 <p>No match found for your team at {homeEventKey || 'the active event'} yet.</p>
+              {:else if activeQuickTabInfo.key === 'strategy' && currentEventMatch}
+                <p class="quick-preview-match-heading">
+                  On the field - {currentMatchState === 'current' ? 'current match' : currentMatchState === 'upcoming' ? 'up next' : 'latest match'}: {matchDisplayName(currentEventMatch)}
+                </p>
+                <div class="quick-preview-alliances">
+                  <div class="current-alliance red"><span>Red</span>{#each currentEventMatch.alliances?.red?.team_keys || [] as teamKey}<b>{displayTeamNumber(teamKey)}</b>{/each}</div>
+                  <div class="current-alliance blue"><span>Blue</span>{#each currentEventMatch.alliances?.blue?.team_keys || [] as teamKey}<b>{displayTeamNumber(teamKey)}</b>{/each}</div>
+                </div>
+              {:else if activeQuickTabInfo.key === 'strategy' && !currentEventMatch}
+                <p>No match currently on the field at {homeEventKey || 'the active event'} yet.</p>
+              {:else if activeQuickTabInfo.key === 'matchscout'}
+                {#if nextDataAssignment}
+                  <p class="quick-preview-match-heading">Next assignment: {nextDataAssignment.match_key.split('_').pop()} - Team {String(nextDataAssignment.team_key || '').replace(/^frc/i, '')}</p>
+                  <p>{incompleteScoutAssignments.filter(a => a.scouting_type === 'data').length} open match scouting assignment{incompleteScoutAssignments.filter(a => a.scouting_type === 'data').length === 1 ? '' : 's'}.</p>
+                {:else}
+                  <p>No open match scouting assignments right now.</p>
+                {/if}
+              {:else if activeQuickTabInfo.key === 'pitscout'}
+                <p class="quick-preview-match-heading">{myPrescoutAssignments.length} pre-scouting team{myPrescoutAssignments.length === 1 ? '' : 's'} to research</p>
+                <p>{activeQuickTabInfo.blurb}</p>
+              {:else if activeQuickTabInfo.key === 'myscout'}
+                <p class="quick-preview-match-heading">{completedScoutAssignmentCount} of {myScoutAssignments.length} assignments completed this event</p>
+                <p>{activeQuickTabInfo.blurb}</p>
               {:else}
                 <p>{activeQuickTabInfo.blurb}</p>
               {/if}
@@ -797,6 +804,27 @@
           {/if}
         </div>
       </div>
+
+      {#if currentMatchLoading && !currentEventMatch}
+        <div class="current-match-card current-match-loading">Loading the {homeEventKey || 'active event'} field...</div>
+      {:else if currentEventMatch}
+        <div class="current-match-card" class:live={currentMatchState === 'current'}>
+          <div class="current-match-heading">
+            <div>
+              <span class="current-match-eyebrow">{homeEventKey}</span>
+              <h4>{currentMatchState === 'current' ? 'Current match' : currentMatchState === 'upcoming' ? 'Up next' : 'Latest match'}</h4>
+            </div>
+            <strong>{matchDisplayName(currentEventMatch)}</strong>
+          </div>
+          <div class="current-match-alliances">
+            <div class="current-alliance red"><span>Red</span>{#each currentEventMatch.alliances?.red?.team_keys || [] as teamKey}<b>{displayTeamNumber(teamKey)}</b>{/each}</div>
+            <div class="current-alliance blue"><span>Blue</span>{#each currentEventMatch.alliances?.blue?.team_keys || [] as teamKey}<b>{displayTeamNumber(teamKey)}</b>{/each}</div>
+          </div>
+          {#if currentMatchState === 'complete'}<small>TBA reports this event’s published matches complete.</small>{/if}
+        </div>
+      {:else if currentMatchError}
+        <div class="current-match-card current-match-loading">Current match unavailable: {currentMatchError}</div>
+      {/if}
     {/if}
   </div>
 {:else if $loginScreenStyle === 'modern'}
@@ -1536,7 +1564,7 @@
     width: 100vw;
     margin-left: calc(50% - 50vw);
     margin-right: calc(50% - 50vw);
-    padding: var(--space-7) var(--space-5);
+    padding: var(--space-4) var(--space-5);
   }
 
   /* Sidebar + its preview pane, side by side, below the rest of the
@@ -1546,9 +1574,15 @@
     grid-template-columns: 200px minmax(0, 1fr);
     align-items: stretch;
     gap: var(--space-5);
-    margin-top: var(--space-6);
+    margin-top: var(--space-7);
+    padding-top: var(--space-5);
+    border-top: 1px solid var(--border);
   }
 
+  /* All 11 tabs stay visible with no internal scrollbar of their own -
+     hiding nav items behind a scroll a visitor might never notice is worse
+     than the list just being what it is. Kept short per-item instead
+     (compact padding/font below) so the whole thing still stays modest. */
   .quick-nav {
     display: flex;
     flex-direction: column;
@@ -1562,7 +1596,7 @@
     text-transform: uppercase;
     letter-spacing: 0.08em;
     color: var(--text-muted);
-    padding: var(--space-3) var(--space-4) var(--space-2);
+    padding: var(--space-2) var(--space-4) 6px;
     border-bottom: 1px solid var(--border);
   }
 
@@ -1570,14 +1604,15 @@
     display: block;
     width: 100%;
     text-align: left;
-    padding: var(--space-3) var(--space-4);
+    padding: 7px var(--space-4);
     border: none;
     border-left: 3px solid transparent;
     border-bottom: 1px solid var(--border);
     background: none;
     color: var(--text-secondary);
     font: inherit;
-    font-size: 0.85rem;
+    font-size: 0.8rem;
+    line-height: 1.3;
     cursor: pointer;
     transition: border-color 0.1s ease, background-color 0.1s ease, color 0.1s ease;
   }
@@ -1658,8 +1693,8 @@
     border: 1px solid var(--border);
     border-left: 3px solid var(--accent);
     border-radius: var(--home-radius, var(--radius-lg));
-    padding: var(--space-5) var(--space-6);
-    margin-bottom: var(--space-6);
+    padding: var(--space-3) var(--space-6);
+    margin-bottom: var(--space-3);
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -1692,7 +1727,7 @@
     gap: 1px;
     background: var(--border);
     border: 1px solid var(--border);
-    margin-bottom: var(--space-6);
+    margin-bottom: var(--space-3);
   }
 
   .stat-tile {
@@ -1700,7 +1735,7 @@
     flex-direction: column;
     gap: var(--space-1);
     background: var(--surface-1);
-    padding: var(--space-4) var(--space-5);
+    padding: var(--space-2) var(--space-5);
   }
 
   .stat-label {
@@ -1781,16 +1816,16 @@
   }
 
   .dashboard-actions h3 {
-    margin: 0 0 var(--space-4) 0;
+    margin: 0 0 var(--space-2) 0;
     color: var(--secondary);
     font-size: var(--font-xl);
   }
 
   .current-match-card {
     display: grid;
-    gap: var(--space-3);
-    margin-bottom: var(--space-4);
-    padding: var(--space-4) var(--space-5);
+    gap: var(--space-2);
+    margin-top: var(--space-7);
+    padding: var(--space-3) var(--space-5);
     border: 1px solid var(--border);
     border-left: 4px solid var(--brand-gold-strong);
     border-radius: var(--home-radius, var(--radius-lg));
@@ -1831,7 +1866,7 @@
     background: var(--primary);
     border: 1px solid var(--border);
     border-left: 3px solid var(--border);
-    padding: var(--space-5) var(--space-6);
+    padding: var(--space-3) var(--space-4);
     text-decoration: none;
     color: inherit;
     transition: border-color 0.1s ease, background-color 0.1s ease;
@@ -1876,6 +1911,11 @@
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
     gap: var(--gap-3);
     margin-top: var(--space-2);
+    /* Caps how tall a long assignment list can push the page - scrolls
+       internally past that instead (part of the page-wide no-scroll
+       constraint on .dashboard-container below). */
+    max-height: 190px;
+    overflow-y: auto;
   }
 
   .assignment-card {
@@ -2113,7 +2153,7 @@
   .dashboard-sections {
     display: flex;
     flex-direction: column;
-    gap: var(--space-6);
+    gap: var(--space-3);
   }
 
   .dashboard-section.editing {
