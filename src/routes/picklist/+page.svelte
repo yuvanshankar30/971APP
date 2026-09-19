@@ -20,6 +20,7 @@
   let availableEvents = [];
   let report = null;
   let eventTeams = [];
+  let fallbackNames = {};
   let teamsWarning = '';
   let loadedEventKey = '';
   let loading = true;
@@ -67,6 +68,42 @@
     normalizedSliderWeights
   ).slice().sort((a, b) => (b.scoutPower ?? -1) - (a.scoutPower ?? -1));
   $: if (resolvedEventKey && resolvedEventKey !== loadedPicklistEventKey && !picklistLoading) void loadPicklist();
+
+  // Real team names: the event roster first, then a per-team TBA lookup for
+  // anyone missing from it (a roster can lag behind scouting data), then
+  // whatever nickname the pick list row itself stored.
+  $: nameByTeam = (() => {
+    const names = new Map();
+    for (const team of eventTeams) {
+      const name = String(team?.nickname || team?.name || '').trim();
+      if (team?.key && name) names.set(team.key, name);
+    }
+    for (const [key, name] of Object.entries(fallbackNames)) if (!names.has(key)) names.set(key, name);
+    for (const entry of picklistEntries) {
+      const name = String(entry?.nickname || '').trim();
+      if (name && !names.has(entry.team_key)) names.set(entry.team_key, name);
+    }
+    return names;
+  })();
+  $: missingNameKeys = [...new Set([...picklistEntries.map((e) => e.team_key), ...autoRankedRows.map((t) => t.key)])]
+    .filter((key) => key && !nameByTeam.has(key) && !(key in requestedNameKeys));
+  let requestedNameKeys = {};
+  $: if (missingNameKeys.length) void loadMissingNames(missingNameKeys);
+  async function loadMissingNames(keys) {
+    requestedNameKeys = { ...requestedNameKeys, ...Object.fromEntries(keys.map((key) => [key, true])) };
+    try {
+      const response = await fetch(`/api/tba/teams-simple?team_keys=${encodeURIComponent(keys.join(','))}`);
+      const payload = await response.json().catch(() => null);
+      const found = {};
+      for (const row of payload?.data || []) {
+        const name = String(row?.nickname || row?.name || '').trim();
+        if (row?.key && name) found[row.key] = name;
+      }
+      fallbackNames = { ...fallbackNames, ...found };
+    } catch {
+      // Names are decoration - a failed lookup just leaves the number.
+    }
+  }
 
   const teamNumber = (teamKey) => String(teamKey || '').replace(/^frc/i, '');
   const number = (value, digits = 1) => Number.isFinite(value) ? value.toFixed(digits) : '-';
@@ -293,7 +330,7 @@
             <li class="picklist-row">
               <span class="picklist-rank">{index + 1}</span>
               <a class="team-number-link" href={teamHref(entry.team_key)}>{entry.team_number}</a>
-              {#if entry.nickname}<span class="muted">{entry.nickname}</span>{/if}
+              {#if nameByTeam.get(entry.team_key)}<span class="team-name">{nameByTeam.get(entry.team_key)}</span>{/if}
               {#if flagsByEntryId.get(entry.id)}
                 <span class="flag-chip" title={flagsByEntryId.get(entry.id)}><AlertTriangle size={14} /> {flagsByEntryId.get(entry.id)}</span>
               {/if}
@@ -314,7 +351,7 @@
       </div>
       <ol class="auto-rank-list">
         {#each autoRankedRows as team (team.key)}
-          <li><a class="team-number-link" href={teamHref(team.key)}>{team.team_number}</a><span class="muted">{number(team.scoutPower)}</span></li>
+          <li><a class="team-number-link" href={teamHref(team.key)}>{team.team_number}</a>{#if nameByTeam.get(team.key)}<span class="team-name">{nameByTeam.get(team.key)}</span>{/if}<span class="muted score">{number(team.scoutPower)}</span></li>
         {/each}
       </ol>
     </aside>
@@ -342,6 +379,8 @@
   .slider-group input[type="range"] { grid-column:1 / -1; width:100%; }
   .auto-rank-list { list-style:decimal inside; margin:0; padding:var(--space-3); display:grid; gap:var(--space-2); }
   .auto-rank-list li { display:flex; align-items:center; justify-content:space-between; gap:var(--space-2); }
+  .team-name { font-weight:600; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .auto-rank-list .score { margin-left:auto; }
   .muted { color:var(--text-secondary); font-size:.82rem; }
   .matches-warning { padding:0 var(--space-3); }
   .empty-state, .notice { border:1px solid var(--border); padding:var(--space-4); margin-top:var(--space-4); color:var(--text-secondary); }
