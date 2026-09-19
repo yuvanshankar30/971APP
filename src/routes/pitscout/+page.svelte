@@ -1144,8 +1144,7 @@
           <span class="topic-count">{topic.done}/{topic.total}</span>
         </button>
         {#if topic.id === 'extra' && activeTopic === 'extra'}
-          <label class="extra-group-select-label" for="extraGroupSelect">More questions</label>
-          <select id="extraGroupSelect" class="form-select extra-group-select" bind:value={activeExtraGroup}>
+          <select id="extraGroupSelect" aria-label="More questions" class="extra-group-select" bind:value={activeExtraGroup}>
             {#each extraGroupStates as group}
               <option value={group.id}>{group.label} ({group.done}/{group.total})</option>
             {/each}
@@ -2190,6 +2189,7 @@
       text-align: left;
     }
     .topic-tab.active { border-right-color: var(--brand-gold-base, #d9a413); background: var(--surface-2); }
+    .extra-group-select { border-bottom: 0; border-right: 2px solid var(--brand-gold-base, #d9a413); background: var(--surface-2); }
   }
 
   .question-section {
@@ -2205,19 +2205,22 @@
     font-size: 0.78rem;
   }
 
-  .extra-group-select-label {
-    display: block;
-    margin-top: var(--space-2);
-    padding: 0 var(--space-3);
-    color: var(--text-muted);
-    font-size: 0.72rem;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-  }
-
+  /* Styled to read as part of the Extra tab itself - same tint, flush
+     against it with no gap or border of its own - not a separate control
+     floating below the rail. */
   .extra-group-select {
-    margin: 0.25rem var(--space-3) var(--space-2);
-    width: calc(100% - var(--space-3) * 2);
+    display: block;
+    width: 100%;
+    margin: 0;
+    padding: var(--space-2) var(--space-3) var(--space-3);
+    border: 0;
+    border-bottom: 2px solid var(--brand-gold-base, #d9a413);
+    border-radius: 0;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: 0.82rem;
+    cursor: pointer;
   }
 
   .question-section h4 {
