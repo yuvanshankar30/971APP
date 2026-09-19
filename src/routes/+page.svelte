@@ -178,6 +178,12 @@
   let showScoutAlert = true;
   $: incompleteScoutAssignments = myScoutAssignments.filter(a => !a.completed_at);
   $: completedScoutAssignmentCount = myScoutAssignments.length - incompleteScoutAssignments.length;
+  // A busy scout can rack up dozens of assignments - letting every card stay
+  // a fixed minimum width just means an ever-taller stack of rows. Shrink
+  // the grid's own minimum column width as the count climbs past a normal
+  // event's worth, so more of them fit per row instead of only adding rows.
+  // Never shrinks below 110px (still fits "Match #qm123 / Team 9999").
+  $: assignmentGridMinWidth = Math.max(110, 200 - Math.max(0, myScoutAssignments.length - 8) * 6);
 
   // Pre-scouting assignment state - teams assigned to this user to research
   // ahead of the event (see /scouting-admin's PitAssignmentPanel,
@@ -519,27 +525,7 @@
   </div>
 {:else if user}
   <!-- User Dashboard -->
-  <div class="dashboard-shell">
-    <!-- Fills what used to be dead margin on wide screens with something
-         useful: quick jumps to the rest of Competition, without opening the
-         top nav's dropdown. Deliberately not position:sticky - the global
-         .nav-header in +layout.svelte is already sticky at top:0 with a
-         much higher z-index, and a second sticky element at the same
-         top:0 gets silently covered by it once the page scrolls (see
-         ScoutAssignmentPanel's own .panel-header for the exact same bug,
-         fixed the same way: don't stick two things to the same line). -->
-    <aside class="quick-nav" aria-label="Competition quick navigation">
-      <span class="quick-nav-label">Competition</span>
-      {#each QUICK_TABS as tab (tab.key)}
-        <button
-          type="button"
-          class="quick-nav-tab"
-          class:active={activeQuickTab === tab.key}
-          on:click={() => activeQuickTab = activeQuickTab === tab.key ? null : tab.key}
-        >{tab.label}</button>
-      {/each}
-    </aside>
-    <div class="dashboard-container">
+  <div class="dashboard-container">
     <div class="user-welcome">
       <div class="user-welcome-text">
         <h2>Welcome back, {user.full_name || user.email}!</h2>
@@ -722,7 +708,7 @@
                 {#if myScoutAssignments.length === 0}
                   <p class="muted">No open scouting assignments right now.</p>
                 {:else}
-                  <div class="card-grid">
+                  <div class="card-grid" style="grid-template-columns: repeat(auto-fit, minmax({assignmentGridMinWidth}px, 1fr));">
                     {#each myScoutAssignments as assignment}
                       <a class="assignment-card" class:completed={!!assignment.completed_at} href={scoutAssignmentHref(assignment)}>
                         <h5>{assignment.scouting_type} scouting - Match #{assignment.match_key.split('_').pop()}</h5>
@@ -763,32 +749,55 @@
         {/if}
       </div>
 
-      {#if activeQuickTabInfo}
+      <!-- Sidebar sits below Your Scouting Assignments now, not competing
+           with it for the left column - a tab click pops its preview up in
+           the pane to its right instead of navigating away. Deliberately
+           not position:sticky - the global .nav-header in +layout.svelte is
+           already sticky at top:0 with a much higher z-index, and a second
+           sticky element at the same top:0 gets silently covered by it once
+           the page scrolls (see ScoutAssignmentPanel's own .panel-header for
+           the exact same bug, fixed the same way: don't stick two things to
+           the same line). -->
+      <div class="quick-nav-row">
+        <aside class="quick-nav" aria-label="Competition quick navigation">
+          <span class="quick-nav-label">Competition</span>
+          {#each QUICK_TABS as tab (tab.key)}
+            <button
+              type="button"
+              class="quick-nav-tab"
+              class:active={activeQuickTab === tab.key}
+              on:click={() => activeQuickTab = activeQuickTab === tab.key ? null : tab.key}
+            >{tab.label}</button>
+          {/each}
+        </aside>
         <div class="quick-preview">
-          <div>
-            <span class="quick-preview-label">{activeQuickTabInfo.label}</span>
-            {#if (activeQuickTabInfo.key === 'driveteam' || activeQuickTabInfo.key === 'strategy') && myTeamNextMatch}
-              <p class="quick-preview-match-heading">
-                {myTeamNextMatchState === 'current' ? 'Current match' : myTeamNextMatchState === 'upcoming' ? 'Up next' : 'Latest match'}: {matchDisplayName(myTeamNextMatch)}
-              </p>
-              <div class="quick-preview-alliances">
-                <div class="current-alliance red"><span>Red</span>{#each myTeamNextMatch.alliances?.red?.team_keys || [] as teamKey}<b>{displayTeamNumber(teamKey)}</b>{/each}</div>
-                <div class="current-alliance blue"><span>Blue</span>{#each myTeamNextMatch.alliances?.blue?.team_keys || [] as teamKey}<b>{displayTeamNumber(teamKey)}</b>{/each}</div>
-              </div>
-            {:else if (activeQuickTabInfo.key === 'driveteam' || activeQuickTabInfo.key === 'strategy') && !myTeamNextMatch}
-              <p>No match found for your team at {homeEventKey || 'the active event'} yet.</p>
-            {:else}
-              <p>{activeQuickTabInfo.blurb}</p>
-            {/if}
-          </div>
-          <div class="quick-preview-actions">
-            <a class="btn btn-primary btn-sm" href={activeQuickTabInfo.href}>Open</a>
-            <button class="btn btn-outline btn-sm" on:click={() => activeQuickTab = null}>Close</button>
-          </div>
+          {#if activeQuickTabInfo}
+            <div>
+              <span class="quick-preview-label">{activeQuickTabInfo.label}</span>
+              {#if (activeQuickTabInfo.key === 'driveteam' || activeQuickTabInfo.key === 'strategy') && myTeamNextMatch}
+                <p class="quick-preview-match-heading">
+                  {myTeamNextMatchState === 'current' ? 'Current match' : myTeamNextMatchState === 'upcoming' ? 'Up next' : 'Latest match'}: {matchDisplayName(myTeamNextMatch)}
+                </p>
+                <div class="quick-preview-alliances">
+                  <div class="current-alliance red"><span>Red</span>{#each myTeamNextMatch.alliances?.red?.team_keys || [] as teamKey}<b>{displayTeamNumber(teamKey)}</b>{/each}</div>
+                  <div class="current-alliance blue"><span>Blue</span>{#each myTeamNextMatch.alliances?.blue?.team_keys || [] as teamKey}<b>{displayTeamNumber(teamKey)}</b>{/each}</div>
+                </div>
+              {:else if (activeQuickTabInfo.key === 'driveteam' || activeQuickTabInfo.key === 'strategy') && !myTeamNextMatch}
+                <p>No match found for your team at {homeEventKey || 'the active event'} yet.</p>
+              {:else}
+                <p>{activeQuickTabInfo.blurb}</p>
+              {/if}
+            </div>
+            <div class="quick-preview-actions">
+              <a class="btn btn-primary btn-sm" href={activeQuickTabInfo.href}>Open</a>
+              <button class="btn btn-outline btn-sm" on:click={() => activeQuickTab = null}>Close</button>
+            </div>
+          {:else}
+            <p class="muted">Select a tab on the left to preview it here.</p>
+          {/if}
         </div>
-      {/if}
+      </div>
     {/if}
-    </div>
   </div>
 {:else if $loginScreenStyle === 'modern'}
   <!-- Authentication Forms: Modern (split-hero) -->
@@ -1513,23 +1522,31 @@
   /* No more capped-width centered column - the quick-nav sidebar takes the
      left gutter and the content column stretches to fill whatever's left,
      so wide monitors don't just get more black margin on both sides. */
-  .dashboard-shell {
+  .dashboard-container {
+    /* Sharp corners throughout this page, by direct instruction - no
+       filleted rectangles. */
     --home-radius: 0;
-    display: grid;
-    grid-template-columns: 200px minmax(0, 1fr);
-    align-items: start;
-    gap: var(--space-5);
+    min-width: 0;
     /* Full-bleed breakout: the global <main> this sits in (see +layout.svelte's
        main.container.page-container) is itself centered and capped at
-       --page-max-width, so the sidebar could only ever reach the left edge
-       of THAT column, not the actual viewport edge - the "still not far
-       enough left" gap on wide screens. width:100vw + this margin math is
-       the standard way to escape a centered ancestor without touching the
-       shared layout (which every other route also depends on). */
+       --page-max-width, so content could only ever reach the left edge of
+       THAT column, not the actual viewport edge. width:100vw + this margin
+       math is the standard way to escape a centered ancestor without
+       touching the shared layout (which every other route also depends on). */
     width: 100vw;
     margin-left: calc(50% - 50vw);
     margin-right: calc(50% - 50vw);
     padding: var(--space-7) var(--space-5);
+  }
+
+  /* Sidebar + its preview pane, side by side, below the rest of the
+     dashboard rather than competing with it for the left column. */
+  .quick-nav-row {
+    display: grid;
+    grid-template-columns: 200px minmax(0, 1fr);
+    align-items: stretch;
+    gap: var(--space-5);
+    margin-top: var(--space-6);
   }
 
   .quick-nav {
@@ -1587,11 +1604,16 @@
     justify-content: space-between;
     align-items: flex-start;
     gap: var(--space-4);
+    min-height: 100%;
     background: var(--surface-1);
     border: 1px solid var(--border);
     border-left: 3px solid var(--accent-strong);
     padding: var(--space-4) var(--space-5);
-    margin-bottom: var(--space-5);
+  }
+
+  .quick-preview > .muted {
+    align-self: center;
+    margin: auto;
   }
 
   .quick-preview-label {
@@ -1629,11 +1651,6 @@
     flex-shrink: 0;
   }
 
-  .dashboard-container {
-    /* Sharp corners throughout this page, by direct instruction - no
-       filleted rectangles. */
-    min-width: 0;
-  }
 
   /* Compact masthead with a gold spine — no dead vertical space */
   .user-welcome {
@@ -1896,7 +1913,7 @@
      instead of a column competing for width - a 200px rail has no business
      existing below tablet width. */
   @media (max-width: 900px) {
-    .dashboard-shell { grid-template-columns: 1fr; }
+    .quick-nav-row { grid-template-columns: 1fr; }
     .quick-nav { flex-direction: row; overflow-x: auto; }
     .quick-nav-label { flex-shrink: 0; border-bottom: none; border-right: 1px solid var(--border); }
     .quick-nav-tab { flex-shrink: 0; width: auto; border-bottom: none; border-right: 1px solid var(--border); border-left: none; border-top: 3px solid transparent; }
@@ -1914,7 +1931,7 @@
     }
     .auth-card { padding: var(--space-6); }
     .brand h1 { font-size: var(--font-xl); }
-    .dashboard-shell { width: auto; margin: var(--space-4) var(--space-3); padding: 0; }
+    .dashboard-container { width: auto; margin: 0; padding: var(--space-4) var(--space-3); }
     .user-welcome { padding: var(--space-6); }
     .user-welcome h2 { font-size: var(--font-md); margin-bottom: var(--space-3); }
     .workspace-grid, .action-grid { grid-template-columns: 1fr; gap: var(--gap-3); }
