@@ -19,7 +19,7 @@ from typing import Optional
 
 from ..commands.SetupGenerator import SetupGenerator
 from ..commands.MultiImport import importFiles
-from ..commands.NewNCProgram import export
+from ..commands.NewNCProgram import export, autocam_program_name
 from ..commands.DeleteToolpaths import DeleteToolpaths
 from ..commands.AutoArrange import AutoArrange
 from ..commands.Orientation import orient_plate_pocket_side_up
@@ -1359,7 +1359,13 @@ def start(data, session):
         except FileNotFoundError:
             pass
 
-        export(plate_id, machine_post_processor_path)
+        # Posted G-code is named <queue-time Fusion file name>AUTOCAM, not the
+        # plate UUID export_dir is keyed by. Without any typed name, fall back
+        # to a short job-based name rather than a pair of UUIDs.
+        program_base_name = autocam_program_name(
+            re.sub(r"\s+", "", str(custom_name)) if custom_name else f"Plate{str(job_id)[:8]}"
+        )
+        export(plate_id, machine_post_processor_path, program_base_name=program_base_name)
 
         # Preserve each file emitted by Fusion's configured post byte-for-byte.
         # Each setup is posted as one ordered program; independent setup/WCS

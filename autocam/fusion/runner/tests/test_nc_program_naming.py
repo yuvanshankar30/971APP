@@ -18,10 +18,10 @@ def _load_safe_program_name():
     end = source.index("def _post_process_with_retry")
     namespace = {"re": re}
     exec(compile(source[start:end], "NewNCProgram_safe_name", "exec"), namespace)
-    return namespace["_safe_program_name"]
+    return namespace["_safe_program_name"], namespace["autocam_program_name"]
 
 
-safe_program_name = _load_safe_program_name()
+safe_program_name, autocam_program_name = _load_safe_program_name()
 
 
 class SafeProgramNameTests(unittest.TestCase):
@@ -44,6 +44,30 @@ class SafeProgramNameTests(unittest.TestCase):
 
     def test_keeps_dashes_and_underscores(self):
         self.assertEqual(safe_program_name("plate_1-final"), "plate_1-final")
+
+
+class AutocamProgramNameTests(unittest.TestCase):
+    def test_is_the_fusion_file_name_plus_autocam(self):
+        self.assertEqual(autocam_program_name("pivot gearbox plate 2"), "pivotgearboxplate2AUTOCAM")
+
+    def test_does_not_double_the_suffix(self):
+        self.assertEqual(autocam_program_name("pivotgearboxplate2AUTOCAM"), "pivotgearboxplate2AUTOCAM")
+        self.assertEqual(autocam_program_name("MainPlate2autocam"), "MainPlate2autocam")
+
+    def test_long_names_keep_the_suffix(self):
+        result = autocam_program_name("x" * 200)
+        self.assertEqual(len(result), 60)
+        self.assertTrue(result.endswith("AUTOCAM"))
+
+    def test_never_returns_an_internal_id_shape(self):
+        self.assertEqual(autocam_program_name(""), "ProgramAUTOCAM")
+
+
+class PlateExportUsesTheFusionFileName(unittest.TestCase):
+    def test_plate_export_passes_a_readable_program_base_name(self):
+        source = (Path(__file__).parents[1] / "workflows/camPlate.py").read_text()
+        self.assertIn("program_base_name=program_base_name", source)
+        self.assertNotIn("export(plate_id, machine_post_processor_path)", source)
 
 
 if __name__ == "__main__":

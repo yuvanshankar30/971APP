@@ -34,6 +34,21 @@ def _safe_program_name(name, fallback="Program"):
     return cleaned[:60] or fallback
 
 
+def autocam_program_name(file_name, fallback="Program"):
+    """`<Fusion file name>AUTOCAM`, the posted G-code filename operators see.
+
+    Direct instruction: posted files are named after the Fusion file name
+    chosen when the job was queued plus the word AUTOCAM, never an internal
+    id. Not doubled when the name already ends in AUTOCAM, and the base is
+    trimmed (not the suffix) so a long name still keeps it under the cap.
+    """
+    suffix = "AUTOCAM"
+    base = _safe_program_name(file_name, fallback)
+    if base.upper().endswith(suffix):
+        return base
+    return f"{base[:60 - len(suffix)]}{suffix}"
+
+
 # Fusion's PostConfiguration objects (see _resolve_post_configuration) carry
 # no filename/path property at all - only vendor/description/extension - so
 # a bundled .cps can only be found again by matching its own `description =`
@@ -169,7 +184,7 @@ def _post_process_with_retry(app, nc_program, options, attempts=6, initial_delay
     raise last_error
 
 
-def export(name, post_processor_path, setup_program_names=None):
+def export(name, post_processor_path, setup_program_names=None, program_base_name=None):
     ui = None
     app = adsk.core.Application.get()
     ui = app.userInterface
@@ -239,8 +254,12 @@ def export(name, post_processor_path, setup_program_names=None):
         # Nearly always exactly one setup, so the common case is a single
         # file named after the job. A second setup would otherwise post
         # under the same name and overwrite the first.
+        # `name` is only the FINAL_PATH folder key (often an internal id);
+        # `program_base_name` is what the operator sees as the filename.
         program_name = _safe_program_name(
-            setup_program_names[index] if setup_program_names is not None else name
+            setup_program_names[index]
+            if setup_program_names is not None
+            else (program_base_name if program_base_name is not None else name)
         )
         if setup_program_names is None and allSetups.count > 1:
             program_name = f"{program_name}-{index + 1}"
