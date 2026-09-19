@@ -15,16 +15,16 @@ describe('strategy schedule', () => {
     expect(teamAlliance(match(1, { alliances: { red: { team_keys: [] }, blue: { team_keys: [team] } } }), team)).toBe('blue');
   });
 
-  it('counts future matches chronologically while showing the last match closest to the top', () => {
+  it('counts future matches chronologically and shows the next match at the top', () => {
     const schedule = buildStrategySchedule([match(3), match(1), match(2)], team);
     expect(schedule.realUpcoming.map((entry) => entry.match_number)).toEqual([1, 2, 3]);
-    expect(schedule.upcoming.map((entry) => entry.match.match_number)).toEqual([3, 2, 1]);
-    expect(schedule.upcoming.map((entry) => entry.matchesAway)).toEqual([2, 1, 0]);
+    expect(schedule.upcoming.map((entry) => entry.match.match_number)).toEqual([1, 2, 3]);
+    expect(schedule.upcoming.map((entry) => entry.matchesAway)).toEqual([0, 1, 2]);
   });
 
   it('does not let a practice match change the real match-away count', () => {
     const schedule = buildStrategySchedule([match(1), match(2), match(99, { is_test_market: true, predicted_time: null })], team);
-    expect(schedule.upcoming.map((entry) => entry.matchesAway)).toEqual([1, 0, null]);
+    expect(schedule.upcoming.map((entry) => entry.matchesAway)).toEqual([0, 1, null]);
   });
 
   it('keeps played matches separate and newest-first', () => {

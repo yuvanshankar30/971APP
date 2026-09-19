@@ -693,17 +693,15 @@
     {:else if !filteredTeams.length}
       <div class="empty">No teams match your search.</div>
     {:else}
-      <div class="team-list">
+      <label class="form-label" for="team-picker">
+        {filteredTeams.length} team{filteredTeams.length === 1 ? '' : 's'} match{filteredTeams.length === 1 ? 'es' : ''}
+      </label>
+      <select id="team-picker" class="form-input" value="" on:change={(e) => { const key = e.currentTarget.value; if (key) openTeam(key); }}>
+        <option value="" disabled>Choose a team...</option>
         {#each filteredTeams as teamKey}
-          <button class="team-row" on:click={() => openTeam(teamKey)}>
-            <span class="team-row-label">
-              <span class="team-row-name">{teamDisplayName(teamKey)}</span>
-              <sub class="team-row-sub">{displayTeam(teamKey)}</sub>
-            </span>
-            <span class="team-row-action">Open</span>
-          </button>
+          <option value={teamKey}>#{displayTeam(teamKey)} - {teamDisplayName(teamKey)}</option>
         {/each}
-      </div>
+      </select>
     {/if}
   </div>
 {:else}
@@ -948,13 +946,6 @@
   .teamview-exit-link:hover { color: var(--text); text-decoration: underline; }
   .picker-card { max-width: 760px; margin: 0 auto; display: grid; gap: var(--gap-3); }
   .picker-title { margin: 0; }
-  .team-list { display: grid; gap: var(--gap-2); max-height: 540px; overflow: auto; }
-  .team-row { display: flex; justify-content: space-between; align-items: center; border: none; border-radius: var(--radius-sm); padding: var(--space-2) var(--space-3); background: color-mix(in srgb, var(--surface-1) 70%, transparent); transition: background 120ms ease; }
-  .team-row:hover, .team-row:focus-visible { background: color-mix(in srgb, var(--accent) 12%, var(--surface-1)); outline: none; }
-  .team-row-label { display: inline-flex; align-items: baseline; gap: 0.45rem; }
-  .team-row-name { font-weight: 700; }
-  .team-row-sub { color: var(--text-muted); font-size: 0.72rem; }
-  .team-row-action { color: var(--text-muted); font-size: var(--font-xs); font-weight: 600; }
   .team-top { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: var(--gap-3); margin-bottom: var(--space-2); }
   .team-meta-box { display: grid; gap: var(--gap-3); }
   .team-name-box { font-size: var(--font-xl); font-weight: 800; line-height: 1.2; display: inline-flex; align-items: baseline; gap: 0.5rem; }

@@ -103,22 +103,17 @@ describe('defaultHeaderTabs', () => {
   });
 
   it('orders the scouting surfaces the way the team asked for them', () => {
-    // Deliberate order, not incidental: strategy leads as the board the team
-    // opens to decide something, then the collection surfaces that feed it
-    // (match -> pit -> rankings -> ratings -> predictions -> vision), with
-    // the admin surface last. Exactly these 11 - Pick List (the 'scouting'
-    // key) is no longer a default entry, per direct feedback naming this
-    // exact list; Robot Ratings joined right after Power Rankings since it
-    // feeds a display-only average into that same page, and Prediction
-    // Market right after that since it bets on the same match schedule
-    // Strategy's Matches view shows. Drive Team sits right after Strategy -
-    // both read the live match schedule, Drive Team is just the field-facing
-    // view of it. Picklist is its own top-level tab (not a Strategy subtab)
-    // right after that - alliance selection is its own workflow, not a
-    // sub-view of the Teams/Matches board.
+    // Exact order named by direct instruction: Strategy, Drive Team (right
+    // after Strategy - both read the live match schedule, Drive Team is
+    // just the field-facing view of it), Match Scouting, Pit Scouting,
+    // Picklist, Match Rankings, Power Rankings, Robot Ratings, Vision
+    // Scouting, Prediction Market, Scouting Admin. Pick List (the
+    // 'scouting' key) is still not a default entry - that instruction from
+    // before this reorder still stands, it's just a different key
+    // ('picklist') that replaced it in the menu.
     const keys = competitionChildren(defaultHeaderTabs()).map((child) => child.key);
     expect(keys).toEqual([
-      'strategy', 'driveteam', 'picklist', 'matchscout', 'matchrankings', 'pitscout', 'powerrankings', 'robotratings', 'predictions', 'vision', 'scouting-admin'
+      'strategy', 'driveteam', 'matchscout', 'pitscout', 'picklist', 'matchrankings', 'powerrankings', 'robotratings', 'vision', 'predictions', 'scouting-admin'
     ]);
   });
 

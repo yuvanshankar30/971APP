@@ -28,7 +28,9 @@
 //     (Note Scouting and Team View) stay in the
 //     codebase for a future restoration but are deliberately out of the
 //     default menu - they are still reachable by URL, and by anyone who
-//     already added them to their own saved nav.
+//     already added them to their own saved nav. Prediction Market was
+//     briefly removed from this default menu too, then restored by direct
+//     instruction with the rest of the Competition order below.
 //     Match Scouting is listed again: #89 removed the route wholesale, and it
 //     has been restored and rewired to api/matchscout instead of the
 //     browser-local storage it originally used.
@@ -88,17 +90,20 @@ export function defaultHeaderTabs(navConfig = navigation) {
     label: 'Competition',
     children: [
       // Strategy leads: it is the board the team actually opens to decide
-      // something, and it reads from every other surface below it.
+      // something, and it reads from every other surface below it. Drive
+      // Team right after it - both read the live match schedule, Drive
+      // Team is just the field-facing view of it. Everything after that is
+      // the order direct feedback named explicitly.
       { key: 'strategy', label: 'Strategy' },
       { key: 'driveteam', label: 'Drive Team' },
-      { key: 'picklist', label: 'Picklist' },
       { key: 'matchscout', label: 'Match Scouting' },
-      { key: 'matchrankings', label: 'Match Rankings' },
       { key: 'pitscout', label: 'Pit Scouting' },
+      { key: 'picklist', label: 'Picklist' },
+      { key: 'matchrankings', label: 'Match Rankings' },
       { key: 'powerrankings', label: 'Power Rankings' },
       { key: 'robotratings', label: 'Robot Ratings' },
-      { key: 'predictions', label: 'Prediction Market' },
       { key: 'vision', label: 'Vision Scouting' },
+      { key: 'predictions', label: 'Prediction Market' },
       { key: 'scouting-admin', label: 'Scouting Admin' }
     ]
   });
