@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { supabase, getAuthHeader } from '$lib/supabase.js';
   import { initAuth, userStore, signOut, authReady as authReadyStore, user as authUserStore } from '$lib/stores/auth.js';
-  import { LogIn, UserPlus, Mail, Lock, User, Shield, CheckCircle, AlertCircle, LogOut, Users, GripVertical, X, Plus, LayoutGrid, ClipboardCheck, Factory, ShoppingCart, ListChecks } from 'lucide-svelte';
+  import { LogIn, UserPlus, Mail, Lock, User, Shield, CheckCircle, AlertCircle, LogOut, Users, GripVertical, X, Plus, LayoutGrid, ClipboardCheck, Factory, ShoppingCart, ListChecks, ListOrdered, Target } from 'lucide-svelte';
   import { goto } from '$app/navigation';
   import { FRC_TEAMS, hasPermission } from '$lib/permissions.js';
   import { theme, setTheme } from '$lib/stores/theme.js';
@@ -157,6 +157,7 @@
   let nextScoutAssignment = null; // { scouting_type, match_key, team_key }
   let showScoutAlert = true;
   $: incompleteScoutAssignments = myScoutAssignments.filter(a => !a.completed_at);
+  $: completedScoutAssignmentCount = myScoutAssignments.length - incompleteScoutAssignments.length;
 
   // Pre-scouting assignment state - teams assigned to this user to research
   // ahead of the event (see /scouting-admin's PitAssignmentPanel,
@@ -510,6 +511,27 @@
       {/if}
     </div>
 
+    <div class="stat-strip">
+      {#if homeEventKey}
+        <div class="stat-tile">
+          <span class="stat-label">Competition</span>
+          <strong class="stat-value stat-value-text">{homeEventKey}</strong>
+        </div>
+      {/if}
+      <div class="stat-tile">
+        <span class="stat-label">Assignments Open</span>
+        <strong class="stat-value">{incompleteScoutAssignments.length}</strong>
+      </div>
+      <div class="stat-tile">
+        <span class="stat-label">Assignments Done</span>
+        <strong class="stat-value">{completedScoutAssignmentCount}</strong>
+      </div>
+      <div class="stat-tile">
+        <span class="stat-label">Pre-Scout Queue</span>
+        <strong class="stat-value">{myPrescoutAssignments.length}</strong>
+      </div>
+    </div>
+
     {#if showScoutAlert && incompleteScoutAssignments.length>0}
       <div class="pending-notice">
         <AlertCircle size={20} />
@@ -607,10 +629,20 @@
                     <h4>Purchasing</h4>
                     <p>Review purchase requests, orders, and needed components</p>
                   </a>
-                  <a href="/scouting" class="workspace-card">
+                  <a href="/matchscout" class="workspace-card">
                     <ClipboardCheck size={24} />
                     <h4>Scouting</h4>
                     <p>Open competition assignments, scouting forms, and event analysis</p>
+                  </a>
+                  <a href="/matchrankings" class="workspace-card">
+                    <ListOrdered size={24} />
+                    <h4>Match Rankings</h4>
+                    <p>Live qualification rankings and match results</p>
+                  </a>
+                  <a href="/strategy" class="workspace-card">
+                    <Target size={24} />
+                    <h4>Strategy</h4>
+                    <p>Alliance selection notes and match strategy</p>
                   </a>
                 </div>
               </div>
@@ -632,7 +664,7 @@
                     <h4>Your Scouting Assignments</h4>
                     <p class="muted">Only assignments assigned to you are shown here.</p>
                   </div>
-                  <a href="/scouting" class="btn btn-outline btn-sm">
+                  <a href="/matchscout" class="btn btn-outline btn-sm">
                     <ListChecks size={14} />
                     Open Scouting
                   </a>
@@ -1403,10 +1435,13 @@
   }
 
   .dashboard-container {
-    /* Slightly softer than the app-wide sharp-corner default (--radius-lg),
-       without going soft-card-AI-generic. Scoped to this page's own cards. */
-    --home-radius: 8px;
-    max-width: 1200px;
+    /* Sharp corners throughout this page, by direct instruction - no
+       filleted rectangles. Wider than before too: this is the one screen
+       every signed-in visit starts on, and it was floating in a narrow
+       centered column with a lot of unused side space on anything wider
+       than a laptop. */
+    --home-radius: 0;
+    max-width: 1440px;
     margin: var(--space-7) auto;
     padding: 0 var(--space-4);
   }
@@ -1440,6 +1475,47 @@
     margin: 0;
     font-size: 0.85rem;
     color: var(--text-muted);
+  }
+
+  /* A telemetry-strip, not another row of rounded cards: tiles share
+     hairlines instead of each carrying their own border, which reads as one
+     continuous instrument rather than four separate boxes. */
+  .stat-strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    margin-bottom: var(--space-6);
+  }
+
+  .stat-tile {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    background: var(--surface-1);
+    padding: var(--space-4) var(--space-5);
+  }
+
+  .stat-label {
+    font-family: var(--font-mono-stack);
+    font-size: var(--font-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+  }
+
+  .stat-value {
+    font-size: var(--font-xxl, 1.75rem);
+    font-weight: 700;
+    color: var(--secondary);
+    line-height: 1.1;
+  }
+
+  .stat-value-text {
+    font-size: var(--font-lg);
+    font-family: var(--font-mono-stack);
+    text-transform: uppercase;
   }
 
   .pending-notice {
@@ -1488,7 +1564,7 @@
   .current-match-heading strong { font-size:var(--font-lg); }
   .current-match-eyebrow { color:var(--text-muted); font-size:var(--font-xs); font-family:var(--font-mono-stack); text-transform:uppercase; }
   .current-match-alliances { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--gap-3); }
-  .current-alliance { display:flex; align-items:center; gap:var(--space-2); padding:var(--space-3); border-radius:var(--radius-sm); }
+  .current-alliance { display:flex; align-items:center; gap:var(--space-2); padding:var(--space-3); }
   .current-alliance span { margin-right:auto; font-weight:700; text-transform:uppercase; font-size:var(--font-xs); }
   .current-alliance b { min-width:2.7rem; text-align:center; }
   .current-alliance.red { background:var(--red-soft); color:var(--red-strong); }
@@ -1497,7 +1573,7 @@
 
   .workspace-grid {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     gap: var(--gap-3);
   }
 
@@ -1515,7 +1591,7 @@
     align-items: center;
     background: var(--primary);
     border: 1px solid var(--border);
-    border-radius: var(--home-radius, var(--radius-lg));
+    border-left: 3px solid var(--border);
     padding: var(--space-5) var(--space-6);
     text-decoration: none;
     color: inherit;
@@ -1526,6 +1602,7 @@
   .action-card:hover {
     background: var(--surface-2);
     border-color: var(--accent-strong);
+    border-left-color: var(--brand-gold-strong);
   }
 
   .workspace-card :global(svg),
@@ -1534,7 +1611,6 @@
     width: 22px;
     height: 22px;
     padding: 9px;
-    border-radius: var(--radius-sm);
     background: var(--brand-gold-soft);
     color: var(--brand-gold-strong);
   }
@@ -1569,7 +1645,7 @@
     color: inherit;
     background: var(--surface-1);
     border: 1px solid var(--border);
-    border-radius: var(--home-radius, var(--radius-lg));
+    border-left: 3px solid var(--brand-gold-strong);
     padding: var(--space-4) var(--space-5);
     transition: border-color 0.1s ease, background-color 0.1s ease;
   }
@@ -1577,11 +1653,12 @@
   .assignment-card:hover {
     background: var(--surface-2);
     border-color: var(--accent-strong);
+    border-left-color: var(--accent-strong);
   }
 
   .assignment-card h5 { margin: 0 0 var(--space-1) 0; color: var(--secondary); }
   .assignment-card p { margin: 0; color: var(--neutral-500); font-size: var(--font-xs); }
-  .assignment-card.completed { opacity: 0.72; }
+  .assignment-card.completed { opacity: 0.72; border-left-color: var(--success, #2e7d32); }
   .assignment-card.completed:hover { opacity: 1; }
   .completed-badge {
     display: inline-flex;
@@ -1774,10 +1851,16 @@
     border-color: var(--accent-strong);
   }
 
+  /* Putting Workspace/Admin next to the assignment queue squeezed both into
+     a narrow outer column - Workspace's own 3-card row had nowhere near
+     enough width and its card text was clipping. Each section spans the
+     full (now much wider) container instead, and branches out
+     horizontally inside itself: workspace-grid/card-grid below both use
+     auto-fit, so they pick up as many columns as the full width allows. */
   .dashboard-sections {
     display: flex;
     flex-direction: column;
-    gap: var(--space-7);
+    gap: var(--space-6);
   }
 
   .dashboard-section.editing {
