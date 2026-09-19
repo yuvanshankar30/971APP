@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { supabase, getAuthHeader } from '$lib/supabase.js';
   import { initAuth, userStore, signOut, authReady as authReadyStore, user as authUserStore } from '$lib/stores/auth.js';
-  import { LogIn, UserPlus, Mail, Lock, User, Shield, CheckCircle, AlertCircle, LogOut, Users, GripVertical, X, Plus, LayoutGrid, ClipboardCheck, Factory, ShoppingCart, ListChecks } from 'lucide-svelte';
+  import { LogIn, UserPlus, Mail, Lock, User, Shield, CheckCircle, AlertCircle, LogOut, Users, GripVertical, X, Plus, LayoutGrid, ClipboardCheck, Factory, ShoppingCart, ListChecks, ListOrdered, Target } from 'lucide-svelte';
   import { goto } from '$app/navigation';
   import { FRC_TEAMS, hasPermission } from '$lib/permissions.js';
   import { theme, setTheme } from '$lib/stores/theme.js';
@@ -512,10 +512,12 @@
     </div>
 
     <div class="stat-strip">
-      <div class="stat-tile">
-        <span class="stat-label">Competition</span>
-        <strong class="stat-value stat-value-text">{homeEventKey || 'Not set'}</strong>
-      </div>
+      {#if homeEventKey}
+        <div class="stat-tile">
+          <span class="stat-label">Competition</span>
+          <strong class="stat-value stat-value-text">{homeEventKey}</strong>
+        </div>
+      {/if}
       <div class="stat-tile">
         <span class="stat-label">Assignments Open</span>
         <strong class="stat-value">{incompleteScoutAssignments.length}</strong>
@@ -627,10 +629,20 @@
                     <h4>Purchasing</h4>
                     <p>Review purchase requests, orders, and needed components</p>
                   </a>
-                  <a href="/scouting" class="workspace-card">
+                  <a href="/matchscout" class="workspace-card">
                     <ClipboardCheck size={24} />
                     <h4>Scouting</h4>
                     <p>Open competition assignments, scouting forms, and event analysis</p>
+                  </a>
+                  <a href="/matchrankings" class="workspace-card">
+                    <ListOrdered size={24} />
+                    <h4>Match Rankings</h4>
+                    <p>Live qualification rankings and match results</p>
+                  </a>
+                  <a href="/strategy" class="workspace-card">
+                    <Target size={24} />
+                    <h4>Strategy</h4>
+                    <p>Alliance selection notes and match strategy</p>
                   </a>
                 </div>
               </div>
@@ -652,7 +664,7 @@
                     <h4>Your Scouting Assignments</h4>
                     <p class="muted">Only assignments assigned to you are shown here.</p>
                   </div>
-                  <a href="/scouting" class="btn btn-outline btn-sm">
+                  <a href="/matchscout" class="btn btn-outline btn-sm">
                     <ListChecks size={14} />
                     Open Scouting
                   </a>
@@ -1561,7 +1573,7 @@
 
   .workspace-grid {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     gap: var(--gap-3);
   }
 
