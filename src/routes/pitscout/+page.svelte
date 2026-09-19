@@ -1874,6 +1874,7 @@
 {/if}
 
     <div class="submit-row">
+      <small class="submit-hint">This saves everything filled in so far across Main, Extra, and Photos at once - submitting from here doesn't skip anything on the other tabs.</small>
       <button class="btn btn-primary submit-btn" type="submit" disabled={saving || uploading}>
         {#if uploading}
           Uploading...
@@ -2459,12 +2460,23 @@
 
   .submit-row {
     display: flex;
+    align-items: center;
     justify-content: flex-end;
+    gap: var(--gap-3);
     margin-top: 0.5rem;
+    padding-top: var(--space-3);
+    border-top: 1px solid var(--border);
+  }
+
+  .submit-hint {
+    flex: 1;
+    color: var(--text-muted);
+    font-size: 0.76rem;
   }
 
   .submit-btn {
     min-width: 190px;
+    flex: none;
   }
 
   @media (max-width: 768px) {
@@ -2496,6 +2508,8 @@
     }
 
     .submit-row {
+      flex-direction: column;
+      align-items: stretch;
       justify-content: stretch;
     }
 
