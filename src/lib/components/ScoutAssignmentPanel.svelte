@@ -743,12 +743,16 @@
     align-items: center;
     gap: var(--gap-2);
     flex-wrap: wrap;
-    /* The roster board is deliberately tall. Keep the only action that
-       commits its staged changes in view instead of stranding it above a
-       multi-row grid of scouts. */
-    position: sticky;
-    top: 0;
-    z-index: 5;
+    /* Not position:sticky - the global nav bar (.nav-header in
+       +layout.svelte) is ALSO sticky at top:0, with a much higher z-index.
+       Both sticking to the same top:0 line meant the nav bar rendered over
+       this header once scrolled, covering Publish Assignments with an
+       invisible click-blocking layer - the button looked normal but
+       nothing happened when pressed. No single top offset here is safe
+       either, since the real nav height differs by breakpoint. Losing the
+       "stays in view while scrolling" nicety is a fair trade for the
+       button reliably working again.
+       */
     margin: calc(var(--space-2) * -1);
     margin-bottom: 0;
     padding: var(--space-2);
