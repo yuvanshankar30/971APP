@@ -27,10 +27,10 @@ class TubeFaceProgramTests(unittest.TestCase):
         self.assertEqual(
             [tube_face_program_name("Tube42", clock) for clock in TUBE_FACE_CLOCKS],
             [
-                "Tube42-side-12-AUTOCAM",
-                "Tube42-side-3-AUTOCAM",
-                "Tube42-side-6-AUTOCAM",
-                "Tube42-side-9-AUTOCAM",
+                "Tube42Side12AUTOCAM",
+                "Tube42Side3AUTOCAM",
+                "Tube42Side6AUTOCAM",
+                "Tube42Side9AUTOCAM",
             ],
         )
 
@@ -41,14 +41,17 @@ class TubeFaceProgramTests(unittest.TestCase):
         self.assertEqual(
             names,
             [
-                long_name[:24] + "-side-12-AUTOCAM",
-                long_name[:25] + "-side-3-AUTOCAM",
-                long_name[:25] + "-side-6-AUTOCAM",
-                long_name[:25] + "-side-9-AUTOCAM",
+                long_name[:27] + "Side12AUTOCAM",
+                long_name[:28] + "Side3AUTOCAM",
+                long_name[:28] + "Side6AUTOCAM",
+                long_name[:28] + "Side9AUTOCAM",
             ],
         )
         self.assertEqual(len(set(names)), 4)
         self.assertTrue(all(len(name) <= 40 for name in names))
+
+    def test_names_never_contain_spaces(self):
+        self.assertEqual(tube_face_program_name("My Tube 2", 12), "MyTube2Side12AUTOCAM")
 
     def test_unknown_face_is_rejected(self):
         with self.assertRaises(ValueError):

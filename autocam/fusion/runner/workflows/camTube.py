@@ -273,7 +273,7 @@ def start(data, session):
         }
         completion_data["stats"] = {
             "facePrograms": [
-                {"label": "Side {}".format(name.rsplit("-side-", 1)[-1]), "programName": name}
+                {"label": "Side {}".format(re.search(r"Side(\d+)AUTOCAM$", name).group(1)), "programName": name}
                 for name in posted_program_names
             ],
         }

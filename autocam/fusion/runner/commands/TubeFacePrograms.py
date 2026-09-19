@@ -8,6 +8,8 @@ cannot drift into numbered files that give the operator no clue which face is
 next.
 """
 
+import re
+
 TUBE_FACE_CLOCKS = (12, 3, 6, 9)
 # Fusion silently truncates longer post program names. Leave room for the
 # meaningful face suffix so the four indexed setups cannot overwrite one
@@ -28,6 +30,7 @@ def tube_face_setup_name(clock):
 def tube_face_program_name(base_name, clock):
     """Filename stem for one face; Fusion's post processor adds .ngc/.nc."""
     tube_face_label(clock)  # validates clock
-    base = str(base_name or "tube").strip() or "tube"
-    suffix = "-side-{}-AUTOCAM".format(clock)
+    # No spaces or separators anywhere: <FusionFileName>Side<clock>AUTOCAM.
+    base = re.sub(r"\s+", "", str(base_name or "")) or "tube"
+    suffix = "Side{}AUTOCAM".format(clock)
     return "{}{}".format(base[:FUSION_PROGRAM_NAME_MAX_LENGTH - len(suffix)], suffix)
