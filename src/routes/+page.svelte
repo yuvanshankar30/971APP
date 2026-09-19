@@ -1839,25 +1839,16 @@
     border-color: var(--accent-strong);
   }
 
-  /* Sections used to stack full-width one after another, which is most of
-     why the page read as sparse - Workspace and Admin are short and had a
-     whole row to themselves. They sit side-by-side with the assignment
-     queue now, whenever there's room for it, and still stack on mobile. */
+  /* Putting Workspace/Admin next to the assignment queue squeezed both into
+     a narrow outer column - Workspace's own 3-card row had nowhere near
+     enough width and its card text was clipping. Each section spans the
+     full (now much wider) container instead, and branches out
+     horizontally inside itself: workspace-grid/card-grid below both use
+     auto-fit, so they pick up as many columns as the full width allows. */
   .dashboard-sections {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
-    align-items: start;
+    display: flex;
+    flex-direction: column;
     gap: var(--space-6);
-  }
-
-  .dashboard-section:has(.user-lists) {
-    grid-column: span 2;
-  }
-
-  @media (max-width: 900px) {
-    .dashboard-section:has(.user-lists) {
-      grid-column: span 1;
-    }
   }
 
   .dashboard-section.editing {
