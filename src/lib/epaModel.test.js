@@ -158,8 +158,21 @@ describe('winProbability', () => {
   });
 
   it('clamps away from the literal extremes even for a huge gap', () => {
-    expect(winProbability(1000, 0)).toBeLessThanOrEqual(0.97);
-    expect(winProbability(0, 1000)).toBeGreaterThanOrEqual(0.03);
+    expect(winProbability(1000, 0)).toBeLessThanOrEqual(0.95);
+    expect(winProbability(0, 1000)).toBeGreaterThanOrEqual(0.05);
+  });
+
+  // Regression test for a real reported case: a 246.6-point alliance-total
+  // gap (697.9 vs 944.5, QM40 - 9032/4414/972 vs 3256/254/581) hit the OLD
+  // 3% floor under every plausible calibrated scale for that event, which
+  // read as the model being stuck/broken rather than a genuinely lopsided
+  // matchup. The floor itself is now 5%, not a fix for "is this gap really
+  // that large" (it isn't wrong here - an alliance anchored by a
+  // historically dominant program can legitimately be this favored), but a
+  // little more honest that some real uncertainty remains either way.
+  it('never reports below the 5% floor even for the specific gap that prompted this widening', () => {
+    const prob = winProbability(697.9, 944.5, 35);
+    expect(prob).toBeGreaterThanOrEqual(0.05);
   });
 });
 

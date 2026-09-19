@@ -198,10 +198,20 @@ function estimateInitialEpa(playedMatches) {
 // literally 0% or 100% is never actually honest for a game with this much
 // variance (a good alliance still loses sometimes), and displaying it that
 // way reads as the model being broken even when the direction is right.
+//
+// The clamp bounds themselves (5%/95%, widened from an initial 3%/97%) are
+// a floor, not a real probability - a genuinely lopsided alliance gap (say,
+// one side anchored by a historically dominant team clearly outscoring the
+// other alliance all event) can legitimately push the raw logistic output
+// past this floor, and every such case then displays as the exact same
+// number regardless of how far past the floor the real estimate actually
+// is. Widening it doesn't fix that (no fixed floor can), but keeps the
+// displayed number a little more honest about genuine uncertainty without
+// literally claiming a lock either way.
 export function winProbability(epaA, epaB, scale = 35) {
   const diff = (epaA - epaB) / scale;
   const raw = 1 / (1 + Math.exp(-diff));
-  return Math.min(0.97, Math.max(0.03, raw));
+  return Math.min(0.95, Math.max(0.05, raw));
 }
 
 const MIN_SCALE = 12; // floor so a small early-event sample (near-zero residuals) can't collapse the curve back to a lock
