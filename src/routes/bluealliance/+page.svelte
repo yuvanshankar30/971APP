@@ -2,13 +2,12 @@
   import { onMount } from 'svelte';
   import { Radar, ExternalLink, MapPin, Calendar, Trophy, Users, Award, ChevronDown, ChevronRight, RefreshCw } from 'lucide-svelte';
 
-  // A draft replica of thebluealliance.com's own front end (team page ->
-  // year picker -> event list -> event detail: rankings/alliances/awards/
+  // A replica of thebluealliance.com's own front end (team page -> year
+  // picker -> event list -> event detail: rankings/alliances/awards/
   // matches), scoped to the two teams 971 cares about rather than a
   // universal "look up any team" browser. Deliberately styled apart from
-  // the rest of Spartans Hub (TBA's own blue, not this app's gold) since
-  // the point of a first draft is to look like the source it's replicating,
-  // not to blend in yet - see the PR description for what's still rough.
+  // the rest of Spartans Hub (TBA's own blue, not this app's gold) - the
+  // point is to look like the source it's replicating, not to blend in.
   //
   // Every fetch below hits a NEW, distinctly-named /api/tba/* route
   // (team-profile, team-years, team-events, event-info, event-rankings,
@@ -154,7 +153,7 @@
 <div class="tba-page">
   <header class="tba-topbar">
     <div class="tba-topbar-inner">
-      <div class="tba-brand"><Radar size={20} /> <span>Blue Alliance</span><small>draft - powered by the TBA API</small></div>
+      <div class="tba-brand"><Radar size={20} /> <span>Blue Alliance</span></div>
       <div class="team-switcher" role="tablist" aria-label="Featured team">
         {#each FEATURED_TEAMS as team}
           <button
@@ -190,15 +189,14 @@
             {/if}
           </div>
         </div>
-      </section>
-
-      <section class="year-bar">
-        <label for="tba-year-select">Season</label>
-        <select id="tba-year-select" bind:value={selectedYear} on:change={loadEvents}>
-          {#each years as year}<option value={year}>{year}</option>{/each}
-          {#if !years.length}<option value={selectedYear}>{selectedYear}</option>{/if}
-        </select>
-        <button class="tba-btn-outline" on:click={loadEvents} disabled={eventsLoading}><RefreshCw size={13} /> Refresh</button>
+        <div class="year-bar">
+          <label for="tba-year-select">Season</label>
+          <select id="tba-year-select" bind:value={selectedYear} on:change={loadEvents}>
+            {#each years as year}<option value={year}>{year}</option>{/each}
+            {#if !years.length}<option value={selectedYear}>{selectedYear}</option>{/if}
+          </select>
+          <button class="tba-btn-outline" on:click={loadEvents} disabled={eventsLoading} title="Refresh"><RefreshCw size={13} /></button>
+        </div>
       </section>
 
       {#if eventsLoading}
@@ -342,8 +340,8 @@
 
 <style>
   /* Deliberately its own visual language (TBA's blue, white cards, dense
-     tables) rather than this app's gold/cream design system - a draft of
-     the site being replicated, not a Spartans Hub-flavored reskin yet. */
+     tables) rather than this app's gold/cream design system - a replica of
+     the site it mirrors, not a Spartans Hub-flavored reskin. */
   .tba-page { --tba-blue: #1a5c96; --tba-blue-dark: #0d3f6b; --tba-border: #dde3ea; --tba-bg: #f4f6f8; background: var(--tba-bg); margin: calc(var(--space-4, 1rem) * -1); padding-bottom: 3rem; min-height: 100%; }
   .tba-topbar { background: var(--tba-blue); color: #fff; padding: 0.9rem 1.25rem; }
   .tba-topbar-inner { max-width: 1100px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem; }
@@ -358,13 +356,15 @@
 
   .team-header { display: flex; gap: 1rem; align-items: center; background: #fff; border: 1px solid var(--tba-border); border-radius: 10px; padding: 1.1rem 1.3rem; margin-bottom: 1rem; }
   .team-header-number { font-size: 2.2rem; font-weight: 800; color: var(--tba-blue); min-width: 5rem; }
+  .team-header-body { flex: 1; min-width: 0; }
   .team-header-body h1 { margin: 0; font-size: 1.35rem; }
   .team-header-fullname { color: #64748b; font-size: 0.82rem; }
   .team-header-meta { display: flex; flex-wrap: wrap; gap: 0.9rem; margin-top: 0.4rem; font-size: 0.8rem; color: #475569; }
   .team-header-meta span, .team-header-meta a { display: inline-flex; align-items: center; gap: 0.3rem; }
   .team-header-meta a { color: var(--tba-blue); text-decoration: none; }
 
-  .year-bar { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 1rem; font-size: 0.85rem; }
+  .year-bar { display: flex; align-items: center; gap: 0.4rem; font-size: 0.82rem; flex: none; }
+  .year-bar label { color: #64748b; }
   .year-bar select { padding: 0.35rem 0.6rem; border-radius: 6px; border: 1px solid var(--tba-border); }
   .tba-btn-outline { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.35rem 0.7rem; border-radius: 6px; border: 1px solid var(--tba-blue); background: #fff; color: var(--tba-blue); font-size: 0.8rem; cursor: pointer; }
   .tba-btn-outline.tiny { padding: 0.15rem 0.4rem; margin-left: auto; }
@@ -419,5 +419,7 @@
   @media (max-width: 640px) {
     .match-row { grid-template-columns: 1fr; }
     .team-header { flex-direction: column; align-items: flex-start; }
+    .year-bar { width: 100%; }
+    .year-bar select { flex: 1; }
   }
 </style>

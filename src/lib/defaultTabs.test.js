@@ -415,7 +415,7 @@ describe('ensurePredictionMarketTab', () => {
 
 describe('ensureBlueAllianceTab', () => {
   // Same append-only migration contract as ensurePowerRankingsTab above -
-  // a saved custom nav from before this draft tab existed still gets it.
+  // a saved custom nav from before this tab existed still gets it.
   it('appends to an existing Competition folder', () => {
     const result = ensureBlueAllianceTab(savedNav(), enabled);
     expect(competitionChildren(result).at(-1)).toEqual({ key: 'bluealliance', label: 'Blue Alliance' });

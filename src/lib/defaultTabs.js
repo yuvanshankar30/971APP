@@ -281,7 +281,7 @@ export function ensurePredictionMarketTab(tabs, navConfig = navigation) {
   return next;
 }
 
-// A draft feature (see the /bluealliance route) - appended for anyone whose
+// See the /bluealliance route - appended for anyone whose
 // saved header_tabs predates it, same as every other Competition tab added
 // after someone had already customized their nav.
 export function ensureBlueAllianceTab(tabs, navConfig = navigation) {

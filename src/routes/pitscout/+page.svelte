@@ -279,10 +279,6 @@
       + (group.id === 'setup' ? [scout_name, drivebase_type, climb_options.length ? climb_options : '', autoOptions.length ? autoOptions : ''].filter(answered).length : 0),
     total: (EXTRA_GROUP_DETAIL_FIELDS[group.id] || []).length + (group.id === 'setup' ? 4 : 0)
   }));
-  $: answeredTotal = topicStates.reduce((sum, topic) => sum + topic.done, 0);
-  $: questionTotal = topicStates.reduce((sum, topic) => sum + topic.total, 0);
-  $: remaining = Math.max(0, questionTotal - answeredTotal);
-
   let photoInputKey = 0;
   let photoInput;
   let prefersCameraCapture = false;
@@ -1172,16 +1168,7 @@
           {/if}
         </div>
       </div>
-      <button
-        class="btn btn-outline entry-photo-action"
-        type="button"
-        on:click={() => (activeTopic = 'photos')}
-      >
-        {editablePhotoPaths.length + pendingFiles.length ? 'Manage photos' : 'Add photos'}
-      </button>
     </div>
-
-    <div class="optional-banner">Every question below is optional - answer whatever you know about the robot and save.</div>
 
     {#if isViewingPastEvent}
       <div class="note">
@@ -1352,11 +1339,14 @@
 {/if}
 
 {#if activeTopic === 'photos'}
-    <div class="form-group">
+    <section class="question-section photo-section">
       <div class="photo-header">
-        <label class="form-label" for="photoUpload">Pit Photos (up to 3)</label>
+        <div>
+          <h4>Pit Photos</h4>
+          <small class="form-help">{editablePhotoPaths.length + pendingFiles.length}/3 selected</small>
+        </div>
         <button
-          class="btn btn-outline"
+          class="btn btn-primary"
           type="button"
           on:click={openPhotoPicker}
           disabled={!photoSlotsRemaining || saving || uploading}
@@ -1379,34 +1369,33 @@
         />
       {/key}
 
-      <small class="form-help">{editablePhotoPaths.length + pendingFiles.length}/3 selected</small>
       {#if prefersCameraCapture && photoSlotsRemaining > 0}
         <small class="form-help">Tap the button again to add the next photo.</small>
       {/if}
-    </div>
 
-    {#if editablePhotoPaths.length || pendingFiles.length}
-      <div class="photo-grid">
-        {#each editablePhotoPaths as path}
-          <div class="photo-item">
-            <img src={photoUrl(path)} alt="Pit robot" />
-            <button class="btn btn-outline" type="button" on:click={() => removeExistingPhoto(path)}>
-              Remove
-            </button>
-          </div>
-        {/each}
+      {#if editablePhotoPaths.length || pendingFiles.length}
+        <div class="photo-grid">
+          {#each editablePhotoPaths as path}
+            <div class="photo-item">
+              <img src={photoUrl(path)} alt="Pit robot" />
+              <button class="photo-remove" type="button" aria-label="Remove photo" title="Remove photo" on:click={() => removeExistingPhoto(path)}>&times;</button>
+            </div>
+          {/each}
 
-        {#each pendingFiles as file, idx}
-          <div class="pending-file-card">
-            <div class="form-label">Ready to upload</div>
-            <div class="pending-file-name">{file.name || `Photo ${idx + 1}`}</div>
-            <button class="btn btn-outline" type="button" on:click={() => removePendingPhoto(idx)}>
-              Remove
-            </button>
-          </div>
-        {/each}
-      </div>
-    {/if}
+          {#each pendingFiles as file, idx}
+            <div class="photo-item pending-file-card">
+              <div class="pending-file-name">
+                <span class="pending-file-badge">Ready to upload</span>
+                {file.name || `Photo ${idx + 1}`}
+              </div>
+              <button class="photo-remove" type="button" aria-label="Remove photo" title="Remove photo" on:click={() => removePendingPhoto(idx)}>&times;</button>
+            </div>
+          {/each}
+        </div>
+      {:else}
+        <div class="photo-empty">No photos yet. Add up to 3 so scouts can recognize the robot at a glance.</div>
+      {/if}
+    </section>
 {/if}
 
 {#if activeTopic === 'extra' && activeExtraGroup === 'setup'}
@@ -2018,14 +2007,6 @@
     margin: 0 auto;
   }
 
-  .optional-banner {
-    padding: var(--space-2) var(--space-3);
-    border-radius: var(--radius-sm);
-    background: var(--accent-subtle);
-    color: var(--text);
-    font-size: 0.85rem;
-  }
-
   .team-search {
     font-size: 1.05rem;
   }
@@ -2094,7 +2075,6 @@
   }
 
   .entry-header > div { flex: 1; }
-  .entry-photo-action { margin-left: auto; white-space: nowrap; }
 
   .entry-subtitle {
     margin-top: 0.3rem;
@@ -2175,31 +2155,6 @@
      scout they can stop asking about it. */
   .topic-tab.done .topic-count { color: var(--green-strong); }
 
-  .topic-progress {
-    display: flex;
-    align-items: center;
-    gap: var(--gap-3);
-    margin-bottom: var(--space-4);
-  }
-  .topic-progress-bar {
-    flex: 1;
-    height: 4px;
-    background: var(--surface-2);
-    border-radius: var(--radius-sm);
-    overflow: hidden;
-  }
-  .topic-progress-fill {
-    height: 100%;
-    background: var(--brand-gold-base, #d9a413);
-    transition: width 160ms ease-out;
-  }
-  .topic-progress-text {
-    font-size: 0.8rem;
-    color: var(--text-muted);
-    white-space: nowrap;
-    font-variant-numeric: tabular-nums;
-  }
-
   @media (min-width: 900px) {
     /* Room for a persistent column, so the remaining topics stay visible
        while answering one of them. */
@@ -2211,22 +2166,16 @@
          had rather than squeezing every select into two thirds of it. */
       max-width: 1040px;
     }
-    .entry-card > *:not(.topic-rail) { grid-column: 2; }
-    .entry-card > .entry-header, .entry-card > .note, .entry-card > .optional-banner { grid-column: 1 / -1; }
-    /* Explicit row 1, not left to auto-placement - the header must anchor
-       the grid's first row itself so topic-rail (explicitly row 2 onward)
-       reliably renders below it, not above it, regardless of how the
-       browser would otherwise resolve an unplaced item against one with an
-       explicit row span. */
-    .entry-card > .entry-header { grid-row: 1; }
+    /* Just two real grid children now - the rail and everything else in one
+       .entry-content wrapper - each explicitly placed in its own column and
+       the shared row 1. That row sizes to entry-content (by far the taller
+       of the two), which is exactly what gives the sticky rail room to
+       float down the page as that column scrolls; no per-child column
+       overrides or fragile multi-row spanning needed to get there. */
+    .topic-rail, .entry-content { grid-row: 1; }
+    .entry-content { grid-column: 2; display: grid; gap: 1rem; }
     .topic-rail {
       grid-column: 1;
-      /* Spans to the grid's actual last row (-1), not a hardcoded large
-         number - Main's much shorter form (vs. the old 7-topic layout)
-         exposed that a fixed "2 / 100" forces ~98 implicit row tracks to
-         exist even when real content only fills a handful, which is
-         exactly the giant empty gap this was leaving on screen. */
-      grid-row: 2 / -1;
       position: sticky;
       top: var(--space-4);
       flex-direction: column;
@@ -2406,36 +2355,87 @@
     border: 0;
   }
 
+  .photo-section .photo-header h4 { margin: 0 0 2px; }
+  .photo-section .photo-header small { color: var(--text-muted); }
+
+  .photo-empty {
+    border: 1px dashed var(--border);
+    border-radius: 10px;
+    padding: 1.5rem 1rem;
+    text-align: center;
+    color: var(--text-muted);
+    background: color-mix(in srgb, var(--surface-1) 92%, transparent);
+  }
+
   .photo-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-    gap: 0.6rem;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 0.75rem;
   }
 
-  .photo-item,
-  .pending-file-card {
-    display: grid;
-    gap: 0.45rem;
-  }
-
-  .photo-item img {
-    width: 100%;
-    height: 140px;
-    object-fit: cover;
-    border-radius: 8px;
+  .photo-item {
+    position: relative;
+    border-radius: 10px;
+    overflow: hidden;
     border: 1px solid var(--border);
   }
 
+  .photo-item img {
+    display: block;
+    width: 100%;
+    height: 150px;
+    object-fit: cover;
+  }
+
+  .photo-remove {
+    position: absolute;
+    top: 0.4rem;
+    right: 0.4rem;
+    width: 1.75rem;
+    height: 1.75rem;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.6);
+    color: #fff;
+    font-size: 1.1rem;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .photo-remove:hover { background: rgba(0, 0, 0, 0.8); }
+
   .pending-file-card {
-    border: 1px dashed var(--border);
-    border-radius: 8px;
+    height: 150px;
     padding: 0.75rem;
+    display: grid;
+    align-content: center;
     background: color-mix(in srgb, var(--surface-1) 92%, transparent);
+  }
+
+  .pending-file-card .photo-remove {
+    background: var(--surface-1);
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+
+  .pending-file-badge {
+    display: inline-block;
+    margin-bottom: 0.3rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: var(--radius-sm);
+    background: var(--accent-subtle);
+    color: var(--text);
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
   }
 
   .pending-file-name {
     word-break: break-word;
-    font-size: 0.92rem;
+    font-size: 0.85rem;
   }
 
   .submit-row {
@@ -2457,8 +2457,6 @@
       flex-direction: column;
       align-items: stretch;
     }
-
-    .entry-photo-action { width: 100%; margin-left: 0; }
 
     .page-summary {
       width: 100%;
