@@ -131,12 +131,31 @@ function estimateInitialEpa(playedMatches) {
 }
 
 // Win probability for team A's alliance vs team B's alliance, from each
-// side's total EPA, using a logistic curve the same shape Statbotics/Elo
-// systems use - `scale` controls how quickly a rating gap turns into
-// near-certainty; 8 points of EPA gap (roughly one good subsystem's worth
-// of output in most FRC games) reads as a clear but not lopsided favorite
-// with the default.
-export function winProbability(epaA, epaB, scale = 8) {
+// side's TOTAL EPA (the sum of 3 robots' ratings, matching how
+// allianceEpaTotal builds it in the Predict tab - NOT one robot's own
+// rating), using a logistic curve the same shape Statbotics/Elo systems
+// use. `scale` controls how quickly a rating gap turns into near-certainty.
+//
+// This used to default to 8, sized for a single robot's rating gap ("one
+// good subsystem's worth of output"), but every real caller passes in
+// alliance TOTALS (sums of 3 robots each) - a 30-40 point gap between two
+// alliances is a normal, not-even-lopsided difference, and dividing that by
+// 8 pushed the logistic curve's input past +/-4, which is already
+// effectively 0%/100% (e(-4) is under 2%). That's the bug behind every
+// match reading as a lock either way regardless of how close the alliances
+// actually were. 35 is a reasoned estimate for alliance-level spread (three
+// independent per-robot estimates summed, each with roughly the spread the
+// old scale=8 assumed, combine to roughly 8 * sqrt(3*3) by variance) - real
+// calibration against actual results would refine this, but it at least
+// puts a normal alliance gap in the "clear favorite, not a lock" range
+// instead of always saturating.
+//
+// The result is also clamped away from the extremes: a probability of
+// literally 0% or 100% is never actually honest for a game with this much
+// variance (a good alliance still loses sometimes), and displaying it that
+// way reads as the model being broken even when the direction is right.
+export function winProbability(epaA, epaB, scale = 35) {
   const diff = (epaA - epaB) / scale;
-  return 1 / (1 + Math.exp(-diff));
+  const raw = 1 / (1 + Math.exp(-diff));
+  return Math.min(0.97, Math.max(0.03, raw));
 }

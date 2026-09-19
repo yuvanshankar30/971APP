@@ -80,4 +80,25 @@ describe('winProbability', () => {
     const b = winProbability(50, 70);
     expect(a + b).toBeCloseTo(1, 9);
   });
+
+  // Regression test for the reported bug: every real caller (the Predict
+  // tab) passes ALLIANCE TOTALS - the sum of 3 robots' EPA each, not one
+  // robot's own rating - and the old default scale (8, sized for a single
+  // robot) pushed any normal alliance-level gap past the point where the
+  // logistic curve is already effectively 0%/100%, so every match looked
+  // like a lock regardless of how close the alliances actually were.
+  it('does not saturate to 0%/100% for a normal alliance-level EPA gap', () => {
+    // Three teams around 100 EPA each vs three teams around 110 each - a
+    // real, meaningfully-favored-but-not-lopsided alliance gap.
+    const redTotal = 100 + 95 + 105;
+    const blueTotal = 110 + 108 + 112;
+    const prob = winProbability(redTotal, blueTotal);
+    expect(prob).toBeGreaterThan(0.05);
+    expect(prob).toBeLessThan(0.5);
+  });
+
+  it('clamps away from the literal extremes even for a huge gap', () => {
+    expect(winProbability(1000, 0)).toBeLessThanOrEqual(0.97);
+    expect(winProbability(0, 1000)).toBeGreaterThanOrEqual(0.03);
+  });
 });
