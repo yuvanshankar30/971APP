@@ -486,7 +486,7 @@
   </summary>
 
   <div class="panel-body">
-    <div class="panel-header">
+    <div class="panel-header" class:has-draft-changes={hasDraftChanges}>
       <div class="hint">
         {#if capabilities.can_edit}
           Select a team, then drag it onto a scout to stage that robot across its scheduled matches. Nothing is sent until you publish.
@@ -743,6 +743,21 @@
     align-items: center;
     gap: var(--gap-2);
     flex-wrap: wrap;
+    /* The roster board is deliberately tall. Keep the only action that
+       commits its staged changes in view instead of stranding it above a
+       multi-row grid of scouts. */
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    margin: calc(var(--space-2) * -1);
+    margin-bottom: 0;
+    padding: var(--space-2);
+    background: var(--surface-1);
+    border-bottom: 1px solid transparent;
+  }
+
+  .panel-header.has-draft-changes {
+    border-bottom-color: var(--accent-strong, #b8860b);
   }
 
   .hint {
@@ -831,8 +846,12 @@
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
     gap: var(--gap-2);
-    max-height: 20rem;
+    /* Let a normal event roster remain visible at once, while retaining a
+       bounded scrolling surface for larger events. The stable gutter makes
+       the scrollable roster obvious even when macOS hides scrollbars. */
+    max-height: min(32rem, 60vh);
     overflow-y: auto;
+    scrollbar-gutter: stable;
     padding-right: 0.2rem;
   }
 
