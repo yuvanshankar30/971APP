@@ -164,12 +164,56 @@
   let myPrescoutAssignments = [];
   let prescoutEventKey = '';
 
-  // Data assignments used to open /datascout. That page is gone, so they go
-  // to Quick Scout instead - it is the surviving surface that writes to the
-  // same /datascout endpoint, so the assignment still gets recorded.
+  // Data assignments used to open /datascout, then briefly Quick Scout once
+  // /datascout was removed. Match Scouting (api/matchscout) is the real,
+  // current surface for "data scouting" now - see ScoutAssignmentPanel's own
+  // "Data Scout"/"Match Scouting Assignments" labeling - so that's where
+  // these need to land, not Quick Scout.
   function scoutAssignmentRoute(scoutingType) {
     if (scoutingType === 'note') return 'notescout';
+    if (scoutingType === 'data') return 'matchscout';
     return 'quickscout';
+  }
+
+  // match_key -> team_key -> 'red' | 'blue', built once from the active
+  // event's TBA schedule. scout_match_assignments itself has no alliance
+  // column (and no event_key of its own - it's embedded in match_key, e.g.
+  // "2026cc_qm14"), so this is the only way to know which side a "data"
+  // assignment's robot is on without asking the scout to look it up by hand.
+  let matchAllianceByKey = {};
+
+  async function loadMatchAlliances() {
+    try {
+      const eventKey = await fetchActiveScoutingEventKey();
+      if (!eventKey) return;
+      const res = await fetch(`/api/tba/event-matches?event_key=${encodeURIComponent(eventKey)}&comp_level=all`);
+      const payload = await res.json();
+      if (!payload?.success) return;
+      const next = {};
+      for (const match of payload.data || []) {
+        next[match.key] = {};
+        for (const teamKey of match.alliances?.red?.team_keys || []) next[match.key][teamKey] = 'red';
+        for (const teamKey of match.alliances?.blue?.team_keys || []) next[match.key][teamKey] = 'blue';
+      }
+      matchAllianceByKey = next;
+    } catch { /* alliance is a nice-to-have autofill, not worth surfacing an error for */ }
+  }
+
+  // Match Scouting's own match_key convention is the bare qualification
+  // number ("14"), not TBA's "2026cc_qm14" - see how it saves match_key
+  // directly from its "Match #" input. Strips the event prefix and comp-
+  // level letters (qm/qf/sf/f) down to just that number.
+  function bareMatchNumber(matchKey) {
+    return String(matchKey || '').split('_').pop().replace(/^[a-z]+/i, '');
+  }
+
+  function scoutAssignmentHref(assignment) {
+    if (assignment?.scouting_type !== 'data') return `/${scoutAssignmentRoute(assignment?.scouting_type)}`;
+    const teamNumber = String(assignment?.team_key || '').replace(/^frc/i, '');
+    const alliance = matchAllianceByKey[assignment?.match_key]?.[assignment?.team_key] || '';
+    const params = new URLSearchParams({ match: bareMatchNumber(assignment?.match_key), team: teamNumber });
+    if (alliance) params.set('alliance', alliance);
+    return `/matchscout?${params.toString()}`;
   }
 
   function compareScoutAssignmentMatches(left, right) {
@@ -267,6 +311,7 @@
     scoutingLoaded = true;
     loadScoutAssignments();
     loadPrescoutAssignments();
+    loadMatchAlliances();
   }
 
   // Keep this browser's login-screen cache in sync with the account's saved
@@ -436,7 +481,7 @@
           <p>You have {myScoutAssignments.length} upcoming scouting assignment{myScoutAssignments.length===1?'':'s'}.</p>
           {#if nextScoutAssignment}
             <div style="margin-top:0.25rem; display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center">
-              <button class="btn btn-primary" on:click={() => goto(`/${scoutAssignmentRoute(nextScoutAssignment.scouting_type)}`)}>Go to Next ({nextScoutAssignment.scouting_type} – {nextScoutAssignment.match_key.split('_').pop()} – {nextScoutAssignment.team_key.replace('frc','')})</button>
+              <button class="btn btn-primary" on:click={() => goto(scoutAssignmentHref(nextScoutAssignment))}>Go to Next ({nextScoutAssignment.scouting_type} – {nextScoutAssignment.match_key.split('_').pop()} – {nextScoutAssignment.team_key.replace('frc','')})</button>
               <button class="btn btn-outline" on:click={() => showScoutAlert=false}>Dismiss</button>
             </div>
           {/if}
@@ -540,7 +585,7 @@
                 {:else}
                   <div class="card-grid">
                     {#each myScoutAssignments.slice(0, 8) as assignment}
-                      <a class="assignment-card" href={`/${scoutAssignmentRoute(assignment.scouting_type)}`}>
+                      <a class="assignment-card" href={scoutAssignmentHref(assignment)}>
                         <h5>{assignment.scouting_type} scouting - Match #{assignment.match_key.split('_').pop()}</h5>
                         <p class="muted">Team {String(assignment.team_key || '').replace(/^frc/i, '')}</p>
                       </a>
