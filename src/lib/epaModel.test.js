@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeEventEpa, winProbability } from './epaModel.js';
+import { computeEventEpa, winProbability, calibratedScale } from './epaModel.js';
 
 function match({ red, blue, redScore, blueScore, matchNumber, compLevel = 'qm' }) {
   return {
@@ -63,6 +63,22 @@ describe('computeEventEpa', () => {
     const outOfOrder = computeEventEpa([early, later]);
     expect(outOfOrder.get('frc1').epa).toBeCloseTo(inOrder.get('frc1').epa, 9);
   });
+
+  it('attaches residualStd measuring how well ratings predicted actual scores', () => {
+    // Every match ties the baseline exactly, so once ratings settle near
+    // that baseline the prediction error should be small and stable.
+    const matches = [
+      match({ red: ['frc1', 'frc2', 'frc3'], blue: ['frc4', 'frc5', 'frc6'], redScore: 90, blueScore: 90, matchNumber: 1 }),
+      match({ red: ['frc1', 'frc2', 'frc3'], blue: ['frc4', 'frc5', 'frc6'], redScore: 90, blueScore: 90, matchNumber: 2 })
+    ];
+    const result = computeEventEpa(matches);
+    expect(Number.isFinite(result.residualStd)).toBe(true);
+    expect(result.residualStd).toBeGreaterThanOrEqual(0);
+  });
+
+  it('residualStd is 0 for an event with no played matches', () => {
+    expect(computeEventEpa([]).residualStd).toBe(0);
+  });
 });
 
 describe('winProbability', () => {
@@ -100,5 +116,23 @@ describe('winProbability', () => {
   it('clamps away from the literal extremes even for a huge gap', () => {
     expect(winProbability(1000, 0)).toBeLessThanOrEqual(0.97);
     expect(winProbability(0, 1000)).toBeGreaterThanOrEqual(0.03);
+  });
+});
+
+describe('calibratedScale', () => {
+  it('falls back to the default scale when there is no measured variance yet', () => {
+    expect(calibratedScale(0)).toBe(35);
+    expect(calibratedScale(undefined)).toBe(35);
+    expect(calibratedScale(NaN)).toBe(35);
+  });
+
+  it('widens for a noisier (higher residualStd) event and tightens for a calmer one', () => {
+    const noisy = calibratedScale(40);
+    const calm = calibratedScale(5);
+    expect(noisy).toBeGreaterThan(calm);
+  });
+
+  it('never drops below the floor even for a near-zero but nonzero residualStd', () => {
+    expect(calibratedScale(0.01)).toBeGreaterThanOrEqual(12);
   });
 });

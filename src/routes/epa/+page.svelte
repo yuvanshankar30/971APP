@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { TrendingUp, Calendar, MapPin, Sparkles, RefreshCw } from 'lucide-svelte';
   import { fetchActiveScoutingEventKey, fetchAvailableScoutingEvents } from '$lib/scoutingEvent.js';
-  import { computeEventEpa, winProbability } from '$lib/epaModel.js';
+  import { computeEventEpa, winProbability, calibratedScale } from '$lib/epaModel.js';
   import SeasonFilter from '$lib/components/SeasonFilter.svelte';
 
   // See GitHub issue #854: a Competition tab that computes our own EPA
@@ -108,8 +108,10 @@
 
   $: predictRedTotal = predictionTeams ? allianceEpaTotal(predictionTeams.red) : null;
   $: predictBlueTotal = predictionTeams ? allianceEpaTotal(predictionTeams.blue) : null;
+  // Calibrated per-event from this event's own measured scoring variance
+  // (epaModel's residualStd) rather than a fixed guess - see calibratedScale.
   $: predictRedWinProb = (predictRedTotal != null && predictBlueTotal != null)
-    ? winProbability(predictRedTotal, predictBlueTotal)
+    ? winProbability(predictRedTotal, predictBlueTotal, calibratedScale(epaByTeam.residualStd))
     : null;
 
   $: rankingRows = oprRows

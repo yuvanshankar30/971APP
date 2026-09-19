@@ -63,6 +63,15 @@ export function computeEventEpa(matches, options = {}) {
   const ratings = new Map();
   const stats = new Map();
 
+  // Every match's pre-update prediction error (actual alliance score minus
+  // the sum of that alliance's CURRENT ratings, before this match nudges
+  // them) is also this event's own empirical measure of how noisy its
+  // scoring actually is. Tracking it lets winProbability calibrate its
+  // logistic scale from THIS event's real variance instead of a guessed
+  // constant - see calibratedScale below.
+  let residualSumSq = 0;
+  let residualCount = 0;
+
   function ensure(teamKey) {
     if (!ratings.has(teamKey)) {
       ratings.set(teamKey, initialEpa);
@@ -81,6 +90,9 @@ export function computeEventEpa(matches, options = {}) {
     const predictedBlue = blueTeams.reduce((sum, t) => sum + ratings.get(t), 0);
     const redError = redScore - predictedRed;
     const blueError = blueScore - predictedBlue;
+
+    residualSumSq += redError * redError + blueError * blueError;
+    residualCount += 2;
 
     for (const teamKey of redTeams) ratings.set(teamKey, ratings.get(teamKey) + (k * redError) / ALLIANCE_SIZE);
     for (const teamKey of blueTeams) ratings.set(teamKey, ratings.get(teamKey) + (k * blueError) / ALLIANCE_SIZE);
@@ -116,6 +128,11 @@ export function computeEventEpa(matches, options = {}) {
       avgScore: row.matchesPlayed ? row.totalScore / row.matchesPlayed : 0
     });
   }
+  // A Map stays the interface every caller (and every existing test) already
+  // depends on - attaching this as a property on it, rather than changing
+  // the return shape, lets winProbability calibration opt in without a
+  // breaking change.
+  result.residualStd = residualCount ? Math.sqrt(residualSumSq / residualCount) : 0;
   return result;
 }
 
@@ -158,4 +175,25 @@ export function winProbability(epaA, epaB, scale = 35) {
   const diff = (epaA - epaB) / scale;
   const raw = 1 / (1 + Math.exp(-diff));
   return Math.min(0.97, Math.max(0.03, raw));
+}
+
+const MIN_SCALE = 12; // floor so a small early-event sample (near-zero residuals) can't collapse the curve back to a lock
+const FALLBACK_SCALE = 35; // used until an event has enough played matches to measure its own scoring variance
+
+/**
+ * Turns this event's own measured prediction-error noise (computeEventEpa's
+ * residualStd - actual alliance score minus predicted, in points) into a
+ * logistic `scale` for winProbability, instead of guessing one constant for
+ * every event and every year's game. Two alliances' errors are independent,
+ * so the gap between them has variance 2 * residualStd^2; a logistic
+ * distribution's std is scale * (pi / sqrt(3)), so solving
+ * scale * (pi / sqrt(3)) = residualStd * sqrt(2) for scale gives the
+ * conversion below. A high-scoring, wildly variable game (or an event with
+ * blowouts) widens the curve on its own; a low-variance game tightens it -
+ * both without hand-tuning per season.
+ */
+export function calibratedScale(residualStd) {
+  if (!Number.isFinite(residualStd) || residualStd <= 0) return FALLBACK_SCALE;
+  const scale = (residualStd * Math.sqrt(2)) / (Math.PI / Math.sqrt(3));
+  return Math.max(MIN_SCALE, scale);
 }
