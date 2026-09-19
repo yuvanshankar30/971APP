@@ -767,7 +767,7 @@
   .status-queued { background: var(--muted-bg, #eee); color: var(--text-muted, #888); }
   .status-claimed { background: rgba(47, 129, 247, 0.14); color: var(--accent, #2f81f7); }
   .status-processing { background: rgba(230, 221, 94, 0.16); color: #b18f1d; }
-  .status-completed { background: rgba(46, 160, 67, 0.16); color: var(--success, #2ea043); }
+  .status-completed { background: var(--surface-2); color: var(--text); }
   .status-failed,
   .status-rejected { background: rgba(248, 81, 73, 0.14); color: var(--danger, #f85149); }
 

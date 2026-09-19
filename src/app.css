@@ -1317,9 +1317,9 @@ textarea:focus,
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
-  background: var(--green-soft);
-  color: var(--green-strong);
-  border-color: var(--green-soft);
+  background: var(--surface-2);
+  color: var(--text);
+  border-color: var(--border);
 }
 
 .tag-pending {
