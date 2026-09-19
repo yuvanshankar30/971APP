@@ -4,7 +4,7 @@
   import { fetchActiveScoutingEventKey } from '$lib/scoutingEvent.js';
   import { getAuthHeader, supabase } from '$lib/supabase.js';
   import { isMatchPlayed, matchLabel } from '$lib/matchProjection.js';
-  import { STARTING_BALANCE, availableBalance, buildTestMarketMatch, myBetForMatch, poolForMatch, summarizeStandings } from '$lib/predictionMarket.js';
+  import { STARTING_BALANCE, availableBalance, myBetForMatch, poolForMatch, summarizeStandings } from '$lib/predictionMarket.js';
 
   let eventKey = '';
   let loading = true;
@@ -42,16 +42,25 @@
     return userNames.get(id) || 'A scout';
   }
 
-  function draftFor(matchKey) {
-    if (!drafts[matchKey]) {
-      const mine = myBetForMatch(bets, matchKey, userId);
-      drafts = { ...drafts, [matchKey]: { side: mine?.side || 'red', stake: mine?.stake ?? '' } };
-    }
-    return drafts[matchKey];
+  // Pure - `drafts` must be an explicit argument, not read from the
+  // enclosing closure, because a Svelte {@const draft = draftFor(match.key)}
+  // only re-runs when a variable actually passed into the call changes.
+  // The old version read `drafts` (and wrote to it as a side effect) only
+  // from closure, so Svelte never saw it as a dependency: clicking "Blue"
+  // updated the `drafts` object correctly, but every {@const} that had
+  // already rendered for that match never re-evaluated, so the toggle's
+  // highlighted side and bound stake value stayed stuck on whatever they
+  // showed when the row first mounted - the reported "can't switch to
+  // Blue" bug.
+  function draftFor(matchKey, draftsMap, betsList, uid) {
+    const existing = draftsMap[matchKey];
+    if (existing) return existing;
+    const mine = myBetForMatch(betsList, matchKey, uid);
+    return { side: mine?.side || 'red', stake: mine?.stake ?? '' };
   }
 
   function setSide(matchKey, side) {
-    drafts = { ...drafts, [matchKey]: { ...draftFor(matchKey), side } };
+    drafts = { ...drafts, [matchKey]: { ...draftFor(matchKey, drafts, bets, userId), side } };
   }
 
   async function loadUserNames() {
@@ -79,20 +88,15 @@
     loading = true;
     error = '';
     warning = '';
-    const [matchesResult, teamsResult] = await Promise.all([
-      fetch(`/api/tba/event-matches?event_key=${encodeURIComponent(eventKey)}&comp_level=all`).then((res) => res.json()).catch(() => null),
-      fetch(`/api/tba/event-teams?event_key=${encodeURIComponent(eventKey)}`).then((res) => res.json()).catch(() => null)
-    ]);
-    const scheduledMatches = matchesResult?.success ? matchesResult.data || [] : [];
-    const eventTeams = teamsResult?.success ? teamsResult.data || [] : [];
-    matches = [buildTestMarketMatch(eventKey, eventTeams), ...scheduledMatches];
+    const matchesResult = await fetch(`/api/tba/event-matches?event_key=${encodeURIComponent(eventKey)}&comp_level=all`).then((res) => res.json()).catch(() => null);
+    matches = matchesResult?.success ? matchesResult.data || [] : [];
     if (!matchesResult?.success) warning = matchesResult?.error || 'Could not load the match schedule.';
     await loadBets();
     loading = false;
   }
 
   async function placeBet(match) {
-    const draft = draftFor(match.key);
+    const draft = draftFor(match.key, drafts, bets, userId);
     saving = { ...saving, [match.key]: true };
     saveMessage = { ...saveMessage, [match.key]: '' };
     try {
@@ -226,17 +230,15 @@
       <div class="bet-list">
         {#each upcomingMatches as match (match.key)}
           {@const mine = myBetForMatch(bets, match.key, userId)}
-          {@const draft = draftFor(match.key)}
+          {@const draft = draftFor(match.key, drafts, bets, userId)}
           {@const pool = poolForMatch(bets, match.key)}
           <div class="bet-row">
             <div class="bet-row-header">
               <strong>{matchLabel(match)}</strong>
-              {#if match.is_test_market}<span class="test-badge">Practice</span>{/if}
               <span class="alliance-chip alliance-red">{match.alliances?.red?.team_keys?.map(teamNumber).join(', ')}</span>
               <span class="text-muted">vs</span>
               <span class="alliance-chip alliance-blue">{match.alliances?.blue?.team_keys?.map(teamNumber).join(', ')}</span>
             </div>
-            {#if match.is_test_market}<p class="practice-note">Try placing, updating, or cancelling a prediction here. This practice market never settles or changes leaderboard scores.</p>{/if}
             {#if pool.total > 0}
               <div class="pool-bar" title={`Crowd so far: ${Math.round(pool.redShare * 100)}% red, ${Math.round(pool.blueShare * 100)}% blue over ${pool.betCount} bet${pool.betCount === 1 ? '' : 's'}`}>
                 <span class="pool-fill" style={`width:${pool.redShare * 100}%`}></span>
@@ -324,8 +326,6 @@
   .bet-list { display:flex; flex-direction:column; gap:var(--space-2); margin-top:var(--space-2); }
   .bet-row { border:1px solid var(--border); border-radius:var(--radius-sm); padding:var(--space-2) var(--space-3); }
   .bet-row-header { display:flex; align-items:center; gap:var(--gap-2); flex-wrap:wrap; margin-bottom:var(--space-2); }
-  .test-badge { padding:.12rem .45rem; border-radius:999px; background:var(--brand-gold-soft); color:var(--text); font-size:.68rem; font-weight:700; text-transform:uppercase; }
-  .practice-note { margin:0 0 var(--space-2); color:var(--text-muted); font-size:.8rem; }
 
   .pool-bar { height:6px; border-radius:3px; background:var(--brand-blue, #2563eb); overflow:hidden; margin-bottom:var(--space-2); }
   .pool-fill { display:block; height:100%; background:var(--danger, #dc3545); }

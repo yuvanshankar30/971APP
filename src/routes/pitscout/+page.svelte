@@ -1,14 +1,16 @@
 <script>
   import { onMount } from 'svelte';
+  import { page } from '$app/stores';
   import { supabase, getAuthHeader } from '$lib/supabase.js';
   import { fetchActiveScoutingEventKey, fetchAvailableScoutingEvents, fetchManualScoutingTeams } from '$lib/scoutingEvent.js';
   import { submitOrQueue } from '$lib/offlineQueue.js';
+  import { fetchWithCache } from '$lib/offlineCache.js';
   import SeasonFilter from '$lib/components/SeasonFilter.svelte';
   import OfflineSyncBadge from '$lib/components/OfflineSyncBadge.svelte';
   import RebuiltFieldMap from '$lib/components/RebuiltFieldMap.svelte';
 
-  const DRIVEBASE_OPTIONS = ['Mechanum', 'Swerve', 'Tank'];
-  const SHOOTER_OPTIONS = ['Single Fixed', 'Multi Fixed', 'Wide', 'Turret', 'Double Turret'];
+  const DRIVEBASE_OPTIONS = ['Mechanum', 'Swerve', 'Tank', 'Other'];
+  const SHOOTER_OPTIONS = ['Single Fixed', 'Multi Fixed', 'Wide', 'Turret', 'Double Turret', 'Other'];
   const HOPPER_OPTIONS = ['Spindexer', 'Dye Rotor', 'Belted', 'Floor roller', 'Passive roller', 'Other'];
   const HUMAN_PLAYER_AUTO_OPTIONS = ['0-10', '10-20', '20+'];
   const ROBOT_ARCHETYPES = ['Shooter', 'Shuttler', 'Defender', 'Climber', 'Hybrid', 'Support / Feeder', 'Unknown'];
@@ -166,12 +168,24 @@
   let entriesByTeam = {};
   let selectedTeam = '';
   let teamSearch = '';
+  // Deep link support: ?team=frc9408 (Team View's "View full pit scouting
+  // data" button, or anywhere else) opens straight to that team's entry
+  // instead of leaving a scout on the team picker.
+  let requestedTeamKey = '';
   let pitContacts = [];
   let scout_name = '';
 
   let drivebase_type = '';
   let shooter_type = '';
   let hopper_type = '';
+  // Write-in text shown when the matching select above is set to 'Other' -
+  // kept as separate fields (not folded into technical_details) because
+  // drivebase/shooter/hopper type are plain passthrough columns server-side
+  // with no fixed enum to validate against, unlike technical_details' single
+  // -select fields.
+  let drivebase_type_other = '';
+  let shooter_type_other = '';
+  let hopper_type_other = '';
   let human_player_balls_in_auto = '';
   let pitSchema = {
     scout_name: true,
@@ -179,6 +193,7 @@
     additional_notes: true,
     likely_breaking_component: true,
     estimated_bps: true,
+    auto_points_estimate: true,
     climb_options: true,
     auto_options: true,
     technical_details: true
@@ -188,6 +203,7 @@
   let additional_notes = '';
   let likely_breaking_component = '';
   let estimated_bps = undefined;
+  let auto_points_estimate = '';
   let climb_options = [];
   let autoOptions = [];
   let technical_details = createDefaultTechnicalDetails();
@@ -200,62 +216,75 @@
   // team just mentioned. Topics are answered one at a time, jumpable in any
   // order, with the remaining count always visible so a scout knows when they
   // can walk away.
+  // Main: the fields on the reference pit scouting form (one page, direct
+  // instruction) plus photos. Everything else that used to live in its own
+  // top-level topic (Basics' leftovers, Mechanisms, the rest of Electrical/
+  // Controls, Structure, Ratings) now lives under one "Extra" topic, picked
+  // with a dropdown instead of its own rail button - still jumpable, just
+  // not competing with Main for a scout's attention.
   const TOPICS = [
-    { id: 'basics', label: 'Basics' },
+    { id: 'main', label: 'Main' },
+    { id: 'extra', label: 'Extra' },
+    { id: 'photos', label: 'Photos' }
+  ];
+
+  const EXTRA_GROUPS = [
+    { id: 'setup', label: 'Contact & Setup' },
     { id: 'mechanisms', label: 'Mechanisms' },
     { id: 'electrical', label: 'Electrical' },
     { id: 'controls', label: 'Controls' },
     { id: 'structure', label: 'Structure' },
-    { id: 'ratings', label: 'Ratings' },
-    { id: 'photos', label: 'Photos' }
+    { id: 'ratings', label: 'Ratings' }
   ];
 
-  // Which answers belong to which topic, for the per-topic counts. Kept
+  // Which answers belong to which group, for the per-topic counts. Kept
   // explicit rather than derived from the markup so a field moving between
-  // topics is a deliberate edit, not a silent change in what "complete" means.
-  const TOPIC_FIELDS = {
-    mechanisms: ['use_net', 'intake_style', 'ground_roller_motor_count'],
-    electrical: ['main_breaker_brand', 'sb_connector', 'main_breaker_shroud'],
-    controls: ['uses_canivore', 'can_bus_count', 'coprocessor', 'uses_wpilib', 'software_other'],
-    structure: ['swerve_module', 'drivetrain_length', 'drivetrain_width', 'drivetrain_height', 'bumper_width', 'bumper_height', 'bumper_length', 'bumper_foam', 'fits_under_trench', 'drives_over_mound', 'printed_roller_hubs', 'roller_hub_material'],
+  // groups is a deliberate edit, not a silent change in what "complete" means.
+  const MAIN_DETAIL_FIELDS = ['main_breaker_brand', 'main_breaker_shroud', 'uses_canivore', 'can_bus_count'];
+  const EXTRA_GROUP_DETAIL_FIELDS = {
+    setup: ['pit_contact_phone'],
+    mechanisms: ['use_net', 'intake_style', 'ground_roller_motor_count', 'motor_controllers', 'motor_types'],
+    electrical: ['sb_connector'],
+    controls: ['coprocessor', 'uses_wpilib', 'auto_tools', 'vision', 'programming_language', 'software_other'],
+    structure: ['swerve_module', 'drivetrain_length', 'drivetrain_width', 'drivetrain_height', 'bumper_width', 'bumper_height', 'bumper_length', 'bumper_foam', 'fits_under_trench', 'drives_over_mound', 'printed_roller_hubs', 'roller_hub_material', 'encoder_types'],
     ratings: ['drivebase_rating', 'electrical_rating', 'overall_reliability_rating']
   };
+  const EXTRA_DETAIL_FIELDS = Object.values(EXTRA_GROUP_DETAIL_FIELDS).flat();
 
-  let activeTopic = 'basics';
+  let activeTopic = 'main';
+  let activeExtraGroup = 'setup';
 
   const answered = (value) =>
     Array.isArray(value) ? value.length > 0 : value !== '' && value !== null && value !== undefined;
 
-  function topicProgress(topicId, details, core, climb, autos, photos, pending) {
-    if (topicId === 'basics') {
-      const values = [core.scout_name, core.drivebase_type, core.shooter_type, core.hopper_type, climb, autos];
-      return { done: values.filter(answered).length, total: values.length };
-    }
-    if (topicId === 'photos') {
-      return { done: photos.length + pending.length ? 1 : 0, total: 1 };
-    }
-    if (topicId === 'ratings') {
-      const keys = TOPIC_FIELDS.ratings;
-      const values = [...keys.map((key) => details[key]), core.estimated_bps, core.likely_breaking_component];
-      return { done: values.filter(answered).length, total: values.length };
-    }
-    const keys = TOPIC_FIELDS[topicId] || [];
-    return { done: keys.filter((key) => answered(details[key])).length, total: keys.length };
-  }
-
-  $: coreAnswers = {
-    scout_name, pit_contact_phone: technical_details.pit_contact_phone,
-    drivebase_type, shooter_type, hopper_type,
-    estimated_bps, likely_breaking_component
+  $: mainAnswers = {
+    shooter_type, hopper_type, robot_archetype, estimated_bps, auto_points_estimate,
+    likely_breaking_component, additional_notes,
+    ...Object.fromEntries(MAIN_DETAIL_FIELDS.map((key) => [key, technical_details[key]]))
   };
-  $: topicStates = TOPICS.map((topic) => ({
-    ...topic,
-    ...topicProgress(topic.id, technical_details, coreAnswers, climb_options, autoOptions, editablePhotoPaths, pendingFiles)
-  }));
-  $: answeredTotal = topicStates.reduce((sum, topic) => sum + topic.done, 0);
-  $: questionTotal = topicStates.reduce((sum, topic) => sum + topic.total, 0);
-  $: remaining = Math.max(0, questionTotal - answeredTotal);
+  $: mainProgress = {
+    done: Object.values(mainAnswers).filter(answered).length,
+    total: Object.keys(mainAnswers).length
+  };
+  $: photosProgress = { done: editablePhotoPaths.length + pendingFiles.length ? 1 : 0, total: 1 };
 
+  $: extraAnswers = {
+    scout_name, drivebase_type, climb_options: climb_options.length ? climb_options : '', auto_options: autoOptions.length ? autoOptions : '',
+    ...Object.fromEntries(EXTRA_DETAIL_FIELDS.map((key) => [key, technical_details[key]]))
+  };
+  $: extraProgress = { done: Object.values(extraAnswers).filter(answered).length, total: Object.keys(extraAnswers).length };
+
+  $: topicStates = [
+    { id: 'main', label: 'Main', ...mainProgress },
+    { id: 'extra', label: 'Extra', ...extraProgress },
+    { id: 'photos', label: 'Photos', ...photosProgress }
+  ];
+  $: extraGroupStates = EXTRA_GROUPS.map((group) => ({
+    ...group,
+    done: (EXTRA_GROUP_DETAIL_FIELDS[group.id] || []).filter((key) => answered(technical_details[key])).length
+      + (group.id === 'setup' ? [scout_name, drivebase_type, climb_options.length ? climb_options : '', autoOptions.length ? autoOptions : ''].filter(answered).length : 0),
+    total: (EXTRA_GROUP_DETAIL_FIELDS[group.id] || []).length + (group.id === 'setup' ? 4 : 0)
+  }));
   let photoInputKey = 0;
   let photoInput;
   let prefersCameraCapture = false;
@@ -449,17 +478,27 @@
     return supabase.storage.from('pit-scout-photos').getPublicUrl(path)?.data?.publicUrl || '';
   }
 
+  // A previously-saved custom write-in (some string that isn't one of the
+  // fixed choices) needs to reopen as "Other" with that text still editable,
+  // not silently vanish because it doesn't match a known option.
+  function splitOtherOption(rawValue, options) {
+    const value = String(rawValue || '').trim();
+    if (!value) return ['', ''];
+    return options.includes(value) ? [value, ''] : ['Other', value];
+  }
+
   function applyTeamEntry(teamKey) {
     const entry = entriesByTeam[teamKey] || null;
     scout_name = entry?.scout_name || '';
-    drivebase_type = entry?.drivebase_type || '';
-    shooter_type = entry?.shooter_type || '';
-    hopper_type = entry?.hopper_type || '';
+    [drivebase_type, drivebase_type_other] = splitOtherOption(entry?.drivebase_type, DRIVEBASE_OPTIONS);
+    [shooter_type, shooter_type_other] = splitOtherOption(entry?.shooter_type, SHOOTER_OPTIONS);
+    [hopper_type, hopper_type_other] = splitOtherOption(entry?.hopper_type, HOPPER_OPTIONS);
     human_player_balls_in_auto = entry?.human_player_balls_in_auto || '';
     robot_archetype = String(entry?.robot_archetype || '').slice(0, 80);
     additional_notes = String(entry?.additional_notes || '');
     likely_breaking_component = entry?.likely_breaking_component || '';
     estimated_bps = hasEstimatedBps(entry?.estimated_bps) ? Number(entry.estimated_bps) : undefined;
+    auto_points_estimate = entry?.auto_points_estimate || '';
     climb_options = normalizeClimbOptions(entry?.climb_options || []);
     autoOptions = normalizeAutoOptions(entry?.auto_options || []);
     technical_details = normalizeTechnicalDetails(entry?.technical_details || {});
@@ -495,14 +534,16 @@
       return [];
     }
 
-    const [eventTeamsRes, eventMatchesRes] = await Promise.all([
-      fetch(`/api/tba/event-teams?event_key=${encodeURIComponent(resolvedEventKey)}`).catch(() => null),
-      fetch(`/api/tba/event-matches?event_key=${encodeURIComponent(resolvedEventKey)}&comp_level=qm`).catch(() => null)
-    ]);
-
+    // Event roster and (qual) schedule barely move mid-event - cached, so a
+    // scout standing in a pit with one bar of signal still gets the team
+    // list instantly instead of a blank picker while this times out.
     const [eventTeamsData, eventMatchesData] = await Promise.all([
-      eventTeamsRes?.json().catch(() => null),
-      eventMatchesRes?.json().catch(() => null)
+      fetchWithCache(`/api/tba/event-teams?event_key=${encodeURIComponent(resolvedEventKey)}`, {
+        cacheKey: `event-teams:${resolvedEventKey}`
+      }).catch(() => null),
+      fetchWithCache(`/api/tba/event-matches?event_key=${encodeURIComponent(resolvedEventKey)}&comp_level=qm`, {
+        cacheKey: `event-matches:${resolvedEventKey}:qm`
+      }).catch(() => null)
     ]);
 
     const set = new Set();
@@ -656,6 +697,10 @@
 
       const [loadedTeams, loadedEntries] = await Promise.all([loadTeams(), loadEntries(), loadProblems(), loadPitContacts()]);
       teams = [...new Set([...loadedTeams, ...Object.keys(loadedEntries)])].sort(teamSort);
+      if (requestedTeamKey && teams.includes(requestedTeamKey)) {
+        selectedTeam = requestedTeamKey;
+        requestedTeamKey = '';
+      }
       syncSelectedTeam();
     } catch (e) {
       apiNote = e.message || 'Load error';
@@ -815,14 +860,18 @@
       // non-recoverable the way checking isQueueableFailure here used to.
       const { paths: uploadedPaths, failed: photoUploadFailed } = await uploadPendingPhotos(selectedTeam);
       const photo_paths = [...editablePhotoPaths, ...uploadedPaths].slice(0, 3);
+      // A select left on "Other" saves the scout's own typed word instead of
+      // the literal string "Other" - falls back to "Other" only if they
+      // picked it but never typed anything.
+      const resolveOther = (value, otherText) => (value === 'Other' ? (otherText.trim() || 'Other') : value);
       const payload = {
         action: 'save-entry',
         event_key: eventKey,
         team_key: selectedTeam,
         ...(pitSchema.scout_name ? { scout_name: String(scout_name || '').trim() } : {}),
-        drivebase_type,
-        shooter_type,
-        hopper_type,
+        drivebase_type: resolveOther(drivebase_type, drivebase_type_other),
+        shooter_type: resolveOther(shooter_type, shooter_type_other),
+        hopper_type: resolveOther(hopper_type, hopper_type_other),
         human_player_balls_in_auto,
         ...(pitSchema.robot_archetype ? { robot_archetype } : {}),
         ...(pitSchema.additional_notes ? { additional_notes } : {}),
@@ -830,6 +879,7 @@
           ? { likely_breaking_component: normalizedLikelyBreakingComponent }
           : {}),
         ...(pitSchema.estimated_bps ? { estimated_bps: normalizedEstimatedBps } : {}),
+        ...(pitSchema.auto_points_estimate ? { auto_points_estimate: String(auto_points_estimate || '').trim().slice(0, 40) } : {}),
         ...(pitSchema.climb_options ? { climb_options: normalizedClimbOptions } : {}),
         ...(pitSchema.auto_options ? { auto_options: normalizedAutoOptions } : {}),
         ...(pitSchema.technical_details ? { technical_details: normalizedTechnicalDetails } : {}),
@@ -911,6 +961,9 @@
   $: selectedTeamProblems = selectedTeam ? (problemsByTeam[selectedTeam] || []) : [];
 
   onMount(() => {
+    const teamParam = String($page.url.searchParams.get('team') || '').trim();
+    const digits = displayTeam(teamParam).replace(/\D/g, '');
+    if (digits) requestedTeamKey = `frc${parseInt(digits, 10)}`;
     prefersCameraCapture = detectCameraCapturePreference();
     loadEventOptions();
   });
@@ -1093,6 +1146,37 @@
   </div>
 {:else}
   <form class="card entry-card" on:submit|preventDefault={saveEntry}>
+    <nav class="topic-rail" aria-label="Pit scouting topics">
+      {#each topicStates as topic}
+        <button
+          type="button"
+          class="topic-tab"
+          class:active={activeTopic === topic.id}
+          class:done={topic.done === topic.total}
+          on:click={() => (activeTopic = topic.id)}
+        >
+          <span class="topic-name">{topic.label}</span>
+          <span class="topic-count">{topic.done}/{topic.total}</span>
+        </button>
+        {#if topic.id === 'extra' && activeTopic === 'extra'}
+          <div class="extra-group-list" role="group" aria-label="More questions">
+            {#each extraGroupStates as group}
+              <button
+                type="button"
+                class="extra-group-item"
+                class:active={activeExtraGroup === group.id}
+                on:click={() => (activeExtraGroup = group.id)}
+              >
+                <span>{group.label}</span>
+                <span class="topic-count">{group.done}/{group.total}</span>
+              </button>
+            {/each}
+          </div>
+        {/if}
+      {/each}
+    </nav>
+
+    <div class="entry-content">
     <div class="entry-header">
       <button class="btn btn-secondary" type="button" on:click={goToTeamPicker}>Back</button>
 
@@ -1106,13 +1190,6 @@
           {/if}
         </div>
       </div>
-      <button
-        class="btn btn-outline entry-photo-action"
-        type="button"
-        on:click={() => (activeTopic = 'photos')}
-      >
-        {editablePhotoPaths.length + pendingFiles.length ? 'Manage photos' : 'Add photos'}
-      </button>
     </div>
 
     {#if isViewingPastEvent}
@@ -1148,35 +1225,202 @@
       </section>
     {/if}
 
-    <nav class="topic-rail" aria-label="Pit scouting topics">
-      {#each topicStates as topic}
-        <button
-          type="button"
-          class="topic-tab"
-          class:active={activeTopic === topic.id}
-          class:done={topic.done === topic.total}
-          on:click={() => (activeTopic = topic.id)}
-        >
-          <span class="topic-name">{topic.label}</span>
-          <span class="topic-count">{topic.done}/{topic.total}</span>
-        </button>
-      {/each}
-    </nav>
-
-    <div class="topic-progress">
-      <div class="topic-progress-bar">
-        <div class="topic-progress-fill" style={`width:${questionTotal ? (answeredTotal / questionTotal) * 100 : 0}%`}></div>
-      </div>
-      <span class="topic-progress-text">
-        {#if remaining}
-          {remaining} question{remaining === 1 ? '' : 's'} left
-        {:else}
-          Everything answered - ready to submit
-        {/if}
-      </span>
+{#if activeTopic === 'main'}
+    <div class="form-group">
+      <label class="form-label" for="shooterSelect">Shooter Type</label>
+      <select id="shooterSelect" class="form-select" bind:value={shooter_type}>
+        <option value="">-- Select --</option>
+        {#each SHOOTER_OPTIONS as option}
+          <option value={option}>{option}</option>
+        {/each}
+      </select>
+      {#if shooter_type === 'Other'}
+        <input class="form-input" maxlength="60" placeholder="What kind?" bind:value={shooter_type_other} />
+      {/if}
     </div>
 
-{#if activeTopic === 'basics'}
+    <div class="form-group">
+      <label class="form-label" for="hopperSelect">Indexer Type</label>
+      <select id="hopperSelect" class="form-select" bind:value={hopper_type}>
+        <option value="">-- Select --</option>
+        {#each HOPPER_OPTIONS as option}
+          <option value={option}>{option}</option>
+        {/each}
+      </select>
+      {#if hopper_type === 'Other'}
+        <input class="form-input" maxlength="60" placeholder="What kind?" bind:value={hopper_type_other} />
+      {/if}
+    </div>
+
+    {#if pitSchema.robot_archetype}
+      <div class="form-group">
+        <label class="form-label" for="robotArchetypeInput">Robot Role</label>
+        <input id="robotArchetypeInput" class="form-input" maxlength="80" placeholder="e.g. shooter, shuttler, hybrid" bind:value={robot_archetype} />
+      </div>
+    {/if}
+
+    {#if pitSchema.estimated_bps}
+      <div class="form-group">
+        <label class="form-label" for="estimatedBpsInput">Estimated BPS</label>
+        <input
+          id="estimatedBpsInput"
+          class="form-input"
+          type="number"
+          min="0"
+          step="0.1"
+          bind:value={estimated_bps}
+          placeholder="e.g. 2.4"
+        />
+        <div class="estimated-bps-slider">
+          <input
+            type="range"
+            min="0"
+            max={ESTIMATED_BPS_SLIDER_MAX}
+            step="0.1"
+            value={estimatedBpsSliderValue(estimated_bps)}
+            aria-label="Estimated BPS"
+            on:input={(event) => setEstimatedBpsFromSlider(event.currentTarget.value)}
+          />
+          <output>{hasEstimatedBps(estimated_bps) ? Number(estimated_bps).toFixed(1) : '0.0'}</output>
+        </div>
+      </div>
+    {/if}
+
+    {#if pitSchema.technical_details}
+      <div class="form-group">
+        <label class="form-label" for="mainBreakerBrandSelect">Main Breaker Brand</label>
+        <select id="mainBreakerBrandSelect" class="form-select" bind:value={technical_details.main_breaker_brand}>
+          <option value="">-- Select --</option>
+          {#each MAIN_BREAKER_OPTIONS as option}
+            <option value={option}>{option}</option>
+          {/each}
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="mainBreakerShroudSelect">Is Main Breaker Protected from Bumping with other Robots?</label>
+        <select id="mainBreakerShroudSelect" class="form-select" bind:value={technical_details.main_breaker_shroud}>
+          <option value="">-- Select --</option>
+          {#each YES_NO_OPTIONS as option}
+            <option value={option}>{option}</option>
+          {/each}
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="usesCanivoreSelect">Uses Canivore?</label>
+        <select id="usesCanivoreSelect" class="form-select" bind:value={technical_details.uses_canivore}>
+          <option value="">-- Select --</option>
+          {#each YES_NO_OPTIONS as option}
+            <option value={option}>{option}</option>
+          {/each}
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="canBusCountInput">How Many Can Busses</label>
+        <input
+          id="canBusCountInput"
+          class="form-input"
+          type="number"
+          min="0"
+          step="1"
+          bind:value={technical_details.can_bus_count}
+        />
+      </div>
+    {/if}
+
+    {#if pitSchema.likely_breaking_component}
+      <div class="form-group">
+        <label class="form-label" for="likelyBreakingComponentInput">What's most likely to break?</label>
+        <textarea
+          id="likelyBreakingComponentInput"
+          class="form-input break-risk-input"
+          rows="3"
+          maxlength={MAX_BREAKING_COMPONENT_LENGTH}
+          bind:value={likely_breaking_component}
+          placeholder="Describe the most likely failure point"
+        />
+      </div>
+    {/if}
+
+    {#if pitSchema.auto_points_estimate}
+      <div class="form-group">
+        <label class="form-label" for="autoPointsEstimateInput">How many points do you usually score in auto?</label>
+        <input id="autoPointsEstimateInput" class="form-input" maxlength="40" placeholder="e.g. 10 or 5-15" bind:value={auto_points_estimate} />
+      </div>
+    {/if}
+
+    {#if pitSchema.additional_notes}
+      <div class="form-group">
+        <label class="form-label" for="additionalNotesInput">Anything else?</label>
+        <textarea id="additionalNotesInput" class="form-input additional-notes-input" rows="5" maxlength="4000" bind:value={additional_notes} placeholder="Strategy observations, pit conversations, repair history, or follow-up questions"></textarea>
+        <small class="form-help">Saved for human review. Structured pit capabilities and unresolved problems affect Power Rankings.</small>
+      </div>
+    {/if}
+{/if}
+
+{#if activeTopic === 'photos'}
+    <section class="question-section photo-section">
+      <div class="photo-header">
+        <div>
+          <h4>Pit Photos</h4>
+          <small class="form-help">{editablePhotoPaths.length + pendingFiles.length}/3 selected</small>
+        </div>
+        <button
+          class="btn btn-primary"
+          type="button"
+          on:click={openPhotoPicker}
+          disabled={!photoSlotsRemaining || saving || uploading}
+        >
+          {photoButtonLabel}
+        </button>
+      </div>
+
+      {#key photoInputKey}
+        <input
+          bind:this={photoInput}
+          id="photoUpload"
+          type="file"
+          class="visually-hidden"
+          accept="image/*"
+          multiple={!prefersCameraCapture}
+          capture={prefersCameraCapture ? 'environment' : undefined}
+          disabled={!photoSlotsRemaining}
+          on:change={onFilesSelected}
+        />
+      {/key}
+
+      {#if prefersCameraCapture && photoSlotsRemaining > 0}
+        <small class="form-help">Tap the button again to add the next photo.</small>
+      {/if}
+
+      {#if editablePhotoPaths.length || pendingFiles.length}
+        <div class="photo-grid">
+          {#each editablePhotoPaths as path}
+            <div class="photo-item">
+              <img src={photoUrl(path)} alt="Pit robot" />
+              <button class="photo-remove" type="button" aria-label="Remove photo" title="Remove photo" on:click={() => removeExistingPhoto(path)}>&times;</button>
+            </div>
+          {/each}
+
+          {#each pendingFiles as file, idx}
+            <div class="photo-item pending-file-card">
+              <div class="pending-file-name">
+                <span class="pending-file-badge">Ready to upload</span>
+                {file.name || `Photo ${idx + 1}`}
+              </div>
+              <button class="photo-remove" type="button" aria-label="Remove photo" title="Remove photo" on:click={() => removePendingPhoto(idx)}>&times;</button>
+            </div>
+          {/each}
+        </div>
+      {:else}
+        <div class="photo-empty">No photos yet. Add up to 3 so scouts can recognize the robot at a glance.</div>
+      {/if}
+    </section>
+{/if}
+
+{#if activeTopic === 'extra' && activeExtraGroup === 'setup'}
     {#if pitSchema.scout_name}
       <div class="form-group">
         <label class="form-label" for="scoutNameInput">Pit contact name</label>
@@ -1210,47 +1454,89 @@
           <option value={option}>{option}</option>
         {/each}
       </select>
+      {#if drivebase_type === 'Other'}
+        <input class="form-input" maxlength="60" placeholder="What kind?" bind:value={drivebase_type_other} />
+      {/if}
     </div>
 
-    <div class="form-group">
-      <label class="form-label" for="shooterSelect">Shooter Type</label>
-      <select id="shooterSelect" class="form-select" bind:value={shooter_type}>
-        <option value="">-- Select --</option>
-        {#each SHOOTER_OPTIONS as option}
-          <option value={option}>{option}</option>
-        {/each}
-      </select>
-    </div>
+    {#if pitSchema.climb_options}
+      <div class="form-group">
+        <label class="form-label">Climb Options</label>
+        <div class="climb-options-grid">
+          {#each CLIMB_OPTIONS as option}
+            <label class="form-checkbox climb-option">
+              <input
+                type="checkbox"
+                checked={climb_options.includes(option)}
+                disabled={option !== NO_CLIMB_OPTION && climb_options.includes(NO_CLIMB_OPTION)}
+                on:change={(event) => setClimbOption(option, event.currentTarget.checked)}
+              />
+              <span>{option}</span>
+            </label>
+          {/each}
+        </div>
+        <small class="form-help">{climb_options.length}/{CLIMB_OPTIONS.length} selected</small>
+      </div>
+    {/if}
 
-    <div class="form-group">
-      <label class="form-label" for="hopperSelect">Indexer Type</label>
-      <select id="hopperSelect" class="form-select" bind:value={hopper_type}>
-        <option value="">-- Select --</option>
-        {#each HOPPER_OPTIONS as option}
-          <option value={option}>{option}</option>
-        {/each}
-      </select>
-    </div>
+    {#if pitSchema.auto_options}
+      <div class="form-group">
+        <div class="auto-options-header">
+          <label class="form-label">Auto Options</label>
+          <button
+            class="btn btn-outline"
+            type="button"
+            on:click={addAutoOption}
+            disabled={autoOptions.length >= MAX_AUTO_OPTIONS}
+          >
+            Add Auto
+          </button>
+        </div>
+        <small class="form-help">{autoOptions.length}/{MAX_AUTO_OPTIONS} autos listed</small>
 
+        {#if !autoOptions.length}
+          <div class="auto-options-empty">No named auto options added.</div>
+        {:else}
+          <div class="auto-option-editor-list">
+            {#each autoOptions as option, idx}
+              <div class="card auto-option-editor">
+                <div class="auto-option-editor-header">
+                  <strong>Auto {idx + 1}</strong>
+                  <button class="btn btn-outline" type="button" on:click={() => removeAutoOption(idx)}>
+                    Remove
+                  </button>
+                </div>
+
+                <input
+                  class="form-input"
+                  type="text"
+                  maxlength={MAX_AUTO_NAME_LENGTH}
+                  placeholder="Auto name"
+                  value={option.name}
+                  on:input={(event) => updateAutoOption(idx, 'name', event.currentTarget.value)}
+                />
+
+                <textarea
+                  class="form-input auto-option-description"
+                  rows="3"
+                  maxlength={MAX_AUTO_DESCRIPTION_LENGTH}
+                  placeholder="Short description of the path, starting spot, and scoring plan"
+                  value={option.description}
+                  on:input={(event) => updateAutoOption(idx, 'description', event.currentTarget.value)}
+                />
+                <div class="pit-auto-route-heading"><span>Mirrored auto path</span><div><button class="btn btn-outline btn-sm" type="button" on:click={() => updateAutoOption(idx, 'name', 'Trench auto')}>Trench</button><button class="btn btn-outline btn-sm" type="button" on:click={() => updateAutoOption(idx, 'name', 'Bump auto')}>Bump</button></div></div>
+                <RebuiltFieldMap alliance="blue" bind:path={autoOptions[idx].path} />
+                <small class="form-help">Draw once in this mirrored field view; pit scouting does not need an alliance selection.</small>
+              </div>
+            {/each}
+          </div>
+        {/if}
+      </div>
+    {/if}
 {/if}
 
-    {#if pitSchema.robot_archetype}
-      <div class="form-group">
-        <label class="form-label" for="robotArchetypeInput">Robot Archetype</label>
-        <input id="robotArchetypeInput" class="form-input" maxlength="80" placeholder="e.g. shooter, shuttler, hybrid" bind:value={robot_archetype} />
-      </div>
-    {/if}
-
-    {#if pitSchema.additional_notes}
-      <div class="form-group">
-        <label class="form-label" for="additionalNotesInput">Additional Notes</label>
-        <textarea id="additionalNotesInput" class="form-input additional-notes-input" rows="5" maxlength="4000" bind:value={additional_notes} placeholder="Strategy observations, pit conversations, repair history, or follow-up questions"></textarea>
-        <small class="form-help">Saved for human review. Structured pit capabilities and unresolved problems affect Power Rankings.</small>
-      </div>
-    {/if}
-
     {#if pitSchema.technical_details}
-{#if activeTopic === 'mechanisms'}
+{#if activeTopic === 'extra' && activeExtraGroup === 'mechanisms'}
       <section class="question-section">
         <h4>Robot and Mechanisms</h4>
 
@@ -1312,21 +1598,12 @@
       </section>
 {/if}
 
-{#if activeTopic === 'electrical'}
+{#if activeTopic === 'extra' && activeExtraGroup === 'electrical'}
       <section class="question-section">
         <h4>Electrical</h4>
+        <p class="extra-note">Main breaker brand and bump protection moved to the Main form.</p>
 
         <div class="field-grid">
-          <div class="form-group">
-            <label class="form-label" for="mainBreakerBrandSelect">Main breaker brand</label>
-            <select id="mainBreakerBrandSelect" class="form-select" bind:value={technical_details.main_breaker_brand}>
-              <option value="">-- Select --</option>
-              {#each MAIN_BREAKER_OPTIONS as option}
-                <option value={option}>{option}</option>
-              {/each}
-            </select>
-          </div>
-
           <div class="form-group">
             <label class="form-label" for="sbConnectorSelect">SB connector</label>
             <select id="sbConnectorSelect" class="form-select" bind:value={technical_details.sb_connector}>
@@ -1336,48 +1613,16 @@
               {/each}
             </select>
           </div>
-
-          <div class="form-group">
-            <label class="form-label" for="mainBreakerShroudSelect">Main breaker shroud?</label>
-            <select id="mainBreakerShroudSelect" class="form-select" bind:value={technical_details.main_breaker_shroud}>
-              <option value="">-- Select --</option>
-              {#each YES_NO_OPTIONS as option}
-                <option value={option}>{option}</option>
-              {/each}
-            </select>
-          </div>
-
         </div>
       </section>
 {/if}
 
-{#if activeTopic === 'controls'}
+{#if activeTopic === 'extra' && activeExtraGroup === 'controls'}
       <section class="question-section">
         <h4>Controls and Software</h4>
+        <p class="extra-note">Uses Canivore and CAN bus count moved to the Main form.</p>
 
         <div class="field-grid">
-          <div class="form-group">
-            <label class="form-label" for="usesCanivoreSelect">Uses CANivore?</label>
-            <select id="usesCanivoreSelect" class="form-select" bind:value={technical_details.uses_canivore}>
-              <option value="">-- Select --</option>
-              {#each YES_NO_OPTIONS as option}
-                <option value={option}>{option}</option>
-              {/each}
-            </select>
-          </div>
-
-          <div class="form-group">
-            <label class="form-label" for="canBusCountInput">Number of CAN buses</label>
-            <input
-              id="canBusCountInput"
-              class="form-input"
-              type="number"
-              min="0"
-              step="1"
-              bind:value={technical_details.can_bus_count}
-            />
-          </div>
-
           <div class="form-group">
             <label class="form-label" for="coprocessorSelect">Coprocessor</label>
             <select id="coprocessorSelect" class="form-select" bind:value={technical_details.coprocessor}>
@@ -1453,7 +1698,7 @@
       </section>
 {/if}
 
-{#if activeTopic === 'structure'}
+{#if activeTopic === 'extra' && activeExtraGroup === 'structure'}
       <section class="question-section">
         <h4>Drivebase and Structure</h4>
 
@@ -1589,7 +1834,7 @@
       </section>
 {/if}
 
-{#if activeTopic === 'ratings'}
+{#if activeTopic === 'extra' && activeExtraGroup === 'ratings'}
       <section class="question-section">
         <h4>Subjective Ratings</h4>
         <div class="rating-grid">
@@ -1641,184 +1886,10 @@
       </section>
     {/if}
 
-    {#if pitSchema.estimated_bps}
-      <div class="form-group">
-        <label class="form-label" for="estimatedBpsInput">Estimated BPS</label>
-        <input
-          id="estimatedBpsInput"
-          class="form-input"
-          type="number"
-          min="0"
-          step="0.1"
-          bind:value={estimated_bps}
-          placeholder="e.g. 2.4"
-        />
-        <div class="estimated-bps-slider">
-          <input
-            type="range"
-            min="0"
-            max={ESTIMATED_BPS_SLIDER_MAX}
-            step="0.1"
-            value={estimatedBpsSliderValue(estimated_bps)}
-            aria-label="Estimated BPS"
-            on:input={(event) => setEstimatedBpsFromSlider(event.currentTarget.value)}
-          />
-          <output>{hasEstimatedBps(estimated_bps) ? Number(estimated_bps).toFixed(1) : '0.0'}</output>
-        </div>
-      </div>
-    {/if}
-
-    {#if pitSchema.likely_breaking_component}
-      <div class="form-group">
-        <label class="form-label" for="likelyBreakingComponentInput">What is most likely to break on the robot?</label>
-        <textarea
-          id="likelyBreakingComponentInput"
-          class="form-input break-risk-input"
-          rows="3"
-          maxlength={MAX_BREAKING_COMPONENT_LENGTH}
-          bind:value={likely_breaking_component}
-          placeholder="Describe the most likely failure point"
-        />
-      </div>
-    {/if}
-
-{/if}
-{#if activeTopic === 'basics'}
-    {#if pitSchema.climb_options}
-      <div class="form-group">
-        <label class="form-label">Climb Options</label>
-        <div class="climb-options-grid">
-          {#each CLIMB_OPTIONS as option}
-            <label class="form-checkbox climb-option">
-              <input
-                type="checkbox"
-                checked={climb_options.includes(option)}
-                disabled={option !== NO_CLIMB_OPTION && climb_options.includes(NO_CLIMB_OPTION)}
-                on:change={(event) => setClimbOption(option, event.currentTarget.checked)}
-              />
-              <span>{option}</span>
-            </label>
-          {/each}
-        </div>
-        <small class="form-help">{climb_options.length}/{CLIMB_OPTIONS.length} selected</small>
-      </div>
-    {/if}
-
-    {#if pitSchema.auto_options}
-      <div class="form-group">
-        <div class="auto-options-header">
-          <label class="form-label">Auto Options</label>
-          <button
-            class="btn btn-outline"
-            type="button"
-            on:click={addAutoOption}
-            disabled={autoOptions.length >= MAX_AUTO_OPTIONS}
-          >
-            Add Auto
-          </button>
-        </div>
-        <small class="form-help">{autoOptions.length}/{MAX_AUTO_OPTIONS} autos listed</small>
-
-        {#if !autoOptions.length}
-          <div class="auto-options-empty">No named auto options added.</div>
-        {:else}
-          <div class="auto-option-editor-list">
-            {#each autoOptions as option, idx}
-              <div class="card auto-option-editor">
-                <div class="auto-option-editor-header">
-                  <strong>Auto {idx + 1}</strong>
-                  <button class="btn btn-outline" type="button" on:click={() => removeAutoOption(idx)}>
-                    Remove
-                  </button>
-                </div>
-
-                <input
-                  class="form-input"
-                  type="text"
-                  maxlength={MAX_AUTO_NAME_LENGTH}
-                  placeholder="Auto name"
-                  value={option.name}
-                  on:input={(event) => updateAutoOption(idx, 'name', event.currentTarget.value)}
-                />
-
-                <textarea
-                  class="form-input auto-option-description"
-                  rows="3"
-                  maxlength={MAX_AUTO_DESCRIPTION_LENGTH}
-                  placeholder="Short description of the path, starting spot, and scoring plan"
-                  value={option.description}
-                  on:input={(event) => updateAutoOption(idx, 'description', event.currentTarget.value)}
-                />
-                <div class="pit-auto-route-heading"><span>Mirrored auto path</span><div><button class="btn btn-outline btn-sm" type="button" on:click={() => updateAutoOption(idx, 'name', 'Trench auto')}>Trench</button><button class="btn btn-outline btn-sm" type="button" on:click={() => updateAutoOption(idx, 'name', 'Bump auto')}>Bump</button></div></div>
-                <RebuiltFieldMap alliance="blue" bind:path={autoOptions[idx].path} />
-                <small class="form-help">Draw once in this mirrored field view; pit scouting does not need an alliance selection.</small>
-              </div>
-            {/each}
-          </div>
-        {/if}
-      </div>
-    {/if}
 {/if}
 
-{#if activeTopic === 'photos'}
-    <div class="form-group">
-      <div class="photo-header">
-        <label class="form-label" for="photoUpload">Pit Photos (up to 3)</label>
-        <button
-          class="btn btn-outline"
-          type="button"
-          on:click={openPhotoPicker}
-          disabled={!photoSlotsRemaining || saving || uploading}
-        >
-          {photoButtonLabel}
-        </button>
-      </div>
-
-      {#key photoInputKey}
-        <input
-          bind:this={photoInput}
-          id="photoUpload"
-          type="file"
-          class="visually-hidden"
-          accept="image/*"
-          multiple={!prefersCameraCapture}
-          capture={prefersCameraCapture ? 'environment' : undefined}
-          disabled={!photoSlotsRemaining}
-          on:change={onFilesSelected}
-        />
-      {/key}
-
-      <small class="form-help">{editablePhotoPaths.length + pendingFiles.length}/3 selected</small>
-      {#if prefersCameraCapture && photoSlotsRemaining > 0}
-        <small class="form-help">Tap the button again to add the next photo.</small>
-      {/if}
-    </div>
-
-    {#if editablePhotoPaths.length || pendingFiles.length}
-      <div class="photo-grid">
-        {#each editablePhotoPaths as path}
-          <div class="photo-item">
-            <img src={photoUrl(path)} alt="Pit robot" />
-            <button class="btn btn-outline" type="button" on:click={() => removeExistingPhoto(path)}>
-              Remove
-            </button>
-          </div>
-        {/each}
-
-        {#each pendingFiles as file, idx}
-          <div class="pending-file-card">
-            <div class="form-label">Ready to upload</div>
-            <div class="pending-file-name">{file.name || `Photo ${idx + 1}`}</div>
-            <button class="btn btn-outline" type="button" on:click={() => removePendingPhoto(idx)}>
-              Remove
-            </button>
-          </div>
-        {/each}
-      </div>
-    {/if}
-
-{/if}
     <div class="submit-row">
+      <small class="submit-hint">This saves everything filled in so far across Main, Extra, and Photos at once - submitting from here doesn't skip anything on the other tabs.</small>
       <button class="btn btn-primary submit-btn" type="submit" disabled={saving || uploading}>
         {#if uploading}
           Uploading...
@@ -1828,6 +1899,7 @@
           Submit Pit Entry
         {/if}
       </button>
+    </div>
     </div>
   </form>
 {/if}
@@ -1950,11 +2022,22 @@
     font-size: 1.1rem;
   }
 
-  .picker-card,
   .entry-card {
     display: grid;
     gap: 1rem;
     max-width: 760px;
+    margin: 0 auto;
+  }
+
+  /* Wider than .entry-card on purpose - the team list is the one screen in
+     this flow that benefits from the page's full width instead of a narrow
+     centered column. A ~40-team event in a single 760px-wide column was all
+     scroll and almost no use of the rest of the screen; letting it flow into
+     several columns turns that into a few rows. */
+  .picker-card {
+    display: grid;
+    gap: 1rem;
+    max-width: 1400px;
     margin: 0 auto;
   }
 
@@ -1964,16 +2047,15 @@
 
   .team-list {
     display: grid;
-    gap: 0.45rem;
-    max-height: 70vh;
-    overflow: auto;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 0.6rem;
   }
 
   .team-row {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 0.75rem;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.4rem;
     width: 100%;
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -2026,7 +2108,6 @@
   }
 
   .entry-header > div { flex: 1; }
-  .entry-photo-action { margin-left: auto; white-space: nowrap; }
 
   .entry-subtitle {
     margin-top: 0.3rem;
@@ -2107,31 +2188,6 @@
      scout they can stop asking about it. */
   .topic-tab.done .topic-count { color: var(--green-strong); }
 
-  .topic-progress {
-    display: flex;
-    align-items: center;
-    gap: var(--gap-3);
-    margin-bottom: var(--space-4);
-  }
-  .topic-progress-bar {
-    flex: 1;
-    height: 4px;
-    background: var(--surface-2);
-    border-radius: var(--radius-sm);
-    overflow: hidden;
-  }
-  .topic-progress-fill {
-    height: 100%;
-    background: var(--brand-gold-base, #d9a413);
-    transition: width 160ms ease-out;
-  }
-  .topic-progress-text {
-    font-size: 0.8rem;
-    color: var(--text-muted);
-    white-space: nowrap;
-    font-variant-numeric: tabular-nums;
-  }
-
   @media (min-width: 900px) {
     /* Room for a persistent column, so the remaining topics stay visible
        while answering one of them. */
@@ -2143,11 +2199,16 @@
          had rather than squeezing every select into two thirds of it. */
       max-width: 1040px;
     }
-    .entry-card > *:not(.topic-rail) { grid-column: 2; }
-    .entry-card > .entry-header, .entry-card > .note { grid-column: 1 / -1; }
+    /* Just two real grid children now - the rail and everything else in one
+       .entry-content wrapper - each explicitly placed in its own column and
+       the shared row 1. That row sizes to entry-content (by far the taller
+       of the two), which is exactly what gives the sticky rail room to
+       float down the page as that column scrolls; no per-child column
+       overrides or fragile multi-row spanning needed to get there. */
+    .topic-rail, .entry-content { grid-row: 1; }
+    .entry-content { grid-column: 2; display: grid; gap: 1rem; }
     .topic-rail {
       grid-column: 1;
-      grid-row: 2 / 100;
       position: sticky;
       top: var(--space-4);
       flex-direction: column;
@@ -2170,6 +2231,39 @@
     border-top: 1px solid var(--border);
     padding-top: 1rem;
   }
+
+  .extra-note {
+    margin: -0.4rem 0 0;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+  }
+
+  /* Pressing Extra drops its sub-topics open right there in the rail - a
+     list of rows, not a native <select> box - same shape as Main/Extra/
+     Photos above it, just indented one level to read as "inside Extra". */
+  .extra-group-list {
+    display: flex;
+    flex-direction: column;
+    background: var(--surface-2);
+  }
+
+  .extra-group-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: var(--gap-2);
+    padding: var(--space-2) var(--space-3) var(--space-2) calc(var(--space-3) * 2);
+    border: 0;
+    background: transparent;
+    color: var(--text-muted);
+    font: inherit;
+    font-size: 0.82rem;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .extra-group-item:hover { color: var(--text); }
+  .extra-group-item.active { color: var(--text); font-weight: 600; background: color-mix(in srgb, var(--brand-gold-soft) 60%, transparent); }
 
   .question-section h4 {
     margin: 0;
@@ -2306,46 +2400,108 @@
     border: 0;
   }
 
+  .photo-section .photo-header h4 { margin: 0 0 2px; }
+  .photo-section .photo-header small { color: var(--text-muted); }
+
+  .photo-empty {
+    border: 1px dashed var(--border);
+    border-radius: 10px;
+    padding: 1.5rem 1rem;
+    text-align: center;
+    color: var(--text-muted);
+    background: color-mix(in srgb, var(--surface-1) 92%, transparent);
+  }
+
   .photo-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-    gap: 0.6rem;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 0.75rem;
   }
 
-  .photo-item,
-  .pending-file-card {
-    display: grid;
-    gap: 0.45rem;
-  }
-
-  .photo-item img {
-    width: 100%;
-    height: 140px;
-    object-fit: cover;
-    border-radius: 8px;
+  .photo-item {
+    position: relative;
+    border-radius: 10px;
+    overflow: hidden;
     border: 1px solid var(--border);
   }
 
+  .photo-item img {
+    display: block;
+    width: 100%;
+    height: 150px;
+    object-fit: cover;
+  }
+
+  .photo-remove {
+    position: absolute;
+    top: 0.4rem;
+    right: 0.4rem;
+    width: 1.75rem;
+    height: 1.75rem;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.6);
+    color: #fff;
+    font-size: 1.1rem;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .photo-remove:hover { background: rgba(0, 0, 0, 0.8); }
+
   .pending-file-card {
-    border: 1px dashed var(--border);
-    border-radius: 8px;
+    height: 150px;
     padding: 0.75rem;
+    display: grid;
+    align-content: center;
     background: color-mix(in srgb, var(--surface-1) 92%, transparent);
+  }
+
+  .pending-file-card .photo-remove {
+    background: var(--surface-1);
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+
+  .pending-file-badge {
+    display: inline-block;
+    margin-bottom: 0.3rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: var(--radius-sm);
+    background: var(--accent-subtle);
+    color: var(--text);
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
   }
 
   .pending-file-name {
     word-break: break-word;
-    font-size: 0.92rem;
+    font-size: 0.85rem;
   }
 
   .submit-row {
     display: flex;
+    align-items: center;
     justify-content: flex-end;
+    gap: var(--gap-3);
     margin-top: 0.5rem;
+    padding-top: var(--space-3);
+    border-top: 1px solid var(--border);
+  }
+
+  .submit-hint {
+    flex: 1;
+    color: var(--text-muted);
+    font-size: 0.76rem;
   }
 
   .submit-btn {
     min-width: 190px;
+    flex: none;
   }
 
   @media (max-width: 768px) {
@@ -2358,8 +2514,6 @@
       align-items: stretch;
     }
 
-    .entry-photo-action { width: 100%; margin-left: 0; }
-
     .page-summary {
       width: 100%;
       justify-content: flex-start;
@@ -2370,15 +2524,13 @@
       justify-content: space-between;
     }
 
-    .team-list {
-      max-height: none;
-    }
-
     .photo-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .submit-row {
+      flex-direction: column;
+      align-items: stretch;
       justify-content: stretch;
     }
 
@@ -2390,11 +2542,6 @@
   }
 
   @media (max-width: 480px) {
-    .team-row {
-      flex-wrap: wrap;
-      align-items: flex-start;
-    }
-
     .photo-grid {
       grid-template-columns: 1fr;
     }

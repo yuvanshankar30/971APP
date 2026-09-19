@@ -4,6 +4,7 @@ const PIT_SCOUT_OPTIONAL_COLUMN_DEFAULTS = Object.freeze({
   additional_notes: null,
   likely_breaking_component: null,
   estimated_bps: null,
+  auto_points_estimate: null,
   climb_options: [],
   auto_options: [],
   technical_details: {}
@@ -39,6 +40,7 @@ export function buildPitScoutSchema(supportedColumns = PIT_SCOUT_OPTIONAL_COLUMN
     additional_notes: supported.has('additional_notes'),
     likely_breaking_component: supported.has('likely_breaking_component'),
     estimated_bps: supported.has('estimated_bps'),
+    auto_points_estimate: supported.has('auto_points_estimate'),
     climb_options: supported.has('climb_options'),
     auto_options: supported.has('auto_options'),
     technical_details: supported.has('technical_details')
@@ -96,6 +98,7 @@ export function pitScoutSchemaWarning(schema = buildPitScoutSchema()) {
   if (!schema?.additional_notes) missing.push('additional notes');
   if (!schema?.likely_breaking_component) missing.push('likely breaking component');
   if (!schema?.estimated_bps) missing.push('estimated BPS');
+  if (!schema?.auto_points_estimate) missing.push('auto points estimate');
   if (!schema?.climb_options) missing.push('climb options');
   if (!schema?.auto_options) missing.push('auto options');
   if (!schema?.technical_details) missing.push('technical details');

@@ -12,6 +12,7 @@
   import { formatPacificTimeWithZone } from '$lib/timezone.js';
   import { buildStrategySchedule } from '$lib/strategySchedule.js';
   import { buildTestMarketMatch } from '$lib/predictionMarket.js';
+  import { fetchWithCache } from '$lib/offlineCache.js';
   import { FRC_TEAMS } from '$lib/permissions.js';
   import SeasonFilter from '$lib/components/SeasonFilter.svelte';
   import MatchScoutReport from '$lib/components/MatchScoutReport.svelte';
@@ -26,11 +27,17 @@
   let selectedEventKey = null;
   let availableEvents = [];
   let report = null;
-  let matches = [];
+  let scheduledMatches = [];
   let eventTeams = [];
   let matchesWarning = '';
   let teamsWarning = '';
   let officialByTeam = new Map();
+  // The practice/test market row depends on eventTeams, which can land
+  // after scheduledMatches does now that both come from independent
+  // cache-then-network fetches - deriving matches reactively (instead of
+  // rebuilding it once inline, mid-load) keeps it correct regardless of
+  // which of the two callbacks fires first.
+  $: matches = [buildTestMarketMatch(resolvedEventKey, eventTeams), ...scheduledMatches];
   let loadedEventKey = '';
   let loading = true;
   let error = '';
@@ -95,7 +102,11 @@
     }
   }
   const sortIndicator = (column) => (sortColumn === column ? (sortDir === 'asc' ? '▲' : '▼') : '');
-  $: selectedTeam = rows.find((row) => row.teamKey === selectedTeamKey) || filteredRows[0] || null;
+  // No fallback to filteredRows[0] here on purpose - defaulting to
+  // "whichever team happened to sort first" highlighted an arbitrary row
+  // on every page load with nothing to explain why that team, of all of
+  // them, was singled out. Nothing is selected until a scout picks one.
+  $: selectedTeam = selectedTeamKey ? rows.find((row) => row.teamKey === selectedTeamKey) || null : null;
   $: activeEventLabel = availableEvents.find((option) => option.value === eventKey)?.label || eventKey || 'not set';
   $: browseEventOptions = availableEvents.filter((option) => option.value !== eventKey);
   // Reuses the same buildPowerRankings pipeline Power Rankings itself calls,
@@ -237,6 +248,24 @@
   const openMatchDetail = (match) => { selectedMatchForDetail = match; };
   const closeMatchDetail = () => { selectedMatchForDetail = null; };
 
+  function applyTeamsPayload(payload) {
+    if (payload?.success) { eventTeams = payload.data || []; teamsWarning = ''; }
+    else teamsWarning = payload?.error || 'Could not load the event roster from The Blue Alliance.';
+  }
+
+  function applyMatchesPayload(payload) {
+    if (payload?.success) { scheduledMatches = payload.data || []; matchesWarning = ''; }
+    else matchesWarning = payload?.error || 'Could not load the match schedule from The Blue Alliance.';
+  }
+
+  // The event roster and match schedule barely change mid-event, so they go
+  // through fetchWithCache: whatever was cached from the last visit paints
+  // immediately via applyTeamsPayload/applyMatchesPayload, then gets
+  // replaced once (if) the network request actually lands - a slow or
+  // dropped connection leaves the last-known roster/schedule on screen
+  // instead of a blank Teams/Matches board. OPR is reference-only and
+  // fetched separately, deliberately not awaited before `loading` clears -
+  // see loadOfficialRankings below.
   async function loadStrategy() {
     if (!resolvedEventKey) {
       report = null;
@@ -249,38 +278,47 @@
     teamsWarning = '';
     try {
       const authHeaders = await getAuthHeader();
-      const [response, matchesResponse, teamsResponse, officialResponse] = await Promise.all([
+      const [response] = await Promise.all([
         fetch(`/api/scouting-report?event_key=${encodeURIComponent(resolvedEventKey)}`, { headers: authHeaders }),
-        fetch(`/api/tba/event-matches?event_key=${encodeURIComponent(resolvedEventKey)}&comp_level=all`),
-        fetch(`/api/tba/event-teams?event_key=${encodeURIComponent(resolvedEventKey)}`),
-        fetch(`/api/tba/event-oprs?event_key=${encodeURIComponent(resolvedEventKey)}`)
+        fetchWithCache(`/api/tba/event-matches?event_key=${encodeURIComponent(resolvedEventKey)}&comp_level=all`, {
+          cacheKey: `event-matches:${resolvedEventKey}:all`,
+          onUpdate: applyMatchesPayload
+        }).catch((e) => applyMatchesPayload({ success: false, error: e?.message })),
+        fetchWithCache(`/api/tba/event-teams?event_key=${encodeURIComponent(resolvedEventKey)}`, {
+          cacheKey: `event-teams:${resolvedEventKey}`,
+          onUpdate: applyTeamsPayload
+        }).catch((e) => applyTeamsPayload({ success: false, error: e?.message }))
       ]);
       const payload = await response.json().catch(() => null);
       if (!response.ok || !payload?.success) throw new Error(payload?.error || 'Could not load scouting strategy data.');
       report = payload;
       loadedEventKey = resolvedEventKey;
-      if (!selectedTeamKey && buildStrategyRows(payload.data)[0]) selectedTeamKey = buildStrategyRows(payload.data)[0].teamKey;
-
-      const teamsPayload = await teamsResponse.json().catch(() => null);
-      if (teamsResponse.ok && teamsPayload?.success) eventTeams = teamsPayload.data || [];
-      else { eventTeams = []; teamsWarning = teamsPayload?.error || 'Could not load the event roster from The Blue Alliance.'; }
-
-      const matchesPayload = await matchesResponse.json().catch(() => null);
-      const scheduledMatches = matchesResponse.ok && matchesPayload?.success ? matchesPayload.data || [] : [];
-      matches = [buildTestMarketMatch(resolvedEventKey, eventTeams), ...scheduledMatches];
-      if (!matchesResponse.ok || !matchesPayload?.success) matchesWarning = matchesPayload?.error || 'Could not load the match schedule from The Blue Alliance.';
-
-      const officialPayload = await officialResponse.json().catch(() => null);
-      officialByTeam = new Map((officialPayload?.success ? officialPayload.data || [] : []).map((team) => [String(team.team), team]));
+      loadOfficialRankings(resolvedEventKey);
     } catch (cause) {
       report = null;
       eventTeams = [];
-      matches = [];
+      scheduledMatches = [];
       officialByTeam = new Map();
       error = cause?.message || 'Could not load scouting strategy data.';
     } finally {
       loadedEventKey = resolvedEventKey;
       loading = false;
+    }
+  }
+
+  // Fire-and-forget, on purpose: OPR is reference data (see the "measure
+  // key" copy elsewhere in this app), never something Teams/Matches needs
+  // to render. Awaiting it inside loadStrategy would mean a slow or
+  // unreachable OPR endpoint delays the page's actual content for no
+  // reason - it fills in officialByTeam whenever it lands, or not at all.
+  async function loadOfficialRankings(forEventKey) {
+    try {
+      const response = await fetch(`/api/tba/event-oprs?event_key=${encodeURIComponent(forEventKey)}`);
+      const payload = await response.json().catch(() => null);
+      if (forEventKey !== resolvedEventKey) return; // event switched while this was in flight
+      officialByTeam = new Map((payload?.success ? payload.data || [] : []).map((team) => [String(team.team), team]));
+    } catch {
+      // Reference-only - silently leave officialByTeam as whatever it was.
     }
   }
 

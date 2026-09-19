@@ -7,6 +7,7 @@
   import { getAuthHeader } from '$lib/supabase.js';
   import { fetchActiveScoutingEventKey } from '$lib/scoutingEvent.js';
   import { submitOrQueue } from '$lib/offlineQueue.js';
+  import { fetchWithCache } from '$lib/offlineCache.js';
   import OfflineSyncBadge from '$lib/components/OfflineSyncBadge.svelte';
   import { AlertTriangle, Check, ChevronRight, ClipboardCheck, MapPinned, Route, RotateCcw, Timer, Trophy } from 'lucide-svelte';
 
@@ -195,16 +196,21 @@
     return payload;
   }
 
+  // Cached - the roster barely changes mid-event, so a scout mid-match on
+  // a bad connection still gets the team picker instantly from whatever
+  // loaded last time, instead of an empty dropdown while this times out.
   async function loadEventTeams(key) {
     if (!key) return;
     try {
-      const response = await fetch(`/api/tba/event-teams?event_key=${encodeURIComponent(key)}`);
-      const payload = await response.json().catch(() => null);
-      if (response.ok && payload?.success) {
-        eventTeams = (payload.data || []).sort((a, b) => Number(a.team_number) - Number(b.team_number));
-      }
+      await fetchWithCache(`/api/tba/event-teams?event_key=${encodeURIComponent(key)}`, {
+        cacheKey: `event-teams:${key}`,
+        onUpdate: (payload) => {
+          if (payload?.success) eventTeams = (payload.data || []).sort((a, b) => Number(a.team_number) - Number(b.team_number));
+        }
+      });
     } catch {
-      eventTeams = [];
+      // No cache and the network failed - leave eventTeams as whatever it
+      // already was rather than clearing a picker someone might be using.
     }
   }
 

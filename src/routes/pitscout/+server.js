@@ -244,6 +244,7 @@ export async function POST({ request }) {
     const additional_notes = sanitizeLongText(body?.additional_notes, 4000);
     const likely_breaking_component = sanitizeLongText(body?.likely_breaking_component);
     const estimated_bps = sanitizeEstimatedBps(body?.estimated_bps);
+    const auto_points_estimate = sanitizeLongText(body?.auto_points_estimate, 40);
     const climb_options = sanitizeClimbOptions(body?.climb_options);
     const photo_paths = sanitizePhotoPaths(body?.photo_paths);
     const auto_options = sanitizeAutoOptions(body?.auto_options);
@@ -265,6 +266,7 @@ export async function POST({ request }) {
       additional_notes,
       likely_breaking_component,
       estimated_bps,
+      auto_points_estimate,
       climb_options,
       auto_options,
       technical_details,

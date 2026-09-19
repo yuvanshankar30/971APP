@@ -4,6 +4,7 @@
   import { fetchActiveScoutingEventKey } from '$lib/scoutingEvent.js';
   import { FRC_TEAMS } from '$lib/permissions.js';
   import { isMatchPlayed, matchLabel } from '$lib/matchProjection.js';
+  import { fetchWithCache } from '$lib/offlineCache.js';
 
   // Built from Slack feedback (Andre Fong, drive team): "like next matches
   // and our like downtimes and how long they are ... like i only know
@@ -64,15 +65,23 @@
     return `${minutes}m`;
   }
 
+  // Sat open on a phone polling every 20s, exactly the page where a bad
+  // stadium connection hurts most - fetchWithCache paints last-known
+  // matches immediately (including on the very first load, from whatever
+  // an earlier visit cached) and a failed poll leaves that schedule on
+  // screen instead of replacing it with an error.
   async function loadMatches() {
     if (!eventKey) { loading = false; return; }
     try {
-      const response = await fetch(`/api/tba/event-matches?event_key=${encodeURIComponent(eventKey)}&comp_level=all`);
-      const payload = await response.json().catch(() => null);
-      if (!response.ok || !payload?.success) throw new Error(payload?.error || 'Could not load the match schedule.');
-      matches = payload.data || [];
-      error = '';
-      lastLoadedAt = Date.now();
+      await fetchWithCache(`/api/tba/event-matches?event_key=${encodeURIComponent(eventKey)}&comp_level=all`, {
+        cacheKey: `event-matches:${eventKey}:all`,
+        onUpdate: (payload) => {
+          if (!payload?.success) throw new Error(payload?.error || 'Could not load the match schedule.');
+          matches = payload.data || [];
+          error = '';
+          lastLoadedAt = Date.now();
+        }
+      });
     } catch (cause) {
       error = cause?.message || 'Could not load the match schedule.';
     } finally {

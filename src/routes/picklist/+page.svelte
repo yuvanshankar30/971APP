@@ -3,6 +3,7 @@
   import { dndzone } from 'svelte-dnd-action';
   import { AlertTriangle, ClipboardList, RefreshCw } from 'lucide-svelte';
   import { getAuthHeader } from '$lib/supabase.js';
+  import { submitOrQueue } from '$lib/offlineQueue.js';
   import { fetchActiveScoutingEventKey, fetchAvailableScoutingEvents } from '$lib/scoutingEvent.js';
   import { buildStrategyRows } from '$lib/strategyScouting.js';
   import { buildPowerRankings, DEFAULT_SCOUT_POWER_WEIGHTS } from '$lib/scoutingStats.js';
@@ -202,14 +203,17 @@
     picklistEntries = finalItems;
 
     try {
-      const headers = { 'Content-Type': 'application/json', ...(await getAuthHeader()) };
-      const response = await fetch('/api/scouting-picklist', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ action: 'reorder', event_key: resolvedEventKey, ordered_ids: finalItems.map((entry) => entry.id) })
+      // Reordering the same target positions is idempotent - a queued
+      // retry landing after an earlier attempt actually succeeded (the
+      // drag already shows the new order locally either way) just
+      // reapplies the same positions, not a duplicate or conflicting one.
+      const result = await submitOrQueue({
+        url: '/api/scouting-picklist',
+        headers: await getAuthHeader(),
+        label: 'Picklist reorder',
+        body: { action: 'reorder', event_key: resolvedEventKey, ordered_ids: finalItems.map((entry) => entry.id) }
       });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok || !payload?.success) throw new Error(payload?.error || 'Could not save the new order.');
+      if (result.queued) picklistError = "Reordered on this phone - no connection right now, so it'll sync once you're back online.";
     } catch (cause) {
       picklistError = cause?.message || 'Could not save the new order.';
     }

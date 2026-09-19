@@ -104,6 +104,7 @@ export function defaultHeaderTabs(navConfig = navigation) {
       { key: 'robotratings', label: 'Robot Ratings' },
       { key: 'vision', label: 'Vision Scouting' },
       { key: 'predictions', label: 'Prediction Market' },
+      { key: 'bluealliance', label: 'Blue Alliance' },
       { key: 'scouting-admin', label: 'Scouting Admin' }
     ]
   });
@@ -266,6 +267,29 @@ export function ensurePredictionMarketTab(tabs, navConfig = navigation) {
   if (containsTabKey(tabs, 'predictions')) return tabs;
 
   const entry = { key: 'predictions', label: 'Prediction Market' };
+  const folderIndex = tabs.findIndex(
+    (item) => item?.type === 'folder' && item?.label === COMPETITION_FOLDER_LABEL
+  );
+  if (folderIndex === -1) return [...tabs, { type: 'tab', ...entry }];
+
+  const folder = tabs[folderIndex];
+  const next = [...tabs];
+  next[folderIndex] = {
+    ...folder,
+    children: [...(Array.isArray(folder.children) ? folder.children : []), entry]
+  };
+  return next;
+}
+
+// See the /bluealliance route - appended for anyone whose
+// saved header_tabs predates it, same as every other Competition tab added
+// after someone had already customized their nav.
+export function ensureBlueAllianceTab(tabs, navConfig = navigation) {
+  if (navConfig?.tabs?.bluealliance === false) return tabs;
+  if (!Array.isArray(tabs)) return tabs;
+  if (containsTabKey(tabs, 'bluealliance')) return tabs;
+
+  const entry = { key: 'bluealliance', label: 'Blue Alliance' };
   const folderIndex = tabs.findIndex(
     (item) => item?.type === 'folder' && item?.label === COMPETITION_FOLDER_LABEL
   );

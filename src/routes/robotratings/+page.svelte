@@ -5,6 +5,7 @@
   import { fetchActiveScoutingEventKey } from '$lib/scoutingEvent.js';
   import { getAuthHeader, supabase } from '$lib/supabase.js';
   import { myRobotRating, rankRobotTeams, summarizeRobotRatings } from '$lib/robotRatings.js';
+  import { submitOrQueue } from '$lib/offlineQueue.js';
 
   const RATING_FIELDS = [
     { key: 'overall_rating', label: 'Overall', required: true },
@@ -134,10 +135,16 @@
     saveMessage = { ...saveMessage, [team.key]: '' };
     try {
       const authHeaders = await getAuthHeader();
-      const response = await fetch('/api/scouting-robot-ratings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders },
-        body: JSON.stringify({
+      // scouting-robot-ratings' upsert is keyed on event_key/team_key/
+      // created_by (a real unique constraint - see the migration), so a
+      // queued retry landing after an earlier attempt actually succeeded
+      // (response merely lost to a bad connection) overwrites the same row
+      // instead of creating a duplicate rating.
+      const result = await submitOrQueue({
+        url: '/api/scouting-robot-ratings',
+        headers: authHeaders,
+        label: `Robot rating / Team ${team.team_number}`,
+        body: {
           action: 'rate',
           event_key: eventKey,
           team_key: team.key,
@@ -150,13 +157,15 @@
           defense_rating: draft.defenseNotApplicable ? null : draft.defense_rating,
           notes: draft.notes,
           strategy_notes: draft.strategy_notes
-        })
+        }
       });
-      const result = await response.json();
-      if (!response.ok || !result?.success) throw new Error(result?.error || 'Could not save rating.');
-      await loadRatings();
       drafts = { ...drafts, [team.key]: emptyDraft(team.key) };
-      saveMessage = { ...saveMessage, [team.key]: 'Saved.' };
+      if (result.queued) {
+        saveMessage = { ...saveMessage, [team.key]: "Saved on this phone - no connection right now, so it'll sync once you're back online." };
+      } else {
+        await loadRatings();
+        saveMessage = { ...saveMessage, [team.key]: 'Saved.' };
+      }
     } catch (cause) {
       saveMessage = { ...saveMessage, [team.key]: cause?.message || 'Could not save rating.' };
     } finally {
