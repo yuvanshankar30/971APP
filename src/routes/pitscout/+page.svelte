@@ -1144,11 +1144,19 @@
           <span class="topic-count">{topic.done}/{topic.total}</span>
         </button>
         {#if topic.id === 'extra' && activeTopic === 'extra'}
-          <select id="extraGroupSelect" aria-label="More questions" class="extra-group-select" bind:value={activeExtraGroup}>
+          <div class="extra-group-list" role="group" aria-label="More questions">
             {#each extraGroupStates as group}
-              <option value={group.id}>{group.label} ({group.done}/{group.total})</option>
+              <button
+                type="button"
+                class="extra-group-item"
+                class:active={activeExtraGroup === group.id}
+                on:click={() => (activeExtraGroup = group.id)}
+              >
+                <span>{group.label}</span>
+                <span class="topic-count">{group.done}/{group.total}</span>
+              </button>
             {/each}
-          </select>
+          </div>
         {/if}
       {/each}
     </nav>
@@ -2189,7 +2197,6 @@
       text-align: left;
     }
     .topic-tab.active { border-right-color: var(--brand-gold-base, #d9a413); background: var(--surface-2); }
-    .extra-group-select { border-bottom: 0; border-right: 2px solid var(--brand-gold-base, #d9a413); background: var(--surface-2); }
   }
 
   .question-section {
@@ -2205,23 +2212,32 @@
     font-size: 0.78rem;
   }
 
-  /* Styled to read as part of the Extra tab itself - same tint, flush
-     against it with no gap or border of its own - not a separate control
-     floating below the rail. */
-  .extra-group-select {
-    display: block;
-    width: 100%;
-    margin: 0;
-    padding: var(--space-2) var(--space-3) var(--space-3);
+  /* Pressing Extra drops its sub-topics open right there in the rail - a
+     list of rows, not a native <select> box - same shape as Main/Extra/
+     Photos above it, just indented one level to read as "inside Extra". */
+  .extra-group-list {
+    display: flex;
+    flex-direction: column;
+    background: var(--surface-2);
+  }
+
+  .extra-group-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: var(--gap-2);
+    padding: var(--space-2) var(--space-3) var(--space-2) calc(var(--space-3) * 2);
     border: 0;
-    border-bottom: 2px solid var(--brand-gold-base, #d9a413);
-    border-radius: 0;
     background: transparent;
-    color: var(--text);
+    color: var(--text-muted);
     font: inherit;
     font-size: 0.82rem;
+    text-align: left;
     cursor: pointer;
   }
+
+  .extra-group-item:hover { color: var(--text); }
+  .extra-group-item.active { color: var(--text); font-weight: 600; background: color-mix(in srgb, var(--brand-gold-soft) 60%, transparent); }
 
   .question-section h4 {
     margin: 0;
