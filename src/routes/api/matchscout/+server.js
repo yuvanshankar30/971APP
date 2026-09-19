@@ -11,6 +11,7 @@ import {
   validatePitProblemHandoff
 } from '$lib/server/matchScoutingSchema.js';
 import { exportAutoPathImageToDrive } from '$lib/server/auto_path_drive_export.js';
+import { notifyAcePitProblem } from '$lib/server/ace_pit_notifications.js';
 
 // Backend for match scouting and the pit-problem handoff.
 //
@@ -155,6 +156,7 @@ export async function POST({ request }) {
     if (error) return json({ error: error.message }, { status: 500 });
 
     let pitProblem = null;
+    let aceNotification = null;
     if (body.teleop_robot_status === 'dead' || body.mechanical_break === true || body.report_pit_problem === true || requiresPitProblemReport(body.robot_disabled)) {
       const { value: report, error: reportInvalid } = normalizePitProblemReport({
         event_key: body.event_key,
@@ -170,7 +172,7 @@ export async function POST({ request }) {
       // instead of filling the pit queue with duplicate reports.
       const { data: existing } = await db
         .from('pit_problem_reports')
-        .select('id')
+        .select('id, slack_channel, slack_ts, slack_notified_at')
         .eq('event_key', report.event_key)
         .eq('team_key', report.team_key)
         .eq('match_key', report.match_key)
@@ -190,9 +192,21 @@ export async function POST({ request }) {
       const { data: savedProblem, error: reportError } = await reportQuery.select('*').single();
       if (reportError) return json({ error: reportError.message }, { status: 500 });
       pitProblem = savedProblem;
+
+      aceNotification = await notifyAcePitProblem(savedProblem, data.scout_name || actor.email);
+      if (aceNotification.ok) {
+        const slackDelivery = {
+          slack_channel: aceNotification.channel,
+          slack_ts: aceNotification.ts,
+          slack_notified_at: new Date().toISOString()
+        };
+        const { error: slackTrackingError } = await db.from('pit_problem_reports').update(slackDelivery).eq('id', savedProblem.id);
+        if (slackTrackingError) console.error('Failed to save ACE pit Slack delivery metadata', slackTrackingError.message);
+        pitProblem = { ...savedProblem, ...slackDelivery };
+      }
     }
 
-    return json({ success: true, data, pit_problem: pitProblem });
+    return json({ success: true, data, pit_problem: pitProblem, ace_notification: aceNotification });
   }
 
   if (action === 'report-pit-problem') {
@@ -200,7 +214,18 @@ export async function POST({ request }) {
     if (invalid) return json({ error: invalid }, { status: 400 });
     const { data, error } = await db.from('pit_problem_reports').insert(value).select('*').single();
     if (error) return json({ error: error.message }, { status: 500 });
-    return json({ success: true, data });
+    const aceNotification = await notifyAcePitProblem(data, body.scout_name || actor.email);
+    if (aceNotification.ok) {
+      const slackDelivery = {
+        slack_channel: aceNotification.channel,
+        slack_ts: aceNotification.ts,
+        slack_notified_at: new Date().toISOString()
+      };
+      const { error: slackTrackingError } = await db.from('pit_problem_reports').update(slackDelivery).eq('id', data.id);
+      if (slackTrackingError) console.error('Failed to save ACE pit Slack delivery metadata', slackTrackingError.message);
+      return json({ success: true, data: { ...data, ...slackDelivery }, ace_notification: aceNotification });
+    }
+    return json({ success: true, data, ace_notification: aceNotification });
   }
 
   if (action === 'delete-entry') {

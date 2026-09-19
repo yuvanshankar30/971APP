@@ -170,6 +170,8 @@ browser confirmation or prompt popups.
   queue available without filling the page with duplicate scouting tools.
   It polls The Blue Alliance for the configured competition every minute and
   shows the current/up-next match number plus both alliances' team numbers.
+  The Drive Team page shows every completed 971 match newest-first with a
+  971-relative win, loss, or tie result and the final score.
   The **Strategy** view (`/strategy`) leads the Competition folder as the
   decision board, and replaced the Data Scouting page outright - that page is
   gone, though `/datascout` remains as the endpoint that reads and writes
@@ -324,6 +326,11 @@ browser confirmation or prompt popups.
   reopened from Pit Scouting instead of disappearing into browser-local state.
   Match Scouting keeps robot status available throughout the workflow and
   requires a described ACE Team handoff whenever a robot breaks mechanically or is marked disabled or dead;
+  each handoff is immediately posted by the server-side Slack bot to
+  `#2026-chezy-ace-strat-pit`. Its Slack channel/timestamp is retained on the
+  ACE issue so later report edits update the original alert instead of posting
+  duplicates; `ACE_PIT_SLACK_CHANNEL_ID` can pin the destination by ID when the
+  channel is private.
   general notes and the auto-path drawing remain optional. The path tool uses
   a simplified, alliance-relative version of WPILib/AdvantageScope's top-down
   2026 REBUILT field, so the scout's wall is always on the left and red/blue
@@ -363,6 +370,9 @@ browser confirmation or prompt popups.
   cards remain visible below open work and can reopen Match Scouting for edits.
   A database trigger provides the same completion sync for stale clients, and
   the backfill preserves existing assignment rows while marking prior reports done.
+  Completion matching normalizes TBA keys, bare match numbers, and historical
+  labels such as `Qual 4`/`Quals 4`; the assignments API performs the same
+  reconciliation as a fallback so formatting drift cannot hide a finished job.
   Match report lists use compact cards that surface auto points, balls scored,
   robot status, and incidents while collapsed; opening a card shows a dense,
   color-coded breakdown so multiple matches for one robot stay easy to scan.

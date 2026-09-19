@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/public';
 import { getSupabase } from '$lib/server/971bot.js';
 import { notifyScoutAssignment, notifyScoutUnassignment } from '$lib/server/slack_notifications.js';
+import { assignmentCompletionEvidence } from '$lib/scoutAssignmentCompletion.js';
 
 const SCOUTING_TYPES = new Set(['data', 'note', 'quick']);
 // Enabled by direct instruction ahead of Chezy Champs - publishing real
@@ -249,7 +250,23 @@ export async function GET({ url, request }) {
     const { data, error } = await base;
     if (error) return json({ error: error.message }, { status: 500 });
 
-    const ids = Array.from(new Set((data || []).map((r) => r.assigned_user).filter(Boolean)));
+    let assignmentRows = data || [];
+    // The trigger is the durable source of truth. This read-time reconciliation
+    // is defense in depth for historical/manual keys and deployment skew.
+    if (mine && scouting_type === 'data' && assignmentRows.some((row) => !row.completed_at)) {
+      const eventKeys = [...new Set(assignmentRows
+        .map((row) => String(row.match_key || '').split('_')[0])
+        .filter(Boolean))];
+      let reportQuery = db
+        .from('match_scout_entries')
+        .select('event_key, match_key, team_key, created_at, updated_at')
+        .eq('created_by', actorId);
+      if (eventKeys.length) reportQuery = reportQuery.in('event_key', eventKeys);
+      const { data: reports, error: reportsError } = await reportQuery;
+      if (!reportsError) assignmentRows = assignmentCompletionEvidence(assignmentRows, reports || []);
+    }
+
+    const ids = Array.from(new Set(assignmentRows.map((r) => r.assigned_user).filter(Boolean)));
     const nameMap = {};
 
     if (ids.length > 0) {
@@ -265,7 +282,7 @@ export async function GET({ url, request }) {
       }
     }
 
-    const rows = (data || []).map((r) => ({
+    const rows = assignmentRows.map((r) => ({
       id: r.id,
       scouting_type: r.scouting_type,
       match_key: r.match_key,
