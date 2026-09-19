@@ -24,9 +24,10 @@ export function teamAlliance(match, teamKey) {
 }
 
 /**
- * 971's schedule, with urgency counted in chronological order but rendered
- * latest-first as requested for the compact match board. Synthetic practice
- * matches remain available for testing without affecting real match urgency.
+ * 971's schedule, with the soonest upcoming match first (direct instruction
+ * - it previously rendered latest-first, then that was reversed). Synthetic
+ * practice matches remain available for testing without affecting real
+ * match urgency.
  */
 export function buildStrategySchedule(matches = [], teamKey) {
   const ours = matches.filter((match) => teamAlliance(match, teamKey));
@@ -40,7 +41,7 @@ export function buildStrategySchedule(matches = [], teamKey) {
   const practice = ours.filter((match) => !isMatchPlayed(match) && match.is_test_market).map((match) => ({
     match, alliance: teamAlliance(match, teamKey), matchesAway: null, estimatedTime: null
   }));
-  const upcoming = [...upcomingByMatch.values()].sort((left, right) => matchOrder(right.match, left.match));
+  const upcoming = [...upcomingByMatch.values()].sort((left, right) => matchOrder(left.match, right.match));
   const played = ours.filter(isMatchPlayed).sort((left, right) => matchOrder(right, left)).map((match) => ({
     match, alliance: teamAlliance(match, teamKey), matchesAway: null, estimatedTime: timeFor(match)
   }));

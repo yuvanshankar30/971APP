@@ -103,23 +103,17 @@ describe('defaultHeaderTabs', () => {
   });
 
   it('orders the scouting surfaces the way the team asked for them', () => {
-    // Deliberate order, not incidental: strategy leads as the board the team
-    // opens to decide something, then the collection surfaces that feed it
-    // (match -> pit -> rankings -> ratings -> vision), with the admin
-    // surface last. Exactly these 10 - Pick List (the 'scouting' key) is no
-    // longer a default entry, per direct feedback naming this exact list;
-    // Robot Ratings joined right after Power Rankings since it feeds a
-    // display-only average into that same page. Drive Team sits right after
-    // Strategy - both read the live match schedule, Drive Team is just the
-    // field-facing view of it. Picklist is its own top-level tab (not a
-    // Strategy subtab) right after that - alliance selection is its own
-    // workflow, not a sub-view of the Teams/Matches board. Prediction Market
-    // (which used to sit right after Robot Ratings) was removed from the
-    // default menu - same "legacy, still reachable by URL" treatment as
-    // Note Scouting and Team View.
+    // Exact order named by direct instruction: Strategy, Drive Team (right
+    // after Strategy - both read the live match schedule, Drive Team is
+    // just the field-facing view of it), Match Scouting, Pit Scouting,
+    // Picklist, Match Rankings, Power Rankings, Robot Ratings, Vision
+    // Scouting, Prediction Market, Scouting Admin. Pick List (the
+    // 'scouting' key) is still not a default entry - that instruction from
+    // before this reorder still stands, it's just a different key
+    // ('picklist') that replaced it in the menu.
     const keys = competitionChildren(defaultHeaderTabs()).map((child) => child.key);
     expect(keys).toEqual([
-      'strategy', 'driveteam', 'picklist', 'matchscout', 'matchrankings', 'pitscout', 'powerrankings', 'robotratings', 'vision', 'scouting-admin'
+      'strategy', 'driveteam', 'matchscout', 'pitscout', 'picklist', 'matchrankings', 'powerrankings', 'robotratings', 'vision', 'predictions', 'scouting-admin'
     ]);
   });
 

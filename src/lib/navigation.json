@@ -9,7 +9,7 @@
     "powerrankings": true,
     "matchrankings": true,
     "robotratings": true,
-    "predictions": false,
+    "predictions": true,
     "docs": true,
     "planner": true,
     "tasks": true,
