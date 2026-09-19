@@ -97,6 +97,60 @@
   // already loads, no new fetches.
   $: nextDataAssignment = incompleteScoutAssignments.find(a => a.scouting_type === 'data') || null;
 
+  // The remaining tabs (picklist, rankings, power/robot ratings,
+  // predictions, admin) don't have anything this page already loads, so
+  // their preview data is fetched lazily the first time that tab is
+  // clicked - never eagerly on page load, and only once per tab per visit.
+  let quickPreviewData = {};
+  let quickPreviewLoading = {};
+
+  function selectQuickTab(key) {
+    const next = activeQuickTab === key ? null : key;
+    activeQuickTab = next;
+    if (next) loadQuickPreviewData(next);
+  }
+
+  async function loadQuickPreviewData(key) {
+    if (!homeEventKey || quickPreviewData[key] || quickPreviewLoading[key]) return;
+    if (!['picklist', 'matchrankings', 'powerrankings', 'robotratings', 'predictions', 'scouting-admin'].includes(key)) return;
+    quickPreviewLoading = { ...quickPreviewLoading, [key]: true };
+    try {
+      const headers = await getAuthHeader();
+      const myTeamKey = `frc${user?.frc_team || FRC_TEAMS.TEAM_971}`;
+      let result = null;
+      if (key === 'picklist') {
+        const res = await fetch(`/api/scouting-picklist?event_key=${encodeURIComponent(homeEventKey)}`, { headers });
+        const payload = await res.json().catch(() => null);
+        const picks = payload?.success ? payload.data || [] : [];
+        result = { count: picks.length, top: picks.slice(0, 3).map(p => p.team_number) };
+      } else if (key === 'matchrankings') {
+        const res = await fetch(`/api/tba/event-rankings?event_key=${encodeURIComponent(homeEventKey)}`);
+        const payload = await res.json().catch(() => null);
+        const rankings = payload?.success ? payload.data?.rankings || [] : [];
+        const mine = rankings.find(r => r.team_key === myTeamKey) || null;
+        result = { totalTeams: rankings.length, mine };
+      } else if (key === 'powerrankings' || key === 'robotratings') {
+        const res = await fetch(`/datascout?all_teams=1&event_key=${encodeURIComponent(homeEventKey)}`, { headers });
+        const payload = await res.json().catch(() => null);
+        const rows = payload?.success ? payload.data || [] : [];
+        result = { scoutedTeams: new Set(rows.map(r => r.team_key)).size };
+      } else if (key === 'predictions') {
+        const res = await fetch(`/api/prediction-market?event_key=${encodeURIComponent(homeEventKey)}`, { headers });
+        const payload = await res.json().catch(() => null);
+        result = { count: payload?.success ? (payload.data || []).length : 0 };
+      } else if (key === 'scouting-admin') {
+        const res = await fetch(`/api/scout-assignments?scouting_type=data&capabilities=1`, { headers });
+        const payload = await res.json().catch(() => null);
+        result = { canEdit: payload?.success ? !!payload.data?.can_edit : false };
+      }
+      quickPreviewData = { ...quickPreviewData, [key]: result };
+    } catch {
+      quickPreviewData = { ...quickPreviewData, [key]: null };
+    } finally {
+      quickPreviewLoading = { ...quickPreviewLoading, [key]: false };
+    }
+  }
+
   $: canViewAdmin = can('VIEW_ADMIN_PANEL');
   $: customSectionKeys = sanitizeSectionKeys(user?.dashboard_sections);
   $: rawVisibleKeys = (customSectionKeys && customSectionKeys.length ? customSectionKeys : defaultSectionKeyList(canViewAdmin))
@@ -178,8 +232,6 @@
 
   // Scouting assignment alert state
   let myScoutAssignments = [];
-  let nextScoutAssignment = null; // { scouting_type, match_key, team_key }
-  let showScoutAlert = true;
   $: incompleteScoutAssignments = myScoutAssignments.filter(a => !a.completed_at);
   $: completedScoutAssignmentCount = myScoutAssignments.length - incompleteScoutAssignments.length;
   // A busy scout can rack up dozens of assignments - letting every card stay
@@ -341,7 +393,6 @@
         return doneA - doneB || compareScoutAssignmentMatches(a, b);
       });
       myScoutAssignments = sorted;
-      nextScoutAssignment = sorted.find(r => !r.completed_at) || null;
     }catch(e){ /* ignore */ }
   }
 
@@ -635,21 +686,23 @@
                     <h4>Purchasing</h4>
                     <p>Review purchase requests, orders, and needed components</p>
                   </a>
-                  <a href="/matchscout" class="workspace-card">
-                    <ClipboardCheck size={24} />
-                    <h4>Scouting</h4>
-                    <p>Open competition assignments, scouting forms, and event analysis</p>
-                  </a>
-                  <a href="/matchrankings" class="workspace-card">
-                    <ListOrdered size={24} />
-                    <h4>Match Rankings</h4>
-                    <p>Live qualification rankings and match results</p>
-                  </a>
-                  <a href="/strategy" class="workspace-card">
-                    <Target size={24} />
-                    <h4>Strategy</h4>
-                    <p>Alliance selection notes and match strategy</p>
-                  </a>
+                  {#if homeEventKey}
+                    <a href="/matchscout" class="workspace-card">
+                      <ClipboardCheck size={24} />
+                      <h4>Scouting</h4>
+                      <p>Open competition assignments, scouting forms, and event analysis</p>
+                    </a>
+                    <a href="/matchrankings" class="workspace-card">
+                      <ListOrdered size={24} />
+                      <h4>Match Rankings</h4>
+                      <p>Live qualification rankings and match results</p>
+                    </a>
+                    <a href="/strategy" class="workspace-card">
+                      <Target size={24} />
+                      <h4>Strategy</h4>
+                      <p>Alliance selection notes and match strategy</p>
+                    </a>
+                  {/if}
                 </div>
               </div>
             {:else if section.key === 'admin'}
@@ -665,20 +718,6 @@
               </div>
             {:else if section.key === 'assignment-queue'}
               <div class="user-lists">
-                {#if showScoutAlert && incompleteScoutAssignments.length>0}
-                  <div class="pending-notice compact">
-                    <AlertCircle size={16} />
-                    <p>
-                      {incompleteScoutAssignments.length} open assignment{incompleteScoutAssignments.length===1?'':'s'}.
-                      {#if nextScoutAssignment}
-                        <button class="link-btn" on:click={() => goto(scoutAssignmentHref(nextScoutAssignment))}>Go to next ({nextScoutAssignment.scouting_type} – {nextScoutAssignment.match_key.split('_').pop()} – {nextScoutAssignment.team_key.replace('frc','')})</button>
-                      {/if}
-                    </p>
-                    <button class="dismiss-btn" on:click={() => showScoutAlert=false} aria-label="Dismiss">
-                      <X size={14} />
-                    </button>
-                  </div>
-                {/if}
                 <div class="assignment-heading">
                   <div>
                     <h4>Your Scouting Assignments</h4>
@@ -742,6 +781,7 @@
            the page scrolls (see ScoutAssignmentPanel's own .panel-header for
            the exact same bug, fixed the same way: don't stick two things to
            the same line). -->
+      {#if homeEventKey}
       <div class="quick-nav-row">
         <aside class="quick-nav" aria-label="Competition quick navigation">
           <span class="quick-nav-label">Competition</span>
@@ -750,7 +790,7 @@
               type="button"
               class="quick-nav-tab"
               class:active={activeQuickTab === tab.key}
-              on:click={() => activeQuickTab = activeQuickTab === tab.key ? null : tab.key}
+              on:click={() => selectQuickTab(tab.key)}
             >{tab.label}</button>
           {/each}
         </aside>
@@ -791,6 +831,45 @@
               {:else if activeQuickTabInfo.key === 'myscout'}
                 <p class="quick-preview-match-heading">{completedScoutAssignmentCount} of {myScoutAssignments.length} assignments completed this event</p>
                 <p>{activeQuickTabInfo.blurb}</p>
+              {:else if quickPreviewLoading[activeQuickTabInfo.key]}
+                <p class="muted">Loading...</p>
+              {:else if activeQuickTabInfo.key === 'picklist'}
+                {#if quickPreviewData.picklist}
+                  <p class="quick-preview-match-heading">{quickPreviewData.picklist.count} team{quickPreviewData.picklist.count === 1 ? '' : 's'} on the pick list</p>
+                  <p>{quickPreviewData.picklist.count ? `Top picks: ${quickPreviewData.picklist.top.join(', ')}` : activeQuickTabInfo.blurb}</p>
+                {:else}
+                  <p>{activeQuickTabInfo.blurb}</p>
+                {/if}
+              {:else if activeQuickTabInfo.key === 'matchrankings'}
+                {#if quickPreviewData.matchrankings?.mine}
+                  <p class="quick-preview-match-heading">Your team - Rank {quickPreviewData.matchrankings.mine.rank} of {quickPreviewData.matchrankings.totalTeams}</p>
+                  <p>{quickPreviewData.matchrankings.mine.record?.wins ?? 0}-{quickPreviewData.matchrankings.mine.record?.losses ?? 0}-{quickPreviewData.matchrankings.mine.record?.ties ?? 0}</p>
+                {:else if quickPreviewData.matchrankings}
+                  <p>No ranking found for your team yet - {quickPreviewData.matchrankings.totalTeams} teams ranked so far.</p>
+                {:else}
+                  <p>{activeQuickTabInfo.blurb}</p>
+                {/if}
+              {:else if activeQuickTabInfo.key === 'powerrankings' || activeQuickTabInfo.key === 'robotratings'}
+                {#if quickPreviewData[activeQuickTabInfo.key]}
+                  <p class="quick-preview-match-heading">{quickPreviewData[activeQuickTabInfo.key].scoutedTeams} teams have local scouting data</p>
+                  <p>{activeQuickTabInfo.blurb}</p>
+                {:else}
+                  <p>{activeQuickTabInfo.blurb}</p>
+                {/if}
+              {:else if activeQuickTabInfo.key === 'predictions'}
+                {#if quickPreviewData.predictions}
+                  <p class="quick-preview-match-heading">{quickPreviewData.predictions.count} prediction{quickPreviewData.predictions.count === 1 ? '' : 's'} placed this event</p>
+                  <p>{activeQuickTabInfo.blurb}</p>
+                {:else}
+                  <p>{activeQuickTabInfo.blurb}</p>
+                {/if}
+              {:else if activeQuickTabInfo.key === 'scouting-admin'}
+                {#if quickPreviewData['scouting-admin']}
+                  <p class="quick-preview-match-heading">{quickPreviewData['scouting-admin'].canEdit ? 'You have edit access' : 'You have view-only access'}</p>
+                  <p>{activeQuickTabInfo.blurb}</p>
+                {:else}
+                  <p>{activeQuickTabInfo.blurb}</p>
+                {/if}
               {:else}
                 <p>{activeQuickTabInfo.blurb}</p>
               {/if}
@@ -804,6 +883,7 @@
           {/if}
         </div>
       </div>
+      {/if}
 
       {#if currentMatchLoading && !currentEventMatch}
         <div class="current-match-card current-match-loading">Loading the {homeEventKey || 'active event'} field...</div>
@@ -1782,39 +1862,6 @@
     line-height: 1.5;
   }
 
-  /* Sits at the top of the assignment list it's actually about now, instead
-     of announcing itself as a full-height banner above the whole page - a
-     single line is enough once it's right next to the thing it refers to. */
-  .pending-notice.compact {
-    align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-2) var(--space-4);
-    margin-bottom: var(--space-4);
-  }
-
-  .pending-notice.compact p {
-    flex: 1;
-    font-size: 0.85rem;
-  }
-
-  .dismiss-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    width: 22px;
-    height: 22px;
-    border: none;
-    background: none;
-    color: inherit;
-    opacity: 0.7;
-    cursor: pointer;
-  }
-
-  .dismiss-btn:hover {
-    opacity: 1;
-  }
-
   .dashboard-actions h3 {
     margin: 0 0 var(--space-2) 0;
     color: var(--secondary);
@@ -1866,7 +1913,7 @@
     background: var(--primary);
     border: 1px solid var(--border);
     border-left: 3px solid var(--border);
-    padding: var(--space-3) var(--space-4);
+    padding: var(--space-5) var(--space-6);
     text-decoration: none;
     color: inherit;
     transition: border-color 0.1s ease, background-color 0.1s ease;
@@ -1882,9 +1929,9 @@
   .workspace-card :global(svg),
   .action-card :global(svg) {
     grid-row: 1 / span 2;
-    width: 22px;
-    height: 22px;
-    padding: 9px;
+    width: 28px;
+    height: 28px;
+    padding: 11px;
     background: var(--brand-gold-soft);
     color: var(--brand-gold-strong);
   }
@@ -1894,7 +1941,7 @@
     grid-column: 2;
     margin: 0;
     color: var(--secondary);
-    font-size: var(--font-md);
+    font-size: var(--font-lg);
   }
 
   .workspace-card p,
@@ -1902,7 +1949,7 @@
     grid-column: 2;
     margin: 0;
     color: var(--neutral-500);
-    font-size: var(--font-xs);
+    font-size: var(--font-sm);
     line-height: 1.4;
   }
 
