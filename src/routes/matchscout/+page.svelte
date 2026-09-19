@@ -701,35 +701,39 @@
             <div class="rating-row"><span>{field}</span><div class="rating-buttons">{#each [1, 2, 3, 4, 5] as value}<button aria-pressed={ratings[field] === value} aria-label={`${field}: ${value} of 5`} class:chosen={ratings[field] === value} on:click={() => toggleRating(field, value)}>{value}</button>{/each}</div></div>
           {/each}
         </div>
-        <div class="intake-observations">
+        <div class="intake-observations card-panel">
           <div class="control-group"><span class="field-label">Intake speed (optional)</span><br /><small class="field-help">1 = slow, 3 = fast. Leave blank when not observed; click again to clear.</small><div class="rating-buttons large">{#each [1, 2, 3] as value}<button aria-pressed={intakeSpeed === value} class:chosen={intakeSpeed === value} on:click={() => intakeSpeed = intakeSpeed === value ? 0 : value}>{value}</button>{/each}</div></div>
           <label class="incident-toggle intake-jam-toggle"><input type="checkbox" bind:checked={intakeJammed} /><span><AlertTriangle size={17} /> Intake jammed during the match</span></label>
         </div>
-        <fieldset class="control-group">
-          <legend>Significant crash (required)</legend>
-          <div class="segmented">
-            <button class:chosen={significantCrash === false} on:click={() => significantCrash = false}>No</button>
-            <button class:chosen={significantCrash === true} on:click={() => significantCrash = true}>Yes</button>
-          </div>
-          {#if significantCrash}
-            <label>Crash target (required)
-              <select class="form-input" bind:value={crashTarget}>
-                <option value="">Choose target</option>
-                {#each ['robot', 'wall', 'field element', 'other'] as target}<option value={target}>{target}</option>{/each}
-              </select>
-            </label>
-            {#if crashTarget === 'other'}<label>Other target (required)<input class="form-input" maxlength="500" bind:value={crashDetails} /></label>{/if}
-          {/if}
-        </fieldset>
-        <fieldset class="control-group"><legend>Robot status (required)</legend><div class="choice-grid">{#each [['active', 'Active'], ['dead', 'Dead'], ['stopped', 'Stopped']] as [status, label]}<button class:chosen={teleopRobotStatus === status} on:click={() => teleopRobotStatus = status}>{label}</button>{/each}</div></fieldset>
+        <div class="status-panel card-panel">
+          <fieldset class="control-group">
+            <legend>Significant crash (required)</legend>
+            <div class="segmented">
+              <button class:chosen={significantCrash === false} on:click={() => significantCrash = false}>No</button>
+              <button class:chosen={significantCrash === true} on:click={() => significantCrash = true}>Yes</button>
+            </div>
+            {#if significantCrash}
+              <label>Crash target (required)
+                <select class="form-input" bind:value={crashTarget}>
+                  <option value="">Choose target</option>
+                  {#each ['robot', 'wall', 'field element', 'other'] as target}<option value={target}>{target}</option>{/each}
+                </select>
+              </label>
+              {#if crashTarget === 'other'}<label>Other target (required)<input class="form-input" maxlength="500" bind:value={crashDetails} /></label>{/if}
+            {/if}
+          </fieldset>
+          <fieldset class="control-group"><legend>Robot status (required)</legend><div class="choice-grid status-choice-grid">{#each [['active', 'Active'], ['dead', 'Dead'], ['stopped', 'Stopped']] as [status, label]}<button class="status-choice status-{status}" class:chosen={teleopRobotStatus === status} on:click={() => teleopRobotStatus = status}>{label}</button>{/each}</div></fieldset>
+        </div>
         <label class="notes-label scouter-notes">Real-scout observations (optional)<textarea class="form-input" rows="9" placeholder="What did the robot actually do? Note repeatable strengths, defense response, cycle consistency, field awareness, or anything the numbers miss." bind:value={teleopNotes}></textarea></label>
         {#if error}<p class="submit-error" role="alert">{error}</p>{/if}
         <div class="section-footer"><button class="btn" on:click={() => selectPhase('auto')}>Back</button><button class="btn btn-primary" on:click={continueToPostMatch}>Continue to post-match <ChevronRight size={16} /></button></div>
       {:else}
         <div class="section-heading"><div><span class="eyebrow">Post-match</span><h2>Match outcome</h2><p>Close out the report and flag anything the ACE Team needs to inspect.</p></div><Trophy size={20} /></div>
-        <div class="post-grid"><fieldset><legend>Cards</legend><div class="choice-grid"><button class:chosen={card === 'none'} on:click={() => card = 'none'}>None</button><button class:chosen={card === 'yellow'} on:click={() => card = 'yellow'}>Yellow</button><button class:chosen={card === 'red'} on:click={() => card = 'red'}>Red</button></div></fieldset></div>
+        <div class="outcome-grid">
+          <div class="post-grid outcome-panel"><fieldset><legend>Cards</legend><div class="choice-grid card-choice-grid"><button class="card-choice card-none" class:chosen={card === 'none'} on:click={() => card = 'none'}><i class="card-swatch" aria-hidden="true"></i>None</button><button class="card-choice card-yellow" class:chosen={card === 'yellow'} on:click={() => card = 'yellow'}><i class="card-swatch" aria-hidden="true"></i>Yellow</button><button class="card-choice card-red" class:chosen={card === 'red'} on:click={() => card = 'red'}><i class="card-swatch" aria-hidden="true"></i>Red</button></div></fieldset></div>
+          <div class="post-grid outcome-panel"><fieldset><legend>Mechanical break (required)</legend><div class="segmented"><button class:chosen={mechanicalBreak === false} on:click={() => mechanicalBreak = false}>No</button><button class:chosen={mechanicalBreak === true} on:click={() => mechanicalBreak = true}>Yes — ACE Team report required</button></div></fieldset></div>
+        </div>
         <label class="incident-toggle"><input type="checkbox" bind:checked={beached} /><span><AlertTriangle size={17} /> Robot became beached</span></label>
-        <fieldset class="control-group"><legend>Mechanical break (required)</legend><div class="segmented"><button class:chosen={mechanicalBreak === false} on:click={() => mechanicalBreak = false}>No</button><button class:chosen={mechanicalBreak === true} on:click={() => mechanicalBreak = true}>Yes — ACE Team report required</button></div></fieldset>
         {#if requiresPitReport}
           <div class="required-handoff"><AlertTriangle size={17} /><span>An ACE Team report is required for a mechanical break, dead, or disabled robot.</span></div>
         {:else}
@@ -796,11 +800,25 @@
   .teleop-roles { margin-bottom:var(--space-4); padding:var(--space-4); border:1px solid var(--border); background:var(--surface-2); }
   .role-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(8.5rem,1fr)); }
   .role-grid button { overflow-wrap:anywhere; white-space:normal; height:auto; }
-  .ratings-grid { display:grid; gap:var(--space-3); } .ratings-heading { display:flex; justify-content:space-between; gap:var(--gap-3); padding-bottom:var(--space-2); border-bottom:1px solid var(--border); } .ratings-heading small { color:var(--text-muted); } .rating-row { display:flex; align-items:center; justify-content:space-between; gap:var(--gap-4); padding-bottom:var(--space-3); border-bottom:1px solid var(--border); } .rating-row span { font-size:.9rem; } .rating-buttons button { width:2.25rem; padding:0; } .rating-buttons.large button { width:3rem; height:3rem; }
+  .ratings-grid { display:grid; gap:var(--space-3); } .ratings-heading { display:flex; justify-content:space-between; gap:var(--gap-3); padding-bottom:var(--space-2); border-bottom:1px solid var(--border); } .ratings-heading small { color:var(--text-muted); } .rating-row { display:flex; align-items:center; justify-content:space-between; gap:var(--gap-4); padding-bottom:var(--space-3); border-bottom:1px solid var(--border); } .rating-row span { font-size:.9rem; } .rating-buttons button { width:2.5rem; padding:0; transition:transform .1s ease, box-shadow .1s ease; } .rating-buttons button.chosen { box-shadow:0 0 0 3px var(--brand-gold-soft); transform:scale(1.08); } .rating-buttons.large button { width:3rem; height:3rem; }
   .notes-label textarea { resize:vertical; min-height:7rem; line-height:1.5; } .scouter-notes textarea { min-height:12rem; } .incident-toggle { display:flex; grid-template-columns:auto 1fr; align-items:center; color:var(--text); font-size:.9rem; } .incident-toggle span { display:flex; align-items:center; gap:var(--gap-2); } .incident-toggle :global(svg) { color:var(--red-base); }
   .pit-report-field { margin-top:var(--space-3); }
   .intake-observations { display:grid; grid-template-columns:minmax(0,1fr) minmax(16rem,1fr); gap:var(--gap-4); align-items:end; margin-top:var(--space-5); }
   .intake-jam-toggle { margin-top:0; }
+  .card-panel { padding:var(--space-4); border:1px solid var(--border); background:var(--surface-2); }
+  .status-panel { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--gap-4); margin-top:var(--space-4); }
+  .status-choice-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); }
+  .status-choice.chosen.status-dead { border-color:var(--red-base); background:var(--red-soft); color:var(--text); }
+  .status-choice.chosen.status-stopped { border-color:var(--chart-orange); background:color-mix(in srgb, var(--chart-orange) 20%, transparent); color:var(--text); }
+  .outcome-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--gap-4); margin-bottom:var(--space-5); }
+  .outcome-panel { margin:0; }
+  .card-choice-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
+  .card-choice { display:flex; align-items:center; justify-content:center; gap:var(--gap-2); }
+  .card-swatch { width:.85rem; height:.85rem; border-radius:50%; border:1px solid var(--border); background:var(--surface-1); }
+  .card-yellow .card-swatch { background:#f1c331; border-color:#c99a00; }
+  .card-red .card-swatch { background:var(--red-base); border-color:var(--red-base); }
+  .card-yellow.chosen { border-color:#c99a00; background:#fff4cc; color:var(--secondary); }
+  .card-red.chosen { border-color:var(--red-base); background:var(--red-soft); color:var(--text); }
   .required-handoff { display:flex; align-items:flex-start; gap:var(--gap-2); margin-top:var(--space-5); padding:var(--space-3) var(--space-4); border-left:3px solid var(--red-base); background:var(--red-soft); color:var(--text); font-size:.88rem; }
   .required-handoff :global(svg) { flex:none; color:var(--red-base); }
   /* One series, so no legend box is needed for identity - the axis labels
@@ -888,7 +906,7 @@
     .assignment-grid { grid-template-columns:1fr; }
     .start-position-block { padding:var(--space-3); }
     .position-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
-    .auto-layout,.intake-observations { grid-template-columns:1fr; }
+    .auto-layout,.intake-observations,.status-panel,.outcome-grid { grid-template-columns:1fr; }
     .ratings-heading,.rating-row,.persistent-status { align-items:flex-start; flex-direction:column; }
     .rating-row { gap:var(--space-3); }
     .rating-buttons { width:100%; }
@@ -896,7 +914,7 @@
     .section-footer { flex-wrap:wrap; gap:var(--space-2); }
     .section-footer > button { flex:1 1 10rem; min-height:3rem; }
     .choice-grid button,.segmented button,.position-grid button { min-height:2.75rem; }
-    .path-panel,.auto-layout,.ratings-grid,.notes-label,.post-grid { padding:var(--space-3); }
+    .path-panel,.auto-layout,.ratings-grid,.notes-label,.post-grid,.card-panel { padding:var(--space-3); }
   }
   @media (max-width:480px) {
     .match-scouting-page { padding:var(--space-2); }

@@ -321,6 +321,37 @@
     }
   }
 
+  // The x on a team chip in a scout's drop zone unassigns that whole robot
+  // (every one of its scheduled matches currently owned by that scout) in
+  // one click, instead of opening the per-match modal once per match -
+  // same immediate, notify-right-away behaviour as removeAssignment above.
+  async function removeRobotAssignment(teamKey) {
+    if (!capabilities.can_edit || saving || !teamKey) return;
+    const matchKeys = matches
+      .filter((match) => match.blue.includes(teamKey) || match.red.includes(teamKey))
+      .map((match) => match.key);
+    if (!matchKeys.length) return;
+    saving = true;
+    errorMsg = '';
+    try {
+      for (const matchKey of matchKeys) {
+        const res = await authFetch('/api/scout-assignments', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ action: 'unassign', scouting_type: scoutingType, match_key: matchKey, team_key: teamKey })
+        });
+        const data = await res.json();
+        if (!data?.success) throw new Error(data?.error || 'unknown');
+      }
+      await loadAssignments();
+      statusMsg = `Team ${displayTeam(teamKey)} unassigned.`;
+    } catch (e) {
+      errorMsg = `Remove failed: ${e.message}`;
+    } finally {
+      saving = false;
+    }
+  }
+
   function randomize() {
     if (!capabilities.can_edit) return;
 
@@ -536,9 +567,19 @@
               <div class="scout-drop-name">{scoutDisplayName(scout)}</div>
               <div class="team-chip-list">
                 {#each scheduledTeamKeys.filter((teamKey) => teamOwner[teamKey] === scout.id) as teamKey}
-                  <button class="team-chip assigned" class:dragging={draggingTeamKey === teamKey} type="button" on:pointerdown={(event) => startTeamDrag(event, teamKey)}>
-                    {displayTeam(teamKey)}
-                  </button>
+                  <span class="team-chip-wrap">
+                    <button class="team-chip assigned" class:dragging={draggingTeamKey === teamKey} type="button" on:pointerdown={(event) => startTeamDrag(event, teamKey)}>
+                      {displayTeam(teamKey)}
+                    </button>
+                    <button
+                      class="chip-remove"
+                      type="button"
+                      title={`Unassign team ${displayTeam(teamKey)} - notifies ${scoutDisplayName(scout)}`}
+                      aria-label={`Unassign team ${displayTeam(teamKey)} from ${scoutDisplayName(scout)}`}
+                      disabled={saving}
+                      on:click={() => removeRobotAssignment(teamKey)}
+                    >&times;</button>
+                  </span>
                 {/each}
                 {#if !scheduledTeamKeys.some((teamKey) => teamOwner[teamKey] === scout.id)}
                   <span class="assignment-empty">Drop a team here</span>
@@ -557,38 +598,39 @@
       <div class="team-drag-ghost" style={`left:${dragClientX + 12}px;top:${dragClientY + 12}px`} aria-hidden="true">#{displayTeam(draggingTeamKey)}</div>
     {/if}
 
-    <div class="scroll-x">
-      <table class="assignment-table">
-        <thead>
-          <tr>
-            <th colspan="3" class="alliance blue">Blue Alliance</th>
-            <th colspan="3" class="alliance red">Red Alliance</th>
-          </tr>
-          <tr>
-            {#each [1, 2, 3] as i}<th class="blue">B{i}</th>{/each}
-            {#each [1, 2, 3] as i}<th class="red">R{i}</th>{/each}
-          </tr>
-        </thead>
-        <tbody>
-          {#each matches as m}
+    <details class="table-accordion">
+      <summary>Match-by-match table ({matches.length} match{matches.length === 1 ? '' : 'es'})</summary>
+      <div class="scroll-x">
+        <table class="assignment-table">
+          <thead>
             <tr>
-              {#each m.blue as t, i}
-                <td data-label={`Blue ${i + 1}`} class="cell blue" class:editable-cell={capabilities.can_edit} on:click={() => openAssign(m.key, t)}>
-                  <div class="team">{displayTeam(t)}</div>
-                  <div class="scout">{assignments?.[m.key]?.[t]?.user_name || '-'}</div>
-                </td>
-              {/each}
-              {#each m.red as t, i}
-                <td data-label={`Red ${i + 1}`} class="cell red" class:editable-cell={capabilities.can_edit} on:click={() => openAssign(m.key, t)}>
-                  <div class="team">{displayTeam(t)}</div>
-                  <div class="scout">{assignments?.[m.key]?.[t]?.user_name || '-'}</div>
-                </td>
-              {/each}
+              <th colspan="3" class="alliance blue">Blue Alliance</th>
+              <th colspan="3" class="alliance red">Red Alliance</th>
             </tr>
-          {/each}
-        </tbody>
-      </table>
-    </div>
+            <tr>
+              {#each [1, 2, 3] as i}<th class="blue">B{i}</th>{/each}
+              {#each [1, 2, 3] as i}<th class="red">R{i}</th>{/each}
+            </tr>
+          </thead>
+          <tbody>
+            {#each matches as m}
+              <tr>
+                {#each m.blue as t, i}
+                  <td data-label={`Blue ${i + 1}`} class="cell blue" class:editable-cell={capabilities.can_edit} on:click={() => openAssign(m.key, t)}>
+                    <span class="team">#{displayTeam(t)}</span><span class="scout">{assignments?.[m.key]?.[t]?.user_name || '-'}</span>
+                  </td>
+                {/each}
+                {#each m.red as t, i}
+                  <td data-label={`Red ${i + 1}`} class="cell red" class:editable-cell={capabilities.can_edit} on:click={() => openAssign(m.key, t)}>
+                    <span class="team">#{displayTeam(t)}</span><span class="scout">{assignments?.[m.key]?.[t]?.user_name || '-'}</span>
+                  </td>
+                {/each}
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    </details>
   </div>
 </details>
 
@@ -822,6 +864,32 @@
     gap: 0.2rem;
   }
 
+  .team-chip-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 1px;
+  }
+
+  .chip-remove {
+    min-width: 1.4rem;
+    min-height: 1.9rem;
+    padding: 0 0.3rem;
+    border: 1px solid var(--accent-strong, #b8860b);
+    border-left: 0;
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    background: var(--surface-1);
+    color: var(--red-strong, #dc2626);
+    font: inherit;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .chip-remove:hover { background: var(--red-soft, rgba(239, 68, 68, 0.1)); }
+  .chip-remove:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .team-chip-wrap .team-chip { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+
   .team-chip {
     min-width: 3rem;
     min-height: 1.9rem;
@@ -870,12 +938,15 @@
 
   .assignment-table th,
   .assignment-table td {
-    padding: var(--space-1) var(--space-2);
+    padding: 3px var(--space-2);
     font-size: var(--font-xs);
     text-align: center;
     background: var(--color-white, #fff);
     border: 1px solid var(--border);
     min-width: 70px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .assignment-table th.alliance {
@@ -892,17 +963,21 @@
     background: var(--red-soft);
   }
 
+  /* Team and scout used to stack on two lines per cell, roughly doubling
+     the height of an already very tall (one row per match) table. One line
+     per cell - "#123 · Name" - keeps every cell readable at a fraction of
+     the height, which is the point of compacting this table at all. */
   .assignment-table .team {
     font-weight: 700;
   }
 
   .assignment-table .scout {
-    font-size: 0.6rem;
-    margin-top: var(--space-1);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    font-size: 0.62rem;
     color: var(--text-muted);
+  }
+
+  .assignment-table .scout::before {
+    content: ' · ';
   }
 
   .editable-cell {
@@ -976,9 +1051,45 @@
       letter-spacing: 0.04em;
       margin-bottom: 2px;
     }
-    .assignment-table .scout {
-      margin-top: 0;
+    .assignment-table td {
       white-space: normal;
     }
+  }
+
+  /* Collapsed by default - a full event's match list here is one row per
+     scheduled qualification match (dozens at a real event), which dwarfed
+     the rest of the page. The drag-and-drop board above already covers
+     assigning; this table is the detailed read/override view underneath. */
+  .table-accordion {
+    margin-top: var(--gap-2);
+  }
+
+  .table-accordion > summary {
+    cursor: pointer;
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--surface-2, #f7f7f5);
+    font-size: var(--font-xs);
+    font-weight: 700;
+    color: var(--text-muted);
+    list-style: none;
+    user-select: none;
+  }
+
+  .table-accordion > summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .table-accordion > summary::before {
+    content: '▸ ';
+  }
+
+  .table-accordion[open] > summary::before {
+    content: '▾ ';
+  }
+
+  .table-accordion .scroll-x {
+    margin-top: var(--gap-2);
   }
 </style>
