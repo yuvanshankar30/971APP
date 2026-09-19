@@ -1824,7 +1824,7 @@
   .current-match-card {
     display: grid;
     gap: var(--space-2);
-    margin-top: var(--space-3);
+    margin-top: var(--space-7);
     padding: var(--space-3) var(--space-5);
     border: 1px solid var(--border);
     border-left: 4px solid var(--brand-gold-strong);
