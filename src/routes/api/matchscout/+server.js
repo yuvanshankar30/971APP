@@ -12,6 +12,7 @@ import {
 } from '$lib/server/matchScoutingSchema.js';
 import { exportAutoPathImageToDrive } from '$lib/server/auto_path_drive_export.js';
 import { notifyAcePitProblem } from '$lib/server/ace_pit_notifications.js';
+import { combinedPitProblemFields, mergeScoutObservation, scoutObservation } from '$lib/pitProblemObservations.js';
 
 // Backend for match scouting and the pit-problem handoff.
 //
@@ -40,6 +41,46 @@ function writeClient(fallback) {
 async function actorFor(client) {
   const { data } = await client.auth.getUser();
   return data?.user || null;
+}
+
+async function findSharedPitProblem(db, report) {
+  const { data } = await db
+    .from('pit_problem_reports')
+    .select('*')
+    .eq('event_key', report.event_key)
+    .eq('team_key', report.team_key)
+    .eq('match_key', report.match_key)
+    .eq('source', 'Match scout')
+    .eq('resolved', false)
+    .limit(1)
+    .maybeSingle();
+  return data || null;
+}
+
+async function saveSharedPitProblem(db, report, scoutName) {
+  const observation = scoutObservation({
+    report,
+    scoutId: report.created_by,
+    scoutName
+  });
+  const saveExisting = async (existing) => {
+    const observations = mergeScoutObservation(existing.scout_observations, observation);
+    const fields = combinedPitProblemFields(observations);
+    return db.from('pit_problem_reports').update({ ...fields, scout_observations: observations }).eq('id', existing.id).select('*').single();
+  };
+
+  const existing = await findSharedPitProblem(db, report);
+  if (existing) return saveExisting(existing);
+
+  const observations = [observation];
+  const fields = combinedPitProblemFields(observations);
+  const inserted = await db.from('pit_problem_reports').insert({ ...report, ...fields, scout_observations: observations }).select('*').single();
+  if (inserted.error?.code !== '23505') return inserted;
+
+  // A simultaneous second scout can race the first insert. The partial
+  // unique index chooses one row; merge this observation into it once.
+  const racedExisting = await findSharedPitProblem(db, report);
+  return racedExisting ? saveExisting(racedExisting) : inserted;
 }
 
 export async function GET({ request, url }) {
@@ -168,28 +209,11 @@ export async function POST({ request }) {
       }, actor.id);
       if (reportInvalid) return json({ error: reportInvalid }, { status: 400 });
 
-      // Retrying a submission updates the same scout's still-open handoff
-      // instead of filling the pit queue with duplicate reports.
-      const { data: existing } = await db
-        .from('pit_problem_reports')
-        .select('id, slack_channel, slack_ts, slack_notified_at')
-        .eq('event_key', report.event_key)
-        .eq('team_key', report.team_key)
-        .eq('match_key', report.match_key)
-        .eq('source', 'Match scout')
-        .eq('created_by', actor.id)
-        .eq('resolved', false)
-        .limit(1)
-        .maybeSingle();
-
-      const reportQuery = existing?.id
-        ? db.from('pit_problem_reports').update({
-            summary: report.summary,
-            detail: report.detail,
-            severity: report.severity
-          }).eq('id', existing.id)
-        : db.from('pit_problem_reports').insert(report);
-      const { data: savedProblem, error: reportError } = await reportQuery.select('*').single();
+      const { data: savedProblem, error: reportError } = await saveSharedPitProblem(
+        db,
+        report,
+        data.scout_name || actor.email
+      );
       if (reportError) return json({ error: reportError.message }, { status: 500 });
       pitProblem = savedProblem;
 
@@ -198,6 +222,7 @@ export async function POST({ request }) {
         const slackDelivery = {
           slack_channel: aceNotification.channel,
           slack_ts: aceNotification.ts,
+          slack_last_payload: aceNotification.payload,
           slack_notified_at: new Date().toISOString()
         };
         const { error: slackTrackingError } = await db.from('pit_problem_reports').update(slackDelivery).eq('id', savedProblem.id);
@@ -212,13 +237,14 @@ export async function POST({ request }) {
   if (action === 'report-pit-problem') {
     const { value, error: invalid } = normalizePitProblemReport(body, actor.id);
     if (invalid) return json({ error: invalid }, { status: 400 });
-    const { data, error } = await db.from('pit_problem_reports').insert(value).select('*').single();
+    const { data, error } = await saveSharedPitProblem(db, value, body.scout_name || actor.email);
     if (error) return json({ error: error.message }, { status: 500 });
     const aceNotification = await notifyAcePitProblem(data, body.scout_name || actor.email);
     if (aceNotification.ok) {
       const slackDelivery = {
         slack_channel: aceNotification.channel,
         slack_ts: aceNotification.ts,
+        slack_last_payload: aceNotification.payload,
         slack_notified_at: new Date().toISOString()
       };
       const { error: slackTrackingError } = await db.from('pit_problem_reports').update(slackDelivery).eq('id', data.id);
@@ -273,7 +299,19 @@ export async function POST({ request }) {
       .select('*')
       .single();
     if (error) return json({ error: error.message }, { status: 500 });
-    return json({ success: true, data });
+    const aceNotification = await notifyAcePitProblem(data, actor.email);
+    if (aceNotification.ok) {
+      const slackDelivery = {
+        slack_channel: aceNotification.channel,
+        slack_ts: aceNotification.ts,
+        slack_last_payload: aceNotification.payload,
+        slack_notified_at: new Date().toISOString()
+      };
+      const { error: slackTrackingError } = await db.from('pit_problem_reports').update(slackDelivery).eq('id', data.id);
+      if (slackTrackingError) console.error('Failed to save ACE pit Slack delivery metadata', slackTrackingError.message);
+      return json({ success: true, data: { ...data, ...slackDelivery }, ace_notification: aceNotification });
+    }
+    return json({ success: true, data, ace_notification: aceNotification });
   }
 
   return json({ error: 'Invalid action' }, { status: 400 });

@@ -369,7 +369,13 @@
       const response = await fetch(`/api/matchscout?resource=pit-problems&event_key=${encodeURIComponent(eventKey)}&team_key=${encodeURIComponent(entry.team_key)}`, { headers: await getAuthHeader() });
       const result = await response.json();
       if (!response.ok || !result.success) throw new Error(result.error || 'Could not load the ACE Team report.');
-      const problem = (result.data || []).find(row => row.match_key === entry.match_key && row.created_by === entry.created_by && row.source === 'Match scout' && !row.resolved);
+      const problem = (result.data || []).find(row =>
+        row.match_key === entry.match_key
+        && row.source === 'Match scout'
+        && !row.resolved
+        && (row.created_by === entry.created_by || (row.scout_observations || []).some(observation => observation.created_by === entry.created_by))
+      );
+      const ownObservation = (problem?.scout_observations || []).find(observation => observation.created_by === entry.created_by);
       nextAssignment();
       matchNumber = entry.match_key;
       robotNumber = entry.team_key.replace(/^frc/, '');
@@ -402,7 +408,7 @@
       card = entry.card || 'none';
       driverSkill = entry.driver_skill ?? undefined;
       pitProblem = Boolean(problem);
-      pitProblemDetails = problem?.summary || '';
+      pitProblemDetails = ownObservation?.summary || problem?.summary || '';
       beached = entry.beached === true;
       postNotes = entry.post_notes || '';
       editing = true;
