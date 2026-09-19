@@ -3,6 +3,7 @@
   import { ArrowDown, ArrowUp, Check, ListOrdered, Plus, RefreshCw, X } from 'lucide-svelte';
   import { fetchActiveScoutingEventKey } from '$lib/scoutingEvent.js';
   import { getAuthHeader } from '$lib/supabase.js';
+  import { fetchWithCache } from '$lib/offlineCache.js';
 
   let eventKey = '';
   let matches = [];
@@ -87,9 +88,11 @@
     loading = true;
     error = '';
     const authHeaders = await getAuthHeader();
+    // Schedule and roster barely change mid-event - cached, so a slow link
+    // doesn't delay showing the rankings board.
     const [matchesResult, rosterResult, rankingsResult, practiceResult] = await Promise.all([
-      fetch(`/api/tba/event-matches?event_key=${encodeURIComponent(eventKey)}&comp_level=all`).then((response) => response.json()).catch(() => null),
-      fetch(`/api/tba/event-teams?event_key=${encodeURIComponent(eventKey)}`).then((response) => response.json()).catch(() => null),
+      fetchWithCache(`/api/tba/event-matches?event_key=${encodeURIComponent(eventKey)}&comp_level=all`, { cacheKey: `event-matches:${eventKey}:all` }).catch(() => null),
+      fetchWithCache(`/api/tba/event-teams?event_key=${encodeURIComponent(eventKey)}`, { cacheKey: `event-teams:${eventKey}` }).catch(() => null),
       fetch(`/api/scouting-match-rankings?event_key=${encodeURIComponent(eventKey)}`, { headers: authHeaders }).then((response) => response.json()).catch(() => null),
       fetch(`/api/scouting-practice-matches?event_key=${encodeURIComponent(eventKey)}`, { headers: authHeaders }).then((response) => response.json()).catch(() => null)
     ]);

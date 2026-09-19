@@ -38,36 +38,68 @@ function writeCache(key, value) {
   }
 }
 
+const DEFAULT_TIMEOUT_MS = 15000;
+
+async function fetchJsonWithTimeout(url, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload?.error || `Request failed (${response.status})`);
+    return payload;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * Fetches `url` as JSON with a cache-then-network strategy.
  *
- * `onUpdate(payload, { stale })` is called once immediately with the last
- * cached payload if one exists (stale: true), then again with the fresh
- * payload once the network request lands (stale: false). If the network
- * request fails and a cached value was already shown, the stale value is
- * left on screen (onUpdate is not called again with an error) and the
- * cached value is returned - a dropped connection degrades to "showing
- * what we had a minute ago", not a blank section or a stuck spinner. If
- * there was no cached value to fall back on, the fetch failure propagates
- * normally so the caller's existing error handling still runs.
+ * The whole point is that a cache hit must never make the caller wait on
+ * the network - a "slow but alive" competition connection (the common
+ * case; see the module docstring) is exactly the scenario a naive
+ * await-fetch-then-fall-back-to-cache design fails to help with, because
+ * the caller still blocks on that slow request every time before ever
+ * seeing the cached value. So:
  *
- * Returns the fresh payload on success, or the stale cached payload on a
- * failure that had one to fall back to.
+ *   - Cache hit: `onUpdate(cached, { stale: true })` fires synchronously
+ *     and the cached value is returned immediately, before the network is
+ *     even touched. A background refresh is then kicked off separately -
+ *     if it succeeds, `onUpdate(fresh, { stale: false })` fires whenever it
+ *     lands (which the caller must be able to act on later, since the
+ *     function has already returned by then); if it fails, it's swallowed
+ *     entirely and the stale value simply stays showing. Either way the
+ *     returned promise resolves immediately - it does not wait on this
+ *     background refresh.
+ *   - Cache miss: there's nothing to show yet, so this does wait on the
+ *     network (bounded by `timeoutMs`, default 15s - generous for a
+ *     slow-but-working link, but bounded so a truly dead connection still
+ *     fails instead of hanging forever). `onUpdate(fresh, { stale: false })`
+ *     fires once, and the fresh payload is returned. A failure here
+ *     propagates normally, since there is no cache to fall back to.
  */
-export async function fetchWithCache(url, { cacheKey, onUpdate } = {}) {
+export function fetchWithCache(url, { cacheKey, onUpdate, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
   const key = cacheKey || url;
   const cached = readCache(key);
-  if (cached && onUpdate) onUpdate(cached.value, { stale: true });
 
-  try {
-    const response = await fetch(url);
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload?.error || `Request failed (${response.status})`);
+  if (cached) {
+    if (onUpdate) onUpdate(cached.value, { stale: true });
+    fetchJsonWithTimeout(url, timeoutMs)
+      .then((payload) => {
+        writeCache(key, payload);
+        if (onUpdate) onUpdate(payload, { stale: false });
+      })
+      .catch(() => {
+        // Background refresh failed - the stale value already shown (and
+        // already returned to the caller below) stays as-is.
+      });
+    return Promise.resolve(cached.value);
+  }
+
+  return fetchJsonWithTimeout(url, timeoutMs).then((payload) => {
     writeCache(key, payload);
     if (onUpdate) onUpdate(payload, { stale: false });
     return payload;
-  } catch (error) {
-    if (cached) return cached.value;
-    throw error;
-  }
+  });
 }

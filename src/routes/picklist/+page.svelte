@@ -4,6 +4,7 @@
   import { AlertTriangle, ClipboardList, RefreshCw } from 'lucide-svelte';
   import { getAuthHeader } from '$lib/supabase.js';
   import { submitOrQueue } from '$lib/offlineQueue.js';
+  import { fetchWithCache } from '$lib/offlineCache.js';
   import { fetchActiveScoutingEventKey, fetchAvailableScoutingEvents } from '$lib/scoutingEvent.js';
   import { buildStrategyRows } from '$lib/strategyScouting.js';
   import { buildPowerRankings, DEFAULT_SCOUT_POWER_WEIGHTS } from '$lib/scoutingStats.js';
@@ -265,18 +266,22 @@
     teamsWarning = '';
     try {
       const authHeaders = await getAuthHeader();
-      const [response, teamsResponse] = await Promise.all([
+      const [response] = await Promise.all([
         fetch(`/api/scouting-report?event_key=${encodeURIComponent(resolvedEventKey)}`, { headers: authHeaders }),
-        fetch(`/api/tba/event-teams?event_key=${encodeURIComponent(resolvedEventKey)}`)
+        // Roster barely changes mid-event - cached, so a slow link doesn't
+        // delay showing the pick list itself.
+        fetchWithCache(`/api/tba/event-teams?event_key=${encodeURIComponent(resolvedEventKey)}`, {
+          cacheKey: `event-teams:${resolvedEventKey}`,
+          onUpdate: (teamsPayload) => {
+            if (teamsPayload?.success) { eventTeams = teamsPayload.data || []; teamsWarning = ''; }
+            else teamsWarning = teamsPayload?.error || 'Could not load the event roster from The Blue Alliance.';
+          }
+        }).catch(() => { teamsWarning = 'Could not load the event roster from The Blue Alliance.'; })
       ]);
       const payload = await response.json().catch(() => null);
       if (!response.ok || !payload?.success) throw new Error(payload?.error || 'Could not load scouting data.');
       report = payload;
       loadedEventKey = resolvedEventKey;
-
-      const teamsPayload = await teamsResponse.json().catch(() => null);
-      if (teamsResponse.ok && teamsPayload?.success) eventTeams = teamsPayload.data || [];
-      else { eventTeams = []; teamsWarning = teamsPayload?.error || 'Could not load the event roster from The Blue Alliance.'; }
     } catch (cause) {
       report = null;
       eventTeams = [];

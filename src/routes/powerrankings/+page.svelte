@@ -5,6 +5,7 @@
   import MatchScoutReport from '$lib/components/MatchScoutReport.svelte';
   import { fetchActiveScoutingEventKey } from '$lib/scoutingEvent.js';
   import { getAuthHeader } from '$lib/supabase.js';
+  import { fetchWithCache } from '$lib/offlineCache.js';
   import { applyPairwiseConsensus, buildPowerRankings, matchRankingsToPairwiseVotes, summarizePairwisePair } from '$lib/scoutingStats.js';
   import { applyRobotRatings } from '$lib/robotRatings.js';
 
@@ -98,14 +99,17 @@
     warning = '';
     officialNote = '';
     const authHeaders = await getAuthHeader();
+    // Roster and OPR are the two TBA-sourced fetches here (everything else
+    // is our own scouting data, which must always be fresh) - cached so a
+    // slow link doesn't delay the rest of this Promise.all.
     const [rosterResult, scoutResult, matchResult, notesResult, pitResult, problemResult, officialResult, comparisonResult, ratingsResult, rankingsResult] = await Promise.all([
-      fetch(`/api/tba/event-teams?event_key=${encodeURIComponent(eventKey)}`).then((response) => response.json()).catch(() => null),
+      fetchWithCache(`/api/tba/event-teams?event_key=${encodeURIComponent(eventKey)}`, { cacheKey: `event-teams:${eventKey}` }).catch(() => null),
       fetch(`/datascout?all_teams=1&event_key=${encodeURIComponent(eventKey)}`, { headers: authHeaders }).then((response) => response.json()).catch(() => null),
       fetch(`/api/matchscout?event_key=${encodeURIComponent(eventKey)}`, { headers: authHeaders }).then((response) => response.json()).catch(() => null),
       fetch(`/notescout?event_key=${encodeURIComponent(eventKey)}&recent=50000`, { headers: authHeaders }).then((response) => response.json()).catch(() => null),
       fetch(`/pitscout?event_key=${encodeURIComponent(eventKey)}`, { headers: authHeaders }).then((response) => response.json()).catch(() => null),
       fetch(`/api/matchscout?resource=pit-problems&event_key=${encodeURIComponent(eventKey)}`, { headers: authHeaders }).then((response) => response.json()).catch(() => null),
-      fetch(`/api/tba/event-oprs?event_key=${encodeURIComponent(eventKey)}`).then((response) => response.json()).catch(() => null),
+      fetchWithCache(`/api/tba/event-oprs?event_key=${encodeURIComponent(eventKey)}`, { cacheKey: `event-oprs:${eventKey}` }).catch(() => null),
       fetch(`/api/scouting-comparisons?event_key=${encodeURIComponent(eventKey)}`, { headers: authHeaders }).then((response) => response.json()).catch(() => null),
       fetch(`/api/scouting-robot-ratings?event_key=${encodeURIComponent(eventKey)}`, { headers: authHeaders }).then((response) => response.json()).catch(() => null),
       fetch(`/api/scouting-match-rankings?event_key=${encodeURIComponent(eventKey)}`, { headers: authHeaders }).then((response) => response.json()).catch(() => null)
