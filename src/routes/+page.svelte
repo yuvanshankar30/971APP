@@ -73,6 +73,26 @@
   let draggedSectionKey = null;
   let dragOverSectionKey = null;
 
+  // Quick-nav sidebar: clicking a tab surfaces a preview right here on the
+  // home page instead of immediately navigating away from it - navigating
+  // is still one click away (the panel's own "Open" button), just no
+  // longer the click on the tab itself.
+  const QUICK_TABS = [
+    { key: 'strategy', label: 'Strategy', href: '/strategy', blurb: 'Alliance selection notes and match strategy, built from every other scouting surface below it.' },
+    { key: 'driveteam', label: 'Drive Team', href: '/driveteam', blurb: 'The field-facing view of the live match schedule - what Drive Team needs to know before each match.' },
+    { key: 'matchscout', label: 'Match Scouting', href: '/matchscout', blurb: 'File a match report for your assigned robot, or edit one you already submitted.' },
+    { key: 'pitscout', label: 'Pit Scouting', href: '/pitscout', blurb: "Record a team's robot capabilities, drivebase, and technical details during pit walks." },
+    { key: 'myscout', label: 'My Scout', href: '/myscout', blurb: 'Every match and pit report you have personally submitted for the active competition.' },
+    { key: 'picklist', label: 'Picklist', href: '/picklist', blurb: 'Drag-reorder your human pick list, with AI move-flagging against the scouting data.' },
+    { key: 'matchrankings', label: 'Match Rankings', href: '/matchrankings', blurb: 'Live qualification rankings and match results as they come in.' },
+    { key: 'powerrankings', label: 'Power Rankings', href: '/powerrankings', blurb: "A computed power ranking blending this team's own scouting data with TBA." },
+    { key: 'robotratings', label: 'Robot Ratings', href: '/robotratings', blurb: 'Scout-submitted ratings for every robot at the event, side by side.' },
+    { key: 'predictions', label: 'Prediction Market', href: '/predictions', blurb: 'Predict match outcomes and see how the team is calling upcoming matches.' },
+    { key: 'scouting-admin', label: 'Scouting Admin', href: '/scouting-admin', blurb: 'Publish scouting assignments, manage the active event, and review submissions.' }
+  ];
+  let activeQuickTab = null;
+  $: activeQuickTabInfo = QUICK_TABS.find((tab) => tab.key === activeQuickTab) || null;
+
   $: canViewAdmin = can('VIEW_ADMIN_PANEL');
   $: customSectionKeys = sanitizeSectionKeys(user?.dashboard_sections);
   $: rawVisibleKeys = (customSectionKeys && customSectionKeys.length ? customSectionKeys : defaultSectionKeyList(canViewAdmin))
@@ -189,6 +209,11 @@
   let currentMatchState = 'unavailable';
   let currentMatchLoading = false;
   let currentMatchError = '';
+  // This signed-in scout's own team's next/current match specifically (not
+  // just whatever match the field is on) - what the Drive Team preview
+  // below is actually for.
+  let myTeamNextMatch = null;
+  let myTeamNextMatchState = 'unavailable';
 
   async function loadMatchAlliances() {
     currentMatchLoading = true;
@@ -214,6 +239,13 @@
       const current = selectCurrentEventMatch(payload.data || []);
       currentEventMatch = current.match;
       currentMatchState = current.state;
+
+      const myTeamKey = `frc${user?.frc_team || FRC_TEAMS.TEAM_971}`;
+      const myTeamMatches = (payload.data || []).filter((m) =>
+        (m.alliances?.red?.team_keys || []).includes(myTeamKey) || (m.alliances?.blue?.team_keys || []).includes(myTeamKey));
+      const myCurrent = selectCurrentEventMatch(myTeamMatches);
+      myTeamNextMatch = myCurrent.match;
+      myTeamNextMatchState = myCurrent.state;
     } catch (error) {
       currentMatchError = error?.message || 'TBA schedule unavailable';
     } finally {
@@ -487,7 +519,27 @@
   </div>
 {:else if user}
   <!-- User Dashboard -->
-  <div class="dashboard-container">
+  <div class="dashboard-shell">
+    <!-- Fills what used to be dead margin on wide screens with something
+         useful: quick jumps to the rest of Competition, without opening the
+         top nav's dropdown. Deliberately not position:sticky - the global
+         .nav-header in +layout.svelte is already sticky at top:0 with a
+         much higher z-index, and a second sticky element at the same
+         top:0 gets silently covered by it once the page scrolls (see
+         ScoutAssignmentPanel's own .panel-header for the exact same bug,
+         fixed the same way: don't stick two things to the same line). -->
+    <aside class="quick-nav" aria-label="Competition quick navigation">
+      <span class="quick-nav-label">Competition</span>
+      {#each QUICK_TABS as tab (tab.key)}
+        <button
+          type="button"
+          class="quick-nav-tab"
+          class:active={activeQuickTab === tab.key}
+          on:click={() => activeQuickTab = activeQuickTab === tab.key ? null : tab.key}
+        >{tab.label}</button>
+      {/each}
+    </aside>
+    <div class="dashboard-container">
     <div class="user-welcome">
       <div class="user-welcome-text">
         <h2>Welcome back, {user.full_name || user.email}!</h2>
@@ -531,22 +583,6 @@
         <strong class="stat-value">{myPrescoutAssignments.length}</strong>
       </div>
     </div>
-
-    {#if showScoutAlert && incompleteScoutAssignments.length>0}
-      <div class="pending-notice">
-        <AlertCircle size={20} />
-        <div>
-          <h3>Scouting Assignments</h3>
-          <p>You have {incompleteScoutAssignments.length} upcoming scouting assignment{incompleteScoutAssignments.length===1?'':'s'}.</p>
-          {#if nextScoutAssignment}
-            <div style="margin-top:0.25rem; display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center">
-              <button class="btn btn-primary" on:click={() => goto(scoutAssignmentHref(nextScoutAssignment))}>Go to Next ({nextScoutAssignment.scouting_type} – {nextScoutAssignment.match_key.split('_').pop()} – {nextScoutAssignment.team_key.replace('frc','')})</button>
-              <button class="btn btn-outline" on:click={() => showScoutAlert=false}>Dismiss</button>
-            </div>
-          {/if}
-        </div>
-      </div>
-    {/if}
 
     {#if !can('CAN_SEE_ROUTES')}
       <div class="pending-notice">
@@ -659,6 +695,20 @@
               </div>
             {:else if section.key === 'assignment-queue'}
               <div class="user-lists">
+                {#if showScoutAlert && incompleteScoutAssignments.length>0}
+                  <div class="pending-notice compact">
+                    <AlertCircle size={16} />
+                    <p>
+                      {incompleteScoutAssignments.length} open assignment{incompleteScoutAssignments.length===1?'':'s'}.
+                      {#if nextScoutAssignment}
+                        <button class="link-btn" on:click={() => goto(scoutAssignmentHref(nextScoutAssignment))}>Go to next ({nextScoutAssignment.scouting_type} – {nextScoutAssignment.match_key.split('_').pop()} – {nextScoutAssignment.team_key.replace('frc','')})</button>
+                      {/if}
+                    </p>
+                    <button class="dismiss-btn" on:click={() => showScoutAlert=false} aria-label="Dismiss">
+                      <X size={14} />
+                    </button>
+                  </div>
+                {/if}
                 <div class="assignment-heading">
                   <div>
                     <h4>Your Scouting Assignments</h4>
@@ -712,7 +762,33 @@
           </div>
         {/if}
       </div>
+
+      {#if activeQuickTabInfo}
+        <div class="quick-preview">
+          <div>
+            <span class="quick-preview-label">{activeQuickTabInfo.label}</span>
+            {#if (activeQuickTabInfo.key === 'driveteam' || activeQuickTabInfo.key === 'strategy') && myTeamNextMatch}
+              <p class="quick-preview-match-heading">
+                {myTeamNextMatchState === 'current' ? 'Current match' : myTeamNextMatchState === 'upcoming' ? 'Up next' : 'Latest match'}: {matchDisplayName(myTeamNextMatch)}
+              </p>
+              <div class="quick-preview-alliances">
+                <div class="current-alliance red"><span>Red</span>{#each myTeamNextMatch.alliances?.red?.team_keys || [] as teamKey}<b>{displayTeamNumber(teamKey)}</b>{/each}</div>
+                <div class="current-alliance blue"><span>Blue</span>{#each myTeamNextMatch.alliances?.blue?.team_keys || [] as teamKey}<b>{displayTeamNumber(teamKey)}</b>{/each}</div>
+              </div>
+            {:else if (activeQuickTabInfo.key === 'driveteam' || activeQuickTabInfo.key === 'strategy') && !myTeamNextMatch}
+              <p>No match found for your team at {homeEventKey || 'the active event'} yet.</p>
+            {:else}
+              <p>{activeQuickTabInfo.blurb}</p>
+            {/if}
+          </div>
+          <div class="quick-preview-actions">
+            <a class="btn btn-primary btn-sm" href={activeQuickTabInfo.href}>Open</a>
+            <button class="btn btn-outline btn-sm" on:click={() => activeQuickTab = null}>Close</button>
+          </div>
+        </div>
+      {/if}
     {/if}
+    </div>
   </div>
 {:else if $loginScreenStyle === 'modern'}
   <!-- Authentication Forms: Modern (split-hero) -->
@@ -1434,16 +1510,129 @@
     font-size: var(--font-xs);
   }
 
+  /* No more capped-width centered column - the quick-nav sidebar takes the
+     left gutter and the content column stretches to fill whatever's left,
+     so wide monitors don't just get more black margin on both sides. */
+  .dashboard-shell {
+    --home-radius: 0;
+    display: grid;
+    grid-template-columns: 200px minmax(0, 1fr);
+    align-items: start;
+    gap: var(--space-5);
+    /* Full-bleed breakout: the global <main> this sits in (see +layout.svelte's
+       main.container.page-container) is itself centered and capped at
+       --page-max-width, so the sidebar could only ever reach the left edge
+       of THAT column, not the actual viewport edge - the "still not far
+       enough left" gap on wide screens. width:100vw + this margin math is
+       the standard way to escape a centered ancestor without touching the
+       shared layout (which every other route also depends on). */
+    width: 100vw;
+    margin-left: calc(50% - 50vw);
+    margin-right: calc(50% - 50vw);
+    padding: var(--space-7) var(--space-5);
+  }
+
+  .quick-nav {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border);
+    background: var(--surface-1);
+  }
+
+  .quick-nav-label {
+    font-family: var(--font-mono-stack);
+    font-size: var(--font-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    padding: var(--space-3) var(--space-4) var(--space-2);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .quick-nav-tab {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: var(--space-3) var(--space-4);
+    border: none;
+    border-left: 3px solid transparent;
+    border-bottom: 1px solid var(--border);
+    background: none;
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: border-color 0.1s ease, background-color 0.1s ease, color 0.1s ease;
+  }
+
+  .quick-nav-tab:last-child {
+    border-bottom: none;
+  }
+
+  .quick-nav-tab:hover {
+    border-left-color: var(--brand-gold-strong);
+    background: var(--surface-2);
+    color: var(--secondary);
+  }
+
+  .quick-nav-tab.active {
+    border-left-color: var(--accent-strong);
+    background: var(--accent-subtle);
+    color: var(--secondary);
+    font-weight: 600;
+  }
+
+  .quick-preview {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: var(--space-4);
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent-strong);
+    padding: var(--space-4) var(--space-5);
+    margin-bottom: var(--space-5);
+  }
+
+  .quick-preview-label {
+    display: block;
+    font-family: var(--font-mono-stack);
+    font-size: var(--font-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin-bottom: var(--space-1);
+  }
+
+  .quick-preview p {
+    margin: 0;
+    color: var(--text-secondary);
+    max-width: 48em;
+  }
+
+  .quick-preview-match-heading {
+    margin: 0 0 var(--space-2) !important;
+    font-weight: 600;
+    color: var(--secondary);
+  }
+
+  .quick-preview-alliances {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--gap-3);
+    max-width: 32em;
+  }
+
+  .quick-preview-actions {
+    display: flex;
+    gap: var(--space-2);
+    flex-shrink: 0;
+  }
+
   .dashboard-container {
     /* Sharp corners throughout this page, by direct instruction - no
-       filleted rectangles. Wider than before too: this is the one screen
-       every signed-in visit starts on, and it was floating in a narrow
-       centered column with a lot of unused side space on anything wider
-       than a laptop. */
-    --home-radius: 0;
-    max-width: 1440px;
-    margin: var(--space-7) auto;
-    padding: 0 var(--space-4);
+       filleted rectangles. */
+    min-width: 0;
   }
 
   /* Compact masthead with a gold spine — no dead vertical space */
@@ -1539,6 +1728,39 @@
   .pending-notice p {
     margin: 0;
     line-height: 1.5;
+  }
+
+  /* Sits at the top of the assignment list it's actually about now, instead
+     of announcing itself as a full-height banner above the whole page - a
+     single line is enough once it's right next to the thing it refers to. */
+  .pending-notice.compact {
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-2) var(--space-4);
+    margin-bottom: var(--space-4);
+  }
+
+  .pending-notice.compact p {
+    flex: 1;
+    font-size: 0.85rem;
+  }
+
+  .dismiss-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    border: none;
+    background: none;
+    color: inherit;
+    opacity: 0.7;
+    cursor: pointer;
+  }
+
+  .dismiss-btn:hover {
+    opacity: 1;
   }
 
   .dashboard-actions h3 {
@@ -1670,15 +1892,29 @@
     font-weight: 600;
   }
 
+  /* Sidebar becomes a horizontal scrollable tab strip above the content
+     instead of a column competing for width - a 200px rail has no business
+     existing below tablet width. */
+  @media (max-width: 900px) {
+    .dashboard-shell { grid-template-columns: 1fr; }
+    .quick-nav { flex-direction: row; overflow-x: auto; }
+    .quick-nav-label { flex-shrink: 0; border-bottom: none; border-right: 1px solid var(--border); }
+    .quick-nav-tab { flex-shrink: 0; width: auto; border-bottom: none; border-right: 1px solid var(--border); border-left: none; border-top: 3px solid transparent; }
+    .quick-nav-tab:last-child { border-right: none; }
+    .quick-nav-tab:hover { border-left-color: transparent; border-top-color: var(--brand-gold-strong); }
+    .quick-nav-tab.active { border-left-color: transparent; border-top-color: var(--accent-strong); }
+    .quick-preview { flex-direction: column; }
+  }
+
   /* Mobile Responsive Styles */
   @media (max-width: 768px) {
-    .auth-container { 
-      margin: var(--space-4) auto; 
+    .auth-container {
+      margin: var(--space-4) auto;
       padding: 0 var(--space-3);
     }
     .auth-card { padding: var(--space-6); }
     .brand h1 { font-size: var(--font-xl); }
-    .dashboard-container { margin: var(--space-4) 0; padding: 0 var(--space-3); }
+    .dashboard-shell { width: auto; margin: var(--space-4) var(--space-3); padding: 0; }
     .user-welcome { padding: var(--space-6); }
     .user-welcome h2 { font-size: var(--font-md); margin-bottom: var(--space-3); }
     .workspace-grid, .action-grid { grid-template-columns: 1fr; gap: var(--gap-3); }
