@@ -281,11 +281,12 @@
   }
 
   // scout_match_assignments (scouting_type 'data') keys its rows with TBA's
-  // full match key ("2026cc_qm14") and "frc"-prefixed team key, while this
-  // page's own match_scout_entries convention is the bare qualification
-  // number and bare team number (see bareMatchNumber/scoutAssignmentHref on
-  // the homepage) - these two convert one into the other so a submission
-  // here can look up and complete the assignment that sent the scout here.
+  // full match key ("2026cc_qm14"), while this page's own match_scout_entries
+  // convention is the bare qualification number for match_key (see
+  // bareMatchNumber/scoutAssignmentHref on the homepage) - matchKey needs
+  // translating between the two. team_key is "frcNNNN" on both sides (the
+  // server normalizes match_scout_entries.team_key the same way), so only
+  // toAssignmentTeamKey's "frc" prefix is needed there, not a translation.
   function assignmentLookupKey(matchKey, teamKey) {
     return `${matchKey}::${teamKey}`;
   }
@@ -354,7 +355,11 @@
       const response = await fetch(`/api/matchscout?event_key=${encodeURIComponent(eventKey)}&mine=1`, { headers: await getAuthHeader() });
       const result = await response.json().catch(() => null);
       if (!response.ok || !result?.success) return false;
-      const entry = (result.data || []).find(r => String(r.match_key) === String(rawMatchNumber) && String(r.team_key) === String(rawTeamNumber));
+      // match_scout_entries.team_key is server-normalized to "frcNNNN" (see
+      // normalizeTeamKey in matchScoutingSchema.js) even though this page's
+      // own robotNumber field is bare digits - toAssignmentTeamKey applies
+      // the same "frc" prefix so this comparison actually lines up.
+      const entry = (result.data || []).find(r => String(r.match_key) === String(rawMatchNumber) && String(r.team_key) === toAssignmentTeamKey(rawTeamNumber));
       if (entry) { await editReport(entry); return true; }
     } catch { /* fall through to a fresh entry */ }
     return false;
