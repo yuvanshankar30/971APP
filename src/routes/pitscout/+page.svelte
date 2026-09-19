@@ -2019,11 +2019,22 @@
     font-size: 1.1rem;
   }
 
-  .picker-card,
   .entry-card {
     display: grid;
     gap: 1rem;
     max-width: 760px;
+    margin: 0 auto;
+  }
+
+  /* Wider than .entry-card on purpose - the team list is the one screen in
+     this flow that benefits from the page's full width instead of a narrow
+     centered column. A ~40-team event in a single 760px-wide column was all
+     scroll and almost no use of the rest of the screen; letting it flow into
+     several columns turns that into a few rows. */
+  .picker-card {
+    display: grid;
+    gap: 1rem;
+    max-width: 1400px;
     margin: 0 auto;
   }
 
@@ -2033,16 +2044,15 @@
 
   .team-list {
     display: grid;
-    gap: 0.45rem;
-    max-height: 70vh;
-    overflow: auto;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 0.6rem;
   }
 
   .team-row {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 0.75rem;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.4rem;
     width: 100%;
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -2511,10 +2521,6 @@
       justify-content: space-between;
     }
 
-    .team-list {
-      max-height: none;
-    }
-
     .photo-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
@@ -2533,11 +2539,6 @@
   }
 
   @media (max-width: 480px) {
-    .team-row {
-      flex-wrap: wrap;
-      align-items: flex-start;
-    }
-
     .photo-grid {
       grid-template-columns: 1fr;
     }
