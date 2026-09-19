@@ -95,7 +95,11 @@
     }
   }
   const sortIndicator = (column) => (sortColumn === column ? (sortDir === 'asc' ? '▲' : '▼') : '');
-  $: selectedTeam = rows.find((row) => row.teamKey === selectedTeamKey) || filteredRows[0] || null;
+  // No fallback to filteredRows[0] here on purpose - defaulting to
+  // "whichever team happened to sort first" highlighted an arbitrary row
+  // on every page load with nothing to explain why that team, of all of
+  // them, was singled out. Nothing is selected until a scout picks one.
+  $: selectedTeam = selectedTeamKey ? rows.find((row) => row.teamKey === selectedTeamKey) || null : null;
   $: activeEventLabel = availableEvents.find((option) => option.value === eventKey)?.label || eventKey || 'not set';
   $: browseEventOptions = availableEvents.filter((option) => option.value !== eventKey);
   // Reuses the same buildPowerRankings pipeline Power Rankings itself calls,
@@ -259,7 +263,6 @@
       if (!response.ok || !payload?.success) throw new Error(payload?.error || 'Could not load scouting strategy data.');
       report = payload;
       loadedEventKey = resolvedEventKey;
-      if (!selectedTeamKey && buildStrategyRows(payload.data)[0]) selectedTeamKey = buildStrategyRows(payload.data)[0].teamKey;
 
       const teamsPayload = await teamsResponse.json().catch(() => null);
       if (teamsResponse.ok && teamsPayload?.success) eventTeams = teamsPayload.data || [];
