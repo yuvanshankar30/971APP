@@ -10,6 +10,11 @@
   // what was asked to change. Scouting Admin's whole point is knowing who
   // submitted a report, so it opts in to keeping that visible everywhere.
   export let showScout = false;
+  // Optional - only Scouting Admin's review list passes this. A plain
+  // callback rather than a dispatched event since the caller (which knows
+  // how to actually delete a report) varies more than a fixed event
+  // contract would buy us here.
+  export let onRemove = null;
 
   const present = (value) => value !== null && value !== undefined && String(value).trim() !== '';
   const valueOrDash = (value) => present(value) ? value : '-';
@@ -59,6 +64,15 @@
       <span>{report?.scout_name || report?.created_by || 'Unknown scout'}</span>
       <time datetime={reportTime || undefined} title={dateValue(reportTime)}>{dateValue(reportTime, true)}</time>
     </span>
+    {#if onRemove}
+      <button
+        class="remove-btn"
+        type="button"
+        title="Remove this match report"
+        aria-label={`Remove the ${matchLabel(report?.match_key)} report for team ${teamNumber(report?.team_key)}`}
+        on:click|stopPropagation|preventDefault={() => onRemove(report)}
+      >&times;</button>
+    {/if}
   </summary>
 
   <div class="report-body">
@@ -178,6 +192,23 @@
   .report-meta { display:flex; flex-direction:column; min-width:0; text-align:right; }
   .report-meta > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:.75rem; }
   .report-meta time { color:var(--text-muted); font-size:.66rem; }
+  summary:has(.remove-btn) { grid-template-columns:minmax(8rem, .7fr) minmax(20rem, 2fr) minmax(9rem, .7fr) auto; }
+  .remove-btn {
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    width:1.7rem;
+    height:1.7rem;
+    border:1px solid var(--border);
+    border-radius:50%;
+    background:var(--surface-1, #fff);
+    color:#b33a2f;
+    font-size:1.1rem;
+    line-height:1;
+    cursor:pointer;
+  }
+  .remove-btn:hover { background:rgba(239, 68, 68, .12); border-color:#b33a2f; }
+  .remove-btn { justify-self:end; }
   .report-body {
     display:grid;
     grid-template-columns:minmax(9rem, .72fr) repeat(3, minmax(12rem, 1fr));
@@ -211,6 +242,8 @@
      access of its own). */
   @media (max-width:1050px) {
     summary:has(.report-meta.force-visible) { grid-template-columns:minmax(8rem, .7fr) minmax(18rem, 2fr) minmax(7rem, .5fr); }
+    summary:has(.report-meta.force-visible):has(.remove-btn) { grid-template-columns:minmax(8rem, .7fr) minmax(16rem, 2fr) minmax(7rem, .5fr) auto; }
+    summary:has(.remove-btn):not(:has(.report-meta.force-visible)) { grid-template-columns:minmax(8rem, .7fr) minmax(20rem, 2fr) auto; }
     .report-meta.force-visible { display:flex; }
   }
   @media (max-width:680px) {

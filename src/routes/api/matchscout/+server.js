@@ -203,6 +203,35 @@ export async function POST({ request }) {
     return json({ success: true, data });
   }
 
+  if (action === 'delete-entry') {
+    if (!body?.id) return json({ error: 'id is required' }, { status: 400 });
+
+    // Removing someone's submitted report is meaningfully more sensitive
+    // than submitting your own, so this checks scouting-admin-equivalent
+    // access rather than just "logged in" - same bar as publishing scout
+    // assignments (see computeScoutingAccess in api/scout-assignments).
+    const { data: profileRow } = await db
+      .from('user_profiles')
+      .select('role, permissions, team_role')
+      .eq('id', actor.id)
+      .single();
+    const { data: rosterRows } = await db
+      .from('roster_entries')
+      .select('key:key_id(key_name)')
+      .eq('user_id', actor.id);
+    const rosterKeys = new Set((rosterRows || []).map((row) => String(row?.key?.key_name || '').toLowerCase().trim()).filter(Boolean));
+    const perms = new Set(Array.isArray(profileRow?.permissions) ? profileRow.permissions.map(String) : []);
+    const isAdmin = profileRow?.role === 'admin';
+    const isCompetitionLead = String(profileRow?.team_role || '').trim().toLowerCase() === 'competition lead';
+    const hasLeadKey = rosterKeys.has('scouting admin') || rosterKeys.has('data scout lead') || rosterKeys.has('scouting lead');
+    const canDelete = isAdmin || isCompetitionLead || perms.has('DATA_SCOUT_ADMIN') || perms.has('VIEW_ADMIN_PANEL') || hasLeadKey;
+    if (!canDelete) return json({ error: 'Forbidden' }, { status: 403 });
+
+    const { error } = await db.from('match_scout_entries').delete().eq('id', body.id);
+    if (error) return json({ error: error.message }, { status: 500 });
+    return json({ success: true });
+  }
+
   if (action === 'resolve-pit-problem') {
     if (!body?.id) return json({ error: 'id is required' }, { status: 400 });
     const resolved = body.resolved !== false;
