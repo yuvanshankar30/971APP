@@ -1,10 +1,20 @@
 <script>
   import { onMount } from 'svelte';
-  import { Candy, Coins, RefreshCw, Trophy, X } from 'lucide-svelte';
+  import { Activity, Candy, Coins, Flame, RefreshCw, Scale, TrendingUp, Trophy, X } from 'lucide-svelte';
   import { fetchActiveScoutingEventKey } from '$lib/scoutingEvent.js';
   import { getAuthHeader, supabase } from '$lib/supabase.js';
   import { isMatchPlayed, matchLabel } from '$lib/matchProjection.js';
-  import { STARTING_BALANCE, availableBalance, myBetForMatch, poolForMatch, summarizeStandings } from '$lib/predictionMarket.js';
+  import { calibratedScale, computeEventEpa, winProbability } from '$lib/epaModel.js';
+  import {
+    STARTING_BALANCE,
+    availableBalance,
+    balanceHistoryForUser,
+    isTestMarketKey,
+    myBetForMatch,
+    oddsHistoryForMatch,
+    poolForMatch,
+    summarizeStandings
+  } from '$lib/predictionMarket.js';
   import { fetchWithCache } from '$lib/offlineCache.js';
 
   let eventKey = '';
@@ -29,13 +39,95 @@
     return match ? matchLabel(match) : matchKey;
   };
 
+  // Turns a plain array of numbers into an SVG <polyline> points string, the
+  // same tiny inline-chart approach used elsewhere in the app rather than
+  // pulling in a charting library for what's just a handful of short lines.
+  function sparklinePoints(values, width = 100, height = 28, pad = 3) {
+    if (!values.length) return '';
+    if (values.length === 1) return `${pad},${(height / 2).toFixed(1)} ${width - pad},${(height / 2).toFixed(1)}`;
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const range = max - min || 1;
+    const step = (width - pad * 2) / (values.length - 1);
+    return values
+      .map((value, index) => {
+        const x = pad + index * step;
+        const y = pad + (1 - (value - min) / range) * (height - pad * 2);
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      })
+      .join(' ');
+  }
+
+  function timeAgo(iso) {
+    if (!iso) return '';
+    const seconds = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+    if (seconds < 60) return 'just now';
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+    return `${Math.floor(seconds / 86400)}d ago`;
+  }
+
   $: standings = summarizeStandings(bets);
   $: candyLeader = standings[0] || null;
   $: myBalance = availableBalance(bets, userId);
   $: myStandingRow = standings.find((row) => row.userId === userId) || null;
   $: myRank = standings.findIndex((row) => row.userId === userId) + 1;
   $: upcomingMatches = matches.filter((match) => !isMatchPlayed(match));
+
+  // The model's own view of each upcoming match, entirely from TBA's own
+  // match data (matches is loaded from /api/tba/event-matches in loadAll) -
+  // recomputes automatically whenever `matches` is refreshed, so it moves
+  // as TBA reports more results, not just once on page load. This is a
+  // reference number shown ALONGSIDE the crowd's pool-based odds, not a
+  // replacement for them - the crowd odds stay the page's headline number.
+  $: epaByTeam = computeEventEpa(matches);
+  function modelWinProbForMatch(match) {
+    const redTeams = match.alliances?.red?.team_keys || [];
+    const blueTeams = match.alliances?.blue?.team_keys || [];
+    const redKnown = redTeams.map((key) => epaByTeam.get(key)?.epa).filter(Number.isFinite);
+    const blueKnown = blueTeams.map((key) => epaByTeam.get(key)?.epa).filter(Number.isFinite);
+    if (!redKnown.length || !blueKnown.length) return null;
+    const redTotal = redKnown.reduce((sum, value) => sum + value, 0);
+    const blueTotal = blueKnown.reduce((sum, value) => sum + value, 0);
+    return winProbability(redTotal, blueTotal, calibratedScale(epaByTeam.residualStd));
+  }
   $: myResolvedBets = bets.filter((bet) => bet.created_by === userId && bet.resolved_at).sort((a, b) => String(b.resolved_at).localeCompare(String(a.resolved_at)));
+  $: liveBets = bets.filter((bet) => !isTestMarketKey(bet.match_key));
+  $: myBalanceHistory = balanceHistoryForUser(bets, userId);
+  $: myBalanceValues = myBalanceHistory.map((point) => point.balance);
+  $: myBalanceSparkline = sparklinePoints(myBalanceValues);
+  // Where STARTING_BALANCE itself falls on the sparkline's y-axis, so a
+  // faint reference line can show "even" without a separate legend.
+  $: balanceSparklineBaselineY = (() => {
+    if (myBalanceValues.length < 2) return 14;
+    const min = Math.min(...myBalanceValues);
+    const max = Math.max(...myBalanceValues);
+    const range = max - min || 1;
+    return 3 + (1 - (STARTING_BALANCE - min) / range) * (28 - 6);
+  })();
+
+  // Market-wide pulse: total action so far, and which upcoming match the
+  // crowd is most torn on (closest to a 50/50 split) vs. most piled onto -
+  // the same "hot market" signal a real prediction market's homepage leads
+  // with, not just a per-match number you'd only see by opening it.
+  $: totalStaked = liveBets.reduce((sum, bet) => sum + Number(bet.stake || 0), 0);
+  $: upcomingPools = upcomingMatches
+    .map((match) => ({ match, pool: poolForMatch(bets, match.key) }))
+    .filter((row) => row.pool.total > 0);
+  $: closestRace = upcomingPools.length
+    ? upcomingPools.reduce((closest, row) => Math.abs(row.pool.redShare - 0.5) < Math.abs(closest.pool.redShare - 0.5) ? row : closest)
+    : null;
+  $: busiestMatch = upcomingPools.length
+    ? upcomingPools.reduce((busiest, row) => row.pool.total > busiest.pool.total ? row : busiest)
+    : null;
+
+  // Most recent bets across every scout, newest first - the "live activity"
+  // feed a dedicated prediction market leads with so the page feels like a
+  // moving market rather than a static form.
+  $: recentActivity = liveBets
+    .slice()
+    .sort((a, b) => String(b.placed_at || '').localeCompare(String(a.placed_at || '')))
+    .slice(0, 8);
 
   function displayName(id) {
     if (!id) return 'Unknown scout';
@@ -190,8 +282,16 @@
 
   <section class="stat-row">
     <div class="surface-card stat-tile">
-      <span class="text-muted">Your balance</span>
-      <strong class="stat-amount" class:positive={myBalance > STARTING_BALANCE} class:negative={myBalance < STARTING_BALANCE}>{points(myBalance)}</strong>
+      <div class="stat-tile-head">
+        <span class="text-muted">Your balance</span>
+        <strong class="stat-amount" class:positive={myBalance > STARTING_BALANCE} class:negative={myBalance < STARTING_BALANCE}>{points(myBalance)}</strong>
+      </div>
+      {#if myBalanceHistory.length > 1}
+        <svg class="balance-sparkline" viewBox="0 0 100 28" preserveAspectRatio="none">
+          <line x1="0" y1={balanceSparklineBaselineY} x2="100" y2={balanceSparklineBaselineY} class="sparkline-baseline" />
+          <polyline points={myBalanceSparkline} class:positive={myBalance >= STARTING_BALANCE} class:negative={myBalance < STARTING_BALANCE} />
+        </svg>
+      {/if}
     </div>
     <div class="surface-card stat-tile">
       <span class="text-muted">Record</span>
@@ -202,6 +302,39 @@
       <strong class="stat-amount">{myRank || '—'} <span class="text-muted stat-of">/ {standings.length}</span></strong>
     </div>
   </section>
+
+  <section class="pulse-row">
+    <div class="surface-card pulse-tile">
+      <Coins size={15} /><span class="text-muted">Total staked</span><strong>{points(totalStaked)}</strong>
+    </div>
+    {#if closestRace}
+      <div class="surface-card pulse-tile">
+        <Scale size={15} /><span class="text-muted">Closest race</span>
+        <strong>{matchLabel(closestRace.match)} <span class="text-muted">({Math.round(closestRace.pool.redShare * 100)}/{Math.round(closestRace.pool.blueShare * 100)})</span></strong>
+      </div>
+    {/if}
+    {#if busiestMatch}
+      <div class="surface-card pulse-tile">
+        <Flame size={15} /><span class="text-muted">Most action</span>
+        <strong>{matchLabel(busiestMatch.match)} <span class="text-muted">({busiestMatch.pool.betCount} bets)</span></strong>
+      </div>
+    {/if}
+  </section>
+
+  {#if recentActivity.length}
+    <section class="surface-card activity-feed">
+      <h2><Activity size={16} /> Market activity</h2>
+      <ul class="activity-list">
+        {#each recentActivity as bet (bet.id)}
+          <li>
+            <span class:alliance-red={bet.side === 'red'} class:alliance-blue={bet.side === 'blue'} class="activity-side">{bet.side}</span>
+            <span class="activity-body"><strong>{displayName(bet.created_by)}</strong> staked {points(bet.stake)} on {matchLabelFor(bet.match_key)}</span>
+            <span class="text-muted activity-time">{timeAgo(bet.placed_at)}</span>
+          </li>
+        {/each}
+      </ul>
+    </section>
+  {/if}
 
   <section class="surface-card leaderboard">
     <h2><Trophy size={18} /> Leaderboard</h2>
@@ -235,6 +368,8 @@
           {@const mine = myBetForMatch(bets, match.key, userId)}
           {@const draft = draftFor(match.key, drafts, bets, userId)}
           {@const pool = poolForMatch(bets, match.key)}
+          {@const history = oddsHistoryForMatch(bets, match.key)}
+          {@const modelProb = modelWinProbForMatch(match)}
           <div class="bet-row">
             <div class="bet-row-header">
               <strong>{matchLabel(match)}</strong>
@@ -254,6 +389,21 @@
             {#if pool.total > 0}
               <div class="pool-bar">
                 <span class="pool-fill" style={`width:${pool.redShare * 100}%`}></span>
+              </div>
+            {/if}
+            {#if modelProb != null}
+              <p class="model-line text-muted">
+                <TrendingUp size={12} /> Model: <span class="alliance-red">Red {Math.round(modelProb * 100)}%</span> · <span class="alliance-blue">Blue {Math.round((1 - modelProb) * 100)}%</span>
+                <span class="model-source">(from TBA match data)</span>
+              </p>
+            {/if}
+            {#if history.length > 1}
+              <div class="odds-history">
+                <svg viewBox="0 0 100 24" preserveAspectRatio="none">
+                  <line x1="0" y1="12" x2="100" y2="12" class="sparkline-baseline" />
+                  <polyline points={sparklinePoints(history.map((point) => point.redShare * 100), 100, 24)} class="odds-history-line" />
+                </svg>
+                <span class="text-muted odds-history-label">Red share over {history.length} bet{history.length === 1 ? '' : 's'}</span>
               </div>
             {/if}
             <div class="bet-row-form">
@@ -314,10 +464,39 @@
 
   .stat-row { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:var(--space-3); margin-top:var(--space-3); }
   .stat-tile { display:flex; flex-direction:column; gap:4px; }
+  .stat-tile-head { display:flex; flex-direction:column; gap:4px; }
   .stat-amount { font-size:1.3rem; }
   .stat-amount.positive { color:var(--status-success, #16a34a); }
   .stat-amount.negative { color:var(--danger, #dc3545); }
   .stat-of { font-size:.85rem; font-weight:400; }
+
+  .balance-sparkline { width:100%; height:28px; margin-top:var(--space-2); }
+  .balance-sparkline polyline { fill:none; stroke-width:2; stroke:var(--text-muted); }
+  .balance-sparkline polyline.positive { stroke:var(--status-success, #16a34a); }
+  .balance-sparkline polyline.negative { stroke:var(--danger, #dc3545); }
+  .sparkline-baseline { stroke:var(--border); stroke-width:1; stroke-dasharray:2 2; }
+
+  .pulse-row { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:var(--space-3); margin-top:var(--space-3); }
+  .pulse-tile { display:flex; flex-direction:column; gap:2px; padding:var(--space-2) var(--space-3); }
+  .pulse-tile :global(svg) { color:var(--text-muted); margin-bottom:2px; }
+  .pulse-tile strong { font-size:.92rem; }
+
+  .activity-feed { margin-top:var(--space-3); }
+  .activity-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; }
+  .activity-list li { display:flex; align-items:center; gap:var(--space-2); padding:var(--space-2) 0; border-bottom:1px solid var(--border); font-size:.86rem; }
+  .activity-list li:last-child { border-bottom:0; }
+  .activity-side { text-transform:uppercase; font-size:.68rem; font-weight:800; letter-spacing:.04em; flex-shrink:0; width:2.6rem; }
+  .activity-body { flex:1; min-width:0; }
+  .activity-time { flex-shrink:0; font-size:.76rem; }
+
+  .odds-history { display:flex; align-items:center; gap:var(--space-2); margin:-4px 0 var(--space-3); }
+  .odds-history svg { width:60px; height:24px; flex-shrink:0; }
+  .odds-history-line { fill:none; stroke-width:1.5; stroke:var(--danger, #dc3545); }
+  .odds-history-label { font-size:.7rem; }
+
+  .model-line { display:flex; align-items:center; gap:5px; flex-wrap:wrap; font-size:.78rem; margin:0 0 var(--space-3); }
+  .model-line :global(svg) { flex-shrink:0; }
+  .model-source { font-size:.7rem; }
 
   .leaderboard { margin-top:var(--space-3); }
   tr.leader td { font-weight:700; }
