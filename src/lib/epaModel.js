@@ -3,6 +3,9 @@
 // every match nudges each participating team's rating toward the alliance
 // score it actually helped produce, processed in the order matches were
 // actually played so a team's rating reflects its form across the event.
+// Multiple convergence passes (see computeEventEpa) then let early-event
+// matches benefit from what the model learns from the WHOLE event, not just
+// whatever happened to come before them chronologically.
 //
 // This is a first-pass, from-scratch implementation - issue #854 flags that
 // Omer reportedly has working EPA calculation code already, so treat this
@@ -22,6 +25,7 @@
 
 const DEFAULT_K = 0.45; // learning rate: how much one match's surprise moves a rating
 const ALLIANCE_SIZE = 3;
+const DEFAULT_PASSES = 10; // see computeEventEpa's pass loop below - convergence is gradual (Gauss-Seidel-like), and this is cheap even for a full event's match list
 
 function matchSortKey(match) {
   // Chronological where TBA has posted real times; otherwise fall back to
@@ -40,11 +44,12 @@ function matchSortKey(match) {
  * matches already returns).
  *
  * @param {Array} matches
- * @param {{ initialEpa?: number, k?: number }} [options]
+ * @param {{ initialEpa?: number, k?: number, passes?: number }} [options]
  * @returns {Map<string, { epa: number, matchesPlayed: number, wins: number, losses: number, ties: number, totalScore: number, avgScore: number }>}
  */
 export function computeEventEpa(matches, options = {}) {
   const k = options.k ?? DEFAULT_K;
+  const passes = Math.max(1, options.passes ?? DEFAULT_PASSES);
   const played = (matches || [])
     .filter((match) => {
       const redScore = match?.alliances?.red?.score;
@@ -60,59 +65,81 @@ export function computeEventEpa(matches, options = {}) {
   // an arbitrary constant that may not fit this game's scoring at all.
   const initialEpa = options.initialEpa ?? estimateInitialEpa(played);
 
-  const ratings = new Map();
-  const stats = new Map();
-
-  // Every match's pre-update prediction error (actual alliance score minus
-  // the sum of that alliance's CURRENT ratings, before this match nudges
-  // them) is also this event's own empirical measure of how noisy its
-  // scoring actually is. Tracking it lets winProbability calibrate its
-  // logistic scale from THIS event's real variance instead of a guessed
-  // constant - see calibratedScale below.
+  // A single left-to-right pass has a real accuracy problem: a team's very
+  // FIRST match is always judged against the flat baseline, even though by
+  // the end of the event we know a lot more about how good that team (and
+  // its early opponents) actually are - that first match's error can never
+  // get corrected within one pass. Real least-squares systems (OPR) solve
+  // this by fitting the whole event as one linear system; this iterates
+  // toward the same idea instead (closer to Gauss-Seidel than a one-shot
+  // solve): each pass re-runs the exact same match order, but starting every
+  // team at where the PREVIOUS pass left it rather than back at the flat
+  // baseline, so by the second and later passes even match 1 is being
+  // judged against each team's whole-event form. Ratings converge after a
+  // few passes rather than drifting indefinitely - see the convergence
+  // regression test in epaModel.test.js.
+  let priorRatings = null;
+  let ratings = new Map();
+  let stats = new Map();
   let residualSumSq = 0;
   let residualCount = 0;
 
-  function ensure(teamKey) {
-    if (!ratings.has(teamKey)) {
-      ratings.set(teamKey, initialEpa);
-      stats.set(teamKey, { matchesPlayed: 0, wins: 0, losses: 0, ties: 0, totalScore: 0 });
+  for (let pass = 0; pass < passes; pass++) {
+    ratings = new Map();
+    stats = new Map();
+    residualSumSq = 0;
+    residualCount = 0;
+
+    const ensure = (teamKey) => {
+      if (!ratings.has(teamKey)) {
+        ratings.set(teamKey, priorRatings?.get(teamKey) ?? initialEpa);
+        stats.set(teamKey, { matchesPlayed: 0, wins: 0, losses: 0, ties: 0, totalScore: 0 });
+      }
+    };
+
+    for (const match of played) {
+      const redTeams = match.alliances?.red?.team_keys || [];
+      const blueTeams = match.alliances?.blue?.team_keys || [];
+      const redScore = Number(match.alliances.red.score);
+      const blueScore = Number(match.alliances.blue.score);
+      for (const teamKey of [...redTeams, ...blueTeams]) ensure(teamKey);
+
+      const predictedRed = redTeams.reduce((sum, t) => sum + ratings.get(t), 0);
+      const predictedBlue = blueTeams.reduce((sum, t) => sum + ratings.get(t), 0);
+      const redError = redScore - predictedRed;
+      const blueError = blueScore - predictedBlue;
+
+      // Only the FINAL pass's residuals describe how well the converged
+      // ratings actually fit reality - an early pass is still working off a
+      // cruder prior, so its residuals would overstate this event's true
+      // scoring noise and miscalibrate winProbability's scale.
+      if (pass === passes - 1) {
+        residualSumSq += redError * redError + blueError * blueError;
+        residualCount += 2;
+      }
+
+      for (const teamKey of redTeams) ratings.set(teamKey, ratings.get(teamKey) + (k * redError) / ALLIANCE_SIZE);
+      for (const teamKey of blueTeams) ratings.set(teamKey, ratings.get(teamKey) + (k * blueError) / ALLIANCE_SIZE);
+
+      for (const teamKey of redTeams) {
+        const row = stats.get(teamKey);
+        row.matchesPlayed += 1;
+        row.totalScore += redScore;
+        if (redScore > blueScore) row.wins += 1;
+        else if (redScore < blueScore) row.losses += 1;
+        else row.ties += 1;
+      }
+      for (const teamKey of blueTeams) {
+        const row = stats.get(teamKey);
+        row.matchesPlayed += 1;
+        row.totalScore += blueScore;
+        if (blueScore > redScore) row.wins += 1;
+        else if (blueScore < redScore) row.losses += 1;
+        else row.ties += 1;
+      }
     }
-  }
 
-  for (const match of played) {
-    const redTeams = match.alliances?.red?.team_keys || [];
-    const blueTeams = match.alliances?.blue?.team_keys || [];
-    const redScore = Number(match.alliances.red.score);
-    const blueScore = Number(match.alliances.blue.score);
-    for (const teamKey of [...redTeams, ...blueTeams]) ensure(teamKey);
-
-    const predictedRed = redTeams.reduce((sum, t) => sum + ratings.get(t), 0);
-    const predictedBlue = blueTeams.reduce((sum, t) => sum + ratings.get(t), 0);
-    const redError = redScore - predictedRed;
-    const blueError = blueScore - predictedBlue;
-
-    residualSumSq += redError * redError + blueError * blueError;
-    residualCount += 2;
-
-    for (const teamKey of redTeams) ratings.set(teamKey, ratings.get(teamKey) + (k * redError) / ALLIANCE_SIZE);
-    for (const teamKey of blueTeams) ratings.set(teamKey, ratings.get(teamKey) + (k * blueError) / ALLIANCE_SIZE);
-
-    for (const teamKey of redTeams) {
-      const row = stats.get(teamKey);
-      row.matchesPlayed += 1;
-      row.totalScore += redScore;
-      if (redScore > blueScore) row.wins += 1;
-      else if (redScore < blueScore) row.losses += 1;
-      else row.ties += 1;
-    }
-    for (const teamKey of blueTeams) {
-      const row = stats.get(teamKey);
-      row.matchesPlayed += 1;
-      row.totalScore += blueScore;
-      if (blueScore > redScore) row.wins += 1;
-      else if (blueScore < redScore) row.losses += 1;
-      else row.ties += 1;
-    }
+    priorRatings = ratings;
   }
 
   const result = new Map();

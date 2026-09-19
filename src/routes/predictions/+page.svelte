@@ -95,15 +95,15 @@
   $: liveBets = bets.filter((bet) => !isTestMarketKey(bet.match_key));
   $: myBalanceHistory = balanceHistoryForUser(bets, userId);
   $: myBalanceValues = myBalanceHistory.map((point) => point.balance);
-  $: myBalanceSparkline = sparklinePoints(myBalanceValues);
-  // Where STARTING_BALANCE itself falls on the sparkline's y-axis, so a
+  // Where STARTING_BALANCE itself falls on the chart's y-axis (viewBox
+  // height 160, 10px top/bottom pad - see the balance-chart svg below), so a
   // faint reference line can show "even" without a separate legend.
   $: balanceSparklineBaselineY = (() => {
-    if (myBalanceValues.length < 2) return 14;
+    if (myBalanceValues.length < 2) return 80;
     const min = Math.min(...myBalanceValues);
     const max = Math.max(...myBalanceValues);
     const range = max - min || 1;
-    return 3 + (1 - (STARTING_BALANCE - min) / range) * (28 - 6);
+    return 10 + (1 - (STARTING_BALANCE - min) / range) * (160 - 20);
   })();
 
   // Market-wide pulse: total action so far, and which upcoming match the
@@ -282,16 +282,8 @@
 
   <section class="stat-row">
     <div class="surface-card stat-tile">
-      <div class="stat-tile-head">
-        <span class="text-muted">Your balance</span>
-        <strong class="stat-amount" class:positive={myBalance > STARTING_BALANCE} class:negative={myBalance < STARTING_BALANCE}>{points(myBalance)}</strong>
-      </div>
-      {#if myBalanceHistory.length > 1}
-        <svg class="balance-sparkline" viewBox="0 0 100 28" preserveAspectRatio="none">
-          <line x1="0" y1={balanceSparklineBaselineY} x2="100" y2={balanceSparklineBaselineY} class="sparkline-baseline" />
-          <polyline points={myBalanceSparkline} class:positive={myBalance >= STARTING_BALANCE} class:negative={myBalance < STARTING_BALANCE} />
-        </svg>
-      {/if}
+      <span class="text-muted">Your balance</span>
+      <strong class="stat-amount" class:positive={myBalance > STARTING_BALANCE} class:negative={myBalance < STARTING_BALANCE}>{points(myBalance)}</strong>
     </div>
     <div class="surface-card stat-tile">
       <span class="text-muted">Record</span>
@@ -305,21 +297,35 @@
 
   <section class="pulse-row">
     <div class="surface-card pulse-tile">
-      <Coins size={15} /><span class="text-muted">Total staked</span><strong>{points(totalStaked)}</strong>
+      <Coins size={16} /><span class="text-muted">Total staked</span><strong>{points(totalStaked)}</strong>
     </div>
     {#if closestRace}
       <div class="surface-card pulse-tile">
-        <Scale size={15} /><span class="text-muted">Closest race</span>
+        <Scale size={16} /><span class="text-muted">Closest race</span>
         <strong>{matchLabel(closestRace.match)} <span class="text-muted">({Math.round(closestRace.pool.redShare * 100)}/{Math.round(closestRace.pool.blueShare * 100)})</span></strong>
       </div>
     {/if}
     {#if busiestMatch}
       <div class="surface-card pulse-tile">
-        <Flame size={15} /><span class="text-muted">Most action</span>
+        <Flame size={16} /><span class="text-muted">Most action</span>
         <strong>{matchLabel(busiestMatch.match)} <span class="text-muted">({busiestMatch.pool.betCount} bets)</span></strong>
       </div>
     {/if}
   </section>
+
+  {#if myBalanceHistory.length > 1}
+    <section class="surface-card balance-history-card">
+      <h2><TrendingUp size={18} /> Your balance over time</h2>
+      <svg class="balance-chart" viewBox="0 0 600 160" preserveAspectRatio="none">
+        <line x1="0" y1={balanceSparklineBaselineY} x2="600" y2={balanceSparklineBaselineY} class="sparkline-baseline" />
+        <polyline points={sparklinePoints(myBalanceValues, 600, 160, 10)} class:positive={myBalance >= STARTING_BALANCE} class:negative={myBalance < STARTING_BALANCE} />
+      </svg>
+      <div class="balance-chart-legend">
+        <span class="text-muted">Start: {points(STARTING_BALANCE)}</span>
+        <span class:positive={myBalance >= STARTING_BALANCE} class:negative={myBalance < STARTING_BALANCE}>Now: {points(myBalance)}</span>
+      </div>
+    </section>
+  {/if}
 
   {#if recentActivity.length}
     <section class="surface-card activity-feed">
@@ -393,17 +399,17 @@
             {/if}
             {#if modelProb != null}
               <p class="model-line text-muted">
-                <TrendingUp size={12} /> Model: <span class="alliance-red">Red {Math.round(modelProb * 100)}%</span> · <span class="alliance-blue">Blue {Math.round((1 - modelProb) * 100)}%</span>
+                <TrendingUp size={13} /> Model: <span class="alliance-red">Red {Math.round(modelProb * 100)}%</span> · <span class="alliance-blue">Blue {Math.round((1 - modelProb) * 100)}%</span>
                 <span class="model-source">(from TBA match data)</span>
               </p>
             {/if}
             {#if history.length > 1}
               <div class="odds-history">
-                <svg viewBox="0 0 100 24" preserveAspectRatio="none">
-                  <line x1="0" y1="12" x2="100" y2="12" class="sparkline-baseline" />
-                  <polyline points={sparklinePoints(history.map((point) => point.redShare * 100), 100, 24)} class="odds-history-line" />
+                <span class="text-muted odds-history-label">How the crowd's odds moved over {history.length} bets</span>
+                <svg viewBox="0 0 300 70" preserveAspectRatio="none">
+                  <line x1="0" y1="35" x2="300" y2="35" class="sparkline-baseline" />
+                  <polyline points={sparklinePoints(history.map((point) => point.redShare * 100), 300, 70, 6)} class="odds-history-line" />
                 </svg>
-                <span class="text-muted odds-history-label">Red share over {history.length} bet{history.length === 1 ? '' : 's'}</span>
               </div>
             {/if}
             <div class="bet-row-form">
@@ -448,57 +454,72 @@
 <style>
   h1, h2 { display:flex; align-items:center; gap:var(--gap-2); }
 
+  /* Overall page rhythm: every major section gets real breathing room from
+     the one before it, rather than the tight var(--space-3) stack this page
+     started with - "more spaced out" was named directly, and a page this
+     information-dense needs the extra separation to read as sections rather
+     than one long run-on block. */
+  .page-header, .candy-banner, .stat-row, .pulse-row, .balance-history-card,
+  .activity-feed, .leaderboard, section.surface-card { margin-top:var(--space-5); }
+  .page-header { margin-top:0; }
+
   .candy-banner {
-    display:flex; align-items:center; gap:var(--space-3); margin-top:var(--space-3); padding:var(--space-3) var(--space-4);
+    display:flex; align-items:center; gap:var(--space-4); padding:var(--space-4) var(--space-5);
     border:1px solid var(--border); border-left:3px solid var(--brand-gold-strong, #b8860b);
     background:var(--surface-1);
     color:var(--text);
   }
   .candy-banner :global(svg) { color:var(--brand-gold-strong, #b8860b); flex-shrink:0; }
   .candy-banner.its-you { border-left-color:var(--status-success, #16a34a); }
-  .candy-copy { display:flex; flex-direction:column; gap:2px; flex:1; }
-  .candy-balance { display:flex; flex-direction:column; gap:2px; text-align:right; }
+  .candy-copy { display:flex; flex-direction:column; gap:4px; flex:1; }
+  .candy-balance { display:flex; flex-direction:column; gap:4px; text-align:right; }
   .candy-eyebrow { font-size:.72rem; text-transform:uppercase; letter-spacing:.04em; color:var(--text-muted); }
-  .candy-name { font-size:1.15rem; }
+  .candy-name { font-size:1.2rem; }
   :global(.candy-inline) { color:var(--brand-gold-strong, #b8860b); vertical-align:-2px; margin-left:4px; }
 
-  .stat-row { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:var(--space-3); margin-top:var(--space-3); }
-  .stat-tile { display:flex; flex-direction:column; gap:4px; }
-  .stat-tile-head { display:flex; flex-direction:column; gap:4px; }
-  .stat-amount { font-size:1.3rem; }
+  .stat-row { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:var(--space-4); }
+  .stat-tile { display:flex; flex-direction:column; gap:6px; padding:var(--space-4); }
+  .stat-amount { font-size:1.5rem; }
   .stat-amount.positive { color:var(--status-success, #16a34a); }
   .stat-amount.negative { color:var(--danger, #dc3545); }
   .stat-of { font-size:.85rem; font-weight:400; }
 
-  .balance-sparkline { width:100%; height:28px; margin-top:var(--space-2); }
-  .balance-sparkline polyline { fill:none; stroke-width:2; stroke:var(--text-muted); }
-  .balance-sparkline polyline.positive { stroke:var(--status-success, #16a34a); }
-  .balance-sparkline polyline.negative { stroke:var(--danger, #dc3545); }
-  .sparkline-baseline { stroke:var(--border); stroke-width:1; stroke-dasharray:2 2; }
-
-  .pulse-row { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:var(--space-3); margin-top:var(--space-3); }
-  .pulse-tile { display:flex; flex-direction:column; gap:2px; padding:var(--space-2) var(--space-3); }
+  .pulse-row { display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:var(--space-4); }
+  .pulse-tile { display:flex; flex-direction:column; gap:4px; padding:var(--space-3) var(--space-4); }
   .pulse-tile :global(svg) { color:var(--text-muted); margin-bottom:2px; }
-  .pulse-tile strong { font-size:.92rem; }
+  .pulse-tile strong { font-size:.95rem; }
 
-  .activity-feed { margin-top:var(--space-3); }
-  .activity-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; }
-  .activity-list li { display:flex; align-items:center; gap:var(--space-2); padding:var(--space-2) 0; border-bottom:1px solid var(--border); font-size:.86rem; }
+  /* The balance-over-time chart gets its own full-width card and a much
+     bigger canvas than the old cramped stat-tile sparkline - "make the
+     graph bigger" was named directly, and a 600x160 viewBox stretched
+     across the card's full width reads as an actual chart instead of a
+     decorative squiggle. */
+  .balance-history-card { padding:var(--space-4) var(--space-5) var(--space-5); }
+  .balance-chart { width:100%; height:160px; display:block; margin-top:var(--space-3); }
+  .balance-chart polyline { fill:none; stroke-width:2.5; stroke:var(--text-muted); }
+  .balance-chart polyline.positive { stroke:var(--status-success, #16a34a); }
+  .balance-chart polyline.negative { stroke:var(--danger, #dc3545); }
+  .balance-chart-legend { display:flex; justify-content:space-between; font-size:.8rem; margin-top:var(--space-2); }
+  .sparkline-baseline { stroke:var(--border); stroke-width:1; stroke-dasharray:3 3; }
+
+  .activity-list { list-style:none; margin:var(--space-3) 0 0; padding:0; display:flex; flex-direction:column; }
+  .activity-list li { display:flex; align-items:center; gap:var(--space-3); padding:var(--space-3) 0; border-bottom:1px solid var(--border); font-size:.88rem; }
   .activity-list li:last-child { border-bottom:0; }
   .activity-side { text-transform:uppercase; font-size:.68rem; font-weight:800; letter-spacing:.04em; flex-shrink:0; width:2.6rem; }
   .activity-body { flex:1; min-width:0; }
   .activity-time { flex-shrink:0; font-size:.76rem; }
 
-  .odds-history { display:flex; align-items:center; gap:var(--space-2); margin:-4px 0 var(--space-3); }
-  .odds-history svg { width:60px; height:24px; flex-shrink:0; }
-  .odds-history-line { fill:none; stroke-width:1.5; stroke:var(--danger, #dc3545); }
-  .odds-history-label { font-size:.7rem; }
+  /* Same "make the graph bigger" treatment for each match's own odds-
+     history chart - was a 60x24 icon-sized afterthought, now a full-width
+     300x70 chart with its own label above it instead of squeezed beside it. */
+  .odds-history { margin:var(--space-1) 0 var(--space-4); }
+  .odds-history svg { width:100%; height:70px; display:block; margin-top:6px; }
+  .odds-history-line { fill:none; stroke-width:2; stroke:var(--danger, #dc3545); }
+  .odds-history-label { font-size:.74rem; }
 
-  .model-line { display:flex; align-items:center; gap:5px; flex-wrap:wrap; font-size:.78rem; margin:0 0 var(--space-3); }
+  .model-line { display:flex; align-items:center; gap:6px; flex-wrap:wrap; font-size:.8rem; margin:0 0 var(--space-4); }
   .model-line :global(svg) { flex-shrink:0; }
-  .model-source { font-size:.7rem; }
-
-  .leaderboard { margin-top:var(--space-3); }
+  .model-source { font-size:.72rem; }
   tr.leader td { font-weight:700; }
   tr.me { background:var(--surface-2); }
   .rank-badge { display:inline-flex; align-items:center; justify-content:center; min-width:1.6rem; height:1.6rem; border-radius:50%; }
@@ -509,38 +530,39 @@
   .alliance-red { color:var(--danger, #dc3545); }
   .alliance-blue { color:var(--brand-blue, #2563eb); }
 
-  .bet-list { display:flex; flex-direction:column; gap:var(--space-3); margin-top:var(--space-2); }
-  .bet-row { border:1px solid var(--border); padding:var(--space-3) var(--space-4); }
-  .bet-row-header { display:flex; align-items:center; justify-content:space-between; gap:var(--gap-2); flex-wrap:wrap; margin-bottom:var(--space-3); }
-  .pool-size { font-size:.76rem; }
+  .bet-list { display:flex; flex-direction:column; gap:var(--space-4); margin-top:var(--space-3); }
+  .bet-row { border:1px solid var(--border); padding:var(--space-4) var(--space-5); }
+  .bet-row-header { display:flex; align-items:center; justify-content:space-between; gap:var(--gap-2); flex-wrap:wrap; margin-bottom:var(--space-4); }
+  .bet-row-header strong { font-size:1.05rem; }
+  .pool-size { font-size:.78rem; }
 
   /* The market's headline number, the way any dedicated prediction market
      (Polymarket/Kalshi-style) leads with a percentage, not a bar chart -
      the pool-share bar below is a secondary detail, not the main read. */
-  .odds-row { display:grid; grid-template-columns:1fr auto 1fr; gap:var(--space-3); align-items:stretch; margin-bottom:var(--space-2); }
+  .odds-row { display:grid; grid-template-columns:1fr auto 1fr; gap:var(--space-4); align-items:stretch; margin-bottom:var(--space-3); }
   .odds-side {
-    display:flex; flex-direction:column; align-items:center; gap:2px;
-    padding:var(--space-3); border:1px solid var(--border); background:var(--surface-1);
+    display:flex; flex-direction:column; align-items:center; gap:6px;
+    padding:var(--space-4); border:1px solid var(--border); background:var(--surface-1);
     font:inherit; cursor:pointer; text-align:center;
   }
   .odds-side:hover { background:var(--surface-2); }
   .odds-side.red.chosen { border-color:var(--danger, #dc3545); background:var(--red-soft); }
   .odds-side.blue.chosen { border-color:var(--brand-blue, #2563eb); background:var(--blue-soft, #e8f1ff); }
-  .odds-pct { font-size:var(--font-xl, 1.4rem); font-weight:800; }
+  .odds-pct { font-size:var(--font-xl, 1.8rem); font-weight:800; }
   .odds-side.red .odds-pct { color:var(--danger, #dc3545); }
   .odds-side.blue .odds-pct { color:var(--brand-blue, #2563eb); }
-  .odds-teams { font-size:.76rem; color:var(--text-secondary); font-weight:600; }
-  .odds-vs { align-self:center; color:var(--text-muted); font-size:.76rem; font-weight:700; }
+  .odds-teams { font-size:.8rem; color:var(--text-secondary); font-weight:600; }
+  .odds-vs { align-self:center; color:var(--text-muted); font-size:.78rem; font-weight:700; }
 
-  .pool-bar { height:4px; background:var(--brand-blue, #2563eb); overflow:hidden; margin-bottom:var(--space-3); }
+  .pool-bar { height:5px; background:var(--brand-blue, #2563eb); overflow:hidden; margin-bottom:var(--space-4); }
   .pool-fill { display:block; height:100%; background:var(--danger, #dc3545); }
 
-  .bet-row-form { display:flex; align-items:center; gap:var(--gap-2); flex-wrap:wrap; }
-  .stake-input { display:inline-flex; align-items:center; gap:2px; border:1px solid var(--border); padding:0 .5rem; background:var(--surface-1); }
+  .bet-row-form { display:flex; align-items:center; gap:var(--space-3); flex-wrap:wrap; margin-top:var(--space-2); }
+  .stake-input { display:inline-flex; align-items:center; gap:4px; border:1px solid var(--border); padding:0 .7rem; background:var(--surface-1); }
   .stake-input span { color:var(--text-muted); }
-  .stake-input input { border:0; background:none; width:5rem; padding:.4rem 0; color:inherit; font:inherit; }
+  .stake-input input { border:0; background:none; width:5rem; padding:.55rem 0; color:inherit; font:inherit; }
   .stake-input input:focus { outline:none; }
-  .my-pick { margin:var(--space-2) 0 0; font-size:.85rem; }
+  .my-pick { margin:var(--space-3) 0 0; font-size:.86rem; }
 
   .positive { color:var(--status-success, #16a34a); }
   .negative { color:var(--danger, #dc3545); }
