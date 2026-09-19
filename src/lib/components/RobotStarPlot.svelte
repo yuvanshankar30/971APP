@@ -47,7 +47,7 @@
 
 <div class="star-plot">
   <svg viewBox={`0 0 ${size} ${size}`} role="img" aria-label={description}>
-    <title>{right ? `Robot star plot for teams ${left?.team_number} and ${right?.team_number}` : `Robot star plot for team ${left?.team_number}`}</title>
+    <desc>{description}</desc>
     {#each rings as ring}
       <polygon class="grid-ring" points={polygon(axes, ring)} />
     {/each}
