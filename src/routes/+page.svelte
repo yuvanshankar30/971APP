@@ -651,26 +651,6 @@
                     <p>Alliance selection notes and match strategy</p>
                   </a>
                 </div>
-                {#if currentMatchLoading && !currentEventMatch}
-                  <div class="current-match-card current-match-loading">Loading the {homeEventKey || 'active event'} field...</div>
-                {:else if currentEventMatch}
-                  <div class="current-match-card" class:live={currentMatchState === 'current'}>
-                    <div class="current-match-heading">
-                      <div>
-                        <span class="current-match-eyebrow">{homeEventKey}</span>
-                        <h4>{currentMatchState === 'current' ? 'Current match' : currentMatchState === 'upcoming' ? 'Up next' : 'Latest match'}</h4>
-                      </div>
-                      <strong>{matchDisplayName(currentEventMatch)}</strong>
-                    </div>
-                    <div class="current-match-alliances">
-                      <div class="current-alliance red"><span>Red</span>{#each currentEventMatch.alliances?.red?.team_keys || [] as teamKey}<b>{displayTeamNumber(teamKey)}</b>{/each}</div>
-                      <div class="current-alliance blue"><span>Blue</span>{#each currentEventMatch.alliances?.blue?.team_keys || [] as teamKey}<b>{displayTeamNumber(teamKey)}</b>{/each}</div>
-                    </div>
-                    {#if currentMatchState === 'complete'}<small>TBA reports this event’s published matches complete.</small>{/if}
-                  </div>
-                {:else if currentMatchError}
-                  <div class="current-match-card current-match-loading">Current match unavailable: {currentMatchError}</div>
-                {/if}
               </div>
             {:else if section.key === 'admin'}
               <div class="dashboard-actions">
@@ -824,6 +804,27 @@
           {/if}
         </div>
       </div>
+
+      {#if currentMatchLoading && !currentEventMatch}
+        <div class="current-match-card current-match-loading">Loading the {homeEventKey || 'active event'} field...</div>
+      {:else if currentEventMatch}
+        <div class="current-match-card" class:live={currentMatchState === 'current'}>
+          <div class="current-match-heading">
+            <div>
+              <span class="current-match-eyebrow">{homeEventKey}</span>
+              <h4>{currentMatchState === 'current' ? 'Current match' : currentMatchState === 'upcoming' ? 'Up next' : 'Latest match'}</h4>
+            </div>
+            <strong>{matchDisplayName(currentEventMatch)}</strong>
+          </div>
+          <div class="current-match-alliances">
+            <div class="current-alliance red"><span>Red</span>{#each currentEventMatch.alliances?.red?.team_keys || [] as teamKey}<b>{displayTeamNumber(teamKey)}</b>{/each}</div>
+            <div class="current-alliance blue"><span>Blue</span>{#each currentEventMatch.alliances?.blue?.team_keys || [] as teamKey}<b>{displayTeamNumber(teamKey)}</b>{/each}</div>
+          </div>
+          {#if currentMatchState === 'complete'}<small>TBA reports this event’s published matches complete.</small>{/if}
+        </div>
+      {:else if currentMatchError}
+        <div class="current-match-card current-match-loading">Current match unavailable: {currentMatchError}</div>
+      {/if}
     {/if}
   </div>
 {:else if $loginScreenStyle === 'modern'}
@@ -1573,7 +1574,9 @@
     grid-template-columns: 200px minmax(0, 1fr);
     align-items: stretch;
     gap: var(--space-5);
-    margin-top: var(--space-3);
+    margin-top: var(--space-7);
+    padding-top: var(--space-5);
+    border-top: 1px solid var(--border);
   }
 
   /* All 11 tabs stay visible with no internal scrollbar of their own -
