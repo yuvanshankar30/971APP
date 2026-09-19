@@ -112,27 +112,37 @@
 
   async function loadQuickPreviewData(key) {
     if (!homeEventKey || quickPreviewData[key] || quickPreviewLoading[key]) return;
-    if (!['picklist', 'matchrankings', 'powerrankings', 'robotratings', 'predictions', 'scouting-admin'].includes(key)) return;
+    if (!['myscout', 'picklist', 'matchrankings', 'powerrankings', 'robotratings', 'predictions', 'scouting-admin'].includes(key)) return;
     quickPreviewLoading = { ...quickPreviewLoading, [key]: true };
     try {
       const headers = await getAuthHeader();
       let result = null;
-      if (key === 'picklist') {
+      if (key === 'myscout') {
+        const res = await fetch(`/api/matchscout?event_key=${encodeURIComponent(homeEventKey)}&mine=1`, { headers });
+        const payload = await res.json().catch(() => null);
+        const reports = payload?.success ? payload.data || [] : [];
+        result = {
+          reports: reports.slice().sort((a, b) =>
+            String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || '')))
+        };
+      } else if (key === 'picklist') {
         const res = await fetch(`/api/scouting-picklist?event_key=${encodeURIComponent(homeEventKey)}`, { headers });
         const payload = await res.json().catch(() => null);
         const picks = payload?.success ? payload.data || [] : [];
-        result = { count: picks.length, top: picks.slice(0, 3).map(p => p.team_number) };
+        result = { count: picks.length, top: picks.slice(0, 3).map(p => p.team_number), all: picks };
       } else if (key === 'matchrankings') {
         const res = await fetch(`/api/tba/event-rankings?event_key=${encodeURIComponent(homeEventKey)}`);
         const payload = await res.json().catch(() => null);
         const rankings = payload?.success ? payload.data?.rankings || [] : [];
         const mine = rankings.find(r => r.team_key === myTeamKey) || null;
-        result = { totalTeams: rankings.length, mine };
+        result = { totalTeams: rankings.length, mine, top: rankings.slice(0, 8) };
       } else if (key === 'powerrankings' || key === 'robotratings') {
         const res = await fetch(`/datascout?all_teams=1&event_key=${encodeURIComponent(homeEventKey)}`, { headers });
         const payload = await res.json().catch(() => null);
         const rows = payload?.success ? payload.data || [] : [];
-        result = { scoutedTeams: new Set(rows.map(r => r.team_key)).size };
+        const teams = [...new Set(rows.map(r => r.team_key))].sort((a, b) =>
+          Number(String(a).replace(/\D/g, '')) - Number(String(b).replace(/\D/g, '')));
+        result = { scoutedTeams: teams.length, teams };
       } else if (key === 'predictions') {
         const res = await fetch(`/api/prediction-market?event_key=${encodeURIComponent(homeEventKey)}`, { headers });
         const payload = await res.json().catch(() => null);
@@ -827,40 +837,79 @@
               {:else if activeQuickTabInfo.key === 'strategy' && !currentEventMatch}
                 <p>No match currently on the field at {homeEventKey || 'the active event'} yet.</p>
               {:else if activeQuickTabInfo.key === 'matchscout'}
-                {#if nextDataAssignment}
-                  <p class="quick-preview-match-heading">Next assignment: {nextDataAssignment.match_key.split('_').pop()} - Team {String(nextDataAssignment.team_key || '').replace(/^frc/i, '')}</p>
-                  <p>{incompleteScoutAssignments.filter(a => a.scouting_type === 'data').length} open match scouting assignment{incompleteScoutAssignments.filter(a => a.scouting_type === 'data').length === 1 ? '' : 's'}.</p>
+                {@const myDataAssignments = incompleteScoutAssignments.filter(a => a.scouting_type === 'data')}
+                {#if myDataAssignments.length}
+                  <p class="quick-preview-match-heading">{myDataAssignments.length} open match scouting assignment{myDataAssignments.length === 1 ? '' : 's'}</p>
+                  <ul class="quick-preview-list">
+                    {#each myDataAssignments as assignment}
+                      <li><a href={scoutAssignmentHref(assignment)}>Match {assignment.match_key.split('_').pop()} · Team {String(assignment.team_key || '').replace(/^frc/i, '')}</a></li>
+                    {/each}
+                  </ul>
                 {:else}
                   <p>No open match scouting assignments right now.</p>
                 {/if}
               {:else if activeQuickTabInfo.key === 'pitscout'}
-                <p class="quick-preview-match-heading">{myPrescoutAssignments.length} pre-scouting team{myPrescoutAssignments.length === 1 ? '' : 's'} to research</p>
-                <p>{activeQuickTabInfo.blurb}</p>
+                {#if myPrescoutAssignments.length}
+                  <p class="quick-preview-match-heading">{myPrescoutAssignments.length} pre-scouting team{myPrescoutAssignments.length === 1 ? '' : 's'} to research</p>
+                  <ul class="quick-preview-list">
+                    {#each myPrescoutAssignments as assignment}
+                      <li><a href={`/teamview?team=${encodeURIComponent(String(assignment.team_key || '').replace(/^frc/i, ''))}&event_key=${encodeURIComponent(prescoutEventKey)}&from=/&fromLabel=Home`}>Team {String(assignment.team_key || '').replace(/^frc/i, '')}</a></li>
+                    {/each}
+                  </ul>
+                {:else}
+                  <p>No pre-scouting teams assigned right now.</p>
+                {/if}
               {:else if activeQuickTabInfo.key === 'myscout'}
-                <p class="quick-preview-match-heading">{completedScoutAssignmentCount} of {myScoutAssignments.length} assignments completed this event</p>
-                <p>{activeQuickTabInfo.blurb}</p>
+                {#if quickPreviewLoading.myscout}
+                  <p class="muted">Loading...</p>
+                {:else if quickPreviewData.myscout?.reports?.length}
+                  <p class="quick-preview-match-heading">{completedScoutAssignmentCount} of {myScoutAssignments.length} assignments completed - {quickPreviewData.myscout.reports.length} match report{quickPreviewData.myscout.reports.length === 1 ? '' : 's'}</p>
+                  <ul class="quick-preview-list">
+                    {#each quickPreviewData.myscout.reports.slice(0, 8) as report}
+                      <li><a href={`/matchscout?match=${encodeURIComponent(report.match_key)}&team=${encodeURIComponent(report.team_key)}`}>Match {report.match_key} · Team {String(report.team_key || '').replace(/^frc/i, '')} <span class="quick-preview-edit">edit →</span></a></li>
+                    {/each}
+                  </ul>
+                {:else}
+                  <p>{completedScoutAssignmentCount} of {myScoutAssignments.length} assignments completed this event.</p>
+                  <p>No match reports submitted yet.</p>
+                {/if}
               {:else if quickPreviewLoading[activeQuickTabInfo.key]}
                 <p class="muted">Loading...</p>
               {:else if activeQuickTabInfo.key === 'picklist'}
-                {#if quickPreviewData.picklist}
+                {#if quickPreviewData.picklist?.count}
                   <p class="quick-preview-match-heading">{quickPreviewData.picklist.count} team{quickPreviewData.picklist.count === 1 ? '' : 's'} on the pick list</p>
-                  <p>{quickPreviewData.picklist.count ? `Top picks: ${quickPreviewData.picklist.top.join(', ')}` : activeQuickTabInfo.blurb}</p>
+                  <ol class="quick-preview-list numbered">
+                    {#each quickPreviewData.picklist.all.slice(0, 8) as pick, index}
+                      <li><a href={`/teamview?team=${encodeURIComponent(String(pick.team_key || '').replace(/^frc/i, ''))}&event_key=${encodeURIComponent(homeEventKey)}&from=/&fromLabel=Home`}><span class="mono">{index + 1}</span> #{pick.team_number}{pick.nickname ? ` - ${pick.nickname}` : ''}</a></li>
+                    {/each}
+                  </ol>
                 {:else}
                   <p>{activeQuickTabInfo.blurb}</p>
                 {/if}
               {:else if activeQuickTabInfo.key === 'matchrankings'}
-                {#if quickPreviewData.matchrankings?.mine}
-                  <p class="quick-preview-match-heading">Your team - Rank {quickPreviewData.matchrankings.mine.rank} of {quickPreviewData.matchrankings.totalTeams}</p>
-                  <p>{quickPreviewData.matchrankings.mine.record?.wins ?? 0}-{quickPreviewData.matchrankings.mine.record?.losses ?? 0}-{quickPreviewData.matchrankings.mine.record?.ties ?? 0}</p>
-                {:else if quickPreviewData.matchrankings}
-                  <p>No ranking found for your team yet - {quickPreviewData.matchrankings.totalTeams} teams ranked so far.</p>
+                {#if quickPreviewData.matchrankings?.top?.length}
+                  {#if quickPreviewData.matchrankings.mine}
+                    <p class="quick-preview-match-heading">Your team - Rank {quickPreviewData.matchrankings.mine.rank} of {quickPreviewData.matchrankings.totalTeams} ({quickPreviewData.matchrankings.mine.record?.wins ?? 0}-{quickPreviewData.matchrankings.mine.record?.losses ?? 0}-{quickPreviewData.matchrankings.mine.record?.ties ?? 0})</p>
+                  {:else}
+                    <p class="quick-preview-match-heading">{quickPreviewData.matchrankings.totalTeams} teams ranked</p>
+                  {/if}
+                  <ol class="quick-preview-list numbered">
+                    {#each quickPreviewData.matchrankings.top as row}
+                      <li><a href={`/teamview?team=${encodeURIComponent(String(row.team_key || '').replace(/^frc/i, ''))}&event_key=${encodeURIComponent(homeEventKey)}&from=/&fromLabel=Home`} class:us={row.team_key === myTeamKey}><span class="mono">{row.rank}</span> #{String(row.team_key || '').replace(/^frc/i, '')} <span class="quick-preview-record">{row.record?.wins ?? 0}-{row.record?.losses ?? 0}-{row.record?.ties ?? 0}</span></a></li>
+                    {/each}
+                  </ol>
                 {:else}
                   <p>{activeQuickTabInfo.blurb}</p>
                 {/if}
               {:else if activeQuickTabInfo.key === 'powerrankings' || activeQuickTabInfo.key === 'robotratings'}
-                {#if quickPreviewData[activeQuickTabInfo.key]}
-                  <p class="quick-preview-match-heading">{quickPreviewData[activeQuickTabInfo.key].scoutedTeams} teams have local scouting data</p>
-                  <p>{activeQuickTabInfo.blurb}</p>
+                {#if quickPreviewData[activeQuickTabInfo.key]?.scoutedTeams}
+                  {@const chartData = quickPreviewData[activeQuickTabInfo.key]}
+                  <p class="quick-preview-match-heading">{chartData.scoutedTeams} teams have local scouting data</p>
+                  <ul class="quick-preview-list wrap">
+                    {#each chartData.teams as teamKey}
+                      <li><a href={`/teamview?team=${encodeURIComponent(String(teamKey || '').replace(/^frc/i, ''))}&event_key=${encodeURIComponent(homeEventKey)}&from=/&fromLabel=Home`}>#{String(teamKey || '').replace(/^frc/i, '')}</a></li>
+                    {/each}
+                  </ul>
                 {:else}
                   <p>{activeQuickTabInfo.blurb}</p>
                 {/if}
@@ -1769,6 +1818,70 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: var(--gap-3);
     max-width: 32em;
+  }
+
+  .quick-preview-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    max-height: 9rem;
+    overflow-y: auto;
+  }
+
+  .quick-preview-list.wrap {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    max-height: none;
+  }
+
+  .quick-preview-list a {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 0.82rem;
+    border-left: 2px solid transparent;
+  }
+
+  .quick-preview-list.wrap a {
+    border-left: none;
+    border: 1px solid var(--border);
+    padding: 3px 8px;
+  }
+
+  .quick-preview-list a:hover {
+    background: var(--surface-2);
+    border-left-color: var(--brand-gold-strong);
+    color: var(--secondary);
+  }
+
+  .quick-preview-list a.us {
+    color: var(--secondary);
+    font-weight: 700;
+  }
+
+  .quick-preview-list .mono {
+    font-family: var(--font-mono-stack);
+    color: var(--text-muted);
+    min-width: 1.2em;
+  }
+
+  .quick-preview-edit {
+    margin-left: auto;
+    color: var(--accent-strong);
+    font-size: 0.72rem;
+  }
+
+  .quick-preview-record {
+    margin-left: auto;
+    color: var(--text-muted);
+    font-size: 0.75rem;
   }
 
   .quick-preview-actions {
