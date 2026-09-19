@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { supabase, getAuthHeader } from '$lib/supabase.js';
   import { fetchActiveScoutingEventKey, fetchAvailableScoutingEvents, fetchManualScoutingTeams } from '$lib/scoutingEvent.js';
-  import { isQueueableFailure, submitOrQueue } from '$lib/offlineQueue.js';
+  import { submitOrQueue } from '$lib/offlineQueue.js';
   import SeasonFilter from '$lib/components/SeasonFilter.svelte';
   import OfflineSyncBadge from '$lib/components/OfflineSyncBadge.svelte';
   import RebuiltFieldMap from '$lib/components/RebuiltFieldMap.svelte';
@@ -747,11 +747,17 @@
     autoOptions = autoOptions.filter((_, i) => i !== idx);
   }
 
+  // Returns whichever photos made it up, plus whether any did not - never
+  // throws. A pit interview's actual notes must never be lost just because
+  // one photo (out of up to 3) hit a bad connection, an RLS hiccup, or a
+  // format Storage rejected - each file is attempted independently, so one
+  // failure doesn't also discard photos that already succeeded before it.
   async function uploadPendingPhotos(teamKey) {
-    if (!pendingFiles.length) return [];
+    if (!pendingFiles.length) return { paths: [], failed: false };
 
     uploading = true;
     const uploadedPaths = [];
+    let failed = false;
 
     try {
       for (let i = 0; i < pendingFiles.length; i += 1) {
@@ -759,15 +765,19 @@
         const fileName = `${Date.now()}-${i}-${sanitizeFileName(file.name)}`;
         const path = `${eventKey}/${teamKey}/${fileName}`;
 
-        const { error } = await supabase.storage
-          .from('pit-scout-photos')
-          .upload(path, file, { upsert: false, contentType: file.type || 'image/jpeg' });
+        try {
+          const { error } = await supabase.storage
+            .from('pit-scout-photos')
+            .upload(path, file, { upsert: false, contentType: file.type || 'image/jpeg' });
 
-        if (error) throw new Error(error.message || 'Upload failed');
-        uploadedPaths.push(path);
+          if (error) throw new Error(error.message || 'Upload failed');
+          uploadedPaths.push(path);
+        } catch {
+          failed = true;
+        }
       }
 
-      return uploadedPaths;
+      return { paths: uploadedPaths, failed };
     } finally {
       uploading = false;
     }
@@ -796,18 +806,14 @@
     apiNote = '';
 
     try {
-      // A photo upload failing over a bad connection must not cost the
-      // scout their actual pit interview notes - fall back to whatever
-      // photos were already saved and keep going with the rest of the
-      // save below, rather than throwing the whole entry away.
-      let uploadedPaths = [];
-      let photoUploadFailed = false;
-      try {
-        uploadedPaths = await uploadPendingPhotos(selectedTeam);
-      } catch (uploadError) {
-        if (!isQueueableFailure(uploadError)) throw uploadError;
-        photoUploadFailed = true;
-      }
+      // A photo upload failing (bad connection, an RLS hiccup, a format
+      // Storage rejects - any reason) must not cost the scout their actual
+      // pit interview notes - fall back to whatever photos did upload and
+      // keep going with the rest of the save below, rather than throwing
+      // the whole entry away. uploadPendingPhotos never throws, so this can
+      // no longer be short-circuited by misclassifying a Storage error as
+      // non-recoverable the way checking isQueueableFailure here used to.
+      const { paths: uploadedPaths, failed: photoUploadFailed } = await uploadPendingPhotos(selectedTeam);
       const photo_paths = [...editablePhotoPaths, ...uploadedPaths].slice(0, 3);
       const payload = {
         action: 'save-entry',
@@ -848,7 +854,7 @@
         entriesByTeam[selectedTeam] = { ...entriesByTeam[selectedTeam], ...payload };
         entriesByTeam = { ...entriesByTeam };
         apiNote = photoUploadFailed
-          ? `Saved pit data for Team ${displayTeam(selectedTeam)} on this phone - no connection right now, so it (and the photo) will sync once you're back online.`
+          ? `Saved pit data for Team ${displayTeam(selectedTeam)} on this phone - no connection right now, so it'll sync once you're back online. The photo didn't upload; add it again once things save.`
           : `Saved pit data for Team ${displayTeam(selectedTeam)} on this phone - no connection right now, so it'll sync once you're back online.`;
       } else {
         const data = result.data;
@@ -860,7 +866,7 @@
         entriesByTeam[selectedTeam] = data.data;
         entriesByTeam = { ...entriesByTeam };
         apiNote = photoUploadFailed
-          ? `Saved pit data for Team ${displayTeam(selectedTeam)}, but the photo didn't upload - no connection. Try adding it again once you're back online.`
+          ? `Saved pit data for Team ${displayTeam(selectedTeam)}, but the photo didn't upload. Try adding it again.`
           : `Saved pit data for Team ${displayTeam(selectedTeam)}.`;
       }
       goToTeamPicker();
