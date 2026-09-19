@@ -64,6 +64,50 @@ describe('computeEventEpa', () => {
     expect(outOfOrder.get('frc1').epa).toBeCloseTo(inOrder.get('frc1').epa, 9);
   });
 
+  describe('multi-pass convergence', () => {
+    // A deterministic round-robin where every match's score is EXACTLY the
+    // sum of each participating team's true rating - the same kind of
+    // well-conditioned system OPR solves exactly with linear algebra. A
+    // single left-to-right pass can't fully recover these because match 1's
+    // teams are judged against the flat baseline before anyone's true
+    // rating is known; more passes should visibly close that gap.
+    const trueEpa = { frc1: 100, frc2: 90, frc3: 80, frc4: 70, frc5: 60, frc6: 50 };
+    const scoreOf = (teamKeys) => teamKeys.reduce((sum, key) => sum + trueEpa[key], 0);
+    const roundRobin = [
+      { red: ['frc1', 'frc2', 'frc3'], blue: ['frc4', 'frc5', 'frc6'] },
+      { red: ['frc1', 'frc4', 'frc5'], blue: ['frc2', 'frc3', 'frc6'] },
+      { red: ['frc2', 'frc5', 'frc6'], blue: ['frc1', 'frc3', 'frc4'] },
+      { red: ['frc3', 'frc4', 'frc6'], blue: ['frc1', 'frc2', 'frc5'] },
+      { red: ['frc1', 'frc3', 'frc5'], blue: ['frc2', 'frc4', 'frc6'] },
+      { red: ['frc1', 'frc2', 'frc6'], blue: ['frc3', 'frc4', 'frc5'] }
+    ].map((sides, index) => match({
+      red: sides.red,
+      blue: sides.blue,
+      redScore: scoreOf(sides.red),
+      blueScore: scoreOf(sides.blue),
+      matchNumber: index + 1
+    }));
+
+    it('fits the observed scores at least as well with more passes (residualStd does not get worse)', () => {
+      const onePass = computeEventEpa(roundRobin, { passes: 1 });
+      const manyPasses = computeEventEpa(roundRobin, { passes: 8 });
+      expect(manyPasses.residualStd).toBeLessThan(onePass.residualStd);
+    });
+
+    it('keeps converging rather than drifting further apart as passes increase', () => {
+      // This iteration is closer to Gauss-Seidel than a one-shot least-
+      // squares solve, so it converges gradually rather than snapping to the
+      // exact answer in a couple of passes - the property that actually
+      // matters is that later passes move ratings LESS than earlier ones
+      // (settling), not that any fixed pass count is already "done".
+      const totalDelta = (a, b) => [...a.keys()].reduce((sum, team) => sum + Math.abs(a.get(team).epa - b.get(team).epa), 0);
+      const p10 = computeEventEpa(roundRobin, { passes: 10 });
+      const p20 = computeEventEpa(roundRobin, { passes: 20 });
+      const p40 = computeEventEpa(roundRobin, { passes: 40 });
+      expect(totalDelta(p20, p40)).toBeLessThan(totalDelta(p10, p20));
+    });
+  });
+
   it('attaches residualStd measuring how well ratings predicted actual scores', () => {
     // Every match ties the baseline exactly, so once ratings settle near
     // that baseline the prediction error should be small and stable.
