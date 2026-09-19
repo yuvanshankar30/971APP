@@ -105,15 +105,16 @@ describe('defaultHeaderTabs', () => {
   it('orders the scouting surfaces the way the team asked for them', () => {
     // Exact order named by direct instruction: Strategy, Drive Team (right
     // after Strategy - both read the live match schedule, Drive Team is
-    // just the field-facing view of it), Match Scouting, Pit Scouting,
-    // Picklist, Match Rankings, Power Rankings, Robot Ratings, Vision
-    // Scouting, Prediction Market, Scouting Admin. Pick List (the
-    // 'scouting' key) is still not a default entry - that instruction from
-    // before this reorder still stands, it's just a different key
-    // ('picklist') that replaced it in the menu.
+    // just the field-facing view of it), Match Scouting, Pit Scouting, My
+    // Scout (a scout's own submission history - sits right after the two
+    // forms it's reporting on), Picklist, Match Rankings, Power Rankings,
+    // Robot Ratings, Vision Scouting, Prediction Market, Scouting Admin.
+    // Pick List (the 'scouting' key) is still not a default entry - that
+    // instruction from before this reorder still stands, it's just a
+    // different key ('picklist') that replaced it in the menu.
     const keys = competitionChildren(defaultHeaderTabs()).map((child) => child.key);
     expect(keys).toEqual([
-      'strategy', 'driveteam', 'matchscout', 'pitscout', 'picklist', 'matchrankings', 'powerrankings', 'robotratings', 'vision', 'predictions', 'bluealliance', 'scouting-admin'
+      'strategy', 'driveteam', 'matchscout', 'pitscout', 'myscout', 'picklist', 'matchrankings', 'powerrankings', 'robotratings', 'vision', 'predictions', 'bluealliance', 'scouting-admin'
     ]);
   });
 

@@ -98,6 +98,7 @@ export function defaultHeaderTabs(navConfig = navigation) {
       { key: 'driveteam', label: 'Drive Team' },
       { key: 'matchscout', label: 'Match Scouting' },
       { key: 'pitscout', label: 'Pit Scouting' },
+      { key: 'myscout', label: 'My Scout' },
       { key: 'picklist', label: 'Picklist' },
       { key: 'matchrankings', label: 'Match Rankings' },
       { key: 'powerrankings', label: 'Power Rankings' },

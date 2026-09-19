@@ -502,6 +502,7 @@
       <a href="/driveteam" class="quick-nav-tab">Drive Team</a>
       <a href="/matchscout" class="quick-nav-tab">Match Scouting</a>
       <a href="/pitscout" class="quick-nav-tab">Pit Scouting</a>
+      <a href="/myscout" class="quick-nav-tab">My Scout</a>
       <a href="/picklist" class="quick-nav-tab">Picklist</a>
       <a href="/matchrankings" class="quick-nav-tab">Match Rankings</a>
       <a href="/powerrankings" class="quick-nav-tab">Power Rankings</a>
@@ -553,22 +554,6 @@
         <strong class="stat-value">{myPrescoutAssignments.length}</strong>
       </div>
     </div>
-
-    {#if showScoutAlert && incompleteScoutAssignments.length>0}
-      <div class="pending-notice">
-        <AlertCircle size={20} />
-        <div>
-          <h3>Scouting Assignments</h3>
-          <p>You have {incompleteScoutAssignments.length} upcoming scouting assignment{incompleteScoutAssignments.length===1?'':'s'}.</p>
-          {#if nextScoutAssignment}
-            <div style="margin-top:0.25rem; display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center">
-              <button class="btn btn-primary" on:click={() => goto(scoutAssignmentHref(nextScoutAssignment))}>Go to Next ({nextScoutAssignment.scouting_type} – {nextScoutAssignment.match_key.split('_').pop()} – {nextScoutAssignment.team_key.replace('frc','')})</button>
-              <button class="btn btn-outline" on:click={() => showScoutAlert=false}>Dismiss</button>
-            </div>
-          {/if}
-        </div>
-      </div>
-    {/if}
 
     {#if !can('CAN_SEE_ROUTES')}
       <div class="pending-notice">
@@ -681,6 +666,20 @@
               </div>
             {:else if section.key === 'assignment-queue'}
               <div class="user-lists">
+                {#if showScoutAlert && incompleteScoutAssignments.length>0}
+                  <div class="pending-notice compact">
+                    <AlertCircle size={16} />
+                    <p>
+                      {incompleteScoutAssignments.length} open assignment{incompleteScoutAssignments.length===1?'':'s'}.
+                      {#if nextScoutAssignment}
+                        <button class="link-btn" on:click={() => goto(scoutAssignmentHref(nextScoutAssignment))}>Go to next ({nextScoutAssignment.scouting_type} – {nextScoutAssignment.match_key.split('_').pop()} – {nextScoutAssignment.team_key.replace('frc','')})</button>
+                      {/if}
+                    </p>
+                    <button class="dismiss-btn" on:click={() => showScoutAlert=false} aria-label="Dismiss">
+                      <X size={14} />
+                    </button>
+                  </div>
+                {/if}
                 <div class="assignment-heading">
                   <div>
                     <h4>Your Scouting Assignments</h4>
@@ -1605,6 +1604,39 @@
   .pending-notice p {
     margin: 0;
     line-height: 1.5;
+  }
+
+  /* Sits at the top of the assignment list it's actually about now, instead
+     of announcing itself as a full-height banner above the whole page - a
+     single line is enough once it's right next to the thing it refers to. */
+  .pending-notice.compact {
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-2) var(--space-4);
+    margin-bottom: var(--space-4);
+  }
+
+  .pending-notice.compact p {
+    flex: 1;
+    font-size: 0.85rem;
+  }
+
+  .dismiss-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    border: none;
+    background: none;
+    color: inherit;
+    opacity: 0.7;
+    cursor: pointer;
+  }
+
+  .dismiss-btn:hover {
+    opacity: 1;
   }
 
   .dashboard-actions h3 {

@@ -319,6 +319,21 @@ export async function GET({ url, request }) {
     const event_key = String(url.searchParams.get('event_key') || '').trim();
     const team_key = String(url.searchParams.get('team_key') || '').trim();
 
+    // "My Scout" wants everything this scout has ever submitted, across
+    // every event, not one event's roster - created_by is overwritten on
+    // every save (see the POST handler above), so in practice this reads
+    // as "pit entries this scout most recently touched," which is the best
+    // signal available for a table with one row per team rather than per
+    // scout.
+    if (!event_key && url.searchParams.get('mine') === '1') {
+      if (!actor?.id) return json({ error: 'Unauthorized' }, { status: 401 });
+      const result = await selectPitScoutEntries(db, (query) =>
+        query.eq('created_by', actor.id).order('updated_at', { ascending: false })
+      );
+      if (result.error) return json({ error: result.error.message }, { status: 500 });
+      return json({ success: true, data: result.data || [], meta: { schema: result.schema, warning: result.warning } });
+    }
+
     if (event_key && team_key) {
       const result = await selectPitScoutEntries(db, (query) =>
         query.eq('event_key', event_key).eq('team_key', team_key).maybeSingle()
