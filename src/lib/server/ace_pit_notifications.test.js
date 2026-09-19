@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { acePitProblemMessage, acePitTeamThreadMessage, sendAcePitProblem } from './ace_pit_notifications.js';
+import { acePitCompetitionThreadMessage, acePitProblemMessage, sendAcePitProblem } from './ace_pit_notifications.js';
 
 const problem = {
   id: 'problem-1',
@@ -39,14 +39,18 @@ describe('ACE pit Slack notifications', () => {
     expect(text).toContain('*Scout Two:* Robot stopped — after contact');
   });
 
-  it('summarizes only one affected team in its parent message', () => {
-    const text = acePitTeamThreadMessage('2026cc', 'frc971', [problem]);
-    expect(text).toContain('*ACE / Pit thread — Team 971 · 2026cc*');
-    expect(text).toContain('*Qualification 12*');
+  it('summarizes all affected teams in one competition parent message', () => {
+    const text = acePitCompetitionThreadMessage('2026cc', [
+      problem,
+      { ...problem, id: 'problem-2', team_key: 'frc254', match_key: '2026cc_qm13', summary: 'Intake jammed' }
+    ]);
+    expect(text).toContain('*ACE / Pit issues — 2026cc*');
+    expect(text).toContain('*Team 971 · Qualification 12*');
+    expect(text).toContain('*Team 254 · Qualification 13*');
     expect(text).toContain('(1 scout)');
   });
 
-  it('posts a new report as a reply in that team thread and logs it', async () => {
+  it('posts a new report as a reply in the competition thread and logs it', async () => {
     const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'CACE', ts: 'reply.1' });
     const insert = vi.fn().mockResolvedValue({ error: null });
     const result = await sendAcePitProblem(problem, 'Scout One', {

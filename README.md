@@ -328,12 +328,12 @@ browser confirmation or prompt popups.
   requires a described ACE Team handoff whenever a robot breaks mechanically or is marked disabled or dead;
   each handoff is immediately posted by the server-side Slack bot to
   `#2026-chezy-ace-strat-pit`. Its Slack channel/timestamp is retained on the
-  ACE issue. Each affected team gets one durable Slack thread per competition;
-  new reports, meaningful edits, and resolutions are replies in that thread,
-  while unchanged retries are suppressed. When multiple scouts cover the same
+  ACE issue. Each competition gets one durable Slack thread in that channel;
+  every affected team is summarized in its parent message, while new reports,
+  meaningful edits, and resolutions are team-labeled replies in that thread.
+  Unchanged retries are suppressed. When multiple scouts cover the same
   robot in the same match, their observations merge into that one issue;
-  editing replaces only that scout's observation. `ACE_PIT_SLACK_CHANNEL_ID` can pin the destination by ID when the
-  channel is private.
+  editing replaces only that scout's observation.
   general notes and the auto-path drawing remain optional. The path tool uses
   a simplified, alliance-relative version of WPILib/AdvantageScope's top-down
   2026 REBUILT field, so the scout's wall is always on the left and red/blue
