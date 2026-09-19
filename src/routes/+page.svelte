@@ -293,9 +293,28 @@
     || (currentEventMatch.alliances?.blue?.team_keys || []).includes(myTeamKey)
   );
 
+  // Competition wifi is "present but slow," not fully offline (see
+  // offlineCache.js's own docstring) - a bare fetch failure here is
+  // usually one dropped request, not a real outage. One quiet retry
+  // covers that common case instead of flashing an error for a blip.
+  async function fetchEventMatches(eventKey, attempt = 1) {
+    try {
+      const res = await fetch(`/api/tba/event-matches?event_key=${encodeURIComponent(eventKey)}&comp_level=all`);
+      const payload = await res.json();
+      if (!res.ok || !payload?.success) throw new Error(payload?.error || 'TBA schedule unavailable');
+      return payload.data || [];
+    } catch (error) {
+      if (attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        return fetchEventMatches(eventKey, attempt + 1);
+      }
+      throw error;
+    }
+  }
+
   async function loadMatchAlliances() {
     currentMatchLoading = true;
-    currentMatchError = '';
+    if (!currentEventMatch) currentMatchError = '';
     try {
       const eventKey = await fetchActiveScoutingEventKey();
       homeEventKey = eventKey || '';
@@ -304,27 +323,29 @@
         currentMatchState = 'unavailable';
         return;
       }
-      const res = await fetch(`/api/tba/event-matches?event_key=${encodeURIComponent(eventKey)}&comp_level=all`);
-      const payload = await res.json();
-      if (!res.ok || !payload?.success) throw new Error(payload?.error || 'TBA schedule unavailable');
+      const matches = await fetchEventMatches(eventKey);
       const next = {};
-      for (const match of payload.data || []) {
+      for (const match of matches) {
         next[match.key] = {};
         for (const teamKey of match.alliances?.red?.team_keys || []) next[match.key][teamKey] = 'red';
         for (const teamKey of match.alliances?.blue?.team_keys || []) next[match.key][teamKey] = 'blue';
       }
       matchAllianceByKey = next;
-      const current = selectCurrentEventMatch(payload.data || []);
+      const current = selectCurrentEventMatch(matches);
       currentEventMatch = current.match;
       currentMatchState = current.state;
 
-      const myTeamMatches = (payload.data || []).filter((m) =>
+      const myTeamMatches = matches.filter((m) =>
         (m.alliances?.red?.team_keys || []).includes(myTeamKey) || (m.alliances?.blue?.team_keys || []).includes(myTeamKey));
       const myCurrent = selectCurrentEventMatch(myTeamMatches);
       myTeamNextMatch = myCurrent.match;
       myTeamNextMatchState = myCurrent.state;
     } catch (error) {
-      currentMatchError = error?.message || 'TBA schedule unavailable';
+      // Keep showing the last good match/alliance data through a
+      // transient failure rather than replacing it with an error - only
+      // surface the error when there's nothing already on screen to fall
+      // back to.
+      if (!currentEventMatch) currentMatchError = error?.message || 'TBA schedule unavailable';
     } finally {
       currentMatchLoading = false;
     }
@@ -631,27 +652,6 @@
     {:else if !dashboardDataReady}
       <div class="empty-state">Loading your dashboard...</div>
     {:else}
-      <div class="stat-strip">
-        {#if homeEventKey}
-          <div class="stat-tile">
-            <span class="stat-label">Competition</span>
-            <strong class="stat-value stat-value-text">{homeEventKey}</strong>
-          </div>
-        {/if}
-        <div class="stat-tile">
-          <span class="stat-label">Assignments Open</span>
-          <strong class="stat-value">{incompleteScoutAssignments.length}</strong>
-        </div>
-        <div class="stat-tile">
-          <span class="stat-label">Assignments Done</span>
-          <strong class="stat-value">{completedScoutAssignmentCount}</strong>
-        </div>
-        <div class="stat-tile">
-          <span class="stat-label">Pre-Scout Queue</span>
-          <strong class="stat-value">{myPrescoutAssignments.length}</strong>
-        </div>
-      </div>
-
       {#if editMode && hiddenSections.length > 0}
         <div class="hidden-sections-tray">
           <span class="tray-label">Hidden:</span>
@@ -721,6 +721,22 @@
                       <p>Alliance selection notes and match strategy</p>
                     </a>
                   {/if}
+                </div>
+                <div class="stat-strip">
+                  {#if homeEventKey}
+                    <div class="stat-tile">
+                      <span class="stat-label">Competition</span>
+                      <strong class="stat-value stat-value-text">{homeEventKey}</strong>
+                    </div>
+                  {/if}
+                  <div class="stat-tile">
+                    <span class="stat-label">Assignments Open</span>
+                    <strong class="stat-value">{incompleteScoutAssignments.length}</strong>
+                  </div>
+                  <div class="stat-tile">
+                    <span class="stat-label">Assignments Done</span>
+                    <strong class="stat-value">{completedScoutAssignmentCount}</strong>
+                  </div>
                 </div>
               </div>
             {:else if section.key === 'admin'}
@@ -1931,7 +1947,7 @@
     gap: 1px;
     background: var(--border);
     border: 1px solid var(--border);
-    margin-bottom: var(--space-3);
+    margin-top: var(--space-4);
   }
 
   .stat-tile {
