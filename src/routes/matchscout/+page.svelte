@@ -5,7 +5,7 @@
   import { BALL_COUNT_RANGES, MATCH_FORM_RATING_FIELDS, MATCH_OPTIONAL_RATING_FIELDS, MATCH_FORM_ROLES as TELEOP_ROLES, AUTO_FUEL_SOURCES, ACCURACY_LABELS, BPS_LABELS, validateMatchScoutForm, parseAutoPointsEstimate } from '$lib/matchScouting.js';
   import { userProfile } from '$lib/stores/auth.js';
   import { getAuthHeader } from '$lib/supabase.js';
-  import { fetchActiveScoutingEventKey } from '$lib/scoutingEvent.js';
+  import { fetchActiveScoutingEventKey, fetchAvailableScoutingEvents } from '$lib/scoutingEvent.js';
   import { submitOrQueue } from '$lib/offlineQueue.js';
   import { fetchWithCache } from '$lib/offlineCache.js';
   import OfflineSyncBadge from '$lib/components/OfflineSyncBadge.svelte';
@@ -70,13 +70,14 @@
   let comparisonLoading = false;
   let comparisonError = '';
   let comparisonRequest = 0;
+  let activeEventKey = '';
   let eventKey = '';
+  let availableEvents = [];
   let eventTeams = [];
   let saving = false;
   let startPhotos = {};
   let startPhotoError = '';
   let error = '';
-  let myDataAssignments = {};
   $: if (!scoutName && $userProfile?.full_name && !$userProfile.full_name.includes('@')) scoutName = $userProfile.full_name;
 
   $: assignmentReady = matchNumber.trim() && robotNumber.trim() && startingPosition && scoutName.trim() && typeof preload === 'boolean';
@@ -91,6 +92,12 @@
   // an exact number sits at its own value, a range/lower-bound sits at its
   // midpoint-or-min estimate, and an empty/unparseable field sits at 0.
   $: autoPointsSliderValue = Math.max(0, Math.min(AUTO_POINTS_SLIDER_MAX, Math.round(autoPointsEstimate?.average ?? 0)));
+  $: competitionOptions = [...new Map([
+    ...(activeEventKey ? [{ value: activeEventKey, label: activeEventKey }] : []),
+    ...(eventKey ? [{ value: eventKey, label: eventKey }] : []),
+    ...availableEvents
+  ].map(option => [option.value, option])).values()]
+    .sort((a, b) => b.value.localeCompare(a.value));
 
   function setAutoPointsFromSlider(rawValue) {
     const value = Number(rawValue);
@@ -201,6 +208,7 @@
   // a bad connection still gets the team picker instantly from whatever
   // loaded last time, instead of an empty dropdown while this times out.
   async function loadEventTeams(key) {
+    eventTeams = [];
     if (!key) return;
     try {
       await fetchWithCache(`/api/tba/event-teams?event_key=${encodeURIComponent(key)}`, {
@@ -213,6 +221,22 @@
       // No cache and the network failed - leave eventTeams as whatever it
       // already was rather than clearing a picker someone might be using.
     }
+  }
+
+  async function changeCompetition(event) {
+    const nextEventKey = String(event.currentTarget?.value || '').trim();
+    if (!nextEventKey || nextEventKey === eventKey) return;
+    eventKey = nextEventKey;
+    myReports = [];
+    reportsError = '';
+    showReports = false;
+    nextAssignment();
+
+    const url = new URL(window.location.href);
+    if (eventKey === activeEventKey) url.searchParams.delete('event_key');
+    else url.searchParams.set('event_key', eventKey);
+    window.history.replaceState({}, '', url);
+    await loadEventTeams(eventKey);
   }
 
   function normalizeRobotNumber(event) {
@@ -280,68 +304,37 @@
     comparisonError = '';
   }
 
-  // scout_match_assignments (scouting_type 'data') keys its rows with TBA's
-  // full match key ("2026cc_qm14"), while this page's own match_scout_entries
-  // convention is the bare qualification number for match_key (see
-  // bareMatchNumber/scoutAssignmentHref on the homepage) - matchKey needs
-  // translating between the two. team_key is "frcNNNN" on both sides (the
-  // server normalizes match_scout_entries.team_key the same way), so only
-  // toAssignmentTeamKey's "frc" prefix is needed there, not a translation.
-  function assignmentLookupKey(matchKey, teamKey) {
-    return `${matchKey}::${teamKey}`;
-  }
-
   function toAssignmentMatchKey(rawMatchNumber) {
-    const trimmed = String(rawMatchNumber || '').trim();
-    return trimmed && eventKey ? `${eventKey}_qm${trimmed}` : '';
+    const raw = String(rawMatchNumber || '').trim();
+    if (!raw || !eventKey) return '';
+    if (raw.includes('_')) return raw;
+    const suffix = /^(qm|qf|sf|f)\d/i.test(raw) ? raw.toLowerCase() : `qm${raw}`;
+    return `${eventKey}_${suffix}`;
   }
 
   function toAssignmentTeamKey(rawTeamNumber) {
-    const trimmed = String(rawTeamNumber || '').trim();
-    return trimmed ? `frc${trimmed}` : '';
-  }
-
-  function isMyAssignedRobot(rawMatchNumber, rawTeamNumber) {
-    const key = assignmentLookupKey(toAssignmentMatchKey(rawMatchNumber), toAssignmentTeamKey(rawTeamNumber));
-    return !!myDataAssignments[key];
-  }
-
-  async function loadMyAssignments() {
-    const userId = $userProfile?.id;
-    if (!userId) { myDataAssignments = {}; return; }
-    try {
-      const response = await fetch(`/api/scout-assignments?scouting_type=data&mine=1&user_id=${encodeURIComponent(userId)}`, { headers: await getAuthHeader() });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok || !payload?.success) throw new Error(payload?.error || 'Failed');
-      const next = {};
-      for (const row of payload.data || []) {
-        if (row?.completed_at) continue;
-        next[assignmentLookupKey(row.match_key, row.team_key)] = true;
-      }
-      myDataAssignments = next;
-    } catch {
-      myDataAssignments = {};
-    }
+    const digits = String(rawTeamNumber || '').trim().replace(/^frc/i, '');
+    return digits ? `frc${digits}` : '';
   }
 
   async function completeMyAssignment(rawMatchNumber, rawTeamNumber) {
-    const userId = $userProfile?.id;
-    if (!userId || !isMyAssignedRobot(rawMatchNumber, rawTeamNumber)) return;
+    const matchKey = toAssignmentMatchKey(rawMatchNumber);
+    const teamKey = toAssignmentTeamKey(rawTeamNumber);
+    if (!matchKey || !teamKey) return;
     try {
-      await fetch('/api/scout-assignments', {
+      const response = await fetch('/api/scout-assignments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(await getAuthHeader()) },
         body: JSON.stringify({
           action: 'complete',
           scouting_type: 'data',
-          match_key: toAssignmentMatchKey(rawMatchNumber),
-          team_key: toAssignmentTeamKey(rawTeamNumber),
-          user_id: userId
+          match_key: matchKey,
+          team_key: teamKey
         })
       });
-      await loadMyAssignments();
+      if (!response.ok) return;
     } catch {
-      // scouted data already saved - a failed "mark complete" isn't worth blocking on
+      // The report is already saved; the database trigger is the fallback.
     }
   }
 
@@ -355,11 +348,12 @@
       const response = await fetch(`/api/matchscout?event_key=${encodeURIComponent(eventKey)}&mine=1`, { headers: await getAuthHeader() });
       const result = await response.json().catch(() => null);
       if (!response.ok || !result?.success) return false;
-      // match_scout_entries.team_key is server-normalized to "frcNNNN" (see
-      // normalizeTeamKey in matchScoutingSchema.js) even though this page's
-      // own robotNumber field is bare digits - toAssignmentTeamKey applies
-      // the same "frc" prefix so this comparison actually lines up.
-      const entry = (result.data || []).find(r => String(r.match_key) === String(rawMatchNumber) && String(r.team_key) === toAssignmentTeamKey(rawTeamNumber));
+      const assignmentMatchKey = toAssignmentMatchKey(rawMatchNumber);
+      const assignmentTeamKey = toAssignmentTeamKey(rawTeamNumber);
+      const entry = (result.data || []).find(row =>
+        toAssignmentMatchKey(row.match_key) === assignmentMatchKey
+        && toAssignmentTeamKey(row.team_key) === assignmentTeamKey
+      );
       if (entry) { await editReport(entry); return true; }
     } catch { /* fall through to a fresh entry */ }
     return false;
@@ -508,10 +502,14 @@
       if (!response.ok || !payload.success) throw new Error(payload.error || 'Starting-position photos unavailable.');
       startPhotos = payload.data || {};
     } catch (error) { startPhotoError = error.message; }
-    eventKey = (await fetchActiveScoutingEventKey()) || '';
-    await loadEventTeams(eventKey);
-    void loadMyAssignments();
     const query = new URLSearchParams(window.location.search);
+    [activeEventKey, availableEvents] = await Promise.all([
+      fetchActiveScoutingEventKey(),
+      fetchAvailableScoutingEvents()
+    ]);
+    activeEventKey ||= '';
+    eventKey = String(query.get('event_key') || '').trim() || activeEventKey;
+    await loadEventTeams(eventKey);
     matchNumber = query.get('match') || '';
     robotNumber = query.get('team') || '';
     alliance = query.get('alliance') === 'blue' ? 'blue' : 'red';
@@ -536,6 +534,17 @@
   </header>
 
   <div class="report-actions">
+    <label class="competition-picker">
+      <span>Competition</span>
+      <select class="form-select" value={eventKey} disabled={saving || reportsLoading} on:change={changeCompetition}>
+        <option value="" disabled>Select competition</option>
+        {#each competitionOptions as option (option.value)}
+          <option value={option.value}>
+            {option.value}{option.label && option.label !== option.value ? ` — ${option.label}` : ''}{option.value === activeEventKey ? ' (active)' : ''}
+          </option>
+        {/each}
+      </select>
+    </label>
     <button class="btn btn-secondary" disabled={saving || reportsLoading} on:click={() => { closeComparison(); showReports = !showReports; if (showReports) loadMyReports(); }}>My reports</button>
     {#if editing && !submitted}<span>Editing saved report. Save changes when finished.</span><button class="btn" disabled={saving} on:click={nextAssignment}>New assignment</button>{/if}
   </div>
@@ -851,6 +860,8 @@
 <style>
   .report-row-actions { display:flex; flex-wrap:wrap; gap:var(--space-2); }
   .report-actions { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-3); margin-bottom:var(--space-3); }
+  .competition-picker { display:grid; gap:.25rem; min-width:min(100%, 22rem); font-weight:600; }
+  .competition-picker span { font-size:.8rem; color:var(--text-muted); }
   .report-history { padding:var(--space-4); margin-bottom:var(--space-4); }
   .report-row { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:var(--space-2); padding:var(--space-2) 0; }
 

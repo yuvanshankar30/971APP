@@ -34,4 +34,20 @@ describe('match scouting field cues and rating controls', () => {
     expect(source).toContain("alliance === 'red' ? 'translate(100 48.5) rotate(180)'");
     expect(source).toContain('startPhotos[`${alliance}:${position}`]');
   });
+
+  it('lets scouts select an event and scopes event data to that choice', () => {
+    expect(source).toContain('fetchAvailableScoutingEvents');
+    expect(source).toContain('<span>Competition</span>');
+    expect(source).toContain('on:change={changeCompetition}');
+    expect(source).toContain("url.searchParams.set('event_key', eventKey)");
+    expect(source).toContain('await loadEventTeams(eventKey)');
+    expect(source).toContain('event_key: eventKey');
+  });
+
+  it('marks the matching assignment done after saving without hiding its history', () => {
+    expect(source).toContain('void completeMyAssignment(matchNumber, robotNumber)');
+    expect(source).toContain("scouting_type: 'data'");
+    expect(source).toContain("action: 'complete'");
+    expect(source).not.toContain('isMyAssignedRobot');
+  });
 });

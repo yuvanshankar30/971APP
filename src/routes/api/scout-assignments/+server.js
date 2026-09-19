@@ -188,7 +188,7 @@ async function listEligibleUsersForType(db, scoutingType) {
                    flag is specifically about the paused assignment-DM
                    rollout, and does not cover this newer, separately
                    requested notification).
-    complete:      { scouting_type, match_key, team_key, user_id }
+    complete:      { scouting_type, match_key, team_key }
 */
 
 export async function GET({ url, request }) {
@@ -467,14 +467,8 @@ export async function POST({ request }) {
     }
 
     if (action === 'complete') {
-      const { match_key, team_key, user_id } = body;
-      if (!match_key || !team_key || !user_id) {
-        return json({ error: 'match_key, team_key, user_id required' }, { status: 400 });
-      }
-
-      if (user_id !== actorId) {
-        return json({ error: 'Forbidden' }, { status: 403 });
-      }
+      const { match_key, team_key } = body;
+      if (!match_key || !team_key) return json({ error: 'match_key and team_key required' }, { status: 400 });
 
       const { data: row, error: rErr } = await db
         .from('scout_match_assignments')
@@ -485,7 +479,7 @@ export async function POST({ request }) {
         .single();
 
       if (rErr) return json({ error: rErr.message }, { status: 500 });
-      if (row.assigned_user !== user_id) return json({ error: 'Not owner' }, { status: 403 });
+      if (row.assigned_user !== actorId) return json({ error: 'Not owner' }, { status: 403 });
 
       const { error } = await db
         .from('scout_match_assignments')
