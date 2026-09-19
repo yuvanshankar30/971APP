@@ -326,12 +326,9 @@ browser confirmation or prompt popups.
   reopened from Pit Scouting instead of disappearing into browser-local state.
   Match Scouting keeps robot status available throughout the workflow and
   requires a described ACE Team handoff whenever a robot breaks mechanically or is marked disabled or dead;
-  each handoff is immediately posted by the server-side Slack bot to
-  `#2026-chezy-ace-strat-pit`. Its Slack channel/timestamp is retained on the
-  ACE issue. Each competition gets one durable Slack thread in that channel;
-  every affected team is summarized in its parent message, while new reports,
-  meaningful edits, and resolutions are team-labeled replies in that thread.
-  Unchanged retries are suppressed. When multiple scouts cover the same
+  ACE Slack notifications are currently disabled: match-scout handoffs remain
+  in the Hub repair queue and do not post or update Slack messages. When
+  multiple scouts cover the same
   robot in the same match, their observations merge into that one issue;
   editing replaces only that scout's observation.
   general notes and the auto-path drawing remain optional. The path tool uses
