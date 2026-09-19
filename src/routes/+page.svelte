@@ -429,7 +429,7 @@
     </div>
 
     {#if showScoutAlert && myScoutAssignments.length>0}
-      <div class="pending-notice" style="background:#fffbe6; border:1px solid #f5d87b;">
+      <div class="pending-notice">
         <AlertCircle size={20} />
         <div>
           <h3>Scouting Assignments</h3>
