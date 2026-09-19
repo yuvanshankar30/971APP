@@ -42,7 +42,12 @@ function computeAccess(profile, rosterKeys) {
   const isCompetitionLead = String(profile?.team_role || '').trim().toLowerCase() === 'competition lead';
   const hasLeadKey = keys.has('scouting admin') || keys.has('data scout lead') || keys.has('scouting lead');
   const hasMemberKey = keys.has('data scout member') || hasLeadKey;
-  const canEdit = isAdmin || isCompetitionLead || perms.has('DATA_SCOUT_ADMIN') || hasLeadKey;
+  // VIEW_ADMIN_PANEL (any team lead, general_role 'lead') already gets into
+  // the Scouting Admin page itself - direct instruction: everyone who can
+  // see this panel should be able to publish from it, not land in a
+  // confusing view-only state just because they hold no scouting-specific
+  // roster key of their own.
+  const canEdit = isAdmin || isCompetitionLead || perms.has('DATA_SCOUT_ADMIN') || perms.has('VIEW_ADMIN_PANEL') || hasLeadKey;
   return {
     canEdit,
     canAssign: canEdit || perms.has('DATA_SCOUT_MEMBER') || hasMemberKey,
