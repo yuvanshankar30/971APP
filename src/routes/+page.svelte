@@ -157,6 +157,7 @@
   let nextScoutAssignment = null; // { scouting_type, match_key, team_key }
   let showScoutAlert = true;
   $: incompleteScoutAssignments = myScoutAssignments.filter(a => !a.completed_at);
+  $: completedScoutAssignmentCount = myScoutAssignments.length - incompleteScoutAssignments.length;
 
   // Pre-scouting assignment state - teams assigned to this user to research
   // ahead of the event (see /scouting-admin's PitAssignmentPanel,
@@ -508,6 +509,25 @@
           {/if}
         </button>
       {/if}
+    </div>
+
+    <div class="stat-strip">
+      <div class="stat-tile">
+        <span class="stat-label">Competition</span>
+        <strong class="stat-value stat-value-text">{homeEventKey || 'Not set'}</strong>
+      </div>
+      <div class="stat-tile">
+        <span class="stat-label">Assignments Open</span>
+        <strong class="stat-value">{incompleteScoutAssignments.length}</strong>
+      </div>
+      <div class="stat-tile">
+        <span class="stat-label">Assignments Done</span>
+        <strong class="stat-value">{completedScoutAssignmentCount}</strong>
+      </div>
+      <div class="stat-tile">
+        <span class="stat-label">Pre-Scout Queue</span>
+        <strong class="stat-value">{myPrescoutAssignments.length}</strong>
+      </div>
     </div>
 
     {#if showScoutAlert && incompleteScoutAssignments.length>0}
@@ -1403,10 +1423,13 @@
   }
 
   .dashboard-container {
-    /* Slightly softer than the app-wide sharp-corner default (--radius-lg),
-       without going soft-card-AI-generic. Scoped to this page's own cards. */
-    --home-radius: 8px;
-    max-width: 1200px;
+    /* Sharp corners throughout this page, by direct instruction - no
+       filleted rectangles. Wider than before too: this is the one screen
+       every signed-in visit starts on, and it was floating in a narrow
+       centered column with a lot of unused side space on anything wider
+       than a laptop. */
+    --home-radius: 0;
+    max-width: 1440px;
     margin: var(--space-7) auto;
     padding: 0 var(--space-4);
   }
@@ -1440,6 +1463,47 @@
     margin: 0;
     font-size: 0.85rem;
     color: var(--text-muted);
+  }
+
+  /* A telemetry-strip, not another row of rounded cards: tiles share
+     hairlines instead of each carrying their own border, which reads as one
+     continuous instrument rather than four separate boxes. */
+  .stat-strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    margin-bottom: var(--space-6);
+  }
+
+  .stat-tile {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    background: var(--surface-1);
+    padding: var(--space-4) var(--space-5);
+  }
+
+  .stat-label {
+    font-family: var(--font-mono-stack);
+    font-size: var(--font-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+  }
+
+  .stat-value {
+    font-size: var(--font-xxl, 1.75rem);
+    font-weight: 700;
+    color: var(--secondary);
+    line-height: 1.1;
+  }
+
+  .stat-value-text {
+    font-size: var(--font-lg);
+    font-family: var(--font-mono-stack);
+    text-transform: uppercase;
   }
 
   .pending-notice {
@@ -1488,7 +1552,7 @@
   .current-match-heading strong { font-size:var(--font-lg); }
   .current-match-eyebrow { color:var(--text-muted); font-size:var(--font-xs); font-family:var(--font-mono-stack); text-transform:uppercase; }
   .current-match-alliances { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--gap-3); }
-  .current-alliance { display:flex; align-items:center; gap:var(--space-2); padding:var(--space-3); border-radius:var(--radius-sm); }
+  .current-alliance { display:flex; align-items:center; gap:var(--space-2); padding:var(--space-3); }
   .current-alliance span { margin-right:auto; font-weight:700; text-transform:uppercase; font-size:var(--font-xs); }
   .current-alliance b { min-width:2.7rem; text-align:center; }
   .current-alliance.red { background:var(--red-soft); color:var(--red-strong); }
@@ -1515,7 +1579,7 @@
     align-items: center;
     background: var(--primary);
     border: 1px solid var(--border);
-    border-radius: var(--home-radius, var(--radius-lg));
+    border-left: 3px solid var(--border);
     padding: var(--space-5) var(--space-6);
     text-decoration: none;
     color: inherit;
@@ -1526,6 +1590,7 @@
   .action-card:hover {
     background: var(--surface-2);
     border-color: var(--accent-strong);
+    border-left-color: var(--brand-gold-strong);
   }
 
   .workspace-card :global(svg),
@@ -1534,7 +1599,6 @@
     width: 22px;
     height: 22px;
     padding: 9px;
-    border-radius: var(--radius-sm);
     background: var(--brand-gold-soft);
     color: var(--brand-gold-strong);
   }
@@ -1569,7 +1633,7 @@
     color: inherit;
     background: var(--surface-1);
     border: 1px solid var(--border);
-    border-radius: var(--home-radius, var(--radius-lg));
+    border-left: 3px solid var(--brand-gold-strong);
     padding: var(--space-4) var(--space-5);
     transition: border-color 0.1s ease, background-color 0.1s ease;
   }
@@ -1577,11 +1641,12 @@
   .assignment-card:hover {
     background: var(--surface-2);
     border-color: var(--accent-strong);
+    border-left-color: var(--accent-strong);
   }
 
   .assignment-card h5 { margin: 0 0 var(--space-1) 0; color: var(--secondary); }
   .assignment-card p { margin: 0; color: var(--neutral-500); font-size: var(--font-xs); }
-  .assignment-card.completed { opacity: 0.72; }
+  .assignment-card.completed { opacity: 0.72; border-left-color: var(--success, #2e7d32); }
   .assignment-card.completed:hover { opacity: 1; }
   .completed-badge {
     display: inline-flex;
@@ -1774,10 +1839,25 @@
     border-color: var(--accent-strong);
   }
 
+  /* Sections used to stack full-width one after another, which is most of
+     why the page read as sparse - Workspace and Admin are short and had a
+     whole row to themselves. They sit side-by-side with the assignment
+     queue now, whenever there's room for it, and still stack on mobile. */
   .dashboard-sections {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-7);
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+    align-items: start;
+    gap: var(--space-6);
+  }
+
+  .dashboard-section:has(.user-lists) {
+    grid-column: span 2;
+  }
+
+  @media (max-width: 900px) {
+    .dashboard-section:has(.user-lists) {
+      grid-column: span 1;
+    }
   }
 
   .dashboard-section.editing {
