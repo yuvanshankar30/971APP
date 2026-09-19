@@ -103,6 +103,7 @@ export function defaultHeaderTabs(navConfig = navigation) {
       { key: 'matchrankings', label: 'Match Rankings' },
       { key: 'powerrankings', label: 'Power Rankings' },
       { key: 'robotratings', label: 'Robot Ratings' },
+      { key: 'epa', label: 'EPA' },
       { key: 'vision', label: 'Vision Scouting' },
       { key: 'predictions', label: 'Prediction Market' },
       { key: 'bluealliance', label: 'Blue Alliance' },
