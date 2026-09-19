@@ -5,9 +5,9 @@ import { getSupabase } from '$lib/server/971bot.js';
 import { notifyScoutAssignment, notifyScoutUnassignment } from '$lib/server/slack_notifications.js';
 
 const SCOUTING_TYPES = new Set(['data', 'note', 'quick']);
-// Assignment publishing is ready to fan out to Slack, but DMs remain disabled
-// until scouting leadership approves the notification rollout.
-const SCOUT_ASSIGNMENT_SLACK_DMS_ENABLED = false;
+// Enabled by direct instruction ahead of Chezy Champs - publishing real
+// scouting assignments should now DM each assigned scout.
+const SCOUT_ASSIGNMENT_SLACK_DMS_ENABLED = true;
 
 async function notifyPublishedScoutAssignment(assignment) {
   if (!SCOUT_ASSIGNMENT_SLACK_DMS_ENABLED) return { ok: false, reason: 'disabled' };
