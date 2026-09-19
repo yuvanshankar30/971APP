@@ -1340,7 +1340,7 @@
           maxlength={MAX_BREAKING_COMPONENT_LENGTH}
           bind:value={likely_breaking_component}
           placeholder="Describe the most likely failure point"
-        />
+        ></textarea>
       </div>
     {/if}
 
@@ -1461,7 +1461,7 @@
 
     {#if pitSchema.climb_options}
       <div class="form-group">
-        <label class="form-label">Climb Options</label>
+        <div class="form-label">Climb Options</div>
         <div class="climb-options-grid">
           {#each CLIMB_OPTIONS as option}
             <label class="form-checkbox climb-option">
@@ -1482,7 +1482,7 @@
     {#if pitSchema.auto_options}
       <div class="form-group">
         <div class="auto-options-header">
-          <label class="form-label">Auto Options</label>
+          <div class="form-label">Auto Options</div>
           <button
             class="btn btn-outline"
             type="button"
@@ -1565,7 +1565,7 @@
         </div>
 
         <div class="form-group">
-          <label class="form-label">Motor controllers used</label>
+          <div class="form-label">Motor controllers used</div>
           <div class="option-grid compact">
             {#each MOTOR_CONTROLLER_OPTIONS as option}
               <label class="form-checkbox option-tile">
@@ -1581,7 +1581,7 @@
         </div>
 
         <div class="form-group">
-          <label class="form-label">Motor types used</label>
+          <div class="form-label">Motor types used</div>
           <div class="option-grid compact">
             {#each MOTOR_TYPE_OPTIONS as option}
               <label class="form-checkbox option-tile">
@@ -1645,7 +1645,7 @@
         </div>
 
         <div class="form-group">
-          <label class="form-label">Auto tools used</label>
+          <div class="form-label">Auto tools used</div>
           <div class="option-grid compact">
             {#each AUTO_TOOL_OPTIONS as option}
               <label class="form-checkbox option-tile">
@@ -1661,7 +1661,7 @@
         </div>
 
         <div class="form-group">
-          <label class="form-label">Vision used</label>
+          <div class="form-label">Vision used</div>
           <div class="option-grid compact">
             {#each VISION_OPTIONS as option}
               <label class="form-checkbox option-tile">
@@ -1677,7 +1677,7 @@
         </div>
 
         <div class="form-group">
-          <label class="form-label">Programming language</label>
+          <div class="form-label">Programming language</div>
           <div class="option-grid compact">
             {#each PROGRAMMING_LANGUAGE_OPTIONS as option}
               <label class="form-checkbox option-tile">
@@ -1789,7 +1789,7 @@
         </div>
 
         <div class="form-group">
-          <label class="form-label">Encoder types used</label>
+          <div class="form-label">Encoder types used</div>
           <div class="option-grid compact">
             {#each ENCODER_TYPE_OPTIONS as option}
               <label class="form-checkbox option-tile">
