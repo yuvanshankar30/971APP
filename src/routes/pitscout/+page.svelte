@@ -1933,7 +1933,7 @@
     display: flex;
     gap: 0.5rem;
     max-width: 760px;
-    margin: 0 auto 1rem;
+    margin: 0 0 1rem;
   }
 
   .view-tabs button {
