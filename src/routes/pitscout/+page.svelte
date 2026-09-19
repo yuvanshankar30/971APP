@@ -4,6 +4,7 @@
   import { supabase, getAuthHeader } from '$lib/supabase.js';
   import { fetchActiveScoutingEventKey, fetchAvailableScoutingEvents, fetchManualScoutingTeams } from '$lib/scoutingEvent.js';
   import { submitOrQueue } from '$lib/offlineQueue.js';
+  import { fetchWithCache } from '$lib/offlineCache.js';
   import SeasonFilter from '$lib/components/SeasonFilter.svelte';
   import OfflineSyncBadge from '$lib/components/OfflineSyncBadge.svelte';
   import RebuiltFieldMap from '$lib/components/RebuiltFieldMap.svelte';
@@ -533,14 +534,16 @@
       return [];
     }
 
-    const [eventTeamsRes, eventMatchesRes] = await Promise.all([
-      fetch(`/api/tba/event-teams?event_key=${encodeURIComponent(resolvedEventKey)}`).catch(() => null),
-      fetch(`/api/tba/event-matches?event_key=${encodeURIComponent(resolvedEventKey)}&comp_level=qm`).catch(() => null)
-    ]);
-
+    // Event roster and (qual) schedule barely move mid-event - cached, so a
+    // scout standing in a pit with one bar of signal still gets the team
+    // list instantly instead of a blank picker while this times out.
     const [eventTeamsData, eventMatchesData] = await Promise.all([
-      eventTeamsRes?.json().catch(() => null),
-      eventMatchesRes?.json().catch(() => null)
+      fetchWithCache(`/api/tba/event-teams?event_key=${encodeURIComponent(resolvedEventKey)}`, {
+        cacheKey: `event-teams:${resolvedEventKey}`
+      }).catch(() => null),
+      fetchWithCache(`/api/tba/event-matches?event_key=${encodeURIComponent(resolvedEventKey)}&comp_level=qm`, {
+        cacheKey: `event-matches:${resolvedEventKey}:qm`
+      }).catch(() => null)
     ]);
 
     const set = new Set();

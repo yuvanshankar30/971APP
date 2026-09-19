@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import { Radar, ExternalLink, MapPin, Calendar, Trophy, Users, Award, ChevronDown, ChevronRight, RefreshCw } from 'lucide-svelte';
+  import { fetchWithCache } from '$lib/offlineCache.js';
 
   // A replica of thebluealliance.com's own front end (team page -> year
   // picker -> event list -> event detail: rankings/alliances/awards/
@@ -53,10 +54,14 @@
     return `${name} ${match?.set_number ?? '?'} Match ${match?.match_number}`;
   }
 
+  // Cached - almost everything this page shows (a past event's rankings,
+  // a completed match's score, a team's own profile) never changes once
+  // it exists, and even a live event's data moves slowly by scouting-app
+  // standards. The URL itself is a fine cache key here since every caller
+  // already encodes the team/event it's asking about into it.
   async function fetchJson(url) {
     try {
-      const response = await fetch(url);
-      const payload = await response.json();
+      const payload = await fetchWithCache(url);
       return payload?.success ? payload.data : null;
     } catch {
       return null;
