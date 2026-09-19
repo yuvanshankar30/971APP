@@ -501,12 +501,18 @@ file: update its diagram alongside this section, not separately from it.
   `@supabase/ssr` is a declared but unused dependency).
 - **3D/CAD**: `occt-import-js` (STEP file parsing, WASM) + `three.js`
   (client-side 3D viewing, `CadViewer.svelte`).
-- **Other integrations**: Slack (`@slack/web-api`, bot notifications/DMs),
+- **Other integrations**: Slack (`@slack/web-api`, bot notifications/DMs,
+  ACE/Pit alerts, and signed `app_mention` handling: `@971app status` reports
+  live Hub/database/scouting status plus recent releases, while other Hub
+  questions receive read-only, context-bounded answers from Groq using the
+  server-only `GROQ_API_KEY`),
   Onshape API (CAD source of truth for parts - see the Onshape-key exposure
   note under **Known gaps** below), The Blue Alliance API (scouting), Sentry
   (error monitoring), Google Drive API (AutoCAM input/output watcher, hand-
   rolled, no `googleapis` dependency - see `autocam/docs/drive-watcher-folder-layout.md`),
   and Hugging Face Qwen3-VL (private DGX Spark inference for Vision Scouting).
+  See `docs/guides/slack-hub-assistant.md` for the required Slack event scope,
+  subscription, and production-secret wiring.
 
 ## AutoCAM (`autocam/`, top-level - not under `src/lib/`)
 

@@ -9,9 +9,11 @@ import {
 } from '$lib/server/971bot';
 import { handlePlannerReaction } from '$lib/server/planner_notifications.js';
 import { handleP0BugAssignmentReaction } from '$lib/server/slack_notifications.js';
+import { handleHubAppMention } from '$lib/server/hub_slack_assistant.js';
 
 // Avoid approving the same purchase repeatedly when multiple reactions are added.
 const recentlyApprovedPurchases = new Set();
+const recentlyHandledMentions = new Set();
 
 export async function POST({ request }) {
   const rawBody = await request.text();
@@ -34,9 +36,23 @@ export async function POST({ request }) {
   if (payload.type === 'event_callback') {
     const event = payload.event || {};
     const event_type = event.type;
-    console.log('Slack event callback received', { event_type, event });
+    console.log('Slack event callback received', { event_type, event_id: payload.event_id || null });
 
-  if (event_type === 'reaction_added') {
+    if (event_type === 'app_mention') {
+      const dedupeKey = payload.event_id || `${event.channel || ''}:${event.ts || ''}`;
+      if (recentlyHandledMentions.has(dedupeKey)) return json({ ok: true, duplicate: true });
+      recentlyHandledMentions.add(dedupeKey);
+      setTimeout(() => recentlyHandledMentions.delete(dedupeKey), 5 * 60 * 1000);
+      try {
+        const result = await handleHubAppMention(event);
+        return json({ ok: true, handled: result.ok });
+      } catch (error) {
+        console.error('Failed to answer Slack app mention', error?.data?.error || error?.message || error);
+        return json({ ok: true, handled: false });
+      }
+    }
+
+    if (event_type === 'reaction_added') {
       const reaction = event.reaction;
       const item = event.item || {};
       const channel = item.channel;
