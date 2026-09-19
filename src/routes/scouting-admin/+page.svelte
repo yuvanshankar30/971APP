@@ -989,11 +989,13 @@
                 {:else}
                   {#each filteredUsers as row}
                     <tr>
-                      <td data-label="Name">
+                      <td data-label="Name" class="name-cell">
                         <label class="sr-only" for={`scout-name-${row.id}`}>Name for {row.email}</label>
                         <input id={`scout-name-${row.id}`} class="form-input" maxlength="120" placeholder="Enter actual full name" bind:value={nameDrafts[row.id]} />
-                        <small>{scoutDisplayName(row)}</small>
-                        <button class="btn btn-sm" disabled={savingNameId !== null || !nameDrafts[row.id]?.trim() || nameDrafts[row.id] === row.full_name} on:click={() => saveScoutName(row)}>Save name</button>
+                        <div class="name-cell-footer">
+                          <small>{scoutDisplayName(row)}</small>
+                          <button class="btn btn-sm" disabled={savingNameId !== null || !nameDrafts[row.id]?.trim() || nameDrafts[row.id] === row.full_name} on:click={() => saveScoutName(row)}>Save name</button>
+                        </div>
                       </td>
                       <td data-label="Email">{row.email || '-'}</td>
                       <td data-label="Competition Role" class="role-cell">
@@ -1307,14 +1309,21 @@
   }
 
   .role-assignment-table th:nth-child(3),
-  .role-assignment-table td:nth-child(3) {
-    min-width: 220px;
-  }
-
+  .role-assignment-table td:nth-child(3),
   .role-assignment-table th:nth-child(4),
   .role-assignment-table td:nth-child(4) {
-    min-width: 180px;
+    min-width: 200px;
   }
+
+  .name-cell { min-width: 220px; }
+  .name-cell-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--gap-2);
+    margin-top: var(--space-1);
+  }
+  .name-cell-footer small { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   .assignment-select {
     appearance: none;
