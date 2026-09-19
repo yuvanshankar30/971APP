@@ -25,7 +25,7 @@
 //     disconnected) - back in the default nav regardless of that
 //     integration's own connection state, same as before the removal.
 //   - Competition: the active scouting surfaces only. The legacy routes
-//     (Note Scouting and Team View) stay in the
+//     (Note Scouting, Team View, and Prediction Market) stay in the
 //     codebase for a future restoration but are deliberately out of the
 //     default menu - they are still reachable by URL, and by anyone who
 //     already added them to their own saved nav.
@@ -97,7 +97,6 @@ export function defaultHeaderTabs(navConfig = navigation) {
       { key: 'pitscout', label: 'Pit Scouting' },
       { key: 'powerrankings', label: 'Power Rankings' },
       { key: 'robotratings', label: 'Robot Ratings' },
-      { key: 'predictions', label: 'Prediction Market' },
       { key: 'vision', label: 'Vision Scouting' },
       { key: 'scouting-admin', label: 'Scouting Admin' }
     ]

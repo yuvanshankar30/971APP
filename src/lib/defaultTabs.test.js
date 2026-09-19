@@ -105,20 +105,21 @@ describe('defaultHeaderTabs', () => {
   it('orders the scouting surfaces the way the team asked for them', () => {
     // Deliberate order, not incidental: strategy leads as the board the team
     // opens to decide something, then the collection surfaces that feed it
-    // (match -> pit -> rankings -> ratings -> predictions -> vision), with
-    // the admin surface last. Exactly these 11 - Pick List (the 'scouting'
-    // key) is no longer a default entry, per direct feedback naming this
-    // exact list; Robot Ratings joined right after Power Rankings since it
-    // feeds a display-only average into that same page, and Prediction
-    // Market right after that since it bets on the same match schedule
-    // Strategy's Matches view shows. Drive Team sits right after Strategy -
-    // both read the live match schedule, Drive Team is just the field-facing
-    // view of it. Picklist is its own top-level tab (not a Strategy subtab)
-    // right after that - alliance selection is its own workflow, not a
-    // sub-view of the Teams/Matches board.
+    // (match -> pit -> rankings -> ratings -> vision), with the admin
+    // surface last. Exactly these 10 - Pick List (the 'scouting' key) is no
+    // longer a default entry, per direct feedback naming this exact list;
+    // Robot Ratings joined right after Power Rankings since it feeds a
+    // display-only average into that same page. Drive Team sits right after
+    // Strategy - both read the live match schedule, Drive Team is just the
+    // field-facing view of it. Picklist is its own top-level tab (not a
+    // Strategy subtab) right after that - alliance selection is its own
+    // workflow, not a sub-view of the Teams/Matches board. Prediction Market
+    // (which used to sit right after Robot Ratings) was removed from the
+    // default menu - same "legacy, still reachable by URL" treatment as
+    // Note Scouting and Team View.
     const keys = competitionChildren(defaultHeaderTabs()).map((child) => child.key);
     expect(keys).toEqual([
-      'strategy', 'driveteam', 'picklist', 'matchscout', 'matchrankings', 'pitscout', 'powerrankings', 'robotratings', 'predictions', 'vision', 'scouting-admin'
+      'strategy', 'driveteam', 'picklist', 'matchscout', 'matchrankings', 'pitscout', 'powerrankings', 'robotratings', 'vision', 'scouting-admin'
     ]);
   });
 
