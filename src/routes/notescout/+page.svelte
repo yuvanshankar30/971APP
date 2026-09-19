@@ -187,6 +187,48 @@
     }
   }
 
+  // --- assignment (scouting_type: 'note') ---
+  let myNoteAssignments = {};
+
+  function assignmentLookupKey(matchKey, teamKey) {
+    return `${matchKey}::${teamKey}`;
+  }
+
+  function isMyAssignedRobot(matchKey, teamKey) {
+    return !!myNoteAssignments[assignmentLookupKey(matchKey, teamKey)];
+  }
+
+  async function loadMyAssignments() {
+    if (!user?.id) { myNoteAssignments = {}; return; }
+    try {
+      const res = await authFetch(`/api/scout-assignments?scouting_type=note&mine=1&user_id=${encodeURIComponent(user.id)}`);
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) throw new Error(data?.error || 'Failed');
+      const next = {};
+      for (const row of data.data || []) {
+        if (row?.completed_at) continue;
+        next[assignmentLookupKey(row.match_key, row.team_key)] = true;
+      }
+      myNoteAssignments = next;
+    } catch {
+      myNoteAssignments = {};
+    }
+  }
+
+  async function completeMyAssignment(matchKey, teamKey) {
+    if (!user?.id || !isMyAssignedRobot(matchKey, teamKey)) return;
+    try {
+      await authFetch('/api/scout-assignments', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'complete', scouting_type: 'note', match_key: matchKey, team_key: teamKey, user_id: user.id })
+      });
+      await loadMyAssignments();
+    } catch {
+      // scouted data already saved - a failed "mark complete" isn't worth blocking on
+    }
+  }
+
   async function saveNote() {
     if (!selectedMatch || !selectedTeam) return;
     saving = true;
@@ -207,6 +249,7 @@
         noteText = '';
         rankingImpact = 0;
         alert(data.warning || 'Saved');
+        void completeMyAssignment(selectedMatch.match_key, selectedTeam);
       }
     } catch (e) {
       alert('Save error: ' + e.message);
@@ -220,7 +263,7 @@
     availableEvents = await fetchAvailableScoutingEvents();
   }
 
-  onMount(() => { loadEventOptions(); loadTeamsWithNotes(); });
+  onMount(() => { loadEventOptions(); loadTeamsWithNotes(); loadMyAssignments(); });
 
   // Re-fetch matches whenever the resolved event changes - covers both the
   // initial async load of the active event key and the user switching the

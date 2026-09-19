@@ -76,6 +76,7 @@
   let startPhotos = {};
   let startPhotoError = '';
   let error = '';
+  let myDataAssignments = {};
   $: if (!scoutName && $userProfile?.full_name && !$userProfile.full_name.includes('@')) scoutName = $userProfile.full_name;
 
   $: assignmentReady = matchNumber.trim() && robotNumber.trim() && startingPosition && scoutName.trim() && typeof preload === 'boolean';
@@ -279,6 +280,86 @@
     comparisonError = '';
   }
 
+  // scout_match_assignments (scouting_type 'data') keys its rows with TBA's
+  // full match key ("2026cc_qm14") and "frc"-prefixed team key, while this
+  // page's own match_scout_entries convention is the bare qualification
+  // number and bare team number (see bareMatchNumber/scoutAssignmentHref on
+  // the homepage) - these two convert one into the other so a submission
+  // here can look up and complete the assignment that sent the scout here.
+  function assignmentLookupKey(matchKey, teamKey) {
+    return `${matchKey}::${teamKey}`;
+  }
+
+  function toAssignmentMatchKey(rawMatchNumber) {
+    const trimmed = String(rawMatchNumber || '').trim();
+    return trimmed && eventKey ? `${eventKey}_qm${trimmed}` : '';
+  }
+
+  function toAssignmentTeamKey(rawTeamNumber) {
+    const trimmed = String(rawTeamNumber || '').trim();
+    return trimmed ? `frc${trimmed}` : '';
+  }
+
+  function isMyAssignedRobot(rawMatchNumber, rawTeamNumber) {
+    const key = assignmentLookupKey(toAssignmentMatchKey(rawMatchNumber), toAssignmentTeamKey(rawTeamNumber));
+    return !!myDataAssignments[key];
+  }
+
+  async function loadMyAssignments() {
+    const userId = $userProfile?.id;
+    if (!userId) { myDataAssignments = {}; return; }
+    try {
+      const response = await fetch(`/api/scout-assignments?scouting_type=data&mine=1&user_id=${encodeURIComponent(userId)}`, { headers: await getAuthHeader() });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.success) throw new Error(payload?.error || 'Failed');
+      const next = {};
+      for (const row of payload.data || []) {
+        if (row?.completed_at) continue;
+        next[assignmentLookupKey(row.match_key, row.team_key)] = true;
+      }
+      myDataAssignments = next;
+    } catch {
+      myDataAssignments = {};
+    }
+  }
+
+  async function completeMyAssignment(rawMatchNumber, rawTeamNumber) {
+    const userId = $userProfile?.id;
+    if (!userId || !isMyAssignedRobot(rawMatchNumber, rawTeamNumber)) return;
+    try {
+      await fetch('/api/scout-assignments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(await getAuthHeader()) },
+        body: JSON.stringify({
+          action: 'complete',
+          scouting_type: 'data',
+          match_key: toAssignmentMatchKey(rawMatchNumber),
+          team_key: toAssignmentTeamKey(rawTeamNumber),
+          user_id: userId
+        })
+      });
+      await loadMyAssignments();
+    } catch {
+      // scouted data already saved - a failed "mark complete" isn't worth blocking on
+    }
+  }
+
+  // The homepage links a completed assignment card straight back here with
+  // the same ?match=&team= it used the first time, so a scout can revisit
+  // and correct an answer. If a report already exists for that match/team,
+  // load it into the normal edit flow instead of starting a blank one.
+  async function tryLoadExistingReport(rawMatchNumber, rawTeamNumber) {
+    if (!eventKey || !rawMatchNumber || !rawTeamNumber) return false;
+    try {
+      const response = await fetch(`/api/matchscout?event_key=${encodeURIComponent(eventKey)}&mine=1`, { headers: await getAuthHeader() });
+      const result = await response.json().catch(() => null);
+      if (!response.ok || !result?.success) return false;
+      const entry = (result.data || []).find(r => String(r.match_key) === String(rawMatchNumber) && String(r.team_key) === String(rawTeamNumber));
+      if (entry) { await editReport(entry); return true; }
+    } catch { /* fall through to a fresh entry */ }
+    return false;
+  }
+
   async function editReport(entry) {
     reportsLoading = true;
     reportsError = '';
@@ -404,7 +485,10 @@
       queuedOffline = result.queued;
       submitted = true;
       editing = true;
-      if (!queuedOffline) void autoSaveAutoPath(autoPathName);
+      if (!queuedOffline) {
+        void autoSaveAutoPath(autoPathName);
+        void completeMyAssignment(matchNumber, robotNumber);
+      }
     } catch (exception) {
       error = exception.message;
     } finally {
@@ -421,11 +505,13 @@
     } catch (error) { startPhotoError = error.message; }
     eventKey = (await fetchActiveScoutingEventKey()) || '';
     await loadEventTeams(eventKey);
+    void loadMyAssignments();
     const query = new URLSearchParams(window.location.search);
     matchNumber = query.get('match') || '';
     robotNumber = query.get('team') || '';
     alliance = query.get('alliance') === 'blue' ? 'blue' : 'red';
     startingPosition = query.get('start') || '';
+    if (matchNumber && robotNumber) await tryLoadExistingReport(matchNumber, robotNumber);
   });
 </script>
 
