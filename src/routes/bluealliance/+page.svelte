@@ -351,7 +351,6 @@
   .tba-topbar { background: var(--tba-blue); color: #fff; padding: 0.9rem 1.25rem; }
   .tba-topbar-inner { max-width: 1100px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem; }
   .tba-brand { display: flex; align-items: center; gap: 0.5rem; font-size: 1.15rem; font-weight: 700; }
-  .tba-brand small { font-weight: 400; font-size: 0.72rem; opacity: 0.75; margin-left: 0.35rem; }
   .team-switcher { display: flex; gap: 0.4rem; }
   .team-switch-btn { padding: 0.4rem 0.9rem; border-radius: 999px; border: 1px solid rgba(255,255,255,0.5); background: transparent; color: #fff; font-weight: 700; cursor: pointer; }
   .team-switch-btn.active { background: #fff; color: var(--tba-blue); }
