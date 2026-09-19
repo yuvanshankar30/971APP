@@ -97,6 +97,60 @@
   // already loads, no new fetches.
   $: nextDataAssignment = incompleteScoutAssignments.find(a => a.scouting_type === 'data') || null;
 
+  // The remaining tabs (picklist, rankings, power/robot ratings,
+  // predictions, admin) don't have anything this page already loads, so
+  // their preview data is fetched lazily the first time that tab is
+  // clicked - never eagerly on page load, and only once per tab per visit.
+  let quickPreviewData = {};
+  let quickPreviewLoading = {};
+
+  function selectQuickTab(key) {
+    const next = activeQuickTab === key ? null : key;
+    activeQuickTab = next;
+    if (next) loadQuickPreviewData(next);
+  }
+
+  async function loadQuickPreviewData(key) {
+    if (!homeEventKey || quickPreviewData[key] || quickPreviewLoading[key]) return;
+    if (!['picklist', 'matchrankings', 'powerrankings', 'robotratings', 'predictions', 'scouting-admin'].includes(key)) return;
+    quickPreviewLoading = { ...quickPreviewLoading, [key]: true };
+    try {
+      const headers = await getAuthHeader();
+      const myTeamKey = `frc${user?.frc_team || FRC_TEAMS.TEAM_971}`;
+      let result = null;
+      if (key === 'picklist') {
+        const res = await fetch(`/api/scouting-picklist?event_key=${encodeURIComponent(homeEventKey)}`, { headers });
+        const payload = await res.json().catch(() => null);
+        const picks = payload?.success ? payload.data || [] : [];
+        result = { count: picks.length, top: picks.slice(0, 3).map(p => p.team_number) };
+      } else if (key === 'matchrankings') {
+        const res = await fetch(`/api/tba/event-rankings?event_key=${encodeURIComponent(homeEventKey)}`);
+        const payload = await res.json().catch(() => null);
+        const rankings = payload?.success ? payload.data?.rankings || [] : [];
+        const mine = rankings.find(r => r.team_key === myTeamKey) || null;
+        result = { totalTeams: rankings.length, mine };
+      } else if (key === 'powerrankings' || key === 'robotratings') {
+        const res = await fetch(`/datascout?all_teams=1&event_key=${encodeURIComponent(homeEventKey)}`, { headers });
+        const payload = await res.json().catch(() => null);
+        const rows = payload?.success ? payload.data || [] : [];
+        result = { scoutedTeams: new Set(rows.map(r => r.team_key)).size };
+      } else if (key === 'predictions') {
+        const res = await fetch(`/api/prediction-market?event_key=${encodeURIComponent(homeEventKey)}`, { headers });
+        const payload = await res.json().catch(() => null);
+        result = { count: payload?.success ? (payload.data || []).length : 0 };
+      } else if (key === 'scouting-admin') {
+        const res = await fetch(`/api/scout-assignments?scouting_type=data&capabilities=1`, { headers });
+        const payload = await res.json().catch(() => null);
+        result = { canEdit: payload?.success ? !!payload.data?.can_edit : false };
+      }
+      quickPreviewData = { ...quickPreviewData, [key]: result };
+    } catch {
+      quickPreviewData = { ...quickPreviewData, [key]: null };
+    } finally {
+      quickPreviewLoading = { ...quickPreviewLoading, [key]: false };
+    }
+  }
+
   $: canViewAdmin = can('VIEW_ADMIN_PANEL');
   $: customSectionKeys = sanitizeSectionKeys(user?.dashboard_sections);
   $: rawVisibleKeys = (customSectionKeys && customSectionKeys.length ? customSectionKeys : defaultSectionKeyList(canViewAdmin))
@@ -742,6 +796,7 @@
            the page scrolls (see ScoutAssignmentPanel's own .panel-header for
            the exact same bug, fixed the same way: don't stick two things to
            the same line). -->
+      {#if homeEventKey}
       <div class="quick-nav-row">
         <aside class="quick-nav" aria-label="Competition quick navigation">
           <span class="quick-nav-label">Competition</span>
@@ -750,7 +805,7 @@
               type="button"
               class="quick-nav-tab"
               class:active={activeQuickTab === tab.key}
-              on:click={() => activeQuickTab = activeQuickTab === tab.key ? null : tab.key}
+              on:click={() => selectQuickTab(tab.key)}
             >{tab.label}</button>
           {/each}
         </aside>
@@ -791,6 +846,45 @@
               {:else if activeQuickTabInfo.key === 'myscout'}
                 <p class="quick-preview-match-heading">{completedScoutAssignmentCount} of {myScoutAssignments.length} assignments completed this event</p>
                 <p>{activeQuickTabInfo.blurb}</p>
+              {:else if quickPreviewLoading[activeQuickTabInfo.key]}
+                <p class="muted">Loading...</p>
+              {:else if activeQuickTabInfo.key === 'picklist'}
+                {#if quickPreviewData.picklist}
+                  <p class="quick-preview-match-heading">{quickPreviewData.picklist.count} team{quickPreviewData.picklist.count === 1 ? '' : 's'} on the pick list</p>
+                  <p>{quickPreviewData.picklist.count ? `Top picks: ${quickPreviewData.picklist.top.join(', ')}` : activeQuickTabInfo.blurb}</p>
+                {:else}
+                  <p>{activeQuickTabInfo.blurb}</p>
+                {/if}
+              {:else if activeQuickTabInfo.key === 'matchrankings'}
+                {#if quickPreviewData.matchrankings?.mine}
+                  <p class="quick-preview-match-heading">Your team - Rank {quickPreviewData.matchrankings.mine.rank} of {quickPreviewData.matchrankings.totalTeams}</p>
+                  <p>{quickPreviewData.matchrankings.mine.record?.wins ?? 0}-{quickPreviewData.matchrankings.mine.record?.losses ?? 0}-{quickPreviewData.matchrankings.mine.record?.ties ?? 0}</p>
+                {:else if quickPreviewData.matchrankings}
+                  <p>No ranking found for your team yet - {quickPreviewData.matchrankings.totalTeams} teams ranked so far.</p>
+                {:else}
+                  <p>{activeQuickTabInfo.blurb}</p>
+                {/if}
+              {:else if activeQuickTabInfo.key === 'powerrankings' || activeQuickTabInfo.key === 'robotratings'}
+                {#if quickPreviewData[activeQuickTabInfo.key]}
+                  <p class="quick-preview-match-heading">{quickPreviewData[activeQuickTabInfo.key].scoutedTeams} teams have local scouting data</p>
+                  <p>{activeQuickTabInfo.blurb}</p>
+                {:else}
+                  <p>{activeQuickTabInfo.blurb}</p>
+                {/if}
+              {:else if activeQuickTabInfo.key === 'predictions'}
+                {#if quickPreviewData.predictions}
+                  <p class="quick-preview-match-heading">{quickPreviewData.predictions.count} prediction{quickPreviewData.predictions.count === 1 ? '' : 's'} placed this event</p>
+                  <p>{activeQuickTabInfo.blurb}</p>
+                {:else}
+                  <p>{activeQuickTabInfo.blurb}</p>
+                {/if}
+              {:else if activeQuickTabInfo.key === 'scouting-admin'}
+                {#if quickPreviewData['scouting-admin']}
+                  <p class="quick-preview-match-heading">{quickPreviewData['scouting-admin'].canEdit ? 'You have edit access' : 'You have view-only access'}</p>
+                  <p>{activeQuickTabInfo.blurb}</p>
+                {:else}
+                  <p>{activeQuickTabInfo.blurb}</p>
+                {/if}
               {:else}
                 <p>{activeQuickTabInfo.blurb}</p>
               {/if}
@@ -804,6 +898,7 @@
           {/if}
         </div>
       </div>
+      {/if}
 
       {#if currentMatchLoading && !currentEventMatch}
         <div class="current-match-card current-match-loading">Loading the {homeEventKey || 'active event'} field...</div>
