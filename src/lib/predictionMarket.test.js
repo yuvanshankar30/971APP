@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { STARTING_BALANCE, availableBalance, buildTestMarketMatch, isTestMarketKey, myBetForMatch, poolForMatch, resolvePariMutuel, summarizeStandings } from './predictionMarket.js';
+import { STARTING_BALANCE, availableBalance, balanceHistoryForUser, buildTestMarketMatch, isTestMarketKey, myBetForMatch, oddsHistoryForMatch, poolForMatch, resolvePariMutuel, summarizeStandings } from './predictionMarket.js';
 
 describe('test prediction market', () => {
   it('uses the active event roster and a stable event-scoped key', () => {
@@ -116,5 +116,47 @@ describe('poolForMatch', () => {
   it('reports no share (not a divide-by-zero) when nobody has bet on the match yet', () => {
     const pool = poolForMatch([], 'm1');
     expect(pool).toMatchObject({ redPool: 0, bluePool: 0, total: 0, betCount: 0, redShare: null, blueShare: null });
+  });
+});
+
+describe('oddsHistoryForMatch', () => {
+  it('replays bets in placed_at order into a running implied red share', () => {
+    const bets = [
+      { match_key: 'm1', side: 'blue', stake: 100, placed_at: '2026-09-19T10:02:00Z' },
+      { match_key: 'm1', side: 'red', stake: 100, placed_at: '2026-09-19T10:00:00Z' },
+      { match_key: 'm2', side: 'red', stake: 500, placed_at: '2026-09-19T09:00:00Z' } // different match, must not leak in
+    ];
+    const history = oddsHistoryForMatch(bets, 'm1');
+    expect(history).toHaveLength(2);
+    // First bet placed (by time, not array order) was red - 100% red share.
+    expect(history[0]).toMatchObject({ redShare: 1, total: 100 });
+    // Then a blue bet arrives, evening the pool to 50/50.
+    expect(history[1]).toMatchObject({ redShare: 0.5, total: 200 });
+  });
+
+  it('returns an empty history when nobody has bet on the match yet', () => {
+    expect(oddsHistoryForMatch([], 'm1')).toEqual([]);
+  });
+});
+
+describe('balanceHistoryForUser', () => {
+  it('starts at STARTING_BALANCE and walks resolved bets in resolution order', () => {
+    const bets = [
+      { created_by: 'u1', match_key: 'm2', stake: 100, payout: 0, resolved_at: '2026-09-19T12:00:00Z' },
+      { created_by: 'u1', match_key: 'm1', stake: 100, payout: 250, resolved_at: '2026-09-19T10:00:00Z' },
+      { created_by: 'u1', match_key: 'm3', stake: 50, payout: 50, resolved_at: null }, // unresolved - must not count yet
+      { created_by: 'u2', match_key: 'm1', stake: 999, payout: 0, resolved_at: '2026-09-19T09:00:00Z' } // different scout
+    ];
+    const history = balanceHistoryForUser(bets, 'u1');
+    expect(history).toHaveLength(3);
+    expect(history[0]).toMatchObject({ balance: STARTING_BALANCE, at: null });
+    // m1 resolved first (10:00) - +150 net.
+    expect(history[1]).toMatchObject({ balance: STARTING_BALANCE + 150, matchKey: 'm1' });
+    // m2 resolved second (12:00) - -100 net.
+    expect(history[2]).toMatchObject({ balance: STARTING_BALANCE + 150 - 100, matchKey: 'm2' });
+  });
+
+  it('is just the starting balance for a scout with no resolved bets', () => {
+    expect(balanceHistoryForUser([], 'u1')).toEqual([{ at: null, balance: STARTING_BALANCE, matchKey: null }]);
   });
 });
