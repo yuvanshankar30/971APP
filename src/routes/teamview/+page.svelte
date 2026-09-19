@@ -733,6 +733,7 @@
         </select>
       </div>
       <div class="pit-accordion">
+        <a class="btn btn-outline btn-sm pit-full-link" href={`/pitscout?team=${selectedTeam}`}>View full pit scouting data</a>
         {#if !pitEntry}
           <div class="empty">No pit data.</div>
         {:else}
@@ -976,6 +977,7 @@
   .team-image { object-fit: cover; }
   .image-empty { display: grid; place-items: center; color: var(--text-muted); font-size: var(--font-sm); background: var(--surface-1); }
   .photo-credit { color:var(--text-muted); font-size:.72rem; }
+  .pit-full-link { display: inline-flex; text-decoration: none; }
   .pit-fields { display: grid; gap: var(--gap-1); margin-top: var(--space-2); font-size: var(--font-sm); }
   .pit-long-answer { white-space: pre-wrap; line-height: 1.4; }
   .pit-auto-group { display: grid; gap: var(--gap-2); margin-top: var(--space-2); }

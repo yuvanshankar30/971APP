@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte';
+  import { page } from '$app/stores';
   import { supabase, getAuthHeader } from '$lib/supabase.js';
   import { fetchActiveScoutingEventKey, fetchAvailableScoutingEvents, fetchManualScoutingTeams } from '$lib/scoutingEvent.js';
   import { submitOrQueue } from '$lib/offlineQueue.js';
@@ -166,6 +167,10 @@
   let entriesByTeam = {};
   let selectedTeam = '';
   let teamSearch = '';
+  // Deep link support: ?team=frc9408 (Team View's "View full pit scouting
+  // data" button, or anywhere else) opens straight to that team's entry
+  // instead of leaving a scout on the team picker.
+  let requestedTeamKey = '';
   let pitContacts = [];
   let scout_name = '';
 
@@ -689,6 +694,10 @@
 
       const [loadedTeams, loadedEntries] = await Promise.all([loadTeams(), loadEntries(), loadProblems(), loadPitContacts()]);
       teams = [...new Set([...loadedTeams, ...Object.keys(loadedEntries)])].sort(teamSort);
+      if (requestedTeamKey && teams.includes(requestedTeamKey)) {
+        selectedTeam = requestedTeamKey;
+        requestedTeamKey = '';
+      }
       syncSelectedTeam();
     } catch (e) {
       apiNote = e.message || 'Load error';
@@ -949,6 +958,9 @@
   $: selectedTeamProblems = selectedTeam ? (problemsByTeam[selectedTeam] || []) : [];
 
   onMount(() => {
+    const teamParam = String($page.url.searchParams.get('team') || '').trim();
+    const digits = displayTeam(teamParam).replace(/\D/g, '');
+    if (digits) requestedTeamKey = `frc${parseInt(digits, 10)}`;
     prefersCameraCapture = detectCameraCapturePreference();
     loadEventOptions();
   });
