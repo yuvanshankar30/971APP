@@ -238,20 +238,25 @@
           <div class="bet-row">
             <div class="bet-row-header">
               <strong>{matchLabel(match)}</strong>
-              <span class="alliance-chip alliance-red">{match.alliances?.red?.team_keys?.map(teamNumber).join(', ')}</span>
-              <span class="text-muted">vs</span>
-              <span class="alliance-chip alliance-blue">{match.alliances?.blue?.team_keys?.map(teamNumber).join(', ')}</span>
+              {#if pool.total > 0}<span class="pool-size text-muted">{pool.betCount} bet{pool.betCount === 1 ? '' : 's'} · {points(pool.total)}</span>{/if}
+            </div>
+            <div class="odds-row">
+              <button type="button" class="odds-side red" class:chosen={draft.side === 'red'} on:click={() => setSide(match.key, 'red')}>
+                <span class="odds-pct">{pool.total > 0 ? `${Math.round(pool.redShare * 100)}%` : '—'}</span>
+                <span class="odds-teams">{match.alliances?.red?.team_keys?.map(teamNumber).join(' · ')}</span>
+              </button>
+              <span class="odds-vs">vs</span>
+              <button type="button" class="odds-side blue" class:chosen={draft.side === 'blue'} on:click={() => setSide(match.key, 'blue')}>
+                <span class="odds-pct">{pool.total > 0 ? `${Math.round(pool.blueShare * 100)}%` : '—'}</span>
+                <span class="odds-teams">{match.alliances?.blue?.team_keys?.map(teamNumber).join(' · ')}</span>
+              </button>
             </div>
             {#if pool.total > 0}
-              <div class="pool-bar" title={`Crowd so far: ${Math.round(pool.redShare * 100)}% red, ${Math.round(pool.blueShare * 100)}% blue over ${pool.betCount} bet${pool.betCount === 1 ? '' : 's'}`}>
+              <div class="pool-bar">
                 <span class="pool-fill" style={`width:${pool.redShare * 100}%`}></span>
               </div>
             {/if}
             <div class="bet-row-form">
-              <div class="side-toggle">
-                <button type="button" class="side-btn side-red" class:chosen={draft.side === 'red'} on:click={() => setSide(match.key, 'red')}>Red</button>
-                <button type="button" class="side-btn side-blue" class:chosen={draft.side === 'blue'} on:click={() => setSide(match.key, 'blue')}>Blue</button>
-              </div>
               <label class="stake-input">
                 <input type="number" min="1" step="1" placeholder="Stake" bind:value={draft.stake} />
                 <span>pts</span>
@@ -295,12 +300,12 @@
 
   .candy-banner {
     display:flex; align-items:center; gap:var(--space-3); margin-top:var(--space-3); padding:var(--space-3) var(--space-4);
-    border-radius:var(--radius-lg); border:1px solid color-mix(in srgb, var(--brand-gold-strong, #b8860b) 55%, var(--border));
-    background:linear-gradient(135deg, color-mix(in srgb, var(--brand-gold-strong, #b8860b) 16%, transparent), color-mix(in srgb, var(--brand-gold-strong, #b8860b) 4%, transparent));
+    border:1px solid var(--border); border-left:3px solid var(--brand-gold-strong, #b8860b);
+    background:var(--surface-1);
     color:var(--text);
   }
   .candy-banner :global(svg) { color:var(--brand-gold-strong, #b8860b); flex-shrink:0; }
-  .candy-banner.its-you { border-color:color-mix(in srgb, var(--status-success, #16a34a) 55%, var(--border)); background:linear-gradient(135deg, color-mix(in srgb, var(--status-success, #16a34a) 14%, transparent), transparent); }
+  .candy-banner.its-you { border-left-color:var(--status-success, #16a34a); }
   .candy-copy { display:flex; flex-direction:column; gap:2px; flex:1; }
   .candy-balance { display:flex; flex-direction:column; gap:2px; text-align:right; }
   .candy-eyebrow { font-size:.72rem; text-transform:uppercase; letter-spacing:.04em; color:var(--text-muted); }
@@ -324,21 +329,35 @@
 
   .alliance-red { color:var(--danger, #dc3545); }
   .alliance-blue { color:var(--brand-blue, #2563eb); }
-  .alliance-chip { font-weight:600; }
 
-  .bet-list { display:flex; flex-direction:column; gap:var(--space-2); margin-top:var(--space-2); }
-  .bet-row { border:1px solid var(--border); border-radius:var(--radius-sm); padding:var(--space-2) var(--space-3); }
-  .bet-row-header { display:flex; align-items:center; gap:var(--gap-2); flex-wrap:wrap; margin-bottom:var(--space-2); }
+  .bet-list { display:flex; flex-direction:column; gap:var(--space-3); margin-top:var(--space-2); }
+  .bet-row { border:1px solid var(--border); padding:var(--space-3) var(--space-4); }
+  .bet-row-header { display:flex; align-items:center; justify-content:space-between; gap:var(--gap-2); flex-wrap:wrap; margin-bottom:var(--space-3); }
+  .pool-size { font-size:.76rem; }
 
-  .pool-bar { height:6px; border-radius:3px; background:var(--brand-blue, #2563eb); overflow:hidden; margin-bottom:var(--space-2); }
+  /* The market's headline number, the way any dedicated prediction market
+     (Polymarket/Kalshi-style) leads with a percentage, not a bar chart -
+     the pool-share bar below is a secondary detail, not the main read. */
+  .odds-row { display:grid; grid-template-columns:1fr auto 1fr; gap:var(--space-3); align-items:stretch; margin-bottom:var(--space-2); }
+  .odds-side {
+    display:flex; flex-direction:column; align-items:center; gap:2px;
+    padding:var(--space-3); border:1px solid var(--border); background:var(--surface-1);
+    font:inherit; cursor:pointer; text-align:center;
+  }
+  .odds-side:hover { background:var(--surface-2); }
+  .odds-side.red.chosen { border-color:var(--danger, #dc3545); background:var(--red-soft); }
+  .odds-side.blue.chosen { border-color:var(--brand-blue, #2563eb); background:var(--blue-soft, #e8f1ff); }
+  .odds-pct { font-size:var(--font-xl, 1.4rem); font-weight:800; }
+  .odds-side.red .odds-pct { color:var(--danger, #dc3545); }
+  .odds-side.blue .odds-pct { color:var(--brand-blue, #2563eb); }
+  .odds-teams { font-size:.76rem; color:var(--text-secondary); font-weight:600; }
+  .odds-vs { align-self:center; color:var(--text-muted); font-size:.76rem; font-weight:700; }
+
+  .pool-bar { height:4px; background:var(--brand-blue, #2563eb); overflow:hidden; margin-bottom:var(--space-3); }
   .pool-fill { display:block; height:100%; background:var(--danger, #dc3545); }
 
   .bet-row-form { display:flex; align-items:center; gap:var(--gap-2); flex-wrap:wrap; }
-  .side-toggle { display:inline-flex; border-radius:var(--radius-sm); overflow:hidden; border:1px solid var(--border); }
-  .side-btn { padding:.4rem .8rem; border:0; background:var(--surface-1); color:var(--text-muted); font:inherit; font-weight:600; cursor:pointer; }
-  .side-btn.side-red.chosen { background:var(--danger, #dc3545); color:#fff; }
-  .side-btn.side-blue.chosen { background:var(--brand-blue, #2563eb); color:#fff; }
-  .stake-input { display:inline-flex; align-items:center; gap:2px; border:1px solid var(--border); border-radius:var(--radius-sm); padding:0 .5rem; background:var(--surface-1); }
+  .stake-input { display:inline-flex; align-items:center; gap:2px; border:1px solid var(--border); padding:0 .5rem; background:var(--surface-1); }
   .stake-input span { color:var(--text-muted); }
   .stake-input input { border:0; background:none; width:5rem; padding:.4rem 0; color:inherit; font:inherit; }
   .stake-input input:focus { outline:none; }
