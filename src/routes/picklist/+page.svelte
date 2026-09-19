@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte';
-  import { dndzone } from 'svelte-dnd-action';
-  import { AlertTriangle, ClipboardList, RefreshCw } from 'lucide-svelte';
+  import { dragHandleZone, dragHandle } from 'svelte-dnd-action';
+  import { AlertTriangle, ClipboardList, GripVertical, RefreshCw } from 'lucide-svelte';
   import { getAuthHeader } from '$lib/supabase.js';
   import { submitOrQueue } from '$lib/offlineQueue.js';
   import { fetchWithCache } from '$lib/offlineCache.js';
@@ -334,9 +334,10 @@
       {:else if !picklistEntries.length}
         <div class="empty-state">No teams on the pick list yet for this event. Sort the <a href="/strategy">Strategy Teams board</a> and use "Send to Picklist" to start one, or reseed from the auto rank.</div>
       {:else}
-        <ul class="picklist-list" use:dndzone={{ items: picklistEntries, flipDurationMs: 150 }} on:consider={handlePicklistConsider} on:finalize={handlePicklistFinalize}>
+        <ul class="picklist-list" use:dragHandleZone={{ items: picklistEntries, flipDurationMs: 150 }} on:consider={handlePicklistConsider} on:finalize={handlePicklistFinalize}>
           {#each picklistEntries as entry, index (entry.id)}
             <li class="picklist-row">
+              <span class="drag-handle" use:dragHandle aria-label={`Drag to reorder team ${entry.team_number}`}><GripVertical size={18} /></span>
               <span class="picklist-rank">{index + 1}</span>
               <a class="team-number-link" href={teamHref(entry.team_key)}>{entry.team_number}</a>
               {#if nameByTeam.get(entry.team_key)}<span class="team-name">{nameByTeam.get(entry.team_key)}</span>{/if}
@@ -380,7 +381,9 @@
   .team-number-link { display:inline-block; margin:0 var(--space-1) 0 0; padding:2px 6px; border-radius:var(--radius-xs); color:var(--text); text-decoration:none; font-weight:600; }
   .team-number-link:hover { text-decoration:underline; }
   .picklist-list { list-style:none; margin:0; padding:var(--space-2); display:grid; gap:var(--space-2); }
-  .picklist-row { display:flex; align-items:center; gap:var(--space-2); padding:var(--space-2) var(--space-3); border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--surface-1); cursor:grab; }
+  .picklist-row { display:flex; align-items:center; gap:var(--space-2); padding:var(--space-2) var(--space-3); border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--surface-1); }
+  .drag-handle { display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; padding:var(--space-1); margin:calc(var(--space-1) * -1) 0; color:var(--text-secondary); cursor:grab; touch-action:none; }
+  .drag-handle:active { cursor:grabbing; }
   .picklist-rank { font-weight:700; color:var(--text-secondary); min-width:1.5em; }
   .flag-chip { display:inline-flex; align-items:center; gap:4px; margin-left:auto; padding:2px 8px; border-radius:999px; background:color-mix(in srgb, var(--danger, #dc3545) 15%, transparent); color:var(--danger, #dc3545); font-size:.78rem; max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .picklist-auto .slider-group { padding:var(--space-3); border-bottom:1px solid var(--border); display:grid; gap:var(--space-3); }
