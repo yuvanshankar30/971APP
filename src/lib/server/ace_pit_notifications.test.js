@@ -12,10 +12,6 @@ const problem = {
   resolved: false
 };
 
-function activitySupa(insert = vi.fn().mockResolvedValue({ error: null })) {
-  return { from: () => ({ insert }) };
-}
-
 describe('ACE pit Slack notifications', () => {
   it('formats a useful team update and neutralizes mass mentions', () => {
     const text = acePitProblemMessage({ ...problem, detail: '<!channel> inspect immediately' }, 'Scout One');
@@ -50,47 +46,14 @@ describe('ACE pit Slack notifications', () => {
     expect(text).toContain('(1 scout)');
   });
 
-  it('posts a new report as a reply in the competition thread and logs it', async () => {
-    const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'CACE', ts: 'reply.1' });
-    const insert = vi.fn().mockResolvedValue({ error: null });
+  it('does not send new reports, edits, or resolutions', async () => {
+    const postMessage = vi.fn();
     const result = await sendAcePitProblem(problem, 'Scout One', {
       client: { chat: { postMessage } },
-      supa: activitySupa(insert),
-      ensureThread: vi.fn().mockResolvedValue({ channel: 'CACE', rootTs: 'root.1' })
-    });
-    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ channel: 'CACE', thread_ts: 'root.1' }));
-    expect(insert).toHaveBeenCalledWith(expect.objectContaining({ table_name: 'slack_messages' }));
-    expect(result).toEqual(expect.objectContaining({
-      ok: true,
-      channel: 'CACE',
-      ts: 'root.1',
-      replyTs: 'reply.1',
-      duplicate: false
-    }));
-  });
-
-  it('does not send an unchanged report a second time', async () => {
-    const text = acePitProblemMessage(problem, 'Scout One');
-    const postMessage = vi.fn();
-    const result = await sendAcePitProblem({ ...problem, slack_last_payload: text }, 'Scout One', {
-      client: { chat: { postMessage } },
-      supa: activitySupa(),
-      ensureThread: vi.fn().mockResolvedValue({ channel: 'CACE', rootTs: 'root.1' })
+      supa: {},
+      ensureThread: vi.fn()
     });
     expect(postMessage).not.toHaveBeenCalled();
-    expect(result).toEqual(expect.objectContaining({ ok: true, duplicate: true, ts: 'root.1' }));
-  });
-
-  it('sends a resolution as a thread update', async () => {
-    const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'CACE', ts: 'reply.2' });
-    await sendAcePitProblem({ ...problem, resolved: true }, 'Pit Lead', {
-      client: { chat: { postMessage } },
-      supa: activitySupa(),
-      ensureThread: vi.fn().mockResolvedValue({ channel: 'CACE', rootTs: 'root.1' })
-    });
-    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({
-      thread_ts: 'root.1',
-      text: expect.stringContaining(':white_check_mark: *Team 971 — issue resolved*')
-    }));
+    expect(result).toEqual({ ok: false, reason: 'ace-pit-notifications-disabled' });
   });
 });
