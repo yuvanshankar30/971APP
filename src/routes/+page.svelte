@@ -232,8 +232,6 @@
 
   // Scouting assignment alert state
   let myScoutAssignments = [];
-  let nextScoutAssignment = null; // { scouting_type, match_key, team_key }
-  let showScoutAlert = true;
   $: incompleteScoutAssignments = myScoutAssignments.filter(a => !a.completed_at);
   $: completedScoutAssignmentCount = myScoutAssignments.length - incompleteScoutAssignments.length;
   // A busy scout can rack up dozens of assignments - letting every card stay
@@ -395,7 +393,6 @@
         return doneA - doneB || compareScoutAssignmentMatches(a, b);
       });
       myScoutAssignments = sorted;
-      nextScoutAssignment = sorted.find(r => !r.completed_at) || null;
     }catch(e){ /* ignore */ }
   }
 
@@ -689,21 +686,23 @@
                     <h4>Purchasing</h4>
                     <p>Review purchase requests, orders, and needed components</p>
                   </a>
-                  <a href="/matchscout" class="workspace-card">
-                    <ClipboardCheck size={24} />
-                    <h4>Scouting</h4>
-                    <p>Open competition assignments, scouting forms, and event analysis</p>
-                  </a>
-                  <a href="/matchrankings" class="workspace-card">
-                    <ListOrdered size={24} />
-                    <h4>Match Rankings</h4>
-                    <p>Live qualification rankings and match results</p>
-                  </a>
-                  <a href="/strategy" class="workspace-card">
-                    <Target size={24} />
-                    <h4>Strategy</h4>
-                    <p>Alliance selection notes and match strategy</p>
-                  </a>
+                  {#if homeEventKey}
+                    <a href="/matchscout" class="workspace-card">
+                      <ClipboardCheck size={24} />
+                      <h4>Scouting</h4>
+                      <p>Open competition assignments, scouting forms, and event analysis</p>
+                    </a>
+                    <a href="/matchrankings" class="workspace-card">
+                      <ListOrdered size={24} />
+                      <h4>Match Rankings</h4>
+                      <p>Live qualification rankings and match results</p>
+                    </a>
+                    <a href="/strategy" class="workspace-card">
+                      <Target size={24} />
+                      <h4>Strategy</h4>
+                      <p>Alliance selection notes and match strategy</p>
+                    </a>
+                  {/if}
                 </div>
               </div>
             {:else if section.key === 'admin'}
@@ -719,20 +718,6 @@
               </div>
             {:else if section.key === 'assignment-queue'}
               <div class="user-lists">
-                {#if showScoutAlert && incompleteScoutAssignments.length>0}
-                  <div class="pending-notice compact">
-                    <AlertCircle size={16} />
-                    <p>
-                      {incompleteScoutAssignments.length} open assignment{incompleteScoutAssignments.length===1?'':'s'}.
-                      {#if nextScoutAssignment}
-                        <button class="link-btn" on:click={() => goto(scoutAssignmentHref(nextScoutAssignment))}>Go to next ({nextScoutAssignment.scouting_type} – {nextScoutAssignment.match_key.split('_').pop()} – {nextScoutAssignment.team_key.replace('frc','')})</button>
-                      {/if}
-                    </p>
-                    <button class="dismiss-btn" on:click={() => showScoutAlert=false} aria-label="Dismiss">
-                      <X size={14} />
-                    </button>
-                  </div>
-                {/if}
                 <div class="assignment-heading">
                   <div>
                     <h4>Your Scouting Assignments</h4>
@@ -1877,39 +1862,6 @@
     line-height: 1.5;
   }
 
-  /* Sits at the top of the assignment list it's actually about now, instead
-     of announcing itself as a full-height banner above the whole page - a
-     single line is enough once it's right next to the thing it refers to. */
-  .pending-notice.compact {
-    align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-2) var(--space-4);
-    margin-bottom: var(--space-4);
-  }
-
-  .pending-notice.compact p {
-    flex: 1;
-    font-size: 0.85rem;
-  }
-
-  .dismiss-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    width: 22px;
-    height: 22px;
-    border: none;
-    background: none;
-    color: inherit;
-    opacity: 0.7;
-    cursor: pointer;
-  }
-
-  .dismiss-btn:hover {
-    opacity: 1;
-  }
-
   .dashboard-actions h3 {
     margin: 0 0 var(--space-2) 0;
     color: var(--secondary);
@@ -1961,7 +1913,7 @@
     background: var(--primary);
     border: 1px solid var(--border);
     border-left: 3px solid var(--border);
-    padding: var(--space-3) var(--space-4);
+    padding: var(--space-5) var(--space-6);
     text-decoration: none;
     color: inherit;
     transition: border-color 0.1s ease, background-color 0.1s ease;
@@ -1977,9 +1929,9 @@
   .workspace-card :global(svg),
   .action-card :global(svg) {
     grid-row: 1 / span 2;
-    width: 22px;
-    height: 22px;
-    padding: 9px;
+    width: 28px;
+    height: 28px;
+    padding: 11px;
     background: var(--brand-gold-soft);
     color: var(--brand-gold-strong);
   }
@@ -1989,7 +1941,7 @@
     grid-column: 2;
     margin: 0;
     color: var(--secondary);
-    font-size: var(--font-md);
+    font-size: var(--font-lg);
   }
 
   .workspace-card p,
@@ -1997,7 +1949,7 @@
     grid-column: 2;
     margin: 0;
     color: var(--neutral-500);
-    font-size: var(--font-xs);
+    font-size: var(--font-sm);
     line-height: 1.4;
   }
 
