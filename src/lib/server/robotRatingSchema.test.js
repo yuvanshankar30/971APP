@@ -7,6 +7,7 @@ describe('normalizeRobotRating', () => {
       event_key: ' 2026casj ',
       team_key: '971',
       overall_rating: 8.4,
+      auto_rating: 6,
       offense_rating: 9,
       shuttling_rating: 7,
       driving_rating: 10,
@@ -21,6 +22,7 @@ describe('normalizeRobotRating', () => {
       team_key: 'frc971',
       team_number: 971,
       overall_rating: 8, // rounded
+      auto_rating: 6,
       offense_rating: 9,
       shuttling_rating: 7,
       driving_rating: 10,
@@ -29,6 +31,12 @@ describe('normalizeRobotRating', () => {
       strategy_notes: 'Ran defense on us in practice match 3',
       created_by: 'user-1'
     });
+  });
+
+  it('treats a blank auto_rating as "not entered" like the other optional fields', () => {
+    const { value, error } = normalizeRobotRating({ event_key: 'x', team_key: '971', overall_rating: 5, auto_rating: '' }, 'user-1');
+    expect(error).toBeNull();
+    expect(value.auto_rating).toBeNull();
   });
 
   it('requires event_key, a valid team_key, and an authenticated scout', () => {
@@ -48,5 +56,8 @@ describe('normalizeRobotRating', () => {
       event_key: 'x', team_key: '971', overall_rating: 5, defense_rating: 15
     }, 'user-1');
     expect(error).toMatch(/defense_rating/);
+
+    expect(normalizeRobotRating({ event_key: 'x', team_key: '971', overall_rating: 5, auto_rating: 0 }, 'user-1').error).toMatch(/auto_rating/);
+    expect(normalizeRobotRating({ event_key: 'x', team_key: '971', overall_rating: 5, auto_rating: 11 }, 'user-1').error).toMatch(/auto_rating/);
   });
 });

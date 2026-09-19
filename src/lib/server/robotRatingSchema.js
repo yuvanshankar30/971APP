@@ -1,6 +1,6 @@
 import { normalizeTeamKey } from './matchScoutingSchema.js';
 
-const OPTIONAL_RATING_FIELDS = ['offense_rating', 'shuttling_rating', 'driving_rating', 'defense_rating'];
+const OPTIONAL_RATING_FIELDS = ['auto_rating', 'offense_rating', 'shuttling_rating', 'driving_rating', 'defense_rating'];
 
 function trimmed(value, maxLength) {
   const text = String(value ?? '').trim();

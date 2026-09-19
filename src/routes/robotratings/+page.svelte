@@ -8,6 +8,7 @@
 
   const RATING_FIELDS = [
     { key: 'overall_rating', label: 'Overall', required: true },
+    { key: 'auto_rating', label: 'Auto' },
     { key: 'offense_rating', label: 'Offense' },
     { key: 'shuttling_rating', label: 'Shuttling' },
     { key: 'driving_rating', label: 'Driving' },
@@ -26,7 +27,7 @@
   let userId = null;
   let userNames = new Map(); // id -> display name
 
-  let expandedKey = '';
+  let expandedKeys = new Set(); // team_key set - multiple teams can be open (and rated) at once, side by side
   let drafts = {}; // team_key -> editable draft object
   let saving = {}; // team_key -> boolean
   let saveMessage = {}; // team_key -> string
@@ -45,6 +46,7 @@
     const mine = myRobotRating(ratings, teamKey, userId);
     return {
       overall_rating: mine?.overall_rating ?? '',
+      auto_rating: mine?.auto_rating ?? '',
       offense_rating: mine?.offense_rating ?? '',
       shuttling_rating: mine?.shuttling_rating ?? '',
       driving_rating: mine?.driving_rating ?? '',
@@ -55,9 +57,14 @@
     };
   }
 
+  // Expanding a team no longer collapses whatever else is open - rating two
+  // robots side by side (e.g. comparing an alliance pairing) means both
+  // stay open and each keeps its own independent draft.
   function toggleExpanded(team) {
-    if (expandedKey === team.key) { expandedKey = ''; return; }
-    expandedKey = team.key;
+    const next = new Set(expandedKeys);
+    if (next.has(team.key)) next.delete(team.key);
+    else next.add(team.key);
+    expandedKeys = next;
     if (!drafts[team.key]) drafts = { ...drafts, [team.key]: emptyDraft(team.key) };
   }
 
@@ -136,6 +143,7 @@
           team_key: team.key,
           team_number: team.team_number,
           overall_rating: draft.overall_rating,
+          auto_rating: draft.auto_rating,
           offense_rating: draft.offense_rating,
           shuttling_rating: draft.shuttling_rating,
           driving_rating: draft.driving_rating,
@@ -190,7 +198,7 @@
     await loadAll();
     const requestedTeam = $page.url.searchParams.get('team');
     if (requestedTeam && teams.some((team) => team.key === requestedTeam)) {
-      expandedKey = requestedTeam;
+      expandedKeys = new Set([requestedTeam]);
       drafts = { ...drafts, [requestedTeam]: emptyDraft(requestedTeam) };
     }
   });
@@ -223,7 +231,7 @@
   <div class="rating-list">
     {#each filteredTeams as team (team.key)}
       {@const summary = summaryByTeam.get(team.key)}
-      {@const isExpanded = expandedKey === team.key}
+      {@const isExpanded = expandedKeys.has(team.key)}
       {@const mine = myRobotRating(ratings, team.key, userId)}
       <section class="surface-card rating-row">
         <button class="rating-row-header" on:click={() => toggleExpanded(team)}>
@@ -297,6 +305,7 @@
                     </div>
                     <div class="rating-entry-scores">
                       <span>Overall <b>{entry.overall_rating}</b></span>
+                      <span>Auto <b>{entry.auto_rating ?? '—'}</b></span>
                       <span>Offense <b>{entry.offense_rating ?? '—'}</b></span>
                       <span>Shuttling <b>{entry.shuttling_rating ?? '—'}</b></span>
                       <span>Driving <b>{entry.driving_rating ?? '—'}</b></span>

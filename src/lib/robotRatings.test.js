@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { applyRobotRatings, myRobotRating, rankRobotTeams, summarizeRobotRatings } from './robotRatings.js';
 
 const ratings = [
-  { team_key: 'frc971', created_by: 'a', overall_rating: 8, offense_rating: 9, shuttling_rating: 7, driving_rating: 10, defense_rating: null, updated_at: '2026-09-01T00:00:00Z' },
-  { team_key: 'frc971', created_by: 'b', overall_rating: 6, offense_rating: null, shuttling_rating: 5, driving_rating: 6, defense_rating: 4, updated_at: '2026-09-02T00:00:00Z' },
-  { team_key: 'frc254', created_by: 'a', overall_rating: 10, offense_rating: 10, shuttling_rating: 10, driving_rating: 10, defense_rating: 10, updated_at: '2026-09-01T00:00:00Z' }
+  { team_key: 'frc971', created_by: 'a', overall_rating: 8, auto_rating: 9, offense_rating: 9, shuttling_rating: 7, driving_rating: 10, defense_rating: null, updated_at: '2026-09-01T00:00:00Z' },
+  { team_key: 'frc971', created_by: 'b', overall_rating: 6, auto_rating: null, offense_rating: null, shuttling_rating: 5, driving_rating: 6, defense_rating: 4, updated_at: '2026-09-02T00:00:00Z' },
+  { team_key: 'frc254', created_by: 'a', overall_rating: 10, auto_rating: 10, offense_rating: 10, shuttling_rating: 10, driving_rating: 10, defense_rating: 10, updated_at: '2026-09-01T00:00:00Z' }
 ];
 
 describe('summarizeRobotRatings', () => {
@@ -13,6 +13,7 @@ describe('summarizeRobotRatings', () => {
     const team971 = summary.get('frc971');
     expect(team971.raterCount).toBe(2);
     expect(team971.overallAvg).toBe(7); // (8+6)/2
+    expect(team971.autoAvg).toBe(9); // only rater a entered auto
     expect(team971.offenseAvg).toBe(9); // only rater a entered offense
     expect(team971.defenseAvg).toBe(4); // only rater b entered defense
     expect(team971.entries[0].created_by).toBe('b'); // most recently updated first
