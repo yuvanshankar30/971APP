@@ -789,6 +789,7 @@
       <div class="rating-summary-grid">
         <span><small>Overall average</small><strong>{selectedProfile?.robotRating?.overallAvg == null ? '—' : selectedProfile.robotRating.overallAvg.toFixed(1)}</strong></span>
         <span><small>Your rating</small><strong>{myRating?.overall_rating ?? 'Not rated'}</strong></span>
+        <span><small>Auto</small><strong>{selectedProfile?.robotRating?.autoAvg == null ? '—' : selectedProfile.robotRating.autoAvg.toFixed(1)}</strong></span>
         <span><small>Offense</small><strong>{selectedProfile?.robotRating?.offenseAvg == null ? '—' : selectedProfile.robotRating.offenseAvg.toFixed(1)}</strong></span>
         <span><small>Driving</small><strong>{selectedProfile?.robotRating?.drivingAvg == null ? '—' : selectedProfile.robotRating.drivingAvg.toFixed(1)}</strong></span>
         <span><small>Defense</small><strong>{selectedProfile?.robotRating?.defenseAvg == null ? '—' : selectedProfile.robotRating.defenseAvg.toFixed(1)}</strong></span>

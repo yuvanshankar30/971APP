@@ -20,7 +20,7 @@ async function actorFor(client) {
   return data?.user || null;
 }
 
-const SELECT_COLUMNS = 'id,event_key,team_key,team_number,created_by,overall_rating,offense_rating,shuttling_rating,driving_rating,defense_rating,notes,strategy_notes,created_at,updated_at';
+const SELECT_COLUMNS = 'id,event_key,team_key,team_number,created_by,overall_rating,auto_rating,offense_rating,shuttling_rating,driving_rating,defense_rating,notes,strategy_notes,created_at,updated_at';
 
 export async function GET({ request, url }) {
   const auth = requestClient(request);

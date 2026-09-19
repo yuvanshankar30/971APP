@@ -6,6 +6,7 @@
 
 const RATING_AVERAGE_FIELDS = [
   ['overall_rating', 'overallAvg'],
+  ['auto_rating', 'autoAvg'],
   ['offense_rating', 'offenseAvg'],
   ['shuttling_rating', 'shuttlingAvg'],
   ['driving_rating', 'drivingAvg'],
@@ -57,7 +58,7 @@ export function rankRobotTeams(teams = [], summaryByTeam = new Map()) {
   });
 }
 
-const EMPTY_SUMMARY = { overallAvg: null, offenseAvg: null, shuttlingAvg: null, drivingAvg: null, defenseAvg: null, raterCount: 0, entries: [] };
+const EMPTY_SUMMARY = { overallAvg: null, autoAvg: null, offenseAvg: null, shuttlingAvg: null, drivingAvg: null, defenseAvg: null, raterCount: 0, entries: [] };
 
 // Attaches the rating summary to each team row without touching scoutPower/
 // powerRank, mirroring applyPairwiseConsensus's "additive, never mutates the
