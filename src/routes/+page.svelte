@@ -155,6 +155,7 @@
   let myScoutAssignments = [];
   let nextScoutAssignment = null; // { scouting_type, match_key, team_key }
   let showScoutAlert = true;
+  $: incompleteScoutAssignments = myScoutAssignments.filter(a => !a.completed_at);
 
   // Pre-scouting assignment state - teams assigned to this user to research
   // ahead of the event (see /scouting-admin's PitAssignmentPanel,
@@ -258,11 +259,17 @@
       });
       const js3 = await res3.json();
       const rows = [].concat(js1?.data||[], js2?.data||[], js3?.data||[]);
-      // Filter incomplete
-      const incomplete = rows.filter(r => !r.completed_at);
-      const sortedIncomplete = [...incomplete].sort(compareScoutAssignmentMatches);
-      myScoutAssignments = sortedIncomplete;
-      nextScoutAssignment = sortedIncomplete[0] || null;
+      // Completed assignments stay in the list (shown as "Completed", and
+      // still clickable to go back and edit the report) rather than
+      // vanishing once done - only sink below the still-open ones so the
+      // visible slice stays useful.
+      const sorted = [...rows].sort((a, b) => {
+        const doneA = a.completed_at ? 1 : 0;
+        const doneB = b.completed_at ? 1 : 0;
+        return doneA - doneB || compareScoutAssignmentMatches(a, b);
+      });
+      myScoutAssignments = sorted;
+      nextScoutAssignment = sorted.find(r => !r.completed_at) || null;
     }catch(e){ /* ignore */ }
   }
 
@@ -473,12 +480,12 @@
       {/if}
     </div>
 
-    {#if showScoutAlert && myScoutAssignments.length>0}
+    {#if showScoutAlert && incompleteScoutAssignments.length>0}
       <div class="pending-notice">
         <AlertCircle size={20} />
         <div>
           <h3>Scouting Assignments</h3>
-          <p>You have {myScoutAssignments.length} upcoming scouting assignment{myScoutAssignments.length===1?'':'s'}.</p>
+          <p>You have {incompleteScoutAssignments.length} upcoming scouting assignment{incompleteScoutAssignments.length===1?'':'s'}.</p>
           {#if nextScoutAssignment}
             <div style="margin-top:0.25rem; display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center">
               <button class="btn btn-primary" on:click={() => goto(scoutAssignmentHref(nextScoutAssignment))}>Go to Next ({nextScoutAssignment.scouting_type} – {nextScoutAssignment.match_key.split('_').pop()} – {nextScoutAssignment.team_key.replace('frc','')})</button>
@@ -585,9 +592,12 @@
                 {:else}
                   <div class="card-grid">
                     {#each myScoutAssignments.slice(0, 8) as assignment}
-                      <a class="assignment-card" href={scoutAssignmentHref(assignment)}>
+                      <a class="assignment-card" class:completed={!!assignment.completed_at} href={scoutAssignmentHref(assignment)}>
                         <h5>{assignment.scouting_type} scouting - Match #{assignment.match_key.split('_').pop()}</h5>
                         <p class="muted">Team {String(assignment.team_key || '').replace(/^frc/i, '')}</p>
+                        {#if assignment.completed_at}
+                          <span class="completed-badge"><CheckCircle size={12} /> Completed{assignment.scouting_type === 'data' ? ' - tap to edit' : ''}</span>
+                        {/if}
                       </a>
                     {/each}
                   </div>
@@ -1497,6 +1507,17 @@
 
   .assignment-card h5 { margin: 0 0 var(--space-1) 0; color: var(--secondary); }
   .assignment-card p { margin: 0; color: var(--neutral-500); font-size: var(--font-xs); }
+  .assignment-card.completed { opacity: 0.72; }
+  .assignment-card.completed:hover { opacity: 1; }
+  .completed-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: var(--space-2);
+    color: var(--success, #2e7d32);
+    font-size: var(--font-xs);
+    font-weight: 600;
+  }
 
   /* Mobile Responsive Styles */
   @media (max-width: 768px) {
