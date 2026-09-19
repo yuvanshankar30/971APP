@@ -73,6 +73,26 @@
   let draggedSectionKey = null;
   let dragOverSectionKey = null;
 
+  // Quick-nav sidebar: clicking a tab surfaces a preview right here on the
+  // home page instead of immediately navigating away from it - navigating
+  // is still one click away (the panel's own "Open" button), just no
+  // longer the click on the tab itself.
+  const QUICK_TABS = [
+    { key: 'strategy', label: 'Strategy', href: '/strategy', blurb: 'Alliance selection notes and match strategy, built from every other scouting surface below it.' },
+    { key: 'driveteam', label: 'Drive Team', href: '/driveteam', blurb: 'The field-facing view of the live match schedule - what Drive Team needs to know before each match.' },
+    { key: 'matchscout', label: 'Match Scouting', href: '/matchscout', blurb: 'File a match report for your assigned robot, or edit one you already submitted.' },
+    { key: 'pitscout', label: 'Pit Scouting', href: '/pitscout', blurb: "Record a team's robot capabilities, drivebase, and technical details during pit walks." },
+    { key: 'myscout', label: 'My Scout', href: '/myscout', blurb: 'Every match and pit report you have personally submitted for the active competition.' },
+    { key: 'picklist', label: 'Picklist', href: '/picklist', blurb: 'Drag-reorder your human pick list, with AI move-flagging against the scouting data.' },
+    { key: 'matchrankings', label: 'Match Rankings', href: '/matchrankings', blurb: 'Live qualification rankings and match results as they come in.' },
+    { key: 'powerrankings', label: 'Power Rankings', href: '/powerrankings', blurb: "A computed power ranking blending this team's own scouting data with TBA." },
+    { key: 'robotratings', label: 'Robot Ratings', href: '/robotratings', blurb: 'Scout-submitted ratings for every robot at the event, side by side.' },
+    { key: 'predictions', label: 'Prediction Market', href: '/predictions', blurb: 'Predict match outcomes and see how the team is calling upcoming matches.' },
+    { key: 'scouting-admin', label: 'Scouting Admin', href: '/scouting-admin', blurb: 'Publish scouting assignments, manage the active event, and review submissions.' }
+  ];
+  let activeQuickTab = null;
+  $: activeQuickTabInfo = QUICK_TABS.find((tab) => tab.key === activeQuickTab) || null;
+
   $: canViewAdmin = can('VIEW_ADMIN_PANEL');
   $: customSectionKeys = sanitizeSectionKeys(user?.dashboard_sections);
   $: rawVisibleKeys = (customSectionKeys && customSectionKeys.length ? customSectionKeys : defaultSectionKeyList(canViewAdmin))
@@ -189,6 +209,11 @@
   let currentMatchState = 'unavailable';
   let currentMatchLoading = false;
   let currentMatchError = '';
+  // This signed-in scout's own team's next/current match specifically (not
+  // just whatever match the field is on) - what the Drive Team preview
+  // below is actually for.
+  let myTeamNextMatch = null;
+  let myTeamNextMatchState = 'unavailable';
 
   async function loadMatchAlliances() {
     currentMatchLoading = true;
@@ -214,6 +239,13 @@
       const current = selectCurrentEventMatch(payload.data || []);
       currentEventMatch = current.match;
       currentMatchState = current.state;
+
+      const myTeamKey = `frc${user?.frc_team || FRC_TEAMS.TEAM_971}`;
+      const myTeamMatches = (payload.data || []).filter((m) =>
+        (m.alliances?.red?.team_keys || []).includes(myTeamKey) || (m.alliances?.blue?.team_keys || []).includes(myTeamKey));
+      const myCurrent = selectCurrentEventMatch(myTeamMatches);
+      myTeamNextMatch = myCurrent.match;
+      myTeamNextMatchState = myCurrent.state;
     } catch (error) {
       currentMatchError = error?.message || 'TBA schedule unavailable';
     } finally {
@@ -498,17 +530,14 @@
          fixed the same way: don't stick two things to the same line). -->
     <aside class="quick-nav" aria-label="Competition quick navigation">
       <span class="quick-nav-label">Competition</span>
-      <a href="/strategy" class="quick-nav-tab">Strategy</a>
-      <a href="/driveteam" class="quick-nav-tab">Drive Team</a>
-      <a href="/matchscout" class="quick-nav-tab">Match Scouting</a>
-      <a href="/pitscout" class="quick-nav-tab">Pit Scouting</a>
-      <a href="/myscout" class="quick-nav-tab">My Scout</a>
-      <a href="/picklist" class="quick-nav-tab">Picklist</a>
-      <a href="/matchrankings" class="quick-nav-tab">Match Rankings</a>
-      <a href="/powerrankings" class="quick-nav-tab">Power Rankings</a>
-      <a href="/robotratings" class="quick-nav-tab">Robot Ratings</a>
-      <a href="/predictions" class="quick-nav-tab">Prediction Market</a>
-      <a href="/scouting-admin" class="quick-nav-tab">Scouting Admin</a>
+      {#each QUICK_TABS as tab (tab.key)}
+        <button
+          type="button"
+          class="quick-nav-tab"
+          class:active={activeQuickTab === tab.key}
+          on:click={() => activeQuickTab = activeQuickTab === tab.key ? null : tab.key}
+        >{tab.label}</button>
+      {/each}
     </aside>
     <div class="dashboard-container">
     <div class="user-welcome">
@@ -733,6 +762,31 @@
           </div>
         {/if}
       </div>
+
+      {#if activeQuickTabInfo}
+        <div class="quick-preview">
+          <div>
+            <span class="quick-preview-label">{activeQuickTabInfo.label}</span>
+            {#if (activeQuickTabInfo.key === 'driveteam' || activeQuickTabInfo.key === 'strategy') && myTeamNextMatch}
+              <p class="quick-preview-match-heading">
+                {myTeamNextMatchState === 'current' ? 'Current match' : myTeamNextMatchState === 'upcoming' ? 'Up next' : 'Latest match'}: {matchDisplayName(myTeamNextMatch)}
+              </p>
+              <div class="quick-preview-alliances">
+                <div class="current-alliance red"><span>Red</span>{#each myTeamNextMatch.alliances?.red?.team_keys || [] as teamKey}<b>{displayTeamNumber(teamKey)}</b>{/each}</div>
+                <div class="current-alliance blue"><span>Blue</span>{#each myTeamNextMatch.alliances?.blue?.team_keys || [] as teamKey}<b>{displayTeamNumber(teamKey)}</b>{/each}</div>
+              </div>
+            {:else if (activeQuickTabInfo.key === 'driveteam' || activeQuickTabInfo.key === 'strategy') && !myTeamNextMatch}
+              <p>No match found for your team at {homeEventKey || 'the active event'} yet.</p>
+            {:else}
+              <p>{activeQuickTabInfo.blurb}</p>
+            {/if}
+          </div>
+          <div class="quick-preview-actions">
+            <a class="btn btn-primary btn-sm" href={activeQuickTabInfo.href}>Open</a>
+            <button class="btn btn-outline btn-sm" on:click={() => activeQuickTab = null}>Close</button>
+          </div>
+        </div>
+      {/if}
     {/if}
     </div>
   </div>
@@ -1465,7 +1519,17 @@
     grid-template-columns: 200px minmax(0, 1fr);
     align-items: start;
     gap: var(--space-5);
-    margin: var(--space-7) var(--space-5);
+    /* Full-bleed breakout: the global <main> this sits in (see +layout.svelte's
+       main.container.page-container) is itself centered and capped at
+       --page-max-width, so the sidebar could only ever reach the left edge
+       of THAT column, not the actual viewport edge - the "still not far
+       enough left" gap on wide screens. width:100vw + this margin math is
+       the standard way to escape a centered ancestor without touching the
+       shared layout (which every other route also depends on). */
+    width: 100vw;
+    margin-left: calc(50% - 50vw);
+    margin-right: calc(50% - 50vw);
+    padding: var(--space-7) var(--space-5);
   }
 
   .quick-nav {
@@ -1486,12 +1550,18 @@
   }
 
   .quick-nav-tab {
+    display: block;
+    width: 100%;
+    text-align: left;
     padding: var(--space-3) var(--space-4);
+    border: none;
     border-left: 3px solid transparent;
     border-bottom: 1px solid var(--border);
+    background: none;
     color: var(--text-secondary);
-    text-decoration: none;
+    font: inherit;
     font-size: 0.85rem;
+    cursor: pointer;
     transition: border-color 0.1s ease, background-color 0.1s ease, color 0.1s ease;
   }
 
@@ -1503,6 +1573,60 @@
     border-left-color: var(--brand-gold-strong);
     background: var(--surface-2);
     color: var(--secondary);
+  }
+
+  .quick-nav-tab.active {
+    border-left-color: var(--accent-strong);
+    background: var(--accent-subtle);
+    color: var(--secondary);
+    font-weight: 600;
+  }
+
+  .quick-preview {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: var(--space-4);
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent-strong);
+    padding: var(--space-4) var(--space-5);
+    margin-bottom: var(--space-5);
+  }
+
+  .quick-preview-label {
+    display: block;
+    font-family: var(--font-mono-stack);
+    font-size: var(--font-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin-bottom: var(--space-1);
+  }
+
+  .quick-preview p {
+    margin: 0;
+    color: var(--text-secondary);
+    max-width: 48em;
+  }
+
+  .quick-preview-match-heading {
+    margin: 0 0 var(--space-2) !important;
+    font-weight: 600;
+    color: var(--secondary);
+  }
+
+  .quick-preview-alliances {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--gap-3);
+    max-width: 32em;
+  }
+
+  .quick-preview-actions {
+    display: flex;
+    gap: var(--space-2);
+    flex-shrink: 0;
   }
 
   .dashboard-container {
@@ -1775,9 +1899,11 @@
     .dashboard-shell { grid-template-columns: 1fr; }
     .quick-nav { flex-direction: row; overflow-x: auto; }
     .quick-nav-label { flex-shrink: 0; border-bottom: none; border-right: 1px solid var(--border); }
-    .quick-nav-tab { flex-shrink: 0; border-bottom: none; border-right: 1px solid var(--border); border-left: none; border-top: 3px solid transparent; }
+    .quick-nav-tab { flex-shrink: 0; width: auto; border-bottom: none; border-right: 1px solid var(--border); border-left: none; border-top: 3px solid transparent; }
     .quick-nav-tab:last-child { border-right: none; }
     .quick-nav-tab:hover { border-left-color: transparent; border-top-color: var(--brand-gold-strong); }
+    .quick-nav-tab.active { border-left-color: transparent; border-top-color: var(--accent-strong); }
+    .quick-preview { flex-direction: column; }
   }
 
   /* Mobile Responsive Styles */
@@ -1788,7 +1914,7 @@
     }
     .auth-card { padding: var(--space-6); }
     .brand h1 { font-size: var(--font-xl); }
-    .dashboard-shell { margin: var(--space-4) var(--space-3); }
+    .dashboard-shell { width: auto; margin: var(--space-4) var(--space-3); padding: 0; }
     .user-welcome { padding: var(--space-6); }
     .user-welcome h2 { font-size: var(--font-md); margin-bottom: var(--space-3); }
     .workspace-grid, .action-grid { grid-template-columns: 1fr; gap: var(--gap-3); }

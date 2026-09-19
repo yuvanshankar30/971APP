@@ -60,22 +60,6 @@ export async function GET({ request, url }) {
     return json({ success: true, data: photos });
   }
   const eventKey = String(url.searchParams.get('event_key') || '').trim();
-
-  // "My Scout" wants everything this scout has ever submitted, not one
-  // event at a time - the only entry point here that can skip the
-  // event_key requirement below.
-  if (!eventKey && url.searchParams.get('mine') === '1') {
-    const { data, error } = await db
-      .from('match_scout_entries')
-      .select('*')
-      .eq('created_by', actor.id)
-      .order('event_key', { ascending: false })
-      .order('match_key')
-      .order('team_key');
-    if (error) return json({ error: error.message }, { status: 500 });
-    return json({ success: true, data: data || [] });
-  }
-
   if (!eventKey) return json({ error: 'event_key is required' }, { status: 400 });
 
   const resource = url.searchParams.get('resource') || 'entries';

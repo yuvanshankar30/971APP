@@ -1504,16 +1504,11 @@
       color: var(--secondary);
     }
 
-    .nav-item.active::after {
-      content: '';
-      position: absolute;
-      left: var(--desktop-underline-inset);
-      right: var(--desktop-underline-inset);
-      bottom: calc(-1 * var(--desktop-underline-offset));
-      height: var(--desktop-underline-thickness);
-      border-radius: 2px;
-      background: var(--accent);
-    }
+    /* No static ::after underline here - .nav-underline below already draws
+       the active indicator (and animates it between tabs). This rule used
+       to draw a second, statically-positioned one on top of it at a
+       slightly different offset, which is the double-line every tab swap
+       showed. */
 
     .nav-item.active :global(svg) {
       opacity: 1;

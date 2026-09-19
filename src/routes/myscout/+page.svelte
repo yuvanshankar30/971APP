@@ -2,7 +2,13 @@
   import { onMount } from 'svelte';
   import { ClipboardCheck, RefreshCw, Wrench } from 'lucide-svelte';
   import { getAuthHeader } from '$lib/supabase.js';
+  import { userStore } from '$lib/stores/auth.js';
+  import { fetchActiveScoutingEventKey } from '$lib/scoutingEvent.js';
 
+  let user;
+  userStore.subscribe((v) => (user = v));
+
+  let eventKey = '';
   let matchReports = [];
   let pitReports = [];
   let loading = true;
@@ -12,13 +18,25 @@
     loading = true;
     error = '';
     try {
+      eventKey = (await fetchActiveScoutingEventKey()) || '';
+      if (!eventKey) {
+        matchReports = [];
+        pitReports = [];
+        return;
+      }
       const headers = await getAuthHeader();
+      // Match Scouting already has a proven mine=1 (per-event) branch -
+      // reuse it exactly rather than a new one. Pit scouting has no
+      // per-scout filter server-side (one row per team, not per scout), so
+      // fetch the event's roster and keep only this scout's own rows -
+      // created_by is overwritten on every save, so this is "entries this
+      // scout most recently touched," the best signal available.
       const [matchRes, pitRes] = await Promise.all([
-        fetch('/api/matchscout?mine=1', { headers }).then((r) => r.json()).catch(() => null),
-        fetch('/pitscout?mine=1', { headers }).then((r) => r.json()).catch(() => null)
+        fetch(`/api/matchscout?event_key=${encodeURIComponent(eventKey)}&mine=1`, { headers }).then((r) => r.json()).catch(() => null),
+        fetch(`/pitscout?event_key=${encodeURIComponent(eventKey)}`, { headers }).then((r) => r.json()).catch(() => null)
       ]);
       matchReports = matchRes?.success ? matchRes.data || [] : [];
-      pitReports = pitRes?.success ? pitRes.data || [] : [];
+      pitReports = pitRes?.success ? (pitRes.data || []).filter((r) => r.created_by === user?.id) : [];
       if (!matchRes?.success && !pitRes?.success) {
         error = matchRes?.error || pitRes?.error || 'Could not load your scouting history.';
       }
@@ -43,7 +61,6 @@
   }
 
   $: teamsCovered = new Set([...matchReports, ...pitReports].map((r) => r.team_key).filter(Boolean)).size;
-  $: eventsCovered = new Set([...matchReports, ...pitReports].map((r) => r.event_key).filter(Boolean)).size;
   $: sortedMatchReports = [...matchReports].sort((a, b) =>
     String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || '')));
   $: sortedPitReports = [...pitReports].sort((a, b) =>
@@ -56,7 +73,7 @@
   <header class="myscout-header">
     <div>
       <h1><ClipboardCheck size={22} /> My Scout</h1>
-      <p>Every match and pit report you've personally submitted, across every event.</p>
+      <p>Every match and pit report you've personally submitted for the active competition.</p>
     </div>
     <button class="btn btn-outline" on:click={load} disabled={loading}><RefreshCw size={16} /> Refresh</button>
   </header>
@@ -65,8 +82,14 @@
     <div class="empty-state">Loading your scouting history...</div>
   {:else if error}
     <div class="notice notice-error">{error}</div>
+  {:else if !eventKey}
+    <div class="empty-state">No active competition is set. Set one in <a href="/scouting-admin">Scouting Admin</a> to see your scouting history here.</div>
   {:else}
     <div class="stat-strip">
+      <div class="stat-tile">
+        <span class="stat-label">Competition</span>
+        <strong class="stat-value stat-value-text">{eventKey}</strong>
+      </div>
       <div class="stat-tile">
         <span class="stat-label">Match Reports</span>
         <strong class="stat-value">{matchReports.length}</strong>
@@ -78,10 +101,6 @@
       <div class="stat-tile">
         <span class="stat-label">Teams Covered</span>
         <strong class="stat-value">{teamsCovered}</strong>
-      </div>
-      <div class="stat-tile">
-        <span class="stat-label">Events</span>
-        <strong class="stat-value">{eventsCovered}</strong>
       </div>
     </div>
 
@@ -183,6 +202,12 @@
     font-weight: 700;
     color: var(--secondary);
     line-height: 1.1;
+  }
+
+  .stat-value-text {
+    font-size: var(--font-lg);
+    font-family: var(--font-mono-stack);
+    text-transform: uppercase;
   }
 
   .report-section {
