@@ -1,6 +1,7 @@
 import { getSlackClient, getSupabase } from '$lib/server/971bot.js';
 
 export const ACE_PIT_CHANNEL_NAME = '2026-chezy-ace-strat-pit';
+export const ACE_PIT_CHANNEL_ID = 'C0C1MKPUTTK';
 
 function cleanSlackText(value, fallback = '') {
   const text = String(value || '').trim();
@@ -126,6 +127,82 @@ export async function deleteQueuedAcePitMessages(dependencies = {}) {
   const eventKeys = [...new Set((data || []).map((row) => row.event_key).filter(Boolean))];
   for (const eventKey of eventKeys) await removeLegacyCompetitionMessages(client, supa, eventKey);
   return { ok: true, deleted_competitions: eventKeys.length };
+}
+
+function isAceBotMessage(message, identity) {
+  return Boolean(
+    (identity.bot_id && message?.bot_id === identity.bot_id)
+    || (identity.user_id && message?.user === identity.user_id)
+  );
+}
+
+async function conversationReplies(client, channel, rootTs) {
+  const messages = [];
+  let cursor;
+  do {
+    try {
+      const response = await client.conversations.replies({ channel, ts: rootTs, limit: 200, cursor });
+      if (!response?.ok) {
+        if (response?.error === 'message_not_found') return messages;
+        throw new Error(response?.error || 'slack-rejected-replies-list');
+      }
+      messages.push(...(response.messages || []));
+      cursor = response.response_metadata?.next_cursor || null;
+    } catch (error) {
+      if (error?.data?.error === 'message_not_found') return messages;
+      throw error;
+    }
+  } while (cursor);
+  return messages;
+}
+
+export async function purgeAcePitSlackMessages(dependencies = {}) {
+  const client = dependencies.client || getSlackClient();
+  const supa = dependencies.supa || getSupabase();
+  const identity = await client.auth.test();
+  if (!identity?.ok) throw new Error(identity?.error || 'slack-auth-failed');
+
+  const { data: queued, error: queueError } = await supa
+    .from('ace_pit_slack_legacy_messages')
+    .select('channel, message_ts');
+  if (queueError) throw new Error(`Could not load ACE cleanup queue: ${queueError.message}`);
+  const roots = new Map((queued || []).map((message) => [
+    `${message.channel}:${message.message_ts}`,
+    { channel: message.channel, ts: message.message_ts }
+  ]));
+
+  let cursor;
+  do {
+    const history = await client.conversations.history({ channel: ACE_PIT_CHANNEL_ID, limit: 200, cursor });
+    if (!history?.ok) throw new Error(history?.error || 'slack-rejected-history-list');
+    for (const message of history.messages || []) {
+      if (isAceBotMessage(message, identity) && /ACE\s*\/\s*Pit/i.test(String(message.text || ''))) {
+        roots.set(`${ACE_PIT_CHANNEL_ID}:${message.ts}`, { channel: ACE_PIT_CHANNEL_ID, ts: message.ts });
+      }
+    }
+    cursor = history.response_metadata?.next_cursor || null;
+  } while (cursor);
+
+  let deletedReplies = 0;
+  let deletedRoots = 0;
+  for (const root of roots.values()) {
+    const replies = await conversationReplies(client, root.channel, root.ts);
+    const botReplies = replies
+      .filter((message) => message.ts !== root.ts && isAceBotMessage(message, identity))
+      .sort((left, right) => Number(right.ts) - Number(left.ts));
+    for (const reply of botReplies) {
+      const response = await client.chat.delete({ channel: root.channel, ts: reply.ts });
+      if (!response?.ok && response?.error !== 'message_not_found') throw new Error(response?.error || 'slack-rejected-reply-delete');
+      if (response?.ok) deletedReplies += 1;
+    }
+    const response = await client.chat.delete({ channel: root.channel, ts: root.ts });
+    if (!response?.ok && response?.error !== 'message_not_found') throw new Error(response?.error || 'slack-rejected-root-delete');
+    if (response?.ok) deletedRoots += 1;
+  }
+
+  const { error: clearError } = await supa.from('ace_pit_slack_legacy_messages').delete().neq('message_ts', '');
+  if (clearError) throw new Error(`Could not clear ACE cleanup queue: ${clearError.message}`);
+  return { ok: true, deleted_roots: deletedRoots, deleted_replies: deletedReplies };
 }
 
 export async function sendAcePitProblem(problem) {

@@ -3,7 +3,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/public';
 import { getSupabase } from '$lib/server/971bot.js';
-import { deleteQueuedAcePitMessages } from '$lib/server/ace_pit_notifications.js';
+import { purgeAcePitSlackMessages } from '$lib/server/ace_pit_notifications.js';
 
 function userClient(request) {
   return createClient(PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY, {
@@ -48,7 +48,7 @@ export async function POST({ request }) {
   if (!authorized) return json({ error: 'Unauthorized' }, { status: 401 });
 
   try {
-    const result = await deleteQueuedAcePitMessages();
+    const result = await purgeAcePitSlackMessages();
     if (bearer) {
       await supa
         .from('ace_pit_cleanup_authorizations')
