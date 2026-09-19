@@ -377,6 +377,15 @@
       .join(' ');
   }
 
+  function areaPoints(values, width = 320, height = TREND_CHART_HEIGHT) {
+    const line = linePoints(values, width, height);
+    if (!line) return '';
+    const left = 34;
+    const right = width - 8;
+    const bottom = height - 34;
+    return `${left},${bottom} ${line} ${right},${bottom}`;
+  }
+
   function yForTick(value, max, height = TREND_CHART_HEIGHT) {
     const top = 10;
     const bottom = height - 34;
@@ -821,6 +830,12 @@
               <details class="trend-item">
                 <summary class="trend-summary"><span>{stat.label}</span><strong>{stat.value}</strong></summary>
                 <svg viewBox={`0 0 320 ${TREND_CHART_HEIGHT}`} class="line" role="img" aria-label={`${stat.label} trend`} on:click={closeParentDetails}>
+                  <defs>
+                    <linearGradient id={`trend-fill-${stat.key}`} x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stop-color={stat.color} stop-opacity="0.32" />
+                      <stop offset="100%" stop-color={stat.color} stop-opacity="0" />
+                    </linearGradient>
+                  </defs>
                   <line x1="34" y1={TREND_CHART_HEIGHT - 34} x2="312" y2={TREND_CHART_HEIGHT - 34} class="axis" />
                   <line x1="34" y1="10" x2="34" y2={TREND_CHART_HEIGHT - 34} class="axis" />
                   <line x1="34" y1={yForTick(max, max)} x2="312" y2={yForTick(max, max)} class="grid" />
@@ -833,6 +848,7 @@
                     <text x={xForIndex(0, viewStats.perMatch.length) - 8} y={TREND_CHART_HEIGHT - 8} class="tick x-tick">{viewStats.perMatch[0].label}</text>
                     <text x={xForIndex(viewStats.perMatch.length - 1, viewStats.perMatch.length) - 8} y={TREND_CHART_HEIGHT - 8} class="tick x-tick">{viewStats.perMatch[viewStats.perMatch.length - 1].label}</text>
                   {/if}
+                  <polygon class="trend-area" fill={`url(#trend-fill-${stat.key})`} points={areaPoints(values)} />
                   <polyline fill="none" stroke={stat.color} stroke-width="2.5" points={linePoints(values)} />
                 </svg>
               </details>
@@ -996,6 +1012,7 @@
   .panel-title { margin: 0; font-size: var(--font-md); }
   .panel-subtitle { font-size: var(--font-xs); color: var(--text-muted); }
   .line { width: 100%; height: 240px; margin: 0; background: color-mix(in srgb, var(--surface-1) 90%, transparent); border: none; border-radius: var(--radius-sm); cursor: pointer; }
+  .trend-area { pointer-events: none; }
   .axis { stroke: color-mix(in srgb, var(--text) 35%, transparent); stroke-width: 1; }
   .grid { stroke: color-mix(in srgb, var(--text) 14%, transparent); stroke-width: 1; }
   .tick { font-size: 9px; fill: var(--text-muted); }

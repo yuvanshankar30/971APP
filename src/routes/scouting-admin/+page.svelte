@@ -1108,6 +1108,15 @@
     min-width: 260px;
   }
 
+  /* The Season control is a label-over-select stack; Refresh Dashboard is a
+     single-line button with no label. Left at the container's default
+     stretch, the button grows to match the stack's full height and its text
+     centers awkwardly instead of sitting level with the select. Align both
+     to their bottom edge so the button lines up with the select itself. */
+  .scouting-header .page-actions {
+    align-items: flex-end;
+  }
+
   /* Event card */
   .event-card {
     display: flex;
