@@ -6,6 +6,7 @@
   import { getAuthHeader, supabase } from '$lib/supabase.js';
   import { myRobotRating, rankRobotTeams, summarizeRobotRatings } from '$lib/robotRatings.js';
   import { submitOrQueue } from '$lib/offlineQueue.js';
+  import { fetchWithCache } from '$lib/offlineCache.js';
 
   const RATING_FIELDS = [
     { key: 'overall_rating', label: 'Overall', required: true },
@@ -114,7 +115,9 @@
     loading = true;
     error = '';
     warning = '';
-    const rosterResult = await fetch(`/api/tba/event-teams?event_key=${encodeURIComponent(eventKey)}`).then((res) => res.json()).catch(() => null);
+    // Roster barely changes mid-event - cached, so the team list to rate
+    // shows up instantly instead of waiting on a slow link.
+    const rosterResult = await fetchWithCache(`/api/tba/event-teams?event_key=${encodeURIComponent(eventKey)}`, { cacheKey: `event-teams:${eventKey}` }).catch(() => null);
     let roster = rosterResult?.success ? rosterResult.data : [];
     await loadRatings();
     if (!roster.length) {

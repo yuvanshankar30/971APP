@@ -313,8 +313,11 @@
   // reason - it fills in officialByTeam whenever it lands, or not at all.
   async function loadOfficialRankings(forEventKey) {
     try {
-      const response = await fetch(`/api/tba/event-oprs?event_key=${encodeURIComponent(forEventKey)}`);
-      const payload = await response.json().catch(() => null);
+      // Same cache key Power Rankings uses for this same call - whichever
+      // page a scout visited first warms it for the other.
+      const payload = await fetchWithCache(`/api/tba/event-oprs?event_key=${encodeURIComponent(forEventKey)}`, {
+        cacheKey: `event-oprs:${forEventKey}`
+      });
       if (forEventKey !== resolvedEventKey) return; // event switched while this was in flight
       officialByTeam = new Map((payload?.success ? payload.data || [] : []).map((team) => [String(team.team), team]));
     } catch {

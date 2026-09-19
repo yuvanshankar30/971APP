@@ -5,6 +5,7 @@
   import { getAuthHeader, supabase } from '$lib/supabase.js';
   import { isMatchPlayed, matchLabel } from '$lib/matchProjection.js';
   import { STARTING_BALANCE, availableBalance, myBetForMatch, poolForMatch, summarizeStandings } from '$lib/predictionMarket.js';
+  import { fetchWithCache } from '$lib/offlineCache.js';
 
   let eventKey = '';
   let loading = true;
@@ -88,7 +89,9 @@
     loading = true;
     error = '';
     warning = '';
-    const matchesResult = await fetch(`/api/tba/event-matches?event_key=${encodeURIComponent(eventKey)}&comp_level=all`).then((res) => res.json()).catch(() => null);
+    // Schedule barely changes mid-event - cached, so the match list to bet
+    // on shows up instantly instead of waiting on a slow link.
+    const matchesResult = await fetchWithCache(`/api/tba/event-matches?event_key=${encodeURIComponent(eventKey)}&comp_level=all`, { cacheKey: `event-matches:${eventKey}:all` }).catch(() => null);
     matches = matchesResult?.success ? matchesResult.data || [] : [];
     if (!matchesResult?.success) warning = matchesResult?.error || 'Could not load the match schedule.';
     await loadBets();
