@@ -487,7 +487,29 @@
   </div>
 {:else if user}
   <!-- User Dashboard -->
-  <div class="dashboard-container">
+  <div class="dashboard-shell">
+    <!-- Fills what used to be dead margin on wide screens with something
+         useful: quick jumps to the rest of Competition, without opening the
+         top nav's dropdown. Deliberately not position:sticky - the global
+         .nav-header in +layout.svelte is already sticky at top:0 with a
+         much higher z-index, and a second sticky element at the same
+         top:0 gets silently covered by it once the page scrolls (see
+         ScoutAssignmentPanel's own .panel-header for the exact same bug,
+         fixed the same way: don't stick two things to the same line). -->
+    <aside class="quick-nav" aria-label="Competition quick navigation">
+      <span class="quick-nav-label">Competition</span>
+      <a href="/strategy" class="quick-nav-tab">Strategy</a>
+      <a href="/driveteam" class="quick-nav-tab">Drive Team</a>
+      <a href="/matchscout" class="quick-nav-tab">Match Scouting</a>
+      <a href="/pitscout" class="quick-nav-tab">Pit Scouting</a>
+      <a href="/picklist" class="quick-nav-tab">Picklist</a>
+      <a href="/matchrankings" class="quick-nav-tab">Match Rankings</a>
+      <a href="/powerrankings" class="quick-nav-tab">Power Rankings</a>
+      <a href="/robotratings" class="quick-nav-tab">Robot Ratings</a>
+      <a href="/predictions" class="quick-nav-tab">Prediction Market</a>
+      <a href="/scouting-admin" class="quick-nav-tab">Scouting Admin</a>
+    </aside>
+    <div class="dashboard-container">
     <div class="user-welcome">
       <div class="user-welcome-text">
         <h2>Welcome back, {user.full_name || user.email}!</h2>
@@ -713,6 +735,7 @@
         {/if}
       </div>
     {/if}
+    </div>
   </div>
 {:else if $loginScreenStyle === 'modern'}
   <!-- Authentication Forms: Modern (split-hero) -->
@@ -1434,16 +1457,59 @@
     font-size: var(--font-xs);
   }
 
+  /* No more capped-width centered column - the quick-nav sidebar takes the
+     left gutter and the content column stretches to fill whatever's left,
+     so wide monitors don't just get more black margin on both sides. */
+  .dashboard-shell {
+    --home-radius: 0;
+    display: grid;
+    grid-template-columns: 200px minmax(0, 1fr);
+    align-items: start;
+    gap: var(--space-5);
+    margin: var(--space-7) var(--space-5);
+  }
+
+  .quick-nav {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border);
+    background: var(--surface-1);
+  }
+
+  .quick-nav-label {
+    font-family: var(--font-mono-stack);
+    font-size: var(--font-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    padding: var(--space-3) var(--space-4) var(--space-2);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .quick-nav-tab {
+    padding: var(--space-3) var(--space-4);
+    border-left: 3px solid transparent;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 0.85rem;
+    transition: border-color 0.1s ease, background-color 0.1s ease, color 0.1s ease;
+  }
+
+  .quick-nav-tab:last-child {
+    border-bottom: none;
+  }
+
+  .quick-nav-tab:hover {
+    border-left-color: var(--brand-gold-strong);
+    background: var(--surface-2);
+    color: var(--secondary);
+  }
+
   .dashboard-container {
     /* Sharp corners throughout this page, by direct instruction - no
-       filleted rectangles. Wider than before too: this is the one screen
-       every signed-in visit starts on, and it was floating in a narrow
-       centered column with a lot of unused side space on anything wider
-       than a laptop. */
-    --home-radius: 0;
-    max-width: 1440px;
-    margin: var(--space-7) auto;
-    padding: 0 var(--space-4);
+       filleted rectangles. */
+    min-width: 0;
   }
 
   /* Compact masthead with a gold spine — no dead vertical space */
@@ -1670,15 +1736,27 @@
     font-weight: 600;
   }
 
+  /* Sidebar becomes a horizontal scrollable tab strip above the content
+     instead of a column competing for width - a 200px rail has no business
+     existing below tablet width. */
+  @media (max-width: 900px) {
+    .dashboard-shell { grid-template-columns: 1fr; }
+    .quick-nav { flex-direction: row; overflow-x: auto; }
+    .quick-nav-label { flex-shrink: 0; border-bottom: none; border-right: 1px solid var(--border); }
+    .quick-nav-tab { flex-shrink: 0; border-bottom: none; border-right: 1px solid var(--border); border-left: none; border-top: 3px solid transparent; }
+    .quick-nav-tab:last-child { border-right: none; }
+    .quick-nav-tab:hover { border-left-color: transparent; border-top-color: var(--brand-gold-strong); }
+  }
+
   /* Mobile Responsive Styles */
   @media (max-width: 768px) {
-    .auth-container { 
-      margin: var(--space-4) auto; 
+    .auth-container {
+      margin: var(--space-4) auto;
       padding: 0 var(--space-3);
     }
     .auth-card { padding: var(--space-6); }
     .brand h1 { font-size: var(--font-xl); }
-    .dashboard-container { margin: var(--space-4) 0; padding: 0 var(--space-3); }
+    .dashboard-shell { margin: var(--space-4) var(--space-3); }
     .user-welcome { padding: var(--space-6); }
     .user-welcome h2 { font-size: var(--font-md); margin-bottom: var(--space-3); }
     .workspace-grid, .action-grid { grid-template-columns: 1fr; gap: var(--gap-3); }
