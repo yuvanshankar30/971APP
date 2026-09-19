@@ -27,6 +27,7 @@
     completed: { label: 'Completed', className: 'status-complete', sort: 2 }
   });
   const YES_NO_OPTIONS = ['Yes', 'No'];
+  const TRENCH_OR_BUMP_OPTIONS = ['Trench', 'Bump', 'Both', 'Neither'];
   const MAIN_BREAKER_OPTIONS = ['Bussmann', 'OptiFuse', 'Other'];
   const SB_CONNECTOR_OPTIONS = ['SB60', 'SB40', 'Other'];
   const WIRE_INSULATION_OPTIONS = ['Silicone', 'Other'];
@@ -240,7 +241,7 @@
   // Which answers belong to which group, for the per-topic counts. Kept
   // explicit rather than derived from the markup so a field moving between
   // groups is a deliberate edit, not a silent change in what "complete" means.
-  const MAIN_DETAIL_FIELDS = ['main_breaker_brand', 'main_breaker_shroud', 'uses_canivore', 'can_bus_count'];
+  const MAIN_DETAIL_FIELDS = ['main_breaker_brand', 'main_breaker_shroud', 'uses_canivore', 'can_bus_count', 'trench_or_bump', 'hopper_capacity'];
   const EXTRA_GROUP_DETAIL_FIELDS = {
     setup: ['pit_contact_phone'],
     mechanisms: ['use_net', 'intake_style', 'ground_roller_motor_count', 'motor_controllers', 'motor_types'],
@@ -1326,6 +1327,29 @@
           min="0"
           step="1"
           bind:value={technical_details.can_bus_count}
+        />
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="trenchOrBumpSelect">Trench or Bump?</label>
+        <select id="trenchOrBumpSelect" class="form-select" bind:value={technical_details.trench_or_bump}>
+          <option value="">-- Select --</option>
+          {#each TRENCH_OR_BUMP_OPTIONS as option}
+            <option value={option}>{option}</option>
+          {/each}
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="hopperCapacityInput">Hopper Capacity</label>
+        <input
+          id="hopperCapacityInput"
+          class="form-input"
+          type="number"
+          min="0"
+          step="1"
+          placeholder="e.g. 5"
+          bind:value={technical_details.hopper_capacity}
         />
       </div>
     {/if}

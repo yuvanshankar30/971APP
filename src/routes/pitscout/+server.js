@@ -43,6 +43,7 @@ const TECHNICAL_DETAIL_OPTIONS = {
   hopper_wall_reinforcement: ['Reinforced Corners', 'Polycarbonate Flanges', 'Other'],
   fits_under_trench: ['Yes', 'No'],
   drives_over_mound: ['Yes', 'No'],
+  trench_or_bump: ['Trench', 'Bump', 'Both', 'Neither'],
   bumper_foam: ['Pool Noodle', 'EVA', 'XPE', 'Other'],
   hardware_standards: ['E-clip', 'Metric Fasteners', 'Metric Bearings'],
   encoder_types: ['PWM', 'CAN Through Bore', 'Other'],
@@ -80,7 +81,8 @@ const TECHNICAL_NUMBER_FIELDS = new Set([
   'can_bus_count',
   'electrical_rating',
   'drivebase_rating',
-  'overall_reliability_rating'
+  'overall_reliability_rating',
+  'hopper_capacity'
 ]);
 
 const getClientFromRequest = (request) => {
