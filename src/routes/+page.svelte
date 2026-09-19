@@ -116,7 +116,6 @@
     quickPreviewLoading = { ...quickPreviewLoading, [key]: true };
     try {
       const headers = await getAuthHeader();
-      const myTeamKey = `frc${user?.frc_team || FRC_TEAMS.TEAM_971}`;
       let result = null;
       if (key === 'picklist') {
         const res = await fetch(`/api/scouting-picklist?event_key=${encodeURIComponent(homeEventKey)}`, { headers });
@@ -267,6 +266,7 @@
   // assignment's robot is on without asking the scout to look it up by hand.
   let matchAllianceByKey = {};
   let homeEventKey = '';
+  $: myTeamKey = `frc${user?.frc_team || FRC_TEAMS.TEAM_971}`;
   let currentEventMatch = null;
   let currentMatchState = 'unavailable';
   let currentMatchLoading = false;
@@ -276,6 +276,12 @@
   // below is actually for.
   let myTeamNextMatch = null;
   let myTeamNextMatchState = 'unavailable';
+  // Whether the field's current match (not necessarily the same as
+  // myTeamNextMatch above) happens to be this scout's own team's match too.
+  $: currentMatchHasMyTeam = !!currentEventMatch && (
+    (currentEventMatch.alliances?.red?.team_keys || []).includes(myTeamKey)
+    || (currentEventMatch.alliances?.blue?.team_keys || []).includes(myTeamKey)
+  );
 
   async function loadMatchAlliances() {
     currentMatchLoading = true;
@@ -302,7 +308,6 @@
       currentEventMatch = current.match;
       currentMatchState = current.state;
 
-      const myTeamKey = `frc${user?.frc_team || FRC_TEAMS.TEAM_971}`;
       const myTeamMatches = (payload.data || []).filter((m) =>
         (m.alliances?.red?.team_keys || []).includes(myTeamKey) || (m.alliances?.blue?.team_keys || []).includes(myTeamKey));
       const myCurrent = selectCurrentEventMatch(myTeamMatches);
@@ -369,19 +374,15 @@
     if(!user?.id) return;
     try {
       const authHeaders = await getAuthHeader();
-      // Fetch all three scouting types
-      const res1 = await fetch(`/api/scout-assignments?scouting_type=data&mine=1&user_id=${encodeURIComponent(user.id)}`, {
-        headers: authHeaders
-      });
-      const js1 = await res1.json();
-      const res2 = await fetch(`/api/scout-assignments?scouting_type=note&mine=1&user_id=${encodeURIComponent(user.id)}`, {
-        headers: authHeaders
-      });
-      const js2 = await res2.json();
-      const res3 = await fetch(`/api/scout-assignments?scouting_type=quick&mine=1&user_id=${encodeURIComponent(user.id)}`, {
-        headers: authHeaders
-      });
-      const js3 = await res3.json();
+      // All three scouting types in parallel - these used to run one after
+      // another (data, then note, then quick), each waiting on the last,
+      // which is most of why this section visibly lagged behind the rest
+      // of the page on load.
+      const [js1, js2, js3] = await Promise.all([
+        fetch(`/api/scout-assignments?scouting_type=data&mine=1&user_id=${encodeURIComponent(user.id)}`, { headers: authHeaders }).then(r => r.json()),
+        fetch(`/api/scout-assignments?scouting_type=note&mine=1&user_id=${encodeURIComponent(user.id)}`, { headers: authHeaders }).then(r => r.json()),
+        fetch(`/api/scout-assignments?scouting_type=quick&mine=1&user_id=${encodeURIComponent(user.id)}`, { headers: authHeaders }).then(r => r.json())
+      ]);
       const rows = [].concat(js1?.data||[], js2?.data||[], js3?.data||[]);
       // Completed assignments stay in the list (shown as "Completed", and
       // still clickable to go back and edit the report) rather than
@@ -438,11 +439,16 @@
 
   $: if (user) profileWaitExpired = false;
   // The scouting landing page only needs the signed-in scout's own queue.
+  // Everything below the welcome banner waits on all three of these
+  // together (dashboardDataReady) instead of each section popping in on
+  // its own as its own fetch happens to resolve - the "top loads, then
+  // everything else trickles in one at a time" effect that was really just
+  // three independent loaders finishing at different times.
+  let dashboardDataReady = false;
   $: if (user && !scoutingLoaded) {
     scoutingLoaded = true;
-    loadScoutAssignments();
-    loadPrescoutAssignments();
-    loadMatchAlliances();
+    Promise.all([loadScoutAssignments(), loadPrescoutAssignments(), loadMatchAlliances()])
+      .finally(() => { dashboardDataReady = true; });
   }
 
   // Keep this browser's login-screen cache in sync with the account's saved
@@ -604,27 +610,6 @@
       {/if}
     </div>
 
-    <div class="stat-strip">
-      {#if homeEventKey}
-        <div class="stat-tile">
-          <span class="stat-label">Competition</span>
-          <strong class="stat-value stat-value-text">{homeEventKey}</strong>
-        </div>
-      {/if}
-      <div class="stat-tile">
-        <span class="stat-label">Assignments Open</span>
-        <strong class="stat-value">{incompleteScoutAssignments.length}</strong>
-      </div>
-      <div class="stat-tile">
-        <span class="stat-label">Assignments Done</span>
-        <strong class="stat-value">{completedScoutAssignmentCount}</strong>
-      </div>
-      <div class="stat-tile">
-        <span class="stat-label">Pre-Scout Queue</span>
-        <strong class="stat-value">{myPrescoutAssignments.length}</strong>
-      </div>
-    </div>
-
     {#if !can('CAN_SEE_ROUTES')}
       <div class="pending-notice">
         <AlertCircle size={20} />
@@ -633,7 +618,30 @@
           <p>Your account has been created successfully. An administrator needs to assign your role and permissions before you can access the manufacturing features. You'll receive an email notification once your account is approved.</p>
         </div>
       </div>
+    {:else if !dashboardDataReady}
+      <div class="empty-state">Loading your dashboard...</div>
     {:else}
+      <div class="stat-strip">
+        {#if homeEventKey}
+          <div class="stat-tile">
+            <span class="stat-label">Competition</span>
+            <strong class="stat-value stat-value-text">{homeEventKey}</strong>
+          </div>
+        {/if}
+        <div class="stat-tile">
+          <span class="stat-label">Assignments Open</span>
+          <strong class="stat-value">{incompleteScoutAssignments.length}</strong>
+        </div>
+        <div class="stat-tile">
+          <span class="stat-label">Assignments Done</span>
+          <strong class="stat-value">{completedScoutAssignmentCount}</strong>
+        </div>
+        <div class="stat-tile">
+          <span class="stat-label">Pre-Scout Queue</span>
+          <strong class="stat-value">{myPrescoutAssignments.length}</strong>
+        </div>
+      </div>
+
       {#if editMode && hiddenSections.length > 0}
         <div class="hidden-sections-tray">
           <span class="tray-label">Hidden:</span>
@@ -888,13 +896,16 @@
       {#if currentMatchLoading && !currentEventMatch}
         <div class="current-match-card current-match-loading">Loading the {homeEventKey || 'active event'} field...</div>
       {:else if currentEventMatch}
-        <div class="current-match-card" class:live={currentMatchState === 'current'}>
+        <div class="current-match-card" class:live={currentMatchState === 'current'} class:has-my-team={currentMatchHasMyTeam}>
           <div class="current-match-heading">
             <div>
               <span class="current-match-eyebrow">{homeEventKey}</span>
               <h4>{currentMatchState === 'current' ? 'Current match' : currentMatchState === 'upcoming' ? 'Up next' : 'Latest match'}</h4>
             </div>
-            <strong>{matchDisplayName(currentEventMatch)}</strong>
+            <div class="current-match-heading-right">
+              {#if currentMatchHasMyTeam}<span class="my-team-badge">Team {user?.frc_team || FRC_TEAMS.TEAM_971} is playing!</span>{/if}
+              <strong>{matchDisplayName(currentEventMatch)}</strong>
+            </div>
           </div>
           <div class="current-match-alliances">
             <div class="current-alliance red"><span>Red</span>{#each currentEventMatch.alliances?.red?.team_keys || [] as teamKey}<b>{displayTeamNumber(teamKey)}</b>{/each}</div>
@@ -1879,10 +1890,23 @@
     background: var(--surface-1);
   }
   .current-match-card.live { border-left-color: var(--success, #2e7d32); }
+  .current-match-card.has-my-team { border-left-color: var(--brand-gold-strong); box-shadow: inset 0 0 0 1px var(--brand-gold-strong); }
   .current-match-loading { color: var(--text-muted); }
   .current-match-heading { display:flex; align-items:center; justify-content:space-between; gap:var(--space-3); }
   .current-match-heading h4 { margin:.15rem 0 0; color:var(--secondary); }
+  .current-match-heading-right { display:flex; align-items:center; gap:var(--space-3); }
   .current-match-heading strong { font-size:var(--font-lg); }
+  .my-team-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 10px;
+    background: var(--brand-gold-soft);
+    color: var(--brand-gold-strong);
+    font-size: var(--font-xs);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
   .current-match-eyebrow { color:var(--text-muted); font-size:var(--font-xs); font-family:var(--font-mono-stack); text-transform:uppercase; }
   .current-match-alliances { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--gap-3); }
   .current-alliance { display:flex; align-items:center; gap:var(--space-2); padding:var(--space-3); }
