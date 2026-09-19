@@ -41,11 +41,6 @@
   let autoMoved = '';
   let autoPath = [];
   let autoPathName = '';
-  let savedAutoPaths = [];
-  let savedPathLoading = false;
-  let selectedSavedPathId = '';
-  let savingPathFile = false;
-  let pathFileMessage = '';
   let ballSources = [];
   let ballsScored = '';
   let autoCollision = false;
@@ -79,10 +74,6 @@
   let saving = false;
   let startPhotos = {};
   let startPhotoError = '';
-  let visionSuggestions = null;
-  let visionSuggestionsLoading = false;
-  let visionSuggestionsError = '';
-  let visionSuggestionNotice = '';
   let error = '';
   $: if (!scoutName && $userProfile?.full_name && !$userProfile.full_name.includes('@')) scoutName = $userProfile.full_name;
 
@@ -120,8 +111,6 @@
     significantCrash = null; crashTarget = ''; crashDetails = ''; teleopRobotStatus = '';
     mechanicalBreak = null; robotDisabled = ''; card = ''; driverSkill = undefined;
     pitProblem = false; pitProblemDetails = ''; beached = false; postNotes = ''; error = '';
-    savedAutoPaths = []; selectedSavedPathId = ''; pathFileMessage = '';
-    visionSuggestions = null; visionSuggestionsError = ''; visionSuggestionNotice = '';
     selectPhase('prematch');
   }
 
@@ -221,132 +210,30 @@
 
   function normalizeRobotNumber(event) {
     robotNumber = String(event.currentTarget?.value || '').replace(/\D/g, '').slice(0, 6);
-    visionSuggestions = null;
-    visionSuggestionsError = '';
-    visionSuggestionNotice = '';
-    savedAutoPaths = [];
-    selectedSavedPathId = '';
   }
 
-  async function loadVisionSuggestions() {
-    visionSuggestionsError = '';
-    visionSuggestionNotice = '';
-    if (!eventKey || !matchNumber.trim() || !robotNumber.trim()) {
-      visionSuggestionsError = 'Choose a match and robot first.';
-      return;
-    }
-    visionSuggestionsLoading = true;
-    try {
-      const params = new URLSearchParams({ event_key: eventKey, match_key: matchNumber.trim(), team_key: robotNumber.trim() });
-      const response = await fetch(`/api/matchscout/vision-suggestions?${params}`, { headers: await getAuthHeader() });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok || !payload?.success) throw new Error(payload?.error || 'Could not load vision suggestions.');
-      visionSuggestions = payload.data;
-    } catch (exception) {
-      visionSuggestions = null;
-      visionSuggestionsError = exception.message;
-    } finally {
-      visionSuggestionsLoading = false;
-    }
-  }
-
-  function applyVisionSuggestions() {
-    const fields = visionSuggestions?.fields || {};
-    const applied = [];
-    // A scout's existing choice outranks vision. This action only fills blank
-    // fields, and every result remains editable in its normal control.
-    if (!startingPosition && fields.startingPosition) { startingPosition = fields.startingPosition; applied.push('starting position'); }
-    if (!autoMoved && fields.autoMoved) { autoMoved = fields.autoMoved; applied.push('auto movement'); }
-    if (!autoPath.length && Array.isArray(fields.autoPath)) { autoPath = fields.autoPath.map(point => [...point]); autoPathName = fields.autoPathName || 'Vision-reviewed auto path'; applied.push('auto path'); }
-    if (significantCrash === null && fields.significantCrash === true) { significantCrash = true; crashTarget = fields.crashTarget || 'other'; crashDetails = fields.crashDetails || 'Vision-reviewed abrupt collision; verify the contact target.'; applied.push('significant crash'); }
-    if (!ballsScored && fields.ballsScored) { ballsScored = fields.ballsScored; applied.push('teleop balls'); }
-    if (!teleopRobotStatus && fields.teleopRobotStatus) { teleopRobotStatus = fields.teleopRobotStatus; applied.push('robot status'); }
-    visionSuggestionNotice = applied.length ? `Applied ${applied.join(', ')}. Review or edit every value before saving.` : 'Your existing answers were kept; there were no blank suggested fields to fill.';
-  }
-
-  async function loadSavedAutoPaths() {
-    if (!eventKey || !robotNumber.trim()) {
-      savedAutoPaths = [];
-      return;
-    }
-    savedPathLoading = true;
-    try {
-      const response = await fetch(
-        `/api/matchscout?resource=auto-paths&event_key=${encodeURIComponent(eventKey)}&team_key=${encodeURIComponent(robotNumber.trim())}`,
-        { headers: await getAuthHeader() }
-      );
-      const payload = await response.json().catch(() => null);
-      if (!response.ok || !payload?.success) throw new Error(payload?.error || 'Could not load saved auto paths.');
-      savedAutoPaths = payload.data || [];
-    } catch (exception) {
-      error = exception.message;
-      savedAutoPaths = [];
-    } finally {
-      savedPathLoading = false;
-    }
-  }
-
-  async function openAutoPhase() {
+  function openAutoPhase() {
     selectPhase('auto');
-    await loadSavedAutoPaths();
-    // Only for a genuinely fresh entry - editing an existing report or a
-    // loaded saved-path file both populate autoPath before this ever runs,
-    // and this must never overwrite either.
+    // Only for a genuinely fresh entry - editing an existing report already
+    // populates autoPath before this ever runs, and this must never
+    // overwrite it.
     if (!autoPath.length && startingPosition) {
       const index = START_POSITIONS.indexOf(startingPosition);
       if (index >= 0) autoPath = [START_POSITION_POINTS[index]];
     }
   }
 
-  function loadSelectedAutoPath() {
-    if (!selectedSavedPathId) return;
-    const saved = savedAutoPaths.find((entry) => String(entry.id) === selectedSavedPathId);
-    if (!saved) return;
-    autoPath = saved.path.map((point) => [...point]);
-    autoPathName = saved.name;
-    alliance = saved.alliance === 'blue' ? 'blue' : saved.alliance === 'red' ? 'red' : alliance;
-    pathFileMessage = `Loaded “${saved.name}”.`;
-  }
-
-  async function saveAutoPathAsNewFile() {
-    pathFileMessage = '';
-    if (!eventKey || !robotNumber.trim()) {
-      pathFileMessage = 'Select a robot before saving a path file.';
-      return;
-    }
-    if (!autoPathName.trim()) {
-      pathFileMessage = 'Enter a path name first.';
-      return;
-    }
-    if (autoPath.length < 2) {
-      pathFileMessage = 'Draw a path before saving the file.';
-      return;
-    }
-    savingPathFile = true;
+  // The scout never names or files a path themselves - a drawn path is
+  // archived to the team's auto-path library (shown on its team profile)
+  // under an auto-generated name the moment the report is submitted.
+  // Best-effort and silent: a name collision just means this exact match's
+  // path was already archived (e.g. resubmitting an edit), which is fine to
+  // skip rather than surface as an error on an otherwise-successful submit.
+  async function autoSaveAutoPath(name) {
+    if (!eventKey || !robotNumber.trim() || autoPath.length < 2) return;
     try {
-      const result = await post({
-        action: 'save-auto-path',
-        event_key: eventKey,
-        team_key: robotNumber.trim(),
-        name: autoPathName,
-        alliance,
-        path: autoPath
-      });
-      const saved = result.data;
-      await loadSavedAutoPaths();
-      selectedSavedPathId = String(saved.id);
-      if (result.drive_export?.ok) {
-        pathFileMessage = `Saved “${saved.name}” and exported its field image to Drive.`;
-      } else if (result.drive_export?.reason === 'drive-export-failed') {
-        pathFileMessage = `Saved “${saved.name}”, but its Drive image could not be exported.`;
-      } else {
-        pathFileMessage = `Saved “${saved.name}” as a new path file.`;
-      }
-    } catch (exception) {
-      pathFileMessage = exception.message;
-    } finally {
-      savingPathFile = false;
-    }
+      await post({ action: 'save-auto-path', event_key: eventKey, team_key: robotNumber.trim(), name, alliance, path: autoPath });
+    } catch { /* best effort */ }
   }
 
   async function loadMyReports() {
@@ -453,11 +340,10 @@
       error = 'Describe what the pit crew needs to inspect before submitting.';
       return;
     }
-    if (autoPath.length && !autoPathName.trim()) {
-      phase = 'auto';
-      error = 'Name the drawn autonomous path before submitting.';
-      return;
-    }
+    // A scout never names their own path - one gets generated here so the
+    // report always has something readable, and so autoSaveAutoPath below
+    // has a name to file it under.
+    if (autoPath.length && !autoPathName.trim()) autoPathName = `Match ${matchNumber.trim()}`;
     saving = true;
     error = '';
     try {
@@ -512,6 +398,7 @@
       queuedOffline = result.queued;
       submitted = true;
       editing = true;
+      if (!queuedOffline) void autoSaveAutoPath(autoPathName);
     } catch (exception) {
       error = exception.message;
     } finally {
@@ -673,30 +560,6 @@
           </label>
           <fieldset><legend>Alliance</legend><div class="segmented"><button class:chosen={alliance === 'red'} class="red-choice" on:click={() => alliance = 'red'}>Red</button><button class:chosen={alliance === 'blue'} class="blue-choice" on:click={() => alliance = 'blue'}>Blue</button></div></fieldset>
         </div>
-        <section class="vision-suggestions" aria-live="polite">
-          <div>
-            <span class="field-label">Vision scouting</span>
-            <strong>Reviewed objective suggestions</strong>
-            <small>Only accepted or corrected evidence is used. Preload, ratings, points, roles, intake, and cards still need a scout. A hard-collision candidate must be reviewed before it is suggested.</small>
-          </div>
-          <button class="btn btn-secondary" disabled={visionSuggestionsLoading || !eventKey || !matchNumber.trim() || !robotNumber.trim()} on:click={loadVisionSuggestions}>
-            {visionSuggestionsLoading ? 'Checking vision…' : 'Check reviewed vision'}
-          </button>
-          {#if visionSuggestions?.run}
-            {#if Object.keys(visionSuggestions.fields || {}).length}
-              <div class="vision-suggestion-result">
-                <span>Run {visionSuggestions.run.model_name || 'vision'} found {visionSuggestions.evidence.reviewed_observations || 0} reviewed event{visionSuggestions.evidence.reviewed_observations === 1 ? '' : 's'}.</span>
-                <button class="btn btn-primary" on:click={applyVisionSuggestions}>Apply blank fields</button>
-              </div>
-            {:else}
-              <small>No usable reviewed evidence for this team yet.</small>
-            {/if}
-          {:else if visionSuggestions}
-            <small>No completed vision run is available for this match yet.</small>
-          {/if}
-          {#if visionSuggestionNotice}<small class="vision-suggestion-notice">{visionSuggestionNotice}</small>{/if}
-          {#if visionSuggestionsError}<small class="submit-error">{visionSuggestionsError}</small>{/if}
-        </section>
         <fieldset class="control-group"><legend>Preload (required)</legend><div class="segmented"><button class:chosen={preload === true} on:click={() => preload = true}>Has preload</button><button class:chosen={preload === false} on:click={() => preload = false}>No preload</button></div></fieldset>
         <div class="start-position-block">
           <span class="field-label">Starting position</span>
@@ -793,36 +656,7 @@
               <div><span class="field-label">Robot path (optional)</span><small>AdvantageScope-style 2026 field; your alliance wall is always on the left.</small></div>
               <button class="btn btn-sm" on:click={() => autoPath = []} disabled={!autoPath.length}><RotateCcw size={14} /> Clear</button>
             </div>
-            <div class="saved-path-controls">
-              <label for="auto-path-name">
-                Path name
-                <input
-                  id="auto-path-name"
-                  class="form-input"
-                  maxlength="120"
-                  placeholder="e.g. Center four-piece"
-                  bind:value={autoPathName}
-                />
-              </label>
-              <label for="saved-auto-path">
-                Saved path files
-                <select id="saved-auto-path" class="form-input" bind:value={selectedSavedPathId} disabled={savedPathLoading || !savedAutoPaths.length}>
-                  <option value="">{savedPathLoading ? 'Loading...' : savedAutoPaths.length ? 'Choose a saved path' : 'No saved paths yet'}</option>
-                  {#each savedAutoPaths as saved}
-                    <option value={saved.id}>{saved.name}</option>
-                  {/each}
-                </select>
-              </label>
-            </div>
-            <div class="path-file-actions">
-              <button class="btn btn-outline" on:click={loadSelectedAutoPath} disabled={!selectedSavedPathId || savedPathLoading}>Load file</button>
-              <button class="btn btn-primary" on:click={saveAutoPathAsNewFile} disabled={savingPathFile || autoPath.length < 2 || !autoPathName.trim()}>
-                {savingPathFile ? 'Saving...' : 'Save as new file'}
-              </button>
-            </div>
-            {#if pathFileMessage}<small class="path-file-message">{pathFileMessage}</small>{/if}
             <RebuiltFieldMap {alliance} bind:path={autoPath} />
-            {#if autoPath.length && !autoPathName.trim()}<small class="estimate-error">Name this path so it can be reopened later.</small>{/if}
             <small class="field-source">Simplified from the official WPILib/AdvantageScope 2026 REBUILT 2D field view for legibility on scouting devices.</small>
           </div>
         </div>
@@ -919,12 +753,6 @@
   .report-history { padding:var(--space-4); margin-bottom:var(--space-4); }
   .report-row { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:var(--space-2); padding:var(--space-2) 0; }
 
-  .vision-suggestions { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:var(--space-3); margin-top:var(--space-4); padding:var(--space-3) var(--space-4); border:1px solid var(--blue-base); border-left-width:3px; background:var(--blue-soft); }
-  .vision-suggestions > div:first-child { display:grid; gap:2px; }
-  .vision-suggestions strong { font-size:.9rem; }
-  .vision-suggestions small { color:var(--text-muted); font-size:.75rem; line-height:1.35; }
-  .vision-suggestion-result { grid-column:1 / -1; display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:var(--space-2); color:var(--text-muted); font-size:.8rem; }
-  .vision-suggestion-notice { grid-column:1 / -1; color:var(--text); }
   .start-position-card { display:flex; flex-direction:column; gap:.4rem; align-items:center; }
   .start-position-card img, .start-position-card svg { width:100%; max-width:230px; height:130px; object-fit:cover; }
   .submit-error { margin:var(--space-2) 0 0; color:var(--danger); font-size:.85rem; }
@@ -964,9 +792,6 @@
   .auto-source-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
   .collision-notes { margin-top:var(--space-2); resize:vertical; }
   .path-panel { display:grid; gap:var(--space-2); } .path-heading { display:flex; justify-content:space-between; align-items:center; gap:var(--gap-3); } .path-heading > div { display:grid; gap:2px; }
-  .saved-path-controls { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--gap-3); margin:var(--space-2) 0; }
-  .path-file-actions { display:flex; flex-wrap:wrap; gap:var(--gap-2); }
-  .path-file-message { color:var(--text-muted); }
   .field-source { color:var(--text-muted); font-size:.68rem; line-height:1.35; }
   .teleop-roles { margin-bottom:var(--space-4); padding:var(--space-4); border:1px solid var(--border); background:var(--surface-2); }
   .role-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(8.5rem,1fr)); }
@@ -1061,11 +886,9 @@
     .stage-nav button { min-height:3.5rem; }
     .match-workspace { padding:var(--space-4); }
     .assignment-grid { grid-template-columns:1fr; }
-    .vision-suggestions { grid-template-columns:1fr; align-items:start; }
     .start-position-block { padding:var(--space-3); }
     .position-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
     .auto-layout,.intake-observations { grid-template-columns:1fr; }
-    .saved-path-controls { grid-template-columns:1fr; }
     .ratings-heading,.rating-row,.persistent-status { align-items:flex-start; flex-direction:column; }
     .rating-row { gap:var(--space-3); }
     .rating-buttons { width:100%; }
@@ -1084,8 +907,6 @@
     .section-heading h2 { font-size:var(--font-lg); }
     .position-grid { grid-template-columns:1fr; }
     .auto-source-grid { grid-template-columns:1fr; }
-    .path-file-actions { display:grid; grid-template-columns:1fr; }
-    .path-file-actions .btn { min-height:3rem; }
     .rating-buttons.large button { min-height:2.75rem; width:auto; }
     .submitted-state { min-height:24rem; padding:var(--space-4) var(--space-2); }
   }
