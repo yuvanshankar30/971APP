@@ -3745,6 +3745,15 @@
   .table td.workflow-col {
     width: 7.5%;
   }
+  /* The WORKFLOW label sits over a chip, not over bare text. Both cells
+     share the same padding, so the header text lines up with the chip's
+     BORDER edge - but the chip's own label is pushed a further 1px border
+     + var(--space-3) padding inward, which is what read as misaligned.
+     Indenting the header by exactly that inset puts the two words on the
+     same left edge. */
+  .table th.workflow-col {
+    padding-left: calc(var(--space-3) + var(--space-3) + 1px);
+  }
   /* The anchor column. Name carries the weight; everything folded in under
      it is one muted spec line. min-width:0 + hidden overflow on the line
      itself so a long stock description or requester name truncates inside
