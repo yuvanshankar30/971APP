@@ -2621,13 +2621,16 @@
                   <span class="tag tag-warning" title="The uploaded STEP file failed validation">⚠ Bad STEP</span>
                 {/if}
               </div>
-              <!-- Everything that used to own a column of its own, folded
-                   into one muted spec line under the name. -->
+              <!-- Compact identifying metadata beneath the part name. -->
               <div class="name-meta" class:hidden={assignMode}>
-                {#if part.project_id}<span class="name-meta-item mono">{part.project_id}</span>{/if}
-                {#if part.stock_assignment}<span class="name-meta-item name-meta-stock"><span class="name-meta-sep">·</span>{part.stock_assignment}</span>{/if}
-                {#if part.requester}<span class="name-meta-item name-meta-requester" title={part.requester}><span class="name-meta-sep">·</span>{part.requester}</span>{/if}
-                <span class="name-meta-item name-meta-date"><span class="name-meta-sep">·</span>{formatDate(part.created_at)}</span>
+                <div class="name-meta-line">
+                  {#if part.project_id}<span class="mono">{part.project_id}</span>{/if}
+                  {#if part.stock_assignment}<span class="name-meta-stock"><span class="name-meta-sep">·</span>{part.stock_assignment}</span>{/if}
+                </div>
+                <div class="name-meta-line">
+                  {#if part.requester}<span class="name-meta-requester" title={part.requester}>{part.requester}</span>{/if}
+                  <span class="name-meta-date">{#if part.requester}<span class="name-meta-sep">·</span>{/if}{formatDate(part.created_at)}</span>
+                </div>
               </div>
               <PartNotes item={part} table="parts" inline on:update={() => loadParts()} />
               {#if part.assigned_to}
@@ -3649,21 +3652,21 @@
     font-size: 0.85rem;
     padding: 0 0.6rem;
   }
-  /* The anchor column keeps metadata intact by wrapping complete fields. */
+  /* The anchor's metadata is deliberately two stable lines: project/stock,
+     then requester/date. */
   .name-meta {
-    display: flex;
-    align-items: baseline;
-    flex-wrap: wrap;
-    gap: 4px;
+    display: grid;
+    gap: 1px;
     min-width: 0;
     margin-top: 2px;
     color: var(--text-muted);
     font-size: 0.8rem;
     line-height: 1.35;
   }
-  .name-meta-item { min-width: 0; }
+  .name-meta-line { display: flex; align-items: baseline; gap: 4px; min-width: 0; white-space: nowrap; overflow: hidden; }
   .name-meta-sep { opacity: 0.45; }
-  .name-meta-stock { overflow-wrap: anywhere; }
+  .name-meta-stock, .name-meta-requester { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .name-meta-stock { flex: 1 1 auto; }
 
   /* Team number trailing the part name. Muted and unweighted so it reads as
      a qualifier on the name rather than competing with it, and uncoloured -
@@ -3691,7 +3694,8 @@
     background: currentColor;
     opacity: 0.8;
   }
-  .name-meta-requester, .name-meta-date { white-space: nowrap; }
+  .name-meta-requester { flex: 1 1 auto; }
+  .name-meta-date { flex: 0 0 auto; }
 
   /* Route: the status word, then a segmented track of this workflow's
      stops filled up to the current one. Kept monochrome - position along
