@@ -2624,10 +2624,10 @@
               <!-- Everything that used to own a column of its own, folded
                    into one muted spec line under the name. -->
               <div class="name-meta" class:hidden={assignMode}>
-                {#if part.project_id}<span class="mono">{part.project_id}</span>{/if}
-                {#if part.stock_assignment}<span class="name-meta-sep">·</span><span>{part.stock_assignment}</span>{/if}
-                {#if part.requester}<span class="name-meta-sep">·</span><span class="name-meta-requester" title={part.requester}>{part.requester}</span>{/if}
-                <span class="name-meta-sep">·</span><span>{formatDate(part.created_at)}</span>
+                {#if part.project_id}<span class="name-meta-item mono">{part.project_id}</span>{/if}
+                {#if part.stock_assignment}<span class="name-meta-item name-meta-stock"><span class="name-meta-sep">·</span>{part.stock_assignment}</span>{/if}
+                {#if part.requester}<span class="name-meta-item name-meta-requester" title={part.requester}><span class="name-meta-sep">·</span>{part.requester}</span>{/if}
+                <span class="name-meta-item name-meta-date"><span class="name-meta-sep">·</span>{formatDate(part.created_at)}</span>
               </div>
               <PartNotes item={part} table="parts" inline on:update={() => loadParts()} />
               {#if part.assigned_to}
@@ -3649,24 +3649,21 @@
     font-size: 0.85rem;
     padding: 0 0.6rem;
   }
-  /* The anchor column. Name carries the weight; everything folded in under
-     it is one muted spec line. min-width:0 + hidden overflow on the line
-     itself so a long stock description or requester name truncates inside
-     its own cell instead of shoving the table's other columns sideways. */
+  /* The anchor column keeps metadata intact by wrapping complete fields. */
   .name-meta {
     display: flex;
     align-items: baseline;
+    flex-wrap: wrap;
     gap: 4px;
     min-width: 0;
     margin-top: 2px;
     color: var(--text-muted);
     font-size: 0.8rem;
     line-height: 1.35;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
+  .name-meta-item { min-width: 0; }
   .name-meta-sep { opacity: 0.45; }
+  .name-meta-stock { overflow-wrap: anywhere; }
 
   /* Team number trailing the part name. Muted and unweighted so it reads as
      a qualifier on the name rather than competing with it, and uncoloured -
@@ -3694,7 +3691,7 @@
     background: currentColor;
     opacity: 0.8;
   }
-  .name-meta-requester { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .name-meta-requester, .name-meta-date { white-space: nowrap; }
 
   /* Route: the status word, then a segmented track of this workflow's
      stops filled up to the current one. Kept monochrome - position along
