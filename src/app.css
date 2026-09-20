@@ -1100,13 +1100,6 @@ textarea:focus,
   font-variant-numeric: tabular-nums;
 }
 
-/* Density control. 48px is the comfortable default (also clears the 44px
-   touch-target floor); compact drops to 40px for long lists on a laptop.
-   Only the vertical padding changes - column rhythm and type stay put, so
-   switching density does not reflow anything horizontally. */
-.table td { height: 48px; }
-.table.density-compact td { height: 40px; padding-top: var(--space-1); padding-bottom: var(--space-1); }
-.table.density-compact th { padding-top: var(--space-1); padding-bottom: var(--space-1); }
 .status-fade {
   white-space: nowrap;
   max-width: 140px;
