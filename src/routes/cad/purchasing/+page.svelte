@@ -8,8 +8,7 @@
   import { isTeam9584, passesTeamFilter } from '$lib/frcTeams.js';
   import TeamFilter from '$lib/components/TeamFilter.svelte';
   import { getSeasonBucket, getCurrentSeasonBucket, getAllSeasonBuckets, passesSeasonFilter } from '$lib/frcSeason.js';
-  import SeasonFilter from '$lib/components/SeasonFilter.svelte';
-  import { ShoppingCart, Package, DollarSign, Truck, CheckCircle, Clock, AlertTriangle, Edit, MapPin, Download, Settings, X, Link as LinkIcon, Target, Pin } from 'lucide-svelte';
+  import { ShoppingCart, Search, Package, DollarSign, Truck, CheckCircle, Clock, AlertTriangle, Edit, MapPin, Download, Settings, X, Link as LinkIcon, Target, Pin } from 'lucide-svelte';
   import { toastActions } from '$lib/toast.js';
   import { formatPacificDate } from '$lib/timezone.js';
   import { purchasingLineTotal } from '$lib/purchasingLineTotal.js';
@@ -42,12 +41,34 @@
   let loading = true;
   let parts = [];
   // Filters
+  let searchTerm = '';
   let vendorFilter = '';
   let projectFilter = '';
   let statusFilter = '';
   let seasonFilter = getCurrentSeasonBucket()?.value || '';
   let show971 = true;
   let show9584 = true;
+
+  // Only counts filters the user actually set. Season defaults to the
+  // current bucket, so it is not "active" until it differs from that.
+  $: activeFilterCount = [
+    searchTerm.trim(),
+    vendorFilter,
+    projectFilter,
+    statusFilter,
+    seasonFilter !== (getCurrentSeasonBucket()?.value || '') ? seasonFilter || 'all' : '',
+    show971 && show9584 ? '' : 'team'
+  ].filter(Boolean).length;
+
+  function clearFilters() {
+    searchTerm = '';
+    vendorFilter = '';
+    projectFilter = '';
+    statusFilter = '';
+    seasonFilter = getCurrentSeasonBucket()?.value || '';
+    show971 = true;
+    show9584 = true;
+  }
   $: showPurchasingLineTotals = user?.show_purchasing_line_totals !== false;
 
   // Derived options and filtered view
@@ -69,6 +90,17 @@
       if (!isRejector && !isRequesterByName && !isRequesterById) return false;
     }
     
+    // Search covers every field someone would recognise an item by - what
+    // it is, who it came from, what it is for, who asked. A filter needs
+    // you to already know which dropdown the answer lives behind; search
+    // does not.
+    if (searchTerm.trim()) {
+      const needle = searchTerm.trim().toLowerCase();
+      const haystack = [p.name, p.vendor, p.project_id, p.requester]
+        .map((field) => (field || '').toString().toLowerCase())
+        .join(' ');
+      if (!haystack.includes(needle)) return false;
+    }
     if (vendorFilter && vendorFilter !== '') {
       const pv = (p.vendor || '').toString().toLowerCase();
       if (pv !== vendorFilter.toString().toLowerCase()) return false;
@@ -1028,48 +1060,66 @@
       </div>
     {/if}
 
-    <div class="card">
-      <div class="filters">
-        <div class="form-group">
-          <label class="form-label">Vendor</label>
-          <select class="form-select" bind:value={vendorFilter}>
-            <option value="">All vendors</option>
-            {#each vendorOptions as v}
-              <option value={v}>{v}</option>
-            {/each}
-          </select>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label">Project</label>
-          <select class="form-select" bind:value={projectFilter}>
-            <option value="">All projects</option>
-            {#each projectOptions as p}
-              <option value={p}>{p}</option>
-            {/each}
-          </select>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label">Status</label>
-          <select class="form-select" bind:value={statusFilter}>
-            <option value="">Any</option>
-            <option value="pending">Pending</option>
-            <option value="rejected">Rejected</option>
-            <option value="approved">Approved</option>
-            <option value="pickup">Pickup</option>
-            <option value="picked_up">Picked Up</option>
-            <option value="ordered">Ordered</option>
-            <option value="delivered">Delivered</option>
-            <option value="kitted">Kitted</option>
-          </select>
-        </div>
-
-        <SeasonFilter options={seasonOptions} bind:value={seasonFilter} />
+    <!-- One toolbar row instead of a grid of labelled dropdowns stacked
+         over a separate team row. Each control states its own default
+         ("All vendors", "Any status"), so the standing labels above them
+         were spending a line of height to repeat what the control already
+         said. Search leads, because finding a known item by name is the
+         most common thing done here and there was no way to do it. -->
+    <div class="purchasing-toolbar">
+      <div class="toolbar-search">
+        <Search size={16} />
+        <input
+          type="search"
+          bind:value={searchTerm}
+          placeholder="Search name, vendor, project, requester&hellip;"
+          aria-label="Search purchasing items"
+        />
+        {#if searchTerm}
+          <button type="button" class="toolbar-search-clear" aria-label="Clear search" on:click={() => (searchTerm = '')}>×</button>
+        {/if}
       </div>
-      <div class="team-filter-row">
-        <TeamFilter bind:show971 bind:show9584 />
-      </div>
+
+      <select class="form-select toolbar-select" bind:value={vendorFilter} aria-label="Vendor">
+        <option value="">All vendors</option>
+        {#each vendorOptions as v}
+          <option value={v}>{v}</option>
+        {/each}
+      </select>
+
+      <select class="form-select toolbar-select" bind:value={projectFilter} aria-label="Project">
+        <option value="">All projects</option>
+        {#each projectOptions as p}
+          <option value={p}>{p}</option>
+        {/each}
+      </select>
+
+      <select class="form-select toolbar-select" bind:value={statusFilter} aria-label="Status">
+        <option value="">Any status</option>
+        <option value="pending">Pending</option>
+        <option value="rejected">Rejected</option>
+        <option value="approved">Approved</option>
+        <option value="pickup">Pickup</option>
+        <option value="picked_up">Picked Up</option>
+        <option value="ordered">Ordered</option>
+        <option value="delivered">Delivered</option>
+        <option value="kitted">Kitted</option>
+      </select>
+
+      <select class="form-select toolbar-select" bind:value={seasonFilter} aria-label="Season">
+        <option value="">All seasons</option>
+        {#each seasonOptions as option (option.value)}
+          <option value={option.value}>{option.label}</option>
+        {/each}
+      </select>
+
+      <div class="toolbar-team"><TeamFilter bind:show971 bind:show9584 /></div>
+
+      {#if activeFilterCount}
+        <button type="button" class="toolbar-clear" on:click={clearFilters}>
+          Clear {activeFilterCount}
+        </button>
+      {/if}
     </div>
 
     {#if (orderMode ? displayedOrderItems : filteredParts).length > 0}
@@ -1671,6 +1721,85 @@
 {/if}
 
 <style>
+  /* One row: search first, then the narrowing controls, then team, then a
+     clear that only exists when there is something to clear. Wraps rather
+     than scrolls, so nothing hides off the edge on a laptop. */
+  .purchasing-toolbar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+    padding: var(--space-3);
+    border: 1px solid var(--border);
+    background: var(--surface-1);
+    margin-bottom: var(--space-3);
+  }
+
+  /* Search holds a fixed, modest width rather than absorbing the row's
+     slack - a search field only needs to fit the few words you are typing,
+     whereas the dropdowns have to show real vendor and project names, so
+     the spare width is worth more to them. */
+  .toolbar-search {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex: 0 1 340px;
+    min-width: 260px;
+    padding: 0 var(--space-3);
+    border: 1px solid var(--border);
+    background: var(--primary);
+    height: 36px;
+  }
+  .toolbar-search:focus-within { border-color: var(--brand-gold-strong); }
+  .toolbar-search :global(svg) { color: var(--text-muted); flex-shrink: 0; }
+  .toolbar-search input {
+    flex: 1;
+    min-width: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    font-size: 0.85rem;
+    padding: 0;
+  }
+  .toolbar-search input:focus { outline: none; }
+  .toolbar-search input::-webkit-search-cancel-button { display: none; }
+  .toolbar-search-clear {
+    border: 0; background: none; cursor: pointer;
+    color: var(--text-muted); font-size: 1.1rem; line-height: 1; padding: 0 2px;
+  }
+  .toolbar-search-clear:hover { color: var(--text); }
+
+  /* The dropdowns share whatever the row has left, so vendor and project
+     names get room to show in full instead of truncating. */
+  .toolbar-select {
+    flex: 1 1 170px;
+    width: auto;
+    min-width: 150px;
+    height: 36px;
+    font-size: 0.85rem;
+  }
+
+  .toolbar-team { display: flex; align-items: center; }
+
+  .toolbar-clear {
+    height: 36px;
+    padding: 0 var(--space-3);
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: 0.8rem;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .toolbar-clear:hover { border-color: var(--brand-gold-strong); color: var(--text); }
+
+  @media (max-width: 760px) {
+    .toolbar-search { flex-basis: 100%; }
+    .toolbar-select { flex: 1 1 45%; }
+  }
+
   /* Budgets rail + working list. The rail is fixed-width so the table gets
      every remaining pixel, and it sits where the centered layout used to
      leave dead space. */
@@ -2133,9 +2262,6 @@
     .header-content h1 { font-size: var(--font-xl); }
     .header-content p { font-size: var(--font-base); }
 
-    .filters { display: grid; grid-template-columns: 1fr; gap: 0.75rem; }
-    .filters .form-group { margin: 0; }
-    .team-filter-row { margin-top: 0.75rem; }
 
     .table-container {
       margin: 0;
@@ -2214,9 +2340,4 @@
     .table-container .table td.delivery .season-tag { justify-self: start; }
   }
 
-  .team-filter-row {
-    margin-top: 0.75rem;
-    padding-top: 0.75rem;
-    border-top: 1px solid var(--border);
-  }
 </style>
