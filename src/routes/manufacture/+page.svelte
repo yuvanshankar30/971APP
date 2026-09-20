@@ -3668,8 +3668,27 @@
      + var(--space-3) padding inward, which is what read as misaligned.
      Indenting the header by exactly that inset puts the two words on the
      same left edge. */
+  /* Workflow chip, scaled up with the rest of the table. The global .tag
+     is 28px at --font-xs, which looked undersized next to the enlarged
+     part name beside it. */
+  .table td.workflow-col .workflow-tag {
+    height: 34px;
+    padding: 0 var(--space-4);
+    font-size: 0.8rem;
+  }
+  /* Kept in step with the chip's own left inset above (1px border +
+     --space-4 padding) so the WORKFLOW label stays on the same left edge
+     as the word inside the chip. */
   .table th.workflow-col {
-    padding-left: calc(var(--space-3) + var(--space-3) + 1px);
+    padding-left: calc(var(--space-3) + var(--space-4) + 1px);
+  }
+
+  /* Due input, same treatment. PartDueDate is shared with other pages, so
+     this is scoped to this table rather than changed in the component. */
+  .table td.metadata-col :global(.due-input) {
+    height: 34px;
+    font-size: 0.85rem;
+    padding: 0 0.6rem;
   }
   /* The anchor column. Name carries the weight; everything folded in under
      it is one muted spec line. min-width:0 + hidden overflow on the line
