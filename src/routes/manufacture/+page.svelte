@@ -2501,6 +2501,14 @@
               <button class="btn btn-secondary btn-sm" on:click={() => installCadStepFile(part)} title="Download STEP file">
                 <Download size={14} /> Install CAD
               </button>
+              {#if part.workflow === 'lathe' && canViewPdf(part)}
+                <button class="btn btn-secondary btn-sm" on:click={() => openPdfViewer(part)} title="View drawing PDF">
+                  <FileText size={14} /> View PDF
+                </button>
+                <button class="btn btn-secondary btn-sm" on:click={() => installPdfFile(part)} title="Download drawing PDF">
+                  <Download size={14} /> Install PDF
+                </button>
+              {/if}
               {#if fusionJob && fusionJob.params?.fusionJobKind !== 'plate:arrange'}
                 <button class="btn btn-secondary btn-sm" on:click={() => openJobDetailsModal(fusionJob)} title="View Fusion CAM job details">
                   <ListChecks size={14} /> Job Details
@@ -2530,7 +2538,7 @@
 
           <!-- Lathe drawing PDF - independent of the STEP/CAD controls above,
                since a lathe part can have a PDF, a STEP, or both. -->
-          {#if part.workflow === 'lathe' && canViewPdf(part)}
+          {#if part.workflow === 'lathe' && canViewPdf(part) && !canViewCad(part)}
             <div class="cad-action-grid" on:click|stopPropagation on:keydown|stopPropagation role="presentation">
               <button class="btn btn-secondary btn-sm" on:click={() => openPdfViewer(part)} title="View drawing PDF">
                 <FileText size={14} /> View PDF
@@ -2560,7 +2568,7 @@
           {/if}
 
           {#if nextProcessStep(part) && !(part.workflow === 'lathe' && !canViewCad(part) && canViewPdf(part))}
-            <button class="btn btn-secondary btn-sm" on:click|stopPropagation={() => advancePartStatus(part, nextProcessStep(part).status)}>
+            <button class="btn btn-secondary btn-sm" class:part-card-process-action={part.workflow === 'lathe' && canViewCad(part) && canViewPdf(part)} on:click|stopPropagation={() => advancePartStatus(part, nextProcessStep(part).status)}>
               {#if nextProcessStep(part).icon === 'start'}<Clock size={14} />
               {:else if nextProcessStep(part).icon === 'cam'}<CircleCheck size={14} />
               {:else if nextProcessStep(part).icon === 'jprog'}<ListChecks size={14} />
@@ -2711,12 +2719,21 @@
                     <button class="btn btn-secondary btn-sm" on:click={() => installCadStepFile(part)} title="Download STEP file">
                       <Download size={13} /> Install CAD
                     </button>
+                    {#if part.workflow === 'lathe' && canViewPdf(part)}
+                      <button class="btn btn-secondary btn-sm" on:click={() => openPdfViewer(part)} title="View drawing PDF">
+                        <FileText size={13} /> View PDF
+                      </button>
+                      <button class="btn btn-secondary btn-sm" on:click={() => installPdfFile(part)} title="Download drawing PDF">
+                        <Download size={13} /> Install PDF
+                      </button>
+                    {/if}
                     {#if fusionJob && fusionJob.params?.fusionJobKind !== 'plate:arrange'}
                       <button class="btn btn-secondary btn-sm" on:click={() => openJobDetailsModal(fusionJob)} title="View Fusion CAM job details">
                         <ListChecks size={13} /> Job Details
                       </button>
                     {/if}
-                    <div class="process-status-action">
+                    {#if !(part.workflow === 'lathe' && canViewPdf(part))}
+                      <div class="process-status-action">
                       {#if nextProcessStep(part)}
                         <button class="btn btn-secondary btn-sm" on:click={() => advancePartStatus(part, nextProcessStep(part).status)} title={nextProcessStep(part).label}>
                           {#if nextProcessStep(part).icon === 'start'}<Clock size={13} />
@@ -2728,7 +2745,8 @@
                           {nextProcessStep(part).label}
                         </button>
                       {/if}
-                    </div>
+                      </div>
+                    {/if}
                   </div>
                   {#if fusionJob}
                     {#if ['queued', 'claimed', 'processing'].includes(fusionJob.status)}
@@ -2752,7 +2770,7 @@
                     </button>
                   </div>
                 {/if}
-                {#if part.workflow === 'lathe' && canViewPdf(part)}
+                {#if part.workflow === 'lathe' && canViewPdf(part) && !canViewCad(part)}
                   <div class="cad-action-grid" on:click|stopPropagation on:keydown|stopPropagation role="presentation">
                     <button class="btn btn-secondary btn-sm" on:click={() => openPdfViewer(part)} title="View drawing PDF">
                       <FileText size={13} /> View PDF
@@ -2781,8 +2799,8 @@
                   </div>
                 {/if}
               </div>
-              {#if !canViewCad(part) && !(part.workflow === 'lathe' && canViewPdf(part))}
-                <div class="cad-action-grid process-action-grid">
+              {#if (!canViewCad(part) && !(part.workflow === 'lathe' && canViewPdf(part))) || (part.workflow === 'lathe' && canViewCad(part) && canViewPdf(part))}
+                <div class="cad-action-grid process-action-grid" class:process-action-grid-full={part.workflow === 'lathe' && canViewCad(part) && canViewPdf(part)}>
                   <div class="process-status-action">
                     {#if nextProcessStep(part)}
                       <button class="btn btn-secondary btn-sm" on:click={() => advancePartStatus(part, nextProcessStep(part).status)} title={nextProcessStep(part).label}>
@@ -3637,6 +3655,9 @@
   .process-status-action .btn {
     width: 100%;
   }
+  .process-action-grid-full .process-status-action {
+    grid-column: 1 / -1;
+  }
   .table {
     /* 12px (--font-xs, the app-wide table default) is too small for a list
        read at arm's length off a shop monitor. */
@@ -4210,6 +4231,9 @@
     flex: 1 1 auto;
     min-width: 80px;
     justify-content: center;
+  }
+  .part-card-actions .part-card-process-action {
+    flex-basis: 100%;
   }
 
   .part-card-actions .cad-action-grid .btn {
