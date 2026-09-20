@@ -1072,7 +1072,7 @@
         <input
           type="search"
           bind:value={searchTerm}
-          placeholder="Search name, vendor, project, requester&hellip;"
+          placeholder="Search parts or vendors&hellip;"
           aria-label="Search purchasing items"
         />
         {#if searchTerm}
@@ -1743,8 +1743,8 @@
     display: flex;
     align-items: center;
     gap: var(--space-2);
-    flex: 0 1 340px;
-    min-width: 260px;
+    flex: 0 1 360px;
+    min-width: 290px;
     padding: 0 var(--space-3);
     border: 1px solid var(--border);
     background: var(--primary);
@@ -1773,9 +1773,9 @@
   /* The dropdowns share whatever the row has left, so vendor and project
      names get room to show in full instead of truncating. */
   .toolbar-select {
-    flex: 1 1 170px;
+    flex: 1 1 185px;
     width: auto;
-    min-width: 150px;
+    min-width: 170px;
     height: 36px;
     font-size: 0.85rem;
   }
