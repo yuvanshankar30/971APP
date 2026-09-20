@@ -8,7 +8,7 @@ import { getSupabase } from '$lib/server/971bot.js';
 import { selectPitScoutEntries } from '$lib/server/pitScoutingSchema.js';
 import { syncScoutingDataToSheet } from '$lib/server/google_sheets_sync.js';
 import { normalizeTeamKey } from '$lib/server/matchScoutingSchema.js';
-import { scoutingDatasetsToCsv } from '$lib/server/scoutingCsvExport.js';
+import { matchScoutingRowsToCsv, pacificDayRangeUtc, scoutingDatasetsToCsv } from '$lib/server/scoutingCsvExport.js';
 
 const ALL_FRC_TEAMS = new Set(Object.values(FRC_TEAMS).map(String));
 const PIT_SCOUT_PHOTO_BUCKET = 'pit-scout-photos';
@@ -54,6 +54,31 @@ async function buildScoutingCsvExport(db, eventKey) {
     SCOUTING_EXPORT_TABLES.map((definition) => exportRowsForTable(db, definition, eventKey))
   );
   return scoutingDatasetsToCsv(datasets);
+}
+
+// Just match_scout_entries (the actual "match scouting submissions"),
+// scoped to one calendar day rather than the whole event - the full
+// Export All CSV above already covers every table for an entire event;
+// this is for pulling one day's worth of match reports specifically,
+// e.g. to hand off at the end of a competition day.
+async function buildMatchScoutingCsvForDay(db, eventKey, dateStr) {
+  const { start, end } = pacificDayRangeUtc(dateStr);
+  const rows = [];
+  for (let offset = 0; ; offset += CSV_PAGE_SIZE) {
+    const { data, error } = await db
+      .from('match_scout_entries')
+      .select('*')
+      .eq('event_key', eventKey)
+      .gte('created_at', start)
+      .lt('created_at', end)
+      .order('created_at', { ascending: true })
+      .range(offset, offset + CSV_PAGE_SIZE - 1);
+    if (error) throw new Error(`Could not export match scouting data: ${error.message}`);
+    const page = data || [];
+    rows.push(...page);
+    if (page.length < CSV_PAGE_SIZE) break;
+  }
+  return matchScoutingRowsToCsv(rows);
 }
 
 function hasAnyPitData(row) {
@@ -1209,6 +1234,22 @@ export async function GET({ request, url }) {
     const settings = await getScoutingSettings(db);
     const eventKey = settings.event_key;
     const smartFuelEnabled = settings.smart_fuel_algorithm_enabled;
+
+    if (url?.searchParams.get('resource') === 'export-match-scouting-csv') {
+      const exportEventKey = String(url.searchParams.get('event_key') || eventKey || '').trim();
+      if (!exportEventKey) return json({ error: 'Set or select a scouting event before exporting.' }, { status: 400 });
+      const dateStr = String(url.searchParams.get('date') || '').trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return json({ error: 'Choose a date to export.' }, { status: 400 });
+      const csv = await buildMatchScoutingCsvForDay(db, exportEventKey, dateStr);
+      const safeEventKey = exportEventKey.replace(/[^a-z0-9_-]/gi, '_');
+      return new Response(csv, {
+        headers: {
+          'content-type': 'text/csv; charset=utf-8',
+          'content-disposition': `attachment; filename="match-scouting-${safeEventKey}-${dateStr}.csv"`,
+          'cache-control': 'no-store'
+        }
+      });
+    }
 
     if (url?.searchParams.get('resource') === 'export-csv') {
       const exportEventKey = String(url.searchParams.get('event_key') || eventKey || '').trim();
