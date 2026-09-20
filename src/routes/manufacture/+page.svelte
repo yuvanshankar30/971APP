@@ -3624,9 +3624,13 @@
 
   .table th.name-col,
   .table td.name-col {
-    /* The largest share - part names are the longest real content here and
-       were the first thing to run out of room. */
-    width: 17%;
+    /* The largest share - part names are the longest real content here,
+       and this column also carries the project/stock/requester/date line
+       folded in beneath them. The six columns now sum to exactly 100%:
+       they previously summed to 69%, leaving nearly a third of the table
+       unallocated for the browser to scatter between columns, which is
+       what opened the wide empty gaps between them. */
+    width: 32%;
     /* Part names wrap onto a second line rather than being cut off with
        an ellipsis - a truncated "P006950_Rev_x60 stiffn..." hides exactly
        the part of the name that distinguishes it from its neighbours.
@@ -3636,6 +3640,9 @@
     overflow-wrap: anywhere;
   }
   .table {
+    /* 12px (--font-xs, the app-wide table default) is too small for a list
+       read at arm's length off a shop monitor. */
+    font-size: var(--font-sm);
     table-layout: fixed;
     /* Fills the container and shares it out proportionally, rather than
        being sized to the sum of fixed column widths. Those fixed widths
@@ -3644,11 +3651,16 @@
        columns keep the same relative layout at every width and simply get
        tighter, which is far better than hiding controls off-screen. */
     width: 100%;
+    /* No max-width: the table uses the full bleed. The proportion problem
+       was never the overall width - it was the column percentages summing
+       to 69% and letting the browser scatter the remaining third into gaps.
+       With them summing to 100% the columns stay balanced at any width, so
+       capping the table would only give back empty margins. */
     margin: 0 auto;
   }
   .table th.workflow-col,
   .table td.workflow-col {
-    width: 7.5%;
+    width: 10%;
   }
   /* The WORKFLOW label sits over a chip, not over bare text. Both cells
      share the same padding, so the header text lines up with the chip's
@@ -3670,7 +3682,7 @@
     min-width: 0;
     margin-top: 2px;
     color: var(--text-muted);
-    font-size: 0.72rem;
+    font-size: 0.8rem;
     line-height: 1.35;
     white-space: nowrap;
     overflow: hidden;
@@ -3712,20 +3724,24 @@
      be the same arbitrary rainbow the workflow tags already lost. */
   .table th.route-col,
   .table td.route-col {
-    width: 15%;
+    width: 17%;
     text-align: center;
     vertical-align: middle;
   }
   .route-track {
     display: flex;
     align-items: center;
-    gap: 2px;
-    margin-top: 5px;
+    gap: 3px;
+    margin-top: 7px;
     justify-content: center;
   }
+  /* Segments were 10x3px - at that size the whole track read as a speck of
+     dust rather than a progress indicator you could count stops on. */
   .route-seg {
-    height: 3px;
-    width: 10px;
+    height: 6px;
+    flex: 1 1 auto;
+    max-width: 22px;
+    min-width: 8px;
     background: var(--border);
   }
   .route-seg.done { background: color-mix(in srgb, var(--text-muted) 70%, transparent); }
@@ -3733,15 +3749,17 @@
   .route-count {
     margin-left: 4px;
     font-family: var(--font-mono-stack);
-    font-size: 0.62rem;
-    color: var(--text-muted);
+    font-size: 0.72rem;
+    color: var(--text-secondary);
     font-variant-numeric: tabular-nums;
   }
 
   .table th.quantity-col,
   .table td.quantity-col {
-    width: 3%;
+    width: 5%;
     text-align: center;
+    font-size: 1.05rem;
+    font-weight: 600;
     /* Tabular figures so a column of quantities does not jitter in width
        from row to row. Kept centered rather than right-aligned (the usual
        rule for numbers) because every other column in this table is
@@ -3755,7 +3773,7 @@
      rendered), not just Status's own longest label. */
   .table th.metadata-col,
   .table td.metadata-col {
-    width: 11.5%;
+    width: 12%;
     /* Centred, like every other column in the row (app.css's .table td
        default). These four were the only cells pinned to the top, so on a
        tall row - one with the full CAD action grid - Status, Due and
@@ -3808,7 +3826,7 @@
     box-sizing: border-box;
     position: sticky;
     right: 0;
-    width: 15%;
+    width: 24%;
     box-shadow: -1px 0 0 var(--border);
   }
   .table thead th.actions-table-col {
@@ -3832,6 +3850,15 @@
     flex-wrap: wrap;
     align-items: center;
     gap: 0.3rem 0.4rem;
+  }
+  /* The anchor needs to actually out-weigh the muted spec line under it.
+     At the table's base size everything sat at the same visual weight,
+     which is most of why the row read as flat. */
+  .name-line strong {
+    font-size: 1.05rem;
+    font-weight: 650;
+    line-height: 1.25;
+    color: var(--text);
   }
 
   .notes-indicator {
