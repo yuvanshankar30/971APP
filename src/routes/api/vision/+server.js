@@ -3,9 +3,11 @@ import { createClient } from '@supabase/supabase-js';
 import { PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY } from '$env/static/public';
 import { env } from '$env/dynamic/private';
 import { getSupabase } from '$lib/server/971bot.js';
-import { fetchTbaMatchRoster } from '$lib/server/vision_reference.js';
+import { fetchTbaMatchRoster, fetchTbaMatchVideoSources } from '$lib/server/vision_reference.js';
 import { buildVisionReleasePreview, VALID_CLIMB_POS } from '$lib/server/visionRelease.js';
 import { evaluateVisionReadiness } from '$lib/visionReadiness.js';
+import { estimateFuelFromShots, summarizeVision, teamVisionAnalytics } from '$lib/visionAnalytics.js';
+import { modelApprovalStatus } from '$lib/server/visionModelApproval.js';
 
 function clientFor(request) {
   return createClient(PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY, {
@@ -105,10 +107,11 @@ export async function GET({ request, url }) {
     if (error) return json({ error: error.message }, { status: 403 });
     return json({ success: true, data });
   }
-  const [{ data: match, error }, { data: rawViews }, { data: runs }] = await Promise.all([
+  const [{ data: match, error }, { data: rawViews }, { data: runs }, { data: videoSources }] = await Promise.all([
     client.from('vision_matches').select('*').eq('id', id).single(),
     client.from('vision_views').select('*').eq('vision_match_id', id).order('created_at'),
-    client.from('vision_runs').select('*').eq('vision_match_id', id).order('created_at', { ascending: false })
+    client.from('vision_runs').select('*').eq('vision_match_id', id).order('created_at', { ascending: false }),
+    client.from('vision_video_sources').select('*').eq('vision_match_id', id).order('created_at')
   ]);
   if (error) return json({ error: error.message }, { status: 404 });
   const views = [];
@@ -117,20 +120,27 @@ export async function GET({ request, url }) {
     views.push({ ...view, signed_url: signed?.signedUrl || null });
   }
   const runId = url.searchParams.get('run_id') || runs?.[0]?.id;
-  let tracks = [], observations = [], discrepancies = [], qwenClips = [];
+  let tracks = [], observations = [], discrepancies = [], qwenClips = [], shotEstimates = {};
   if (runId) {
     const results = await Promise.all([
       client.from('vision_tracks').select('*').eq('vision_run_id', runId),
       client.from('vision_observations').select('*').eq('vision_run_id', runId).order('started_ms'),
       client.from('vision_discrepancies').select('*').eq('vision_run_id', runId).order('created_at'),
-      client.from('vision_qwen_clips').select('id,view_id,started_ms,ended_ms,model,revision,dtype,latency_ms,clip_quality,event_count,normalized_result,created_at').eq('vision_run_id', runId).order('started_ms')
+      client.from('vision_qwen_clips').select('id,view_id,started_ms,ended_ms,model,revision,dtype,latency_ms,clip_quality,event_count,normalized_result,created_at').eq('vision_run_id', runId).order('started_ms'),
+      client.from('vision_reference_snapshots').select('payload').eq('vision_run_id', runId).eq('source', 'tba').maybeSingle()
     ]);
     tracks = results[0].data || [];
     observations = results[1].data || [];
     discrepancies = results[2].data || [];
     qwenClips = results[3].data || [];
+    const reference = results[4].data?.payload;
+    if (reference) {
+      const primary = observations.filter((observation) => observation.source !== 'qwen3_vl');
+      shotEstimates = estimateFuelFromShots(summarizeVision(primary, tracks), reference);
+    }
   }
-  return json({ success: true, data: { match, views: views || [], runs: runs || [], tracks, observations, discrepancies, qwenClips } });
+  const teamAnalytics = teamVisionAnalytics(tracks, observations);
+  return json({ success: true, data: { match, views: views || [], videoSources: videoSources || [], runs: runs || [], tracks, observations, discrepancies, qwenClips, shotEstimates, teamAnalytics } });
 }
 
 export async function POST({ request }) {
@@ -163,6 +173,24 @@ export async function POST({ request }) {
     const { data, error } = await client.from('vision_matches').update({ team_roster: roster }).eq('id', body.id).select('*').single();
     if (error) return json({ error: error.message }, { status: 400 });
     return json({ success: true, data });
+  }
+
+  if (action === 'resolve-video-sources') {
+    if (!body.id) return json({ error: 'match id required' }, { status: 400 });
+    const { data: sourceMatch, error: sourceMatchError } = await client.from('vision_matches').select('match_key').eq('id', body.id).single();
+    if (sourceMatchError || !sourceMatch?.match_key) return json({ error: 'Vision match not found' }, { status: 404 });
+    const sources = await fetchTbaMatchVideoSources(sourceMatch.match_key, env.TBA_API_KEY || env.PUBLIC_TBA_API_KEY);
+    if (sources == null) return json({ error: 'The Blue Alliance video lookup failed' }, { status: 502 });
+    if (sources.length) {
+      const rows = sources.map((source) => ({
+        vision_match_id: body.id, provider: source.provider, external_id: source.external_id,
+        url: source.url, label: source.label, provenance: source.provenance,
+        review_only: true, calibrated: false, saved_by: actor.id
+      }));
+      const { error } = await client.from('vision_video_sources').upsert(rows, { onConflict: 'vision_match_id,url' });
+      if (error) return json({ error: error.message }, { status: 400 });
+    }
+    return json({ success: true, data: sources });
   }
 
   if (action === 'add-view') {
@@ -360,6 +388,39 @@ export async function POST({ request }) {
     return json({ success: true, data });
   }
 
+  if (['approve-model', 'revoke-model', 'set-event-model-policy'].includes(action)) {
+    const { data: actorProfile } = await client.from('user_profiles').select('role, permissions').eq('id', actor.id).single();
+    const canManage = actorProfile?.role === 'admin' || (actorProfile?.permissions || []).includes('VISION_RELEASE');
+    if (!canManage) return json({ error: 'VISION_RELEASE permission required' }, { status: 403 });
+    const db = getSupabase();
+    if (action === 'set-event-model-policy') {
+      if (!body.event_key) return json({ error: 'event_key required' }, { status: 400 });
+      const { data, error } = await db.from('vision_event_policies').upsert({
+        event_key: body.event_key, require_approved_model: Boolean(body.require_approved_model),
+        updated_by: actor.id, updated_at: new Date().toISOString()
+      }).select('*').single();
+      if (error) return json({ error: error.message }, { status: 400 });
+      return json({ success: true, data });
+    }
+    if (!body.model_name || !body.model_version) return json({ error: 'model_name and model_version required' }, { status: 400 });
+    if (action === 'approve-model') {
+      const expiresAt = body.expires_at ? new Date(body.expires_at) : null;
+      if (expiresAt && Number.isNaN(expiresAt.getTime())) return json({ error: 'expires_at must be a valid timestamp' }, { status: 400 });
+      const { data, error } = await db.from('vision_model_approvals').upsert({
+        model_name: body.model_name, model_version: body.model_version,
+        approved_by: actor.id, approved_at: new Date().toISOString(), expires_at: expiresAt?.toISOString() || null,
+        revoked_at: null, revoked_by: null, notes: body.notes || null
+      }, { onConflict: 'model_name,model_version' }).select('*').single();
+      if (error) return json({ error: error.message }, { status: 400 });
+      return json({ success: true, data });
+    }
+    const { data, error } = await db.from('vision_model_approvals').update({
+      revoked_at: new Date().toISOString(), revoked_by: actor.id
+    }).eq('model_name', body.model_name).eq('model_version', body.model_version).select('*').single();
+    if (error) return json({ error: error.message }, { status: 400 });
+    return json({ success: true, data });
+  }
+
   // Reviewed-result consumer: the one path that lets a project owner turn
   // advisory vision output into real scouting data. Every other action
   // above is available to any approved user; this one requires the
@@ -374,13 +435,26 @@ export async function POST({ request }) {
     const db = getSupabase(); // service role: writes to scout_data_events, a
     // table this actor's own RLS identity has no INSERT grant on (see
     // docs/guides/scoutingvision.md) - the permission check above is the real gate.
-    const { data: run, error: runError } = await db.from('vision_runs').select('*, vision_matches(match_key)').eq('id', body.run_id).single();
+    const { data: run, error: runError } = await db.from('vision_runs').select('*, vision_matches(match_key,event_key)').eq('id', body.run_id).single();
     if (runError) return json({ error: runError.message }, { status: 404 });
     if (run.status !== 'complete') return json({ error: 'Only a completed run can be released' }, { status: 400 });
     if (run.released_at) return json({ error: 'This run has already been released' }, { status: 409 });
 
     const matchKey = run.vision_matches?.match_key;
     if (!matchKey) return json({ error: 'Run has no associated match' }, { status: 400 });
+
+    const eventKey = run.vision_matches?.event_key;
+    const { data: policy } = eventKey
+      ? await db.from('vision_event_policies').select('require_approved_model').eq('event_key', eventKey).maybeSingle()
+      : { data: null };
+    if (policy?.require_approved_model) {
+      const { data: approval } = await db.from('vision_model_approvals').select('approved_at,expires_at,revoked_at')
+        .eq('model_name', run.model_name).eq('model_version', run.model_version).maybeSingle();
+      const approvalStatus = modelApprovalStatus(policy, approval);
+      if (!approvalStatus.allowed) {
+        return json({ error: `Event policy blocks release: ${run.model_name} ${run.model_version} is ${approvalStatus.reason.replace('_', ' ')}` }, { status: 409 });
+      }
+    }
 
     const [{ data: tracks }, { data: observations }, { data: runViews }] = await Promise.all([
       db.from('vision_tracks').select('*').eq('vision_run_id', run.id),

@@ -85,6 +85,16 @@
     finally { busy = false; }
   }
 
+  async function resolveVideoSources() {
+    busy = true;
+    error = '';
+    try {
+      await post({ action: 'resolve-video-sources', id: detail.match.id, match_key: detail.match.match_key });
+      await loadDetail(selectedId);
+    } catch (exception) { error = exception.message; }
+    finally { busy = false; }
+  }
+
   function calibrationSummary(view) {
     const parts = [];
     if (view.field_mask?.length) parts.push('mask');
@@ -516,6 +526,17 @@
     {:else}
       <section class="surface-card section">
         <h2>{detail.match.match_key} · Camera views</h2>
+        <div class="source-tools">
+          <button class="btn btn-sm" on:click={resolveVideoSources} disabled={busy}>Resolve videos from TBA</button>
+          <span class="text-muted">Broadcast sources are review-only and uncalibrated. Download and upload a private copy below before inference.</span>
+        </div>
+        {#if detail.videoSources?.length}
+          <div class="video-source-list">
+            {#each detail.videoSources as source}
+              <a href={source.url} target="_blank" rel="noreferrer">{source.label || source.provider}<small>saved from TBA · review-only · uncalibrated</small></a>
+            {/each}
+          </div>
+        {/if}
         <div class="view-list">
           {#each detail.views as view (view.id)}
             <div>
@@ -680,6 +701,36 @@
         </section>
       {/if}
 
+      {#if Object.keys(detail.teamAnalytics || {}).length}
+        <section class="surface-card section">
+          <h2>Calibrated trajectory analytics</h2>
+          <div class="table-wrap"><table><thead><tr><th>Team</th><th>Distance</th><th>Max speed</th><th>Defense proximity</th><th>Cycle time</th><th>First score</th></tr></thead><tbody>
+            {#each Object.entries(detail.teamAnalytics) as [teamKey, analytics]}
+              <tr><td>{teamKey.replace(/^frc/i, '')}</td><td>{analytics.distanceMeters.toFixed(1)} m</td><td>{analytics.maxSpeedMps?.toFixed(2) ?? '—'} m/s</td><td>{analytics.defenseProximitySeconds.toFixed(1)} s</td><td>{analytics.cycleTimeSeconds?.toFixed(1) ?? '—'} s</td><td>{analytics.timeToFirstScoreSeconds?.toFixed(1) ?? '—'} s</td></tr>
+            {/each}
+          </tbody></table></div>
+          <small>Only calibrated tracks are included. Missing observations stay blank; they are not coerced to zero.</small>
+        </section>
+      {/if}
+
+      {#if Object.keys(detail.shotEstimates || {}).length}
+        <section class="surface-card section">
+          <h2>Fuel attribution cross-check</h2>
+          <p class="text-muted">The shot-share estimate splits TBA's official alliance total by each robot's observed share of outgoing shots. It is a review-only second opinion and is never released automatically.</p>
+          <div class="table-wrap"><table><thead><tr><th>Team</th><th>Observed shots</th><th>Shot share</th><th>Direct goal entries</th><th>Shot-share estimate</th></tr></thead><tbody>
+            {#each Object.entries(detail.shotEstimates) as [teamKey, estimate]}
+              <tr>
+                <td data-label="Team">{teamKey.replace(/^frc/i, '')}</td>
+                <td data-label="Observed shots">{estimate.shotCount}</td>
+                <td data-label="Shot share">{(estimate.shotShare * 100).toFixed(1)}%</td>
+                <td data-label="Direct goal entries">{estimate.directScored}</td>
+                <td data-label="Shot-share estimate">{estimate.estimatedScored.toFixed(1)}</td>
+              </tr>
+            {/each}
+          </tbody></table></div>
+        </section>
+      {/if}
+
       {#if detail.observations.length}
         <section class="surface-card section">
           <h2>Detected actions ({visibleObservations.length} of {detail.observations.length})</h2>
@@ -788,7 +839,7 @@
       {/if}
 
       {#if detail.qwenClips?.length}
-        <section class="surface-card section"><h2>Qwen clip audit</h2><div class="qwen-clip-list">{#each detail.qwenClips as clip}<div><b>{(clip.started_ms / 1000).toFixed(1)}–{(clip.ended_ms / 1000).toFixed(1)}s</b><span>{clip.clip_quality || 'unknown quality'} · {clip.event_count} proposals · {clip.latency_ms ?? '—'} ms</span><small>{clip.model}@{clip.revision?.slice(0, 8)} · {clip.dtype}</small>{#if clip.normalized_result?.error}<p class="clip-error">Clip skipped: {clip.normalized_result.error}</p>{:else if clip.normalized_result?.review_notes}<p>{clip.normalized_result.review_notes}</p>{/if}</div>{/each}</div></section>
+        <section class="surface-card section"><h2>Qwen clip audit</h2><div class="qwen-clip-list">{#each detail.qwenClips as clip}<div><b>{(clip.started_ms / 1000).toFixed(1)}–{(clip.ended_ms / 1000).toFixed(1)}s</b><span>{clip.clip_quality || (clip.normalized_result?.selection?.selected === false ? 'not analyzed' : 'unknown quality')} · {clip.event_count} proposals · {clip.latency_ms ?? '—'} ms</span><small>{clip.model}@{clip.revision?.slice(0, 8)} · {clip.dtype}</small>{#if clip.normalized_result?.error}<p class="clip-error">Clip failed: {clip.normalized_result.error}</p>{:else if clip.normalized_result?.selection}<p>Selection: {clip.normalized_result.selection.reason.replaceAll('_', ' ')} · {clip.normalized_result.selection.nearby_samples || 0} nearby track samples</p>{:else if clip.normalized_result?.review_notes}<p>{clip.normalized_result.review_notes}</p>{/if}</div>{/each}</div></section>
       {/if}
 
       <section class="surface-card section">
@@ -816,6 +867,9 @@
   .match-list span,.view-list span { display:grid; }
   small { color:var(--text-muted); }
   .view-list > div { display:grid; grid-template-columns:auto minmax(0,1fr) minmax(14rem,18rem); align-items:center; gap:var(--gap-2); padding:var(--space-2); border-bottom:1px solid var(--border); }
+  .source-tools { display:flex; align-items:center; gap:var(--gap-2); margin-bottom:var(--space-2); }
+  .video-source-list { display:flex; flex-wrap:wrap; gap:var(--gap-2); margin-bottom:var(--space-3); }
+  .video-source-list a { display:grid; padding:var(--space-2); border:1px solid var(--border); border-radius:var(--radius-sm); }
   .view-list video { width:100%; max-height:10rem; background:#000; }
   .upload-grid,.run-controls { display:grid; grid-template-columns:repeat(auto-fit,minmax(13rem,1fr)); gap:var(--gap-4); margin-top:var(--space-4); }
   .upload-grid label,.run-controls label { display:grid; gap:var(--space-1); font-size:.8rem; color:var(--text-muted); }

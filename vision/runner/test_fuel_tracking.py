@@ -3,7 +3,7 @@ import ast
 from pathlib import Path
 import unittest
 
-from fuel_tracking import PieceTracker, goal_entry, nearest_pixel_track
+from fuel_tracking import PieceTracker, goal_entry, nearest_pixel_track, shot_candidate
 
 
 class FuelTrackingTest(unittest.TestCase):
@@ -51,6 +51,23 @@ class FuelTrackingTest(unittest.TestCase):
         self.assertIs(nearest_pixel_track((10, 10), [robot], 0)[0], robot)
         self.assertIsNone(nearest_pixel_track((500, 400), [robot], 0)[0])
         self.assertIsNone(nearest_pixel_track((10, 10), [robot], 501)[0])
+
+    def test_shot_candidate_requires_a_fast_departure_from_a_robot(self):
+        robot = {'track_key': 'r1', 'trajectory': [
+            {'t': 0, 'x': 100, 'y': 100, 'pixel_x': 100, 'pixel_y': 100, 'calibrated': True},
+            {'t': 500, 'x': 105, 'y': 100, 'pixel_x': 105, 'pixel_y': 100, 'calibrated': True},
+        ]}
+        result = shot_candidate([(0, 105, 100), (250, 145, 100), (500, 205, 100)], [robot])
+        self.assertIs(result[0], robot)
+        self.assertGreater(result[1]['initial_speed_px_s'], 90)
+
+    def test_shot_candidate_rejects_stationary_and_inbound_balls(self):
+        robot = {'trajectory': [
+            {'t': 0, 'x': 100, 'y': 100, 'pixel_x': 100, 'pixel_y': 100, 'calibrated': True},
+            {'t': 500, 'x': 100, 'y': 100, 'pixel_x': 100, 'pixel_y': 100, 'calibrated': True},
+        ]}
+        self.assertIsNone(shot_candidate([(0, 105, 100), (250, 108, 100), (500, 110, 100)], [robot]))
+        self.assertIsNone(shot_candidate([(0, 180, 100), (250, 140, 100), (500, 105, 100)], [robot]))
 
     def test_goal_entry_rejects_stationary_and_already_inside_blobs(self):
         inside = lambda p: p[0] >= 10

@@ -1,5 +1,12 @@
 # Vision model training
 
+`private_review_app.py` serves the deterministic 30-frame audit sample on
+loopback only. Reviewers judge every proposed robot box independently, record
+missed robots, and can exclude an unobservable frame. The app writes a
+mode-0600 `independent-review.json` and exposes live precision, recall,
+alliance-confusion, geometry-disagreement, and completion metrics at
+`/api/metrics`.
+
 > **New to this? Read [`TRAINING.md`](TRAINING.md) first.** It is the
 > end-to-end walkthrough — how much footage to collect, what the labeling rules
 > are, why splits must be by match, and what has to be true before a model's

@@ -1,5 +1,18 @@
 # Vision acceptance evaluation
 
+`evaluate_tracking.py` provides the private held-out current-vs-candidate
+detector/tracker comparison:
+
+```bash
+python evaluate_tracking.py --manifest heldout.json --current current.json \
+  --candidate candidate.json --output-dir reports/tracking
+```
+
+It writes JSON and HTML covering detector recall, duplicate detections, track
+fragmentation, ID switches, alliance-color correctness and unknowns, plus
+recall slices for challenge tags such as occlusion, blur, crowding, replay
+overlays, and lighting changes. Private footage stays outside the repository.
+
 `evaluate_qwen.py` compares a reviewed Qwen export with human ground truth.
 It clusters the same event across camera views before scoring, then reports
 per-event precision/recall, hallucination rate, timestamp MAE, box IoU, fuel
