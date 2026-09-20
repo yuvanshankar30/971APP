@@ -356,31 +356,6 @@
     return (file?.name || '').replace(/\.[^.]+$/, '').trim();
   }
 
-  // Row density, remembered per device - the shop tablet and someone's
-  // laptop want different answers, and re-picking it on every visit would
-  // make the control not worth having.
-  const ROW_DENSITY_STORAGE_KEY = 'manufacture:compact-rows';
-  let compactRows = false;
-
-  function setCompactRows(next) {
-    compactRows = next;
-    if (!browser) return;
-    try {
-      localStorage.setItem(ROW_DENSITY_STORAGE_KEY, next ? '1' : '0');
-    } catch {
-      // Private windows and blocked site data both throw here; the choice
-      // just does not persist, which is not worth surfacing an error for.
-    }
-  }
-
-  if (browser) {
-    try {
-      compactRows = localStorage.getItem(ROW_DENSITY_STORAGE_KEY) === '1';
-    } catch {
-      compactRows = false;
-    }
-  }
-
   function getStoredLastSubsystemId() {
     if (!browser) return '';
     try {
@@ -2113,27 +2088,7 @@
 
   // Reactive statement that filters parts when search term, filters, or parts array changes
   // ToDo tab: hide completed parts
-  // Where a part sits in the shop, grouped into the stages people actually
-  // talk about at a standup - "what's queued", "what's on a machine",
-  // "what's waiting on CAM". The raw status list is ten values deep, which
-  // is the right granularity for a dropdown and the wrong one for a summary.
-  const SHOP_STAGES = [
-    { key: 'queued', label: 'Queued', statuses: ['pending'] },
-    { key: 'cam', label: 'CAM', statuses: ['cam_review', 'cammed', 'autocammed', 'postprocessed', 'jprogged'] },
-    { key: 'making', label: 'On a machine', statuses: ['in-progress', 'drawing', 'print-started', 'machining', 'ready'] },
-    { key: 'check', label: 'Inspection', statuses: ['machined', 'inspection', 'inspected'] },
-    { key: 'done', label: 'Done', statuses: ['complete', 'kitted'] }
-  ];
-  const stageForStatus = (status) => SHOP_STAGES.find((stage) => stage.statuses.includes((status || 'pending').toString().toLowerCase()))?.key || '';
-
-  let filterStage = '';
-  function toggleStageFilter(stageKey) {
-    filterStage = filterStage === stageKey ? '' : stageKey;
-  }
-
   $: filteredParts = parts.filter(part => {
-    const matchesStage = !filterStage || stageForStatus(part.status) === filterStage;
-    if (!matchesStage) return false;
     const matchesSearch = !searchTerm ||
       part.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       part.requester.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -2152,24 +2107,6 @@
 
     return matchesSearch && matchesWorkflow && matchesStatus && matchesProject && notCompleted && matchesTeam && matchesSeason;
   });
-
-  // Counted against everything EXCEPT the stage filter itself, so picking a
-  // stage narrows the list without collapsing the other stages to zero.
-  $: stageSourceParts = parts.filter((part) => {
-    const matchesSearch = !searchTerm ||
-      part.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      part.requester.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      part.project_id.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesWorkflow = !filterWorkflow || part.workflow === filterWorkflow;
-    const matchesProject = !filterProject || part.project_id === filterProject;
-    return matchesSearch && matchesWorkflow && matchesProject && !isPartFullyCompleted(part)
-      && passesTeamFilter(part.frc_team, show971, show9584)
-      && passesSeasonFilter(part.created_at, filterSeason);
-  });
-  $: shopStages = SHOP_STAGES.map((stage) => ({
-    ...stage,
-    count: stageSourceParts.filter((part) => stageForStatus(part.status) === stage.key).length
-  }));
 
   $: filteredPartKeys = filteredParts.map(getPartKey);
   $: selectedFilteredCount = filteredPartKeys.filter((key) => selectedPartIds.includes(key)).length;
@@ -2362,38 +2299,6 @@
     <p>No parts found. {parts.length === 0 ? 'Create your first part!' : 'Try adjusting your filters.'}</p>
   </div>
 {:else}
-  <!-- Where the shop's work actually is, full width above the list. Each
-       stage filters, and the count/density controls ride on the right so
-       the strip is one band rather than two stacked toolbars. -->
-  <div class="shop-bar">
-    <div class="shop-stages" role="group" aria-label="Filter by shop stage">
-      {#each shopStages as stage (stage.key)}
-        <button
-          type="button"
-          class="shop-stage"
-          class:active={filterStage === stage.key}
-          class:empty={stage.count === 0}
-          aria-pressed={filterStage === stage.key}
-          on:click={() => toggleStageFilter(stage.key)}
-        >
-          <span class="shop-stage-count">{stage.count}</span>
-          <span class="shop-stage-label">{stage.label}</span>
-        </button>
-      {/each}
-    </div>
-    <div class="shop-bar-right">
-      <span class="list-count">
-        <strong>{filteredParts.length}</strong>
-        {filteredParts.length === 1 ? 'part' : 'parts'}
-        {#if filterStage}<button type="button" class="list-clear" on:click={() => (filterStage = '')}>clear stage</button>{/if}
-      </span>
-      <div class="density-toggle" role="group" aria-label="Row density">
-        <button type="button" class:active={!compactRows} aria-pressed={!compactRows} on:click={() => setCompactRows(false)}>Comfortable</button>
-        <button type="button" class:active={compactRows} aria-pressed={compactRows} on:click={() => setCompactRows(true)}>Compact</button>
-      </div>
-    </div>
-  </div>
-
   <div class="content-layout">
     {#if assignMode}
       <aside class="assign-sidebar">
@@ -2661,7 +2566,7 @@
 
   <!-- Desktop Table View -->
   <div class="table-container desktop-table" class:assign-mode={assignMode}>
-    <table class="table" class:density-compact={compactRows}>
+    <table class="table">
       <thead>
         <tr>
           {#if batchSelectMode}
@@ -3804,91 +3709,6 @@
     font-size: 0.62rem;
     color: var(--text-muted);
     font-variant-numeric: tabular-nums;
-  }
-
-  /* One full-width band between the filter card and the list: stage counts
-     on the left, result count and density on the right. Must sit OUTSIDE
-     .content-layout - that is a flex row, so anything dropped inside it
-     becomes another column and collapses into a narrow strip. */
-  .shop-bar {
-    display: flex;
-    align-items: stretch;
-    justify-content: space-between;
-    gap: var(--space-4);
-    flex-wrap: wrap;
-    margin-bottom: var(--space-3);
-    border: 1px solid var(--border);
-    background: var(--surface-1);
-  }
-  .shop-stages { display: flex; flex: 1; min-width: 0; }
-  .shop-stage {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    justify-content: center;
-    gap: 1px;
-    min-width: 0;
-    padding: var(--space-2) var(--space-4);
-    border: 0;
-    border-right: 1px solid var(--border);
-    background: none;
-    color: inherit;
-    font: inherit;
-    cursor: pointer;
-    transition: background-color 0.12s ease;
-  }
-  .shop-stage:hover { background: var(--surface-2); }
-  .shop-stage:focus-visible { outline: 2px solid var(--brand-gold-strong); outline-offset: -2px; }
-  .shop-stage.active { background: var(--brand-gold-soft); box-shadow: inset 0 -2px 0 var(--brand-gold-strong); }
-  .shop-stage.empty { color: var(--text-muted); }
-  .shop-stage-count { font-size: 1.15rem; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
-  .shop-stage-label {
-    font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.05em;
-    color: var(--text-muted); white-space: nowrap;
-  }
-  .shop-stage.active .shop-stage-label { color: var(--brand-gold-strong); }
-
-  .shop-bar-right {
-    display: flex; align-items: center; gap: var(--space-3);
-    padding: var(--space-2) var(--space-4);
-    flex-wrap: wrap;
-  }
-  .list-clear {
-    border: 0; background: none; padding: 0 0 0 var(--space-2);
-    color: var(--brand-gold-strong); font: inherit; font-size: 0.75rem;
-    text-decoration: underline; cursor: pointer;
-  }
-
-  @media (max-width: 900px) {
-    .shop-stages { flex-wrap: wrap; }
-    .shop-stage { flex: 1 1 33%; border-bottom: 1px solid var(--border); }
-    .shop-bar-right { width: 100%; justify-content: space-between; }
-  }
-  .list-count { font-size: 0.82rem; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
-  .list-count strong { font-size: 1rem; color: var(--text); }
-  .list-count-total { color: var(--text-muted); margin-left: 2px; }
-
-  .density-toggle { display: inline-flex; border: 1px solid var(--border); }
-  .density-toggle button {
-    border: 0;
-    border-left: 1px solid var(--border);
-    background: none;
-    color: var(--text-secondary);
-    font: inherit;
-    font-size: 0.74rem;
-    padding: var(--space-1) var(--space-3);
-    min-height: 30px;
-    cursor: pointer;
-  }
-  .density-toggle button:first-child { border-left: 0; }
-  .density-toggle button:hover { background: var(--surface-2); color: var(--text); }
-  .density-toggle button.active { background: var(--brand-gold-soft); color: var(--brand-gold-strong); font-weight: 600; }
-  .density-toggle button:focus-visible { outline: 2px solid var(--brand-gold-strong); outline-offset: -2px; }
-
-  /* The density control drives the desktop table only - the mobile view is
-     cards, which have their own spacing. */
-  @media (max-width: 768px) {
-    .density-toggle { display: none; }
   }
 
   .table th.quantity-col,
