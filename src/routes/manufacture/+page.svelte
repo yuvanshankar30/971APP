@@ -3688,7 +3688,18 @@
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
-  .name-team-dot { opacity: 0.5; margin-right: 4px; }
+  /* The separator is a full-size middot rather than a shrunken one - at the
+     surrounding text size it reads as a speck. Sized up and nudged onto the
+     text baseline so it sits between the two words rather than low against
+     the descenders. */
+  .name-team-dot {
+    display: inline-block;
+    font-size: 1.25rem;
+    line-height: 0;
+    vertical-align: middle;
+    opacity: 0.55;
+    margin-right: 5px;
+  }
   .name-meta-requester { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
   /* Route: the status word, then a segmented track of this workflow's
