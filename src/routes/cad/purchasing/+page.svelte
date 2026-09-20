@@ -980,16 +980,41 @@
         </div>
     </div>
 
-    <!-- Budget pins live behind this button. The pinned-budget cards and
-         the stage pipeline that sat here were both removed by request; the
-         control moves to the left, where the row was otherwise empty. -->
-    {#if !loading && user}
-      <div class="budget-pins-row">
-        <button class="btn btn-sm btn-text" on:click={() => showPinModal = true}>
-          <Settings size={14} /> Manage Budget Pins
-        </button>
-      </div>
-    {/if}
+    <!-- Two columns: budgets live in their own rail on the left (the space
+         the centered layout used to waste), the working list on the right.
+         Pinning a budget now has somewhere to show up. -->
+    <div class="purchasing-layout">
+      <aside class="budget-rail">
+        <div class="budget-rail-head">
+          <h3>Budgets</h3>
+          <button class="btn btn-sm btn-text" on:click={() => showPinModal = true}>
+            <Settings size={14} /> Manage
+          </button>
+        </div>
+
+        {#if pinnedBudgets.length > 0}
+          {#each pinnedBudgets as budget (budget.id)}
+            {@const over = budget.spent > budget.amount}
+            <div class="budget-card" class:over>
+              <div class="budget-card-head">
+                <span class="budget-name" title={budget.name}>{budget.name}</span>
+                <span class="badge scope-{budget.scope_type} small">{budget.scope_type === 'project' ? 'Proj' : budget.scope_type}</span>
+              </div>
+              <div class="progress-bar">
+                <div class="progress-fill" class:over style="width: {Math.min((budget.spent / budget.amount) * 100, 100)}%"></div>
+              </div>
+              <div class="budget-stats">
+                <span class:text-danger={over}>${budget.spent.toLocaleString()}</span>
+                <span class="text-muted">/ ${Number(budget.amount).toLocaleString()}</span>
+              </div>
+            </div>
+          {/each}
+        {:else if !loading}
+          <p class="budget-rail-empty">No budgets pinned. Use <strong>Manage</strong> to pin the ones you want to watch while ordering.</p>
+        {/if}
+      </aside>
+
+      <div class="purchasing-main">
 
     {#if orderMode}
       <div class="order-mode-banner">
@@ -1315,6 +1340,8 @@
   <p>Add COTS items via your BOM flow or purchasing tools.</p>
       </div>
     {/if}
+      </div>
+    </div>
   </div>
 
   <!-- Kitting modal removed; inline input used instead -->
@@ -1643,25 +1670,64 @@
   </div>
 {/if}
 
-<style>.budgets-section {
-    margin: 0 0 2rem 0;
-    padding: 0;
+<style>
+  /* Budgets rail + working list. The rail is fixed-width so the table gets
+     every remaining pixel, and it sits where the centered layout used to
+     leave dead space. */
+  .purchasing-layout {
+    display: grid;
+    grid-template-columns: 240px minmax(0, 1fr);
+    gap: var(--space-5);
+    align-items: start;
   }
-  .budget-name {
-    font-weight: 600;
-    font-size: 0.875rem;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    flex: 1;
-    min-width: 0;
-  }
-  /* Left-aligned: this button used to be pushed to the far right with the
-     whole row empty beside it. */
-  .budget-pins-row {
+  .purchasing-main { min-width: 0; }
+
+  .budget-rail {
+    position: sticky;
+    top: var(--space-4);
     display: flex;
-    justify-content: flex-start;
-    margin-bottom: var(--space-4);
+    flex-direction: column;
+    gap: var(--space-3);
+    border: 1px solid var(--border);
+    background: var(--surface-1);
+    padding: var(--space-4);
+  }
+  .budget-rail-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+  .budget-rail-head h3 { margin: 0; font-size: 0.95rem; }
+  .budget-rail-empty { margin: 0; font-size: 0.78rem; color: var(--text-muted); line-height: 1.5; }
+
+  .budget-card {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: var(--space-3);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--border);
+    background: var(--surface-2);
+  }
+  /* Only a budget that is actually over its number takes colour. */
+  .budget-card.over { border-left-color: var(--red-base); }
+  .budget-card-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+  .budget-name {
+    font-weight: 600; font-size: 0.82rem;
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .budget-stats {
+    display: flex; gap: 4px; align-items: baseline;
+    font-family: var(--font-mono-stack); font-size: 0.75rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .progress-bar { height: 5px; background: var(--surface-3); overflow: hidden; }
+  .progress-fill { height: 100%; background: var(--brand-gold-strong); }
+  .progress-fill.over { background: var(--red-base); }
+  .text-danger { color: var(--red-base); font-weight: 700; }
+
+  /* Below the breakout width the rail stops being a rail: budgets go back
+     above the list rather than squeezing the table into a narrow column. */
+  @media (max-width: 1200px) {
+    .purchasing-layout { grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
+    .budget-rail { position: static; }
   }
 
   .badge {
