@@ -43,6 +43,12 @@ browser confirmation or prompt popups.
   connection state - a saved layout from while CAD was briefly hidden still
   resolves correctly (see `promoteChildrenOfDisabledFolders` in
   `src/lib/defaultTabs.js`).
+- **Competition analytics**: the EPA page uses The Blue Alliance match data
+  to rank teams, project alliance outcomes, and show a live walk-forward
+  accuracy record for the selected event. Winner-call accuracy, Brier score,
+  log loss, and uncertainty update as official results arrive; each evaluated
+  match is predicted only from earlier results, so the record does not use
+  hindsight from the match being scored.
 - **AutoCAM**: automatic STEP → G-code generation for lathe turning, router
   routering, and indexed tube-stock drilling jobs run on the router with the
   operator flipping the tube between faces by hand - either manually queued
