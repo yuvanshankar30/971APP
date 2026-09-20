@@ -15,7 +15,7 @@
   import { searchFolderTree } from '$lib/fusionFolderSearch.js';
   import ROUTER_FLOW from '$lib/router_flow.json';
   import { convertGcodeToInches } from '$autocam/fusion/gcodeUnitConvert.js';
-  import { getDisplayStatus, BUTTONS, getBadgeClass, getWorkflowStatuses } from '$lib/statuses.js';
+  import { getDisplayStatus, BUTTONS, getBadgeClass, getWorkflowStatuses, WORKFLOW_STATUSES, ALL_STATUSES } from '$lib/statuses.js';
   import { summarizeRouterStages, isFullyKitted, buildRouterProgressUpdate, canAdvanceRouterToCamReview } from '$lib/router_progress.js';
   import { isManufacturingLead, canCamReview as camReviewAllowed, canDeleteParts } from '$lib/permissions.js';
   import CadViewer from '$lib/components/CadViewer.svelte';
@@ -161,6 +161,23 @@
   function isPartFullyCompleted(part) {
     if (part?.workflow === 'router') return isFullyKitted(part);
     return part?.status === 'complete';
+  }
+
+  // A part's route through the shop. Every workflow is a sequence of
+  // stages, and the single most useful thing the list can say is WHERE
+  // along that sequence a part currently sits - a laser-cut part has three
+  // stops, a router part has eight, and "Pending" means something quite
+  // different in each. WORKFLOW_STATUSES holds the real per-process route;
+  // ALL_STATUSES is the fallback for a workflow with no route of its own.
+  function partRoute(part) {
+    const stages = WORKFLOW_STATUSES[part?.workflow] || ALL_STATUSES;
+    const status = (part?.status || 'pending').toString().toLowerCase();
+    let index = stages.findIndex((stage) => stage.value === status);
+    // Terminal status is spelled several ways across older rows.
+    if (index === -1 && (status === 'complete' || status === 'kitted' || status === 'done')) {
+      index = stages.length - 1;
+    }
+    return { stages, index };
   }
 
   function getQuantitySummary(part) {
@@ -337,6 +354,31 @@
 
   function derivePartNameFromFile(file) {
     return (file?.name || '').replace(/\.[^.]+$/, '').trim();
+  }
+
+  // Row density, remembered per device - the shop tablet and someone's
+  // laptop want different answers, and re-picking it on every visit would
+  // make the control not worth having.
+  const ROW_DENSITY_STORAGE_KEY = 'manufacture:compact-rows';
+  let compactRows = false;
+
+  function setCompactRows(next) {
+    compactRows = next;
+    if (!browser) return;
+    try {
+      localStorage.setItem(ROW_DENSITY_STORAGE_KEY, next ? '1' : '0');
+    } catch {
+      // Private windows and blocked site data both throw here; the choice
+      // just does not persist, which is not worth surfacing an error for.
+    }
+  }
+
+  if (browser) {
+    try {
+      compactRows = localStorage.getItem(ROW_DENSITY_STORAGE_KEY) === '1';
+    } catch {
+      compactRows = false;
+    }
   }
 
   function getStoredLastSubsystemId() {
@@ -2071,8 +2113,28 @@
 
   // Reactive statement that filters parts when search term, filters, or parts array changes
   // ToDo tab: hide completed parts
+  // Where a part sits in the shop, grouped into the stages people actually
+  // talk about at a standup - "what's queued", "what's on a machine",
+  // "what's waiting on CAM". The raw status list is ten values deep, which
+  // is the right granularity for a dropdown and the wrong one for a summary.
+  const SHOP_STAGES = [
+    { key: 'queued', label: 'Queued', statuses: ['pending'] },
+    { key: 'cam', label: 'CAM', statuses: ['cam_review', 'cammed', 'autocammed', 'postprocessed', 'jprogged'] },
+    { key: 'making', label: 'On a machine', statuses: ['in-progress', 'drawing', 'print-started', 'machining', 'ready'] },
+    { key: 'check', label: 'Inspection', statuses: ['machined', 'inspection', 'inspected'] },
+    { key: 'done', label: 'Done', statuses: ['complete', 'kitted'] }
+  ];
+  const stageForStatus = (status) => SHOP_STAGES.find((stage) => stage.statuses.includes((status || 'pending').toString().toLowerCase()))?.key || '';
+
+  let filterStage = '';
+  function toggleStageFilter(stageKey) {
+    filterStage = filterStage === stageKey ? '' : stageKey;
+  }
+
   $: filteredParts = parts.filter(part => {
-    const matchesSearch = !searchTerm || 
+    const matchesStage = !filterStage || stageForStatus(part.status) === filterStage;
+    if (!matchesStage) return false;
+    const matchesSearch = !searchTerm ||
       part.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       part.requester.toLowerCase().includes(searchTerm.toLowerCase()) ||
       part.project_id.toLowerCase().includes(searchTerm.toLowerCase());
@@ -2090,6 +2152,24 @@
 
     return matchesSearch && matchesWorkflow && matchesStatus && matchesProject && notCompleted && matchesTeam && matchesSeason;
   });
+
+  // Counted against everything EXCEPT the stage filter itself, so picking a
+  // stage narrows the list without collapsing the other stages to zero.
+  $: stageSourceParts = parts.filter((part) => {
+    const matchesSearch = !searchTerm ||
+      part.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      part.requester.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      part.project_id.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesWorkflow = !filterWorkflow || part.workflow === filterWorkflow;
+    const matchesProject = !filterProject || part.project_id === filterProject;
+    return matchesSearch && matchesWorkflow && matchesProject && !isPartFullyCompleted(part)
+      && passesTeamFilter(part.frc_team, show971, show9584)
+      && passesSeasonFilter(part.created_at, filterSeason);
+  });
+  $: shopStages = SHOP_STAGES.map((stage) => ({
+    ...stage,
+    count: stageSourceParts.filter((part) => stageForStatus(part.status) === stage.key).length
+  }));
 
   $: filteredPartKeys = filteredParts.map(getPartKey);
   $: selectedFilteredCount = filteredPartKeys.filter((key) => selectedPartIds.includes(key)).length;
@@ -2282,6 +2362,38 @@
     <p>No parts found. {parts.length === 0 ? 'Create your first part!' : 'Try adjusting your filters.'}</p>
   </div>
 {:else}
+  <!-- Where the shop's work actually is, full width above the list. Each
+       stage filters, and the count/density controls ride on the right so
+       the strip is one band rather than two stacked toolbars. -->
+  <div class="shop-bar">
+    <div class="shop-stages" role="group" aria-label="Filter by shop stage">
+      {#each shopStages as stage (stage.key)}
+        <button
+          type="button"
+          class="shop-stage"
+          class:active={filterStage === stage.key}
+          class:empty={stage.count === 0}
+          aria-pressed={filterStage === stage.key}
+          on:click={() => toggleStageFilter(stage.key)}
+        >
+          <span class="shop-stage-count">{stage.count}</span>
+          <span class="shop-stage-label">{stage.label}</span>
+        </button>
+      {/each}
+    </div>
+    <div class="shop-bar-right">
+      <span class="list-count">
+        <strong>{filteredParts.length}</strong>
+        {filteredParts.length === 1 ? 'part' : 'parts'}
+        {#if filterStage}<button type="button" class="list-clear" on:click={() => (filterStage = '')}>clear stage</button>{/if}
+      </span>
+      <div class="density-toggle" role="group" aria-label="Row density">
+        <button type="button" class:active={!compactRows} aria-pressed={!compactRows} on:click={() => setCompactRows(false)}>Comfortable</button>
+        <button type="button" class:active={compactRows} aria-pressed={compactRows} on:click={() => setCompactRows(true)}>Compact</button>
+      </div>
+    </div>
+  </div>
+
   <div class="content-layout">
     {#if assignMode}
       <aside class="assign-sidebar">
@@ -2549,7 +2661,7 @@
 
   <!-- Desktop Table View -->
   <div class="table-container desktop-table" class:assign-mode={assignMode}>
-    <table class="table">
+    <table class="table" class:density-compact={compactRows}>
       <thead>
         <tr>
           {#if batchSelectMode}
@@ -2557,21 +2669,23 @@
               <input type="checkbox" checked={allFilteredSelected} on:change={toggleSelectAllFiltered} aria-label="Select all filtered parts" />
             </th>
           {/if}
-          <th class="name-col">Name</th>
+          <!-- Eleven columns gave every field the same weight, so nothing
+               was scannable. Project, stock, requester and created now sit
+               as a secondary line under the part name (the anchor column),
+               and Status becomes Route - where the part is along its
+               workflow, which is the question the shop actually asks. -->
+          <th class="name-col">Part</th>
           <th class="workflow-col">Workflow</th>
-          <th class="project-col mono" class:hidden={assignMode}>Project ID</th>
+          <th class="route-col">Route</th>
           <th class="quantity-col" class:hidden={assignMode}>Qty</th>
-          <th class="stock-col" class:hidden={assignMode}>Stock</th>
-          <th class="metadata-col">Status</th>
           <th class="metadata-col" class:hidden={assignMode}>Due</th>
-          <th class="metadata-col" class:hidden={assignMode}>Created</th>
-          <th class="requester-col" class:hidden={assignMode}>Requested By</th>
           <th class="actions-table-col" class:hidden={assignMode}>Actions</th>
         </tr>
       </thead>
       <tbody>
         {#each filteredParts as part (part.id)}
           {@const fusionJob = part.workflow === 'router' ? fusionJobsByPart[part.id] : null}
+          {@const route = partRoute(part)}
           <tr
             id="part-{part.id}"
             class="parts-row"
@@ -2607,6 +2721,14 @@
                   <span class="tag tag-warning" title="The uploaded STEP file failed validation">⚠ Bad STEP</span>
                 {/if}
               </div>
+              <!-- Everything that used to own a column of its own, folded
+                   into one muted spec line under the name. -->
+              <div class="name-meta" class:hidden={assignMode}>
+                {#if part.project_id}<span class="mono">{part.project_id}</span>{/if}
+                {#if part.stock_assignment}<span class="name-meta-sep">·</span><span>{part.stock_assignment}</span>{/if}
+                {#if part.requester}<span class="name-meta-sep">·</span><span class="name-meta-requester" title={part.requester}>{part.requester}</span>{/if}
+                <span class="name-meta-sep">·</span><span>{formatDate(part.created_at)}</span>
+              </div>
               <PartNotes item={part} table="parts" inline on:update={() => loadParts()} />
               {#if part.assigned_to}
                  <span class="assigned-user-badge pill pill-soft pill-assigned">
@@ -2619,35 +2741,39 @@
                 {getWorkflowLabel(part.workflow)}
               </span>
             </td>
-            <td class="project-col mono" class:hidden={assignMode}>{part.project_id}</td>
-            <td class="quantity-col" class:hidden={assignMode}>{getQuantitySummary(part)}</td>
-            <td class="stock-col text-muted" class:hidden={assignMode}>{part.stock_assignment || '-'}</td>
-            <td class="metadata-col">
-              <div class="metadata-line">
-                <span class="status-badge {getBadgeClass(part.status, getRouterMeta(part))} status-table status-fade">{getStatusDisplay(part)}</span>
-              </div>
+            <td class="route-col">
+              <span class="status-badge {getBadgeClass(part.status, getRouterMeta(part))} status-table status-fade">{getStatusDisplay(part)}</span>
+              <!-- Segmented track: one segment per stop on this workflow's
+                   route, filled up to where the part currently is. Gives
+                   "how far along" at a glance, which a status word alone
+                   cannot - "Pending" on an 8-stop router route is a very
+                   different amount of remaining work than on a 3-stop
+                   laser route. -->
+              {#if route.index >= 0}
+                <span
+                  class="route-track"
+                  title={`Stage ${route.index + 1} of ${route.stages.length}: ${route.stages[route.index].label}`}
+                >
+                  {#each route.stages as stage, stageIndex (stage.value)}
+                    <span
+                      class="route-seg"
+                      class:done={stageIndex < route.index}
+                      class:current={stageIndex === route.index}
+                    ></span>
+                  {/each}
+                  <span class="route-count">{route.index + 1}/{route.stages.length}</span>
+                </span>
+              {/if}
               {#if part.workflow === 'router' && getRouterProgressSummary(part)}
                 <div class="metadata-sub router-progress-note">{getRouterProgressSummary(part)}</div>
               {/if}
             </td>
+            <td class="quantity-col" class:hidden={assignMode}>{getQuantitySummary(part)}</td>
             <!-- svelte-ignore a11y_no_static_element_interactions -->
             <td class="metadata-col" class:hidden={assignMode} on:click|stopPropagation on:keydown|stopPropagation>
               <div class="metadata-line">
                 <PartDueDate {part} on:update={() => loadParts()} />
               </div>
-            </td>
-            <td class="metadata-col" class:hidden={assignMode}>
-              <div class="metadata-line">{formatDate(part.created_at)}</div>
-              {#if getSeasonBucket(part.created_at)}
-                <div class="metadata-sub">
-                  <span class="tag season-tag {getSeasonBucket(part.created_at).isOffseason ? 'tag-offseason' : 'tag-season'}">
-                    {getSeasonBucket(part.created_at).label}
-                  </span>
-                </div>
-              {/if}
-            </td>
-            <td class="requester-col" class:hidden={assignMode} title={part.requester || 'Requester not recorded'}>
-              <div class="metadata-line requester-line"><span class="requester-text">{part.requester || '—'}</span></div>
             </td>
             <td class="actions-table-col" class:hidden={assignMode}>
               <div class="row-actions">
@@ -3619,25 +3745,162 @@
   .table td.workflow-col {
     width: 7.5%;
   }
-  .table th.project-col,
-  .table td.project-col {
-    width: 6.5%;
-    /* Subsystem names are often CamelCase with no spaces
-       ("2026ThirdRobotDrivetrain") - same overflow the name column already
-       guards against (see its comment above), so it needs the same escape
-       hatch or a long one overflows straight into the Stock column. */
-    white-space: normal;
-    overflow-wrap: anywhere;
+  /* The WORKFLOW label sits over a chip, not over bare text. Both cells
+     share the same padding, so the header text lines up with the chip's
+     BORDER edge - but the chip's own label is pushed a further 1px border
+     + var(--space-3) padding inward, which is what read as misaligned.
+     Indenting the header by exactly that inset puts the two words on the
+     same left edge. */
+  .table th.workflow-col {
+    padding-left: calc(var(--space-3) + var(--space-3) + 1px);
   }
+  /* The anchor column. Name carries the weight; everything folded in under
+     it is one muted spec line. min-width:0 + hidden overflow on the line
+     itself so a long stock description or requester name truncates inside
+     its own cell instead of shoving the table's other columns sideways. */
+  .name-meta {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    min-width: 0;
+    margin-top: 2px;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    line-height: 1.35;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .name-meta-sep { opacity: 0.45; }
+  .name-meta-requester { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+  /* Route: the status word, then a segmented track of this workflow's
+     stops filled up to the current one. Kept monochrome - position along
+     the track is what carries the meaning, so adding hue per stage would
+     be the same arbitrary rainbow the workflow tags already lost. */
+  .table th.route-col,
+  .table td.route-col {
+    width: 15%;
+    text-align: center;
+    vertical-align: middle;
+  }
+  .route-track {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin-top: 5px;
+    justify-content: center;
+  }
+  .route-seg {
+    height: 3px;
+    width: 10px;
+    background: var(--border);
+  }
+  .route-seg.done { background: color-mix(in srgb, var(--text-muted) 70%, transparent); }
+  .route-seg.current { background: var(--brand-gold-strong); }
+  .route-count {
+    margin-left: 4px;
+    font-family: var(--font-mono-stack);
+    font-size: 0.62rem;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* One full-width band between the filter card and the list: stage counts
+     on the left, result count and density on the right. Must sit OUTSIDE
+     .content-layout - that is a flex row, so anything dropped inside it
+     becomes another column and collapses into a narrow strip. */
+  .shop-bar {
+    display: flex;
+    align-items: stretch;
+    justify-content: space-between;
+    gap: var(--space-4);
+    flex-wrap: wrap;
+    margin-bottom: var(--space-3);
+    border: 1px solid var(--border);
+    background: var(--surface-1);
+  }
+  .shop-stages { display: flex; flex: 1; min-width: 0; }
+  .shop-stage {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 1px;
+    min-width: 0;
+    padding: var(--space-2) var(--space-4);
+    border: 0;
+    border-right: 1px solid var(--border);
+    background: none;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+    transition: background-color 0.12s ease;
+  }
+  .shop-stage:hover { background: var(--surface-2); }
+  .shop-stage:focus-visible { outline: 2px solid var(--brand-gold-strong); outline-offset: -2px; }
+  .shop-stage.active { background: var(--brand-gold-soft); box-shadow: inset 0 -2px 0 var(--brand-gold-strong); }
+  .shop-stage.empty { color: var(--text-muted); }
+  .shop-stage-count { font-size: 1.15rem; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .shop-stage-label {
+    font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--text-muted); white-space: nowrap;
+  }
+  .shop-stage.active .shop-stage-label { color: var(--brand-gold-strong); }
+
+  .shop-bar-right {
+    display: flex; align-items: center; gap: var(--space-3);
+    padding: var(--space-2) var(--space-4);
+    flex-wrap: wrap;
+  }
+  .list-clear {
+    border: 0; background: none; padding: 0 0 0 var(--space-2);
+    color: var(--brand-gold-strong); font: inherit; font-size: 0.75rem;
+    text-decoration: underline; cursor: pointer;
+  }
+
+  @media (max-width: 900px) {
+    .shop-stages { flex-wrap: wrap; }
+    .shop-stage { flex: 1 1 33%; border-bottom: 1px solid var(--border); }
+    .shop-bar-right { width: 100%; justify-content: space-between; }
+  }
+  .list-count { font-size: 0.82rem; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+  .list-count strong { font-size: 1rem; color: var(--text); }
+  .list-count-total { color: var(--text-muted); margin-left: 2px; }
+
+  .density-toggle { display: inline-flex; border: 1px solid var(--border); }
+  .density-toggle button {
+    border: 0;
+    border-left: 1px solid var(--border);
+    background: none;
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: 0.74rem;
+    padding: var(--space-1) var(--space-3);
+    min-height: 30px;
+    cursor: pointer;
+  }
+  .density-toggle button:first-child { border-left: 0; }
+  .density-toggle button:hover { background: var(--surface-2); color: var(--text); }
+  .density-toggle button.active { background: var(--brand-gold-soft); color: var(--brand-gold-strong); font-weight: 600; }
+  .density-toggle button:focus-visible { outline: 2px solid var(--brand-gold-strong); outline-offset: -2px; }
+
+  /* The density control drives the desktop table only - the mobile view is
+     cards, which have their own spacing. */
+  @media (max-width: 768px) {
+    .density-toggle { display: none; }
+  }
+
   .table th.quantity-col,
   .table td.quantity-col {
     width: 3%;
     text-align: center;
-  }
-  .table th.stock-col,
-  .table td.stock-col {
-    /* Real values are full stock descriptions ('1/8" Polycarbonate Sheet'). */
-    width: 9%;
+    /* Tabular figures so a column of quantities does not jitter in width
+       from row to row. Kept centered rather than right-aligned (the usual
+       rule for numbers) because every other column in this table is
+       centered by design - one right-aligned column would read as a ragged
+       edge against its centered neighbours, not as precision. */
+    font-variant-numeric: tabular-nums;
   }
   /* Status, Due, and Created all share this width so the three columns
      stay horizontally even with equal spacing - sized to the longest real
@@ -3674,19 +3937,10 @@
     min-height: var(--control-height);
     width: 100%;
   }
-  .requester-line {
-    justify-content: flex-start;
-  }
-  .requester-text {
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
   /* Keep the date/status and their secondary badge as one in-flow stack.
      The table cell's vertical-align: middle then centres the whole group,
      instead of absolutely positioning the badge against the bottom edge. */
-  .metadata-col .metadata-sub {
+  .route-col .metadata-sub {
     margin-top: 0.3rem;
     display: flex;
     justify-content: center;
@@ -3701,19 +3955,6 @@
   .metadata-col :global(.due-input) {
     box-sizing: border-box;
     width: min(10.75rem, 100%);
-  }
-  .table th.requester-col,
-  .table td.requester-col {
-    width: 7.5%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    /* Centred with the rest of the row. This was pinned to the top back
-       when each of these cells rendered a differently-sized box and top
-       alignment was the only thing keeping them level with each other;
-       they now share one fixed-height line box (.metadata-line), so they
-       stay level with each other AND with the row. */
-    vertical-align: middle;
   }
   .table th.actions-table-col,
   .table td.actions-table-col {
