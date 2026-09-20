@@ -16,8 +16,16 @@ export const BUTTONS = {
   KITTED: 'Kitted'
 };
 
-// Workflow-specific progress steps
-// Each workflow has its own set of statuses that make sense for that process
+const SIMPLE_MANUFACTURING_STATUSES = [
+  { value: 'pending', label: 'Pending' },
+  { value: 'in-progress', label: 'In Progress' },
+  { value: 'machined', label: 'Machined' },
+  { value: 'complete', label: 'Kitted' }
+];
+
+// Router is the only workflow that needs CAM, postprocessing, and JProg as
+// distinct handoff stages. Every other shop workflow is Start -> Machined ->
+// Kit, keeping the route honest and compact.
 export const WORKFLOW_STATUSES = {
   'router': [
     { value: 'pending', label: 'Pending' },
@@ -29,41 +37,17 @@ export const WORKFLOW_STATUSES = {
     { value: 'machined', label: 'Machined' },
     { value: 'complete', label: 'Kitted' }
   ],
-  '3d-print': [
-    { value: 'pending', label: 'Pending' },
-    { value: 'in-progress', label: 'In Progress' },
-    { value: 'print-started', label: 'Print Started' },
-    { value: 'complete', label: 'Complete' }
-  ],
-  'lathe': [
-    { value: 'pending', label: 'Pending' },
-    { value: 'drawing', label: 'Drawing In Progress' },
-    { value: 'ready', label: 'Ready to Machine' },
-    { value: 'machining', label: 'Machining' },
-    { value: 'inspection', label: 'Inspection' },
-    { value: 'complete', label: 'Done' }
-  ],
-  'mill': [
-    { value: 'pending', label: 'Pending' },
-    { value: 'drawing', label: 'Drawing In Progress' },
-    { value: 'machining', label: 'Machining' },
-    { value: 'inspection', label: 'Inspection' },
-    { value: 'complete', label: 'Done' }
-  ],
-  'laser-cut': [
-    { value: 'pending', label: 'Pending' },
-    { value: 'in-progress', label: 'In Progress' },
-    { value: 'complete', label: 'Complete' }
-  ]
+  '3d-print': SIMPLE_MANUFACTURING_STATUSES,
+  'lathe': SIMPLE_MANUFACTURING_STATUSES,
+  'mill': SIMPLE_MANUFACTURING_STATUSES,
+  'laser-cut': SIMPLE_MANUFACTURING_STATUSES
 };
 
 // Unified status set shown for ALL part workflows.
 export const ALL_STATUSES = WORKFLOW_STATUSES['router'];
 
-// Get statuses for a part. We now use a single unified status set across every
-// workflow so all parts share the same pipeline (Pending -> ... -> Kitted).
-export function getWorkflowStatuses(_workflow) {
-  return ALL_STATUSES;
+export function getWorkflowStatuses(workflow) {
+  return WORKFLOW_STATUSES[workflow] || SIMPLE_MANUFACTURING_STATUSES;
 }
 
 // status: raw part.status from DB (e.g. 'pending','autocammed','in-progress','cammed','machined','kitted')

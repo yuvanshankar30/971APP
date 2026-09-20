@@ -31,9 +31,9 @@ browser confirmation or prompt popups.
   Router's the only workflow with this many distinct steps). See the
   **AutoCAM** section below for automatic G-code generation specifically.
   The Manufacturing ToDo list keeps the next valid action visible after
-  Start: non-router requests advance through CAM complete, postprocess,
-  JProg, machine, and kit; routed requests continue into their counted
-  post-processing flow before they can become complete.
+  Start: lathe, mill, 3D-print, and laser-cut requests advance directly from
+  in progress to machined and then kitted. Router requests alone use the
+  complete CAM, postprocessing, and JProg handoff sequence before machining.
   Router request cards link only to the Fusion AutoCAM workflow and derive their
   job status/G-code downloads from actual Fusion generation jobs (not
   arrangement-only runs); a request cannot advance to CAM review until its

@@ -2,10 +2,14 @@ import { describe, it, expect } from 'vitest';
 import { getWorkflowStatuses, getDisplayStatus, getBadgeClass, isAutocamEligible, ALL_STATUSES } from './statuses.js';
 
 describe('getWorkflowStatuses', () => {
-  it('returns the unified status set regardless of workflow', () => {
+  it('keeps router stages separate from the compact shop workflows', () => {
     expect(getWorkflowStatuses('router')).toBe(ALL_STATUSES);
-    expect(getWorkflowStatuses('lathe')).toBe(ALL_STATUSES);
-    expect(getWorkflowStatuses(undefined)).toBe(ALL_STATUSES);
+    expect(getWorkflowStatuses('router')).toHaveLength(8);
+    for (const workflow of ['lathe', 'mill', '3d-print', 'laser-cut', undefined]) {
+      expect(getWorkflowStatuses(workflow).map((stage) => stage.value)).toEqual([
+        'pending', 'in-progress', 'machined', 'complete'
+      ]);
+    }
   });
 });
 
