@@ -3777,14 +3777,19 @@
   .table td.quantity-col {
     width: 5%;
     text-align: center;
-    font-size: 1.05rem;
-    font-weight: 600;
     /* Tabular figures so a column of quantities does not jitter in width
        from row to row. Kept centered rather than right-aligned (the usual
        rule for numbers) because every other column in this table is
        centered by design - one right-aligned column would read as a ragged
        edge against its centered neighbours, not as precision. */
     font-variant-numeric: tabular-nums;
+  }
+  /* The VALUE only. This was previously set on the th as well, which blew
+     the QTY label up out of line with every other column heading - the
+     headers are a uniform mono caption row and one of them was shouting. */
+  .table td.quantity-col {
+    font-size: 1rem;
+    font-weight: 600;
   }
   /* Status, Due, and Created all share this width so the three columns
      stay horizontally even with equal spacing - sized to the longest real
