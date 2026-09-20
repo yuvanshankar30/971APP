@@ -2757,21 +2757,16 @@
                   </div>
                 {/if}
               </div>
-              {#if part.status === 'pending' && !canViewCad(part)}
-                {#if part.workflow === 'router' && canAdvanceRouterToCamReview(part, fusionJob)}
-                  <button class="btn btn-secondary btn-sm" on:click={() => advanceRouterToCamReview(part)} title="Review completed Fusion CAM output">
-                    <CircleCheck size={13} /> Review CAM
+              {#if !canViewCad(part)}
+                {#if part.status === 'pending'}
+                  <button
+                    class="btn btn-secondary btn-sm"
+                    on:click={() => advancePartStatus(part, 'in-progress')}
+                    title="Start Work"
+                  >
+                    <Clock size={13} /> Start
                   </button>
-                {/if}
-                <button
-                  class="btn btn-secondary btn-sm"
-                  on:click={() => advancePartStatus(part, 'in-progress')}
-                  title="Start Work"
-                >
-                  <Clock size={13} /> Start
-                </button>
-
-              {:else if part.status === 'in-progress'}
+                {:else if part.status === 'in-progress'}
                 <div class="actions-col">
                   <button class="btn btn-primary btn-sm" on:click={() => advancePartStatus(part, 'cammed')} title="CAM Complete">
                     <CircleCheck size={13} /> CAM Complete
@@ -2801,6 +2796,7 @@
                     <Package size={13} /> Kit
                   </button>
                 </div>
+                {/if}
               {/if}
             </td>
           </tr>
