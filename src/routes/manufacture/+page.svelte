@@ -2711,13 +2711,15 @@
                     {/if}
                   {/if}
                 {:else if part.workflow === 'router' || part.workflow === 'lathe' || part.workflow === '3d-print'}
-                  <button
-                    class="btn btn-secondary btn-sm"
-                    on:click={() => openCamProfileModal(part)}
-                    title="This part was created before a file was required for its workflow - attach one to unlock the 3D viewer{part.workflow === 'router' ? ' and Fusion CAM' : ''}"
-                  >
-                    <Upload size={13} /> Attach STEP{part.workflow === 'lathe' ? ' or PDF' : ''}
-                  </button>
+                  <div class="cad-action-grid attach-file-action" on:click|stopPropagation on:keydown|stopPropagation role="presentation">
+                    <button
+                      class="btn btn-secondary btn-sm"
+                      on:click={() => openCamProfileModal(part)}
+                      title="This part was created before a file was required for its workflow - attach one to unlock the 3D viewer{part.workflow === 'router' ? ' and Fusion CAM' : ''}"
+                    >
+                      <Upload size={13} /> Attach STEP{part.workflow === 'lathe' ? ' or PDF' : ''}
+                    </button>
+                  </div>
                 {/if}
                 {#if part.workflow === 'lathe' && canViewPdf(part)}
                   <div class="cad-action-grid" on:click|stopPropagation on:keydown|stopPropagation role="presentation">
