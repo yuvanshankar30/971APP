@@ -23,6 +23,13 @@ const SIMPLE_MANUFACTURING_STATUSES = [
   { value: 'complete', label: 'Kitted' }
 ];
 
+const THREE_D_PRINT_STATUSES = [
+  { value: 'pending', label: 'Pending' },
+  { value: 'in-progress', label: 'In Progress' },
+  { value: 'printed', label: 'Printed' },
+  { value: 'complete', label: 'Kitted' }
+];
+
 // Router is the only workflow that needs CAM, postprocessing, and JProg as
 // distinct handoff stages. Every other shop workflow is Start -> Machined ->
 // Kit, keeping the route honest and compact.
@@ -37,7 +44,7 @@ export const WORKFLOW_STATUSES = {
     { value: 'machined', label: 'Machined' },
     { value: 'complete', label: 'Kitted' }
   ],
-  '3d-print': SIMPLE_MANUFACTURING_STATUSES,
+  '3d-print': THREE_D_PRINT_STATUSES,
   'lathe': SIMPLE_MANUFACTURING_STATUSES,
   'mill': SIMPLE_MANUFACTURING_STATUSES,
   'laser-cut': SIMPLE_MANUFACTURING_STATUSES
@@ -66,6 +73,7 @@ export function getDisplayStatus(status, meta) {
   if (status === 'cammed') return BUTTONS.CAM_REVIEWED;
   if (status === 'postprocessed') return BUTTONS.POSTPROCESSED;
   if (status === 'jprogged') return BUTTONS.JPROGGED;
+  if (status === 'printed') return 'Printed';
   if (status === 'machined' || status === 'inspected') return BUTTONS.MACHINED;
   if (status === 'kitted' || status === 'complete') return BUTTONS.KITTED;
   if (typeof status === 'string') return status.charAt(0).toUpperCase() + status.slice(1);
@@ -85,6 +93,7 @@ export function getBadgeClass(status, meta) {
   if (status === 'cammed') return 'status-cammed';
   if (status === 'postprocessed') return 'status-postprocessed';
   if (status === 'jprogged') return 'status-jprogged';
+  if (status === 'printed') return 'status-machined';
   if (status === 'machined' || status === 'inspected') return 'status-machined';
   if (status === 'complete' || status === 'kitted') return 'status-complete';
   return 'status-pending';
