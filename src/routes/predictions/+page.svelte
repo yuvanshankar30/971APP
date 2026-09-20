@@ -4,7 +4,6 @@
   import { fetchActiveScoutingEventKey } from '$lib/scoutingEvent.js';
   import { getAuthHeader, supabase } from '$lib/supabase.js';
   import { isMatchPlayed, matchLabel } from '$lib/matchProjection.js';
-  import { calibratedScale, computeEventEpa, winProbability } from '$lib/epaModel.js';
   import {
     STARTING_BALANCE,
     availableBalance,
@@ -74,23 +73,6 @@
   $: myRank = standings.findIndex((row) => row.userId === userId) + 1;
   $: upcomingMatches = matches.filter((match) => !isMatchPlayed(match));
 
-  // The model's own view of each upcoming match, entirely from TBA's own
-  // match data (matches is loaded from /api/tba/event-matches in loadAll) -
-  // recomputes automatically whenever `matches` is refreshed, so it moves
-  // as TBA reports more results, not just once on page load. This is a
-  // reference number shown ALONGSIDE the crowd's pool-based odds, not a
-  // replacement for them - the crowd odds stay the page's headline number.
-  $: epaByTeam = computeEventEpa(matches);
-  function modelWinProbForMatch(match) {
-    const redTeams = match.alliances?.red?.team_keys || [];
-    const blueTeams = match.alliances?.blue?.team_keys || [];
-    const redKnown = redTeams.map((key) => epaByTeam.get(key)?.epa).filter(Number.isFinite);
-    const blueKnown = blueTeams.map((key) => epaByTeam.get(key)?.epa).filter(Number.isFinite);
-    if (!redKnown.length || !blueKnown.length) return null;
-    const redTotal = redKnown.reduce((sum, value) => sum + value, 0);
-    const blueTotal = blueKnown.reduce((sum, value) => sum + value, 0);
-    return winProbability(redTotal, blueTotal, calibratedScale(epaByTeam.residualStd));
-  }
   $: myResolvedBets = bets.filter((bet) => bet.created_by === userId && bet.resolved_at).sort((a, b) => String(b.resolved_at).localeCompare(String(a.resolved_at)));
   $: liveBets = bets.filter((bet) => !isTestMarketKey(bet.match_key));
   $: myBalanceHistory = balanceHistoryForUser(bets, userId);
@@ -130,7 +112,7 @@
     .slice(0, 8);
 
   function displayName(id) {
-    if (!id) return 'Unknown scout';
+    if (!id) return 'A scout';
     if (id === userId) return 'You';
     return userNames.get(id) || 'A scout';
   }
@@ -375,7 +357,6 @@
           {@const draft = draftFor(match.key, drafts, bets, userId)}
           {@const pool = poolForMatch(bets, match.key)}
           {@const history = oddsHistoryForMatch(bets, match.key)}
-          {@const modelProb = modelWinProbForMatch(match)}
           <div class="bet-row">
             <div class="bet-row-header">
               <strong>{matchLabel(match)}</strong>
@@ -396,12 +377,6 @@
               <div class="pool-bar">
                 <span class="pool-fill" style={`width:${pool.redShare * 100}%`}></span>
               </div>
-            {/if}
-            {#if modelProb != null}
-              <p class="model-line text-muted">
-                <TrendingUp size={13} /> Model: <span class="alliance-red">Red {Math.round(modelProb * 100)}%</span> · <span class="alliance-blue">Blue {Math.round((1 - modelProb) * 100)}%</span>
-                <span class="model-source">(from TBA match data)</span>
-              </p>
             {/if}
             {#if history.length > 1}
               <div class="odds-history">
@@ -517,9 +492,6 @@
   .odds-history-line { fill:none; stroke-width:2; stroke:var(--danger, #dc3545); }
   .odds-history-label { font-size:.74rem; }
 
-  .model-line { display:flex; align-items:center; gap:6px; flex-wrap:wrap; font-size:.8rem; margin:0 0 var(--space-4); }
-  .model-line :global(svg) { flex-shrink:0; }
-  .model-source { font-size:.72rem; }
   tr.leader td { font-weight:700; }
   tr.me { background:var(--surface-2); }
   .rank-badge { display:inline-flex; align-items:center; justify-content:center; min-width:1.6rem; height:1.6rem; border-radius:50%; }

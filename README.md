@@ -198,7 +198,10 @@ browser confirmation or prompt popups.
   match when the real schedule is empty. Robot Ratings orders rated teams by
   overall average from best to worst, followed by unrated teams. The Prediction
   Market uses play points throughout and shares the same non-settling practice
-  match so scouts can test placing, updating, and cancelling predictions. The
+  match so scouts can test placing, updating, and cancelling predictions. Its
+  EPA participant contributes one fixed-stake alliance vote per unlocked match
+  through a service-only table; the public market receives it as an ordinary
+  anonymous vote and never receives the model probability or source marker. The
   event picker always includes the active event and resolves keys such as
   `2026cc` to their TBA name (for example, Chezy Champs) when available.
 - **Vision Scouting**: a real Competition-folder nav tab, open to every

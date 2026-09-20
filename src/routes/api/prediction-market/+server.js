@@ -5,8 +5,10 @@ import { env } from '$env/dynamic/private';
 import { getSupabase } from '$lib/server/971bot.js';
 import { normalizeBetRequest } from '$lib/server/predictionMarketSchema.js';
 import { STARTING_BALANCE, availableBalance, isTestMarketKey, resolvePariMutuel } from '$lib/predictionMarket.js';
+import { buildModelVotes, publicAnonymousVote } from '$lib/server/predictionMarketModelVote.js';
 
 const SELECT_COLUMNS = 'id,event_key,match_key,created_by,side,stake,placed_at,updated_at,resolved_at,payout,winning_side';
+const SYSTEM_SELECT_COLUMNS = 'id,event_key,match_key,side,stake,placed_at,updated_at,resolved_at,payout,winning_side';
 
 function requestClient(request) {
   return createClient(PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY, {
@@ -51,6 +53,55 @@ async function fetchTbaMatch(matchKey) {
     return await response.json();
   } catch {
     return null;
+  }
+}
+
+async function fetchTbaEventMatches(eventKey) {
+  const authKey = env.TBA_API_KEY || env.VITE_TBA_API_KEY || env.PUBLIC_TBA_API_KEY;
+  if (!authKey) return null;
+  try {
+    const response = await fetch(`https://www.thebluealliance.com/api/v3/event/${encodeURIComponent(eventKey)}/matches`, {
+      headers: { 'X-TBA-Auth-Key': authKey }
+    });
+    if (!response.ok) return null;
+    const matches = await response.json();
+    return Array.isArray(matches) ? matches : null;
+  } catch {
+    return null;
+  }
+}
+
+async function syncModelVotes(db, eventKey) {
+  const matches = await fetchTbaEventMatches(eventKey);
+  if (!matches) return;
+  const stake = Number(env.PREDICTION_MARKET_MODEL_STAKE || 100);
+  const votes = buildModelVotes(matches, { stake });
+  if (votes.length) {
+    const { error } = await db.from('prediction_market_system_votes').upsert(
+      votes.map((vote) => ({
+        ...vote, event_key: eventKey, updated_at: new Date().toISOString(),
+        resolved_at: null, payout: null, winning_side: null
+      })),
+      { onConflict: 'event_key,match_key' }
+    );
+    // The migration may not have reached a local/dev database yet. Human
+    // betting must keep working even when the private participant cannot.
+    if (error) return;
+  }
+
+  const played = new Map(matches.filter((match) => match?.actual_time).map((match) => [match.key, match]));
+  if (!played.size) return;
+  const { data: unresolved, error } = await db.from('prediction_market_system_votes')
+    .select(SYSTEM_SELECT_COLUMNS).eq('event_key', eventKey).is('resolved_at', null);
+  if (error) return;
+  for (const vote of unresolved || []) {
+    const match = played.get(vote.match_key);
+    if (!match) continue;
+    const winner = match.winning_alliance === 'red' || match.winning_alliance === 'blue' ? match.winning_alliance : null;
+    const payout = winner == null ? Number(vote.stake) : vote.side === winner ? Number(vote.stake) * 2 : 0;
+    await db.from('prediction_market_system_votes').update({
+      resolved_at: new Date().toISOString(), payout, winning_side: winner
+    }).eq('id', vote.id).is('resolved_at', null);
   }
 }
 
@@ -101,6 +152,7 @@ export async function GET({ request, url }) {
 
   const db = getDbClient(auth);
   await resolveOutstandingBets(db, eventKey);
+  await syncModelVotes(db, eventKey);
 
   const { data, error } = await auth
     .from('prediction_market_bets')
@@ -109,7 +161,14 @@ export async function GET({ request, url }) {
     .order('placed_at', { ascending: false });
   if (error && isMissingBetsTable(error)) return json({ success: true, data: [], unavailable: true });
   if (error) return json({ error: error.message }, { status: 500 });
-  return json({ success: true, data: data || [] });
+  const { data: privateVotes, error: privateVoteError } = await db
+    .from('prediction_market_system_votes')
+    .select(SYSTEM_SELECT_COLUMNS)
+    .eq('event_key', eventKey);
+  const anonymousVotes = privateVoteError ? [] : (privateVotes || []).map(publicAnonymousVote);
+  const combined = [...(data || []), ...anonymousVotes]
+    .sort((left, right) => String(right.placed_at || '').localeCompare(String(left.placed_at || '')));
+  return json({ success: true, data: combined });
 }
 
 export async function POST({ request }) {
