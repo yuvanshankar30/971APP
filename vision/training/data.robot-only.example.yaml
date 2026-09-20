@@ -1,0 +1,9 @@
+# Detector contract: vision-detector/v1
+# Fuel is intentionally excluded; the runner's trajectory pipeline owns it.
+path: ./datasets/robot-only
+train: images/train
+val: images/val
+test: images/test
+names:
+  0: robot_red
+  1: robot_blue

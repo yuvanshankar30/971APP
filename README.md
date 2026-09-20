@@ -209,17 +209,25 @@ browser confirmation or prompt popups.
   reversal as a crash candidate; every suggestion stays editable. Preload,
   points, ratings, roles, intake, cards, and mechanical calls remain scout
   judgement. A calibrated red/blue field-occupancy heatmap fills as trajectory
-  results arrive.
+  results arrive. Reviewers can resolve and save every supported TBA
+  match-video source with provenance; broadcast links remain explicitly
+  review-only and uncalibrated, while footage used for inference must still be
+  uploaded to private storage.
   Generic robot-only YOLO weights are supported: a conservative second stage
   reads the lower bumper band for alliance colour and rejects unclear crops;
   roster-constrained bumper-number reads remain review-required before a
   track is attached to a team.
   A full BF16 Qwen3-VL-30B-A3B-Instruct service on NVIDIA DGX Spark proposes semantic
-  events from bounded multi-camera clips; a
+  events from bounded multi-camera clips. Clips with robot activity inside
+  configured goal/climb regions are prioritized, with an auditable low-rate
+  fallback and fail-open behavior when regions are absent; a
   separate versioned YOLO/ByteTrack runner supplies dense tracking and
   mobility. Fuel uses an HSV/contour baseline with motion-predicted association,
   observed goal-entry candidates, and pixel-space shooter matching (not ball
-  pixels compared to robot metres). Each camera video gets fresh tracker state.
+  pixels compared to robot metres). It also records review-only outgoing-shot
+  candidates and shows an Orbit-style second opinion that apportions TBA's
+  official alliance fuel by each robot's observed shot share; that estimate is
+  never released automatically. Each camera video gets fresh tracker state.
   Both feed a human-reviewed evidence queue rather than silently
   treating model predictions as ground truth; compatible alliance totals are
   reconciled with TBA and material differences enter an evidence-backed
@@ -245,7 +253,10 @@ browser confirmation or prompt popups.
   explicit acknowledgement for incomplete shadow runs, shows selected upload
   size, and provides keyboard observation review. A `VISION_RELEASE` holder
   must generate and inspect the exact proposed `scout_data_events` rows before
-  the release button is enabled. The Chezy capture, storage, review, fallback,
+  the release button is enabled. Events may also opt into an approved-model
+  gate; approvals retain approver, timestamp, expiry, revocation, and notes,
+  and an expired or revoked model is blocked before preview or release. The
+  Chezy capture, storage, review, fallback,
   and ownership procedure is in `docs/guides/chezy-vision-runbook.md`; runner
   hosts have a read-only `vision/runner/preflight.py` check.
 - **Planning**: Gantt-based build/task scheduling (`wx-svelte-gantt`),

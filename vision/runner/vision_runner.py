@@ -29,10 +29,12 @@ import requests
 from ultralytics import YOLO
 
 from apriltag_calibration import probe_recording
-from fuel_tracking import PieceTracker, goal_entry, nearest_pixel_track
+from fuel_tracking import PieceTracker, goal_entry, nearest_pixel_track, shot_candidate
 from bumper_alliance import infer_bumper_alliance
 from team_identity import CropCollector, resolve_identities
 from motion_events import track_motion_candidates
+from qwen_activity import select_clip
+from model_contract import validate_model_classes
 
 API = os.environ["VISION_API_URL"].rstrip("/") + "/api/vision-runner"
 TOKEN = os.environ["VISION_RUNNER_TOKEN"]
@@ -258,8 +260,28 @@ def analyze_view_with_qwen(view, config, video_path, match_key=None, robot_track
     start_ms = 0
     analyzed = 0
     failed = 0
+    clip_index = 0
+    activity_regions = (view.get("goal_zones") or []) + (view.get("climb_zones") or [])
     while start_ms < duration_ms:
         end_ms = min(start_ms + clip_ms, duration_ms)
+        selection = select_clip(
+            start_ms, end_ms, robot_tracks, activity_regions, frame_shape,
+            sync_offset_ms=int(view.get("sync_offset_ms") or 0),
+            clip_index=clip_index,
+            fallback_every=max(0, int(config.get("qwen_activity_fallback_every", 12))),
+        )
+        clip_index += 1
+        if not selection["selected"]:
+            clips.append({
+                "view_id": view["id"], "started_ms": start_ms, "ended_ms": end_ms,
+                "model": QWEN_MODEL, "revision": QWEN_REVISION, "dtype": "bfloat16",
+                "latency_ms": None, "clip_quality": None, "event_count": 0,
+                "normalized_result": {"selection": selection}, "raw_response": "",
+            })
+            start_ms = end_ms
+            if on_progress:
+                on_progress()
+            continue
         frames = sample_qwen_clip(video_path, start_ms, end_ms, frame_count_per_clip)
         if len(frames) < 2:
             start_ms = end_ms
@@ -287,7 +309,7 @@ def analyze_view_with_qwen(view, config, video_path, match_key=None, robot_track
                 "view_id": view["id"], "started_ms": start_ms, "ended_ms": end_ms,
                 "model": QWEN_MODEL, "revision": QWEN_REVISION, "dtype": "bfloat16",
                 "latency_ms": None, "clip_quality": "unusable", "event_count": 0,
-                "normalized_result": {"error": str(error)[:500]},
+                "normalized_result": {"error": str(error)[:500], "selection": selection},
                 "raw_response": qwen_error_detail(error),
             })
             start_ms = end_ms
@@ -296,6 +318,7 @@ def analyze_view_with_qwen(view, config, video_path, match_key=None, robot_track
             continue
         analyzed += 1
         result = payload.get("result", {})
+        result["selection"] = selection
         clips.append({
             "view_id": view["id"], "started_ms": start_ms, "ended_ms": end_ms,
             "model": payload.get("model", QWEN_MODEL),
@@ -561,6 +584,41 @@ def attribute_scores(piece_trajectories, robot_tracks, goal_zones, frame_shape, 
             "confidence": 0.7 if best_track else 0.4,  # lower confidence when no robot track could be matched to the origin
             "source": "classical_cv", "review_status": "unreviewed",
             "evidence": {"source": "classical_cv", "zone": scoring_zone.get("label"), "trajectory_points": len(trajectory), "goal_entry_candidate": True, "review_required": True}
+        })
+    return observations
+
+
+def attribute_shots(piece_trajectories, robot_tracks, view_id, config):
+    """Create Orbit-style shot-count candidates from ball departures."""
+    observations = []
+    for trajectory in piece_trajectories:
+        candidate = shot_candidate(
+            trajectory,
+            robot_tracks,
+            max_distance_px=float(config.get("fuel_shot_max_origin_distance_px", 120)),
+            min_points=max(2, int(config.get("fuel_shot_min_points", 3))),
+            min_speed_px_s=float(config.get("fuel_shot_min_speed_px_s", 90)),
+            min_departure_px=float(config.get("fuel_shot_min_departure_px", 35)),
+            window_ms=max(100, int(config.get("fuel_shot_window_ms", 700))),
+        )
+        if not candidate:
+            continue
+        track, evidence = candidate
+        observations.append({
+            "view_id": view_id,
+            "team_key": track.get("team_key"),
+            "track_key": track.get("track_key"),
+            "alliance": track.get("alliance"),
+            "phase": None,
+            "observation_type": "fuel_shot",
+            "value": {"count": 1},
+            "started_ms": trajectory[0][0],
+            "ended_ms": trajectory[min(1, len(trajectory) - 1)][0],
+            "confidence": 0.75,
+            "source": "classical_cv",
+            "review_status": "unreviewed",
+            "evidence": {"source": "classical_cv", "shot_departure_candidate": True,
+                         "review_required": True, **evidence},
         })
     return observations
 
@@ -836,9 +894,11 @@ def process_view(model, view, config, video_path, team_roster=None):
             track.pop("auto_start_pixel", None), start_zones, frame_shape,
         )
     climb_observations = attribute_climbs(climb_detections, finished_tracks, view, config)
-    fuel_observations = attribute_scores(piece_tracker.all_trajectories(), finished_tracks, goal_zones, frame_shape or (1, 1), view["id"], float(config.get("fuel_attribution_distance_px", 120)))
+    piece_trajectories = piece_tracker.all_trajectories()
+    fuel_observations = attribute_scores(piece_trajectories, finished_tracks, goal_zones, frame_shape or (1, 1), view["id"], float(config.get("fuel_attribution_distance_px", 120)))
+    shot_observations = attribute_shots(piece_trajectories, finished_tracks, view["id"], config)
     motion_observations = [candidate for track in finished_tracks for candidate in track_motion_candidates(track, view["id"], config)]
-    return finished_tracks, climb_observations + fuel_observations + motion_observations
+    return finished_tracks, climb_observations + fuel_observations + shot_observations + motion_observations
 
 
 def run_job(model, run):
@@ -907,6 +967,8 @@ def main():
     if QWEN_REQUIRED and (not QWEN_URL or not QWEN_TOKEN):
         raise RuntimeError("VISION_QWEN_URL and VISION_QWEN_TOKEN are required")
     model = YOLO(WEIGHTS)
+    detector_contract = validate_model_classes(model.names)
+    print(f"[model-contract] {json.dumps(detector_contract, sort_keys=True)}", flush=True)
     last_error = None
     while True:
         heartbeat(last_error=last_error)
