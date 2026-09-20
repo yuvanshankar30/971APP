@@ -7,6 +7,7 @@
   import { fetchActiveScoutingEventKey } from '$lib/scoutingEvent.js';
   import navConfig from '$lib/navigation.json';
   import { defaultHeaderTabs, mergeDefaultHeaderTabs, ensurePowerRankingsTab, ensureMatchRankingsTab, ensureRobotRatingsTab, ensurePredictionMarketTab, ensureBlueAllianceTab, ensureScoutingAdminTab, ensureStrategyTab, ensureDriveTeamTab, ensurePicklistTab, ensureGcodeConverterTab, ensureFilesTab, ensureFusionAutocamTab, promoteChildrenOfDisabledFolders } from '$lib/defaultTabs.js';
+  import { COMPETITION_FOLDER_LABEL, COMPETITION_ROUTE, competitionNavChildren } from '$lib/competitionTabs.js';
   import { Move3d, Hammer, Wrench, Receipt, Home, Briefcase, Coins, Package, User, ChevronDown, Menu, X, Camera, CalendarDays, Cpu, FileText, Trophy, Eye, ClipboardCheck, ListChecks, Target, Folder, Search, Star, Dice5, Zap, Radar } from 'lucide-svelte';
   import { goto, afterNavigate } from '$app/navigation';
   import { page } from '$app/stores';
@@ -558,6 +559,15 @@
   $: visibleNavTabs = promoteChildrenOfDisabledFolders(baseNavTabs, navConfig);
   $: navItems = isApproved ? buildNavItems(visibleNavTabs) : [];
 
+  // The Competition folder opens /competition (a tile page) instead of a
+  // dropdown - fourteen entries is past what a hover menu can show usefully.
+  // Its resolved children feed that page from here, so the page mirrors this
+  // user's actual folder rather than maintaining a second list of its own.
+  function isCompetitionFolder(item) {
+    return item?.type === 'folder' && item?.label === COMPETITION_FOLDER_LABEL;
+  }
+  $: competitionNavChildren.set(navItems.find(isCompetitionFolder)?.children || []);
+
   // Drag-to-reorder for the desktop nav's top-level tabs/folders. Home is
   // rendered outside this list entirely, and Admin is appended by
   // addAdminTabIfAllowed() rather than stored in header_tabs — so both are
@@ -679,28 +689,39 @@
                 on:drop={(e) => handleTabDrop(e, item)}
                 on:dragend={handleTabDragEnd}
               >
-                <button
-                  type="button"
-                  class="nav-item"
-                  class:active={isFolderActive(item)}
-                  aria-haspopup="true"
-                  aria-expanded={openDesktopFolder === idx}
-                  on:click={(e) => toggleDesktopFolder(e, idx)}
-                >
-                  <span>{item.label}</span>
-                  <ChevronDown size={14} class="caret" />
-                </button>
-                <div
-                  class="dropdown-menu"
-                  style={openDesktopFolder === idx ? `top: ${desktopFolderPosition.top}px; left: ${desktopFolderPosition.left}px;` : ''}
-                >
-                  {#each item.children as child}
-                    <a href={child.href} class="dropdown-link" class:active={isActive(child.href)} on:click={closeDesktopFolders}>
-                      <svelte:component this={child.icon} size={16} />
-                      <span>{child.label}</span>
-                    </a>
-                  {/each}
-                </div>
+                {#if isCompetitionFolder(item)}
+                  <a
+                    href={COMPETITION_ROUTE}
+                    class="nav-item"
+                    class:active={isActive(COMPETITION_ROUTE) || isFolderActive(item)}
+                    on:click={closeDesktopFolders}
+                  >
+                    <span>{item.label}</span>
+                  </a>
+                {:else}
+                  <button
+                    type="button"
+                    class="nav-item"
+                    class:active={isFolderActive(item)}
+                    aria-haspopup="true"
+                    aria-expanded={openDesktopFolder === idx}
+                    on:click={(e) => toggleDesktopFolder(e, idx)}
+                  >
+                    <span>{item.label}</span>
+                    <ChevronDown size={14} class="caret" />
+                  </button>
+                  <div
+                    class="dropdown-menu"
+                    style={openDesktopFolder === idx ? `top: ${desktopFolderPosition.top}px; left: ${desktopFolderPosition.left}px;` : ''}
+                  >
+                    {#each item.children as child}
+                      <a href={child.href} class="dropdown-link" class:active={isActive(child.href)} on:click={closeDesktopFolders}>
+                        <svelte:component this={child.icon} size={16} />
+                        <span>{child.label}</span>
+                      </a>
+                    {/each}
+                  </div>
+                {/if}
               </div>
             {:else}
               <a
@@ -763,7 +784,17 @@
 
     {#if isApproved}
       {#each navItems as item, idx}
-        {#if item.type === 'folder'}
+        {#if isCompetitionFolder(item)}
+          <a
+            href={COMPETITION_ROUTE}
+            class="mobile-link"
+            class:active={isActive(COMPETITION_ROUTE) || isFolderActive(item)}
+            on:click={closeMobileMenu}
+          >
+            <Trophy size={18} />
+            <span>{item.label}</span>
+          </a>
+        {:else if item.type === 'folder'}
           <div class="mobile-folder" class:open={openMobileFolders[idx]}>
             <button
               type="button"

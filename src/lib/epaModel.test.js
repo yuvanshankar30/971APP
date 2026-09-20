@@ -1,5 +1,33 @@
 import { describe, expect, it } from 'vitest';
-import { computeEventEpa, winProbability, calibratedScale } from './epaModel.js';
+import { computeEventEpa, winProbability, calibratedScale, evaluateEpaModel, fitEpaParameters } from './epaModel.js';
+
+// A synthetic event where every team has a fixed true strength and each
+// alliance's score is the sum of its three - so a model that has learned
+// the strengths should predict nearly everything right, and one that has
+// not should hover near a coin flip.
+function syntheticEvent({ matchCount = 60, noise = 0 } = {}) {
+  const strength = {};
+  for (let team = 1; team <= 24; team += 1) strength[`frc${team}`] = 40 + (team % 12) * 8;
+  let seed = 7;
+  const rand = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  const scoreOf = (keys) => keys.reduce((sum, key) => sum + strength[key], 0);
+  const matches = [];
+  for (let number = 1; number <= matchCount; number += 1) {
+    const pool = Object.keys(strength).slice().sort(() => rand() - 0.5);
+    const red = pool.slice(0, 3);
+    const blue = pool.slice(3, 6);
+    const jitter = () => Math.round((rand() - 0.5) * noise);
+    matches.push({
+      comp_level: 'qm',
+      match_number: number,
+      alliances: {
+        red: { team_keys: red, score: scoreOf(red) + jitter() },
+        blue: { team_keys: blue, score: scoreOf(blue) + jitter() }
+      }
+    });
+  }
+  return matches;
+}
 
 function match({ red, blue, redScore, blueScore, matchNumber, compLevel = 'qm' }) {
   return {
@@ -173,6 +201,79 @@ describe('winProbability', () => {
   it('never reports below the 5% floor even for the specific gap that prompted this widening', () => {
     const prob = winProbability(697.9, 944.5, 35);
     expect(prob).toBeGreaterThanOrEqual(0.05);
+  });
+});
+
+describe('evaluateEpaModel', () => {
+  it('beats a coin flip on an event where strength is actually learnable', () => {
+    const result = evaluateEpaModel(syntheticEvent({ noise: 20 }), { k: 0.45, scale: 50 });
+    expect(result.samples).toBeGreaterThan(20);
+    // A coin flip scores exactly 0.25; anything above that is worse than guessing.
+    expect(result.brier).toBeLessThan(0.25);
+    expect(result.accuracy).toBeGreaterThan(0.6);
+  });
+
+  it('scores no better than a coin flip when results are pure noise', () => {
+    // Every score independent of who is playing - there is nothing to learn,
+    // so an honest evaluation must NOT report a good score here.
+    let seed = 3;
+    const rand = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+    const matches = Array.from({ length: 60 }, (unused, index) => ({
+      comp_level: 'qm',
+      match_number: index + 1,
+      alliances: {
+        red: { team_keys: ['frc1', 'frc2', 'frc3'], score: Math.round(rand() * 200) },
+        blue: { team_keys: ['frc4', 'frc5', 'frc6'], score: Math.round(rand() * 200) }
+      }
+    }));
+    expect(evaluateEpaModel(matches, { k: 0.45, scale: 50 }).brier).toBeGreaterThan(0.2);
+  });
+
+  it('never lets a match inform its own prediction (no lookahead)', () => {
+    // Truncating the event must not change the scores of the matches that
+    // remain - if it did, later results were leaking into earlier ones.
+    const matches = syntheticEvent({ matchCount: 40, noise: 20 });
+    const full = evaluateEpaModel(matches, { k: 0.45, scale: 50, warmupMatches: 8 });
+    const truncated = evaluateEpaModel(matches.slice(0, 30), { k: 0.45, scale: 50, warmupMatches: 8 });
+    expect(truncated.samples).toBe(30 - 8);
+    // The first 22 scored matches are shared, so the truncated run's total
+    // squared error must be a strict prefix of the full run's.
+    expect(truncated.brier * truncated.samples).toBeLessThanOrEqual(full.brier * full.samples + 1e-9);
+  });
+
+  it('reports a standard error so grid noise can be told from a real gain', () => {
+    const result = evaluateEpaModel(syntheticEvent({ noise: 20 }), { k: 0.45, scale: 50 });
+    expect(result.brierStdErr).toBeGreaterThan(0);
+    expect(result.brierStdErr).toBeLessThan(result.brier);
+  });
+});
+
+describe('fitEpaParameters', () => {
+  it('falls back to the defaults, untuned, before an event has enough history', () => {
+    const fit = fitEpaParameters(syntheticEvent({ matchCount: 10, noise: 20 }));
+    expect(fit.tuned).toBe(false);
+    expect(fit.k).toBe(0.45);
+  });
+
+  it('fits parameters that predict at least as well as the defaults', () => {
+    const matches = syntheticEvent({ noise: 40 });
+    const fit = fitEpaParameters(matches);
+    expect(fit.tuned).toBe(true);
+    const fitted = evaluateEpaModel(matches, { k: fit.k, scale: fit.scale });
+    const defaults = evaluateEpaModel(matches, { k: 0.45, scale: 35 });
+    expect(fitted.brier).toBeLessThanOrEqual(defaults.brier);
+  });
+
+  it('shrinks toward the prior instead of taking the raw argmin', () => {
+    // On a real event the Brier surface around the optimum is a broad, flat
+    // valley, so the argmin is often an extreme learning rate that is just
+    // fitting noise. The chosen setting must stay statistically tied with
+    // the best while sitting closer to the defaults than that argmin does.
+    const matches = syntheticEvent({ noise: 40 });
+    const fit = fitEpaParameters(matches);
+    expect(fit.brier).toBeLessThanOrEqual(fit.bestBrier + fit.brierStdErr + 1e-9);
+    expect(fit.tiedCandidates).toBeGreaterThan(0);
+    expect(Math.abs(Math.log(fit.k / 0.45))).toBeLessThanOrEqual(Math.abs(Math.log(1.2 / 0.45)));
   });
 });
 

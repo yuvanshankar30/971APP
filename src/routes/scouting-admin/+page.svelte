@@ -1194,6 +1194,14 @@
     align-items: flex-end;
   }
 
+  /* SeasonFilter wraps its select in a .form-group, which carries a
+     16px bottom margin meant for stacked form layouts. In this header that
+     margin is part of the flex item's box, so bottom-aligning left the
+     select's visible edge sitting 16px above the buttons beside it. */
+  .scouting-header .page-actions :global(.form-group) {
+    margin-bottom: 0;
+  }
+
   .match-scouting-export {
     display: flex;
     align-items: center;
