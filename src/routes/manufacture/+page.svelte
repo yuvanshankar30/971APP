@@ -2698,6 +2698,33 @@
                         <ListChecks size={13} /> Job Details
                       </button>
                     {/if}
+                    <div class="process-status-action">
+                      {#if part.status === 'pending'}
+                        <button class="btn btn-secondary btn-sm" on:click={() => advancePartStatus(part, 'in-progress')} title="Start Work">
+                          <Clock size={13} /> Start
+                        </button>
+                      {:else if part.status === 'in-progress'}
+                        <button class="btn btn-secondary btn-sm" on:click={() => advancePartStatus(part, 'cammed')} title="CAM Complete">
+                          <CircleCheck size={13} /> CAM Complete
+                        </button>
+                      {:else if part.status === 'cammed'}
+                        <button class="btn btn-secondary btn-sm" on:click={() => advancePartStatus(part, 'postprocessed')} title="Postprocess">
+                          <Wrench size={13} /> Postprocess
+                        </button>
+                      {:else if part.status === 'postprocessed'}
+                        <button class="btn btn-secondary btn-sm" on:click={() => advancePartStatus(part, 'jprogged')} title="JProg">
+                          <ListChecks size={13} /> JProg
+                        </button>
+                      {:else if part.status === 'jprogged'}
+                        <button class="btn btn-secondary btn-sm" on:click={() => advancePartStatus(part, 'machined')} title="Machine">
+                          <Wrench size={13} /> Machine
+                        </button>
+                      {:else if part.status === 'machined'}
+                        <button class="btn btn-secondary btn-sm" on:click={() => advancePartStatus(part, 'complete')} title="Kit">
+                          <Package size={13} /> Kit
+                        </button>
+                      {/if}
+                    </div>
                   </div>
                   {#if fusionJob}
                     {#if ['queued', 'claimed', 'processing'].includes(fusionJob.status)}
@@ -2730,7 +2757,7 @@
                   </div>
                 {/if}
               </div>
-              {#if part.status === 'pending'}
+              {#if part.status === 'pending' && !canViewCad(part)}
                 {#if part.workflow === 'router' && canAdvanceRouterToCamReview(part, fusionJob)}
                   <button class="btn btn-secondary btn-sm" on:click={() => advanceRouterToCamReview(part)} title="Review completed Fusion CAM output">
                     <CircleCheck size={13} /> Review CAM
@@ -3606,6 +3633,13 @@
        one long token with no spaces to break at. */
     white-space: normal;
     overflow-wrap: anywhere;
+  }
+  .process-status-action {
+    grid-column: 2;
+    min-width: 0;
+  }
+  .process-status-action .btn {
+    width: 100%;
   }
   .table {
     /* 12px (--font-xs, the app-wide table default) is too small for a list
