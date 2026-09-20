@@ -2348,7 +2348,7 @@
               />
             {/if}
             <strong>{part.name}</strong>
-            <span class="name-team"><span class="name-team-dot">·</span>{teamShortLabel(part.frc_team)}</span>
+            <span class="name-team"><span class="name-team-dot" aria-hidden="true"></span>{teamShortLabel(part.frc_team)}</span>
             {#if stepFileWarning(part) === 'missing'}
               <span class="tag tag-warning" title="No STEP file uploaded for this router part">⚠ No STEP</span>
             {:else if stepFileWarning(part) === 'invalid'}
@@ -2619,7 +2619,7 @@
                      only appears for one team means the other team's parts
                      are identified by the absence of a label, which is not
                      something you can scan for. -->
-                <span class="name-team"><span class="name-team-dot">·</span>{teamShortLabel(part.frc_team)}</span>
+                <span class="name-team"><span class="name-team-dot" aria-hidden="true"></span>{teamShortLabel(part.frc_team)}</span>
                 {#if stepFileWarning(part) === 'missing'}
                   <span class="tag tag-warning" title="No STEP file uploaded for this router part">⚠ No STEP</span>
                 {:else if stepFileWarning(part) === 'invalid'}
@@ -3682,23 +3682,27 @@
      a qualifier on the name rather than competing with it, and uncoloured -
      the number itself says which team it is. */
   .name-team {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
     color: var(--text-muted);
     font-size: 0.78rem;
     font-weight: 500;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
-  /* The separator is a full-size middot rather than a shrunken one - at the
-     surrounding text size it reads as a speck. Sized up and nudged onto the
-     text baseline so it sits between the two words rather than low against
-     the descenders. */
+  /* Drawn, not typed. A "·" glyph sits wherever the font's metrics put it -
+     which is low, small, and different in every face - and no amount of
+     vertical-align reliably fixes that. A real circle centred as a flex
+     item lands exactly between the two words at exactly the size asked
+     for. */
   .name-team-dot {
-    display: inline-block;
-    font-size: 1.25rem;
-    line-height: 0;
-    vertical-align: middle;
-    opacity: 0.55;
-    margin-right: 5px;
+    flex: none;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: 0.8;
   }
   .name-meta-requester { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
