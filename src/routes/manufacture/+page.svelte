@@ -3788,7 +3788,7 @@
      the QTY label up out of line with every other column heading - the
      headers are a uniform mono caption row and one of them was shouting. */
   .table td.quantity-col {
-    font-size: 1.2rem;
+    font-size: 1rem;
     font-weight: 600;
   }
   /* Status, Due, and Created all share this width so the three columns
