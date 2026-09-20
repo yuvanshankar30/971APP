@@ -2535,42 +2535,13 @@
               <Clock size={14} /> Start
             </button>
           {:else if part.status === 'in-progress'}
-            {#if part.workflow === 'router'}
-              {#if (!getRouterMeta(part).step || getRouterMeta(part).step === 'cam_ing') && canAdvanceRouterToCamReview(part, fusionJob)}
-                <button
-                  class="btn btn-primary btn-sm"
-                  on:click|stopPropagation={() => advanceRouterToCamReview(part)}
-                >
-                  <CircleCheck size={14} /> Review CAM
-                </button>
-              {:else if getRouterMeta(part).step === 'cam_review'}
-                {#if canCamReview}
-                  <button
-                    class="btn btn-primary btn-sm"
-                    on:click|stopPropagation={async () => { await updatePartStatus(part.id, 'cammed'); await updateRouterMeta(part, { step: 'cammed' }); setLocalStatus(part.id, 'cammed'); setLocalRouterMeta(part.id, { step: 'cammed' }); }}
-                  >
-                    {BUTTONS.CAM_REVIEWED}
-                  </button>
-                {/if}
-              {/if}
-            {:else}
-              <button class="btn btn-primary btn-sm" on:click|stopPropagation={() => advancePartStatus(part, 'cammed')}>
-                <CircleCheck size={14} /> CAM Complete
-              </button>
-            {/if}
+            <button class="btn btn-primary btn-sm" on:click|stopPropagation={() => advancePartStatus(part, 'cammed')}>
+              <CircleCheck size={14} /> CAM Complete
+            </button>
           {:else if part.status === 'cammed'}
-            {#if part.workflow === 'router'}
-              <button
-                class="btn btn-primary btn-sm"
-                on:click|stopPropagation={() => markPartMachined(part)}
-              >
-                <Wrench size={14} /> Machine
-              </button>
-            {:else}
-              <button class="btn btn-primary btn-sm" on:click|stopPropagation={() => advancePartStatus(part, 'postprocessed')}>
-                <Wrench size={14} /> Postprocess
-              </button>
-            {/if}
+            <button class="btn btn-primary btn-sm" on:click|stopPropagation={() => advancePartStatus(part, 'postprocessed')}>
+              <Wrench size={14} /> Postprocess
+            </button>
           {:else if part.status === 'postprocessed'}
             <button class="btn btn-primary btn-sm" on:click|stopPropagation={() => advancePartStatus(part, 'jprogged')}>
               <ListChecks size={14} /> JProg
@@ -2580,15 +2551,9 @@
               <Wrench size={14} /> Machine
             </button>
           {:else if part.status === 'machined'}
-            {#if part.workflow === 'router'}
-              <button class="btn btn-secondary btn-sm" on:click|stopPropagation={() => goto('/manufacture/post-processing')}>
-                <Package size={14} /> Post-process
-              </button>
-            {:else}
-              <button class="btn btn-primary btn-sm" on:click|stopPropagation={() => advancePartStatus(part, 'complete')}>
-                <Package size={14} /> Kit
-              </button>
-            {/if}
+            <button class="btn btn-primary btn-sm" on:click|stopPropagation={() => advancePartStatus(part, 'complete')}>
+              <Package size={14} /> Kit
+            </button>
           {/if}
         </div>
       </div>
@@ -2733,26 +2698,6 @@
                         <ListChecks size={13} /> Job Details
                       </button>
                     {/if}
-                    <!-- Start/Review CAM live inside this grid too (not as
-                         separate siblings below, the old layout) so a
-                         pending part's action buttons form one even 2-column
-                         grid instead of a lopsided stack. See the duplicate
-                         block below .row-actions for the !canViewCad(part)
-                         case, where there's no grid for this to join. -->
-                    {#if part.status === 'pending'}
-                      {#if part.workflow === 'router' && canAdvanceRouterToCamReview(part, fusionJob)}
-                        <button class="btn btn-secondary btn-sm" on:click={() => advanceRouterToCamReview(part)} title="Review completed Fusion CAM output">
-                          <CircleCheck size={13} /> Review CAM
-                        </button>
-                      {/if}
-                      <button
-                        class="btn btn-secondary btn-sm"
-                        on:click={() => advancePartStatus(part, 'in-progress')}
-                        title="Start Work"
-                      >
-                        <Clock size={13} /> Start
-                      </button>
-                    {/if}
                   </div>
                   {#if fusionJob}
                     {#if ['queued', 'claimed', 'processing'].includes(fusionJob.status)}
@@ -2785,7 +2730,7 @@
                   </div>
                 {/if}
               </div>
-              {#if part.status === 'pending' && !canViewCad(part)}
+              {#if part.status === 'pending'}
                 {#if part.workflow === 'router' && canAdvanceRouterToCamReview(part, fusionJob)}
                   <button class="btn btn-secondary btn-sm" on:click={() => advanceRouterToCamReview(part)} title="Review completed Fusion CAM output">
                     <CircleCheck size={13} /> Review CAM
@@ -2800,57 +2745,17 @@
                 </button>
 
               {:else if part.status === 'in-progress'}
-                {#if part.workflow === 'router'}
-                  <!-- Fusion completion is the only path from CAMing to review. -->
-                  {#if (!getRouterMeta(part).step || getRouterMeta(part).step === 'cam_ing') && canAdvanceRouterToCamReview(part, fusionJob)}
-                  <div class="actions-col">
-                    <button
-                      class="btn btn-primary btn-sm"
-                      on:click={() => advanceRouterToCamReview(part)}
-                      title="Review completed Fusion CAM output"
-                    >
-                      <CircleCheck size={13} /> Review CAM
-                    </button>
-                  </div>
-              {:else if getRouterMeta(part).step === 'cam_review'}
-                  {#if canCamReview}
-                    <div class="actions-col">
-                      <button
-                        class="btn btn-primary btn-sm"
-                        on:click={async () => { await updatePartStatus(part.id, 'cammed'); await updateRouterMeta(part, { step: 'cammed' }); setLocalStatus(part.id, 'cammed'); setLocalRouterMeta(part.id, { step: 'cammed' }); }}
-                        title={BUTTONS.CAM_REVIEWED}
-                      >
-                        {BUTTONS.CAM_REVIEWED}
-                      </button>
-                    </div>
-                  {/if}
-                  {/if}
-                {:else}
-                  <div class="actions-col">
-                    <button class="btn btn-primary btn-sm" on:click={() => advancePartStatus(part, 'cammed')} title="CAM Complete">
-                      <CircleCheck size={13} /> CAM Complete
-                    </button>
-                  </div>
-                {/if}
+                <div class="actions-col">
+                  <button class="btn btn-primary btn-sm" on:click={() => advancePartStatus(part, 'cammed')} title="CAM Complete">
+                    <CircleCheck size={13} /> CAM Complete
+                  </button>
+                </div>
               {:else if part.status === 'cammed'}
-                {#if part.workflow === 'router'}
-                  <div class="actions-col">
-                    <button
-                      class="btn btn-primary btn-sm"
-                      on:click={() => markPartMachined(part)}
-                      title="Machine"
-                    >
-                      <Wrench size={14} />
-                      Machine
-                    </button>
-                  </div>
-                {:else}
-                  <div class="actions-col">
-                    <button class="btn btn-primary btn-sm" on:click={() => advancePartStatus(part, 'postprocessed')} title="Postprocess">
-                      <Wrench size={13} /> Postprocess
-                    </button>
-                  </div>
-                {/if}
+                <div class="actions-col">
+                  <button class="btn btn-primary btn-sm" on:click={() => advancePartStatus(part, 'postprocessed')} title="Postprocess">
+                    <Wrench size={13} /> Postprocess
+                  </button>
+                </div>
               {:else if part.status === 'postprocessed'}
                 <div class="actions-col">
                   <button class="btn btn-primary btn-sm" on:click={() => advancePartStatus(part, 'jprogged')} title="JProg">
@@ -2865,15 +2770,9 @@
                 </div>
               {:else if part.status === 'machined'}
                 <div class="actions-col">
-                  {#if part.workflow === 'router'}
-                    <button class="btn btn-secondary btn-sm" on:click={() => goto('/manufacture/post-processing')} title="Continue to post-processing">
-                      <Package size={13} /> Post-process
-                    </button>
-                  {:else}
-                    <button class="btn btn-primary btn-sm" on:click={() => advancePartStatus(part, 'complete')} title="Kit">
-                      <Package size={13} /> Kit
-                    </button>
-                  {/if}
+                  <button class="btn btn-primary btn-sm" on:click={() => advancePartStatus(part, 'complete')} title="Kit">
+                    <Package size={13} /> Kit
+                  </button>
                 </div>
               {/if}
             </td>
