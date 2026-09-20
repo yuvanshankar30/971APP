@@ -1681,6 +1681,11 @@
     align-items: start;
   }
   .purchasing-main { min-width: 0; }
+  /* The global .card carries margin: var(--space-4) 0, so the first card in
+     this column started a notch lower than the rail beside it, which has no
+     top margin. Zeroing it on whichever element leads the column puts both
+     columns on the same top edge. */
+  .purchasing-main > :first-child { margin-top: 0; }
 
   .budget-rail {
     position: sticky;
