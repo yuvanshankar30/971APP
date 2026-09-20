@@ -2518,7 +2518,7 @@
                 <button class="fusion-cam-failed part-card-fusion-status" on:click={() => openFusionCamModal(part, fusionJob)} title={fusionJob.errors?.[0] || 'Unknown error'}>Fusion CAM failed - retry AutoCAM</button>
               {/if}
             {/if}
-          {:else if part.workflow === 'router' || part.workflow === 'lathe' || part.workflow === '3d-print'}
+          {:else if (part.workflow === 'router' || part.workflow === 'lathe' || part.workflow === '3d-print') && !(part.workflow === 'lathe' && canViewPdf(part))}
             <button
               class="btn btn-secondary btn-sm"
               on:click|stopPropagation={() => openCamProfileModal(part)}
@@ -2538,10 +2538,28 @@
               <button class="btn btn-secondary btn-sm" on:click={() => installPdfFile(part)} title="Download drawing PDF">
                 <Download size={14} /> Install PDF
               </button>
+              {#if !canViewCad(part)}
+                <button
+                  class="btn btn-secondary btn-sm"
+                  on:click|stopPropagation={() => openCamProfileModal(part)}
+                  title="This part was created before a file was required for its workflow - attach one to unlock the 3D viewer"
+                >
+                  <Upload size={14} /> Attach STEP or PDF
+                </button>
+                {#if nextProcessStep(part)}
+                  <button class="btn btn-secondary btn-sm" on:click|stopPropagation={() => advancePartStatus(part, nextProcessStep(part).status)}>
+                    {#if nextProcessStep(part).icon === 'start'}<Clock size={14} />
+                    {:else if nextProcessStep(part).icon === 'print'}<Upload size={14} />
+                    {:else if nextProcessStep(part).icon === 'kit'}<Package size={14} />
+                    {:else}<Wrench size={14} />{/if}
+                    {nextProcessStep(part).label}
+                  </button>
+                {/if}
+              {/if}
             </div>
           {/if}
 
-          {#if nextProcessStep(part)}
+          {#if nextProcessStep(part) && !(part.workflow === 'lathe' && !canViewCad(part) && canViewPdf(part))}
             <button class="btn btn-secondary btn-sm" on:click|stopPropagation={() => advancePartStatus(part, nextProcessStep(part).status)}>
               {#if nextProcessStep(part).icon === 'start'}<Clock size={14} />
               {:else if nextProcessStep(part).icon === 'cam'}<CircleCheck size={14} />
@@ -2723,7 +2741,7 @@
                       <button class="fusion-cam-failed" on:click={() => openFusionCamModal(part, fusionJob)} title={fusionJob.errors?.[0] || 'Unknown error'}>Fusion CAM failed - retry AutoCAM</button>
                     {/if}
                   {/if}
-                {:else if part.workflow === 'router' || part.workflow === 'lathe' || part.workflow === '3d-print'}
+                {:else if (part.workflow === 'router' || part.workflow === 'lathe' || part.workflow === '3d-print') && !(part.workflow === 'lathe' && canViewPdf(part))}
                   <div class="cad-action-grid attach-file-action" on:click|stopPropagation on:keydown|stopPropagation role="presentation">
                     <button
                       class="btn btn-secondary btn-sm"
@@ -2742,10 +2760,28 @@
                     <button class="btn btn-secondary btn-sm" on:click={() => installPdfFile(part)} title="Download drawing PDF">
                       <Download size={13} /> Install PDF
                     </button>
+                    {#if !canViewCad(part)}
+                      <button
+                        class="btn btn-secondary btn-sm"
+                        on:click={() => openCamProfileModal(part)}
+                        title="This part was created before a file was required for its workflow - attach one to unlock the 3D viewer"
+                      >
+                        <Upload size={13} /> Attach STEP or PDF
+                      </button>
+                      {#if nextProcessStep(part)}
+                        <button class="btn btn-secondary btn-sm" on:click={() => advancePartStatus(part, nextProcessStep(part).status)} title={nextProcessStep(part).label}>
+                          {#if nextProcessStep(part).icon === 'start'}<Clock size={13} />
+                          {:else if nextProcessStep(part).icon === 'print'}<Upload size={13} />
+                          {:else if nextProcessStep(part).icon === 'kit'}<Package size={13} />
+                          {:else}<Wrench size={13} />{/if}
+                          {nextProcessStep(part).label}
+                        </button>
+                      {/if}
+                    {/if}
                   </div>
                 {/if}
               </div>
-              {#if !canViewCad(part)}
+              {#if !canViewCad(part) && !(part.workflow === 'lathe' && canViewPdf(part))}
                 <div class="cad-action-grid process-action-grid">
                   <div class="process-status-action">
                     {#if nextProcessStep(part)}
@@ -3865,7 +3901,6 @@
     resize: vertical;
     font-family: inherit;
   }
-
   .version-text {
     font-size: 0.75rem;
     color: var(--neutral-500);
