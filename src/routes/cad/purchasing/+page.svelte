@@ -1681,10 +1681,16 @@
     align-items: start;
   }
   .purchasing-main { min-width: 0; }
+  /* The global .card carries margin: var(--space-4) 0, so the first card in
+     this column started a notch lower than the rail beside it, which has no
+     top margin. Zeroing it on whichever element leads the column puts both
+     columns on the same top edge. */
+  .purchasing-main > :first-child { margin-top: 0; }
 
   .budget-rail {
-    position: sticky;
-    top: var(--space-4);
+    /* Not sticky: once you have scrolled past the budgets you are working
+       the parts list, and a panel that follows you down the page is just
+       taking width from it. The rail scrolls away with the rest. */
     display: flex;
     flex-direction: column;
     gap: var(--space-3);
@@ -1727,7 +1733,6 @@
      above the list rather than squeezing the table into a narrow column. */
   @media (max-width: 1200px) {
     .purchasing-layout { grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
-    .budget-rail { position: static; }
   }
 
   .badge {
