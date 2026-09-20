@@ -3640,6 +3640,9 @@
     overflow-wrap: anywhere;
   }
   .table {
+    /* 12px (--font-xs, the app-wide table default) is too small for a list
+       read at arm's length off a shop monitor. */
+    font-size: var(--font-sm);
     table-layout: fixed;
     /* Fills the container and shares it out proportionally, rather than
        being sized to the sum of fixed column widths. Those fixed widths
@@ -3679,7 +3682,7 @@
     min-width: 0;
     margin-top: 2px;
     color: var(--text-muted);
-    font-size: 0.72rem;
+    font-size: 0.8rem;
     line-height: 1.35;
     white-space: nowrap;
     overflow: hidden;
@@ -3755,6 +3758,8 @@
   .table td.quantity-col {
     width: 5%;
     text-align: center;
+    font-size: 1.05rem;
+    font-weight: 600;
     /* Tabular figures so a column of quantities does not jitter in width
        from row to row. Kept centered rather than right-aligned (the usual
        rule for numbers) because every other column in this table is
@@ -3850,7 +3855,7 @@
      At the table's base size everything sat at the same visual weight,
      which is most of why the row read as flat. */
   .name-line strong {
-    font-size: 0.95rem;
+    font-size: 1.05rem;
     font-weight: 650;
     line-height: 1.25;
     color: var(--text);
