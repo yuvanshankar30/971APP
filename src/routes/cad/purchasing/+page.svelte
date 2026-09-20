@@ -86,49 +86,6 @@
     return true;
   });
 
-  // The stages a purchase actually moves through, in order. A procurement
-  // page's first question is "what is waiting on me, and what is in
-  // flight?" - answering that previously meant guessing at a status
-  // dropdown, so the pipeline below turns each stage into a visible count
-  // you can click to filter by.
-  const PURCHASE_STAGES = [
-    { key: 'pending', label: 'Awaiting approval' },
-    { key: 'approved', label: 'Approved' },
-    { key: 'ordered', label: 'Ordered' },
-    { key: 'delivered', label: 'Delivered' },
-    { key: 'kitted', label: 'Kitted' }
-  ];
-
-  const partStatus = (part) => (part?.status || 'pending').toString().toLowerCase();
-  const partLineValue = (part) => (Number(part?.final_price ?? part?.price) || 0) * (Number(part?.quantity) || 1);
-
-  // Counted against everything the current filters ALREADY allow except the
-  // status filter itself - otherwise clicking "Ordered" would collapse
-  // every other stage to zero and the strip would stop being a pipeline.
-  $: stageSourceParts = parts.filter((part) => {
-    if (partStatus(part) === 'rejected') return false;
-    if (vendorFilter && (part.vendor || '').toString().toLowerCase() !== vendorFilter.toString().toLowerCase()) return false;
-    if (projectFilter && (part.project_id || '').toString() !== projectFilter.toString()) return false;
-    if (!passesTeamFilter(part.frc_team, show971, show9584)) return false;
-    if (!passesSeasonFilter(part.created_at, seasonFilter)) return false;
-    return true;
-  });
-
-  $: purchaseStages = PURCHASE_STAGES.map((stage) => {
-    const items = stageSourceParts.filter((part) => partStatus(part) === stage.key);
-    return {
-      ...stage,
-      count: items.length,
-      value: items.reduce((sum, part) => sum + partLineValue(part), 0)
-    };
-  });
-
-  function toggleStageFilter(stageKey) {
-    statusFilter = statusFilter === stageKey ? '' : stageKey;
-  }
-
-  const money = (value) => `$${(Number(value) || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
-  
   let showKittingModal = false;
   let selectedPart = null;
   let showLinkModal = false;
@@ -1023,45 +980,15 @@
         </div>
     </div>
 
-    <!-- Pinned Budgets Section -->
-    {#if pinnedBudgets.length > 0}
-      <div class="budgets-section">
-        <div class="section-header-row">
-          <h3>Pinned Budgets</h3>
-          <button class="btn btn-sm btn-outline" on:click={() => showPinModal = true}>
-            <Settings size={14} /> Manage Pins
-          </button>
-        </div>
-        <div class="budgets-grid">
-          {#each pinnedBudgets as budget}
-            <div class="budget-card">
-              <div class="budget-header">
-                <span class="budget-name">{budget.name}</span>
-                <span class="badge scope-{budget.scope_type}">{budget.scope_type === 'project' ? 'Proj' : budget.scope_type}</span>
-              </div>
-              <div class="budget-progress">
-                <div class="progress-bar">
-                  <div 
-                    class="progress-fill" 
-                    class:over={budget.spent > budget.amount}
-                    style="width: {Math.min((budget.spent / budget.amount) * 100, 100)}%"
-                  ></div>
-                </div>
-              </div>
-              <div class="budget-stats">
-                <span class:text-danger={budget.spent > budget.amount}>${budget.spent.toLocaleString()}</span>
-                <span class="text-muted"> / ${Number(budget.amount).toLocaleString()}</span>
-              </div>
-            </div>
-          {/each}
-        </div>
+    <!-- Budget pins live behind this button. The pinned-budget cards and
+         the stage pipeline that sat here were both removed by request; the
+         control moves to the left, where the row was otherwise empty. -->
+    {#if !loading && user}
+      <div class="budget-pins-row">
+        <button class="btn btn-sm btn-text" on:click={() => showPinModal = true}>
+          <Settings size={14} /> Manage Budget Pins
+        </button>
       </div>
-    {:else if !loading && user}
-       <div style="margin-bottom: 2rem; display: flex; justify-content: flex-end;">
-          <button class="btn btn-sm btn-text" on:click={() => showPinModal = true}>
-            <Settings size={14} /> Manage Budget Pins
-          </button>
-       </div>
     {/if}
 
     {#if orderMode}
@@ -1075,29 +1002,6 @@
         </div>
       </div>
     {/if}
-
-    <!-- Request-to-kit pipeline. Each stage is a filter toggle, so the
-         answer to "what is waiting on me" is one click, not a dropdown. -->
-    <div class="pipeline" role="group" aria-label="Filter by purchase stage">
-      {#each purchaseStages as stage, index (stage.key)}
-        <button
-          type="button"
-          class="pipeline-stage"
-          class:active={statusFilter === stage.key}
-          class:empty={stage.count === 0}
-          aria-pressed={statusFilter === stage.key}
-          on:click={() => toggleStageFilter(stage.key)}
-        >
-          <span class="pipeline-step">{index + 1}</span>
-          <span class="pipeline-label">{stage.label}</span>
-          <span class="pipeline-count">{stage.count}</span>
-          <span class="pipeline-value">{stage.count ? money(stage.value) : '—'}</span>
-        </button>
-      {/each}
-      {#if statusFilter}
-        <button type="button" class="pipeline-clear" on:click={() => (statusFilter = '')}>Clear stage filter</button>
-      {/if}
-    </div>
 
     <div class="card">
       <div class="filters">
@@ -1739,42 +1643,9 @@
   </div>
 {/if}
 
-<style>
-  /* Budgets Styles */
-  .budgets-section {
+<style>.budgets-section {
     margin: 0 0 2rem 0;
     padding: 0;
-  }
-  .section-header-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 1rem;
-  }
-  .section-header-row h3 {
-    margin: 0;
-    font-size: 1.25rem;
-    color: var(--text);
-  }
-  .budgets-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-    gap: var(--gap-3);
-  }
-  .budget-card {
-    background: var(--surface-1);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    padding: var(--space-3);
-    display: flex;
-    flex-direction: column;
-    gap: var(--gap-2);
-  }
-  .budget-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: var(--gap-2);
   }
   .budget-name {
     font-weight: 600;
@@ -1785,6 +1656,14 @@
     flex: 1;
     min-width: 0;
   }
+  /* Left-aligned: this button used to be pushed to the far right with the
+     whole row empty beside it. */
+  .budget-pins-row {
+    display: flex;
+    justify-content: flex-start;
+    margin-bottom: var(--space-4);
+  }
+
   .badge {
     display: inline-flex;
     align-items: center;
@@ -1819,102 +1698,7 @@
     letter-spacing: 0.04em;
   }
 
-  /* Request-to-kit pipeline. Reads as one continuous run of stages rather
-     than five detached cards: shared hairline borders, no gaps, and only
-     the selected stage carries the gold. Counts are the loudest thing in
-     each cell because the count is the question being asked. */
-  .pipeline {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-    border: 1px solid var(--border);
-    background: var(--surface-1);
-    margin-bottom: var(--space-4);
-  }
-  .pipeline-stage {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    grid-template-rows: auto auto;
-    align-items: baseline;
-    gap: 2px var(--space-2);
-    padding: var(--space-3) var(--space-4);
-    border: 0;
-    border-left: 1px solid var(--border);
-    background: none;
-    color: inherit;
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
-    transition: background-color 0.12s ease;
-  }
-  .pipeline-stage:first-child { border-left: 0; }
-  .pipeline-stage:hover { background: var(--surface-2); }
-  .pipeline-stage:focus-visible { outline: 2px solid var(--brand-gold-strong); outline-offset: -2px; }
-  .pipeline-stage.active { background: var(--brand-gold-soft); box-shadow: inset 0 -2px 0 var(--brand-gold-strong); }
-  /* A stage with nothing in it should recede rather than demand a read. */
-  .pipeline-stage.empty .pipeline-count,
-  .pipeline-stage.empty .pipeline-label { color: var(--text-muted); }
 
-  .pipeline-step {
-    grid-row: 1 / span 2;
-    align-self: center;
-    display: inline-flex; align-items: center; justify-content: center;
-    width: 22px; height: 22px;
-    border: 1px solid var(--border);
-    font-family: var(--font-mono-stack);
-    font-size: 0.66rem;
-    color: var(--text-muted);
-  }
-  .pipeline-stage.active .pipeline-step { border-color: var(--brand-gold-strong); color: var(--brand-gold-strong); }
-  .pipeline-label {
-    font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.06em;
-    color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  }
-  .pipeline-count {
-    grid-column: 2;
-    font-size: 1.35rem; font-weight: 700; line-height: 1.1;
-    font-variant-numeric: tabular-nums;
-  }
-  .pipeline-value {
-    grid-column: 2;
-    font-family: var(--font-mono-stack); font-size: 0.72rem; color: var(--text-muted);
-    font-variant-numeric: tabular-nums;
-  }
-  .pipeline-clear {
-    grid-column: 1 / -1;
-    border: 0; border-top: 1px solid var(--border);
-    background: none; color: var(--text-secondary);
-    padding: var(--space-2); font: inherit; font-size: 0.75rem; cursor: pointer;
-  }
-  .pipeline-clear:hover { background: var(--surface-2); color: var(--text); }
-
-  @media (max-width: 640px) {
-    .pipeline { grid-template-columns: repeat(2, 1fr); }
-    .pipeline-stage { border-top: 1px solid var(--border); }
-    .pipeline-stage:nth-child(-n+2) { border-top: 0; }
-    .pipeline-stage:nth-child(odd) { border-left: 0; }
-    .pipeline-count { font-size: 1.15rem; }
-  }
-
-  .progress-bar {
-    height: 6px;
-    background: var(--surface-2);
-    border-radius: 3px;
-    overflow: hidden;
-  }
-  .progress-fill {
-    height: 100%;
-    background: var(--brand-gold-strong);
-    border-radius: 3px;
-  }
-  .progress-fill.over { background: var(--red-strong); }
-
-  .budget-stats {
-    display: flex;
-    justify-content: flex-end;
-    font-size: 0.75rem;
-    font-weight: 500;
-  }
-  .text-danger { color: var(--red-strong); }
   
   .btn-text {
     background: none;
