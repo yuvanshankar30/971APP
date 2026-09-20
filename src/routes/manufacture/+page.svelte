@@ -153,6 +153,7 @@
     { value: 'cam_review', label: 'CAM Review Pending' },
     { value: 'postprocessed', label: 'Postprocessed' },
     { value: 'jprogged', label: 'Jprogged' },
+    { value: 'printed', label: 'Printed' },
     { value: 'machined', label: 'Machined' },
     { value: 'complete', label: 'Complete' }
   ];
@@ -183,6 +184,13 @@
     const status = String(part?.status || 'pending').toLowerCase();
     if (status === 'pending') return { status: 'in-progress', label: 'Start', icon: 'start' };
     if (part?.workflow !== 'router') {
+      if (part.workflow === '3d-print') {
+        if (['in-progress', 'cammed', 'postprocessed', 'jprogged'].includes(status)) {
+          return { status: 'printed', label: 'Printed', icon: 'print' };
+        }
+        if (status === 'printed' || status === 'machined') return { status: 'complete', label: 'Kit', icon: 'kit' };
+        return null;
+      }
       if (['in-progress', 'cammed', 'postprocessed', 'jprogged'].includes(status)) {
         return { status: 'machined', label: 'Machined', icon: 'machine' };
       }
@@ -2538,6 +2546,7 @@
               {#if nextProcessStep(part).icon === 'start'}<Clock size={14} />
               {:else if nextProcessStep(part).icon === 'cam'}<CircleCheck size={14} />
               {:else if nextProcessStep(part).icon === 'jprog'}<ListChecks size={14} />
+              {:else if nextProcessStep(part).icon === 'print'}<Upload size={14} />
               {:else if nextProcessStep(part).icon === 'kit'}<Package size={14} />
               {:else}<Wrench size={14} />{/if}
               {nextProcessStep(part).label}
@@ -2692,6 +2701,7 @@
                           {#if nextProcessStep(part).icon === 'start'}<Clock size={13} />
                           {:else if nextProcessStep(part).icon === 'cam'}<CircleCheck size={13} />
                           {:else if nextProcessStep(part).icon === 'jprog'}<ListChecks size={13} />
+                          {:else if nextProcessStep(part).icon === 'print'}<Upload size={13} />
                           {:else if nextProcessStep(part).icon === 'kit'}<Package size={13} />
                           {:else}<Wrench size={13} />{/if}
                           {nextProcessStep(part).label}
@@ -2740,6 +2750,7 @@
                         {#if nextProcessStep(part).icon === 'start'}<Clock size={13} />
                         {:else if nextProcessStep(part).icon === 'cam'}<CircleCheck size={13} />
                         {:else if nextProcessStep(part).icon === 'jprog'}<ListChecks size={13} />
+                        {:else if nextProcessStep(part).icon === 'print'}<Upload size={13} />
                         {:else if nextProcessStep(part).icon === 'kit'}<Package size={13} />
                         {:else}<Wrench size={13} />{/if}
                         {nextProcessStep(part).label}
