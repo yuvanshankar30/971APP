@@ -168,6 +168,9 @@ browser confirmation or prompt popups.
   The signed-in home dashboard balances direct links to Manufacturing,
   Purchasing, and Scouting, while keeping each scout's personal assignment
   queue available without filling the page with duplicate scouting tools.
+  **My Scout** also puts up to 20 incomplete match, note, and quick-scout
+  assignments in a fixed two-row worklist above that scout's submitted reports,
+  so the page remains stable while completed work leaves the queue.
   It polls The Blue Alliance for the configured competition every minute and
   shows the current/up-next match number plus both alliances' team numbers.
   The Drive Team page shows every completed 971 match newest-first with a
