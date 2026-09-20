@@ -3648,12 +3648,11 @@
        columns keep the same relative layout at every width and simply get
        tighter, which is far better than hiding controls off-screen. */
     width: 100%;
-    /* Full-bleed gave this page the room it needed, but on a 3000px+ shop
-       monitor an unbounded table stretches six columns across the whole
-       wall and leaves each one marooned in its own empty space. Capping it
-       keeps the proportions readable while still using far more width than
-       the old --page-max-width shell allowed. */
-    max-width: 2100px;
+    /* No max-width: the table uses the full bleed. The proportion problem
+       was never the overall width - it was the column percentages summing
+       to 69% and letting the browser scatter the remaining third into gaps.
+       With them summing to 100% the columns stay balanced at any width, so
+       capping the table would only give back empty margins. */
     margin: 0 auto;
   }
   .table th.workflow-col,
