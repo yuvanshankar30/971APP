@@ -1688,8 +1688,9 @@
   .purchasing-main > :first-child { margin-top: 0; }
 
   .budget-rail {
-    position: sticky;
-    top: var(--space-4);
+    /* Not sticky: once you have scrolled past the budgets you are working
+       the parts list, and a panel that follows you down the page is just
+       taking width from it. The rail scrolls away with the rest. */
     display: flex;
     flex-direction: column;
     gap: var(--space-3);
@@ -1732,7 +1733,6 @@
      above the list rather than squeezing the table into a narrow column. */
   @media (max-width: 1200px) {
     .purchasing-layout { grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
-    .budget-rail { position: static; }
   }
 
   .badge {
