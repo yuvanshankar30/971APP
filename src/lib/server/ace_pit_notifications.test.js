@@ -171,7 +171,7 @@ describe('ACE pit Slack notifications', () => {
       const result = await backfillUnsentAcePitProblems({ supa, notify });
       expect(notify.mock.calls[0][0].id).toBe('older');
       expect(notify.mock.calls[1][0].id).toBe('newer');
-      expect(result).toEqual({ ok: true, sent: 2, failed: 0, total: 2 });
+      expect(result).toEqual({ ok: true, sent: 2, failed: 0, total: 2, failure_reasons: {} });
     });
 
     it('counts a failed delivery instead of throwing, so one bad report cannot block the rest', async () => {
@@ -181,7 +181,24 @@ describe('ACE pit Slack notifications', () => {
       const notify = vi.fn().mockResolvedValue({ ok: false, reason: 'slack-error' });
 
       const result = await backfillUnsentAcePitProblems({ supa, notify });
-      expect(result).toEqual({ ok: true, sent: 0, failed: 1, total: 1 });
+      expect(result).toEqual({ ok: true, sent: 0, failed: 1, total: 1, failure_reasons: { 'slack-error': 1 } });
+    });
+
+    it('reports WHY each failure happened, not just a count, so a real backfill run is diagnosable', async () => {
+      const unsent = [
+        { ...problem, id: 'a' },
+        { ...problem, id: 'b' },
+        { ...problem, id: 'c' }
+      ];
+      const order = vi.fn().mockResolvedValue({ data: unsent, error: null });
+      const supa = { from: () => ({ select: () => ({ is: () => ({ order }) }) }) };
+      const notify = vi.fn()
+        .mockResolvedValueOnce({ ok: false, reason: 'not_in_channel' })
+        .mockResolvedValueOnce({ ok: false, reason: 'not_in_channel' })
+        .mockResolvedValueOnce({ ok: false, reason: 'channel_not_found' });
+
+      const result = await backfillUnsentAcePitProblems({ supa, notify });
+      expect(result.failure_reasons).toEqual({ not_in_channel: 2, channel_not_found: 1 });
     });
   });
 });

@@ -352,12 +352,22 @@ export async function backfillUnsentAcePitProblems(dependencies = {}) {
 
   let sent = 0;
   let failed = 0;
+  // The reason strings (deduplicated, capped) so a caller has enough to
+  // actually diagnose a failed backfill - "64 failed" alone means re-running
+  // this is a shot in the dark instead of a real fix.
+  const failureReasons = new Map();
+  const recordFailure = (reason) => {
+    const key = reason || 'unknown-error';
+    failureReasons.set(key, (failureReasons.get(key) || 0) + 1);
+    failed += 1;
+  };
+
   for (const problem of data || []) {
     const latestObservation = Array.isArray(problem.scout_observations) ? problem.scout_observations.at(-1) : null;
     const scoutName = latestObservation?.scout_name || null;
     const result = await notify(problem, scoutName, dependencies);
     if (!result?.ok) {
-      failed += 1;
+      recordFailure(result?.reason);
       continue;
     }
     const slackDelivery = {
@@ -368,10 +378,16 @@ export async function backfillUnsentAcePitProblems(dependencies = {}) {
     };
     const { error: updateError } = await supa.from('pit_problem_reports').update(slackDelivery).eq('id', problem.id);
     if (updateError) {
-      failed += 1;
+      recordFailure(updateError.message);
       continue;
     }
     sent += 1;
   }
-  return { ok: true, sent, failed, total: (data || []).length };
+  return {
+    ok: true,
+    sent,
+    failed,
+    total: (data || []).length,
+    failure_reasons: Object.fromEntries(failureReasons)
+  };
 }
