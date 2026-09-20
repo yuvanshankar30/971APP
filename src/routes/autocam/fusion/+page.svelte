@@ -248,28 +248,36 @@
      this page used to define. The tab bar itself reverted back to this
      page's own underline-tab style below (Manufacturing's .subtabs pill
      look didn't render cleanly for a <button>-based switcher - see the
-     reverted attempt's own history). */
+     reverted attempt's own history). Kept as an underline style on redesign
+     too, just tightened up - a heavier active state (bold label + a thicker
+     accent rule) and a hairline separator so the row reads as one connected
+     bar rather than floating buttons above the page content. */
+  .page-header h1 {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
   .tab-nav {
     display: flex;
-    gap: 0.5rem;
+    gap: var(--space-1);
     border-bottom: 1px solid var(--border);
-    margin: 1rem 0 1.5rem;
+    margin: var(--space-4) 0 var(--space-6);
     overflow-x: auto;
   }
   .tab-nav button {
     display: flex;
     align-items: center;
     gap: 0.4rem;
-    padding: 0.6rem 1rem;
+    padding: var(--space-3) var(--space-4);
     background: none;
     border: none;
     border-bottom: 2px solid transparent;
     color: var(--text-muted);
     cursor: pointer;
     white-space: nowrap;
-    font-size: 0.95rem;
-    border-radius: 8px 8px 0 0;
-    transition: color 0.15s, background 0.15s;
+    font-size: 0.9rem;
+    font-weight: 500;
+    transition: color 0.12s ease, background-color 0.12s ease, border-color 0.12s ease;
   }
   .tab-nav button:hover {
     color: var(--text);
@@ -277,28 +285,29 @@
   }
   .tab-nav button.active {
     background: none;
-    color: var(--accent);
+    color: var(--accent-strong);
+    font-weight: 700;
     border-bottom-color: var(--accent);
   }
   .quick-queue-choice-modal { width: min(420px, 92vw); }
-  .quick-queue-choice-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-top: 0.75rem; }
+  .quick-queue-choice-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); margin-top: var(--space-3); }
   .quick-queue-choice-button {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.5rem;
-    padding: 1.25rem 0.75rem;
-    background: var(--surface-2, #f7f7f5);
+    gap: var(--space-2);
+    padding: var(--space-5) var(--space-3);
+    background: var(--surface-2);
     border: 1px solid var(--border);
-    border-radius: var(--radius-md, 10px);
+    border-radius: var(--radius-lg);
     color: var(--text);
     font-size: 0.95rem;
     font-weight: 600;
     cursor: pointer;
-    transition: border-color 0.15s, background 0.15s;
+    transition: border-color 0.12s ease, background-color 0.12s ease;
   }
   .quick-queue-choice-button:hover, .quick-queue-choice-button:focus-visible {
-    border-color: var(--accent);
+    border-color: var(--accent-strong);
     background: var(--surface-1);
     outline: none;
   }

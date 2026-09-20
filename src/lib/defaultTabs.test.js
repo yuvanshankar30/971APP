@@ -27,12 +27,12 @@ const savedNav = () => [
 describe('defaultHeaderTabs', () => {
   it('puts Manufacturing and Competition before CAD and Purchasing', () => {
     const order = defaultHeaderTabs().map((tab) => tab.key || tab.label);
-    expect(order).toEqual(['Manufacturing', 'Competition', 'CAD', 'purchasing', 'docs']);
+    expect(order).toEqual(['Manufacturing', 'Competition', 'CAD', 'purchasing']);
   });
 
   it('matches the shared header order after the separately rendered Home tab', () => {
     const order = ['home', ...defaultHeaderTabs().map((tab) => tab.key || tab.label), 'admin'];
-    expect(order).toEqual(['home', 'Manufacturing', 'Competition', 'CAD', 'purchasing', 'docs', 'admin']);
+    expect(order).toEqual(['home', 'Manufacturing', 'Competition', 'CAD', 'purchasing', 'admin']);
   });
 
   it('groups CAD, Build, and Files together in the CAD folder', () => {

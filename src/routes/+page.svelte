@@ -247,8 +247,14 @@
   // a fixed minimum width just means an ever-taller stack of rows. Shrink
   // the grid's own minimum column width as the count climbs past a normal
   // event's worth, so more of them fit per row instead of only adding rows.
-  // Never shrinks below 110px (still fits "Match #qm123 / Team 9999").
-  $: assignmentGridMinWidth = Math.max(110, 200 - Math.max(0, myScoutAssignments.length - 8) * 6);
+  // Never shrinks below 100px (h5/p now truncate with an ellipsis instead of
+  // wrapping, so a narrower card never looks broken).
+  // Base width dropped from 200 to 145: with 8 or fewer live assignments the
+  // old 200px basis + auto-fit's row-filling stretch is what made a short
+  // card grid balloon out to full-width, wide cards - direct report: "data
+  // scouting - Match #qm61" had room to wrap onto a second line at that
+  // width instead of fitting on one.
+  $: assignmentGridMinWidth = Math.max(100, 145 - Math.max(0, myScoutAssignments.length - 8) * 6);
 
   // Pre-scouting assignment state - teams assigned to this user to research
   // ahead of the event (see /scouting-admin's PitAssignmentPanel,
@@ -765,7 +771,7 @@
                 {#if myScoutAssignments.length === 0}
                   <p class="muted">No open scouting assignments right now.</p>
                 {:else}
-                  <div class="card-grid" style="grid-template-columns: repeat(auto-fit, minmax({assignmentGridMinWidth}px, 1fr));">
+                  <div class="card-grid" style="grid-template-columns: repeat(auto-fill, minmax({assignmentGridMinWidth}px, 1fr));">
                     {#each myScoutAssignments as assignment}
                       <a class="assignment-card" class:completed={!!assignment.completed_at} href={scoutAssignmentHref(assignment)}>
                         <h5>{assignment.scouting_type} scouting - Match #{assignment.match_key.split('_').pop()}</h5>
@@ -2108,8 +2114,12 @@
 
   .card-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: var(--gap-3);
+    /* auto-fill (not auto-fit) so a short list on a wide screen keeps
+       compact, basis-width cards instead of stretching each one to fill
+       the leftover row width - that stretch was why "data scouting - Match
+       #qm61" had room to wrap onto a second line instead of fitting on one. */
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: var(--gap-2);
     margin-top: var(--space-2);
     /* Caps how tall a long assignment list can push the page - scrolls
        internally past that instead (part of the page-wide no-scroll
@@ -2125,7 +2135,7 @@
     background: var(--surface-1);
     border: 1px solid var(--border);
     border-left: 3px solid var(--brand-gold-strong);
-    padding: var(--space-4) var(--space-5);
+    padding: var(--space-2) var(--space-3);
     transition: border-color 0.1s ease, background-color 0.1s ease;
   }
 
@@ -2135,8 +2145,22 @@
     border-left-color: var(--accent-strong);
   }
 
-  .assignment-card h5 { margin: 0 0 var(--space-1) 0; color: var(--secondary); }
-  .assignment-card p { margin: 0; color: var(--neutral-500); font-size: var(--font-xs); }
+  /* Was truncated with an ellipsis at one point - direct report: that cut
+     "Match #qm61" off entirely instead of just tightening the layout. Left
+     free to wrap (its natural behavior) so the full match number always
+     stays visible; a smaller font is what actually keeps most cards to one
+     line at this width, not clipping the text. */
+  .assignment-card h5 {
+    margin: 0 0 var(--space-1) 0;
+    color: var(--secondary);
+    font-size: 0.8rem;
+    line-height: 1.25;
+  }
+  .assignment-card p {
+    margin: 0;
+    color: var(--neutral-500);
+    font-size: var(--font-xs);
+  }
   .assignment-card.completed { opacity: 0.72; border-left-color: var(--success, #2e7d32); }
   .assignment-card.completed:hover { opacity: 1; }
   .completed-badge {

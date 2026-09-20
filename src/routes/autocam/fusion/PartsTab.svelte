@@ -1290,14 +1290,26 @@
                       {/if}
                     </span>
                   {/if}
-                  {#if part.epic} - {part.epic}{/if}
+                  {#if part.epic}{part.ticket ? '' : ' -'} {part.epic}{/if}
                   {#if part.ticket} - {part.ticket}{/if}
-                  {#if part.project_id} - project <strong>{part.project_id}</strong>{/if}
-                  {#if part.stock_assignment} - stock <strong>{part.stock_assignment}</strong>{/if}
-                  {#if part.parts} - linked to <strong>{part.parts.name}</strong>{/if}
-                  {#if part.fusion_file_name} - Fusion file name: <strong>{part.fusion_file_name}</strong>{/if}
-                  {#if part.created_at} - added {formatPacificDateTime(part.created_at)}{/if}
                 </p>
+                {#if part.project_id || part.stock_assignment}
+                  <p class="cam-form-hint">
+                    {#if part.project_id}project <strong>{part.project_id}</strong>{/if}
+                    {#if part.project_id && part.stock_assignment} - {/if}
+                    {#if part.stock_assignment}stock <strong>{part.stock_assignment}</strong>{/if}
+                  </p>
+                {/if}
+                {#if part.parts || part.fusion_file_name}
+                  <p class="cam-form-hint">
+                    {#if part.parts}linked to <strong>{part.parts.name}</strong>{/if}
+                    {#if part.parts && part.fusion_file_name} - {/if}
+                    {#if part.fusion_file_name}Fusion file name: <strong>{part.fusion_file_name}</strong>{/if}
+                  </p>
+                {/if}
+                {#if part.created_at}
+                  <p class="cam-form-hint">added {formatPacificDateTime(part.created_at)}</p>
+                {/if}
                 <div class="cam-list-actions">
                   {#if part.parts}
                     <a class="btn btn-secondary btn-sm" href="/manufacture?part={part.part_id}">
@@ -1726,61 +1738,9 @@
 {/if}
 
 <style>
-  .cad-modal { width: min(900px, 94vw); }
-  .cad-modal .modal-body { min-height: 60vh; }
+  @import '../fusion/_autocam-shared.css';
   .stock-group { margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid var(--border); }
   .stock-group:first-of-type { margin-top: 1rem; padding-top: 0; border-top: none; }
-  .group-header { flex-wrap: wrap; margin-bottom: 0.75rem; }
-  .group-header h3 { margin: 0; }
-  .recent-queue-picker { margin: 0.75rem 0; }
-  .recent-queue-header { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
-  .recent-queue-search { max-width: 240px; width: 100%; }
-  .recent-queue-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.45rem; }
-  .recent-queue-button {
-    display: grid;
-    gap: 0.15rem;
-    min-width: 0;
-    min-height: 3.6rem;
-    padding: 0.5rem 0.6rem;
-    text-align: left;
-    color: var(--text);
-    background: var(--surface-2, #f7f7f5);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm, 6px);
-    cursor: pointer;
-  }
-  .recent-queue-button { transition: border-color 0.15s, background 0.15s, box-shadow 0.15s; }
-  .recent-queue-button:hover, .recent-queue-button:focus-visible { border-color: var(--accent); background: var(--surface-1); outline: none; }
-  .recent-queue-button.selected {
-    border-color: var(--accent);
-    /* A tint of the theme's own accent rather than a hardcoded color, so
-       this reads as "picked" in every Spartans Hub theme instead of just
-       the one it was designed against. */
-    background: color-mix(in srgb, var(--accent) 12%, var(--primary));
-    box-shadow: inset 0 0 0 1px var(--accent);
-  }
-  .recent-queue-name, .recent-queue-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .recent-queue-name { font-weight: 600; font-size: 0.8rem; display: flex; align-items: center; gap: 0.25rem; }
-  .recent-queue-detail { color: var(--text-muted); font-size: 0.72rem; }
-  @media (max-width: 640px) { .recent-queue-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-  .cam-list-toolbar { display: flex; justify-content: space-between; align-items: flex-end; gap: 1.5rem; margin-bottom: 0.5rem; flex-wrap: wrap; }
-  .tab-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-  .tab-filters { flex: 1 1 32rem; --filters-columns: 2fr 1fr 1fr; margin: 0; }
-  .form-row { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
-  .form-row-final { padding-top: 0.75rem; border-top: 1px solid var(--border); }
-  .form-row .form-group { flex: 1; min-width: 160px; }
-  .cam-list { display: flex; flex-direction: column; gap: 0.75rem; }
-  .cam-list-item { padding: 1rem; }
-  .cam-list-header { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
-  .rename-control { display: flex; align-items: center; gap: 0.35rem; min-width: 0; }
-  .rename-input { padding: 0.2rem 0.4rem; height: auto; width: auto; min-width: 10rem; }
-  .cam-list-header-left { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
-  .cam-list-header-right { display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0; }
-  .bulk-select-checkbox { width: 1rem; height: 1rem; flex-shrink: 0; cursor: pointer; }
-  .bulk-select-bar { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.5rem 0.75rem; margin-bottom: 0.6rem; border: 1px solid var(--border); border-radius: var(--radius-md, 10px); background: var(--surface-2, #f7f7f5); flex-wrap: wrap; }
-  .quantity-control { display: inline-flex; }
-  .quantity-input { min-width: 4rem; width: 4rem; }
-  .cam-list-actions { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; flex-wrap: wrap; }
   .group-part-picker { border: 1px solid var(--border); border-radius: var(--radius-md, 10px); padding: 0.85rem 0.9rem; margin: 0 0 0.75rem; background: var(--surface-2, #f7f7f5); }
   .group-part-picker legend { color: var(--text-muted); font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; padding: 0 0.35rem; }
   .group-part-summary { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap; font-size: 0.8rem; font-weight: 500; color: var(--text-muted); margin-bottom: 0.6rem; }
@@ -1840,8 +1800,6 @@
     margin-top: 0.1rem;
   }
   .grouped-qty-input { min-width: 4rem; width: 4rem; height: var(--control-height, 2.25rem); }
-  .empty-state { color: var(--text-muted, #888); padding: 2rem 0; text-align: center; }
-  .cam-form-hint { color: var(--text-muted, #888); font-size: 0.85rem; margin: 0.25rem 0 0; }
   .depth-hint strong { color: var(--text, #111); }
   .locked-step-file {
     display: flex;
@@ -1859,7 +1817,6 @@
     font-size: 0.85rem;
     margin: 0 0 0.75rem;
   }
-  .queue-subsection { margin-top: 1rem; padding-left: 0.75rem; border-left: 2px solid var(--border); }
   .queue-tool-mode { margin-bottom: 0.75rem; }
   .queue-tool-mode-header { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.35rem; }
   .queue-tool-mode-header .form-label { margin: 0; }
@@ -1869,39 +1826,7 @@
   .segmented-control button:last-child { border-right: 0; }
   .segmented-control button.active { background: var(--accent); color: var(--accent-contrast, #fff); }
   .segmented-control button:disabled { color: var(--text-muted); cursor: not-allowed; }
-  .queue-subheader { display: flex; align-items: center; gap: 0.4rem; margin: 0 0 0.5rem; font-size: 0.95rem; }
-  .queue-modal { max-width: 32rem; }
-  .queue-picker-modal { --modal-width: 46rem; }
   .modal-header-actions { display: inline-flex; align-items: center; gap: 0.25rem; }
   .date-with-clear { display: flex; align-items: center; gap: 0.5rem; }
   .date-with-clear .form-input { flex: 1; min-width: 0; }
-  .folder-tree-box {
-    max-height: 16rem;
-    overflow-y: auto;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm, 6px);
-    padding: 0.35rem;
-  }
-  .folder-picker-header { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.4rem; }
-  .folder-search { max-width: 220px; height: 2rem; padding: 0.25rem 0.5rem; font-size: 0.8rem; }
-  .folder-search-result {
-    display: flex;
-    align-items: center;
-    gap: 0.45rem;
-    width: 100%;
-    text-align: left;
-    background: none;
-    border: none;
-    padding: 0.4rem 0.6rem;
-    border-radius: var(--radius-sm, 6px);
-    cursor: pointer;
-    color: var(--text);
-    font-size: 0.9rem;
-  }
-  .folder-search-result:hover { background: var(--surface-2); }
-  .folder-search-result.selected { background: var(--accent-soft, rgba(47, 129, 247, 0.14)); color: var(--accent); font-weight: 600; }
-  .folder-search-name { flex-shrink: 0; }
-  /* The full path is what disambiguates two folders with the same leaf
-     name, so it stays visible - but it yields the horizontal space first. */
-  .folder-search-path { color: var(--text-muted); font-size: 0.75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>
