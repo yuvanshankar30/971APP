@@ -151,6 +151,8 @@
     { value: 'inspection', label: 'Inspection' },
     { value: 'cammed', label: 'CAM Reviewed' },
     { value: 'cam_review', label: 'CAM Review Pending' },
+    { value: 'postprocessed', label: 'Postprocessed' },
+    { value: 'jprogged', label: 'Jprogged' },
     { value: 'machined', label: 'Machined' },
     { value: 'complete', label: 'Complete' }
   ];
@@ -163,14 +165,11 @@
     return part?.status === 'complete';
   }
 
-  // A part's route through the shop. Every workflow is a sequence of
-  // stages, and the single most useful thing the list can say is WHERE
-  // along that sequence a part currently sits - a laser-cut part has three
-  // stops, a router part has eight, and "Pending" means something quite
-  // different in each. WORKFLOW_STATUSES holds the real per-process route;
-  // ALL_STATUSES is the fallback for a workflow with no route of its own.
+  // The manufacturing list advances every request through the same visible
+  // status ladder. Workflow-specific detail (such as router unit counts)
+  // remains elsewhere, but the list must never lose its route after Start.
   function partRoute(part) {
-    const stages = WORKFLOW_STATUSES[part?.workflow] || ALL_STATUSES;
+    const stages = ALL_STATUSES;
     const status = (part?.status || 'pending').toString().toLowerCase();
     let index = stages.findIndex((stage) => stage.value === status);
     // Terminal status is spelled several ways across older rows.
@@ -1051,9 +1050,17 @@
       await sendNotification('router-status', { part_id: partId, status: newStatus });
       // NOTE: no loadParts() here — callers use setLocalStatus for an optimistic update
       // so the hub doesn't flash/reload on every button click.
+      return true;
     } catch (error) {
       console.error('Error updating part status:', error);
       alert('Error updating part status. Please try again.');
+      return false;
+    }
+  }
+
+  async function advancePartStatus(part, nextStatus) {
+    if (await updatePartStatus(part.id, nextStatus)) {
+      setLocalStatus(part.id, nextStatus);
     }
   }
 
@@ -2523,7 +2530,7 @@
             {/if}
             <button
               class="btn btn-secondary btn-sm"
-              on:click|stopPropagation={async () => { await updatePartStatus(part.id, 'in-progress'); setLocalStatus(part.id, 'in-progress'); }}
+              on:click|stopPropagation={() => advancePartStatus(part, 'in-progress')}
             >
               <Clock size={14} /> Start
             </button>
@@ -2546,6 +2553,10 @@
                   </button>
                 {/if}
               {/if}
+            {:else}
+              <button class="btn btn-primary btn-sm" on:click|stopPropagation={() => advancePartStatus(part, 'cammed')}>
+                <CircleCheck size={14} /> CAM Complete
+              </button>
             {/if}
           {:else if part.status === 'cammed'}
             {#if part.workflow === 'router'}
@@ -2554,6 +2565,28 @@
                 on:click|stopPropagation={() => markPartMachined(part)}
               >
                 <Wrench size={14} /> Machine
+              </button>
+            {:else}
+              <button class="btn btn-primary btn-sm" on:click|stopPropagation={() => advancePartStatus(part, 'postprocessed')}>
+                <Wrench size={14} /> Postprocess
+              </button>
+            {/if}
+          {:else if part.status === 'postprocessed'}
+            <button class="btn btn-primary btn-sm" on:click|stopPropagation={() => advancePartStatus(part, 'jprogged')}>
+              <ListChecks size={14} /> JProg
+            </button>
+          {:else if part.status === 'jprogged'}
+            <button class="btn btn-primary btn-sm" on:click|stopPropagation={() => advancePartStatus(part, 'machined')}>
+              <Wrench size={14} /> Machine
+            </button>
+          {:else if part.status === 'machined'}
+            {#if part.workflow === 'router'}
+              <button class="btn btn-secondary btn-sm" on:click|stopPropagation={() => goto('/manufacture/post-processing')}>
+                <Package size={14} /> Post-process
+              </button>
+            {:else}
+              <button class="btn btn-primary btn-sm" on:click|stopPropagation={() => advancePartStatus(part, 'complete')}>
+                <Package size={14} /> Kit
               </button>
             {/if}
           {/if}
@@ -2714,7 +2747,7 @@
                       {/if}
                       <button
                         class="btn btn-secondary btn-sm"
-                        on:click={async () => { await updatePartStatus(part.id, 'in-progress'); setLocalStatus(part.id, 'in-progress'); }}
+                        on:click={() => advancePartStatus(part, 'in-progress')}
                         title="Start Work"
                       >
                         <Clock size={13} /> Start
@@ -2760,7 +2793,7 @@
                 {/if}
                 <button
                   class="btn btn-secondary btn-sm"
-                  on:click={async () => { await updatePartStatus(part.id, 'in-progress'); setLocalStatus(part.id, 'in-progress'); }}
+                  on:click={() => advancePartStatus(part, 'in-progress')}
                   title="Start Work"
                 >
                   <Clock size={13} /> Start
@@ -2792,6 +2825,12 @@
                     </div>
                   {/if}
                   {/if}
+                {:else}
+                  <div class="actions-col">
+                    <button class="btn btn-primary btn-sm" on:click={() => advancePartStatus(part, 'cammed')} title="CAM Complete">
+                      <CircleCheck size={13} /> CAM Complete
+                    </button>
+                  </div>
                 {/if}
               {:else if part.status === 'cammed'}
                 {#if part.workflow === 'router'}
@@ -2805,7 +2844,37 @@
                       Machine
                     </button>
                   </div>
+                {:else}
+                  <div class="actions-col">
+                    <button class="btn btn-primary btn-sm" on:click={() => advancePartStatus(part, 'postprocessed')} title="Postprocess">
+                      <Wrench size={13} /> Postprocess
+                    </button>
+                  </div>
                 {/if}
+              {:else if part.status === 'postprocessed'}
+                <div class="actions-col">
+                  <button class="btn btn-primary btn-sm" on:click={() => advancePartStatus(part, 'jprogged')} title="JProg">
+                    <ListChecks size={13} /> JProg
+                  </button>
+                </div>
+              {:else if part.status === 'jprogged'}
+                <div class="actions-col">
+                  <button class="btn btn-primary btn-sm" on:click={() => advancePartStatus(part, 'machined')} title="Machine">
+                    <Wrench size={13} /> Machine
+                  </button>
+                </div>
+              {:else if part.status === 'machined'}
+                <div class="actions-col">
+                  {#if part.workflow === 'router'}
+                    <button class="btn btn-secondary btn-sm" on:click={() => goto('/manufacture/post-processing')} title="Continue to post-processing">
+                      <Package size={13} /> Post-process
+                    </button>
+                  {:else}
+                    <button class="btn btn-primary btn-sm" on:click={() => advancePartStatus(part, 'complete')} title="Kit">
+                      <Package size={13} /> Kit
+                    </button>
+                  {/if}
+                </div>
               {/if}
             </td>
           </tr>
