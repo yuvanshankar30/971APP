@@ -104,7 +104,11 @@ describe('ACE pit Slack notifications', () => {
       expect(thread).toEqual({ channel: 'C123', root_ts: '100.000' });
     });
 
-    it('creates and records a new thread when the event/day has none yet, titled by that day', async () => {
+    it('creates and records a new thread when the event/day has none yet, addressed by channel NAME (not a looked-up ID)', async () => {
+      // conversations.list (looking a name up into an ID) needs a Slack
+      // scope this bot's token was never granted - chat.postMessage accepts
+      // a bare channel name directly instead, and Slack's own response
+      // carries back the real resolved ID, which is what gets stored.
       const maybeSingle = vi.fn().mockResolvedValue({ data: null, error: null });
       const single = vi.fn().mockResolvedValue({ data: { channel: 'C999', root_ts: '200.000' }, error: null });
       const supa = {
@@ -113,15 +117,14 @@ describe('ACE pit Slack notifications', () => {
           insert: () => ({ select: () => ({ single }) })
         })
       };
-      const conversationsList = vi.fn().mockResolvedValue({ ok: true, channels: [{ id: 'C999', name: '2026-ace-pit-bot' }] });
       const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C999', ts: '200.000' });
       const thread = await ensureAcePitCompetitionThread(
-        { chat: { postMessage }, conversations: { list: conversationsList } },
+        { chat: { postMessage } },
         supa,
         '2026cc',
         new Date('2026-09-19T12:00:00-07:00')
       );
-      expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ channel: 'C999', text: expect.stringContaining('September 19 Ace Issues') }));
+      expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ channel: '2026-ace-pit-bot', text: expect.stringContaining('September 19 Ace Issues') }));
       expect(thread).toEqual({ channel: 'C999', root_ts: '200.000' });
     });
 
@@ -137,10 +140,9 @@ describe('ACE pit Slack notifications', () => {
           insert: () => ({ select: () => ({ single }) })
         })
       };
-      const conversationsList = vi.fn().mockResolvedValue({ ok: true, channels: [{ id: 'C999', name: '2026-ace-pit-bot' }] });
       const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C999', ts: '300.000' });
       const thread = await ensureAcePitCompetitionThread(
-        { chat: { postMessage }, conversations: { list: conversationsList } },
+        { chat: { postMessage } },
         supa,
         '2026cc',
         new Date('2026-09-20T09:00:00-07:00')

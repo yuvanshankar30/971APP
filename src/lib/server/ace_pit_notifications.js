@@ -7,27 +7,22 @@ import { getSlackClient, getSupabase } from '$lib/server/971bot.js';
 // as its own reply in that thread rather than crammed into one message.
 export const ACE_PIT_CHANNEL_NAME = '2026-ace-pit-bot';
 
-// Channel IDs aren't derivable from a name, and hardcoding one that was
-// never actually looked up in this workspace would risk silently posting
-// nowhere (or somewhere wrong) - resolved by name against the real
-// workspace instead, once, then cached for the life of the process.
-let cachedChannelId = null;
-
-async function resolveAcePitChannelId(client) {
-  if (cachedChannelId) return cachedChannelId;
-  let cursor;
-  do {
-    const response = await client.conversations.list({ types: 'public_channel,private_channel', limit: 200, cursor });
-    if (!response?.ok) throw new Error(response?.error || 'slack-rejected-channel-list');
-    const match = (response.channels || []).find((channel) => channel.name === ACE_PIT_CHANNEL_NAME);
-    if (match) {
-      cachedChannelId = match.id;
-      return cachedChannelId;
-    }
-    cursor = response.response_metadata?.next_cursor || null;
-  } while (cursor);
-  throw new Error(`Could not find a Slack channel named #${ACE_PIT_CHANNEL_NAME} - is the bot a member of it?`);
-}
+// This USED to resolve the name to a real channel ID via conversations.list
+// - correct in principle (a hardcoded ID no one ever looked up risks
+// silently posting nowhere or somewhere wrong), but conversations.list needs
+// the channels:read/groups:read scope, and the bot's token was only ever
+// granted chat:write (the old code addressed its channel by a hardcoded ID
+// and never needed to list channels at all, so this gap was invisible until
+// now: real production error, missing_scope, on every single send). Getting
+// the scope added means a Slack admin reinstalling the app mid-competition,
+// which also rotates the token - not worth it for what chat.postMessage
+// already supports natively: passing a channel NAME directly (Slack's own
+// docs: "Can be an encoded ID, or a name"). Slack resolves it and returns
+// the real ID in the response, which is what actually gets stored in
+// ace_pit_slack_threads.channel/pit_problem_reports.slack_channel - so only
+// this FIRST post per thread ever relies on name resolution; every update
+// after it already has a real ID.
+const ACE_PIT_CHANNEL_TARGET = ACE_PIT_CHANNEL_NAME;
 
 function cleanSlackText(value, fallback = '') {
   const text = String(value || '').trim();
@@ -140,13 +135,12 @@ export async function ensureAcePitCompetitionThread(client, supa, eventKey, now 
   if (error) throw new Error(`Could not load the ACE Slack thread: ${error.message}`);
   if (existing?.channel && existing?.root_ts) return existing;
 
-  const channel = await resolveAcePitChannelId(client);
-  const posted = await client.chat.postMessage({ channel, text: acePitThreadTitle(now) });
+  const posted = await client.chat.postMessage({ channel: ACE_PIT_CHANNEL_TARGET, text: acePitThreadTitle(now) });
   if (!posted?.ok) throw new Error(posted?.error || 'slack-rejected-root-post');
 
   const { data: inserted, error: insertError } = await supa
     .from('ace_pit_slack_threads')
-    .insert({ event_key: eventKey, thread_date: threadDate, channel: posted.channel || channel, root_ts: posted.ts })
+    .insert({ event_key: eventKey, thread_date: threadDate, channel: posted.channel || ACE_PIT_CHANNEL_TARGET, root_ts: posted.ts })
     .select('channel, root_ts')
     .single();
   if (!insertError) return inserted;
@@ -162,7 +156,7 @@ export async function ensureAcePitCompetitionThread(client, supa, eventKey, now 
     .eq('thread_date', threadDate)
     .single();
   if (refetchError) throw new Error(`Could not load the ACE Slack thread after a race: ${refetchError.message}`);
-  await client.chat.delete({ channel: posted.channel || channel, ts: posted.ts }).catch(() => {});
+  await client.chat.delete({ channel: posted.channel || ACE_PIT_CHANNEL_TARGET, ts: posted.ts }).catch(() => {});
   return winner;
 }
 
@@ -253,7 +247,14 @@ export async function purgeAcePitSlackMessages(dependencies = {}) {
   const supa = dependencies.supa || getSupabase();
   const identity = await client.auth.test();
   if (!identity?.ok) throw new Error(identity?.error || 'slack-auth-failed');
-  const channelId = await resolveAcePitChannelId(client);
+  // Unlike chat.postMessage (see ACE_PIT_CHANNEL_TARGET above),
+  // conversations.history does NOT accept a channel name - only a real ID.
+  // This admin-only cleanup path isn't on the critical send path, so rather
+  // than block re-enabling notifications on it, it stays as a real ID that
+  // needs setting once one is looked up (Slack channel details panel) -
+  // it'll fail clearly (channel_not_found) rather than silently no-op until
+  // then.
+  const channelId = dependencies.channelId || ACE_PIT_CHANNEL_TARGET;
 
   const { data: queued, error: queueError } = await supa
     .from('ace_pit_slack_legacy_messages')
