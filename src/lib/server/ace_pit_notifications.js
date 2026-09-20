@@ -1,7 +1,33 @@
 import { getSlackClient, getSupabase } from '$lib/server/971bot.js';
 
-export const ACE_PIT_CHANNEL_NAME = '2026-chezy-ace-strat-pit';
-export const ACE_PIT_CHANNEL_ID = 'C0C1MKPUTTK';
+// ACE asked (2026-09-19) for automated pit notifications back, now aimed at
+// a new channel and a simpler shape than the old one: ONE thread per
+// competition (not per team - Slack only threads whole messages, and one
+// thread per team got noisy fast), with every report/edit/resolution posted
+// as its own reply in that thread rather than crammed into one message.
+export const ACE_PIT_CHANNEL_NAME = '2026-ace-pit-bot';
+
+// Channel IDs aren't derivable from a name, and hardcoding one that was
+// never actually looked up in this workspace would risk silently posting
+// nowhere (or somewhere wrong) - resolved by name against the real
+// workspace instead, once, then cached for the life of the process.
+let cachedChannelId = null;
+
+async function resolveAcePitChannelId(client) {
+  if (cachedChannelId) return cachedChannelId;
+  let cursor;
+  do {
+    const response = await client.conversations.list({ types: 'public_channel,private_channel', limit: 200, cursor });
+    if (!response?.ok) throw new Error(response?.error || 'slack-rejected-channel-list');
+    const match = (response.channels || []).find((channel) => channel.name === ACE_PIT_CHANNEL_NAME);
+    if (match) {
+      cachedChannelId = match.id;
+      return cachedChannelId;
+    }
+    cursor = response.response_metadata?.next_cursor || null;
+  } while (cursor);
+  throw new Error(`Could not find a Slack channel named #${ACE_PIT_CHANNEL_NAME} - is the bot a member of it?`);
+}
 
 function cleanSlackText(value, fallback = '') {
   const text = String(value || '').trim();
@@ -72,6 +98,72 @@ export function acePitCompetitionThreadMessage(eventKey, problems = []) {
     lines.push(`• ${problem.severity === 'urgent' ? ':rotating_light:' : ':warning:'} *Team ${teamNumber(problem)} · ${displayMatch(problem.match_key)}* — ${cleanSlackText(problem.summary, 'Mechanical issue flagged')} (${count} scout${count === 1 ? '' : 's'})`);
   }
   return lines.join('\n');
+}
+
+// The thread's root message: a fixed title only (not a live-updated open-
+// issues summary - acePitCompetitionThreadMessage above still exists for
+// that if it's ever wanted, but every individual report already gets its
+// own reply, so the root's only job is to name the thread). Dated rather
+// than keyed by event_key so it reads naturally in Slack; still one thread
+// per (event_key, day) underneath (see ensureAcePitCompetitionThread) - a
+// multi-day competition gets a fresh thread each day rather than one thread
+// spanning the whole event, so the title's date always actually matches
+// the thread it names.
+export function acePitThreadTitle(date = new Date()) {
+  const formatted = date.toLocaleDateString('en-US', { month: 'long', day: 'numeric', timeZone: 'America/Los_Angeles' });
+  return [
+    `:toolbox: *${formatted} Ace Issues*`,
+    'Every pit issue reported at this competition today lands here as its own reply in this thread.'
+  ].join('\n');
+}
+
+// The date this thread belongs to, in the same Pacific calendar day
+// acePitThreadTitle's date reads by - en-CA gives an ISO-shaped YYYY-MM-DD
+// string directly, which is exactly what the `date` column expects.
+function pacificDateKey(date) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
+}
+
+// One durable root message per (competition, day) - public.ace_pit_slack_
+// threads, PK (event_key, thread_date). Every NEW report replies into it
+// via sendAcePitProblem below; an edit or resolution of an already-posted
+// report updates that report's own existing reply directly and never calls
+// this, so it can't be moved into a later day's thread out from under it.
+export async function ensureAcePitCompetitionThread(client, supa, eventKey, now = new Date()) {
+  const threadDate = pacificDateKey(now);
+  const { data: existing, error } = await supa
+    .from('ace_pit_slack_threads')
+    .select('channel, root_ts')
+    .eq('event_key', eventKey)
+    .eq('thread_date', threadDate)
+    .maybeSingle();
+  if (error) throw new Error(`Could not load the ACE Slack thread: ${error.message}`);
+  if (existing?.channel && existing?.root_ts) return existing;
+
+  const channel = await resolveAcePitChannelId(client);
+  const posted = await client.chat.postMessage({ channel, text: acePitThreadTitle(now) });
+  if (!posted?.ok) throw new Error(posted?.error || 'slack-rejected-root-post');
+
+  const { data: inserted, error: insertError } = await supa
+    .from('ace_pit_slack_threads')
+    .insert({ event_key: eventKey, thread_date: threadDate, channel: posted.channel || channel, root_ts: posted.ts })
+    .select('channel, root_ts')
+    .single();
+  if (!insertError) return inserted;
+  if (insertError.code !== '23505') throw new Error(`Could not save the ACE Slack thread: ${insertError.message}`);
+
+  // Another concurrent report raced this one and already created today's
+  // real thread - keep theirs (so every issue lands in the same place) and
+  // quietly remove the extra root message this call just posted.
+  const { data: winner, error: refetchError } = await supa
+    .from('ace_pit_slack_threads')
+    .select('channel, root_ts')
+    .eq('event_key', eventKey)
+    .eq('thread_date', threadDate)
+    .single();
+  if (refetchError) throw new Error(`Could not load the ACE Slack thread after a race: ${refetchError.message}`);
+  await client.chat.delete({ channel: posted.channel || channel, ts: posted.ts }).catch(() => {});
+  return winner;
 }
 
 async function removeLegacyCompetitionMessages(client, supa, eventKey) {
@@ -161,6 +253,7 @@ export async function purgeAcePitSlackMessages(dependencies = {}) {
   const supa = dependencies.supa || getSupabase();
   const identity = await client.auth.test();
   if (!identity?.ok) throw new Error(identity?.error || 'slack-auth-failed');
+  const channelId = await resolveAcePitChannelId(client);
 
   const { data: queued, error: queueError } = await supa
     .from('ace_pit_slack_legacy_messages')
@@ -173,11 +266,11 @@ export async function purgeAcePitSlackMessages(dependencies = {}) {
 
   let cursor;
   do {
-    const history = await client.conversations.history({ channel: ACE_PIT_CHANNEL_ID, limit: 200, cursor });
+    const history = await client.conversations.history({ channel: channelId, limit: 200, cursor });
     if (!history?.ok) throw new Error(history?.error || 'slack-rejected-history-list');
     for (const message of history.messages || []) {
-      if (isAceBotMessage(message, identity) && /ACE\s*\/\s*Pit/i.test(String(message.text || ''))) {
-        roots.set(`${ACE_PIT_CHANNEL_ID}:${message.ts}`, { channel: ACE_PIT_CHANNEL_ID, ts: message.ts });
+      if (isAceBotMessage(message, identity) && /ACE\s*\/\s*Pit|ACE issues/i.test(String(message.text || ''))) {
+        roots.set(`${channelId}:${message.ts}`, { channel: channelId, ts: message.ts });
       }
     }
     cursor = history.response_metadata?.next_cursor || null;
@@ -205,19 +298,80 @@ export async function purgeAcePitSlackMessages(dependencies = {}) {
   return { ok: true, deleted_roots: deletedRoots, deleted_replies: deletedReplies };
 }
 
-export async function sendAcePitProblem(problem) {
+// Every report, edit (merged scout observation), and resolution calls this.
+// An edit/resolution of a problem that already has a Slack message updates
+// that SAME reply in place (chat.update) rather than posting a duplicate;
+// a brand-new problem gets a fresh reply into that competition's thread.
+export async function sendAcePitProblem(problem, scoutName = null, dependencies = {}) {
   if (!problem?.id) return { ok: false, reason: 'missing-problem-id' };
-  // ACE explicitly disabled automated pit notifications. Keep this guard in
-  // application code in addition to the database privilege revocation so a
-  // future schema grant cannot silently reactivate channel traffic.
-  return { ok: false, reason: 'ace-pit-notifications-disabled' };
+  const client = dependencies.client || getSlackClient();
+  const supa = dependencies.supa || getSupabase();
+  const ensureThread = dependencies.ensureThread || ensureAcePitCompetitionThread;
+
+  const text = acePitProblemMessage(problem, scoutName);
+
+  if (problem.slack_channel && problem.slack_ts) {
+    const updated = await client.chat.update({ channel: problem.slack_channel, ts: problem.slack_ts, text });
+    if (!updated?.ok) throw new Error(updated?.error || 'slack-rejected-update');
+    return { ok: true, channel: updated.channel || problem.slack_channel, ts: updated.ts || problem.slack_ts, payload: text };
+  }
+
+  const thread = await ensureThread(client, supa, problem.event_key);
+  const posted = await client.chat.postMessage({ channel: thread.channel, thread_ts: thread.root_ts, text });
+  if (!posted?.ok) throw new Error(posted?.error || 'slack-rejected-post');
+  return { ok: true, channel: posted.channel, ts: posted.ts, payload: text };
 }
 
-export async function notifyAcePitProblem(problem, scoutName = null) {
+export async function notifyAcePitProblem(problem, scoutName = null, dependencies = {}) {
   try {
-    return await sendAcePitProblem(problem, scoutName);
+    return await sendAcePitProblem(problem, scoutName, dependencies);
   } catch (error) {
     console.error('Failed to notify ACE pit Slack channel', error?.data?.error || error?.message || error);
     return { ok: false, reason: error?.data?.error || error?.message || 'slack-error' };
   }
+}
+
+// One-time catch-up for reports that predate this feature going back live:
+// every pit_problem_reports row still missing slack_notified_at (the same
+// condition pit_problem_reports_unsent_slack_idx was built for) gets posted
+// now, oldest first, so today's backlog isn't silently missing once
+// notifications resume. Each one goes through the normal send/update path -
+// a report that already has a Slack message (from before a mid-event
+// disable/re-enable) still gets treated as new here only if slack_notified_at
+// was never set, so this cannot double-post something already delivered.
+export async function backfillUnsentAcePitProblems(dependencies = {}) {
+  const supa = dependencies.supa || getSupabase();
+  const notify = dependencies.notify || notifyAcePitProblem;
+
+  const { data, error } = await supa
+    .from('pit_problem_reports')
+    .select('*')
+    .is('slack_notified_at', null)
+    .order('created_at', { ascending: true });
+  if (error) throw new Error(`Could not load unsent ACE pit reports: ${error.message}`);
+
+  let sent = 0;
+  let failed = 0;
+  for (const problem of data || []) {
+    const latestObservation = Array.isArray(problem.scout_observations) ? problem.scout_observations.at(-1) : null;
+    const scoutName = latestObservation?.scout_name || null;
+    const result = await notify(problem, scoutName, dependencies);
+    if (!result?.ok) {
+      failed += 1;
+      continue;
+    }
+    const slackDelivery = {
+      slack_channel: result.channel,
+      slack_ts: result.ts,
+      slack_last_payload: result.payload,
+      slack_notified_at: new Date().toISOString()
+    };
+    const { error: updateError } = await supa.from('pit_problem_reports').update(slackDelivery).eq('id', problem.id);
+    if (updateError) {
+      failed += 1;
+      continue;
+    }
+    sent += 1;
+  }
+  return { ok: true, sent, failed, total: (data || []).length };
 }
