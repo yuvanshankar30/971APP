@@ -5,7 +5,7 @@
   import { supabase } from '$lib/supabase.js';
   import { page } from '$app/stores';
   import { userStore, loadUserFromUUID, upsertProfileIfMissing, setUserUUID } from '$lib/stores/user.js';
-  import { isTeam9584, passesTeamFilter } from '$lib/frcTeams.js';
+  import { passesTeamFilter, teamShortLabel } from '$lib/frcTeams.js';
   import TeamFilter from '$lib/components/TeamFilter.svelte';
   import { getSeasonBucket, getCurrentSeasonBucket, getAllSeasonBuckets, passesSeasonFilter } from '$lib/frcSeason.js';
   import SeasonFilter from '$lib/components/SeasonFilter.svelte';
@@ -2348,9 +2348,7 @@
               />
             {/if}
             <strong>{part.name}</strong>
-            {#if isTeam9584(part.frc_team)}
-              <span class="tag team-tag tag-9584">9584</span>
-            {/if}
+            <span class="name-team"><span class="name-team-dot">·</span>{teamShortLabel(part.frc_team)}</span>
             {#if stepFileWarning(part) === 'missing'}
               <span class="tag tag-warning" title="No STEP file uploaded for this router part">⚠ No STEP</span>
             {:else if stepFileWarning(part) === 'invalid'}
@@ -2617,9 +2615,11 @@
             <td class="name-col">
               <div class="name-line">
                 <strong>{part.name}</strong>
-                {#if isTeam9584(part.frc_team)}
-                  <span class="tag team-tag tag-9584" title="Requested by Team 9584">9584</span>
-                {/if}
+                <!-- Every part shows its team, not just 9584 - a tag that
+                     only appears for one team means the other team's parts
+                     are identified by the absence of a label, which is not
+                     something you can scan for. -->
+                <span class="name-team"><span class="name-team-dot">·</span>{teamShortLabel(part.frc_team)}</span>
                 {#if stepFileWarning(part) === 'missing'}
                   <span class="tag tag-warning" title="No STEP file uploaded for this router part">⚠ No STEP</span>
                 {:else if stepFileWarning(part) === 'invalid'}
@@ -3677,6 +3677,18 @@
     text-overflow: ellipsis;
   }
   .name-meta-sep { opacity: 0.45; }
+
+  /* Team number trailing the part name. Muted and unweighted so it reads as
+     a qualifier on the name rather than competing with it, and uncoloured -
+     the number itself says which team it is. */
+  .name-team {
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .name-team-dot { opacity: 0.5; margin-right: 4px; }
   .name-meta-requester { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
   /* Route: the status word, then a segmented track of this workflow's
