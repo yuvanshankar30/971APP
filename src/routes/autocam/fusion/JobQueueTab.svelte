@@ -207,6 +207,20 @@
     rejected: 'Rejected'
   };
 
+  // Maps a job's status onto the app-wide five-state badge vocabulary
+  // (.status-pending/-progress/-cam-review/-complete/-error, see app.css) so
+  // a job card uses the same "waiting / in flight / done / broken" colors as
+  // every other status chip in Spartans Hub, instead of reinventing its own
+  // per-status palette.
+  const STATUS_BADGE_CLASS = {
+    queued: 'status-pending',
+    claimed: 'status-progress',
+    processing: 'status-progress',
+    completed: 'status-complete',
+    failed: 'status-error',
+    rejected: 'status-error'
+  };
+
   // Free-text search over the currently loaded page(s) of jobs - matches
   // name, machine, and tool (the fields shown on each card), plus status
   // label so e.g. typing "failed" finds every failed job on screen. Client
@@ -535,26 +549,19 @@
           <strong><ListChecks size={16} /> {job.name || `Job ${job.id.slice(0, 8)}`}</strong>
           <span>
             {#if job.params?.fusionGroupingMode === 'grouped'}<span class="tag">Grouped</span>{/if}
-            <span class="tag status-{job.status}">{STATUS_LABELS[job.status] || job.status}</span>
+            <span class="status-badge {STATUS_BADGE_CLASS[job.status] || 'status-pending'}">{STATUS_LABELS[job.status] || job.status}</span>
           </span>
         </div>
         {#if jobKind(job) === 'box_tube'}
-          <p class="cam-form-hint">
-            Box tube - {boxTubeById[jobBoxTubeId(job)]?.name || jobBoxTubeId(job) || 'n/a'}
-            - {job.cam_machines?.name || 'no machine assigned'}
-            - {jobToolLabel(job)}
-            - queued {formatPacificDateTimeWithZone(job.created_at)}
-            {#if job.claimed_by} - claimed by {job.claimed_by}{/if}
-          </p>
+          <p class="cam-form-hint">Box tube - {boxTubeById[jobBoxTubeId(job)]?.name || jobBoxTubeId(job) || 'n/a'}</p>
         {:else}
-          <p class="cam-form-hint">
-            {jobKind(job)} - plate {job.params?.fusionPlateSnapshot?.name || job.params?.plateId || 'n/a'}
-            - {job.cam_machines?.name || 'no machine assigned'}
-            - {jobToolLabel(job)}
-            - queued {formatPacificDateTimeWithZone(job.created_at)}
-            {#if job.claimed_by} - claimed by {job.claimed_by}{/if}
-          </p>
+          <p class="cam-form-hint">{jobKind(job)} - plate {job.params?.fusionPlateSnapshot?.name || job.params?.plateId || 'n/a'}</p>
         {/if}
+        <p class="cam-form-hint">{job.cam_machines?.name || 'no machine assigned'} - {jobToolLabel(job)}</p>
+        <p class="cam-form-hint">
+          queued {formatPacificDateTimeWithZone(job.created_at)}
+          {#if job.claimed_by} - claimed by {job.claimed_by}{/if}
+        </p>
         <p class="cam-form-hint">
           {#if editingMaterialJobId === job.id}
             <span class="rename-control">
@@ -739,8 +746,7 @@
 {/if}
 
 <style>
-  .cad-modal { width: min(900px, 94vw); }
-  .cad-modal .modal-body { min-height: 60vh; }
+  @import '../fusion/_autocam-shared.css';
   .load-more-row {
     display: flex;
     align-items: center;
@@ -748,28 +754,7 @@
     justify-content: center;
     margin-top: var(--space-3);
   }
-  .cam-list-toolbar { display: flex; justify-content: space-between; align-items: flex-end; gap: 0.5rem; margin-bottom: 0.5rem; flex-wrap: wrap; }
-  .tab-filters { flex: 1 1 32rem; --filters-columns: 2fr 1fr 1fr; margin: 0; }
-  .cam-list { display: flex; flex-direction: column; gap: 0.75rem; }
-  .cam-list-item { padding: 1rem; }
-  .cam-list-header { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
-  .cam-list-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
-  .empty-state { color: var(--text-muted, #888); padding: 2rem 0; text-align: center; }
-  .error-text { color: var(--danger, #e05252); }
-  .cam-form-hint { color: var(--text-muted, #888); font-size: 0.85rem; margin: 0.25rem 0 0; }
-  .rename-control { display: inline-flex; align-items: center; gap: 0.35rem; min-width: 0; }
   .material-edit-select { padding: 0.2rem 0.4rem; height: auto; width: auto; min-width: 10rem; font-size: 0.85rem; }
-
-  /* Status tags were previously unstyled (no .status-* rule existed anywhere,
-     so every job looked identical regardless of state). Matches Valor's own
-     plate-ready/plate-cooking convention: green when done, gold while
-     actively running, red on failure. */
-  .status-queued { background: var(--muted-bg, #eee); color: var(--text-muted, #888); }
-  .status-claimed { background: rgba(47, 129, 247, 0.14); color: var(--accent, #2f81f7); }
-  .status-processing { background: rgba(230, 221, 94, 0.16); color: #b18f1d; }
-  .status-completed { background: var(--surface-2); color: var(--text); }
-  .status-failed,
-  .status-rejected { background: rgba(248, 81, 73, 0.14); color: var(--danger, #f85149); }
 
   .job-error-button {
     display: inline-flex;

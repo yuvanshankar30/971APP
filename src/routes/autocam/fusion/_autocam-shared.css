@@ -1,0 +1,171 @@
+/* Shared visual language for the /autocam/fusion tabs (Parts, Tube Stock,
+   Turning, Jobs, Stock Categories). Pulled out of five near-identical copies
+   living in each tab's own <style> block into one place so a redesign pass
+   only has to happen once and every tab actually stays consistent with the
+   others - see each tab's own <style> for what's left (only truly
+   tab-specific rules). Deliberately flat (no shadows, small radii) and gold-
+   accented to match the rest of Spartans Hub's own theme tokens - this file
+   never invents a color the site doesn't already use.
+   Import with `@import '../fusion/_autocam-shared.css';` (or a relative path
+   from wherever the component lives) at the top of the component's own
+   <style> block - Svelte does not scope `@import`ed rules, so these apply
+   exactly like a second global stylesheet scoped to this section. */
+
+/* ---------- Toolbar (Add button + search/filters row above a list) ---------- */
+.cam-list-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  padding: var(--space-3) var(--space-4);
+  margin: 0 0 var(--space-4);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+.tab-actions { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+.tab-filters { flex: 1 1 32rem; --filters-columns: 2fr 1fr 1fr; margin: 0; }
+
+/* ---------- List + item cards ---------- */
+.cam-list { display: flex; flex-direction: column; gap: var(--space-3); }
+.cam-list-item {
+  padding: var(--space-4);
+  transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+.cam-list-item:hover { border-color: var(--accent-strong); }
+.cam-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.cam-list-header strong { font-size: var(--font-md, 1rem); font-weight: 600; }
+.cam-list-header-left { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.cam-list-header-right { display: flex; align-items: center; gap: var(--space-2); flex-shrink: 0; }
+.cam-list-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+/* Metadata lines under a list item's header (material, router, tool,
+   queued-at, etc.) - not global because these are always paired with
+   .cam-list-item, but every tab wants the same quiet, compact treatment. */
+.cam-form-hint {
+  color: var(--text-muted);
+  font-size: var(--font-xs, 0.85rem);
+  line-height: 1.6;
+  margin: var(--space-1) 0 0;
+}
+
+/* ---------- Inline rename / quantity edit controls ---------- */
+.rename-control { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.rename-input { padding: 0.2rem var(--space-2); height: auto; width: auto; min-width: 10rem; }
+.quantity-control { display: inline-flex; }
+.quantity-input { min-width: 4rem; width: 4rem; }
+
+/* ---------- Bulk-select bar ---------- */
+.bulk-select-checkbox { width: 1rem; height: 1rem; flex-shrink: 0; cursor: pointer; accent-color: var(--accent); }
+.bulk-select-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  flex-wrap: wrap;
+}
+
+/* ---------- Inline form rows (Add Part / Add Tube forms, etc.) ---------- */
+.form-row { display: flex; gap: var(--space-4); flex-wrap: wrap; margin-bottom: var(--space-3); }
+.form-row-final { padding-top: var(--space-3); border-top: 1px solid var(--border); }
+.form-row .form-group { flex: 1; min-width: 160px; }
+
+/* ---------- Recent-parts / recent-tubes quick-pick grid (queue picker) ---------- */
+.recent-queue-picker { margin: var(--space-3) 0; }
+.recent-queue-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-2);
+}
+.recent-queue-search { max-width: 240px; width: 100%; height: 2rem; padding: 0.25rem var(--space-2); font-size: 0.8rem; }
+.recent-queue-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-2); }
+.recent-queue-button {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+  min-height: 3.6rem;
+  padding: var(--space-2) 0.6rem;
+  text-align: left;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color 0.12s ease, background-color 0.12s ease, box-shadow 0.12s ease;
+}
+.recent-queue-button:hover,
+.recent-queue-button:focus-visible { border-color: var(--accent); background: var(--surface-1); outline: none; }
+.recent-queue-button.selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--primary));
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.recent-queue-name, .recent-queue-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent-queue-name { font-weight: 600; font-size: 0.8rem; display: flex; align-items: center; gap: 0.25rem; }
+.recent-queue-detail { color: var(--text-muted); font-size: 0.72rem; }
+@media (max-width: 640px) { .recent-queue-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* ---------- Fusion Data Panel folder picker ---------- */
+.folder-tree-box {
+  max-height: 16rem;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2);
+  background: var(--surface-2);
+}
+.folder-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-2);
+}
+.folder-search { max-width: 220px; height: 2rem; padding: 0.25rem var(--space-2); font-size: 0.8rem; }
+.folder-search-result {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0.4rem var(--space-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--text);
+  font-size: 0.9rem;
+}
+.folder-search-result:hover { background: var(--surface-1); }
+.folder-search-result.selected { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent-strong); font-weight: 600; }
+.folder-search-name { flex-shrink: 0; }
+.folder-search-path { color: var(--text-muted); font-size: 0.75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- Modal size helpers ---------- */
+.queue-modal { max-width: 32rem; }
+.cad-modal { width: min(900px, 94vw); }
+.cad-modal .modal-body { min-height: 60vh; }
+.queue-picker-modal { --modal-width: 46rem; }

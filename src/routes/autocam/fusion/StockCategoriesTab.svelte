@@ -239,24 +239,19 @@
     margin: 0 0 0.75rem;
   }
   .unreviewed-warning :global(svg) { flex-shrink: 0; margin-top: 0.15rem; }
-  .cam-list { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.75rem; }
+  .cam-list { display: flex; flex-direction: column; gap: var(--space-2); margin-top: var(--space-3); }
   .cam-list-item {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 0.5rem;
-    padding: 0.5rem 0.75rem;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
+    transition: border-color 0.12s ease;
   }
-  .cam-list-item-main { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
-  .tag-warning {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3rem;
-    background: var(--yellow-subtle, rgba(234, 179, 8, 0.12));
-    color: var(--yellow-strong, #854d0e);
-  }
+  .cam-list-item:hover { border-color: var(--accent-strong); }
+  .cam-list-item-main { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
   @media (max-width: 640px) {
     .form-group, .thickness-group { flex-basis: 100%; }
   }

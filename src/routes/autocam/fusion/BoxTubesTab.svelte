@@ -684,14 +684,26 @@
                 {/if}
               </span>
             {/if}
-            {#if boxTube.epic}{boxTube.epic}{/if}
+            {#if boxTube.epic}{boxTube.ticket ? '' : ' -'} {boxTube.epic}{/if}
             {#if boxTube.ticket} - {boxTube.ticket}{/if}
-            {#if boxTube.project_id} - project <strong>{boxTube.project_id}</strong>{/if}
-            {#if boxTube.stock_assignment} - stock <strong>{boxTube.stock_assignment}</strong>{/if}
-            {#if !boxTube.step_file_name} - <em>no STEP file attached</em>{/if}
-            {#if boxTube.parts} - linked to <strong>{boxTube.parts.name}</strong>{/if}
-            {#if boxTube.created_at} - added {formatPacificDateTime(boxTube.created_at)}{/if}
           </p>
+          {#if boxTube.project_id || boxTube.stock_assignment}
+            <p class="cam-form-hint">
+              {#if boxTube.project_id}project <strong>{boxTube.project_id}</strong>{/if}
+              {#if boxTube.project_id && boxTube.stock_assignment} - {/if}
+              {#if boxTube.stock_assignment}stock <strong>{boxTube.stock_assignment}</strong>{/if}
+            </p>
+          {/if}
+          {#if boxTube.parts || !boxTube.step_file_name}
+            <p class="cam-form-hint">
+              {#if boxTube.parts}linked to <strong>{boxTube.parts.name}</strong>{/if}
+              {#if boxTube.parts && !boxTube.step_file_name} - {/if}
+              {#if !boxTube.step_file_name}<em>no STEP file attached</em>{/if}
+            </p>
+          {/if}
+          {#if boxTube.created_at}
+            <p class="cam-form-hint">added {formatPacificDateTime(boxTube.created_at)}</p>
+          {/if}
           <div class="cam-list-actions">
             {#if boxTube.parts}
               <a class="btn btn-secondary btn-sm" href="/manufacture?part={boxTube.part_id}">
@@ -941,83 +953,5 @@
 {/if}
 
 <style>
-  .cam-list-toolbar { display: flex; justify-content: space-between; align-items: flex-end; gap: 1.5rem; margin-bottom: 0.5rem; flex-wrap: wrap; }
-  .tab-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-  .tab-filters { flex: 1 1 32rem; --filters-columns: 2fr 1fr 1fr; margin: 0; }
-  .form-row { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
-  .form-row-final { padding-top: 0.75rem; border-top: 1px solid var(--border); }
-  .form-row .form-group { flex: 1; min-width: 160px; }
-  .cam-list { display: flex; flex-direction: column; gap: 0.75rem; }
-  .cam-list-item { padding: 1rem; }
-  .cam-list-header { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
-  .rename-control { display: flex; align-items: center; gap: 0.35rem; min-width: 0; }
-  .rename-input { padding: 0.2rem 0.4rem; height: auto; width: auto; min-width: 10rem; }
-  .cam-list-header-left { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
-  .cam-list-header-right { display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0; }
-  .bulk-select-checkbox { width: 1rem; height: 1rem; flex-shrink: 0; cursor: pointer; }
-  .bulk-select-bar { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.5rem 0.75rem; margin-bottom: 0.6rem; border: 1px solid var(--border); border-radius: var(--radius-md, 10px); background: var(--surface-2, #f7f7f5); flex-wrap: wrap; }
-  .quantity-control { display: inline-flex; }
-  .quantity-input { min-width: 4rem; width: 4rem; }
-  .cam-list-actions { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; flex-wrap: wrap; }
-  .empty-state { color: var(--text-muted, #888); padding: 2rem 0; text-align: center; }
-  .cam-form-hint { color: var(--text-muted, #888); font-size: 0.85rem; margin: 0.25rem 0 0; }
-  .queue-modal { max-width: 32rem; }
-  .cad-modal { width: min(900px, 94vw); }
-  .cad-modal .modal-body { min-height: 60vh; }
-  .queue-picker-modal { --modal-width: 46rem; }
-  .recent-queue-picker { margin: 0.75rem 0; }
-  .recent-queue-header { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.4rem; }
-  .recent-queue-search { max-width: 220px; height: 2rem; padding: 0.25rem 0.5rem; font-size: 0.8rem; }
-  .recent-queue-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.45rem; }
-  .recent-queue-button {
-    display: grid;
-    gap: 0.15rem;
-    min-width: 0;
-    min-height: 3.6rem;
-    padding: 0.5rem 0.6rem;
-    text-align: left;
-    color: var(--text);
-    background: var(--surface-2, #f7f7f5);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm, 6px);
-    cursor: pointer;
-  }
-  .recent-queue-button { transition: border-color 0.15s, background 0.15s, box-shadow 0.15s; }
-  .recent-queue-button:hover, .recent-queue-button:focus-visible { border-color: var(--accent); background: var(--surface-1); outline: none; }
-  .recent-queue-button.selected {
-    border-color: var(--accent);
-    background: color-mix(in srgb, var(--accent) 12%, var(--primary));
-    box-shadow: inset 0 0 0 1px var(--accent);
-  }
-  .recent-queue-name, .recent-queue-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .recent-queue-name { font-weight: 600; font-size: 0.8rem; display: flex; align-items: center; gap: 0.25rem; }
-  .recent-queue-detail { color: var(--text-muted); font-size: 0.72rem; }
-  @media (max-width: 640px) { .recent-queue-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-  .folder-tree-box {
-    max-height: 16rem;
-    overflow-y: auto;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm, 6px);
-    padding: 0.35rem;
-  }
-  .folder-picker-header { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.4rem; }
-  .folder-search { max-width: 220px; height: 2rem; padding: 0.25rem 0.5rem; font-size: 0.8rem; }
-  .folder-search-result {
-    display: flex;
-    align-items: center;
-    gap: 0.45rem;
-    width: 100%;
-    text-align: left;
-    background: none;
-    border: none;
-    padding: 0.4rem 0.6rem;
-    border-radius: var(--radius-sm, 6px);
-    cursor: pointer;
-    color: var(--text);
-    font-size: 0.9rem;
-  }
-  .folder-search-result:hover { background: var(--surface-2); }
-  .folder-search-result.selected { background: var(--accent-soft, rgba(47, 129, 247, 0.14)); color: var(--accent); font-weight: 600; }
-  .folder-search-name { flex-shrink: 0; }
-  .folder-search-path { color: var(--text-muted); font-size: 0.75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  @import '../fusion/_autocam-shared.css';
 </style>
