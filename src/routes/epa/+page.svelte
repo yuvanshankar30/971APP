@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { TrendingUp, Calendar, MapPin, Sparkles, RefreshCw } from 'lucide-svelte';
   import { fetchActiveScoutingEventKey, fetchAvailableScoutingEvents } from '$lib/scoutingEvent.js';
-  import { computeEventEpa, winProbability, calibratedScale } from '$lib/epaModel.js';
+  import { computeEventEpa, winProbability, fitEpaParameters } from '$lib/epaModel.js';
   import SeasonFilter from '$lib/components/SeasonFilter.svelte';
 
   // See GitHub issue #854: a Competition tab that computes our own EPA
@@ -32,6 +32,7 @@
   let matches = [];
   let oprRows = [];
   let epaByTeam = new Map();
+  let epaFit = null;
 
   let activeSubtab = 'rankings'; // 'rankings' | 'events' | 'predict'
 
@@ -70,7 +71,15 @@
       oprRows = oprData || [];
       eventInfo = infoData;
       eventTeams = teamsData || [];
-      epaByTeam = computeEventEpa(matches);
+      // Two-step on purpose: a first pass measures this event's own scoring
+      // noise (residualStd), which seeds the parameter search; the search
+      // then back-tests candidate settings against the matches that have
+      // already been played and returns the pair that would actually have
+      // predicted them best. Ratings are then rebuilt with that fitted
+      // learning rate instead of a constant picked by feel.
+      const probeEpa = computeEventEpa(matches);
+      epaFit = fitEpaParameters(matches, { residualStd: probeEpa.residualStd });
+      epaByTeam = epaFit.tuned ? computeEventEpa(matches, { k: epaFit.k }) : probeEpa;
       if (!predictMatchKey) {
         const upcoming = matches.find((m) => !m.actual_time) || matches[matches.length - 1];
         if (upcoming) selectMatchForPredict(upcoming.key);
@@ -80,6 +89,7 @@
       matches = [];
       oprRows = [];
       epaByTeam = new Map();
+      epaFit = null;
     } finally {
       loading = false;
     }
@@ -108,10 +118,11 @@
 
   $: predictRedTotal = predictionTeams ? allianceEpaTotal(predictionTeams.red) : null;
   $: predictBlueTotal = predictionTeams ? allianceEpaTotal(predictionTeams.blue) : null;
-  // Calibrated per-event from this event's own measured scoring variance
-  // (epaModel's residualStd) rather than a fixed guess - see calibratedScale.
-  $: predictRedWinProb = (predictRedTotal != null && predictBlueTotal != null)
-    ? winProbability(predictRedTotal, predictBlueTotal, calibratedScale(epaByTeam.residualStd))
+  // Scale comes from the back-test above (fitEpaParameters), so it is the
+  // value that actually predicted this event's played matches best - not a
+  // constant, and not just a guess from scoring variance alone.
+  $: predictRedWinProb = (predictRedTotal != null && predictBlueTotal != null && epaFit)
+    ? winProbability(predictRedTotal, predictBlueTotal, epaFit.scale)
     : null;
 
   $: rankingRows = oprRows
@@ -254,6 +265,18 @@
               <span class="predict-prob">{pct(1 - predictRedWinProb)} to win</span>
             </div>
           </div>
+          {#if epaFit?.tuned}
+            <p class="predict-calibration tba-muted">
+              Tuned on this event's {epaFit.samples} played matches - it called
+              {pct(epaFit.accuracy)} of them correctly (Brier {epaFit.brier.toFixed(3)};
+              a coin flip scores 0.250). Learning rate {epaFit.k}, scale {Math.round(epaFit.scale)}.
+            </p>
+          {:else}
+            <p class="predict-calibration tba-muted">
+              Using default settings - this event has not played enough matches yet
+              to back-test the model against.
+            </p>
+          {/if}
         {:else if predictionTeams}
           <p class="tba-muted">Not enough EPA data yet for one or both alliances - they may not have played a match.</p>
         {:else}
@@ -321,6 +344,7 @@
   .manual-teams { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
 
   .predict-result { display: grid; grid-template-columns: 1fr auto 1fr; gap: var(--space-4); align-items: center; }
+  .predict-calibration { margin: 0; font-size: 0.78rem; line-height: 1.5; }
   .predict-alliance { display: flex; flex-direction: column; align-items: center; gap: var(--space-1); padding: var(--space-4); }
   .predict-alliance.red { background: var(--red-soft); }
   .predict-alliance.blue { background: var(--blue-soft, #e8f1ff); }

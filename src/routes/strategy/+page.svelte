@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
-  import { AlertTriangle, CalendarClock, ClipboardList, MapPinned, RefreshCw, Route, Target, Users } from 'lucide-svelte';
+  import { AlertTriangle, CalendarClock, ClipboardList, ExternalLink, MapPinned, RefreshCw, Route, Target, Users } from 'lucide-svelte';
   import { getAuthHeader } from '$lib/supabase.js';
   import { requestConfirmation } from '$lib/confirmation.js';
   import { toastActions } from '$lib/toast.js';
@@ -181,9 +181,18 @@
   const percent = (value) => Number.isFinite(value) ? `${Math.round(value * 100)}%` : '-';
   const text = (value) => String(value || '').trim();
 
+  // A single click only selects, filling the team brief beside the board -
+  // the common case is comparing several teams in a row, and navigating away
+  // on every click meant a round trip back for each one. Leaving the page is
+  // now a deliberate act: double-click the row, or use the brief's own
+  // "Open team view" button.
+  function selectTeam(row) {
+    selectedTeamKey = row.teamKey;
+  }
+
   function openTeamView(row) {
     selectedTeamKey = row.teamKey;
-    goto(`/teamview?event_key=${encodeURIComponent(resolvedEventKey)}&team=${encodeURIComponent(row.teamKey)}&from=${encodeURIComponent('/strategy')}&fromLabel=${encodeURIComponent('Strategy')}`);
+    goto(teamHref(row.teamKey));
   }
 
   const teamHref = (teamKey) =>
@@ -470,7 +479,17 @@
             </tr></thead>
             <tbody>
               {#each sortedRows as row}
-                <tr class:selected={selectedTeam?.teamKey === row.teamKey} on:click={() => openTeamView(row)}>
+                <tr
+                  class:selected={selectedTeam?.teamKey === row.teamKey}
+                  tabindex="0"
+                  aria-selected={selectedTeam?.teamKey === row.teamKey}
+                  title="Click for the team brief, double-click to open the full team view"
+                  on:click={() => selectTeam(row)}
+                  on:dblclick={() => openTeamView(row)}
+                  on:keydown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); selectTeam(row); }
+                  }}
+                >
                   <td data-label="Rank"><strong>{officialByTeam.get(row.teamNumber)?.rank ?? '—'}</strong></td>
                   <td data-label="Team"><strong>{row.teamNumber}</strong>{#if row.pitEntry?.robot_archetype}<small>{row.pitEntry.robot_archetype}</small>{/if}</td>
                   <td data-label="Reports">{row.matchScoutSummary.reportCount || '-'}<small>{row.performance.matchesScouted || 0} data matches</small></td>
@@ -494,6 +513,9 @@
     <aside class="team-brief" aria-live="polite">
       {#if selectedTeam}
         <div class="brief-title"><div><span class="eyebrow">Team brief</span><h2>Team {selectedTeam.teamNumber}</h2></div><span class:status-risk={selectedTeam.openProblems.length} class="coverage">{selectedTeam.coverage} observations</span></div>
+        <a class="btn btn-outline btn-sm brief-open-team" href={teamHref(selectedTeam.teamKey)}>
+          Open team view <ExternalLink size={14} />
+        </a>
         <div class="metric-grid">
           <div><span>Fuel / match</span><strong>{number(selectedTeam.performance.avgFuel, 0)}</strong></div>
           <div><span>Auto average</span><strong>{number(selectedTeam.autoAverage, 0)}</strong></div>
@@ -531,11 +553,13 @@
           {#if selectedTeam.openProblems.length}<ul class="risk-list">{#each selectedTeam.openProblems as issue}<li><strong>{issue.severity || 'watch'}</strong> {issue.summary}</li>{/each}</ul>{:else}<p class="muted">No open issues.</p>{/if}
         </div>
         <div class="brief-actions">
-          <a class="btn btn-outline btn-sm" href={`/teamview?event_key=${encodeURIComponent(resolvedEventKey)}&team=${encodeURIComponent(selectedTeam.teamKey)}&from=${encodeURIComponent('/strategy')}&fromLabel=${encodeURIComponent('Strategy')}`}>Open team view</a>
+          <!-- "Open team view" used to live here too; it now sits directly
+               under the brief's title instead, since the brief is long
+               enough that an action at the very bottom was easy to miss. -->
           <a class="btn btn-outline btn-sm" href={`/powerrankings`}>Power rankings</a>
           <a class="btn btn-outline btn-sm" href={`/picklist`}>Picklist</a>
         </div>
-      {:else}<div class="empty-state">Select a team to view its strategy brief.</div>{/if}
+      {:else}<div class="empty-state">Click a team to see its strategy brief here. Double-click to open the full team view.</div>{/if}
     </aside>
   </section>
   {/if}
@@ -609,6 +633,7 @@
   li span { color:var(--text-secondary); font-size:.8rem; text-transform:capitalize; }
   .risk-list strong { color:var(--danger, #dc3545); text-transform:capitalize; }
   .brief-actions { display:flex; gap:var(--space-2); padding:var(--space-3); flex-wrap:wrap; }
+  .brief-open-team { display:inline-flex; align-items:center; gap:var(--space-2); margin:var(--space-3) var(--space-3) 0; }
   .empty-state, .notice { border:1px solid var(--border); padding:var(--space-4); margin-top:var(--space-4); color:var(--text-secondary); }
   .notice-error { border-color:var(--danger, #dc3545); color:var(--danger, #dc3545); }
   @media (max-width:900px) { .summary-grid { grid-template-columns:repeat(3, 1fr); } .summary-grid > div:nth-child(3) { border-right:0; } .strategy-layout { grid-template-columns:1fr; } }

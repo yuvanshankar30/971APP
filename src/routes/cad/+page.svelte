@@ -1343,7 +1343,11 @@
                   View Build <ExternalLink size={12} />
                 </a>
                 {#if build.status !== 'assembled'}
-                  <button class="btn btn-primary btn-sm" on:click|stopPropagation={() => markAsAssembled(build.id)}>
+                  <!-- Secondary, not primary: every build card carrying two
+                       gold fills turned the All Builds row into a wall of
+                       solid gold, and it put a state change at the same
+                       visual weight as simply opening the build. -->
+                  <button class="btn btn-secondary btn-sm" on:click|stopPropagation={() => markAsAssembled(build.id)}>
                     Mark as Assembled
                   </button>
                 {/if}
@@ -1644,8 +1648,22 @@
   .subsystem-badges { display: flex; align-items: center; gap: var(--gap-1); flex-wrap: wrap; }
   .badge { display: inline-flex; align-items: center; justify-content: center; height: var(--control-height) !important; padding: 0 var(--space-2) !important; border-radius: var(--radius-sm); font-size: var(--font-xs); font-weight: 600; text-transform: uppercase; line-height: 1; box-sizing: border-box; white-space: nowrap; }
   .subsystem-header .btn-outline.btn-small { display: inline-flex; align-items: center; justify-content: center; height: var(--control-height) !important; width: var(--control-height) !important; padding: 0 !important; font-size: var(--font-xs); border-radius: var(--radius-sm); box-sizing: border-box; }
-  .badge-lead { background: var(--accent); color: var(--color-white); }
-  .badge-member { background: var(--green-base); color: var(--color-white); }
+  /* Soft tint + colored text + a faint border, the same treatment the
+     status chips use (see --status-ready-* in app.css). These were solid
+     fills of saturated gold and green, which on the dark theme's near-black
+     cards read as glaring blocks - and made a role label shout louder than
+     the actual buttons beside it. The soft tokens are themed, so this stays
+     readable in both light and dark without a per-theme override. */
+  .badge-lead {
+    background: var(--brand-gold-soft);
+    color: var(--brand-gold-strong);
+    border: 1px solid color-mix(in srgb, var(--brand-gold-base) 35%, transparent);
+  }
+  .badge-member {
+    background: var(--green-soft);
+    color: var(--green-strong);
+    border: 1px solid color-mix(in srgb, var(--green-base) 35%, transparent);
+  }
   .subsystem-description { color: var(--neutral-500); margin-bottom: var(--space-4); line-height: 1.5; }
   .subsystem-info { display: flex; flex-direction: column; gap: var(--gap-2); margin-bottom: var(--space-4); }
   .lead-label { font-weight: 500; color: var(--secondary); }
