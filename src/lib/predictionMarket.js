@@ -8,6 +8,7 @@
 
 export const STARTING_BALANCE = 1000;
 export const TEST_MARKET_SUFFIX = 'test1';
+export const ANONYMOUS_MARKET_PARTICIPANT_ID = '00000000-0000-4000-8000-000000000971';
 
 const FALLBACK_TEST_TEAMS = ['frc971', 'frc254', 'frc1678', 'frc1323', 'frc604', 'frc581'];
 
@@ -76,7 +77,7 @@ export function resolvePariMutuel(bets = [], winningSide) {
 // an unresolved wager is neither a win nor a loss yet, so it cannot move the
 // number the candy prize gets decided on. pendingStake surfaces separately
 // so a big outstanding bet is still visible before it resolves.
-export function summarizeStandings(bets = []) {
+export function summarizeStandings(bets = [], overrides = []) {
   const byScout = new Map();
   for (const bet of bets) {
     if (isTestMarketKey(bet?.match_key)) continue;
@@ -96,8 +97,17 @@ export function summarizeStandings(bets = []) {
     }
   }
 
+  for (const override of overrides || []) {
+    const key = override?.participant_id;
+    if (!key) continue;
+    if (!byScout.has(key)) byScout.set(key, { userId: key, settledNet: 0, pendingStake: 0, wins: 0, losses: 0, pushes: 0, betCount: 0 });
+    const row = byScout.get(key);
+    if (Number.isFinite(Number(override.balance))) row.balanceOverride = Number(override.balance);
+    if (Number.isInteger(Number(override.losses)) && Number(override.losses) >= 0) row.losses = Number(override.losses);
+  }
+
   return [...byScout.values()]
-    .map((row) => ({ ...row, balance: STARTING_BALANCE + row.settledNet }))
+    .map((row) => ({ ...row, balance: row.balanceOverride ?? STARTING_BALANCE + row.settledNet }))
     .sort((a, b) => b.balance - a.balance || b.wins - a.wins);
 }
 

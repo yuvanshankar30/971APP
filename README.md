@@ -205,7 +205,10 @@ browser confirmation or prompt popups.
   match so scouts can test placing, updating, and cancelling predictions. Its
   EPA participant contributes one fixed-stake alliance vote per unlocked match
   through a service-only table; the public market receives it as an ordinary
-  anonymous vote and never receives the model probability or source marker. The
+  pseudonymous scout vote, includes its results in the leaderboard, and never
+  receives the model probability or source marker. Per-event or global service-
+  managed leaderboard overrides can set a participant's displayed balance and
+  loss count without rewriting their underlying bet history. The
   event picker always includes the active event and resolves keys such as
   `2026cc` to their TBA name (for example, Chezy Champs) when available.
 - **Vision Scouting**: a real Competition-folder nav tab, open to every

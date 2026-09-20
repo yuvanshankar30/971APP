@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { ANONYMOUS_MARKET_PARTICIPANT_ID } from '$lib/predictionMarket.js';
 import { buildModelVotes, modelVoteForMatch, publicAnonymousVote } from './predictionMarketModelVote.js';
 
 const match = (key, red, blue, extra = {}) => ({
@@ -39,7 +40,7 @@ describe('private prediction-market model vote', () => {
       placed_at: 'now', updated_at: 'now', resolved_at: null, payout: null, winning_side: null,
       source: 'model', probability: 0.83
     });
-    expect(output).toMatchObject({ id: 'secret-id', created_by: null, side: 'blue', stake: 100 });
+    expect(output).toMatchObject({ id: 'secret-id', created_by: ANONYMOUS_MARKET_PARTICIPANT_ID, side: 'blue', stake: 100 });
     expect(output).not.toHaveProperty('source');
     expect(output).not.toHaveProperty('probability');
   });

@@ -88,21 +88,6 @@ async function syncModelVotes(db, eventKey) {
     // betting must keep working even when the private participant cannot.
     if (error) return;
   }
-
-  const played = new Map(matches.filter((match) => match?.actual_time).map((match) => [match.key, match]));
-  if (!played.size) return;
-  const { data: unresolved, error } = await db.from('prediction_market_system_votes')
-    .select(SYSTEM_SELECT_COLUMNS).eq('event_key', eventKey).is('resolved_at', null);
-  if (error) return;
-  for (const vote of unresolved || []) {
-    const match = played.get(vote.match_key);
-    if (!match) continue;
-    const winner = match.winning_alliance === 'red' || match.winning_alliance === 'blue' ? match.winning_alliance : null;
-    const payout = winner == null ? Number(vote.stake) : vote.side === winner ? Number(vote.stake) * 2 : 0;
-    await db.from('prediction_market_system_votes').update({
-      resolved_at: new Date().toISOString(), payout, winning_side: winner
-    }).eq('id', vote.id).is('resolved_at', null);
-  }
 }
 
 // Resolves every outstanding bet whose match TBA now reports a result for.
@@ -116,10 +101,20 @@ async function resolveOutstandingBets(db, eventKey) {
     .select(SELECT_COLUMNS)
     .eq('event_key', eventKey)
     .is('resolved_at', null);
-  if (error || !pending?.length) return;
+  if (error) return;
+  const { data: systemPending, error: systemError } = await db
+    .from('prediction_market_system_votes')
+    .select(SYSTEM_SELECT_COLUMNS)
+    .eq('event_key', eventKey)
+    .is('resolved_at', null);
+  const allPending = [
+    ...(pending || []).map((bet) => ({ ...bet, participantType: 'human' })),
+    ...(systemError ? [] : systemPending || []).map((bet) => ({ ...bet, participantType: 'system' }))
+  ];
+  if (!allPending.length) return;
 
   const byMatch = new Map();
-  for (const bet of pending) {
+  for (const bet of allPending) {
     if (!byMatch.has(bet.match_key)) byMatch.set(bet.match_key, []);
     byMatch.get(bet.match_key).push(bet);
   }
@@ -133,8 +128,12 @@ async function resolveOutstandingBets(db, eventKey) {
     if (!match?.actual_time) continue;
     const resolutions = resolvePariMutuel(matchBets, match.winning_alliance);
     for (const resolution of resolutions) {
+      const participant = matchBets.find((bet) => bet.id === resolution.id);
+      const table = participant?.participantType === 'system'
+        ? 'prediction_market_system_votes'
+        : 'prediction_market_bets';
       await db
-        .from('prediction_market_bets')
+        .from(table)
         .update({ resolved_at: new Date().toISOString(), payout: resolution.payout, winning_side: resolution.winning_side })
         .eq('id', resolution.id)
         .is('resolved_at', null);
@@ -151,8 +150,8 @@ export async function GET({ request, url }) {
   if (!eventKey) return json({ error: 'event_key is required' }, { status: 400 });
 
   const db = getDbClient(auth);
-  await resolveOutstandingBets(db, eventKey);
   await syncModelVotes(db, eventKey);
+  await resolveOutstandingBets(db, eventKey);
 
   const { data, error } = await auth
     .from('prediction_market_bets')
@@ -166,9 +165,20 @@ export async function GET({ request, url }) {
     .select(SYSTEM_SELECT_COLUMNS)
     .eq('event_key', eventKey);
   const anonymousVotes = privateVoteError ? [] : (privateVotes || []).map(publicAnonymousVote);
+  const { data: overrideRows, error: overrideError } = await db
+    .from('prediction_market_leaderboard_overrides')
+    .select('event_key,participant_id,balance,losses')
+    .in('event_key', ['*', eventKey]);
+  const overridesByParticipant = new Map();
+  if (!overrideError) {
+    const orderedOverrides = (overrideRows || []).sort((left, right) => Number(left.event_key !== '*') - Number(right.event_key !== '*'));
+    for (const row of orderedOverrides) {
+      overridesByParticipant.set(row.participant_id, row);
+    }
+  }
   const combined = [...(data || []), ...anonymousVotes]
     .sort((left, right) => String(right.placed_at || '').localeCompare(String(left.placed_at || '')));
-  return json({ success: true, data: combined });
+  return json({ success: true, data: combined, leaderboard_overrides: [...overridesByParticipant.values()] });
 }
 
 export async function POST({ request }) {

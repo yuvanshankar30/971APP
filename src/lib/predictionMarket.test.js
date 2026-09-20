@@ -72,6 +72,15 @@ describe('summarizeStandings', () => {
     expect(standings.find((row) => row.userId === 'b').losses).toBe(1);
   });
 
+  it('includes pseudonymous and overridden participants in the leaderboard', () => {
+    const standings = summarizeStandings([
+      { created_by: 'anonymous', match_key: 'event_qm1', stake: 100, payout: 200, resolved_at: 'now' }
+    ], [{ participant_id: 'arin', balance: 3000, losses: 5 }]);
+    expect(standings.find((row) => row.userId === 'anonymous')).toMatchObject({ balance: 1100, wins: 1 });
+    expect(standings.find((row) => row.userId === 'arin')).toMatchObject({ balance: 3000, losses: 5 });
+    expect(standings[0].userId).toBe('arin');
+  });
+
   it('keeps practice predictions out of standings and balances', () => {
     const practice = [{ id: 'test', match_key: '2026test_test1', created_by: 'a', side: 'red', stake: 900, resolved_at: null }];
     expect(summarizeStandings(practice)).toEqual([]);

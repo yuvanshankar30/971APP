@@ -6,6 +6,7 @@
   import { isMatchPlayed, matchLabel } from '$lib/matchProjection.js';
   import {
     STARTING_BALANCE,
+    ANONYMOUS_MARKET_PARTICIPANT_ID,
     availableBalance,
     balanceHistoryForUser,
     isTestMarketKey,
@@ -25,6 +26,7 @@
   let bets = [];
   let userId = null;
   let userNames = new Map();
+  let leaderboardOverrides = [];
 
   let drafts = {}; // match_key -> { side, stake }
   let saving = {};
@@ -66,7 +68,7 @@
     return `${Math.floor(seconds / 86400)}d ago`;
   }
 
-  $: standings = summarizeStandings(bets);
+  $: standings = summarizeStandings(bets, leaderboardOverrides);
   $: candyLeader = standings[0] || null;
   $: myBalance = availableBalance(bets, userId);
   $: myStandingRow = standings.find((row) => row.userId === userId) || null;
@@ -112,6 +114,7 @@
     .slice(0, 8);
 
   function displayName(id) {
+    if (id === ANONYMOUS_MARKET_PARTICIPANT_ID) return 'A scout';
     if (!id) return 'A scout';
     if (id === userId) return 'You';
     return userNames.get(id) || 'A scout';
@@ -153,6 +156,7 @@
       .catch(() => null);
     if (response?.success) {
       bets = response.data || [];
+      leaderboardOverrides = response.leaderboard_overrides || [];
       if (response.unavailable) warning = 'The prediction market is unavailable until its migration is applied.';
     } else {
       warning = response?.error || 'Could not load the prediction market.';

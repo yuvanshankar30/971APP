@@ -1,4 +1,5 @@
 import { calibratedScale, computeEventEpa, winProbability } from '$lib/epaModel.js';
+import { ANONYMOUS_MARKET_PARTICIPANT_ID } from '$lib/predictionMarket.js';
 
 export const DEFAULT_MODEL_VOTE_STAKE = 100;
 
@@ -34,7 +35,7 @@ export function publicAnonymousVote(row) {
     id: row.id,
     event_key: row.event_key,
     match_key: row.match_key,
-    created_by: null,
+    created_by: ANONYMOUS_MARKET_PARTICIPANT_ID,
     side: row.side,
     stake: row.stake,
     placed_at: row.placed_at,
