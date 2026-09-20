@@ -1794,10 +1794,19 @@
   }
 
   .parts-container {
-    /* Shared page width rather than a third bespoke value. */
-    max-width: var(--page-max-width);
-    margin: 2rem auto;
-    padding: 0 1rem;
+    /* Full-bleed breakout, same technique the manufacturing page and the
+       homepage already use. This was a centered column capped at
+       --page-max-width, which left a dead gutter down the left of the
+       screen while the parts table - vendor, project, requester, qty,
+       price, total, status, actions - was squeezed for room inside it.
+       Escaping the shell puts the Manage Budget Pins control at the true
+       left edge and gives the table the width it was short of. */
+    width: 100vw;
+    margin-left: calc(50% - 50vw);
+    margin-right: calc(50% - 50vw);
+    margin-top: 2rem;
+    margin-bottom: 2rem;
+    padding: 0 var(--space-5);
   }
 
   .page-header { padding: 2rem; margin-bottom: 2rem; box-shadow: var(--shadow-sm); }
@@ -2038,8 +2047,11 @@
 
   .modal textarea { min-height: 72px; }
 
-  @media (max-width: 1200px) { 
-    .parts-container { margin: 1rem; padding: 0; } 
+  @media (max-width: 1200px) {
+    /* Below the shell's own max-width there is no gutter to reclaim, so
+       the breakout is cancelled and the container goes back to normal
+       flow - otherwise 100vw would overflow the viewport sideways. */
+    .parts-container { width: auto; margin: 1rem; padding: 0; }
     .page-header { padding: 1.5rem; } 
     .header-content { flex-direction: column; align-items: flex-start; }
   }
