@@ -123,6 +123,49 @@ export function availableBalance(bets = [], userId, excludeBetId = null) {
   return STARTING_BALANCE + settledNet - pendingStake;
 }
 
+// Replays one match's bets in the order they were actually placed so the
+// implied red-side share can be charted over time, the same "odds moved as
+// the crowd weighed in" line real prediction markets show. Built entirely
+// from data already on each bet row (placed_at, side, stake) - no new
+// schema or history table needed. A bet that was later edited or cancelled
+// only shows its FINAL stake at its ORIGINAL placed_at (bets are one
+// editable row per scout, not an append-only ledger), so this is a
+// reasonable reconstruction, not a perfectly exact replay.
+export function oddsHistoryForMatch(bets = [], matchKey) {
+  const matchBets = (bets || [])
+    .filter((bet) => bet.match_key === matchKey && (bet.side === 'red' || bet.side === 'blue'))
+    .slice()
+    .sort((a, b) => String(a.placed_at).localeCompare(String(b.placed_at)));
+  const history = [];
+  let redPool = 0;
+  let bluePool = 0;
+  for (const bet of matchBets) {
+    if (bet.side === 'red') redPool += Number(bet.stake || 0);
+    else bluePool += Number(bet.stake || 0);
+    const total = redPool + bluePool;
+    history.push({ at: bet.placed_at, redShare: total > 0 ? redPool / total : 0.5, total });
+  }
+  return history;
+}
+
+// One scout's running point balance over time, from STARTING_BALANCE
+// through each of their bets in the order it actually resolved - the same
+// idea as a portfolio-value-over-time chart, built from settled bets alone
+// since an unresolved bet hasn't moved the balance yet.
+export function balanceHistoryForUser(bets = [], userId) {
+  const resolved = (bets || [])
+    .filter((bet) => bet.created_by === userId && bet.resolved_at && !isTestMarketKey(bet.match_key))
+    .slice()
+    .sort((a, b) => String(a.resolved_at).localeCompare(String(b.resolved_at)));
+  let balance = STARTING_BALANCE;
+  const history = [{ at: null, balance, matchKey: null }];
+  for (const bet of resolved) {
+    balance += Number(bet.payout ?? 0) - Number(bet.stake ?? 0);
+    history.push({ at: bet.resolved_at, balance, matchKey: bet.match_key });
+  }
+  return history;
+}
+
 // How much is currently staked on each side of ONE match, and what that
 // implies about the "crowd's" confidence - real signal a scout can weigh
 // before placing their own bet, the same way real prediction/betting

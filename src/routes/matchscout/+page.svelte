@@ -310,8 +310,15 @@
     const raw = String(rawMatchNumber || '').trim();
     if (!raw || !eventKey) return '';
     if (raw.includes('_')) return raw;
-    const suffix = /^(qm|qf|sf|f)\d/i.test(raw) ? raw.toLowerCase() : `qm${raw}`;
-    return `${eventKey}_${suffix}`;
+    // A TBA-style code (qm9, sf2m1, f1) is already unambiguous - keep it.
+    if (/^(qm|qf|sf|f)\d/i.test(raw)) return `${eventKey}_${raw.toLowerCase()}`;
+    // Match #'s placeholder is "14", but nothing stops a scout typing
+    // "Quals 9", "Qual 4", "Q9", etc (real historical match_scout_entries
+    // rows include exactly this) - pull out the first run of digits and
+    // treat that as the qualification match number, rather than gluing the
+    // raw text onto "qm" and producing a key nothing else matches.
+    const digits = raw.match(/\d+/)?.[0];
+    return digits ? `${eventKey}_qm${digits}` : '';
   }
 
   function toAssignmentTeamKey(rawTeamNumber) {
@@ -369,7 +376,13 @@
       const response = await fetch(`/api/matchscout?resource=pit-problems&event_key=${encodeURIComponent(eventKey)}&team_key=${encodeURIComponent(entry.team_key)}`, { headers: await getAuthHeader() });
       const result = await response.json();
       if (!response.ok || !result.success) throw new Error(result.error || 'Could not load the ACE Team report.');
-      const problem = (result.data || []).find(row => row.match_key === entry.match_key && row.created_by === entry.created_by && row.source === 'Match scout' && !row.resolved);
+      const problem = (result.data || []).find(row =>
+        row.match_key === entry.match_key
+        && row.source === 'Match scout'
+        && !row.resolved
+        && (row.created_by === entry.created_by || (row.scout_observations || []).some(observation => observation.created_by === entry.created_by))
+      );
+      const ownObservation = (problem?.scout_observations || []).find(observation => observation.created_by === entry.created_by);
       nextAssignment();
       matchNumber = entry.match_key;
       robotNumber = entry.team_key.replace(/^frc/, '');
@@ -402,7 +415,7 @@
       card = entry.card || 'none';
       driverSkill = entry.driver_skill ?? undefined;
       pitProblem = Boolean(problem);
-      pitProblemDetails = problem?.summary || '';
+      pitProblemDetails = ownObservation?.summary || problem?.summary || '';
       beached = entry.beached === true;
       postNotes = entry.post_notes || '';
       editing = true;
@@ -865,7 +878,11 @@
 
 <style>
   .report-row-actions { display:flex; flex-wrap:wrap; gap:var(--space-2); }
-  .report-actions { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-3); margin-bottom:var(--space-3); }
+  /* flex-end, not center: .competition-picker is a 2-row grid (its own
+     "Competition" label above the select), so centering it against the
+     single-line "My reports" button left the button riding high, aligned
+     with the label text instead of the select it actually sits next to. */
+  .report-actions { display:flex; flex-wrap:wrap; align-items:flex-end; gap:var(--space-3); margin-bottom:var(--space-3); }
   .competition-picker { display:grid; gap:.25rem; min-width:min(100%, 22rem); font-weight:600; }
   .competition-picker span { font-size:.8rem; color:var(--text-muted); }
   .report-history { padding:var(--space-4); margin-bottom:var(--space-4); }

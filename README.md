@@ -294,7 +294,9 @@ browser confirmation or prompt popups.
   every current default tab, so new and restored team tools do not vanish.
   Scouting Admin is restricted to site administrators and the dedicated
   Scouting Admin roster entries for Arya Saikia, Caden Nguyen, and Aarush
-  Rajagopalan.
+  Rajagopalan. Its event picker and date control can export the selected day's
+  submitted Match Scouting results as CSV; assignments and unrelated scouting
+  administration data are intentionally excluded.
 - **Pick List** (`scouting/`): a team-comparison / pick-list workspace for the
   active event. Named for what it produces: it was previously labelled "Data
   Scouting" in the nav, which collided with the separate `datascout` route and
@@ -326,11 +328,15 @@ browser confirmation or prompt popups.
   reopened from Pit Scouting instead of disappearing into browser-local state.
   Match Scouting keeps robot status available throughout the workflow and
   requires a described ACE Team handoff whenever a robot breaks mechanically or is marked disabled or dead;
-  each handoff is immediately posted by the server-side Slack bot to
-  `#2026-chezy-ace-strat-pit`. Its Slack channel/timestamp is retained on the
-  ACE issue so later report edits update the original alert instead of posting
-  duplicates; `ACE_PIT_SLACK_CHANNEL_ID` can pin the destination by ID when the
-  channel is private.
+  every handoff posts to the `#2026-ace-pit-bot` Slack channel, one durable
+  thread per competition (`ace_pit_slack_threads`, keyed by event, titled
+  "ACE issues for &lt;date&gt;") with every report, edit, and resolution as its
+  own reply in that thread rather than a separate top-level message per
+  issue. Re-submitting an edited report or resolving one updates that same
+  reply in place instead of posting a duplicate. When
+  multiple scouts cover the same
+  robot in the same match, their observations merge into that one issue;
+  editing replaces only that scout's observation.
   general notes and the auto-path drawing remain optional. The path tool uses
   a simplified, alliance-relative version of WPILib/AdvantageScope's top-down
   2026 REBUILT field, so the scout's wall is always on the left and red/blue
@@ -505,7 +511,8 @@ file: update its diagram alongside this section, not separately from it.
   ACE/Pit alerts, and signed `app_mention` handling: `@971app status` reports
   live Hub/database/scouting status plus recent releases, while other Hub
   questions receive read-only, context-bounded answers from Groq using the
-  server-only `GROQ_API_KEY`),
+  server-only `GROQ_API_KEY`; Slack retry IDs are durably deduplicated in
+  `slack_event_receipts`),
   Onshape API (CAD source of truth for parts - see the Onshape-key exposure
   note under **Known gaps** below), The Blue Alliance API (scouting), Sentry
   (error monitoring), Google Drive API (AutoCAM input/output watcher, hand-

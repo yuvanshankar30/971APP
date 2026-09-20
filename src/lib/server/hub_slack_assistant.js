@@ -3,8 +3,9 @@ import { getSlackClient, getSupabase } from '$lib/server/971bot.js';
 
 export const HUB_RECENT_CHANGES = [
   'Drive Team now shows every completed 971 match with Win/Loss/Tie and the final score.',
-  'Match Scouting sends mechanical, disabled, and dead-robot ACE handoffs to #2026-chezy-ace-strat-pit.',
+  'Match Scouting sends mechanical, disabled, and dead-robot ACE handoffs only to #2026-ace-pit-bot.',
   'Completed scouting assignments stay visible, display Done, and match historical labels such as Qual 1 or Quals 1.',
+  'Scouting Admin exports submitted match-scouting results as CSV without including assignment rows.',
   'Home shows the current or upcoming TBA match and Match Scouting supports competition selection.'
 ];
 
@@ -13,6 +14,11 @@ Spartans Hub is the internal web workspace for FRC teams 971 and 9584.
 Major areas include Manufacturing and AutoCAM, CAD/build tracking, Purchasing,
 Planner/tasks, Competition scouting, Strategy, Drive Team, Vision Scouting,
 Pit Scouting, Match Scouting, robot ratings, predictions, and administration.
+Useful routes include /matchscout for recording match observations,
+/scouting-admin for assignments and match-result exports, /pitscout for pit
+scouting, /driveteam for completed 971 match results, /predictions for the
+prediction market, /manufacture for manufacturing requests, and /autocam for
+CAM automation.
 Match Scouting reports are stored in Supabase. Mechanical breaks, disabled or
 dead robots, and manually flagged pit problems create ACE/Pit issues. The bot
 must never claim that an action was performed, change data, reveal credentials,
@@ -78,7 +84,9 @@ export async function askGroqAboutHub(question, snapshot, options = {}) {
   if (!apiKey) throw new Error('GROQ_API_KEY is not configured');
   const fetchImpl = options.fetchImpl || fetch;
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), options.timeoutMs || 6000);
+  // Slack expects Events API requests to be acknowledged in roughly three
+  // seconds. Leave time for the status snapshot and chat.postMessage call.
+  const timeout = setTimeout(() => controller.abort(), options.timeoutMs || 1500);
   try {
     const response = await fetchImpl('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',

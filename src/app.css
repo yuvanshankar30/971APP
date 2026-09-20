@@ -1317,9 +1317,9 @@ textarea:focus,
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
-  background: var(--green-soft);
-  color: var(--green-strong);
-  border-color: var(--green-soft);
+  background: var(--surface-2);
+  color: var(--text);
+  border-color: var(--border);
 }
 
 .tag-pending {
@@ -1418,51 +1418,30 @@ textarea:focus,
   border-color: var(--border);
 }
 
+/* Workflow (Router/Lathe/Mill/3D Print/Laser Cut) tags are all the same
+   neutral style now, not a per-workflow color rainbow - a distinct pastel
+   for every machining process read as an AI-generated-dashboard cliche
+   rather than a considered design choice. Purchase keeps its own gold
+   (deliberately shared with the COTS type tag elsewhere, not part of this
+   machining-workflow set). */
 .tag-workflow-laser,
 .tag-workflow-laser-cut,
-.tag-workflow-lasercut {
-  background: var(--brand-gold-soft);
-  color: var(--orange-strong);
-  border-color: var(--brand-gold-base);
-}
-
-/* Workflow tags reuse the same hue families as the status chips (forest
-   green / azure / teal) for a consistent, considered palette instead of
-   raw saturated Tailwind swatches. Lathe gets its own rust tone, distinct
-   from the danger-red used for Rejected. Purchase used to share this same
-   green with Router - same color on two different workflows made COTS
-   parts read as manufactured ones at a glance, so Purchase gets the same
-   gold family as the COTS type tag instead (they always appear together). */
-.tag-workflow-router {
-  background: #dbe9c8;
-  color: #4f7a2e;
-  border-color: #a3c47a;
+.tag-workflow-lasercut,
+.tag-workflow-router,
+.tag-workflow-lathe,
+.tag-workflow-mill,
+.tag-workflow-3d,
+.tag-workflow-3d-print,
+.tag-workflow-3dprint {
+  background: var(--surface-2);
+  color: var(--text);
+  border-color: var(--border);
 }
 
 .tag-workflow-purchase {
   background: var(--brand-gold-soft);
   color: var(--orange-strong);
   border-color: var(--brand-gold-base);
-}
-
-.tag-workflow-lathe {
-  background: #f2d3ba;
-  color: #a8451f;
-  border-color: #dea274;
-}
-
-.tag-workflow-mill {
-  background: #dce7f0;
-  color: #1d5f8f;
-  border-color: #9dc2dc;
-}
-
-.tag-workflow-3d,
-.tag-workflow-3d-print,
-.tag-workflow-3dprint {
-  background: #d3ece5;
-  color: #0d7a68;
-  border-color: #85cabb;
 }
 
 .workflow-tag {
@@ -2346,41 +2325,13 @@ textarea:focus,
    themes (legacy and modern) are untouched.
    ======================================================================== */
 
-/* Workflow tags otherwise render with a fully-opaque brightened border
-   (e.g. --purple-base) around a near-transparent fill — reads as a harsh
-   neon outline on dark surfaces. Give every workflow tag the same
-   translucent-border treatment as the status chips above, reusing the same
-   hue families for a consistent, considered palette across the app. */
-[data-theme="modern-dark"] .tag-workflow-3d,
-[data-theme="modern-dark"] .tag-workflow-3d-print,
-[data-theme="modern-dark"] .tag-workflow-3dprint {
-  background: rgba(60, 180, 155, 0.22);
-  color: #82dcc4;
-  border-color: rgba(60, 180, 155, 0.5);
-}
-
-[data-theme="modern-dark"] .tag-workflow-mill {
-  background: rgba(56, 138, 186, 0.22);
-  color: #8fc4e3;
-  border-color: rgba(56, 138, 186, 0.5);
-}
-
-[data-theme="modern-dark"] .tag-workflow-router {
-  background: rgba(130, 178, 80, 0.22);
-  color: #b8d68f;
-  border-color: rgba(130, 178, 80, 0.5);
-}
-
+/* Machining workflow tags stay neutral in dark mode too (see the light-mode
+   rule above for why) - only Purchase keeps a dark-mode tint, matching its
+   own light-mode gold. */
 [data-theme="modern-dark"] .tag-workflow-purchase {
   background: rgba(212, 165, 60, 0.22);
   color: #e6c877;
   border-color: rgba(212, 165, 60, 0.5);
-}
-
-[data-theme="modern-dark"] .tag-workflow-lathe {
-  background: rgba(196, 120, 80, 0.22);
-  color: #eab48e;
-  border-color: rgba(196, 120, 80, 0.5);
 }
 
 /* Solid-fill helpers become tints too (ordered / delivered / ready) */

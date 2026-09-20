@@ -31,5 +31,9 @@ In the 971app configuration at `api.slack.com/apps`:
    subscriptions.
 
 The endpoint verifies Slack request signatures, ignores bot-authored mentions,
-deduplicates Slack retries, and replies in the mention thread. The Groq model
-has no mutation tools and cannot change Hub data.
+deduplicates Slack retries through the service-role-only
+`slack_event_receipts` table, and replies in the mention thread. Failed
+deliveries are marked retryable; completed or in-progress event IDs cannot
+double-post from another Cloud Run instance. Groq has a short request timeout
+so the complete event callback normally stays within Slack's acknowledgement
+window. The model has no mutation tools and cannot change Hub data.

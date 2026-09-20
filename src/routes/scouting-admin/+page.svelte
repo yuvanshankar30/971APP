@@ -23,6 +23,11 @@
   let selectedEventKey = '';
   let savingEvent = false;
   let deletingAllScoutingData = false;
+  let exportingMatchScoutingCsv = false;
+  // Defaults to today (Pacific, matching how the export itself interprets
+  // the date) so the common case - "export today's match scouting" at the
+  // end of a competition day - needs no picking at all.
+  let matchScoutingExportDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles' }).format(new Date());
 
   // Separate from selectedEventKey above (which drives the "Competition
   // Code" picker that sets the live active event) - this just lets an admin
@@ -122,6 +127,37 @@
       ...(await getAuthHeader())
     };
     return fetch(url, { ...options, headers });
+  }
+
+  async function exportMatchScoutingCsvForDay() {
+    const exportEventKey = browseEventKey || eventKey;
+    if (!exportEventKey || !matchScoutingExportDate || exportingMatchScoutingCsv) return;
+    exportingMatchScoutingCsv = true;
+    errorMsg = '';
+    successMsg = '';
+    try {
+      const response = await authFetch(
+        `/api/scouting-admin?resource=export-match-scouting-csv&event_key=${encodeURIComponent(exportEventKey)}&date=${encodeURIComponent(matchScoutingExportDate)}`
+      );
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.error || `Export failed (${response.status})`);
+      }
+      const blob = await response.blob();
+      const href = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = href;
+      link.download = `match-scouting-${exportEventKey.replace(/[^a-z0-9_-]/gi, '_')}-${matchScoutingExportDate}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(href);
+      successMsg = `Exported match scouting submissions for ${matchScoutingExportDate}.`;
+    } catch (error) {
+      errorMsg = error?.message || 'Could not export match scouting data.';
+    } finally {
+      exportingMatchScoutingCsv = false;
+    }
   }
 
   async function loadStartPhotos() {
@@ -583,6 +619,17 @@
           bind:value={browseEventKey}
           allLabel={`Current Event (${eventKey || 'none set'})`}
         />
+        <div class="match-scouting-export">
+          <label class="sr-only" for="matchScoutingExportDate">Day to export</label>
+          <input id="matchScoutingExportDate" class="form-input" type="date" bind:value={matchScoutingExportDate} />
+          <button
+            class="btn btn-secondary"
+            disabled={exportingMatchScoutingCsv || !(browseEventKey || eventKey) || !matchScoutingExportDate}
+            on:click={exportMatchScoutingCsvForDay}
+          >
+            {exportingMatchScoutingCsv ? 'Exporting...' : 'Export Match Scouting CSV'}
+          </button>
+        </div>
         <button class="btn btn-secondary" disabled={loading} on:click={loadDashboard}>Refresh Dashboard</button>
       </div>
     </div>
@@ -1145,6 +1192,16 @@
      to their bottom edge so the button lines up with the select itself. */
   .scouting-header .page-actions {
     align-items: flex-end;
+  }
+
+  .match-scouting-export {
+    display: flex;
+    align-items: center;
+    gap: var(--gap-2);
+  }
+
+  .match-scouting-export input[type='date'] {
+    width: auto;
   }
 
   /* Event card */

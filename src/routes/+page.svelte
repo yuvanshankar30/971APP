@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { supabase, getAuthHeader } from '$lib/supabase.js';
   import { initAuth, userStore, signOut, authReady as authReadyStore, user as authUserStore } from '$lib/stores/auth.js';
-  import { LogIn, UserPlus, Mail, Lock, User, Shield, CheckCircle, AlertCircle, LogOut, Users, GripVertical, X, Plus, LayoutGrid, ClipboardCheck, Factory, ShoppingCart, ListChecks } from 'lucide-svelte';
+  import { LogIn, UserPlus, Mail, Lock, User, Shield, CheckCircle, AlertCircle, LogOut, Users, GripVertical, X, Plus, LayoutGrid, ClipboardCheck, Factory, ShoppingCart, ListChecks, ListOrdered, Target } from 'lucide-svelte';
   import { goto } from '$app/navigation';
   import { FRC_TEAMS, hasPermission } from '$lib/permissions.js';
   import { theme, setTheme } from '$lib/stores/theme.js';
@@ -72,6 +72,93 @@
   let editMode = false;
   let draggedSectionKey = null;
   let dragOverSectionKey = null;
+
+  // Quick-nav sidebar: clicking a tab surfaces a preview right here on the
+  // home page instead of immediately navigating away from it - navigating
+  // is still one click away (the panel's own "Open" button), just no
+  // longer the click on the tab itself.
+  const QUICK_TABS = [
+    { key: 'strategy', label: 'Strategy', href: '/strategy', blurb: "What's happening on the field right now, for alliance-selection awareness." },
+    { key: 'driveteam', label: 'Drive Team', href: '/driveteam', blurb: 'Your own next match - what Drive Team needs to know before it plays.' },
+    { key: 'matchscout', label: 'Match Scouting', href: '/matchscout', blurb: 'File a match report for your assigned robot, or edit one you already submitted.' },
+    { key: 'pitscout', label: 'Pit Scouting', href: '/pitscout', blurb: "Record a team's robot capabilities, drivebase, and technical details during pit walks." },
+    { key: 'myscout', label: 'My Scout', href: '/myscout', blurb: 'Every match and pit report you have personally submitted for the active competition.' },
+    { key: 'picklist', label: 'Picklist', href: '/picklist', blurb: 'Drag-reorder your human pick list, with AI move-flagging against the scouting data.' },
+    { key: 'matchrankings', label: 'Match Rankings', href: '/matchrankings', blurb: 'Live qualification rankings and match results as they come in.' },
+    { key: 'powerrankings', label: 'Power Rankings', href: '/powerrankings', blurb: "A computed power ranking blending this team's own scouting data with TBA." },
+    { key: 'robotratings', label: 'Robot Ratings', href: '/robotratings', blurb: 'Scout-submitted ratings for every robot at the event, side by side.' },
+    { key: 'predictions', label: 'Prediction Market', href: '/predictions', blurb: 'Predict match outcomes and see how the team is calling upcoming matches.' },
+    { key: 'scouting-admin', label: 'Scouting Admin', href: '/scouting-admin', blurb: 'Publish scouting assignments, manage the active event, and review submissions.' }
+  ];
+  let activeQuickTab = null;
+  $: activeQuickTabInfo = QUICK_TABS.find((tab) => tab.key === activeQuickTab) || null;
+  // Each tab's preview shows something specific to it, not the same
+  // "here's a match" card everywhere - built entirely from state this page
+  // already loads, no new fetches.
+  $: nextDataAssignment = incompleteScoutAssignments.find(a => a.scouting_type === 'data') || null;
+
+  // The remaining tabs (picklist, rankings, power/robot ratings,
+  // predictions, admin) don't have anything this page already loads, so
+  // their preview data is fetched lazily the first time that tab is
+  // clicked - never eagerly on page load, and only once per tab per visit.
+  let quickPreviewData = {};
+  let quickPreviewLoading = {};
+
+  function selectQuickTab(key) {
+    const next = activeQuickTab === key ? null : key;
+    activeQuickTab = next;
+    if (next) loadQuickPreviewData(next);
+  }
+
+  async function loadQuickPreviewData(key) {
+    if (!homeEventKey || quickPreviewData[key] || quickPreviewLoading[key]) return;
+    if (!['myscout', 'picklist', 'matchrankings', 'powerrankings', 'robotratings', 'predictions', 'scouting-admin'].includes(key)) return;
+    quickPreviewLoading = { ...quickPreviewLoading, [key]: true };
+    try {
+      const headers = await getAuthHeader();
+      let result = null;
+      if (key === 'myscout') {
+        const res = await fetch(`/api/matchscout?event_key=${encodeURIComponent(homeEventKey)}&mine=1`, { headers });
+        const payload = await res.json().catch(() => null);
+        const reports = payload?.success ? payload.data || [] : [];
+        result = {
+          reports: reports.slice().sort((a, b) =>
+            String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || '')))
+        };
+      } else if (key === 'picklist') {
+        const res = await fetch(`/api/scouting-picklist?event_key=${encodeURIComponent(homeEventKey)}`, { headers });
+        const payload = await res.json().catch(() => null);
+        const picks = payload?.success ? payload.data || [] : [];
+        result = { count: picks.length, top: picks.slice(0, 3).map(p => p.team_number), all: picks };
+      } else if (key === 'matchrankings') {
+        const res = await fetch(`/api/tba/event-rankings?event_key=${encodeURIComponent(homeEventKey)}`);
+        const payload = await res.json().catch(() => null);
+        const rankings = payload?.success ? payload.data?.rankings || [] : [];
+        const mine = rankings.find(r => r.team_key === myTeamKey) || null;
+        result = { totalTeams: rankings.length, mine, top: rankings.slice(0, 8) };
+      } else if (key === 'powerrankings' || key === 'robotratings') {
+        const res = await fetch(`/datascout?all_teams=1&event_key=${encodeURIComponent(homeEventKey)}`, { headers });
+        const payload = await res.json().catch(() => null);
+        const rows = payload?.success ? payload.data || [] : [];
+        const teams = [...new Set(rows.map(r => r.team_key))].sort((a, b) =>
+          Number(String(a).replace(/\D/g, '')) - Number(String(b).replace(/\D/g, '')));
+        result = { scoutedTeams: teams.length, teams };
+      } else if (key === 'predictions') {
+        const res = await fetch(`/api/prediction-market?event_key=${encodeURIComponent(homeEventKey)}`, { headers });
+        const payload = await res.json().catch(() => null);
+        result = { count: payload?.success ? (payload.data || []).length : 0 };
+      } else if (key === 'scouting-admin') {
+        const res = await fetch(`/api/scout-assignments?scouting_type=data&capabilities=1`, { headers });
+        const payload = await res.json().catch(() => null);
+        result = { canEdit: payload?.success ? !!payload.data?.can_edit : false };
+      }
+      quickPreviewData = { ...quickPreviewData, [key]: result };
+    } catch {
+      quickPreviewData = { ...quickPreviewData, [key]: null };
+    } finally {
+      quickPreviewLoading = { ...quickPreviewLoading, [key]: false };
+    }
+  }
 
   $: canViewAdmin = can('VIEW_ADMIN_PANEL');
   $: customSectionKeys = sanitizeSectionKeys(user?.dashboard_sections);
@@ -154,9 +241,14 @@
 
   // Scouting assignment alert state
   let myScoutAssignments = [];
-  let nextScoutAssignment = null; // { scouting_type, match_key, team_key }
-  let showScoutAlert = true;
   $: incompleteScoutAssignments = myScoutAssignments.filter(a => !a.completed_at);
+  $: completedScoutAssignmentCount = myScoutAssignments.length - incompleteScoutAssignments.length;
+  // A busy scout can rack up dozens of assignments - letting every card stay
+  // a fixed minimum width just means an ever-taller stack of rows. Shrink
+  // the grid's own minimum column width as the count climbs past a normal
+  // event's worth, so more of them fit per row instead of only adding rows.
+  // Never shrinks below 110px (still fits "Match #qm123 / Team 9999").
+  $: assignmentGridMinWidth = Math.max(110, 200 - Math.max(0, myScoutAssignments.length - 8) * 6);
 
   // Pre-scouting assignment state - teams assigned to this user to research
   // ahead of the event (see /scouting-admin's PitAssignmentPanel,
@@ -184,14 +276,45 @@
   // assignment's robot is on without asking the scout to look it up by hand.
   let matchAllianceByKey = {};
   let homeEventKey = '';
+  $: myTeamKey = `frc${user?.frc_team || FRC_TEAMS.TEAM_971}`;
   let currentEventMatch = null;
   let currentMatchState = 'unavailable';
   let currentMatchLoading = false;
   let currentMatchError = '';
+  // This signed-in scout's own team's next/current match specifically (not
+  // just whatever match the field is on) - what the Drive Team preview
+  // below is actually for.
+  let myTeamNextMatch = null;
+  let myTeamNextMatchState = 'unavailable';
+  // Whether the field's current match (not necessarily the same as
+  // myTeamNextMatch above) happens to be this scout's own team's match too.
+  $: currentMatchHasMyTeam = !!currentEventMatch && (
+    (currentEventMatch.alliances?.red?.team_keys || []).includes(myTeamKey)
+    || (currentEventMatch.alliances?.blue?.team_keys || []).includes(myTeamKey)
+  );
+
+  // Competition wifi is "present but slow," not fully offline (see
+  // offlineCache.js's own docstring) - a bare fetch failure here is
+  // usually one dropped request, not a real outage. One quiet retry
+  // covers that common case instead of flashing an error for a blip.
+  async function fetchEventMatches(eventKey, attempt = 1) {
+    try {
+      const res = await fetch(`/api/tba/event-matches?event_key=${encodeURIComponent(eventKey)}&comp_level=all`);
+      const payload = await res.json();
+      if (!res.ok || !payload?.success) throw new Error(payload?.error || 'TBA schedule unavailable');
+      return payload.data || [];
+    } catch (error) {
+      if (attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        return fetchEventMatches(eventKey, attempt + 1);
+      }
+      throw error;
+    }
+  }
 
   async function loadMatchAlliances() {
     currentMatchLoading = true;
-    currentMatchError = '';
+    if (!currentEventMatch) currentMatchError = '';
     try {
       const eventKey = await fetchActiveScoutingEventKey();
       homeEventKey = eventKey || '';
@@ -200,21 +323,29 @@
         currentMatchState = 'unavailable';
         return;
       }
-      const res = await fetch(`/api/tba/event-matches?event_key=${encodeURIComponent(eventKey)}&comp_level=all`);
-      const payload = await res.json();
-      if (!res.ok || !payload?.success) throw new Error(payload?.error || 'TBA schedule unavailable');
+      const matches = await fetchEventMatches(eventKey);
       const next = {};
-      for (const match of payload.data || []) {
+      for (const match of matches) {
         next[match.key] = {};
         for (const teamKey of match.alliances?.red?.team_keys || []) next[match.key][teamKey] = 'red';
         for (const teamKey of match.alliances?.blue?.team_keys || []) next[match.key][teamKey] = 'blue';
       }
       matchAllianceByKey = next;
-      const current = selectCurrentEventMatch(payload.data || []);
+      const current = selectCurrentEventMatch(matches);
       currentEventMatch = current.match;
       currentMatchState = current.state;
+
+      const myTeamMatches = matches.filter((m) =>
+        (m.alliances?.red?.team_keys || []).includes(myTeamKey) || (m.alliances?.blue?.team_keys || []).includes(myTeamKey));
+      const myCurrent = selectCurrentEventMatch(myTeamMatches);
+      myTeamNextMatch = myCurrent.match;
+      myTeamNextMatchState = myCurrent.state;
     } catch (error) {
-      currentMatchError = error?.message || 'TBA schedule unavailable';
+      // Keep showing the last good match/alliance data through a
+      // transient failure rather than replacing it with an error - only
+      // surface the error when there's nothing already on screen to fall
+      // back to.
+      if (!currentEventMatch) currentMatchError = error?.message || 'TBA schedule unavailable';
     } finally {
       currentMatchLoading = false;
     }
@@ -274,19 +405,15 @@
     if(!user?.id) return;
     try {
       const authHeaders = await getAuthHeader();
-      // Fetch all three scouting types
-      const res1 = await fetch(`/api/scout-assignments?scouting_type=data&mine=1&user_id=${encodeURIComponent(user.id)}`, {
-        headers: authHeaders
-      });
-      const js1 = await res1.json();
-      const res2 = await fetch(`/api/scout-assignments?scouting_type=note&mine=1&user_id=${encodeURIComponent(user.id)}`, {
-        headers: authHeaders
-      });
-      const js2 = await res2.json();
-      const res3 = await fetch(`/api/scout-assignments?scouting_type=quick&mine=1&user_id=${encodeURIComponent(user.id)}`, {
-        headers: authHeaders
-      });
-      const js3 = await res3.json();
+      // All three scouting types in parallel - these used to run one after
+      // another (data, then note, then quick), each waiting on the last,
+      // which is most of why this section visibly lagged behind the rest
+      // of the page on load.
+      const [js1, js2, js3] = await Promise.all([
+        fetch(`/api/scout-assignments?scouting_type=data&mine=1&user_id=${encodeURIComponent(user.id)}`, { headers: authHeaders }).then(r => r.json()),
+        fetch(`/api/scout-assignments?scouting_type=note&mine=1&user_id=${encodeURIComponent(user.id)}`, { headers: authHeaders }).then(r => r.json()),
+        fetch(`/api/scout-assignments?scouting_type=quick&mine=1&user_id=${encodeURIComponent(user.id)}`, { headers: authHeaders }).then(r => r.json())
+      ]);
       const rows = [].concat(js1?.data||[], js2?.data||[], js3?.data||[]);
       // Completed assignments stay in the list (shown as "Completed", and
       // still clickable to go back and edit the report) rather than
@@ -298,7 +425,6 @@
         return doneA - doneB || compareScoutAssignmentMatches(a, b);
       });
       myScoutAssignments = sorted;
-      nextScoutAssignment = sorted.find(r => !r.completed_at) || null;
     }catch(e){ /* ignore */ }
   }
 
@@ -344,11 +470,16 @@
 
   $: if (user) profileWaitExpired = false;
   // The scouting landing page only needs the signed-in scout's own queue.
+  // Everything below the welcome banner waits on all three of these
+  // together (dashboardDataReady) instead of each section popping in on
+  // its own as its own fetch happens to resolve - the "top loads, then
+  // everything else trickles in one at a time" effect that was really just
+  // three independent loaders finishing at different times.
+  let dashboardDataReady = false;
   $: if (user && !scoutingLoaded) {
     scoutingLoaded = true;
-    loadScoutAssignments();
-    loadPrescoutAssignments();
-    loadMatchAlliances();
+    Promise.all([loadScoutAssignments(), loadPrescoutAssignments(), loadMatchAlliances()])
+      .finally(() => { dashboardDataReady = true; });
   }
 
   // Keep this browser's login-screen cache in sync with the account's saved
@@ -510,22 +641,6 @@
       {/if}
     </div>
 
-    {#if showScoutAlert && incompleteScoutAssignments.length>0}
-      <div class="pending-notice">
-        <AlertCircle size={20} />
-        <div>
-          <h3>Scouting Assignments</h3>
-          <p>You have {incompleteScoutAssignments.length} upcoming scouting assignment{incompleteScoutAssignments.length===1?'':'s'}.</p>
-          {#if nextScoutAssignment}
-            <div style="margin-top:0.25rem; display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center">
-              <button class="btn btn-primary" on:click={() => goto(scoutAssignmentHref(nextScoutAssignment))}>Go to Next ({nextScoutAssignment.scouting_type} – {nextScoutAssignment.match_key.split('_').pop()} – {nextScoutAssignment.team_key.replace('frc','')})</button>
-              <button class="btn btn-outline" on:click={() => showScoutAlert=false}>Dismiss</button>
-            </div>
-          {/if}
-        </div>
-      </div>
-    {/if}
-
     {#if !can('CAN_SEE_ROUTES')}
       <div class="pending-notice">
         <AlertCircle size={20} />
@@ -534,6 +649,8 @@
           <p>Your account has been created successfully. An administrator needs to assign your role and permissions before you can access the manufacturing features. You'll receive an email notification once your account is approved.</p>
         </div>
       </div>
+    {:else if !dashboardDataReady}
+      <div class="empty-state">Loading your dashboard...</div>
     {:else}
       {#if editMode && hiddenSections.length > 0}
         <div class="hidden-sections-tray">
@@ -576,26 +693,6 @@
             {#if section.key === 'workspace'}
               <div class="dashboard-actions">
                 <h3>Team Workspace</h3>
-                {#if currentMatchLoading && !currentEventMatch}
-                  <div class="current-match-card current-match-loading">Loading the {homeEventKey || 'active event'} field...</div>
-                {:else if currentEventMatch}
-                  <div class="current-match-card" class:live={currentMatchState === 'current'}>
-                    <div class="current-match-heading">
-                      <div>
-                        <span class="current-match-eyebrow">{homeEventKey}</span>
-                        <h4>{currentMatchState === 'current' ? 'Current match' : currentMatchState === 'upcoming' ? 'Up next' : 'Latest match'}</h4>
-                      </div>
-                      <strong>{matchDisplayName(currentEventMatch)}</strong>
-                    </div>
-                    <div class="current-match-alliances">
-                      <div class="current-alliance red"><span>Red</span>{#each currentEventMatch.alliances?.red?.team_keys || [] as teamKey}<b>{displayTeamNumber(teamKey)}</b>{/each}</div>
-                      <div class="current-alliance blue"><span>Blue</span>{#each currentEventMatch.alliances?.blue?.team_keys || [] as teamKey}<b>{displayTeamNumber(teamKey)}</b>{/each}</div>
-                    </div>
-                    {#if currentMatchState === 'complete'}<small>TBA reports this event’s published matches complete.</small>{/if}
-                  </div>
-                {:else if currentMatchError}
-                  <div class="current-match-card current-match-loading">Current match unavailable: {currentMatchError}</div>
-                {/if}
                 <div class="workspace-grid">
                   <a href="/manufacture" class="workspace-card">
                     <Factory size={24} />
@@ -607,11 +704,39 @@
                     <h4>Purchasing</h4>
                     <p>Review purchase requests, orders, and needed components</p>
                   </a>
-                  <a href="/scouting" class="workspace-card">
-                    <ClipboardCheck size={24} />
-                    <h4>Scouting</h4>
-                    <p>Open competition assignments, scouting forms, and event analysis</p>
-                  </a>
+                  {#if homeEventKey}
+                    <a href="/matchscout" class="workspace-card">
+                      <ClipboardCheck size={24} />
+                      <h4>Scouting</h4>
+                      <p>Open competition assignments, scouting forms, and event analysis</p>
+                    </a>
+                    <a href="/matchrankings" class="workspace-card">
+                      <ListOrdered size={24} />
+                      <h4>Match Rankings</h4>
+                      <p>Live qualification rankings and match results</p>
+                    </a>
+                    <a href="/strategy" class="workspace-card">
+                      <Target size={24} />
+                      <h4>Strategy</h4>
+                      <p>Alliance selection notes and match strategy</p>
+                    </a>
+                  {/if}
+                </div>
+                <div class="stat-strip">
+                  {#if homeEventKey}
+                    <div class="stat-tile">
+                      <span class="stat-label">Competition</span>
+                      <strong class="stat-value stat-value-text">{homeEventKey}</strong>
+                    </div>
+                  {/if}
+                  <div class="stat-tile">
+                    <span class="stat-label">Assignments Open</span>
+                    <strong class="stat-value">{incompleteScoutAssignments.length}</strong>
+                  </div>
+                  <div class="stat-tile">
+                    <span class="stat-label">Assignments Done</span>
+                    <strong class="stat-value">{completedScoutAssignmentCount}</strong>
+                  </div>
                 </div>
               </div>
             {:else if section.key === 'admin'}
@@ -632,7 +757,7 @@
                     <h4>Your Scouting Assignments</h4>
                     <p class="muted">Only assignments assigned to you are shown here.</p>
                   </div>
-                  <a href="/scouting" class="btn btn-outline btn-sm">
+                  <a href="/matchscout" class="btn btn-outline btn-sm">
                     <ListChecks size={14} />
                     Open Scouting
                   </a>
@@ -640,7 +765,7 @@
                 {#if myScoutAssignments.length === 0}
                   <p class="muted">No open scouting assignments right now.</p>
                 {:else}
-                  <div class="card-grid">
+                  <div class="card-grid" style="grid-template-columns: repeat(auto-fit, minmax({assignmentGridMinWidth}px, 1fr));">
                     {#each myScoutAssignments as assignment}
                       <a class="assignment-card" class:completed={!!assignment.completed_at} href={scoutAssignmentHref(assignment)}>
                         <h5>{assignment.scouting_type} scouting - Match #{assignment.match_key.split('_').pop()}</h5>
@@ -680,6 +805,182 @@
           </div>
         {/if}
       </div>
+
+      <!-- Sidebar sits below Your Scouting Assignments now, not competing
+           with it for the left column - a tab click pops its preview up in
+           the pane to its right instead of navigating away. Deliberately
+           not position:sticky - the global .nav-header in +layout.svelte is
+           already sticky at top:0 with a much higher z-index, and a second
+           sticky element at the same top:0 gets silently covered by it once
+           the page scrolls (see ScoutAssignmentPanel's own .panel-header for
+           the exact same bug, fixed the same way: don't stick two things to
+           the same line). -->
+      {#if homeEventKey}
+      <div class="quick-nav-row">
+        <aside class="quick-nav" aria-label="Competition quick navigation">
+          <span class="quick-nav-label">Competition</span>
+          {#each QUICK_TABS as tab (tab.key)}
+            <button
+              type="button"
+              class="quick-nav-tab"
+              class:active={activeQuickTab === tab.key}
+              on:click={() => selectQuickTab(tab.key)}
+            >{tab.label}</button>
+          {/each}
+        </aside>
+        <div class="quick-preview">
+          {#if activeQuickTabInfo}
+            <div>
+              <span class="quick-preview-label">{activeQuickTabInfo.label}</span>
+              {#if activeQuickTabInfo.key === 'driveteam' && myTeamNextMatch}
+                <p class="quick-preview-match-heading">
+                  Your team - {myTeamNextMatchState === 'current' ? 'current match' : myTeamNextMatchState === 'upcoming' ? 'up next' : 'latest match'}: {matchDisplayName(myTeamNextMatch)}
+                </p>
+                <div class="quick-preview-alliances">
+                  <div class="current-alliance red"><span>Red</span>{#each myTeamNextMatch.alliances?.red?.team_keys || [] as teamKey}<b>{displayTeamNumber(teamKey)}</b>{/each}</div>
+                  <div class="current-alliance blue"><span>Blue</span>{#each myTeamNextMatch.alliances?.blue?.team_keys || [] as teamKey}<b>{displayTeamNumber(teamKey)}</b>{/each}</div>
+                </div>
+              {:else if activeQuickTabInfo.key === 'driveteam' && !myTeamNextMatch}
+                <p>No match found for your team at {homeEventKey || 'the active event'} yet.</p>
+              {:else if activeQuickTabInfo.key === 'strategy' && currentEventMatch}
+                <p class="quick-preview-match-heading">
+                  On the field - {currentMatchState === 'current' ? 'current match' : currentMatchState === 'upcoming' ? 'up next' : 'latest match'}: {matchDisplayName(currentEventMatch)}
+                </p>
+                <div class="quick-preview-alliances">
+                  <div class="current-alliance red"><span>Red</span>{#each currentEventMatch.alliances?.red?.team_keys || [] as teamKey}<b>{displayTeamNumber(teamKey)}</b>{/each}</div>
+                  <div class="current-alliance blue"><span>Blue</span>{#each currentEventMatch.alliances?.blue?.team_keys || [] as teamKey}<b>{displayTeamNumber(teamKey)}</b>{/each}</div>
+                </div>
+              {:else if activeQuickTabInfo.key === 'strategy' && !currentEventMatch}
+                <p>No match currently on the field at {homeEventKey || 'the active event'} yet.</p>
+              {:else if activeQuickTabInfo.key === 'matchscout'}
+                {@const myDataAssignments = incompleteScoutAssignments.filter(a => a.scouting_type === 'data')}
+                {#if myDataAssignments.length}
+                  <p class="quick-preview-match-heading">{myDataAssignments.length} open match scouting assignment{myDataAssignments.length === 1 ? '' : 's'}</p>
+                  <ul class="quick-preview-list">
+                    {#each myDataAssignments as assignment}
+                      <li><a href={scoutAssignmentHref(assignment)}>Match {assignment.match_key.split('_').pop()} · Team {String(assignment.team_key || '').replace(/^frc/i, '')}</a></li>
+                    {/each}
+                  </ul>
+                {:else}
+                  <p>No open match scouting assignments right now.</p>
+                {/if}
+              {:else if activeQuickTabInfo.key === 'pitscout'}
+                {#if myPrescoutAssignments.length}
+                  <p class="quick-preview-match-heading">{myPrescoutAssignments.length} pre-scouting team{myPrescoutAssignments.length === 1 ? '' : 's'} to research</p>
+                  <ul class="quick-preview-list">
+                    {#each myPrescoutAssignments as assignment}
+                      <li><a href={`/teamview?team=${encodeURIComponent(String(assignment.team_key || '').replace(/^frc/i, ''))}&event_key=${encodeURIComponent(prescoutEventKey)}&from=/&fromLabel=Home`}>Team {String(assignment.team_key || '').replace(/^frc/i, '')}</a></li>
+                    {/each}
+                  </ul>
+                {:else}
+                  <p>No pre-scouting teams assigned right now.</p>
+                {/if}
+              {:else if activeQuickTabInfo.key === 'myscout'}
+                {#if quickPreviewLoading.myscout}
+                  <p class="muted">Loading...</p>
+                {:else if quickPreviewData.myscout?.reports?.length}
+                  <p class="quick-preview-match-heading">{completedScoutAssignmentCount} of {myScoutAssignments.length} assignments completed - {quickPreviewData.myscout.reports.length} match report{quickPreviewData.myscout.reports.length === 1 ? '' : 's'}</p>
+                  <ul class="quick-preview-list">
+                    {#each quickPreviewData.myscout.reports.slice(0, 8) as report}
+                      <li><a href={`/matchscout?match=${encodeURIComponent(report.match_key)}&team=${encodeURIComponent(report.team_key)}`}>Match {report.match_key} · Team {String(report.team_key || '').replace(/^frc/i, '')} <span class="quick-preview-edit">edit →</span></a></li>
+                    {/each}
+                  </ul>
+                {:else}
+                  <p>{completedScoutAssignmentCount} of {myScoutAssignments.length} assignments completed this event.</p>
+                  <p>No match reports submitted yet.</p>
+                {/if}
+              {:else if quickPreviewLoading[activeQuickTabInfo.key]}
+                <p class="muted">Loading...</p>
+              {:else if activeQuickTabInfo.key === 'picklist'}
+                {#if quickPreviewData.picklist?.count}
+                  <p class="quick-preview-match-heading">{quickPreviewData.picklist.count} team{quickPreviewData.picklist.count === 1 ? '' : 's'} on the pick list</p>
+                  <ol class="quick-preview-list numbered">
+                    {#each quickPreviewData.picklist.all.slice(0, 8) as pick, index}
+                      <li><a href={`/teamview?team=${encodeURIComponent(String(pick.team_key || '').replace(/^frc/i, ''))}&event_key=${encodeURIComponent(homeEventKey)}&from=/&fromLabel=Home`}><span class="mono">{index + 1}</span> #{pick.team_number}{pick.nickname ? ` - ${pick.nickname}` : ''}</a></li>
+                    {/each}
+                  </ol>
+                {:else}
+                  <p>{activeQuickTabInfo.blurb}</p>
+                {/if}
+              {:else if activeQuickTabInfo.key === 'matchrankings'}
+                {#if quickPreviewData.matchrankings?.top?.length}
+                  {#if quickPreviewData.matchrankings.mine}
+                    <p class="quick-preview-match-heading">Your team - Rank {quickPreviewData.matchrankings.mine.rank} of {quickPreviewData.matchrankings.totalTeams} ({quickPreviewData.matchrankings.mine.record?.wins ?? 0}-{quickPreviewData.matchrankings.mine.record?.losses ?? 0}-{quickPreviewData.matchrankings.mine.record?.ties ?? 0})</p>
+                  {:else}
+                    <p class="quick-preview-match-heading">{quickPreviewData.matchrankings.totalTeams} teams ranked</p>
+                  {/if}
+                  <ol class="quick-preview-list numbered">
+                    {#each quickPreviewData.matchrankings.top as row}
+                      <li><a href={`/teamview?team=${encodeURIComponent(String(row.team_key || '').replace(/^frc/i, ''))}&event_key=${encodeURIComponent(homeEventKey)}&from=/&fromLabel=Home`} class:us={row.team_key === myTeamKey}><span class="mono">{row.rank}</span> #{String(row.team_key || '').replace(/^frc/i, '')} <span class="quick-preview-record">{row.record?.wins ?? 0}-{row.record?.losses ?? 0}-{row.record?.ties ?? 0}</span></a></li>
+                    {/each}
+                  </ol>
+                {:else}
+                  <p>{activeQuickTabInfo.blurb}</p>
+                {/if}
+              {:else if activeQuickTabInfo.key === 'powerrankings' || activeQuickTabInfo.key === 'robotratings'}
+                {#if quickPreviewData[activeQuickTabInfo.key]?.scoutedTeams}
+                  {@const chartData = quickPreviewData[activeQuickTabInfo.key]}
+                  <p class="quick-preview-match-heading">{chartData.scoutedTeams} teams have local scouting data</p>
+                  <ul class="quick-preview-list wrap">
+                    {#each chartData.teams as teamKey}
+                      <li><a href={`/teamview?team=${encodeURIComponent(String(teamKey || '').replace(/^frc/i, ''))}&event_key=${encodeURIComponent(homeEventKey)}&from=/&fromLabel=Home`}>#{String(teamKey || '').replace(/^frc/i, '')}</a></li>
+                    {/each}
+                  </ul>
+                {:else}
+                  <p>{activeQuickTabInfo.blurb}</p>
+                {/if}
+              {:else if activeQuickTabInfo.key === 'predictions'}
+                {#if quickPreviewData.predictions}
+                  <p class="quick-preview-match-heading">{quickPreviewData.predictions.count} prediction{quickPreviewData.predictions.count === 1 ? '' : 's'} placed this event</p>
+                  <p>{activeQuickTabInfo.blurb}</p>
+                {:else}
+                  <p>{activeQuickTabInfo.blurb}</p>
+                {/if}
+              {:else if activeQuickTabInfo.key === 'scouting-admin'}
+                {#if quickPreviewData['scouting-admin']}
+                  <p class="quick-preview-match-heading">{quickPreviewData['scouting-admin'].canEdit ? 'You have edit access' : 'You have view-only access'}</p>
+                  <p>{activeQuickTabInfo.blurb}</p>
+                {:else}
+                  <p>{activeQuickTabInfo.blurb}</p>
+                {/if}
+              {:else}
+                <p>{activeQuickTabInfo.blurb}</p>
+              {/if}
+            </div>
+            <div class="quick-preview-actions">
+              <a class="btn btn-primary btn-sm" href={activeQuickTabInfo.href}>Open</a>
+              <button class="btn btn-outline btn-sm" on:click={() => activeQuickTab = null}>Close</button>
+            </div>
+          {:else}
+            <p class="muted">Select a tab on the left to preview it here.</p>
+          {/if}
+        </div>
+      </div>
+      {/if}
+
+      {#if currentMatchLoading && !currentEventMatch}
+        <div class="current-match-card current-match-loading">Loading the {homeEventKey || 'active event'} field...</div>
+      {:else if currentEventMatch}
+        <div class="current-match-card" class:live={currentMatchState === 'current'} class:has-my-team={currentMatchHasMyTeam}>
+          <div class="current-match-heading">
+            <div>
+              <span class="current-match-eyebrow">{homeEventKey}</span>
+              <h4>{currentMatchState === 'current' ? 'Current match' : currentMatchState === 'upcoming' ? 'Up next' : 'Latest match'}</h4>
+            </div>
+            <div class="current-match-heading-right">
+              {#if currentMatchHasMyTeam}<span class="my-team-badge">Team {user?.frc_team || FRC_TEAMS.TEAM_971} is playing!</span>{/if}
+              <strong>{matchDisplayName(currentEventMatch)}</strong>
+            </div>
+          </div>
+          <div class="current-match-alliances">
+            <div class="current-alliance red"><span>Red</span>{#each currentEventMatch.alliances?.red?.team_keys || [] as teamKey}<b>{displayTeamNumber(teamKey)}</b>{/each}</div>
+            <div class="current-alliance blue"><span>Blue</span>{#each currentEventMatch.alliances?.blue?.team_keys || [] as teamKey}<b>{displayTeamNumber(teamKey)}</b>{/each}</div>
+          </div>
+          {#if currentMatchState === 'complete'}<small>TBA reports this event’s published matches complete.</small>{/if}
+        </div>
+      {:else if currentMatchError}
+        <div class="current-match-card current-match-loading">Current match unavailable: {currentMatchError}</div>
+      {/if}
     {/if}
   </div>
 {:else if $loginScreenStyle === 'modern'}
@@ -1402,14 +1703,209 @@
     font-size: var(--font-xs);
   }
 
+  /* No more capped-width centered column - the quick-nav sidebar takes the
+     left gutter and the content column stretches to fill whatever's left,
+     so wide monitors don't just get more black margin on both sides. */
   .dashboard-container {
-    /* Slightly softer than the app-wide sharp-corner default (--radius-lg),
-       without going soft-card-AI-generic. Scoped to this page's own cards. */
-    --home-radius: 8px;
-    max-width: 1200px;
-    margin: var(--space-7) auto;
-    padding: 0 var(--space-4);
+    /* Sharp corners throughout this page, by direct instruction - no
+       filleted rectangles. */
+    --home-radius: 0;
+    min-width: 0;
+    /* Full-bleed breakout: the global <main> this sits in (see +layout.svelte's
+       main.container.page-container) is itself centered and capped at
+       --page-max-width, so content could only ever reach the left edge of
+       THAT column, not the actual viewport edge. width:100vw + this margin
+       math is the standard way to escape a centered ancestor without
+       touching the shared layout (which every other route also depends on). */
+    width: 100vw;
+    margin-left: calc(50% - 50vw);
+    margin-right: calc(50% - 50vw);
+    padding: var(--space-4) var(--space-5);
   }
+
+  /* Sidebar + its preview pane, side by side, below the rest of the
+     dashboard rather than competing with it for the left column. */
+  .quick-nav-row {
+    display: grid;
+    grid-template-columns: 200px minmax(0, 1fr);
+    align-items: stretch;
+    gap: var(--space-5);
+    margin-top: var(--space-7);
+    padding-top: var(--space-5);
+    border-top: 1px solid var(--border);
+  }
+
+  /* All 11 tabs stay visible with no internal scrollbar of their own -
+     hiding nav items behind a scroll a visitor might never notice is worse
+     than the list just being what it is. Kept short per-item instead
+     (compact padding/font below) so the whole thing still stays modest. */
+  .quick-nav {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border);
+    background: var(--surface-1);
+  }
+
+  .quick-nav-label {
+    font-family: var(--font-mono-stack);
+    font-size: var(--font-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    padding: var(--space-2) var(--space-4) 6px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .quick-nav-tab {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 7px var(--space-4);
+    border: none;
+    border-left: 3px solid transparent;
+    border-bottom: 1px solid var(--border);
+    background: none;
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: 0.8rem;
+    line-height: 1.3;
+    cursor: pointer;
+    transition: border-color 0.1s ease, background-color 0.1s ease, color 0.1s ease;
+  }
+
+  .quick-nav-tab:last-child {
+    border-bottom: none;
+  }
+
+  .quick-nav-tab:hover {
+    border-left-color: var(--brand-gold-strong);
+    background: var(--surface-2);
+    color: var(--secondary);
+  }
+
+  .quick-nav-tab.active {
+    border-left-color: var(--accent-strong);
+    background: var(--accent-subtle);
+    color: var(--secondary);
+    font-weight: 600;
+  }
+
+  .quick-preview {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: var(--space-4);
+    min-height: 100%;
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent-strong);
+    padding: var(--space-4) var(--space-5);
+  }
+
+  .quick-preview > .muted {
+    align-self: center;
+    margin: auto;
+  }
+
+  .quick-preview-label {
+    display: block;
+    font-family: var(--font-mono-stack);
+    font-size: var(--font-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin-bottom: var(--space-1);
+  }
+
+  .quick-preview p {
+    margin: 0;
+    color: var(--text-secondary);
+    max-width: 48em;
+  }
+
+  .quick-preview-match-heading {
+    margin: 0 0 var(--space-2) !important;
+    font-weight: 600;
+    color: var(--secondary);
+  }
+
+  .quick-preview-alliances {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--gap-3);
+    max-width: 32em;
+  }
+
+  .quick-preview-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    max-height: 9rem;
+    overflow-y: auto;
+  }
+
+  .quick-preview-list.wrap {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    max-height: none;
+  }
+
+  .quick-preview-list a {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 0.82rem;
+    border-left: 2px solid transparent;
+  }
+
+  .quick-preview-list.wrap a {
+    border-left: none;
+    border: 1px solid var(--border);
+    padding: 3px 8px;
+  }
+
+  .quick-preview-list a:hover {
+    background: var(--surface-2);
+    border-left-color: var(--brand-gold-strong);
+    color: var(--secondary);
+  }
+
+  .quick-preview-list a.us {
+    color: var(--secondary);
+    font-weight: 700;
+  }
+
+  .quick-preview-list .mono {
+    font-family: var(--font-mono-stack);
+    color: var(--text-muted);
+    min-width: 1.2em;
+  }
+
+  .quick-preview-edit {
+    margin-left: auto;
+    color: var(--accent-strong);
+    font-size: 0.72rem;
+  }
+
+  .quick-preview-record {
+    margin-left: auto;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+  }
+
+  .quick-preview-actions {
+    display: flex;
+    gap: var(--space-2);
+    flex-shrink: 0;
+  }
+
 
   /* Compact masthead with a gold spine — no dead vertical space */
   .user-welcome {
@@ -1417,8 +1913,8 @@
     border: 1px solid var(--border);
     border-left: 3px solid var(--accent);
     border-radius: var(--home-radius, var(--radius-lg));
-    padding: var(--space-5) var(--space-6);
-    margin-bottom: var(--space-6);
+    padding: var(--space-3) var(--space-6);
+    margin-bottom: var(--space-3);
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -1440,6 +1936,47 @@
     margin: 0;
     font-size: 0.85rem;
     color: var(--text-muted);
+  }
+
+  /* A telemetry-strip, not another row of rounded cards: tiles share
+     hairlines instead of each carrying their own border, which reads as one
+     continuous instrument rather than four separate boxes. */
+  .stat-strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    margin-top: var(--space-4);
+  }
+
+  .stat-tile {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    background: var(--surface-1);
+    padding: var(--space-2) var(--space-5);
+  }
+
+  .stat-label {
+    font-family: var(--font-mono-stack);
+    font-size: var(--font-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+  }
+
+  .stat-value {
+    font-size: var(--font-xxl, 1.75rem);
+    font-weight: 700;
+    color: var(--secondary);
+    line-height: 1.1;
+  }
+
+  .stat-value-text {
+    font-size: var(--font-lg);
+    font-family: var(--font-mono-stack);
+    text-transform: uppercase;
   }
 
   .pending-notice {
@@ -1466,29 +2003,42 @@
   }
 
   .dashboard-actions h3 {
-    margin: 0 0 var(--space-4) 0;
+    margin: 0 0 var(--space-2) 0;
     color: var(--secondary);
     font-size: var(--font-xl);
   }
 
   .current-match-card {
     display: grid;
-    gap: var(--space-3);
-    margin-bottom: var(--space-4);
-    padding: var(--space-4) var(--space-5);
+    gap: var(--space-2);
+    margin-top: var(--space-7);
+    padding: var(--space-3) var(--space-5);
     border: 1px solid var(--border);
     border-left: 4px solid var(--brand-gold-strong);
     border-radius: var(--home-radius, var(--radius-lg));
     background: var(--surface-1);
   }
   .current-match-card.live { border-left-color: var(--success, #2e7d32); }
+  .current-match-card.has-my-team { border-left-color: var(--brand-gold-strong); box-shadow: inset 0 0 0 1px var(--brand-gold-strong); }
   .current-match-loading { color: var(--text-muted); }
   .current-match-heading { display:flex; align-items:center; justify-content:space-between; gap:var(--space-3); }
   .current-match-heading h4 { margin:.15rem 0 0; color:var(--secondary); }
+  .current-match-heading-right { display:flex; align-items:center; gap:var(--space-3); }
   .current-match-heading strong { font-size:var(--font-lg); }
+  .my-team-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 10px;
+    background: var(--brand-gold-soft);
+    color: var(--brand-gold-strong);
+    font-size: var(--font-xs);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
   .current-match-eyebrow { color:var(--text-muted); font-size:var(--font-xs); font-family:var(--font-mono-stack); text-transform:uppercase; }
   .current-match-alliances { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--gap-3); }
-  .current-alliance { display:flex; align-items:center; gap:var(--space-2); padding:var(--space-3); border-radius:var(--radius-sm); }
+  .current-alliance { display:flex; align-items:center; gap:var(--space-2); padding:var(--space-3); }
   .current-alliance span { margin-right:auto; font-weight:700; text-transform:uppercase; font-size:var(--font-xs); }
   .current-alliance b { min-width:2.7rem; text-align:center; }
   .current-alliance.red { background:var(--red-soft); color:var(--red-strong); }
@@ -1497,7 +2047,7 @@
 
   .workspace-grid {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     gap: var(--gap-3);
   }
 
@@ -1515,7 +2065,7 @@
     align-items: center;
     background: var(--primary);
     border: 1px solid var(--border);
-    border-radius: var(--home-radius, var(--radius-lg));
+    border-left: 3px solid var(--border);
     padding: var(--space-5) var(--space-6);
     text-decoration: none;
     color: inherit;
@@ -1526,15 +2076,15 @@
   .action-card:hover {
     background: var(--surface-2);
     border-color: var(--accent-strong);
+    border-left-color: var(--brand-gold-strong);
   }
 
   .workspace-card :global(svg),
   .action-card :global(svg) {
     grid-row: 1 / span 2;
-    width: 22px;
-    height: 22px;
-    padding: 9px;
-    border-radius: var(--radius-sm);
+    width: 28px;
+    height: 28px;
+    padding: 11px;
     background: var(--brand-gold-soft);
     color: var(--brand-gold-strong);
   }
@@ -1544,7 +2094,7 @@
     grid-column: 2;
     margin: 0;
     color: var(--secondary);
-    font-size: var(--font-md);
+    font-size: var(--font-lg);
   }
 
   .workspace-card p,
@@ -1552,7 +2102,7 @@
     grid-column: 2;
     margin: 0;
     color: var(--neutral-500);
-    font-size: var(--font-xs);
+    font-size: var(--font-sm);
     line-height: 1.4;
   }
 
@@ -1561,6 +2111,11 @@
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
     gap: var(--gap-3);
     margin-top: var(--space-2);
+    /* Caps how tall a long assignment list can push the page - scrolls
+       internally past that instead (part of the page-wide no-scroll
+       constraint on .dashboard-container below). */
+    max-height: 190px;
+    overflow-y: auto;
   }
 
   .assignment-card {
@@ -1569,7 +2124,7 @@
     color: inherit;
     background: var(--surface-1);
     border: 1px solid var(--border);
-    border-radius: var(--home-radius, var(--radius-lg));
+    border-left: 3px solid var(--brand-gold-strong);
     padding: var(--space-4) var(--space-5);
     transition: border-color 0.1s ease, background-color 0.1s ease;
   }
@@ -1577,11 +2132,12 @@
   .assignment-card:hover {
     background: var(--surface-2);
     border-color: var(--accent-strong);
+    border-left-color: var(--accent-strong);
   }
 
   .assignment-card h5 { margin: 0 0 var(--space-1) 0; color: var(--secondary); }
   .assignment-card p { margin: 0; color: var(--neutral-500); font-size: var(--font-xs); }
-  .assignment-card.completed { opacity: 0.72; }
+  .assignment-card.completed { opacity: 0.72; border-left-color: var(--success, #2e7d32); }
   .assignment-card.completed:hover { opacity: 1; }
   .completed-badge {
     display: inline-flex;
@@ -1593,15 +2149,29 @@
     font-weight: 600;
   }
 
+  /* Sidebar becomes a horizontal scrollable tab strip above the content
+     instead of a column competing for width - a 200px rail has no business
+     existing below tablet width. */
+  @media (max-width: 900px) {
+    .quick-nav-row { grid-template-columns: 1fr; }
+    .quick-nav { flex-direction: row; overflow-x: auto; }
+    .quick-nav-label { flex-shrink: 0; border-bottom: none; border-right: 1px solid var(--border); }
+    .quick-nav-tab { flex-shrink: 0; width: auto; border-bottom: none; border-right: 1px solid var(--border); border-left: none; border-top: 3px solid transparent; }
+    .quick-nav-tab:last-child { border-right: none; }
+    .quick-nav-tab:hover { border-left-color: transparent; border-top-color: var(--brand-gold-strong); }
+    .quick-nav-tab.active { border-left-color: transparent; border-top-color: var(--accent-strong); }
+    .quick-preview { flex-direction: column; }
+  }
+
   /* Mobile Responsive Styles */
   @media (max-width: 768px) {
-    .auth-container { 
-      margin: var(--space-4) auto; 
+    .auth-container {
+      margin: var(--space-4) auto;
       padding: 0 var(--space-3);
     }
     .auth-card { padding: var(--space-6); }
     .brand h1 { font-size: var(--font-xl); }
-    .dashboard-container { margin: var(--space-4) 0; padding: 0 var(--space-3); }
+    .dashboard-container { width: auto; margin: 0; padding: var(--space-4) var(--space-3); }
     .user-welcome { padding: var(--space-6); }
     .user-welcome h2 { font-size: var(--font-md); margin-bottom: var(--space-3); }
     .workspace-grid, .action-grid { grid-template-columns: 1fr; gap: var(--gap-3); }
@@ -1774,10 +2344,16 @@
     border-color: var(--accent-strong);
   }
 
+  /* Putting Workspace/Admin next to the assignment queue squeezed both into
+     a narrow outer column - Workspace's own 3-card row had nowhere near
+     enough width and its card text was clipping. Each section spans the
+     full (now much wider) container instead, and branches out
+     horizontally inside itself: workspace-grid/card-grid below both use
+     auto-fit, so they pick up as many columns as the full width allows. */
   .dashboard-sections {
     display: flex;
     flex-direction: column;
-    gap: var(--space-7);
+    gap: var(--space-3);
   }
 
   .dashboard-section.editing {
