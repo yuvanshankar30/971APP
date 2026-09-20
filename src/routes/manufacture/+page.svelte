@@ -339,6 +339,31 @@
     return (file?.name || '').replace(/\.[^.]+$/, '').trim();
   }
 
+  // Row density, remembered per device - the shop tablet and someone's
+  // laptop want different answers, and re-picking it on every visit would
+  // make the control not worth having.
+  const ROW_DENSITY_STORAGE_KEY = 'manufacture:compact-rows';
+  let compactRows = false;
+
+  function setCompactRows(next) {
+    compactRows = next;
+    if (!browser) return;
+    try {
+      localStorage.setItem(ROW_DENSITY_STORAGE_KEY, next ? '1' : '0');
+    } catch {
+      // Private windows and blocked site data both throw here; the choice
+      // just does not persist, which is not worth surfacing an error for.
+    }
+  }
+
+  if (browser) {
+    try {
+      compactRows = localStorage.getItem(ROW_DENSITY_STORAGE_KEY) === '1';
+    } catch {
+      compactRows = false;
+    }
+  }
+
   function getStoredLastSubsystemId() {
     if (!browser) return '';
     try {
@@ -2306,6 +2331,22 @@
       </aside>
     {/if}
 
+  <!-- Result count and density, above the list itself. The count answers
+       "did my filter do anything" without counting rows by eye, and
+       density lets a long queue be scanned on a laptop without the row
+       height that a shop tablet needs. -->
+  <div class="list-toolbar">
+    <span class="list-count">
+      <strong>{filteredParts.length}</strong>
+      {filteredParts.length === 1 ? 'part' : 'parts'}
+      {#if filteredParts.length !== parts.length}<span class="list-count-total">of {parts.length}</span>{/if}
+    </span>
+    <div class="density-toggle" role="group" aria-label="Row density">
+      <button type="button" class:active={!compactRows} aria-pressed={!compactRows} on:click={() => setCompactRows(false)}>Comfortable</button>
+      <button type="button" class:active={compactRows} aria-pressed={compactRows} on:click={() => setCompactRows(true)}>Compact</button>
+    </div>
+  </div>
+
   <!-- Mobile Card View -->
   <div class="mobile-parts-list">
     {#each filteredParts as part (part.id)}
@@ -2549,7 +2590,7 @@
 
   <!-- Desktop Table View -->
   <div class="table-container desktop-table" class:assign-mode={assignMode}>
-    <table class="table">
+    <table class="table" class:density-compact={compactRows}>
       <thead>
         <tr>
           {#if batchSelectMode}
@@ -3629,10 +3670,55 @@
     white-space: normal;
     overflow-wrap: anywhere;
   }
+  /* Sits between the filter card and the list, reading as the list's own
+     header rather than another card - hairline rule, no fill. */
+  .list-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+    padding: var(--space-2) 0;
+    margin-bottom: var(--space-2);
+    border-bottom: 1px solid var(--border);
+  }
+  .list-count { font-size: 0.82rem; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+  .list-count strong { font-size: 1rem; color: var(--text); }
+  .list-count-total { color: var(--text-muted); margin-left: 2px; }
+
+  .density-toggle { display: inline-flex; border: 1px solid var(--border); }
+  .density-toggle button {
+    border: 0;
+    border-left: 1px solid var(--border);
+    background: none;
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: 0.74rem;
+    padding: var(--space-1) var(--space-3);
+    min-height: 30px;
+    cursor: pointer;
+  }
+  .density-toggle button:first-child { border-left: 0; }
+  .density-toggle button:hover { background: var(--surface-2); color: var(--text); }
+  .density-toggle button.active { background: var(--brand-gold-soft); color: var(--brand-gold-strong); font-weight: 600; }
+  .density-toggle button:focus-visible { outline: 2px solid var(--brand-gold-strong); outline-offset: -2px; }
+
+  /* The density control drives the desktop table only - the mobile view is
+     cards, which have their own spacing. */
+  @media (max-width: 768px) {
+    .density-toggle { display: none; }
+  }
+
   .table th.quantity-col,
   .table td.quantity-col {
     width: 3%;
     text-align: center;
+    /* Tabular figures so a column of quantities does not jitter in width
+       from row to row. Kept centered rather than right-aligned (the usual
+       rule for numbers) because every other column in this table is
+       centered by design - one right-aligned column would read as a ragged
+       edge against its centered neighbours, not as precision. */
+    font-variant-numeric: tabular-nums;
   }
   .table th.stock-col,
   .table td.stock-col {

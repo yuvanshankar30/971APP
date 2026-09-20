@@ -86,11 +86,48 @@
     return true;
   });
 
-  // Debug logging
-  $: if (parts.length > 0) {
-    console.log(`Filtering: ${parts.length} total parts -> ${filteredParts.length} filtered parts`);
-    console.log('Active filters:', { vendorFilter, projectFilter, statusFilter, seasonFilter });
+  // The stages a purchase actually moves through, in order. A procurement
+  // page's first question is "what is waiting on me, and what is in
+  // flight?" - answering that previously meant guessing at a status
+  // dropdown, so the pipeline below turns each stage into a visible count
+  // you can click to filter by.
+  const PURCHASE_STAGES = [
+    { key: 'pending', label: 'Awaiting approval' },
+    { key: 'approved', label: 'Approved' },
+    { key: 'ordered', label: 'Ordered' },
+    { key: 'delivered', label: 'Delivered' },
+    { key: 'kitted', label: 'Kitted' }
+  ];
+
+  const partStatus = (part) => (part?.status || 'pending').toString().toLowerCase();
+  const partLineValue = (part) => (Number(part?.final_price ?? part?.price) || 0) * (Number(part?.quantity) || 1);
+
+  // Counted against everything the current filters ALREADY allow except the
+  // status filter itself - otherwise clicking "Ordered" would collapse
+  // every other stage to zero and the strip would stop being a pipeline.
+  $: stageSourceParts = parts.filter((part) => {
+    if (partStatus(part) === 'rejected') return false;
+    if (vendorFilter && (part.vendor || '').toString().toLowerCase() !== vendorFilter.toString().toLowerCase()) return false;
+    if (projectFilter && (part.project_id || '').toString() !== projectFilter.toString()) return false;
+    if (!passesTeamFilter(part.frc_team, show971, show9584)) return false;
+    if (!passesSeasonFilter(part.created_at, seasonFilter)) return false;
+    return true;
+  });
+
+  $: purchaseStages = PURCHASE_STAGES.map((stage) => {
+    const items = stageSourceParts.filter((part) => partStatus(part) === stage.key);
+    return {
+      ...stage,
+      count: items.length,
+      value: items.reduce((sum, part) => sum + partLineValue(part), 0)
+    };
+  });
+
+  function toggleStageFilter(stageKey) {
+    statusFilter = statusFilter === stageKey ? '' : stageKey;
   }
+
+  const money = (value) => `$${(Number(value) || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
   
   let showKittingModal = false;
   let selectedPart = null;
@@ -1039,6 +1076,29 @@
       </div>
     {/if}
 
+    <!-- Request-to-kit pipeline. Each stage is a filter toggle, so the
+         answer to "what is waiting on me" is one click, not a dropdown. -->
+    <div class="pipeline" role="group" aria-label="Filter by purchase stage">
+      {#each purchaseStages as stage, index (stage.key)}
+        <button
+          type="button"
+          class="pipeline-stage"
+          class:active={statusFilter === stage.key}
+          class:empty={stage.count === 0}
+          aria-pressed={statusFilter === stage.key}
+          on:click={() => toggleStageFilter(stage.key)}
+        >
+          <span class="pipeline-step">{index + 1}</span>
+          <span class="pipeline-label">{stage.label}</span>
+          <span class="pipeline-count">{stage.count}</span>
+          <span class="pipeline-value">{stage.count ? money(stage.value) : '—'}</span>
+        </button>
+      {/each}
+      {#if statusFilter}
+        <button type="button" class="pipeline-clear" on:click={() => (statusFilter = '')}>Clear stage filter</button>
+      {/if}
+    </div>
+
     <div class="card">
       <div class="filters">
         <div class="form-group">
@@ -1107,10 +1167,10 @@
               <th>Vendor</th>
               <th>Project ID</th>
               <th>Requester</th>
-              <th>Quantity</th>
-              <th>Price</th>
+              <th class="quantity">Qty</th>
+              <th class="price">Price</th>
               {#if showPurchasingLineTotals}
-                <th>Total</th>
+                <th class="num">Total</th>
               {/if}
               {#if !orderMode}
                 <th>Link</th>
@@ -1739,13 +1799,101 @@
     flex-shrink: 0;
   }
   .badge.small { font-size: 0.6rem; height: 20px; }
-  .scope-overall { background: var(--blue-soft); color: var(--blue-strong); border: 1px solid var(--blue-base); }
-  .scope-global { background: var(--blue-soft); color: var(--blue-strong); border: 1px solid var(--blue-base); }
-  .scope-team { background: var(--green-soft); color: var(--green-strong); border: 1px solid var(--green-base); }
-  .scope-project { background: var(--purple-soft); color: var(--purple-strong); border: 1px solid var(--purple-base); }
-  .scope-subsystem { background: var(--green-soft); color: var(--green-strong); border: 1px solid var(--green-base); }
-  .scope-build { background: var(--brand-gold-soft); color: var(--brand-gold-strong); border: 1px solid var(--brand-gold-base); }
-  .scope-build_group { background: var(--red-soft); color: var(--red-strong); border: 1px solid var(--red-base); }
+  /* Budget scope is a CATEGORY, not a state - "team" is not more urgent
+     than "project". It used to be painted across six saturated hues
+     (blue/green/purple/gold/red), which read as a status rainbow and made
+     the budget cards the loudest thing on the page for no information
+     gain. The label word already says which scope it is, so the chip is
+     now neutral and color is reserved for things that actually mean
+     something (spend against budget, order status). */
+  .scope-overall,
+  .scope-global,
+  .scope-team,
+  .scope-project,
+  .scope-subsystem,
+  .scope-build,
+  .scope-build_group {
+    background: var(--surface-2);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    letter-spacing: 0.04em;
+  }
+
+  /* Request-to-kit pipeline. Reads as one continuous run of stages rather
+     than five detached cards: shared hairline borders, no gaps, and only
+     the selected stage carries the gold. Counts are the loudest thing in
+     each cell because the count is the question being asked. */
+  .pipeline {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    border: 1px solid var(--border);
+    background: var(--surface-1);
+    margin-bottom: var(--space-4);
+  }
+  .pipeline-stage {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    grid-template-rows: auto auto;
+    align-items: baseline;
+    gap: 2px var(--space-2);
+    padding: var(--space-3) var(--space-4);
+    border: 0;
+    border-left: 1px solid var(--border);
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 0.12s ease;
+  }
+  .pipeline-stage:first-child { border-left: 0; }
+  .pipeline-stage:hover { background: var(--surface-2); }
+  .pipeline-stage:focus-visible { outline: 2px solid var(--brand-gold-strong); outline-offset: -2px; }
+  .pipeline-stage.active { background: var(--brand-gold-soft); box-shadow: inset 0 -2px 0 var(--brand-gold-strong); }
+  /* A stage with nothing in it should recede rather than demand a read. */
+  .pipeline-stage.empty .pipeline-count,
+  .pipeline-stage.empty .pipeline-label { color: var(--text-muted); }
+
+  .pipeline-step {
+    grid-row: 1 / span 2;
+    align-self: center;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px;
+    border: 1px solid var(--border);
+    font-family: var(--font-mono-stack);
+    font-size: 0.66rem;
+    color: var(--text-muted);
+  }
+  .pipeline-stage.active .pipeline-step { border-color: var(--brand-gold-strong); color: var(--brand-gold-strong); }
+  .pipeline-label {
+    font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .pipeline-count {
+    grid-column: 2;
+    font-size: 1.35rem; font-weight: 700; line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+  }
+  .pipeline-value {
+    grid-column: 2;
+    font-family: var(--font-mono-stack); font-size: 0.72rem; color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .pipeline-clear {
+    grid-column: 1 / -1;
+    border: 0; border-top: 1px solid var(--border);
+    background: none; color: var(--text-secondary);
+    padding: var(--space-2); font: inherit; font-size: 0.75rem; cursor: pointer;
+  }
+  .pipeline-clear:hover { background: var(--surface-2); color: var(--text); }
+
+  @media (max-width: 640px) {
+    .pipeline { grid-template-columns: repeat(2, 1fr); }
+    .pipeline-stage { border-top: 1px solid var(--border); }
+    .pipeline-stage:nth-child(-n+2) { border-top: 0; }
+    .pipeline-stage:nth-child(odd) { border-left: 0; }
+    .pipeline-count { font-size: 1.15rem; }
+  }
 
   .progress-bar {
     height: 6px;
