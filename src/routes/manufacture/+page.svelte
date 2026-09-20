@@ -3751,7 +3751,7 @@
     background: currentColor;
     opacity: 0.8;
   }
-  .name-meta-requester { flex: 1 1 auto; }
+  .name-meta-requester { flex: 0 1 auto; }
   .name-meta-date { flex: 0 0 auto; }
 
   /* Route: the status word, then a segmented track of this workflow's
