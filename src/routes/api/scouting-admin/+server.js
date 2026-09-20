@@ -8,59 +8,13 @@ import { getSupabase } from '$lib/server/971bot.js';
 import { selectPitScoutEntries } from '$lib/server/pitScoutingSchema.js';
 import { syncScoutingDataToSheet } from '$lib/server/google_sheets_sync.js';
 import { normalizeTeamKey } from '$lib/server/matchScoutingSchema.js';
-import { matchScoutingRowsToCsv, pacificDayRangeUtc, scoutingDatasetsToCsv } from '$lib/server/scoutingCsvExport.js';
+import { matchScoutingRowsToCsv, pacificDayRangeUtc } from '$lib/server/scoutingCsvExport.js';
 
 const ALL_FRC_TEAMS = new Set(Object.values(FRC_TEAMS).map(String));
 const PIT_SCOUT_PHOTO_BUCKET = 'pit-scout-photos';
 const CSV_PAGE_SIZE = 1000;
-const SCOUTING_EXPORT_TABLES = [
-  { name: 'data_events', table: 'scout_data_events', scope: 'match_key' },
-  { name: 'notes', table: 'scout_notes', scope: 'match_key' },
-  { name: 'match_reports', table: 'match_scout_entries', scope: 'event_key' },
-  { name: 'auto_paths', table: 'match_scout_auto_paths', scope: 'event_key' },
-  { name: 'pit_entries', table: 'pit_scout_entries', scope: 'event_key' },
-  { name: 'pit_issues', table: 'pit_problem_reports', scope: 'event_key' },
-  { name: 'match_assignments', table: 'scout_match_assignments', scope: 'match_key' },
-  { name: 'pit_assignments', table: 'scout_pit_assignments', scope: 'event_key' },
-  { name: 'prescout_assignments', table: 'scout_prescout_assignments', scope: 'event_key' },
-  { name: 'flagged_matches', table: 'scout_flagged_matches', scope: 'event_key' },
-  { name: 'picklist', table: 'scouting_picklist', scope: 'event_key' },
-  { name: 'pairwise_votes', table: 'scouting_pairwise_votes', scope: 'event_key' },
-  { name: 'match_rankings', table: 'scouting_match_rankings', scope: 'event_key' },
-  { name: 'robot_ratings', table: 'scouting_robot_ratings', scope: 'event_key' },
-  { name: 'practice_matches', table: 'scouting_practice_matches', scope: 'event_key' },
-  { name: 'prediction_market_bets', table: 'prediction_market_bets', scope: 'event_key' }
-];
 
-async function exportRowsForTable(db, definition, eventKey) {
-  const rows = [];
-  for (let offset = 0; ; offset += CSV_PAGE_SIZE) {
-    let query = db.from(definition.table).select('*');
-    query = definition.scope === 'match_key'
-      ? query.ilike('match_key', `${eventKey}_%`)
-      : query.eq('event_key', eventKey);
-    query = query.order('id', { ascending: true });
-    const { data, error } = await query.range(offset, offset + CSV_PAGE_SIZE - 1);
-    if (error) throw new Error(`Could not export ${definition.name}: ${error.message}`);
-    const page = data || [];
-    rows.push(...page);
-    if (page.length < CSV_PAGE_SIZE) break;
-  }
-  return { name: definition.name, rows };
-}
-
-async function buildScoutingCsvExport(db, eventKey) {
-  const datasets = await Promise.all(
-    SCOUTING_EXPORT_TABLES.map((definition) => exportRowsForTable(db, definition, eventKey))
-  );
-  return scoutingDatasetsToCsv(datasets);
-}
-
-// Just match_scout_entries (the actual "match scouting submissions"),
-// scoped to one calendar day rather than the whole event - the full
-// Export All CSV above already covers every table for an entire event;
-// this is for pulling one day's worth of match reports specifically,
-// e.g. to hand off at the end of a competition day.
+// Export actual match scouting submissions for one competition day.
 async function buildMatchScoutingCsvForDay(db, eventKey, dateStr) {
   const { start, end } = pacificDayRangeUtc(dateStr);
   const rows = [];
@@ -1246,20 +1200,6 @@ export async function GET({ request, url }) {
         headers: {
           'content-type': 'text/csv; charset=utf-8',
           'content-disposition': `attachment; filename="match-scouting-${safeEventKey}-${dateStr}.csv"`,
-          'cache-control': 'no-store'
-        }
-      });
-    }
-
-    if (url?.searchParams.get('resource') === 'export-csv') {
-      const exportEventKey = String(url.searchParams.get('event_key') || eventKey || '').trim();
-      if (!exportEventKey) return json({ error: 'Set or select a scouting event before exporting.' }, { status: 400 });
-      const csv = await buildScoutingCsvExport(db, exportEventKey);
-      const safeEventKey = exportEventKey.replace(/[^a-z0-9_-]/gi, '_');
-      return new Response(csv, {
-        headers: {
-          'content-type': 'text/csv; charset=utf-8',
-          'content-disposition': `attachment; filename="scouting-all-data-${safeEventKey}.csv"`,
           'cache-control': 'no-store'
         }
       });
