@@ -115,7 +115,8 @@ browser confirmation or prompt popups.
   that ports the shop's manual JProg sheet workflow to the web: searchable
   persistent stock sheets/cuts, a reloadable Storage-backed grouped part
   library, thickness-specific bundled hole programs, G-code inspection,
-  measurement, reusable click-to-place canvas placement,
+  measurement, reusable click-to-place placement, direct `.ngc`/`.tap`
+  drop-to-place on the canvas,
   selection/drag/rotation/pan/zoom/undo, and suffix-grouped LinuxCNC or
   WinCNC G-code emission. Before a multi-tool WinCNC emit, the operator can
   reorder the complete detected tool list; the output groups every part by

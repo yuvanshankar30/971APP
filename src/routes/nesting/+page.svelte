@@ -423,17 +423,18 @@
       toastActions.show(`Click the sheet to place ${group.label}. Press Esc when finished.`);
     } catch (error) { toastActions.show(error.message); }
   }
-  async function uploadParts(event) {
-    const files = [...(event.currentTarget.files || [])]; if (!files.length) return;
+  async function importPartFiles(files, dropPoint = null) {
+    const programs = [...(files || [])].filter(file => /\.(ngc|tap)$/i.test(file.name));
+    if (!programs.length) return toastActions.show('Drop .ngc or .tap G-code files into JProg.');
     let type;
     try {
-      type = singleProgramType(files.map(file => file.name));
+      type = singleProgramType(programs.map(file => file.name));
       assertProgramTypeCompatible(sheet?.program_extension, type);
-    } catch (error) { toastActions.show(error.message); event.currentTarget.value = ''; return; }
-    const firstStem = files[0].name.replace(/\.[^.]+$/, '');
+    } catch (error) { toastActions.show(error.message); return; }
+    const firstStem = programs[0].name.replace(/\.[^.]+$/, '');
     const partName = firstStem.replace(/_[^_]+$/, '') || firstStem;
     try {
-      await Promise.all(files.map(file => uploadPartFile(file, sheet.name, partName)));
+      await Promise.all(programs.map(file => uploadPartFile(file, sheet.name, partName)));
       // Real, confirmed gap: readPartGroup (used every time a stored part is
       // re-loaded from the library) already converts metric AutoCAM output
       // to inches before parsing - this immediate in-memory parse right
@@ -444,15 +445,36 @@
       // (JProg's WinCNC parser has no G22 case and aborts - see
       // gcodeUnitConvert.js's own header). Converted here too for
       // consistency with every other ingestion path.
-      const variants = await Promise.all(files.map(async file => parseGcodeDocument(convertGcodeToInches(await file.text()).gcode, file.name)));
+      const variants = await Promise.all(programs.map(async file => parseGcodeDocument(convertGcodeToInches(await file.text()).gcode, file.name)));
       const primary = variants[0], bounds = variants.reduce((largest, item) => item.bounds.width * item.bounds.height > largest.width * largest.height ? item.bounds : largest, primary.bounds);
       const key = `${sheetPartLibraryRoot(sheet.name)}/${partName}`; gcodePrograms[key] = { variants, bounds };
       if (!sheet?.program_extension && type) { await setSheetProgramType(sheet.id, type); sheet = { ...sheet, program_extension: type }; }
       activePart = { label: partName, part_library_path: key, width_in: bounds.width, height_in: bounds.height };
-      placing = { ...activePart }; placingWithShortcut = false;
-      await loadLibrary(); toastActions.show(`Uploaded ${files.length} program${files.length === 1 ? '' : 's'}; click the sheet to place it`);
+      if (dropPoint) {
+        const candidate = makePlacement({ ...activePart, x: dropPoint.x, y: dropPoint.y });
+        commit([...placements, candidate]);
+        selectedId = candidate.id;
+        placing = null;
+        draw();
+      } else {
+        placing = { ...activePart };
+      }
+      placingWithShortcut = false;
+      await loadLibrary();
+      const count = `${programs.length} program${programs.length === 1 ? '' : 's'}`;
+      toastActions.show(dropPoint ? `Uploaded and placed ${count}` : `Uploaded ${count}; click the sheet to place it`);
     } catch (error) { toastActions.show(error.message); }
+  }
+  async function uploadParts(event) {
+    await importPartFiles(event.currentTarget.files);
     event.currentTarget.value = '';
+  }
+  async function dropParts(event) {
+    event.preventDefault();
+    if (!sheet || !canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const point = screenToSheet({ x: event.clientX - rect.left, y: event.clientY - rect.top }, view);
+    await importPartFiles(event.dataTransfer?.files, point);
   }
   function draw() {
     if (!canvas || !sheet) return;
@@ -684,7 +706,7 @@
 {:else}
   <main class="workspace"><header class="workspace-header"><div class="jprog-identity"><h1>JProg</h1><button class="btn btn-secondary" on:click={() => { screen = 'select'; goto('/jprog'); }}><FolderOpen size={16}/> JProg Home</button></div><div class="header-sheet-name"><strong>{sheet?.name}</strong><span>{sheet?.width_in} x {sheet?.height_in} in · {sheet?.thickness_key} in</span></div><div class="header-actions"><span class:save-error={saveStatus === "error"} class="save-status">{saveStatus === "saving" ? "Saving..." : saveStatus === "unsaved" ? "Unsaved" : saveStatus === "error" ? "Save failed" : "Saved"}</span><button type="button" class="btn btn-secondary" on:click={() => (showOutputEditor = true)}><FolderCog size={16}/> Output Editor</button><a class="btn btn-secondary" href={JPROG_OUTPUT_REPOSITORY} target="_blank" rel="noreferrer"><ExternalLink size={16}/> Open Output Repository</a><button class="btn btn-secondary" on:click={fitView}><Crosshair size={16}/> Fit sheet</button><button class:active={measuring || measure.length} class="btn btn-secondary" on:click={() => { measuring = !measuring; if (measuring) measure = []; toastActions.show(measuring ? 'Click two points to measure' : 'Measurement cancelled'); }}><Ruler size={16}/> Measure</button><button class="btn btn-secondary" disabled={!undo.canUndo} on:click={undoChange}><Undo2 size={16}/> Undo</button><button class="btn btn-secondary" disabled={!undo.canRedo} on:click={redoChange}><Redo2 size={16}/> Redo</button><button class="btn btn-secondary" on:click={save}><Save size={16}/>{saving ? 'Saving' : 'Save'}</button><button class="btn btn-primary" on:click={openEmitDialog}><Download size={16}/> Emit G-code</button></div></header>
   <div class="workspace-body"><aside><section class="sheet-specs"><strong>{sheet?.name}</strong><span>{sheet?.width_in} x {sheet?.height_in} in · {sheet?.thickness_key} in thick</span></section><section><label for="active-cut">Active cut</label><select id="active-cut" value={activeCutId} on:change={(e) => chooseCut(e.currentTarget.value)}>{#each sheet?.nesting_cuts || [] as cut}<option value={cut.id}>{cut.name}</option>{/each}</select>{#if editingCutName}<div class="cut-rename"><input aria-label="Cut name" bind:value={cutName} on:keydown={(event) => { if (event.key === 'Enter') saveCutName(); if (event.key === 'Escape') editingCutName = false; }}/><button class="icon-button" title="Save cut name" on:click={saveCutName}><Save size={15}/></button><button class="icon-button" title="Cancel rename" on:click={() => editingCutName = false}><X size={15}/></button></div>{/if}<div class="cut-actions"><button type="button" class="btn btn-secondary add-cut-button" on:click={addCut}><Plus size={15}/> Add cut</button><button type="button" class="icon-button" title="Rename cut" on:click={beginRenameCut}><Pencil size={15}/></button><button type="button" class="icon-button danger" title="Delete cut" disabled={deletingCut || (sheet?.nesting_cuts?.length || 0) <= 1} on:click={removeActiveCut}><Trash2 size={15}/></button></div></section><section class="workflow-panel"><div class="section-heading"><h2>Cut workflow</h2><span class:ready={activeValidation.length === 0} class="validation-status">{activeValidation.length ? activeValidation.length + " issue" + (activeValidation.length === 1 ? "" : "s") : "Ready"}</span></div><div class="workflow-stats"><span>{placements.filter(item => item.kind === "part").length} parts</span><span>{placements.filter(item => item.kind === "hole").length} holes</span><span>{programType.toUpperCase()}</span></div>{#if activeValidation.length}<ul class="validation-list">{#each activeValidation.slice(0, 4) as issue}<li>{issue.message}</li>{/each}{#if activeValidation.length > 4}<li>+ {activeValidation.length - 4} more</li>{/if}</ul>{:else}<p class="hint">This cut is ready to emit.</p>{/if}</section><section><h2>Place</h2><label class="btn btn-secondary upload"><Upload size={16}/> Upload to Parts Library<input type="file" accept=".ngc,.tap" multiple on:change={uploadParts}/></label><div class="row placement-actions"><button type="button" class="btn btn-secondary" on:click={openLibraryBrowser}><FolderOpen size={16}/> Library</button><button type="button" class="btn btn-secondary" on:click={openCamJobs}><FolderInput size={16}/> Upload AutoCAM</button><button type="button" class="btn btn-secondary" on:click={openSheetFiles}><Files size={16}/> Files</button><button class="btn btn-secondary placement-reload" on:click={loadLibrary}><RefreshCw size={16}/> Reload</button></div>{#if showLibrary}<div class="library-panel"><div class="section-heading"><span>Recent parts</span><span class="hint">{partGroups.length}</span></div><div class="library">{#each recentPartGroups as group}<button title={`Place ${group.label}`} on:click={() => armStoredPart(group)}>{group.label}<span>{group.files.length}</span></button>{:else}<span class="hint">No part programs on this sheet yet.</span>{/each}</div></div>{/if}<button class:active={placing?.kind === 'hole'} class="btn btn-secondary" on:click={placeHole}><Crosshair size={16}/> Add hole</button>{#if placing}<p class="hint">Click the sheet to place {placing.label}. Keep clicking to add copies, then press Esc to finish.</p>{/if}</section>{#if selected}<section><h2>Selection</h2><strong>{selected.label}</strong><div class="coordinate-grid"><label>X<input type="number" step="0.001" value={selected.x} on:change={(e) => commit(placements.map(item => item.id === selected.id ? { ...item, x: Number(e.currentTarget.value) } : item))}/></label><label>Y<input type="number" step="0.001" value={selected.y} on:change={(e) => commit(placements.map(item => item.id === selected.id ? { ...item, y: Number(e.currentTarget.value) } : item))}/></label></div><div class="selection-actions"><button class="btn btn-secondary" on:click={() => rotateSelected(-1)}><RotateCcw size={16}/> Rotate left</button><button class="btn btn-secondary" on:click={() => rotateSelected(1)}><RotateCw size={16}/> Rotate right</button><button class="btn btn-secondary" on:click={duplicateSelected}><Copy size={16}/> Duplicate</button>{#if selected.kind === 'part'}<button class="btn btn-secondary" on:click={inspectSelected}><FileCode size={16}/> Inspect G-code</button>{/if}<button class="btn btn-secondary danger" on:click={removeSelected}><Trash2 size={16}/> Delete</button></div></section>{/if}<section><h2>Measurement</h2>{#if measure.length === 2}<strong>{Math.hypot(measure[1].x - measure[0].x, measure[1].y - measure[0].y).toFixed(3)} in</strong><button class="text-button" on:click={() => { measure = []; draw(); }}>Clear measurement</button>{:else}<p class="hint">Select the ruler, then click two points.</p>{/if}</section></aside>
-  <section class="canvas-wrap"><canvas bind:this={canvas} on:pointerdown={pointerDown} on:pointermove={pointerMove} on:pointerup={pointerUp} on:pointerleave={pointerUp} on:wheel={wheel}></canvas></section></div></main>
+  <section class="canvas-wrap"><canvas bind:this={canvas} on:dragover|preventDefault on:drop={dropParts} on:pointerdown={pointerDown} on:pointermove={pointerMove} on:pointerup={pointerUp} on:pointerleave={pointerUp} on:wheel={wheel}></canvas></section></div></main>
 {/if}
 {#if showNewSheet}<div class="scrim"><form class="modal" on:submit|preventDefault={createNewSheet}><button type="button" class="modal-close" title="Close" on:click={() => showNewSheet = false}><X size={18}/></button><h2>New Sheet</h2><label>Name<input bind:value={newSheet.name} /></label><div class="two"><label>Width (in)<input type="number" min="1" bind:value={newSheet.width}/></label><label>Height (in)<input type="number" min="1" bind:value={newSheet.height}/></label></div><label>Thickness<select bind:value={newSheet.thickness}><option value="0.063">1/16 in</option><option value="0.09">0.090 in</option><option value="0.125">1/8 in</option><option value="0.1875">3/16 in</option><option value="0.25">1/4 in</option><option value="0.3125">5/16 in</option><option value="0.375">3/8 in</option><option value="0.5">1/2 in</option><option value="0.75">3/4 in</option></select></label><div class="row"><button type="button" class="btn btn-secondary" on:click={() => showNewSheet = false}>Cancel</button><button class="btn btn-primary">Create sheet</button></div></form></div>{/if}
 {#if showEditSheet}<div class="scrim"><form class="modal" on:submit|preventDefault={saveEditSheet}><button type="button" class="modal-close" title="Close" on:click={() => showEditSheet = false}><X size={18}/></button><h2>Edit Sheet</h2><label>Name<input bind:value={editSheet.name} /></label><div class="two"><label>Width (in)<input type="number" min="1" bind:value={editSheet.width}/></label><label>Height (in)<input type="number" min="1" bind:value={editSheet.height}/></label></div><label>Thickness<select bind:value={editSheet.thickness}><option value="0.063">1/16 in</option><option value="0.09">0.090 in</option><option value="0.125">1/8 in</option><option value="0.1875">3/16 in</option><option value="0.25">1/4 in</option><option value="0.3125">5/16 in</option><option value="0.375">3/8 in</option><option value="0.5">1/2 in</option><option value="0.75">3/4 in</option></select></label><div class="row"><button type="button" class="btn btn-secondary" on:click={() => showEditSheet = false}>Cancel</button><button class="btn btn-primary">Save changes</button></div></form></div>{/if}
