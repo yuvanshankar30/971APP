@@ -23,7 +23,6 @@
   let selectedEventKey = '';
   let savingEvent = false;
   let deletingAllScoutingData = false;
-  let exportingCsv = false;
   let exportingMatchScoutingCsv = false;
   // Defaults to today (Pacific, matching how the export itself interprets
   // the date) so the common case - "export today's match scouting" at the
@@ -128,35 +127,6 @@
       ...(await getAuthHeader())
     };
     return fetch(url, { ...options, headers });
-  }
-
-  async function exportAllScoutingData() {
-    const exportEventKey = browseEventKey || eventKey;
-    if (!exportEventKey || exportingCsv) return;
-    exportingCsv = true;
-    errorMsg = '';
-    successMsg = '';
-    try {
-      const response = await authFetch(`/api/scouting-admin?resource=export-csv&event_key=${encodeURIComponent(exportEventKey)}`);
-      if (!response.ok) {
-        const payload = await response.json().catch(() => null);
-        throw new Error(payload?.error || `Export failed (${response.status})`);
-      }
-      const blob = await response.blob();
-      const href = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = href;
-      link.download = `scouting-all-data-${exportEventKey.replace(/[^a-z0-9_-]/gi, '_')}.csv`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(href);
-      successMsg = `Exported all scouting data for ${exportEventKey}.`;
-    } catch (error) {
-      errorMsg = error?.message || 'Could not export scouting data.';
-    } finally {
-      exportingCsv = false;
-    }
   }
 
   async function exportMatchScoutingCsvForDay() {
@@ -649,9 +619,6 @@
           bind:value={browseEventKey}
           allLabel={`Current Event (${eventKey || 'none set'})`}
         />
-        <button class="btn btn-secondary" disabled={exportingCsv || !(browseEventKey || eventKey)} on:click={exportAllScoutingData}>
-          {exportingCsv ? 'Exporting...' : 'Export All CSV'}
-        </button>
         <div class="match-scouting-export">
           <label class="sr-only" for="matchScoutingExportDate">Day to export</label>
           <input id="matchScoutingExportDate" class="form-input" type="date" bind:value={matchScoutingExportDate} />

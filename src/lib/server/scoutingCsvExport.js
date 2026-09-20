@@ -14,27 +14,6 @@ export function csvCell(value) {
   return `"${text.replaceAll('"', '""')}"`;
 }
 
-export function scoutingDatasetsToCsv(datasets = []) {
-  const rows = datasets.flatMap(({ name, rows: datasetRows = [] }) => (
-    datasetRows.map((row) => ({ dataset: name, ...(row || {}) }))
-  ));
-  const discovered = new Set(rows.flatMap((row) => Object.keys(row)));
-  const preferred = ['dataset', 'event_key', 'match_key', 'team_key'];
-  const columns = [
-    ...preferred.filter((column) => discovered.has(column) || column === 'dataset'),
-    ...[...discovered].filter((column) => !preferred.includes(column)).sort()
-  ];
-  return `\uFEFF${[
-    columns.map(csvCell).join(','),
-    ...rows.map((row) => columns.map((column) => csvCell(row[column])).join(','))
-  ].join('\r\n')}\r\n`;
-}
-
-// A single-table export (one specific day's match scouting submissions) has
-// no "dataset" concept to distinguish rows by, so this skips the forced
-// dataset column scoutingDatasetsToCsv always includes, rather than reusing
-// that function with an artificial one-dataset wrapper just to get a
-// meaningless empty column in every export.
 export function matchScoutingRowsToCsv(rows = []) {
   const discovered = new Set(rows.flatMap((row) => Object.keys(row || {})));
   const preferred = ['event_key', 'match_key', 'team_key'];

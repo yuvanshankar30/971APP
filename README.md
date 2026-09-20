@@ -294,10 +294,9 @@ browser confirmation or prompt popups.
   every current default tab, so new and restored team tools do not vanish.
   Scouting Admin is restricted to site administrators and the dedicated
   Scouting Admin roster entries for Arya Saikia, Caden Nguyen, and Aarush
-  Rajagopalan. Its event picker can export the selected event's complete
-  scouting dataset as one CSV, with each row labeled by its source dataset;
-  the export includes observations, notes, reports, paths, pit data/issues,
-  assignments, pick-list/consensus data, ratings, and prediction-market bets.
+  Rajagopalan. Its event picker and date control can export the selected day's
+  submitted Match Scouting results as CSV; assignments and unrelated scouting
+  administration data are intentionally excluded.
 - **Pick List** (`scouting/`): a team-comparison / pick-list workspace for the
   active event. Named for what it produces: it was previously labelled "Data
   Scouting" in the nav, which collided with the separate `datascout` route and

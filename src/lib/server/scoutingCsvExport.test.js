@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { csvCell, matchScoutingRowsToCsv, pacificDayRangeUtc, scoutingDatasetsToCsv } from './scoutingCsvExport.js';
+import { csvCell, matchScoutingRowsToCsv, pacificDayRangeUtc } from './scoutingCsvExport.js';
 
 describe('scouting CSV export', () => {
   it('escapes quotes, commas, newlines, arrays, and objects', () => {
-    const csv = scoutingDatasetsToCsv([
-      { name: 'notes', rows: [{ event_key: '2026test', team_key: 'frc971', notes: 'Fast, but "fragile"\nCheck chain', tags: ['drive', 'pit'], detail: { urgent: true } }] }
+    const csv = matchScoutingRowsToCsv([
+      { event_key: '2026test', team_key: 'frc971', notes: 'Fast, but "fragile"\nCheck chain', tags: ['drive', 'pit'], detail: { urgent: true } }
     ]);
     expect(csv).toContain('"Fast, but ""fragile""\nCheck chain"');
     expect(csv).toContain('"[""drive"",""pit""]"');
@@ -15,26 +15,16 @@ describe('scouting CSV export', () => {
     expect(csvCell('=HYPERLINK("https://bad.example")')).toBe('"\'=HYPERLINK(""https://bad.example"")"');
     expect(csvCell('+1')).toBe('"\'+1"');
   });
-
-  it('keeps datasets distinguishable in one CSV and handles an empty export', () => {
-    const csv = scoutingDatasetsToCsv([
-      { name: 'data_events', rows: [{ match_key: '2026test_qm1', team_key: 'frc971', event_type: 'climb' }] },
-      { name: 'pit_entries', rows: [{ event_key: '2026test', team_key: 'frc254', drivebase_type: 'Swerve' }] }
-    ]);
-    expect(csv).toContain('"dataset","event_key","match_key","team_key"');
-    expect(csv).toContain('"data_events"');
-    expect(csv).toContain('"pit_entries"');
-    expect(scoutingDatasetsToCsv([])).toBe('\uFEFF"dataset"\r\n');
-  });
 });
 
 describe('matchScoutingRowsToCsv', () => {
-  it('has no dataset column - unlike scoutingDatasetsToCsv, there is only one table here', () => {
+  it('exports match scouting fields without an assignment or dataset column', () => {
     const csv = matchScoutingRowsToCsv([
       { event_key: '2026test', match_key: '2026test_qm1', team_key: 'frc971', crash_or_break: false }
     ]);
     expect(csv).toContain('"event_key","match_key","team_key"');
     expect(csv).not.toContain('dataset');
+    expect(csv).not.toContain('assigned_user');
   });
 
   it('handles an empty day with no submissions', () => {
