@@ -31,6 +31,13 @@
   $: activeProfile = profile;
   $: currentPath = $page.url.pathname;
   $: requiresAuth = !PUBLIC_ROUTES.includes(currentPath);
+  // Prediction Market v2 gets its own fully self-contained dark shell (own
+  // top bar, own subnav, own theme) rather than the shared site chrome -
+  // direct instruction: it doesn't need to follow Spartans Hub's design
+  // system at all. Hiding the real header here (rather than the page just
+  // visually covering it) means no stray site nav ever peeks out at an odd
+  // viewport size or before the page's own CSS finishes loading.
+  $: hideGlobalChrome = currentPath.startsWith('/predictions');
   $: isAuthenticated = !!(authUser || activeProfile);
   $: shouldHoldProtectedContent = requiresAuth && !authReady;
   $: shouldRedirectToLogin = requiresAuth && authReady && !isAuthenticated;
@@ -662,7 +669,7 @@
   }
 </script>
 
-{#if authReady && isAuthenticated}
+{#if authReady && isAuthenticated && !hideGlobalChrome}
   <header class="nav-header">
     <div class="nav-container">
       <!-- Brand. The side slots are equal-weight flex items, which is what
@@ -854,7 +861,7 @@
 <GlobalSiteSearch bind:open={siteSearchOpen} canViewAdmin={canViewAdmin} canViewScoutingAdmin={canViewScoutingAdmin} />
 
 {#if canRenderPageContent}
-  <main class="container page-container">
+  <main class="container page-container" class:predictions-shell={hideGlobalChrome}>
     <slot />
   </main>
 {:else if shouldHoldProtectedContent}
@@ -1319,6 +1326,23 @@
     max-width: var(--page-max-width);
     margin: 0 auto;
     padding: 0 var(--space-4);
+  }
+
+  /* Prediction Market v2's own full-bleed dark shell - no shared container
+     width/padding, no inherited site background (the page's own root
+     element, src/routes/predictions/+layout.svelte, paints the real
+     background; this fallback color only matters for the instant before
+     that CSS applies, so it never flashes the light site background).
+     Needs the full "main.container.page-container" prefix, not just
+     ".predictions-shell" alone, to out-specificity the rule above - both
+     are scoped to this same component, and the extra element+class in
+     that selector otherwise wins the tie. */
+  main.container.page-container.predictions-shell {
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    background: #0a0d13;
+    min-height: 100vh;
   }
 
   .auth-loading-shell {
