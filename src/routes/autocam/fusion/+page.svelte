@@ -340,37 +340,45 @@
     align-items: center;
     gap: var(--space-2);
   }
-  /* Wraps the tab row and (when the active tab has one) the Add
-     button/filters row into one connected surface instead of two floating
-     boxes - the tab-nav's own border/margin move onto this wrapper, and
-     .cam-list-toolbar's own border/radius/margin (meant for it to stand
-     alone above a list) are stripped back out immediately below so it
-     reads as this bar's second row, not its own separate card. */
+  /* One horizontal row - tabs, Add button, and filters all inline, instead
+     of the tabs stacked above a second Add-button/filters row. .tab-nav
+     and .cam-list-toolbar are each already their own internal flex row
+     (tab buttons; Add button + filter fields), so laying THIS wrapper out
+     as a row too, with those two as its only two flex items, is enough to
+     put everything on one line without restructuring either of them. */
   .tab-nav-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     background: var(--surface-2);
     margin: var(--space-4) 0 var(--space-6);
-    overflow: hidden;
+    padding: 0 var(--space-3);
+    overflow-x: auto;
   }
   .tab-nav-bar .cam-list-toolbar {
+    flex: 1 1 auto;
+    flex-wrap: nowrap;
+    align-items: center;
     border: none;
     border-radius: 0;
     margin: 0;
+    padding: var(--space-2) 0;
     background: none;
   }
   .tab-nav {
     display: flex;
+    align-items: center;
     gap: var(--space-1);
-    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
     margin: 0;
-    overflow-x: auto;
   }
   .tab-nav button {
     display: flex;
     align-items: center;
     gap: 0.4rem;
-    padding: var(--space-3) var(--space-4);
+    padding: var(--space-3) var(--space-3);
     background: none;
     border: none;
     border-bottom: 2px solid transparent;
