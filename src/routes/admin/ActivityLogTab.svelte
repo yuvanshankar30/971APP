@@ -224,6 +224,10 @@
   .op-update { background: var(--blue-soft); color: #1e40af; }
   .op-delete { background: #fee2e2; color: #991b1b; }
   .op-sent { background: var(--blue-soft); color: var(--blue-base); }
+  :global([data-theme="modern-dark"]) .op-insert { background: rgba(74, 222, 128, 0.16); color: #86efac; }
+  :global([data-theme="modern-dark"]) .op-update,
+  :global([data-theme="modern-dark"]) .op-sent { background: rgba(96, 165, 250, 0.16); color: #93c5fd; }
+  :global([data-theme="modern-dark"]) .op-delete { background: rgba(248, 113, 113, 0.16); color: #fca5a5; }
 
   .activity-main { min-width: 0; flex: 1; }
   .activity-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.4rem; font-size: 0.85rem; }

@@ -2376,6 +2376,15 @@ textarea:focus,
   color: #86efac;
 }
 
+/* Admin > Activity Log's active tab was a solid saturated gold fill with
+   --secondary (near-white in this theme) text - too jarring, and low
+   contrast against the pale text. Give it the same translucent-tint
+   treatment as the chips above. */
+[data-theme="modern-dark"] .tab-nav button.active {
+  background: var(--brand-gold-soft);
+  color: var(--accent-strong);
+}
+
 /* btn-warning pairs gold bg with gold-strong text; with strong now light on
    dark themes it needs dark ink instead */
 [data-theme="modern-dark"] .btn-warning {
