@@ -662,6 +662,19 @@
 {/if}
 
 <style>
+  /* Modern dark only: the site's gold "primary" accent doesn't work as a
+     button fill on this page's dark surfaces (direct instruction) - swap
+     to a plain neutral/"black" button here instead of the shared gold one.
+     Other themes keep the normal gold btn-primary look untouched. */
+  :global([data-theme="modern-dark"]) .btn-primary {
+    --btn-bg: var(--surface-1);
+    --btn-color: var(--text);
+    --btn-border: var(--border);
+    --btn-hover-bg: var(--surface-2);
+    --btn-hover-color: var(--text);
+    --btn-hover-border: var(--accent);
+  }
+
   .build-container { max-width: 1800px; margin: 0 auto; padding: 0 var(--space-4) var(--space-4); }
 
   .stats-grid {

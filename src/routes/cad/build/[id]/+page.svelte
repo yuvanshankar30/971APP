@@ -2571,6 +2571,23 @@
 {/if}
 
 <style>
+  /* Modern dark only: the site's gold "primary" accent doesn't work as a
+     button fill on this page's dark surfaces (direct instruction) - swap
+     to a plain neutral/"black" button here instead of the shared gold one.
+     Other themes keep the normal gold btn-primary/btn-yellow look
+     untouched. .btn-yellow is this page's own class (see its definition
+     further down) for the Add/Save/Add-to-Purchasing buttons - same gold
+     accent, same fix needed. */
+  :global([data-theme="modern-dark"]) .btn-primary,
+  :global([data-theme="modern-dark"]) .btn-yellow {
+    --btn-bg: var(--surface-1);
+    --btn-color: var(--text);
+    --btn-border: var(--border);
+    --btn-hover-bg: var(--surface-2);
+    --btn-hover-color: var(--text);
+    --btn-hover-border: var(--accent);
+  }
+
   /* Issue 2: Fix the status card / progress section - remove yellow background */
   .status-section {
     margin-bottom: var(--space-4);
