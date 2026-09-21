@@ -5,6 +5,7 @@ import {
   formatHubStatus,
   formatTeamReportStatus,
   handleHubAppMention,
+  isHubAssistantChannelAllowed,
   isHubStatusRequest,
   isTeamReportStatusRequest,
   stripAppMention
@@ -78,6 +79,26 @@ describe('Slack Hub assistant', () => {
     expect(isTeamReportStatusRequest('Have all reports for team 971 been finished?')).toBe(true);
   });
 
+  it('allows only the configured or durably recorded ACE/Pit channel', async () => {
+    const supa = {
+      from: () => {
+        const query = {
+          select: () => query,
+          eq: (_column, value) => {
+            query.channel = value;
+            return query;
+          },
+          limit: async () => ({ data: query.channel === 'C-ACE' ? [{ channel: 'C-ACE' }] : [], error: null })
+        };
+        return query;
+      }
+    };
+    expect(await isHubAssistantChannelAllowed(supa, 'C-CONFIGURED', { channelId: 'C-CONFIGURED' })).toBe(true);
+    expect(await isHubAssistantChannelAllowed(supa, 'C-OTHER', { channelId: 'C-CONFIGURED' })).toBe(false);
+    expect(await isHubAssistantChannelAllowed(supa, 'C-ACE', { channelId: '' })).toBe(true);
+    expect(await isHubAssistantChannelAllowed(supa, 'C-RANDOM', { channelId: '' })).toBe(false);
+  });
+
   it('formats live status and recent changes', () => {
     const text = formatHubStatus(snapshot);
     expect(text).toContain('*Spartans Hub status:* Operational');
@@ -139,5 +160,19 @@ describe('Slack Hub assistant', () => {
     });
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(postMessage.mock.calls[0][0].text).toContain('2/3 complete');
+  });
+
+  it('keeps replies inside an existing Slack thread for either app display name', async () => {
+    const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C-ACE', ts: '8.1' });
+    await handleHubAppMention({
+      channel: 'C-ACE',
+      ts: '8.0',
+      thread_ts: '7.0',
+      text: '<@U971APP> /status'
+    }, {
+      supa: supabaseForStatus(),
+      slack: { chat: { postMessage } }
+    });
+    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ channel: 'C-ACE', thread_ts: '7.0' }));
   });
 });
