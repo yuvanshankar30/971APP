@@ -749,9 +749,11 @@
   .sheet-list { max-width: none; gap: 7px; }
   .sheet-row { min-height: 74px; align-items: center; padding: 13px 16px; border-radius: 6px; transition: border-color .15s ease, background .15s ease; }
   .sheet-row:hover { border-color: #2563eb; background: var(--primary-soft, #eff6ff); }
+  [data-theme="modern-dark"] .sheet-row:hover { background: var(--surface-3); }
   .sheet-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; }
   .sheet-edit, .sheet-delete { flex: 0 0 auto; }
   .sheet-mark { display: grid; place-items: center; width: 38px; height: 38px; color: #2563eb; background: var(--primary-soft, #eff6ff); border-radius: 5px; }
+  [data-theme="modern-dark"] .sheet-mark { color: var(--text-muted); background: var(--surface-3); }
   .sheet-details { display: grid; gap: 4px; flex: 1; min-width: 0; }
   .sheet-details strong { font-size: 1rem; }
   .sheet-details span { color: var(--text-muted); font-size: .88rem; }
@@ -832,6 +834,7 @@
   .cam-job-list { display: grid; gap: 7px; max-height: 55vh; overflow: auto; }
   .cam-job-item { display: grid; gap: 3px; padding: 10px; border: 1px solid var(--border); background: var(--surface-1); text-align: left; color: inherit; }
   .cam-job-item:hover, .cam-job-item:focus-visible { border-color: #2563eb; background: var(--primary-soft, #eff6ff); outline: none; }
+  [data-theme="modern-dark"] .cam-job-item:hover, [data-theme="modern-dark"] .cam-job-item:focus-visible { background: var(--surface-3); }
   .cam-job-item span { color: var(--text-muted); font-size: .8rem; }
   .library-loading { min-height: 180px; display: grid; place-items: center; align-content: center; gap: 10px; color: var(--text-muted); }
   .loading-spinner { width: 24px; height: 24px; border: 3px solid var(--border); border-top-color: #2563eb; border-radius: 50%; animation: library-spin .75s linear infinite; }
