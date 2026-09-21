@@ -80,12 +80,12 @@ describe('Slack Hub assistant', () => {
   });
 
   it('allows only the configured 971app testing channel', async () => {
+    expect(await isHubAssistantChannelAllowed(null, 'C0C36BSST46')).toBe(true);
+    expect(await isHubAssistantChannelAllowed(null, 'C-RANDOM')).toBe(false);
     expect(await isHubAssistantChannelAllowed(null, 'C-CONFIGURED', { channelId: 'C-CONFIGURED' })).toBe(true);
     expect(await isHubAssistantChannelAllowed(null, 'C-OTHER', { channelId: 'C-CONFIGURED' })).toBe(false);
-    expect(await isHubAssistantChannelAllowed(null, '971app-bot-testing', { channelId: '' })).toBe(true);
-    expect(await isHubAssistantChannelAllowed(null, '#971app-bot-testing', { channelId: '' })).toBe(true);
-    expect(await isHubAssistantChannelAllowed(null, '2026-ace-pit-bot', { channelId: '' })).toBe(false);
-    expect(await isHubAssistantChannelAllowed(null, 'C-RANDOM', { channelId: '' })).toBe(false);
+    expect(await isHubAssistantChannelAllowed(null, '971app-bot-testing')).toBe(false);
+    expect(await isHubAssistantChannelAllowed(null, '2026-ace-pit-bot')).toBe(false);
   });
 
   it('formats live status and recent changes', () => {

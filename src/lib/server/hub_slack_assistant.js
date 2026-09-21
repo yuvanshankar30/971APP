@@ -2,6 +2,7 @@ import { env } from '$env/dynamic/private';
 import { getSlackClient, getSupabase } from '$lib/server/971bot.js';
 
 export const HUB_ASSISTANT_CHANNEL_NAME = '971app-bot-testing';
+export const HUB_ASSISTANT_CHANNEL_ID = 'C0C36BSST46';
 
 export const HUB_RECENT_CHANGES = [
   'Drive Team now shows every completed 971 match with Win/Loss/Tie and the final score.',
@@ -76,15 +77,8 @@ export function isTeamReportStatusRequest(question) {
 export async function isHubAssistantChannelAllowed(supa, channel, options = {}) {
   const candidate = String(channel || '').trim();
   if (!candidate) return false;
-  const configuredChannelId = String(
-    options.channelId ?? env.SLACK_HUB_ASSISTANT_CHANNEL_ID ?? ''
-  ).trim();
-  if (configuredChannelId) return candidate === configuredChannelId;
-
-  // Slack app_mention events use opaque C... channel IDs. Name matching is
-  // retained only for direct/local calls; production fails closed until the
-  // testing channel's exact ID is configured.
-  return candidate === HUB_ASSISTANT_CHANNEL_NAME || candidate === `#${HUB_ASSISTANT_CHANNEL_NAME}`;
+  const allowedChannelId = String(options.channelId ?? HUB_ASSISTANT_CHANNEL_ID).trim();
+  return candidate === allowedChannelId;
 }
 
 export async function fetchHubStatusSnapshot(supa = getSupabase()) {
