@@ -1213,7 +1213,7 @@
                   <div class="requester-content">
                     <span title={part.requester || ''}>{purchasingDisplayName(part.requester)}</span>
                     {#if isTeam9584(part.frc_team)}
-                      <span class="tag team-tag tag-9584" title="Team 9584">9584</span>
+                      <span class="requester-team" title="Team 9584">&bull; 9584</span>
                     {/if}
                   </div>
                 </td>
@@ -2063,6 +2063,15 @@
 
   .requester-content span:first-child {
     min-width: 0;
+  }
+
+  /* Team 9584's requesters used to get a colored box badge here - replaced
+     with a plain "name · team#" suffix so the requester column reads as
+     text, not another status-chip-like element competing for attention. */
+  .requester-team {
+    color: var(--text-muted, var(--neutral-500));
+    font-size: 0.85em;
+    white-space: nowrap;
   }
 
   .download {
