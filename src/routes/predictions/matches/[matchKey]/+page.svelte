@@ -3,7 +3,11 @@
   import { ArrowLeft, Share2 } from 'lucide-svelte';
   import { findMockMatch, MOCK_MATCH_DETAIL } from '$lib/predictionMarketV2Mock.js';
 
-  // TODO(backend): GET /api/prediction-market-v2/matches/[matchKey]
+  // TODO(backend): GET /api/prediction-market-v2/matches/[matchKey], and
+  // POST /api/prediction-market-v2/picks (see that endpoint's own upsert -
+  // switching a pick before the match starts is already how the real API
+  // is designed to work, so the mock below matches that rather than a
+  // one-shot "locked forever" model.
   $: matchKey = $page.params.matchKey;
   $: summary = findMockMatch(matchKey);
   // Plain const, not `$:` - this never actually varies with matchKey (the
@@ -12,11 +16,39 @@
   // before this had a value yet, throwing on `undefined.my_pick` and
   // blanking the whole page - a plain const has no such ordering hazard.
   const detail = MOCK_MATCH_DETAIL;
+  // A local, mutable copy - placing/switching a pick below updates this,
+  // not the shared MOCK_MATCH_DETAIL export itself, so it resets to the
+  // mock's own starting state on a fresh page load instead of drifting
+  // further every time someone visits this page in the same session.
+  let localDetail = { ...detail, community_breakdown: { ...detail.community_breakdown } };
 
-  let selectedSide = detail.my_pick;
+  let selectedSide = localDetail.my_pick;
 
+  // Was a one-shot "already locked in, do nothing" no-op - the "Predict
+  // Red"/"Predict Blue" buttons themselves promise a click places (or
+  // moves) your pick, not that it only works once. Placing a first pick
+  // or switching an existing one before the match starts is exactly what
+  // the real POST /api/prediction-market-v2/picks endpoint's own upsert
+  // supports - this mock now behaves the same way.
   function pick(side) {
-    if (detail.my_pick) return; // already locked in, in the mock
+    if (selectedSide === side) return;
+    const previousSide = localDetail.my_pick;
+    const nextBreakdown = { ...localDetail.community_breakdown };
+    if (previousSide) {
+      // Switching an existing pick moves one vote from one side to the
+      // other - the total voter count doesn't change.
+      nextBreakdown[previousSide] = Math.max(0, nextBreakdown[previousSide] - 1);
+    } else {
+      // A first-time pick is a new voter.
+      nextBreakdown.total += 1;
+    }
+    nextBreakdown[side] += 1;
+    localDetail = {
+      ...localDetail,
+      my_pick: side,
+      model_probability_at_my_pick: side === 'red' ? localDetail.model_probability_red : 1 - localDetail.model_probability_red,
+      community_breakdown: nextBreakdown
+    };
     selectedSide = side;
   }
 
@@ -49,14 +81,14 @@
 <div class="pm-alliance-grid">
   <button type="button" class="pm-alliance-card pm-alliance-card-red" class:selected={selectedSide === 'red'} on:click={() => pick('red')}>
     <span class="pm-alliance-label">Red Alliance</span>
-    <strong class="pm-alliance-prob">{Math.round(detail.model_probability_red * 100)}%</strong>
-    <span class="pm-alliance-teams">{detail.red_teams.join(', ')}</span>
+    <strong class="pm-alliance-prob">{Math.round(localDetail.model_probability_red * 100)}%</strong>
+    <span class="pm-alliance-teams">{localDetail.red_teams.join(', ')}</span>
     <span class="pm-alliance-status">{selectedSide === 'red' ? 'Selected' : 'Predict Red'}</span>
   </button>
   <button type="button" class="pm-alliance-card pm-alliance-card-blue" class:selected={selectedSide === 'blue'} on:click={() => pick('blue')}>
     <span class="pm-alliance-label">Blue Alliance</span>
-    <strong class="pm-alliance-prob">{Math.round((1 - detail.model_probability_red) * 100)}%</strong>
-    <span class="pm-alliance-teams">{detail.blue_teams.join(', ')}</span>
+    <strong class="pm-alliance-prob">{Math.round((1 - localDetail.model_probability_red) * 100)}%</strong>
+    <span class="pm-alliance-teams">{localDetail.blue_teams.join(', ')}</span>
     <span class="pm-alliance-status">{selectedSide === 'blue' ? 'Selected' : 'Predict Blue'}</span>
   </button>
 </div>
@@ -64,13 +96,13 @@
 <section class="pm-panel pm-community-panel">
   <div class="pm-panel-header"><h2>Community Predictions</h2></div>
   <div class="pm-community-stats">
-    <div><strong class="pm-num-red">{detail.community_breakdown.red}</strong><span>Red</span></div>
-    <div><strong>{Math.round(detail.model_probability_red * 100) - detail.community_breakdown.red}</strong><span>vs model</span></div>
-    <div><strong>{detail.community_breakdown.total}</strong><span>Total</span></div>
-    <div><strong class="pm-num-blue">{detail.community_breakdown.blue}</strong><span>Blue</span></div>
+    <div><strong class="pm-num-red">{localDetail.community_breakdown.red}</strong><span>Red</span></div>
+    <div><strong>{Math.round(localDetail.model_probability_red * 100) - localDetail.community_breakdown.red}</strong><span>vs model</span></div>
+    <div><strong>{localDetail.community_breakdown.total}</strong><span>Total</span></div>
+    <div><strong class="pm-num-blue">{localDetail.community_breakdown.blue}</strong><span>Blue</span></div>
   </div>
-  {#if detail.my_pick}
-    <p class="pm-frozen-note">Model probability when you predicted: {Math.round(detail.model_probability_at_my_pick * 100)}% for {detail.my_pick === 'red' ? 'Red' : 'Blue'}. Later model changes update the graph, not your saved prediction.</p>
+  {#if localDetail.my_pick}
+    <p class="pm-frozen-note">Model probability when you predicted: {Math.round(localDetail.model_probability_at_my_pick * 100)}% for {localDetail.my_pick === 'red' ? 'Red' : 'Blue'}. Later model changes update the graph, not your saved prediction.</p>
   {/if}
 </section>
 
