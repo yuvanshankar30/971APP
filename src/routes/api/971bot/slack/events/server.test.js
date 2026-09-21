@@ -41,7 +41,7 @@ describe('Slack app mention events', () => {
     failSlackEvent.mockReset().mockResolvedValue(undefined);
   });
 
-  it('ignores mentions outside the ACE/Pit channel before claiming a receipt', async () => {
+  it('ignores mentions outside the 971app testing channel before claiming a receipt', async () => {
     isHubAssistantChannelAllowed.mockResolvedValueOnce(false);
     const event = { type: 'app_mention', channel: 'C-RANDOM', ts: '1.5', text: '<@U971APP> status' };
     const response = await POST({ request: slackRequest({ type: 'event_callback', event_id: 'Ev-wrong-channel', event }) });

@@ -544,7 +544,7 @@ file: update its diagram alongside this section, not separately from it.
   live Hub/database/scouting status plus recent releases, team-report questions
   use live assignment and report rows, and other Hub feature questions receive
   read-only, context-bounded answers from Groq using the ordinary server-side
-  `GROQ_API_KEY`; the assistant is restricted to `#2026-ace-pit-bot`, keeps
+  `GROQ_API_KEY`; the assistant is restricted to `#971app-bot-testing`, keeps
   replies in the originating thread, and durably deduplicates Slack retry IDs
   in `slack_event_receipts`),
   Onshape API (CAD source of truth for parts - see the Onshape-key exposure
