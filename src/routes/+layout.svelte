@@ -8,6 +8,8 @@
   import navConfig from '$lib/navigation.json';
   import { defaultHeaderTabs, mergeDefaultHeaderTabs, ensurePowerRankingsTab, ensureMatchRankingsTab, ensureRobotRatingsTab, ensurePredictionMarketTab, ensureBlueAllianceTab, ensureScoutingAdminTab, ensureStrategyTab, ensureDriveTeamTab, ensurePicklistTab, ensureGcodeConverterTab, ensureFilesTab, ensureFusionAutocamTab, promoteChildrenOfDisabledFolders } from '$lib/defaultTabs.js';
   import { COMPETITION_FOLDER_LABEL, COMPETITION_ROUTE, competitionNavChildren } from '$lib/competitionTabs.js';
+  import { CAD_FOLDER_LABEL, cadNavChildren } from '$lib/cadHubTabs.js';
+  import { MANUFACTURING_FOLDER_LABEL, manufacturingNavChildren } from '$lib/manufacturingHubTabs.js';
   import { Move3d, Hammer, Wrench, Receipt, Home, Briefcase, Coins, Package, User, ChevronDown, Menu, X, Camera, CalendarDays, Cpu, FileText, Trophy, Eye, ClipboardCheck, ListChecks, Target, Folder, Search, Star, Dice5, Zap, Radar } from 'lucide-svelte';
   import { goto, afterNavigate } from '$app/navigation';
   import { page } from '$app/stores';
@@ -567,6 +569,20 @@
     return item?.type === 'folder' && item?.label === COMPETITION_FOLDER_LABEL;
   }
   $: competitionNavChildren.set(navItems.find(isCompetitionFolder)?.children || []);
+
+  // Same idea, feeding /cad-hub (home page's "CAD" card only - the CAD
+  // folder's own top-nav dropdown is untouched and still opens normally).
+  function isCadFolder(item) {
+    return item?.type === 'folder' && item?.label === CAD_FOLDER_LABEL;
+  }
+  $: cadNavChildren.set(navItems.find(isCadFolder)?.children || []);
+
+  // Same idea, feeding /manufacture-hub (home page's "Manufacturing" card
+  // only - the Manufacturing folder's own top-nav dropdown is untouched).
+  function isManufacturingFolder(item) {
+    return item?.type === 'folder' && item?.label === MANUFACTURING_FOLDER_LABEL;
+  }
+  $: manufacturingNavChildren.set(navItems.find(isManufacturingFolder)?.children || []);
 
   // Drag-to-reorder for the desktop nav's top-level tabs/folders. Home is
   // rendered outside this list entirely, and Admin is appended by

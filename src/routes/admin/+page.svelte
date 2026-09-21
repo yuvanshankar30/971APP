@@ -26,6 +26,45 @@
   import ActivityLogTab from './ActivityLogTab.svelte';
   const BOT_BASE_URL = import.meta.env?.VITE_BOT_BASE_URL || '/api/971bot';
 
+  // Site Settings: hub_settings is a single-row (id=1) table, same pattern
+  // as scouting_settings. competition_mode gates every competition-only
+  // home page surface (Your Scouting Assignments, Your Pre-Scouting
+  // Assignments, the Latest/Current/Upcoming match card) for every signed-in
+  // user - see src/routes/+page.svelte's own loadCompetitionMode. Direct
+  // instruction: an admin flips this off between competitions rather than
+  // it being tied to a real event's start/end date automatically.
+  let competitionModeSetting = false;
+  let competitionModeSettingLoaded = false;
+  let savingCompetitionMode = false;
+  async function loadCompetitionModeSetting() {
+    try {
+      const { data, error } = await supabase.from('hub_settings').select('competition_mode').eq('id', 1).maybeSingle();
+      if (error) throw error;
+      competitionModeSetting = data?.competition_mode ?? false;
+    } catch (e) {
+      console.error('Failed to load hub_settings:', e);
+    } finally {
+      competitionModeSettingLoaded = true;
+    }
+  }
+  async function toggleCompetitionMode(checked) {
+    const previous = competitionModeSetting;
+    competitionModeSetting = checked;
+    savingCompetitionMode = true;
+    try {
+      const { error } = await supabase.from('hub_settings')
+        .update({ competition_mode: checked, updated_by: get(currentUser)?.id || null, updated_at: new Date().toISOString() })
+        .eq('id', 1);
+      if (error) throw error;
+      toastActions.show(checked ? 'Competition mode turned on' : 'Competition mode turned off');
+    } catch (e) {
+      competitionModeSetting = previous;
+      toastActions.show(e.message || 'Failed to update competition mode');
+    } finally {
+      savingCompetitionMode = false;
+    }
+  }
+
   // Tab management
   let activeTab = 'access'; // 'access', 'purchasing', 'rosters', 'planner-calendar'
 
@@ -722,9 +761,10 @@
     }
 
     adminAccessChecked = true;
-    
+
     await loadUsers();
     await loadRosters();
+    loadCompetitionModeSetting();
     if (activeTab === 'purchasing') {
       await loadVendors();
       await loadPurchaseHistory();
@@ -1600,6 +1640,29 @@
   </nav>
 
   {#if activeTab === 'access'}
+    <section class="section-card">
+      <div class="section-header">
+        <div>
+          <h3>Site Settings</h3>
+          <p>Global toggles that apply to every signed-in user's home page.</p>
+        </div>
+      </div>
+      <div class="competition-mode-row">
+        <label class="toggle-input">
+          <input
+            type="checkbox"
+            checked={competitionModeSetting}
+            disabled={!competitionModeSettingLoaded || savingCompetitionMode}
+            on:change={(e) => toggleCompetitionMode(e.currentTarget.checked)}
+          />
+          Competition mode
+        </label>
+        <p class="text-muted competition-mode-hint">
+          Shows Your Scouting Assignments, Your Pre-Scouting Assignments, and the Latest/Current/Upcoming match card on the home page. Turn this on when a competition starts and off once it ends.
+        </p>
+      </div>
+    </section>
+
     <section class="section-card">
       <div class="section-header">
         <div>
@@ -3062,6 +3125,8 @@
   .pill-option { display: inline-flex; align-items: center; gap: var(--gap-1); border: 1px solid var(--border); border-radius: var(--radius-full); padding: var(--space-1) var(--space-3); font-size: var(--font-xs); background: var(--surface-2); }
   .pill-option input { margin: 0; }
   .toggle-input { display: inline-flex; align-items: center; gap: var(--gap-1); font-weight: 600; }
+  .competition-mode-row { display: flex; flex-direction: column; gap: var(--gap-2); }
+  .competition-mode-hint { margin: 0; font-size: var(--font-xs); }
   .attendance-form .form-actions { display: flex; gap: var(--gap-2); flex-wrap: wrap; }
   .leader-name { font-weight: 600; }
   .leader-email { font-size: var(--font-xs); color: var(--muted-text, var(--neutral-500)); }

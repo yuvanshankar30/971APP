@@ -228,7 +228,7 @@
   <h1>Post Processing</h1>
 </div>
 
-<div class="subtabs">
+<div class="subtabs subtabs-tight">
   <a href="/manufacture" class:active={$page.url.pathname === '/manufacture'}>ToDo</a>
   <a href="/manufacture/completed" class:active={$page.url.pathname === '/manufacture/completed'}>Completed</a>
   <a href="/manufacture/router" class:active={$page.url.pathname === '/manufacture/router'}>Router</a>
@@ -326,6 +326,18 @@
 {/if}
 
 <style>
+  /* Same fix as /manufacture's ToDo/Completed pages: the sub-tabs used to
+     sit right above whatever card follows, but with their own separate
+     bottom margin stacked on top of that card's own top margin - a dead
+     gap between two independently-margined blocks. Tightened instead of
+     moved into a card here, since what follows isn't a single static card
+     on this page (it's a loading/empty/loaded conditional). */
+  .subtabs-tight {
+    margin: 0 0 var(--space-3);
+    padding-bottom: var(--space-3);
+    border-bottom: 1px solid var(--border);
+  }
+
   .post-processing-list {
     display: flex;
     flex-direction: column;
