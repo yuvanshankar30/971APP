@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { supabase, getAuthHeader } from '$lib/supabase.js';
   import { initAuth, userStore, signOut, authReady as authReadyStore, user as authUserStore } from '$lib/stores/auth.js';
-  import { LogIn, UserPlus, Mail, Lock, User, Shield, CheckCircle, AlertCircle, LogOut, Users, GripVertical, X, Plus, LayoutGrid, ClipboardCheck, Factory, ShoppingCart, ListChecks, ListOrdered, Target } from 'lucide-svelte';
+  import { LogIn, UserPlus, Mail, Lock, User, Shield, CheckCircle, AlertCircle, LogOut, Users, GripVertical, X, Plus, LayoutGrid, ClipboardCheck, Factory, ShoppingCart, ListChecks, ListOrdered, Target, Box, Trophy } from 'lucide-svelte';
   import { goto } from '$app/navigation';
   import { FRC_TEAMS, hasPermission } from '$lib/permissions.js';
   import { theme, setTheme } from '$lib/stores/theme.js';
@@ -160,14 +160,42 @@
     }
   }
 
+  // Global admin toggle (hub_settings.competition_mode, see the Admin
+  // panel's Site Settings card) - hides every competition-only home page
+  // surface (this section, and the Latest/Current/Upcoming match card
+  // below) for everyone, regardless of a user's own saved dashboard_sections.
+  // Direct instruction: off by default between competitions; an admin turns
+  // it on once the next event starts. Starts true (not false) so a returning
+  // user's assignment cards don't visibly flash away while this loads -
+  // loadCompetitionMode() below corrects it before any of the gated content
+  // or data fetches actually run.
+  let competitionMode = true;
+  let competitionModeLoaded = false;
+  async function loadCompetitionMode() {
+    try {
+      const { data, error } = await supabase.from('hub_settings').select('competition_mode').eq('id', 1).maybeSingle();
+      if (error) throw error;
+      competitionMode = data?.competition_mode ?? false;
+    } catch (e) {
+      console.error('Failed to load hub_settings:', e);
+      // Fails closed - an unreachable settings table shouldn't leave a
+      // dead/broken competition surface showing on the home page.
+      competitionMode = false;
+    } finally {
+      competitionModeLoaded = true;
+    }
+  }
+
   $: canViewAdmin = can('VIEW_ADMIN_PANEL');
   $: customSectionKeys = sanitizeSectionKeys(user?.dashboard_sections);
   $: rawVisibleKeys = (customSectionKeys && customSectionKeys.length ? customSectionKeys : defaultSectionKeyList(canViewAdmin))
     .filter(k => k !== 'admin' || canViewAdmin)
-    .filter(k => k === 'admin' || ALL_DASHBOARD_SECTIONS.some(d => d.key === k));
+    .filter(k => k === 'admin' || ALL_DASHBOARD_SECTIONS.some(d => d.key === k))
+    .filter(k => k !== 'assignment-queue' || competitionMode);
   $: visibleSections = rawVisibleKeys.map(k => ({ key: k, label: sectionLabel(k) }));
   $: hiddenSections = [...ALL_DASHBOARD_SECTIONS.map(d => d.key), ...(canViewAdmin ? ['admin'] : [])]
     .filter(k => !rawVisibleKeys.includes(k))
+    .filter(k => k !== 'assignment-queue' || competitionMode)
     .map(k => ({ key: k, label: sectionLabel(k) }));
 
   async function persistDashboardSections(keys) {
@@ -470,7 +498,8 @@
         };
       }
     }, 5000);
-    const currentMatchTimer = setInterval(() => { if (user) loadMatchAlliances(); }, 60_000);
+    const currentMatchTimer = setInterval(() => { if (user && competitionMode) loadMatchAlliances(); }, 60_000);
+    loadCompetitionMode();
     return () => { clearTimeout(profileWaitTimer); clearInterval(currentMatchTimer); unsub?.(); unsubAuthUser?.(); unsubReady?.(); uninit?.(); };
   });
 
@@ -480,12 +509,18 @@
   // together (dashboardDataReady) instead of each section popping in on
   // its own as its own fetch happens to resolve - the "top loads, then
   // everything else trickles in one at a time" effect that was really just
-  // three independent loaders finishing at different times.
+  // three independent loaders finishing at different times. Waits on
+  // competitionModeLoaded too - none of these three are worth fetching at
+  // all while competition mode is off (see loadCompetitionMode above).
   let dashboardDataReady = false;
-  $: if (user && !scoutingLoaded) {
+  $: if (user && competitionModeLoaded && !scoutingLoaded) {
     scoutingLoaded = true;
-    Promise.all([loadScoutAssignments(), loadPrescoutAssignments(), loadMatchAlliances()])
-      .finally(() => { dashboardDataReady = true; });
+    if (competitionMode) {
+      Promise.all([loadScoutAssignments(), loadPrescoutAssignments(), loadMatchAlliances()])
+        .finally(() => { dashboardDataReady = true; });
+    } else {
+      dashboardDataReady = true;
+    }
   }
 
   // Keep this browser's login-screen cache in sync with the account's saved
@@ -700,15 +735,25 @@
               <div class="dashboard-actions">
                 <h3>Team Workspace</h3>
                 <div class="workspace-grid">
-                  <a href="/manufacture" class="workspace-card">
+                  <a href="/manufacture-hub" class="workspace-card">
                     <Factory size={24} />
                     <h4>Manufacturing</h4>
                     <p>Manage active parts and production work</p>
+                  </a>
+                  <a href="/cad-hub" class="workspace-card">
+                    <Box size={24} />
+                    <h4>CAD</h4>
+                    <p>Browse subsystems, builds, and design files</p>
                   </a>
                   <a href="/cad/purchasing" class="workspace-card">
                     <ShoppingCart size={24} />
                     <h4>Purchasing</h4>
                     <p>Review purchase requests, orders, and needed components</p>
+                  </a>
+                  <a href="/competition" class="workspace-card">
+                    <Trophy size={24} />
+                    <h4>Competition</h4>
+                    <p>Strategy, scouting, rankings, and every other competition tool</p>
                   </a>
                   {#if homeEventKey}
                     <a href="/matchscout" class="workspace-card">
@@ -728,22 +773,24 @@
                     </a>
                   {/if}
                 </div>
-                <div class="stat-strip">
-                  {#if homeEventKey}
+                {#if competitionMode}
+                  <div class="stat-strip">
+                    {#if homeEventKey}
+                      <div class="stat-tile">
+                        <span class="stat-label">Competition</span>
+                        <strong class="stat-value stat-value-text">{homeEventKey}</strong>
+                      </div>
+                    {/if}
                     <div class="stat-tile">
-                      <span class="stat-label">Competition</span>
-                      <strong class="stat-value stat-value-text">{homeEventKey}</strong>
+                      <span class="stat-label">Assignments Open</span>
+                      <strong class="stat-value">{incompleteScoutAssignments.length}</strong>
                     </div>
-                  {/if}
-                  <div class="stat-tile">
-                    <span class="stat-label">Assignments Open</span>
-                    <strong class="stat-value">{incompleteScoutAssignments.length}</strong>
+                    <div class="stat-tile">
+                      <span class="stat-label">Assignments Done</span>
+                      <strong class="stat-value">{completedScoutAssignmentCount}</strong>
+                    </div>
                   </div>
-                  <div class="stat-tile">
-                    <span class="stat-label">Assignments Done</span>
-                    <strong class="stat-value">{completedScoutAssignmentCount}</strong>
-                  </div>
-                </div>
+                {/if}
               </div>
             {:else if section.key === 'admin'}
               <div class="dashboard-actions">
@@ -964,9 +1011,9 @@
       </div>
       {/if}
 
-      {#if currentMatchLoading && !currentEventMatch}
+      {#if competitionMode && currentMatchLoading && !currentEventMatch}
         <div class="current-match-card current-match-loading">Loading the {homeEventKey || 'active event'} field...</div>
-      {:else if currentEventMatch}
+      {:else if competitionMode && currentEventMatch}
         <div class="current-match-card" class:live={currentMatchState === 'current'} class:has-my-team={currentMatchHasMyTeam}>
           <div class="current-match-heading">
             <div>
@@ -984,7 +1031,7 @@
           </div>
           {#if currentMatchState === 'complete'}<small>TBA reports this event’s published matches complete.</small>{/if}
         </div>
-      {:else if currentMatchError}
+      {:else if competitionMode && currentMatchError}
         <div class="current-match-card current-match-loading">Current match unavailable: {currentMatchError}</div>
       {/if}
     {/if}

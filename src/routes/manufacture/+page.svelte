@@ -2251,18 +2251,18 @@
   </div>
 </div>
 
-<!-- Manufacture Sub-Tabs -->
-<div class="subtabs">
-  <a href="/manufacture" class:active={$page.url.pathname === '/manufacture'}>ToDo</a>
-  <a href="/manufacture/completed" class:active={$page.url.pathname === '/manufacture/completed'}>Completed</a>
-  <a href="/manufacture/router" class:active={$page.url.pathname === '/manufacture/router'}>Router</a>
-  <a href="/manufacture/post-processing" class:active={$page.url.pathname === '/manufacture/post-processing'}>Post Processing</a>
-  <a href="/manufacture/bins" class:active={$page.url.pathname === '/manufacture/bins'}>Bins</a>
-  <a href="/manufacture/gcode-converter" class:active={$page.url.pathname === '/manufacture/gcode-converter'}>G-code Converter</a>
-  <a href="/manufacture/files" class:active={$page.url.pathname === '/manufacture/files'}>Files</a>
-</div>
-
 <div class="card">
+  <!-- Manufacture Sub-Tabs -->
+  <div class="subtabs subtabs-in-card">
+    <a href="/manufacture" class:active={$page.url.pathname === '/manufacture'}>ToDo</a>
+    <a href="/manufacture/completed" class:active={$page.url.pathname === '/manufacture/completed'}>Completed</a>
+    <a href="/manufacture/router" class:active={$page.url.pathname === '/manufacture/router'}>Router</a>
+    <a href="/manufacture/post-processing" class:active={$page.url.pathname === '/manufacture/post-processing'}>Post Processing</a>
+    <a href="/manufacture/bins" class:active={$page.url.pathname === '/manufacture/bins'}>Bins</a>
+    <a href="/manufacture/gcode-converter" class:active={$page.url.pathname === '/manufacture/gcode-converter'}>G-code Converter</a>
+    <a href="/manufacture/files" class:active={$page.url.pathname === '/manufacture/files'}>Files</a>
+  </div>
+
   <div class="filters" style="--filters-columns: 2fr 1fr 1fr 1fr 1fr;">
     <div class="form-group">
       <label class="form-label">
@@ -3476,6 +3476,19 @@
 {/if}
 
 <style>
+  /* The ToDo/Completed/Router/etc. sub-tabs used to sit in their own block
+     above the filters card - two separately-margined containers stacked on
+     top of each other, which read as a dead gap between them. Moved inside
+     the same card as the filters; this just tightens the tab row's own
+     bottom margin and adds a hairline so it still reads as a distinct row
+     from the filters below it, instead of doubling the card's own padding
+     on top of the tab row's margin. */
+  .subtabs-in-card {
+    margin: 0 0 var(--space-3);
+    padding-bottom: var(--space-3);
+    border-bottom: 1px solid var(--border);
+  }
+
   /* No hover effects on the manufacture tab (dense buttons + table rows).
      Use theme tokens so rows flip correctly in dark mode. Ruled hairlines
      only — no zebra striping, matching the rest of the app's tables. */

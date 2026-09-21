@@ -142,18 +142,17 @@
   </div>
   
 </div>
-<div class="subtabs">
-  <a href="/manufacture" class:active={$page.url.pathname === '/manufacture'}>ToDo</a>
-  <a href="/manufacture/completed" class:active={$page.url.pathname === '/manufacture/completed'}>Completed</a>
-  <a href="/manufacture/router" class:active={$page.url.pathname === '/manufacture/router'}>Router</a>
-  <a href="/manufacture/post-processing" class:active={$page.url.pathname === '/manufacture/post-processing'}>Post Processing</a>
-  <a href="/manufacture/bins" class:active={$page.url.pathname === '/manufacture/bins'}>Bins</a>
-  <a href="/manufacture/gcode-converter" class:active={$page.url.pathname === '/manufacture/gcode-converter'}>G-code Converter</a>
-  <a href="/manufacture/files" class:active={$page.url.pathname === '/manufacture/files'}>Files</a>
-  
-</div>
-
 <div class="card">
+  <div class="subtabs subtabs-in-card">
+    <a href="/manufacture" class:active={$page.url.pathname === '/manufacture'}>ToDo</a>
+    <a href="/manufacture/completed" class:active={$page.url.pathname === '/manufacture/completed'}>Completed</a>
+    <a href="/manufacture/router" class:active={$page.url.pathname === '/manufacture/router'}>Router</a>
+    <a href="/manufacture/post-processing" class:active={$page.url.pathname === '/manufacture/post-processing'}>Post Processing</a>
+    <a href="/manufacture/bins" class:active={$page.url.pathname === '/manufacture/bins'}>Bins</a>
+    <a href="/manufacture/gcode-converter" class:active={$page.url.pathname === '/manufacture/gcode-converter'}>G-code Converter</a>
+    <a href="/manufacture/files" class:active={$page.url.pathname === '/manufacture/files'}>Files</a>
+  </div>
+
   <div class="filters" style="--filters-columns: 2fr 1fr 1fr;">
     <div class="form-group">
       <label class="form-label" for="completed-search">Search</label>
@@ -302,6 +301,15 @@
 {/if}
 
 <style>
+  /* Same fix as /manufacture's own ToDo page: the sub-tabs used to sit in
+     their own separately-margined block above the filters card, reading as
+     a dead gap between two stacked containers. Now inside the same card. */
+  .subtabs-in-card {
+    margin: 0 0 var(--space-3);
+    padding-bottom: var(--space-3);
+    border-bottom: 1px solid var(--border);
+  }
+
   .view-cad-link {
     display: inline-flex;
     align-items: center;
