@@ -596,7 +596,8 @@
   .strategy-header { display:flex; justify-content:space-between; gap:var(--space-4); align-items:flex-end; }
   .strategy-header h1 { display:flex; align-items:center; gap:var(--space-2); margin:0; }
   .strategy-header p, .section-heading p { margin:var(--space-1) 0 0; color:var(--text-secondary); }
-  .header-actions { display:flex; gap:var(--space-2); align-items:center; flex-wrap:wrap; }
+  .header-actions { display:flex; gap:var(--space-2); align-items:flex-end; flex-wrap:wrap; }
+  .header-actions :global(.form-group) { margin-bottom:0; }
   .summary-grid { display:grid; grid-template-columns:repeat(5, minmax(0, 1fr)); border:1px solid var(--border); margin-top:var(--space-4); }
   .summary-grid > div { min-height:92px; padding:var(--space-3); border-right:1px solid var(--border); display:grid; grid-template-columns:auto 1fr; gap:0 var(--space-2); align-content:center; }
   .summary-grid > div:last-child { border-right:0; }
