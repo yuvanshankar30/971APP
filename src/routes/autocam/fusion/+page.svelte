@@ -5,7 +5,7 @@
   import { supabase } from '$lib/supabase.js';
   import { userStore, loadUserFromUUID } from '$lib/stores/user.js';
   import { canManageCamProfiles } from '$lib/permissions.js';
-  import { Layers, Package, Box, ListChecks, SlidersHorizontal, BookOpen, HelpCircle, Send, RotateCcw, Zap, X, Wrench, Plus } from 'lucide-svelte';
+  import { Layers, Package, Box, ListChecks, SlidersHorizontal, BookOpen, HelpCircle, Send, RotateCcw, Zap, X, Wrench, Plus, Trash2 } from 'lucide-svelte';
   import PartsTab from './PartsTab.svelte';
   import BoxTubesTab from './BoxTubesTab.svelte';
   import JobQueueTab from './JobQueueTab.svelte';
@@ -49,6 +49,7 @@
   let partsTabRef;
   let boxTubesTabRef;
   let turningTabRef;
+  let jobQueueTabRef;
   // "Quick Queue": add a brand new part/tube and queue it in one flow,
   // instead of the normal two separate steps (add stock, then separately
   // find and queue it). This page-level button only needs to ask Plate vs
@@ -95,17 +96,28 @@
   let filterSeason = '';
   let projectIds = [];
   let seasonOptions = [];
+  // 'action' is 'add' for the three stock tabs (a primary button that opens
+  // that tab's New X form) or 'delete-failed' for Jobs (a ghost/danger
+  // button with its own disabled/label state) - different enough from a
+  // plain Add button that the template branches on it below rather than
+  // pretending both are the same button with a different label.
   const TOOLBAR_CONFIG = {
-    parts: { addLabel: 'Add Part', searchPlaceholder: 'Search parts by name, project, or material...' },
-    'box-tubes': { addLabel: 'Add Tube Stock', searchPlaceholder: 'Search tube stock by name or project...' },
-    turning: { addLabel: 'Add Turning Stock', searchPlaceholder: 'Search turning stock by name or project...' }
+    parts: { action: 'add', addLabel: 'Add Part', searchPlaceholder: 'Search parts by name, project, or material...' },
+    'box-tubes': { action: 'add', addLabel: 'Add Tube Stock', searchPlaceholder: 'Search tube stock by name or project...' },
+    turning: { action: 'add', addLabel: 'Add Turning Stock', searchPlaceholder: 'Search turning stock by name or project...' },
+    queue: { action: 'delete-failed', searchPlaceholder: 'Search jobs by name, machine, tool, or status...' }
   };
   $: toolbarConfig = TOOLBAR_CONFIG[activeTab] || null;
+  let deletingFailedJobs = false;
 
   function handleAddClick() {
     if (activeTab === 'parts') partsTabRef?.openAddForm();
     else if (activeTab === 'box-tubes') boxTubesTabRef?.openAddForm();
     else if (activeTab === 'turning') turningTabRef?.openAddForm();
+  }
+
+  function handleDeleteFailedClick() {
+    jobQueueTabRef?.handleDeleteAllFailed();
   }
 
   function setActiveTab(tab) {
@@ -221,10 +233,16 @@
   </nav>
   {#if toolbarConfig}
     <div class="cam-list-toolbar">
-      {#if canManage}
+      {#if toolbarConfig.action === 'add' && canManage}
         <div class="tab-actions">
           <button type="button" class="btn btn-secondary" on:click={handleAddClick}>
             <Plus size={16} /> {toolbarConfig.addLabel}
+          </button>
+        </div>
+      {:else if toolbarConfig.action === 'delete-failed'}
+        <div class="tab-actions">
+          <button type="button" class="btn btn-ghost" on:click={handleDeleteFailedClick} disabled={deletingFailedJobs}>
+            <Trash2 size={16} /> {deletingFailedJobs ? 'Deleting...' : 'Delete all failed jobs'}
           </button>
         </div>
       {/if}
@@ -271,7 +289,11 @@
     bind:turningListSearch={search} bind:filterProject bind:filterSeason bind:projectIds bind:seasonOptions
   />
 {:else if activeTab === 'queue'}
-  <JobQueueTab />
+  <JobQueueTab
+    bind:this={jobQueueTabRef}
+    bind:jobsSearch={search} bind:jobsFilterProject={filterProject} bind:jobsFilterSeason={filterSeason}
+    bind:jobsProjectIds={projectIds} bind:jobsSeasonOptions={seasonOptions} bind:deletingFailed={deletingFailedJobs}
+  />
 {/if}
 
 {#if quickQueueChoiceOpen}

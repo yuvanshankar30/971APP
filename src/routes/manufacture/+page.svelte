@@ -2920,15 +2920,6 @@
         <!-- Part Details Section -->
         {#if editPart}
           <div class="part-details-section">
-            {#if getOnshapeUrl(editPart)}
-              <div class="detail-row">
-                <span class="detail-label">Onshape Document:</span>
-                <a href={getOnshapeUrl(editPart)} target="_blank" rel="noopener noreferrer" class="onshape-link">
-                  <ExternalLink size={14} />
-                  Open in Onshape
-                </a>
-              </div>
-            {/if}
             <div class="detail-row">
               <span class="detail-label">Added:</span>
               <span class="detail-value">{formatDateTime(editPart.created_at)}</span>
