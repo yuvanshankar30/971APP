@@ -5,13 +5,14 @@
   import { supabase } from '$lib/supabase.js';
   import { userStore, loadUserFromUUID } from '$lib/stores/user.js';
   import { canManageCamProfiles } from '$lib/permissions.js';
-  import { Layers, Package, Box, ListChecks, SlidersHorizontal, BookOpen, HelpCircle, Send, RotateCcw, Zap, X, Wrench } from 'lucide-svelte';
+  import { Layers, Package, Box, ListChecks, SlidersHorizontal, BookOpen, HelpCircle, Send, RotateCcw, Zap, X, Wrench, Plus, Filter } from 'lucide-svelte';
   import PartsTab from './PartsTab.svelte';
   import BoxTubesTab from './BoxTubesTab.svelte';
   import JobQueueTab from './JobQueueTab.svelte';
   import StockCategoriesTab from './StockCategoriesTab.svelte';
   import TurningTab from './TurningTab.svelte';
   import AtcSlotConfig from '$autocam/components/AtcSlotConfig.svelte';
+  import SeasonFilter from '$lib/components/SeasonFilter.svelte';
 
   // Deep link from Manufacturing's "Open Fusion CAM" button
   // (/manufacture's fusionCamHref) - ?tab=parts&manufacturingPart=<id>
@@ -81,7 +82,40 @@
 
   $: canManage = canManageCamProfiles(user);
 
+  // Add button + Search/Project/Season filters used to live inside each of
+  // Parts/Tube Stock/Turning's own toolbar, repeated three times - moved up
+  // here onto the shared tab bar (direct instruction) so there's one Add
+  // button and one filter row instead of three near-identical copies, and
+  // it visually merges into the same bar as the Parts/Tube Stock/Turning
+  // tabs themselves rather than floating as its own separate box below.
+  // Each tab still owns its actual list/filtering logic - these are bound
+  // straight through to whichever tab is active (see the template below).
+  let search = '';
+  let filterProject = '';
+  let filterSeason = '';
+  let projectIds = [];
+  let seasonOptions = [];
+  const TOOLBAR_CONFIG = {
+    parts: { addLabel: 'Add Part', searchPlaceholder: 'Search parts by name, project, or material...' },
+    'box-tubes': { addLabel: 'Add Tube Stock', searchPlaceholder: 'Search tube stock by name or project...' },
+    turning: { addLabel: 'Add Turning Stock', searchPlaceholder: 'Search turning stock by name or project...' }
+  };
+  $: toolbarConfig = TOOLBAR_CONFIG[activeTab] || null;
+
+  function handleAddClick() {
+    if (activeTab === 'parts') partsTabRef?.openAddForm();
+    else if (activeTab === 'box-tubes') boxTubesTabRef?.openAddForm();
+    else if (activeTab === 'turning') turningTabRef?.openAddForm();
+  }
+
   function setActiveTab(tab) {
+    // Each tab's own list/filters are independent - starting fresh on
+    // every switch matches what already happened before this moved up
+    // here, since {#if activeTab === ...} below destroys and remounts the
+    // previous tab's component (and its now-lifted state) either way.
+    search = '';
+    filterProject = '';
+    filterSeason = '';
     goto(TAB_PATHS[tab]);
   }
 
@@ -167,32 +201,75 @@
   </div>
 </div>
 
-<nav class="tab-nav" aria-label="Fusion AutoCAM sections">
-  <button type="button" class:active={activeTab === 'parts'} on:click={() => setActiveTab('parts')}>
-    <Package size={16} /> Parts
-  </button>
-  <button type="button" class:active={activeTab === 'box-tubes'} on:click={() => setActiveTab('box-tubes')}>
-    <Box size={16} /> Tube Stock
-  </button>
-  <button type="button" class:active={activeTab === 'turning'} on:click={() => setActiveTab('turning')}>
-    <RotateCcw size={16} /> Turning
-  </button>
-  <button type="button" class:active={activeTab === 'queue'} on:click={() => setActiveTab('queue')}>
-    <ListChecks size={16} /> Jobs
-  </button>
-  <button type="button" class:active={activeTab === 'stock-categories'} on:click={() => setActiveTab('stock-categories')}>
-    <SlidersHorizontal size={16} /> Stock Categories
-  </button>
-</nav>
+<div class="tab-nav-bar">
+  <nav class="tab-nav" aria-label="Fusion AutoCAM sections">
+    <button type="button" class:active={activeTab === 'parts'} on:click={() => setActiveTab('parts')}>
+      <Package size={16} /> Parts
+    </button>
+    <button type="button" class:active={activeTab === 'box-tubes'} on:click={() => setActiveTab('box-tubes')}>
+      <Box size={16} /> Tube Stock
+    </button>
+    <button type="button" class:active={activeTab === 'turning'} on:click={() => setActiveTab('turning')}>
+      <RotateCcw size={16} /> Turning
+    </button>
+    <button type="button" class:active={activeTab === 'queue'} on:click={() => setActiveTab('queue')}>
+      <ListChecks size={16} /> Jobs
+    </button>
+    <button type="button" class:active={activeTab === 'stock-categories'} on:click={() => setActiveTab('stock-categories')}>
+      <SlidersHorizontal size={16} /> Stock Categories
+    </button>
+  </nav>
+  {#if toolbarConfig}
+    <div class="cam-list-toolbar">
+      {#if canManage}
+        <div class="tab-actions">
+          <button type="button" class="btn btn-primary" on:click={handleAddClick}>
+            <Plus size={16} /> {toolbarConfig.addLabel}
+          </button>
+        </div>
+      {/if}
+      <div class="filters tab-filters">
+        <div class="form-group">
+          <label class="form-label" for="fusion-tab-search">Search</label>
+          <input
+            id="fusion-tab-search"
+            type="search"
+            class="form-input"
+            placeholder={toolbarConfig.searchPlaceholder}
+            bind:value={search}
+            aria-label="Search"
+          />
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="fusion-tab-project-filter"><Filter size={14} /> Project</label>
+          <select id="fusion-tab-project-filter" class="form-select" bind:value={filterProject}>
+            <option value="">All Projects</option>
+            {#each projectIds as pid}<option value={pid}>{pid}</option>{/each}
+          </select>
+        </div>
+        <SeasonFilter options={seasonOptions} bind:value={filterSeason} />
+      </div>
+    </div>
+  {/if}
+</div>
 
 {#if activeTab === 'parts'}
-  <PartsTab bind:this={partsTabRef} {user} {canManage} {initialManufacturingPartId} />
+  <PartsTab
+    bind:this={partsTabRef} {user} {canManage} {initialManufacturingPartId}
+    bind:partsListSearch={search} bind:filterProject bind:filterSeason bind:projectIds bind:seasonOptions
+  />
 {:else if activeTab === 'stock-categories'}
   <StockCategoriesTab {canManage} />
 {:else if activeTab === 'box-tubes'}
-  <BoxTubesTab bind:this={boxTubesTabRef} {user} {canManage} />
+  <BoxTubesTab
+    bind:this={boxTubesTabRef} {user} {canManage}
+    bind:boxTubesListSearch={search} bind:filterProject bind:filterSeason bind:projectIds bind:seasonOptions
+  />
 {:else if activeTab === 'turning'}
-  <TurningTab bind:this={turningTabRef} {user} {canManage} />
+  <TurningTab
+    bind:this={turningTabRef} {user} {canManage}
+    bind:turningListSearch={search} bind:filterProject bind:filterSeason bind:projectIds bind:seasonOptions
+  />
 {:else if activeTab === 'queue'}
   <JobQueueTab />
 {/if}
@@ -232,6 +309,12 @@
 />
 
 <style>
+  /* .cam-list-toolbar/.tab-actions/.tab-filters below come from here - the
+     Add button + filters row used to live inside each of Parts/Tube
+     Stock/Turning's own <style> (which already @imports this), now it
+     lives up here instead since the row itself moved up to this shell. */
+  @import '../fusion/_autocam-shared.css';
+
   /* This page used to redefine the site's own --background/--accent/etc.
      custom properties to force a black/blue/gold look
      regardless of which Spartans Hub theme (light/dark/modern/legacy) was
@@ -257,11 +340,30 @@
     align-items: center;
     gap: var(--space-2);
   }
+  /* Wraps the tab row and (when the active tab has one) the Add
+     button/filters row into one connected surface instead of two floating
+     boxes - the tab-nav's own border/margin move onto this wrapper, and
+     .cam-list-toolbar's own border/radius/margin (meant for it to stand
+     alone above a list) are stripped back out immediately below so it
+     reads as this bar's second row, not its own separate card. */
+  .tab-nav-bar {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--surface-2);
+    margin: var(--space-4) 0 var(--space-6);
+    overflow: hidden;
+  }
+  .tab-nav-bar .cam-list-toolbar {
+    border: none;
+    border-radius: 0;
+    margin: 0;
+    background: none;
+  }
   .tab-nav {
     display: flex;
     gap: var(--space-1);
     border-bottom: 1px solid var(--border);
-    margin: var(--space-4) 0 var(--space-6);
+    margin: 0;
     overflow-x: auto;
   }
   .tab-nav button {

@@ -11,10 +11,9 @@
   import { searchFolderTree } from '$lib/fusionFolderSearch.js';
   import { formatPacificDateTime } from '$lib/timezone.js';
   import CadViewer from '$lib/components/CadViewer.svelte';
-  import SeasonFilter from '$lib/components/SeasonFilter.svelte';
   import FolderTreeNode from './FolderTreeNode.svelte';
   import { getAllSeasonBuckets, passesSeasonFilter } from '$lib/frcSeason.js';
-  import { RotateCcw, Plus, Trash2, Send, X, Pencil, Check, Download, Upload, Filter, Folder } from 'lucide-svelte';
+  import { RotateCcw, Trash2, Send, X, Pencil, Check, Download, Upload, Folder } from 'lucide-svelte';
 
   export let user;
   export let canManage;
@@ -65,11 +64,16 @@
   let recentPartSearch = '';
   $: recentPartSearchTerm = recentPartSearch.trim().toLowerCase();
 
-  let turningListSearch = '';
+  // Lifted to the shell's shared header bar (see /autocam/fusion/+page.svelte)
+  // rather than rendered here - exported so the shell can bind:value the
+  // inputs it owns, and can read the two computed option lists below.
+  export let turningListSearch = '';
   $: turningListSearchTerm = turningListSearch.trim().toLowerCase();
   $: turningPartsByCreatedAt = [...turningParts].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
-  let filterProject = '';
-  let filterSeason = '';
+  export let filterProject = '';
+  export let filterSeason = '';
+  export let projectIds = [];
+  export let seasonOptions = [];
   $: projectIds = Array.from(new Set(turningParts.map((part) => part.project_id).filter(Boolean))).sort();
   $: seasonOptions = getAllSeasonBuckets(turningParts);
   $: filteredTurningPartsByCreatedAt = turningPartsByCreatedAt.filter((part) =>
@@ -157,6 +161,13 @@
     newTurningPart = { name: '', quantity: 1, camType: '', tailstockLengthIn: '', projectId: '' };
     stepFile = null;
     showAddForm = false;
+  }
+
+  // Called externally via bind:this from +page.svelte's shared header bar -
+  // the "Add Turning Stock" button now lives there instead of in this tab's
+  // own toolbar.
+  export function openAddForm() {
+    showAddForm = !showAddForm;
   }
 
   export function openQueuePicker() {
@@ -385,32 +396,6 @@
 {#if loading}
   <p>Loading turning stock...</p>
 {:else}
-  <div class="cam-list-toolbar">
-    {#if canManage}
-      <div class="tab-actions">
-        <button class="btn btn-primary" on:click={() => (showAddForm = !showAddForm)}>
-          <Plus size={16} /> Add Turning Stock
-        </button>
-      </div>
-    {/if}
-    {#if turningParts.length > 0}
-      <div class="filters tab-filters">
-        <div class="form-group">
-          <label class="form-label" for="turning-search">Search</label>
-          <input id="turning-search" type="search" class="form-input" placeholder="Search turning stock by name or project..." bind:value={turningListSearch} aria-label="Search turning stock" />
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="turning-project-filter"><Filter size={14} /> Project</label>
-          <select id="turning-project-filter" class="form-select" bind:value={filterProject}>
-            <option value="">All Projects</option>
-            {#each projectIds as pid}<option value={pid}>{pid}</option>{/each}
-          </select>
-        </div>
-        <SeasonFilter options={seasonOptions} bind:value={filterSeason} />
-      </div>
-    {/if}
-  </div>
-
   {#if showAddForm && canManage}
     <div class="card">
       <div class="cam-list-header">

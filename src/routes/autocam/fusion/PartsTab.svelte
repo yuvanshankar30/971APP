@@ -14,10 +14,9 @@
   import { extractRoutingContoursFromMeshes } from '$autocam/stepProfile.js';
   import CadViewer from '$lib/components/CadViewer.svelte';
   import FolderTreeNode from './FolderTreeNode.svelte';
-  import SeasonFilter from '$lib/components/SeasonFilter.svelte';
   import { getAllSeasonBuckets, passesSeasonFilter } from '$lib/frcSeason.js';
   import { searchFolderTree } from '$lib/fusionFolderSearch.js';
-  import { Plus, Trash2, Package, Pencil, Check, X, Sparkles, Box, Download, Send, Folder, Wrench, FilterX, Upload, Filter, Link as LinkIcon } from 'lucide-svelte';
+  import { Trash2, Package, Pencil, Check, X, Sparkles, Box, Download, Send, Folder, Wrench, FilterX, Upload, Link as LinkIcon } from 'lucide-svelte';
   import AtcSlotConfig from '$autocam/components/AtcSlotConfig.svelte';
 
   export let user;
@@ -67,8 +66,13 @@
   // request backlog, and silently hiding an older-but-still-active part
   // behind a season filter someone forgot they'd set would be a real
   // regression from today's "no filtering at all" behavior.
-  let filterProject = '';
-  let filterSeason = '';
+  // Lifted to the shell's shared header bar (see /autocam/fusion/+page.svelte)
+  // rather than rendered here - exported so the shell can bind:value the
+  // inputs it owns, and can read the two computed option lists below.
+  export let filterProject = '';
+  export let filterSeason = '';
+  export let projectIds = [];
+  export let seasonOptions = [];
   $: projectIds = Array.from(new Set(parts.map((part) => part.project_id).filter(Boolean))).sort();
   $: seasonOptions = getAllSeasonBuckets(parts);
   $: filteredPartsByCreatedAt = partsByCreatedAt.filter((part) =>
@@ -188,8 +192,9 @@
   let atcTools = []; // full cam_tools catalog, for the ATC Slots modal
   let loading = true;
 
-  // Search box above the main parts list itself, not the queue picker's.
-  let partsListSearch = '';
+  // Search box above the main parts list itself, not the queue picker's -
+  // exported for the same reason as the filters above.
+  export let partsListSearch = '';
 
   let showAddPartForm = false;
   // True when the New Part form was opened from the page-level "Quick
@@ -248,6 +253,13 @@
     const date = value instanceof Date ? value : new Date(value);
     if (!Number.isFinite(date.getTime())) return null;
     return new Intl.DateTimeFormat('en-CA', { timeZone: PACIFIC_TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
+  }
+
+  // Called externally via bind:this from +page.svelte's shared header bar -
+  // the "Add Part" button now lives there instead of in this tab's own
+  // toolbar, so the shell needs a way to toggle this form open/closed.
+  export function openAddForm() {
+    showAddPartForm = !showAddPartForm;
   }
 
   // Called externally via bind:this from +page.svelte's header button.
@@ -1081,39 +1093,6 @@
 {#if loading}
   <p>Loading parts...</p>
 {:else}
-  <div class="cam-list-toolbar">
-    {#if canManage}
-      <div class="tab-actions">
-        <button class="btn btn-primary" on:click={() => (showAddPartForm = !showAddPartForm)}>
-          <Plus size={16} /> Add Part
-        </button>
-      </div>
-    {/if}
-    {#if partsByCreatedAt.length > 0}
-      <div class="filters tab-filters">
-        <div class="form-group">
-          <label class="form-label" for="parts-search">Search</label>
-          <input
-            id="parts-search"
-            type="search"
-            class="form-input"
-            placeholder="Search parts by name, project, or material..."
-            bind:value={partsListSearch}
-            aria-label="Search parts"
-          />
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="parts-project-filter"><Filter size={14} /> Project</label>
-          <select id="parts-project-filter" class="form-select" bind:value={filterProject}>
-            <option value="">All Projects</option>
-            {#each projectIds as pid}<option value={pid}>{pid}</option>{/each}
-          </select>
-        </div>
-        <SeasonFilter options={seasonOptions} bind:value={filterSeason} />
-      </div>
-    {/if}
-  </div>
-
   {#if showAddPartForm && canManage}
     <div class="card">
       <div class="cam-list-header">

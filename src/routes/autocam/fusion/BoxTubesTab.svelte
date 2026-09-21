@@ -10,10 +10,9 @@
   import { formatPacificDateTime } from '$lib/timezone.js';
   import CadViewer from '$lib/components/CadViewer.svelte';
   import FolderTreeNode from './FolderTreeNode.svelte';
-  import SeasonFilter from '$lib/components/SeasonFilter.svelte';
   import { getAllSeasonBuckets, passesSeasonFilter } from '$lib/frcSeason.js';
   import { searchFolderTree } from '$lib/fusionFolderSearch.js';
-  import { Plus, Trash2, Box, Send, X, Pencil, Check, Download, Folder, Upload, Filter, Link as LinkIcon } from 'lucide-svelte';
+  import { Trash2, Box, Send, X, Pencil, Check, Download, Folder, Upload, Link as LinkIcon } from 'lucide-svelte';
 
   export let user;
   export let canManage;
@@ -82,16 +81,21 @@
   }
   // Search box above the main tube stock list itself (separate from the
   // queue picker's own "Recent tube stock" search) - matches name and the
-  // linked manufacturing project id, the fields shown on each card.
-  let boxTubesListSearch = '';
+  // linked manufacturing project id, the fields shown on each card. Lifted
+  // to the shell's shared header bar (see /autocam/fusion/+page.svelte)
+  // rather than rendered here - exported so the shell can bind:value the
+  // inputs it owns, and can read the two computed option lists below.
+  export let boxTubesListSearch = '';
   $: boxTubesListSearchTerm = boxTubesListSearch.trim().toLowerCase();
   $: boxTubesByCreatedAt = [...boxTubes].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
   // Dedicated Project/Season filters - see PartsTab.svelte's matching
   // filteredPartsByCreatedAt for the full reasoning, including why these
   // default to "show everything" rather than /manufacture's own
   // "current season" default.
-  let filterProject = '';
-  let filterSeason = '';
+  export let filterProject = '';
+  export let filterSeason = '';
+  export let projectIds = [];
+  export let seasonOptions = [];
   $: projectIds = Array.from(new Set(boxTubes.map((tube) => tube.project_id).filter(Boolean))).sort();
   $: seasonOptions = getAllSeasonBuckets(boxTubes);
   $: filteredBoxTubesByCreatedAt = boxTubesByCreatedAt.filter((tube) =>
@@ -260,6 +264,13 @@
     stepFile = null;
     showAddForm = false;
     quickQueueMode = false;
+  }
+
+  // Called externally via bind:this from +page.svelte's shared header bar -
+  // the "Add Tube Stock" button now lives there instead of in this tab's
+  // own toolbar.
+  export function openAddForm() {
+    showAddForm = !showAddForm;
   }
 
   export function openQueuePicker() {
@@ -521,39 +532,6 @@
 {#if loading}
   <p>Loading box tubes...</p>
 {:else}
-  <div class="cam-list-toolbar">
-    {#if canManage}
-      <div class="tab-actions">
-        <button class="btn btn-primary" on:click={() => (showAddForm = !showAddForm)}>
-          <Plus size={16} /> Add Tube Stock
-        </button>
-      </div>
-    {/if}
-    {#if boxTubes.length > 0}
-      <div class="filters tab-filters">
-        <div class="form-group">
-          <label class="form-label" for="tubes-search">Search</label>
-          <input
-            id="tubes-search"
-            type="search"
-            class="form-input"
-            placeholder="Search tube stock by name or project..."
-            bind:value={boxTubesListSearch}
-            aria-label="Search tube stock"
-          />
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="tubes-project-filter"><Filter size={14} /> Project</label>
-          <select id="tubes-project-filter" class="form-select" bind:value={filterProject}>
-            <option value="">All Projects</option>
-            {#each projectIds as pid}<option value={pid}>{pid}</option>{/each}
-          </select>
-        </div>
-        <SeasonFilter options={seasonOptions} bind:value={filterSeason} />
-      </div>
-    {/if}
-  </div>
-
   {#if showAddForm && canManage}
     <div class="card">
       <div class="cam-list-header">
