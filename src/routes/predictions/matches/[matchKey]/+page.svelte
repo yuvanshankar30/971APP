@@ -6,7 +6,12 @@
   // TODO(backend): GET /api/prediction-market-v2/matches/[matchKey]
   $: matchKey = $page.params.matchKey;
   $: summary = findMockMatch(matchKey);
-  $: detail = MOCK_MATCH_DETAIL; // mock always returns the qm34 detail shape regardless of key
+  // Plain const, not `$:` - this never actually varies with matchKey (the
+  // mock always returns the same qm34 shape), and declaring it reactive
+  // left a real bug: `let selectedSide = detail.my_pick` right below ran
+  // before this had a value yet, throwing on `undefined.my_pick` and
+  // blanking the whole page - a plain const has no such ordering hazard.
+  const detail = MOCK_MATCH_DETAIL;
 
   let selectedSide = detail.my_pick;
 
