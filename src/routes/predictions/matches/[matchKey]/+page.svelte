@@ -1,55 +1,55 @@
 <script>
   import { page } from '$app/stores';
   import { ArrowLeft, Share2 } from 'lucide-svelte';
-  import { findMockMatch, MOCK_MATCH_DETAIL } from '$lib/predictionMarketV2Mock.js';
+  import { getAuthHeader } from '$lib/supabase.js';
+  import { pmEventKey } from '$lib/stores/predictionMarketEvent.js';
 
-  // TODO(backend): GET /api/prediction-market-v2/matches/[matchKey], and
-  // POST /api/prediction-market-v2/picks (see that endpoint's own upsert -
-  // switching a pick before the match starts is already how the real API
-  // is designed to work, so the mock below matches that rather than a
-  // one-shot "locked forever" model.
   $: matchKey = $page.params.matchKey;
-  $: summary = findMockMatch(matchKey);
-  // Plain const, not `$:` - this never actually varies with matchKey (the
-  // mock always returns the same qm34 shape), and declaring it reactive
-  // left a real bug: `let selectedSide = detail.my_pick` right below ran
-  // before this had a value yet, throwing on `undefined.my_pick` and
-  // blanking the whole page - a plain const has no such ordering hazard.
-  const detail = MOCK_MATCH_DETAIL;
-  // A local, mutable copy - placing/switching a pick below updates this,
-  // not the shared MOCK_MATCH_DETAIL export itself, so it resets to the
-  // mock's own starting state on a fresh page load instead of drifting
-  // further every time someone visits this page in the same session.
-  let localDetail = { ...detail, community_breakdown: { ...detail.community_breakdown } };
 
-  let selectedSide = localDetail.my_pick;
+  let loading = true;
+  let error = '';
+  let saving = false;
+  let localDetail = null;
+  let selectedSide = null;
 
-  // Was a one-shot "already locked in, do nothing" no-op - the "Predict
-  // Red"/"Predict Blue" buttons themselves promise a click places (or
-  // moves) your pick, not that it only works once. Placing a first pick
-  // or switching an existing one before the match starts is exactly what
-  // the real POST /api/prediction-market-v2/picks endpoint's own upsert
-  // supports - this mock now behaves the same way.
-  function pick(side) {
-    if (selectedSide === side) return;
-    const previousSide = localDetail.my_pick;
-    const nextBreakdown = { ...localDetail.community_breakdown };
-    if (previousSide) {
-      // Switching an existing pick moves one vote from one side to the
-      // other - the total voter count doesn't change.
-      nextBreakdown[previousSide] = Math.max(0, nextBreakdown[previousSide] - 1);
-    } else {
-      // A first-time pick is a new voter.
-      nextBreakdown.total += 1;
+  async function loadDetail(key) {
+    if (!key) return;
+    loading = true;
+    error = '';
+    try {
+      const authHeaders = await getAuthHeader();
+      const response = await fetch(`/api/prediction-market-v2/matches/${encodeURIComponent(key)}`, { headers: authHeaders });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result?.error || 'Could not load this match.');
+      localDetail = result;
+      selectedSide = result.my_pick;
+    } catch (cause) {
+      error = cause?.message || 'Could not load this match.';
+    } finally {
+      loading = false;
     }
-    nextBreakdown[side] += 1;
-    localDetail = {
-      ...localDetail,
-      my_pick: side,
-      model_probability_at_my_pick: side === 'red' ? localDetail.model_probability_red : 1 - localDetail.model_probability_red,
-      community_breakdown: nextBreakdown
-    };
-    selectedSide = side;
+  }
+
+  $: loadDetail(matchKey);
+
+  async function pick(side) {
+    if (saving || selectedSide === side) return;
+    saving = true;
+    try {
+      const authHeaders = await getAuthHeader();
+      const response = await fetch('/api/prediction-market-v2/picks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify({ event_key: $pmEventKey, match_key: matchKey, side })
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result?.error || 'Could not save your prediction.');
+      await loadDetail(matchKey);
+    } catch (cause) {
+      error = cause?.message || 'Could not save your prediction.';
+    } finally {
+      saving = false;
+    }
   }
 
   // Simple, real SVG line chart - no library, drawn to an explicit scale
@@ -57,12 +57,13 @@
   const CHART_W = 640;
   const CHART_H = 220;
   const PAD = { top: 16, right: 16, bottom: 28, left: 40 };
-  $: points = detail.elo_history_series;
+  $: points = localDetail?.elo_history_series || [];
   $: xStep = (CHART_W - PAD.left - PAD.right) / Math.max(1, points.length - 1);
   function xFor(i) { return PAD.left + i * xStep; }
   function yFor(p) { return PAD.top + (1 - p) * (CHART_H - PAD.top - PAD.bottom); }
   $: modelPath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${xFor(i)} ${yFor(p.model_prob)}`).join(' ');
   $: communityPath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${xFor(i)} ${yFor(p.community_prob)}`).join(' ');
+  const tickLabel = (t) => { const d = new Date(t); return Number.isNaN(d.getTime()) ? t : d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); };
 </script>
 
 <svelte:head><title>{matchKey?.toUpperCase()} — Prediction Market</title></svelte:head>
@@ -74,18 +75,19 @@
   <button type="button" class="pm-icon-btn" title="Share prediction card"><Share2 size={14} /> Share prediction card</button>
 </div>
 
-{#if !summary}
-  <p class="pm-empty">Match not found in the mock data set - every other real key falls back to the qm34 detail shape above.</p>
-{/if}
-
+{#if loading}
+  <p class="pm-empty">Loading match…</p>
+{:else if error}
+  <p class="pm-empty">{error}</p>
+{:else if localDetail}
 <div class="pm-alliance-grid">
-  <button type="button" class="pm-alliance-card pm-alliance-card-red" class:selected={selectedSide === 'red'} on:click={() => pick('red')}>
+  <button type="button" class="pm-alliance-card pm-alliance-card-red" disabled={saving} class:selected={selectedSide === 'red'} on:click={() => pick('red')}>
     <span class="pm-alliance-label">Red Alliance</span>
     <strong class="pm-alliance-prob">{Math.round(localDetail.model_probability_red * 100)}%</strong>
     <span class="pm-alliance-teams">{localDetail.red_teams.join(', ')}</span>
     <span class="pm-alliance-status">{selectedSide === 'red' ? 'Selected' : 'Predict Red'}</span>
   </button>
-  <button type="button" class="pm-alliance-card pm-alliance-card-blue" class:selected={selectedSide === 'blue'} on:click={() => pick('blue')}>
+  <button type="button" class="pm-alliance-card pm-alliance-card-blue" disabled={saving} class:selected={selectedSide === 'blue'} on:click={() => pick('blue')}>
     <span class="pm-alliance-label">Blue Alliance</span>
     <strong class="pm-alliance-prob">{Math.round((1 - localDetail.model_probability_red) * 100)}%</strong>
     <span class="pm-alliance-teams">{localDetail.blue_teams.join(', ')}</span>
@@ -102,20 +104,21 @@
     <div><strong class="pm-num-blue">{localDetail.community_breakdown.blue}</strong><span>Blue</span></div>
   </div>
   {#if localDetail.my_pick}
-    <p class="pm-frozen-note">Model probability when you predicted: {Math.round(localDetail.model_probability_at_my_pick * 100)}% for {localDetail.my_pick === 'red' ? 'Red' : 'Blue'}. Later model changes update the graph, not your saved prediction.</p>
+    <p class="pm-frozen-note">Model probability when you predicted: {Math.round((localDetail.model_probability_at_my_pick ?? 0.5) * 100)}% for {localDetail.my_pick === 'red' ? 'Red' : 'Blue'}. Later model changes update the graph, not your saved prediction.</p>
   {/if}
 </section>
 
 <section class="pm-panel">
   <div class="pm-panel-header"><h2>Model and Community Predictions Over Time</h2></div>
   <div class="pm-chart-wrap">
+    {#if points.length}
     <svg viewBox="0 0 {CHART_W} {CHART_H}" role="img" aria-label="Model and community win probability for Red, over time">
       {#each [0, 0.25, 0.5, 0.75, 1] as tick}
         <line x1={PAD.left} x2={CHART_W - PAD.right} y1={yFor(tick)} y2={yFor(tick)} class="pm-grid-line" />
         <text x={PAD.left - 8} y={yFor(tick) + 4} class="pm-chart-tick" text-anchor="end">{Math.round(tick * 100)}%</text>
       {/each}
       {#each points as p, i}
-        <text x={xFor(i)} y={CHART_H - 8} class="pm-chart-tick" text-anchor="middle">{p.t}</text>
+        <text x={xFor(i)} y={CHART_H - 8} class="pm-chart-tick" text-anchor="middle">{tickLabel(p.t)}</text>
       {/each}
       <path d={communityPath} class="pm-chart-line pm-chart-line-community" />
       <path d={modelPath} class="pm-chart-line pm-chart-line-model" />
@@ -128,8 +131,12 @@
       <span><i class="pm-legend-swatch pm-legend-model"></i> Model</span>
       <span><i class="pm-legend-swatch pm-legend-community"></i> Community</span>
     </div>
+    {:else}
+      <p class="pm-empty">No predictions yet for this match.</p>
+    {/if}
   </div>
 </section>
+{/if}
 
 <style>
   .pm-back { display: inline-flex; align-items: center; gap: 0.4rem; color: var(--pm-accent); text-decoration: none; font-size: 0.82rem; margin-bottom: 1rem; }

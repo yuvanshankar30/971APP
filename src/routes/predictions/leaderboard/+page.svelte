@@ -1,22 +1,49 @@
 <script>
+  import { onMount } from 'svelte';
   import { Trophy } from 'lucide-svelte';
-  import { MOCK_LEADERBOARD, MOCK_ELO } from '$lib/predictionMarketV2Mock.js';
+  import { getAuthHeader, supabase } from '$lib/supabase.js';
 
-  // TODO(backend): GET /api/prediction-market-v2/leaderboard?event_key=...
-  $: ranked = [...MOCK_LEADERBOARD].sort((a, b) => b.elo - a.elo);
   const MEDAL = ['pm-medal-gold', 'pm-medal-silver', 'pm-medal-bronze'];
-  // Mock treats the signed-in user as the "Lightning" row - matches MOCK_ELO.
-  const MY_USER_ID = 'u2';
+
+  let loading = true;
+  let error = '';
+  let ranked = [];
+  let myUserId = null;
+
+  $: myRow = ranked.find((row) => row.user_id === myUserId) || null;
+
+  onMount(async () => {
+    const { data } = await supabase.auth.getUser();
+    myUserId = data?.user?.id || null;
+    try {
+      const authHeaders = await getAuthHeader();
+      const response = await fetch('/api/prediction-market-v2/leaderboard', { headers: authHeaders });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result?.error || 'Could not load the leaderboard.');
+      ranked = Array.isArray(result) ? result : [];
+    } catch (cause) {
+      error = cause?.message || 'Could not load the leaderboard.';
+    } finally {
+      loading = false;
+    }
+  });
 </script>
 
 <svelte:head><title>Leaderboard — Prediction Market</title></svelte:head>
 
 <div class="pm-page-header">
   <h1>Leaderboard</h1>
-  <span class="pm-page-sub">Elo across every 971/9584 event this season</span>
+  <span class="pm-page-sub">Elo across every event this season</span>
 </div>
 
 <section class="pm-panel">
+  {#if loading}
+    <p class="pm-empty">Loading…</p>
+  {:else if error}
+    <p class="pm-empty">{error}</p>
+  {:else if !ranked.length}
+    <p class="pm-empty">No scored predictions yet.</p>
+  {:else}
   <div class="pm-table-scroll">
     <table class="pm-table">
       <thead>
@@ -29,8 +56,8 @@
         </tr>
       </thead>
       <tbody>
-        {#each ranked as row, i}
-          <tr class:pm-me={row.user_id === MY_USER_ID}>
+        {#each ranked as row, i (row.user_id)}
+          <tr class:pm-me={row.user_id === myUserId}>
             <td class="pm-rank-col">
               {#if i < 3}
                 <span class="pm-medal {MEDAL[i]}"><Trophy size={12} /> {i + 1}</span>
@@ -40,9 +67,9 @@
             </td>
             <td class="pm-name-cell">
               {row.name}
-              {#if row.user_id === MY_USER_ID}<span class="pm-you-chip">You</span>{/if}
+              {#if row.user_id === myUserId}<span class="pm-you-chip">You</span>{/if}
             </td>
-            <td class="pm-num pm-elo-cell">{row.elo}</td>
+            <td class="pm-num pm-elo-cell">{Math.round(row.elo)}</td>
             <td class="pm-num pm-mono">{row.wins}-{row.losses}</td>
             <td class="pm-num pm-mono">{row.wins + row.losses ? Math.round((row.wins / (row.wins + row.losses)) * 100) : 0}%</td>
           </tr>
@@ -50,9 +77,12 @@
       </tbody>
     </table>
   </div>
+  {/if}
 </section>
 
-<p class="pm-footnote">Your rating: <strong>{MOCK_ELO.elo}</strong> Elo ({MOCK_ELO.elo_delta_event >= 0 ? '+' : ''}{MOCK_ELO.elo_delta_event} this event) &middot; {Math.round(MOCK_ELO.accuracy * 100)}% accuracy across {MOCK_ELO.scored_predictions} scored predictions.</p>
+{#if myRow}
+  <p class="pm-footnote">Your rating: <strong>{Math.round(myRow.elo)}</strong> Elo &middot; {myRow.wins}-{myRow.losses} ({myRow.wins + myRow.losses ? Math.round((myRow.wins / (myRow.wins + myRow.losses)) * 100) : 0}% accuracy) across {myRow.wins + myRow.losses} scored predictions.</p>
+{/if}
 
 <style>
   .pm-page-header { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; margin-bottom: 1.1rem; flex-wrap: wrap; }

@@ -31,6 +31,26 @@ export function matchVideoUrl(match) {
   return match?.key ? `https://www.thebluealliance.com/match/${encodeURIComponent(match.key)}` : '';
 }
 
+// Picks the best webcast off an event's TBA `webcasts` array and returns an
+// embeddable iframe URL for the types we know how to embed (youtube/twitch),
+// or a plain link URL for everything else (ustream/iframe/html5/rtmp/mms
+// aren't embeddable the same way, and are rare in practice).
+export function eventWebcastEmbed(webcasts = []) {
+  const usable = (webcasts || []).find((cast) => cast?.type === 'youtube' && cast?.channel)
+    || (webcasts || []).find((cast) => cast?.type === 'twitch' && cast?.channel)
+    || (webcasts || [])[0];
+  if (!usable) return null;
+  if (usable.type === 'youtube') {
+    return { embedUrl: `https://www.youtube.com/embed/${encodeURIComponent(usable.channel)}?autoplay=0`, linkUrl: `https://www.youtube.com/watch?v=${encodeURIComponent(usable.channel)}` };
+  }
+  if (usable.type === 'twitch') {
+    const parent = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+    return { embedUrl: `https://player.twitch.tv/?channel=${encodeURIComponent(usable.channel)}&parent=${encodeURIComponent(parent)}&autoplay=false`, linkUrl: `https://www.twitch.tv/${encodeURIComponent(usable.channel)}` };
+  }
+  const linkUrl = usable.channel && /^https?:\/\//.test(usable.channel) ? usable.channel : '';
+  return { embedUrl: null, linkUrl };
+}
+
 export function matchVideoSources(match) {
   const matchKey = String(match?.key || '').trim();
   const sources = [];

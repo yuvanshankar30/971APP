@@ -1,22 +1,68 @@
 <script>
-  import { MOCK_ALLIANCE_DRAFT } from '$lib/predictionMarketV2Mock.js';
+  import { getAuthHeader, supabase } from '$lib/supabase.js';
+  import { pmEventKey } from '$lib/stores/predictionMarketEvent.js';
 
-  // TODO(backend): GET/POST /api/prediction-market-v2/alliance-draft?event_key=...
   // Predicting alliance selection order ahead of eliminations - captains are
-  // the top seeds, picks are each community's guess at who they'll take.
-  const draft = MOCK_ALLIANCE_DRAFT;
-  $: captains = draft.seeds.slice(0, 8);
-  $: pickByCaptain = new Map(draft.picks.map((p) => [p.captain, p]));
+  // the top-ranked teams (rank order stands in for seed, same as real FRC
+  // alliance selection), picks are this user's guess at who they'll take.
+  let loading = true;
+  let error = '';
+  let captains = [];
+  let pickByCaptain = new Map();
+  let myUserId = null;
 
   let draftPick = '';
-  let selectedCaptain = draft.seeds[0];
+  let selectedCaptain = '';
+  $: if (!selectedCaptain && captains.length) selectedCaptain = captains[0];
 
-  function submitPick() {
-    if (!draftPick.trim()) return;
-    // mock-only: no persistence until the backend endpoint exists
-    pickByCaptain.set(selectedCaptain, { pick_round: 1, captain: selectedCaptain, predicted_pick: draftPick.trim(), locked: false });
-    pickByCaptain = new Map(pickByCaptain);
-    draftPick = '';
+  async function loadDraft(eventKey) {
+    if (!eventKey) { loading = false; return; }
+    loading = true;
+    error = '';
+    try {
+      const { data } = await supabase.auth.getUser();
+      myUserId = data?.user?.id || null;
+      const authHeaders = await getAuthHeader();
+      const [rankingsResponse, picksResponse] = await Promise.all([
+        fetch(`/api/tba/event-rankings?event_key=${encodeURIComponent(eventKey)}`).then((res) => res.json()),
+        fetch(`/api/prediction-market-v2/alliance-draft?event_key=${encodeURIComponent(eventKey)}`, { headers: authHeaders }).then((res) => res.json())
+      ]);
+      if (!rankingsResponse?.success) throw new Error(rankingsResponse?.error || 'Could not load event rankings.');
+      if (picksResponse?.error) throw new Error(picksResponse.error);
+      captains = (rankingsResponse.data?.rankings || []).slice(0, 8).map((row) => row.team_key);
+      selectedCaptain = captains[0] || '';
+      const picks = Array.isArray(picksResponse) ? picksResponse : [];
+      pickByCaptain = new Map(picks.filter((p) => p.user_id === myUserId).map((p) => [p.predicted_captain, p]));
+    } catch (cause) {
+      error = cause?.message || 'Could not load the alliance draft.';
+    } finally {
+      loading = false;
+    }
+  }
+
+  $: loadDraft($pmEventKey);
+
+  let saving = false;
+  async function submitPick() {
+    const predictedPick = draftPick.trim();
+    if (!predictedPick || !selectedCaptain || saving) return;
+    saving = true;
+    try {
+      const authHeaders = await getAuthHeader();
+      const response = await fetch('/api/prediction-market-v2/alliance-draft', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify({ event_key: $pmEventKey, predicted_captain: selectedCaptain, predicted_pick: predictedPick, pick_round: 1 })
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result?.error || 'Could not save your prediction.');
+      draftPick = '';
+      await loadDraft($pmEventKey);
+    } catch (cause) {
+      error = cause?.message || 'Could not save your prediction.';
+    } finally {
+      saving = false;
+    }
   }
 </script>
 
@@ -24,9 +70,16 @@
 
 <div class="pm-page-header">
   <h1>Alliance Draft</h1>
-  <span class="pm-page-sub">{draft.event_key.toUpperCase()} &middot; predict who each captain takes in round 1</span>
+  <span class="pm-page-sub">{$pmEventKey?.toUpperCase() || ''} &middot; predict who each captain takes in round 1</span>
 </div>
 
+{#if loading}
+  <p class="pm-empty">Loading…</p>
+{:else if error}
+  <p class="pm-empty">{error}</p>
+{:else if !captains.length}
+  <p class="pm-empty">No rankings published for this event yet - check back once qualification matches begin.</p>
+{:else}
 <section class="pm-panel pm-predict-panel">
   <div class="pm-panel-header"><h2>Make a Prediction</h2></div>
   <form class="pm-predict-form" on:submit|preventDefault={submitPick}>
@@ -40,14 +93,14 @@
     </label>
     <label class="pm-field">
       <span>Predicted 1st pick</span>
-      <input type="text" placeholder="Team number" bind:value={draftPick} />
+      <input type="text" placeholder="Team key, e.g. frc254" bind:value={draftPick} />
     </label>
-    <button type="submit" class="pm-btn-accent">Save Prediction</button>
+    <button type="submit" class="pm-btn-accent" disabled={saving}>Save Prediction</button>
   </form>
 </section>
 
 <section class="pm-panel">
-  <div class="pm-panel-header"><h2>Seed Order &amp; Community Picks</h2></div>
+  <div class="pm-panel-header"><h2>Seed Order &amp; My Picks</h2></div>
   <div class="pm-table-scroll">
     <table class="pm-table">
       <thead>
@@ -61,10 +114,12 @@
             <td class="pm-mono pm-captain">{seed}</td>
             <td class="pm-mono">{pick ? pick.predicted_pick : '—'}</td>
             <td>
-              {#if pick}
-                <span class="pm-status-chip" class:pm-status-locked={pick.locked}>{pick.locked ? 'Locked' : 'Open'}</span>
-              {:else}
+              {#if !pick}
                 <span class="pm-muted-text">No prediction yet</span>
+              {:else if pick.resolved_at}
+                <span class="pm-status-chip" class:pm-status-locked={!pick.correct}>{pick.correct ? 'Correct' : 'Incorrect'}</span>
+              {:else}
+                <span class="pm-status-chip">Predicted</span>
               {/if}
             </td>
           </tr>
@@ -73,6 +128,7 @@
     </table>
   </div>
 </section>
+{/if}
 
 <style>
   .pm-page-header { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; margin-bottom: 1.1rem; flex-wrap: wrap; }

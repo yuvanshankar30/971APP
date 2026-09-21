@@ -2,11 +2,9 @@ import { createClient } from '@supabase/supabase-js';
 import { PUBLIC_SUPABASE_ANON_KEY, PUBLIC_SUPABASE_URL } from '$env/static/public';
 import { env } from '$env/dynamic/private';
 import { computeEventEpa, winProbability } from '$lib/epaModel.js';
-import { FRC_TEAMS } from '$lib/permissions.js';
 import { getSupabase } from '$lib/server/971bot.js';
 
 export const ELO_K = 32;
-const TEAM_KEYS = [`frc${FRC_TEAMS.TEAM_971}`, `frc${FRC_TEAMS.TEAM_9584}`];
 
 export function requestClient(request) {
   return createClient(PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY, {
@@ -44,13 +42,15 @@ function eventYear(eventKey) {
   return /^20\d{2}/.test(value) ? value.slice(0, 4) : null;
 }
 
+// Was: only events FRC 971 or 9584 are registered for. Reversed by direct
+// instruction - any currently-running FRC event is fair game, not just this
+// team's own. Now just confirms TBA actually knows about the event.
 export async function assertScopedEvent(eventKey) {
   const key = String(eventKey || '').trim();
-  const year = eventYear(key);
-  if (!year) throw new Error('event_key must begin with a four-digit FRC year');
-  const lists = await Promise.all(TEAM_KEYS.map((teamKey) => fetchTba(`team/${encodeURIComponent(teamKey)}/events/${year}/simple`)));
-  const allowed = lists.flat().some((event) => event?.key === key);
-  if (!allowed) throw new Error('This event is not registered for FRC 971 or FRC 9584');
+  if (!eventYear(key)) throw new Error('event_key must begin with a four-digit FRC year');
+  const response = await fetch(`https://www.thebluealliance.com/api/v3/event/${encodeURIComponent(key)}/simple`, { headers: tbaHeaders() });
+  if (response.status === 404) throw new Error('Event not found on The Blue Alliance');
+  if (!response.ok) throw new Error(`TBA upstream error ${response.status}`);
   return key;
 }
 

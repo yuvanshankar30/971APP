@@ -1,12 +1,47 @@
 <script>
-  import { MOCK_MY_PICKS, findMockMatch } from '$lib/predictionMarketV2Mock.js';
+  import { getAuthHeader, supabase } from '$lib/supabase.js';
+  import { pmEventKey } from '$lib/stores/predictionMarketEvent.js';
 
-  // TODO(backend): GET /api/prediction-market-v2/my-predictions
-  $: open = MOCK_MY_PICKS.filter((p) => !p.locked);
-  $: settled = MOCK_MY_PICKS.filter((p) => p.locked);
+  let loading = true;
+  let error = '';
+  let open = [];
+  let settled = [];
+
   $: wins = settled.filter((p) => p.result === 'won').length;
   $: losses = settled.filter((p) => p.result === 'lost').length;
   $: netElo = settled.reduce((sum, p) => sum + p.elo_delta, 0);
+
+  function resultFor(eloDelta) {
+    if (eloDelta > 0) return 'won';
+    if (eloDelta < 0) return 'lost';
+    return 'push';
+  }
+
+  async function loadMine(eventKey) {
+    if (!eventKey) { loading = false; return; }
+    loading = true;
+    error = '';
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const authHeaders = await getAuthHeader();
+      const [picksResponse, historyResult] = await Promise.all([
+        fetch(`/api/prediction-market-v2/picks/mine?event_key=${encodeURIComponent(eventKey)}`, { headers: authHeaders }).then((res) => res.json()),
+        supabase.from('pm_elo_history').select('match_key,picked_side,elo_delta,resolved_at').eq('event_key', eventKey).eq('user_id', user?.id || '')
+      ]);
+      if (picksResponse?.error) throw new Error(picksResponse.error);
+      const picks = Array.isArray(picksResponse) ? picksResponse : [];
+      open = picks.filter((p) => !p.locked);
+      settled = (historyResult?.data || [])
+        .map((row) => ({ match_key: row.match_key, side: row.picked_side, elo_delta: Number(row.elo_delta), result: resultFor(Number(row.elo_delta)) }))
+        .sort((a, b) => String(b.resolved_at).localeCompare(String(a.resolved_at)));
+    } catch (cause) {
+      error = cause?.message || 'Could not load your predictions.';
+    } finally {
+      loading = false;
+    }
+  }
+
+  $: loadMine($pmEventKey);
 </script>
 
 <svelte:head><title>My Predictions — Prediction Market</title></svelte:head>
@@ -18,24 +53,25 @@
 
 <section class="pm-panel">
   <div class="pm-panel-header"><h2>Open Picks</h2></div>
-  {#if open.length}
+  {#if loading}
+    <p class="pm-empty">Loading…</p>
+  {:else if error}
+    <p class="pm-empty">{error}</p>
+  {:else if open.length}
     <div class="pm-table-scroll">
       <table class="pm-table">
         <colgroup>
           <col class="pm-col-match" />
           <col class="pm-col-pick" />
-          <col class="pm-col-num" />
         </colgroup>
         <thead>
-          <tr><th>Match</th><th>My Pick</th><th class="pm-num">Model Prob. at Pick</th><th></th></tr>
+          <tr><th>Match</th><th>My Pick</th><th></th></tr>
         </thead>
         <tbody>
-          {#each open as p}
-            {@const m = findMockMatch(p.match_key)}
+          {#each open as p (p.id)}
             <tr>
               <td class="pm-match-key">{p.match_key.toUpperCase()}</td>
               <td><span class="pm-side-chip pm-side-{p.side}">{p.side}</span></td>
-              <td class="pm-num pm-mono">{Math.round(p.model_probability_at_pick * 100)}%</td>
               <td class="pm-action-col"><a href="/predictions/matches/{p.match_key}" class="pm-link">View match</a></td>
             </tr>
           {/each}

@@ -24,6 +24,7 @@ export async function GET({ request, url }) {
     const wins = scored.filter((row) => Number(row.elo_delta) > 0).length;
     return json({
       elo: Number(rating?.elo ?? 1000),
+      elo_delta_event: scored.reduce((sum, row) => sum + Number(row.elo_delta), 0),
       active_predictions: (picks || []).filter((pick) => !pick.locked).length,
       accuracy: scored.length ? wins / scored.length : 0,
       scored_predictions: scored.length,

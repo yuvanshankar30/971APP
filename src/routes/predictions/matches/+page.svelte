@@ -1,13 +1,36 @@
 <script>
   import { Search } from 'lucide-svelte';
-  import { MOCK_MATCHES } from '$lib/predictionMarketV2Mock.js';
+  import { getAuthHeader } from '$lib/supabase.js';
+  import { pmEventKey } from '$lib/stores/predictionMarketEvent.js';
 
-  // TODO(backend): GET /api/prediction-market-v2/matches?event_key=...
   let query = '';
-  $: needle = query.trim().toLowerCase();
-  $: filtered = MOCK_MATCHES.filter((m) => !needle || m.match_key.includes(needle) || [...m.red_teams, ...m.blue_teams].some((t) => t.includes(needle)));
+  let loading = true;
+  let error = '';
+  let matches = [];
 
-  const STATUS_LABEL = { upcoming: 'Upcoming', complete: 'Final' };
+  $: needle = query.trim().toLowerCase();
+  $: filtered = matches.filter((m) => !needle || m.match_key.includes(needle) || [...m.red_teams, ...m.blue_teams].some((t) => t.includes(needle)));
+
+  const STATUS_LABEL = { upcoming: 'Upcoming', locked: 'Locked', completed: 'Final' };
+
+  async function loadMatches(eventKey) {
+    if (!eventKey) { loading = false; return; }
+    loading = true;
+    error = '';
+    try {
+      const authHeaders = await getAuthHeader();
+      const response = await fetch(`/api/prediction-market-v2/matches?event_key=${encodeURIComponent(eventKey)}`, { headers: authHeaders });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result?.error || 'Could not load matches.');
+      matches = Array.isArray(result) ? result : [];
+    } catch (cause) {
+      error = cause?.message || 'Could not load matches.';
+    } finally {
+      loading = false;
+    }
+  }
+
+  $: loadMatches($pmEventKey);
 </script>
 
 <svelte:head><title>Matches — Prediction Market</title></svelte:head>
@@ -56,8 +79,12 @@
         {/each}
       </tbody>
     </table>
-    {#if !filtered.length}
-      <p class="pm-empty">No matches match "{query}".</p>
+    {#if loading}
+      <p class="pm-empty">Loading matches…</p>
+    {:else if error}
+      <p class="pm-empty">{error}</p>
+    {:else if !filtered.length}
+      <p class="pm-empty">{query ? `No matches match "${query}".` : 'No matches for this event yet.'}</p>
     {/if}
   </div>
 </section>

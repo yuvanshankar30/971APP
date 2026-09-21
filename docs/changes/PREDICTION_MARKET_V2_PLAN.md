@@ -21,14 +21,14 @@ only** — no data, logic, or API calls are pulled from either.
 | Question | Decision |
 |---|---|
 | Mechanic | **Elo rating**, not pari-mutuel points. Confidence-weighted: correctly calling a close model/community split earns more Elo than confirming a lopsided favorite; calling it wrong loses proportionally more the more "obvious" it looked. |
-| Event scope | Only events **971 or 9584 are actually competing at** — not the single "active scouting event," not season-wide. |
+| Event scope | ~~Only events 971 or 9584 are actually competing at.~~ **Reversed by direct instruction**: any current FRC event, via an event picker (`GET /api/tba/current-events`) marking whichever event is happening right now as "live" — not scoped to this team, not the single "active scouting event," not season-wide. `assertScopedEvent` now just confirms TBA recognizes the event key. |
 | Rollout | **Replaces `/predictions` in place** (no side-by-side v1/v2). |
 | Access | Everyone signed in, same as today — no new permission gate. |
 | Existing data | **Fresh start.** `prediction_market_bets` is left alone (queryable history, not migrated/converted). Chezy Champs is over; no in-flight bets to carry forward. |
 | Model % | Reuses **this app's own EPA model** (`src/lib/epaModel.js`: `computeEventEpa` + `winProbability`). No external dependency on Pit Wall or Bluebanner — those are the visual reference only. |
 | Alliance Draft | A **new prediction game**, not a reuse of `/picklist`: users predict which teams alliance captains will pick during real alliance selection. |
 | Live picks feed | Real-time — see everyone's picks as they're made (matches the reference screenshots; herd-behavior risk accepted as a tradeoff for the "alive" feel). |
-| Livestream panel | **Placeholder** for the first build. Real embed comes later once the UI is settled. |
+| Livestream panel | ~~Placeholder for the first build.~~ **Done early, by direct instruction**: auto-embeds the selected event's real TBA `webcasts` entry (youtube/twitch) - no manual paste-a-link step. |
 | Emoji reactions / live feed | Built as **real, persisted, multi-user** features from the start — not mocked then swapped later. |
 | Friends | Real feature, included in v1 (add/follow users, not just a static list). |
 | Mobile | **Desktop-first.** The dense multi-panel layout is the priority; mobile gets a basic scrollable fallback, not a dedicated responsive redesign. |

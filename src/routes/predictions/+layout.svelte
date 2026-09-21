@@ -1,14 +1,10 @@
 <script>
-  import { tick } from 'svelte';
+  import { tick, onMount } from 'svelte';
   import { page } from '$app/stores';
-  import { Radio, ArrowLeftCircle, Trophy } from 'lucide-svelte';
-  import { MOCK_ELO, MOCK_EVENT } from '$lib/predictionMarketV2Mock.js';
+  import { ArrowLeftCircle, Trophy } from 'lucide-svelte';
+  import { pmEvents, pmEventKey, pmLoadingEvents, pmMyElo, loadPmEvents } from '$lib/stores/predictionMarketEvent.js';
 
-  // TODO(backend): replace with a real fetch of hub_settings-scoped events
-  // (971/9584 only, per the plan doc's event-scope decision) and the
-  // signed-in user's real Elo from GET /api/prediction-market-v2/dashboard.
-  const elo = MOCK_ELO;
-  const event = MOCK_EVENT;
+  onMount(loadPmEvents);
 
   const TABS = [
     { href: '/predictions', label: 'Dashboard', exact: true },
@@ -53,10 +49,17 @@
       <a href="/predictions" class="pm-brand">
         <span class="pm-brand-name">Prediction Market</span>
       </a>
-      <div class="pm-event-picker">
-        <span class="pm-event-key">{event.event_key}</span>
-        <span class="pm-event-name">{event.name}</span>
-      </div>
+      {#if $pmEvents.length}
+        <label class="pm-event-picker">
+          <select class="pm-event-select" value={$pmEventKey} on:change={(e) => pmEventKey.set(e.currentTarget.value)}>
+            {#each $pmEvents as event (event.key)}
+              <option value={event.key}>{event.live ? '● LIVE — ' : ''}{event.short_name || event.name || event.key}</option>
+            {/each}
+          </select>
+        </label>
+      {:else if !$pmLoadingEvents}
+        <span class="pm-event-picker pm-event-empty">No current events</span>
+      {/if}
     </div>
 
     <nav class="pm-tabs" aria-label="Prediction Market sections">
@@ -69,7 +72,7 @@
     <div class="pm-topbar-right">
       <span class="pm-elo-badge" title="Your current Elo rating">
         <Trophy size={13} />
-        {elo.elo} Elo
+        {$pmMyElo?.elo ?? '—'} Elo
       </span>
       <a href="/" class="pm-icon-link pm-return-link" title="Return to Spartans Hub"><ArrowLeftCircle size={16} /> Return to SpartansHub</a>
     </div>
@@ -161,8 +164,18 @@
     font-size: 0.78rem;
     white-space: nowrap;
   }
-  .pm-event-key { color: var(--pm-accent); font-weight: 600; text-transform: uppercase; }
-  .pm-event-name { color: var(--pm-muted); }
+  .pm-event-select {
+    appearance: none;
+    background: none;
+    border: 0;
+    color: var(--pm-text);
+    font: inherit;
+    font-family: var(--pm-font-mono);
+    max-width: 260px;
+    cursor: pointer;
+  }
+  .pm-event-select:focus { outline: none; color: var(--pm-accent); }
+  .pm-event-empty { color: var(--pm-muted); }
 
   .pm-tabs {
     position: relative;

@@ -1,12 +1,37 @@
 <script>
-  import { onMount } from 'svelte';
-  import { Flame, Trophy, Clock, Target, CheckCircle2, Radio, Pencil, X } from 'lucide-svelte';
-  import { MOCK_ELO, MOCK_MATCHES, MOCK_MY_PICKS, MOCK_LIVE_FEED } from '$lib/predictionMarketV2Mock.js';
+  import { Flame, Trophy, Clock, Target, CheckCircle2, Radio, Video } from 'lucide-svelte';
+  import { getAuthHeader } from '$lib/supabase.js';
+  import { eventWebcastEmbed } from '$lib/tbaMedia.js';
+  import { pmEvents, pmEventKey, pmMyElo } from '$lib/stores/predictionMarketEvent.js';
 
-  // TODO(backend): GET /api/prediction-market-v2/dashboard?event_key=...
-  const elo = MOCK_ELO;
-  const upcoming = MOCK_MATCHES.filter((m) => m.status === 'upcoming');
-  const myPicks = MOCK_MY_PICKS.filter((p) => !p.locked);
+  let loading = true;
+  let error = '';
+  let matches = [];
+
+  $: selectedEvent = $pmEvents.find((event) => event.key === $pmEventKey) || null;
+  $: webcast = selectedEvent ? eventWebcastEmbed(selectedEvent.webcasts) : null;
+  $: upcoming = matches.filter((m) => m.status !== 'completed');
+  $: myPicks = matches.filter((m) => m.my_pick && m.status !== 'completed');
+
+  async function loadDashboard(eventKey) {
+    if (!eventKey) { loading = false; return; }
+    loading = true;
+    error = '';
+    try {
+      const authHeaders = await getAuthHeader();
+      const response = await fetch(`/api/prediction-market-v2/dashboard?event_key=${encodeURIComponent(eventKey)}`, { headers: authHeaders });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result?.error || 'Could not load the dashboard.');
+      matches = result.matches || [];
+      pmMyElo.set({ elo: result.elo, elo_delta_event: result.elo_delta_event, accuracy: result.accuracy, scored_predictions: result.scored_predictions });
+    } catch (cause) {
+      error = cause?.message || 'Could not load the dashboard.';
+    } finally {
+      loading = false;
+    }
+  }
+
+  $: loadDashboard($pmEventKey);
 
   function deltaFor(match) {
     // Placeholder "model movement" number until the backend tracks a real
@@ -18,89 +43,33 @@
   function reveal(node, { delay = 0 }) {
     return { delay, duration: 260, css: (t) => `opacity: ${t}; transform: translateY(${(1 - t) * 6}px)` };
   }
-
-  // Livestream embed - no backend field for this yet (the dashboard
-  // contract doesn't carry a stream URL per event), so this is stored
-  // per-browser like recentTabs.js does elsewhere in the app. Whoever is
-  // watching pastes the event's real YouTube link once and it embeds here
-  // for the rest of the session.
-  const STREAM_STORAGE_KEY = 'spartanshub_pm_stream_url';
-  let streamInput = '';
-  let streamEmbedId = null;
-  let editingStream = false;
-
-  function extractYouTubeId(raw) {
-    const trimmed = (raw || '').trim();
-    if (!trimmed) return null;
-    if (/^[\w-]{11}$/.test(trimmed)) return trimmed;
-    try {
-      const url = new URL(trimmed);
-      if (url.hostname.includes('youtu.be')) return url.pathname.slice(1) || null;
-      if (url.hostname.includes('youtube.com')) {
-        if (url.searchParams.get('v')) return url.searchParams.get('v');
-        const match = url.pathname.match(/\/(?:live|embed|shorts)\/([\w-]{11})/);
-        if (match) return match[1];
-      }
-    } catch {
-      return null;
-    }
-    return null;
-  }
-
-  onMount(() => {
-    try {
-      const saved = localStorage.getItem(STREAM_STORAGE_KEY);
-      if (saved) {
-        streamInput = saved;
-        streamEmbedId = extractYouTubeId(saved);
-      }
-    } catch {
-      // localStorage can throw in a private window - the panel just falls
-      // back to "no stream set" for that viewer.
-    }
-  });
-
-  let streamError = '';
-  function saveStream() {
-    const id = extractYouTubeId(streamInput);
-    if (!id) {
-      streamError = "That doesn't look like a YouTube video/live link.";
-      return;
-    }
-    streamError = '';
-    streamEmbedId = id;
-    editingStream = false;
-    try { localStorage.setItem(STREAM_STORAGE_KEY, streamInput.trim()); } catch {}
-  }
-
-  function clearStream() {
-    streamEmbedId = null;
-    streamInput = '';
-    streamError = '';
-    try { localStorage.removeItem(STREAM_STORAGE_KEY); } catch {}
-  }
 </script>
 
 <svelte:head><title>Prediction Market</title></svelte:head>
 
+{#if !selectedEvent}
+  <p class="pm-empty">{loading ? 'Loading…' : 'Pick a current event above to get started.'}</p>
+{:else if error}
+  <p class="pm-empty">{error}</p>
+{:else}
 <div class="pm-dashboard">
   <div class="pm-main-col">
     <div class="pm-stat-row">
       <div class="pm-stat">
         <span class="pm-stat-label"><Trophy size={13} /> Event Elo Δ</span>
-        <strong class="pm-stat-value" class:pm-positive={elo.elo_delta_event >= 0}>{elo.elo_delta_event >= 0 ? '+' : ''}{elo.elo_delta_event}</strong>
+        <strong class="pm-stat-value" class:pm-positive={($pmMyElo?.elo_delta_event ?? 0) >= 0}>{($pmMyElo?.elo_delta_event ?? 0) >= 0 ? '+' : ''}{Math.round($pmMyElo?.elo_delta_event ?? 0)}</strong>
       </div>
       <div class="pm-stat">
         <span class="pm-stat-label"><Clock size={13} /> Active Predictions</span>
-        <strong class="pm-stat-value">{elo.active_predictions}</strong>
+        <strong class="pm-stat-value">{myPicks.length}</strong>
       </div>
       <div class="pm-stat">
         <span class="pm-stat-label"><Target size={13} /> Accuracy</span>
-        <strong class="pm-stat-value">{elo.accuracy != null ? `${Math.round(elo.accuracy * 100)}%` : '—'}</strong>
+        <strong class="pm-stat-value">{$pmMyElo?.accuracy != null ? `${Math.round($pmMyElo.accuracy * 100)}%` : '—'}</strong>
       </div>
       <div class="pm-stat">
         <span class="pm-stat-label"><CheckCircle2 size={13} /> Scored Predictions</span>
-        <strong class="pm-stat-value">{elo.scored_predictions}</strong>
+        <strong class="pm-stat-value">{$pmMyElo?.scored_predictions ?? 0}</strong>
       </div>
     </div>
 
@@ -149,10 +118,10 @@
           <table class="pm-table">
             <thead><tr><th>Match</th><th>Alliance</th><th class="pm-num">Elo Δ</th></tr></thead>
             <tbody>
-              {#each myPicks as p}
+              {#each myPicks as m}
                 <tr>
-                  <td class="pm-match-key">{p.match_key.toUpperCase()}</td>
-                  <td><span class="pm-side-chip pm-side-{p.side}">{p.side}</span></td>
+                  <td class="pm-match-key">{m.match_key.toUpperCase()}</td>
+                  <td><span class="pm-side-chip pm-side-{m.my_pick}">{m.my_pick}</span></td>
                   <td class="pm-num pm-active-tag">active</td>
                 </tr>
               {/each}
@@ -168,33 +137,23 @@
   <aside class="pm-rail">
     <section class="pm-panel pm-stream-panel">
       <div class="pm-panel-header">
-        <h2><Radio size={14} class="pm-pulse" /> Event Stream</h2>
-        <button type="button" class="pm-link pm-stream-toggle" on:click={() => (editingStream = !editingStream)}>
-          {#if editingStream}<X size={12} /> Cancel{:else}<Pencil size={12} /> {streamEmbedId ? 'Edit' : 'Set link'}{/if}
-        </button>
+        <h2><Radio size={14} class="pm-pulse" /> {selectedEvent.live ? 'Live now' : 'Event Stream'}</h2>
       </div>
-      {#if editingStream}
-        <form class="pm-stream-form" on:submit|preventDefault={saveStream}>
-          <input type="text" placeholder="Paste the event's YouTube link" bind:value={streamInput} />
-          <button type="submit" class="pm-btn-accent">Save</button>
-          {#if streamEmbedId}
-            <button type="button" class="pm-stream-remove" on:click={clearStream}>Remove</button>
-          {/if}
-        </form>
-        {#if streamError}<p class="pm-stream-error">{streamError}</p>{/if}
-      {/if}
-      <div class="pm-stream-placeholder" class:pm-stream-live={streamEmbedId}>
-        {#if streamEmbedId}
+      <div class="pm-stream-placeholder" class:pm-stream-live={webcast?.embedUrl}>
+        {#if webcast?.embedUrl}
           <iframe
             class="pm-stream-iframe"
-            src="https://www.youtube.com/embed/{streamEmbedId}?autoplay=0&rel=0"
+            src={webcast.embedUrl}
             title="Event livestream"
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
             allowfullscreen
           ></iframe>
+        {:else if webcast?.linkUrl}
+          <span class="pm-live-dot"></span>
+          <p><Video size={14} /> <a class="pm-link" href={webcast.linkUrl} target="_blank" rel="noreferrer">Watch on {selectedEvent.webcasts?.[0]?.type}</a></p>
         {:else}
           <span class="pm-live-dot"></span>
-          <p>No stream set for this event yet - paste a YouTube link above to watch here.</p>
+          <p>No stream published for this event yet.</p>
         {/if}
       </div>
       <div class="pm-reactions">
@@ -202,21 +161,10 @@
           <button type="button" class="pm-reaction-btn">{emoji}</button>
         {/each}
       </div>
-      <div class="pm-live-feed">
-        <h3>Live Predictions</h3>
-        <ul>
-          {#each MOCK_LIVE_FEED as entry, i}
-            <li in:reveal={{ delay: i * 40 }}>
-              <span class="pm-feed-user">{entry.user}</span> picked
-              <span class="pm-side-chip pm-side-{entry.side}">{entry.side}</span>
-              · <span class="pm-feed-match">{entry.match_key}</span>
-            </li>
-          {/each}
-        </ul>
-      </div>
     </section>
   </aside>
 </div>
+{/if}
 
 <style>
   .pm-dashboard {
@@ -338,44 +286,6 @@
 
   /* Live/streaming rail */
   .pm-stream-panel { display: flex; flex-direction: column; }
-  .pm-stream-toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3rem;
-    background: none;
-    border: none;
-    cursor: pointer;
-    font: inherit;
-  }
-  .pm-stream-form {
-    display: flex;
-    gap: 0.5rem;
-    padding: 0.75rem 1.1rem;
-    border-bottom: 1px solid var(--pm-border);
-    flex-wrap: wrap;
-  }
-  .pm-stream-form input {
-    flex: 1;
-    min-width: 160px;
-    padding: 0.45rem 0.6rem;
-    background: var(--pm-surface-raised);
-    border: 1px solid var(--pm-border);
-    color: var(--pm-text);
-    font: inherit;
-    font-family: var(--pm-font-mono);
-    font-size: 0.8rem;
-  }
-  .pm-stream-form input:focus { outline: none; border-color: var(--pm-accent); }
-  .pm-stream-remove {
-    padding: 0.45rem 0.75rem;
-    background: none;
-    border: 1px solid var(--pm-border);
-    color: var(--pm-muted);
-    font-size: 0.78rem;
-    cursor: pointer;
-  }
-  .pm-stream-remove:hover { border-color: var(--pm-red); color: var(--pm-red); }
-  .pm-stream-error { margin: 0; padding: 0 1.1rem 0.75rem; color: var(--pm-red); font-size: 0.78rem; }
   .pm-stream-placeholder {
     aspect-ratio: 16 / 9;
     min-height: 720px;
@@ -419,20 +329,6 @@
     transition: transform 0.12s ease, border-color 0.12s ease;
   }
   .pm-reaction-btn:hover { transform: translateY(-2px) scale(1.08); border-color: var(--pm-accent); }
-
-  .pm-live-feed { padding: 0.9rem 1.1rem 1.1rem; }
-  .pm-live-feed h3 {
-    margin: 0 0 0.6rem;
-    font-family: var(--pm-font-mono);
-    font-size: 0.72rem;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--pm-muted);
-  }
-  .pm-live-feed ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.55rem; }
-  .pm-live-feed li { font-size: 0.8rem; color: var(--pm-muted); line-height: 1.4; }
-  .pm-feed-user { color: var(--pm-text); font-weight: 600; }
-  .pm-feed-match { font-family: var(--pm-font-mono); color: var(--pm-text); }
 
   @media (max-width: 1050px) {
     .pm-dashboard { grid-template-columns: 1fr; }
