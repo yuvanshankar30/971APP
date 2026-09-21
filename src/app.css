@@ -58,6 +58,13 @@
   --accent-strong: var(--brand-gold-strong);
   --accent-subtle: var(--brand-gold-soft);
   --on-primary: var(--color-black);
+  /* Readable text for anything filled solid with --accent. Was left
+     undefined everywhere it's referenced (var(--accent-contrast, #fff)),
+     so every one of those controls silently fell back to hardcoded white -
+     illegible on gold in every theme, but especially jarring on modern-dark
+     since --secondary (often used instead of this token) is itself
+     near-white there. */
+  --accent-contrast: var(--on-primary);
 
   --success: var(--green-base);
   --danger: var(--red-base);
@@ -2383,6 +2390,16 @@ textarea:focus,
 [data-theme="modern-dark"] .tab-nav button.active {
   background: var(--brand-gold-soft);
   color: var(--accent-strong);
+}
+
+/* Every other spot that fills solid with --accent and sets text to
+   --secondary (near-white here) instead of the shared --accent-contrast
+   token - same white-on-gold illegibility. Swap to dark ink like the
+   already-fixed .subtabs/.btn-primary do. */
+[data-theme="modern-dark"] .workflow-icon,
+[data-theme="modern-dark"] .docs-file-item.active,
+[data-theme="modern-dark"] .submit-btn {
+  color: var(--on-primary);
 }
 
 /* btn-warning pairs gold bg with gold-strong text; with strong now light on

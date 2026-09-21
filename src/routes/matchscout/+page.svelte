@@ -948,7 +948,7 @@
   .card-swatch { width:.85rem; height:.85rem; border-radius:50%; border:1px solid var(--border); background:var(--surface-1); }
   .card-yellow .card-swatch { background:#f1c331; border-color:#c99a00; }
   .card-red .card-swatch { background:var(--red-base); border-color:var(--red-base); }
-  .card-yellow.chosen { border-color:#c99a00; background:#fff4cc; color:var(--secondary); }
+  .card-yellow.chosen { border-color:#c99a00; background:var(--brand-gold-soft); color:var(--brand-gold-strong); }
   .card-red.chosen { border-color:var(--red-base); background:var(--red-soft); color:var(--text); }
   .required-handoff { display:flex; align-items:flex-start; gap:var(--gap-2); margin-top:var(--space-5); padding:var(--space-3) var(--space-4); border-left:3px solid var(--red-base); background:var(--red-soft); color:var(--text); font-size:.88rem; }
   .required-handoff :global(svg) { flex:none; color:var(--red-base); }
