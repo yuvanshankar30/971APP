@@ -6,7 +6,15 @@ database reachability, the active scouting event, open assignments, open
 ACE/Pit issues, stored match-report count, and curated recent changes. Team
 report-completion questions are answered directly from live assignment and
 report rows. Other questions are answered by Groq from the read-only Hub
-feature catalog and status snapshot.
+feature catalog and status snapshot. Mentions using either the old `@971app`
+display name or the `@971hub` display name work because Slack identifies the
+app by ID rather than by the visible name.
+
+The assistant only responds in `#2026-ace-pit-bot`. Mentions in every other
+channel are acknowledged and ignored before an event receipt is claimed, a
+database status snapshot is loaded, or Groq is called. Replies to a mention in
+an existing thread remain in that thread; channel-level mentions start one
+threaded reply beneath the mention.
 
 ## Required runtime configuration
 
@@ -16,6 +24,9 @@ feature catalog and status snapshot.
   runtime, set it in that runtime's private environment-variable settings.
   Never prefix it with `PUBLIC_` or `VITE_`.
 - `GROQ_MODEL` is optional and defaults to `openai/gpt-oss-20b`.
+- `SLACK_HUB_ASSISTANT_CHANNEL_ID` may be set to the Slack channel ID for
+  `#2026-ace-pit-bot`. If omitted, the assistant accepts only IDs already
+  recorded in the ACE/Pit notification thread table.
 
 ## Required Slack app configuration
 

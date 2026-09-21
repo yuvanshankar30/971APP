@@ -1,5 +1,6 @@
 import { env } from '$env/dynamic/private';
 import { getSlackClient, getSupabase } from '$lib/server/971bot.js';
+import { ACE_PIT_CHANNEL_NAME } from '$lib/server/ace_pit_notifications.js';
 
 export const HUB_RECENT_CHANGES = [
   'Drive Team now shows every completed 971 match with Win/Loss/Tie and the final score.',
@@ -69,6 +70,32 @@ export function isTeamReportStatusRequest(question) {
     && /\b(report|scout|assignment)s?\b/i.test(String(question || ''))
     && /\b(all|complete|completed|done|finish|finished|missing|remaining|status)\b/i.test(String(question || ''))
   );
+}
+
+export async function isHubAssistantChannelAllowed(supa, channel, options = {}) {
+  const candidate = String(channel || '').trim();
+  if (!candidate) return false;
+  const configuredChannelId = String(
+    options.channelId ?? env.SLACK_HUB_ASSISTANT_CHANNEL_ID ?? ''
+  ).trim();
+  if (configuredChannelId) return candidate === configuredChannelId;
+
+  // Slack sends an opaque channel ID in app_mention events. ACE/Pit stores the
+  // canonical ID returned by chat.postMessage, so use that durable record when
+  // an explicit runtime ID has not been supplied. The name checks keep local
+  // development and direct unit tests useful without weakening production.
+  if (candidate === ACE_PIT_CHANNEL_NAME || candidate === `#${ACE_PIT_CHANNEL_NAME}`) return true;
+  try {
+    const lookup = await supa
+      .from('ace_pit_slack_threads')
+      .select('channel')
+      .eq('channel', candidate)
+      .limit(1);
+    return !lookup.error && Array.isArray(lookup.data) && lookup.data.length > 0;
+  } catch (error) {
+    console.error('Could not verify 971hub Slack channel', error?.message || error);
+    return false;
+  }
 }
 
 export async function fetchHubStatusSnapshot(supa = getSupabase()) {
