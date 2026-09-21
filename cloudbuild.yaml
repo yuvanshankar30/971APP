@@ -173,7 +173,11 @@ steps:
       # enabled version and the accessor role on the runtime SA above (see
       # issue #309). Do not reuse either token for the other runner, and do
       # not bake either value into an image.
-      - '--set-secrets=SUPABASE_SERVICE_KEY=SUPABASE_SERVICE_KEY:latest,SUPABASE_ANON_KEY=SUPABASE_ANON_KEY:latest,SLACK_BOT_TOKEN=SLACK_BOT_TOKEN:latest,SLACK_SIGNING_SECRET=SLACK_SIGNING_SECRET:latest,TBA_API_KEY=TBA_API_KEY:latest,CRON_NOTIFICATION_TOKEN=CRON_NOTIFICATION_TOKEN:latest,FUSION_RUNNER_TOKEN=FUSION_RUNNER_TOKEN:latest,VISION_RUNNER_TOKEN=VISION_RUNNER_TOKEN:latest'
+      # The 971hub question-answering handler reads GEMINI_API_KEY at runtime.
+      # Before merging this mapping, verify that GEMINI_API_KEY has an enabled
+      # version in the spartanshub project and that the Cloud Run runtime
+      # service account can access it. A missing secret prevents deployment.
+      - '--set-secrets=SUPABASE_SERVICE_KEY=SUPABASE_SERVICE_KEY:latest,SUPABASE_ANON_KEY=SUPABASE_ANON_KEY:latest,SLACK_BOT_TOKEN=SLACK_BOT_TOKEN:latest,SLACK_SIGNING_SECRET=SLACK_SIGNING_SECRET:latest,TBA_API_KEY=TBA_API_KEY:latest,CRON_NOTIFICATION_TOKEN=CRON_NOTIFICATION_TOKEN:latest,FUSION_RUNNER_TOKEN=FUSION_RUNNER_TOKEN:latest,VISION_RUNNER_TOKEN=VISION_RUNNER_TOKEN:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest'
       # ORIGIN is adapter-node's own documented fix for a real gap: "HTTP
       # doesn't give SvelteKit a reliable way to know the URL that is
       # currently being requested" behind a reverse proxy that terminates

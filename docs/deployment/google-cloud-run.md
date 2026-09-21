@@ -15,6 +15,35 @@ API Key" and other infrastructure this app never used). It was moved to the corr
 app-related resource (Cloud Run service, Artifact Registry repos, secrets, Cloud Build
 trigger) and is no longer relevant to this app at all.
 
+## 971hub Gemini runtime secret
+
+The Slack assistant's general-question handler reads `GEMINI_API_KEY` from the
+Cloud Run process environment. `cloudbuild.yaml` maps that variable to the
+`GEMINI_API_KEY` Secret Manager secret at **runtime**; the key must not be
+committed, added to a public environment variable, or baked into the image.
+`/status` does not need the key, which is why it can work while general
+questions fail.
+
+Before merging or deploying the runtime mapping, verify **metadata only** in
+the live `spartanshub` project (do not print or paste the secret value):
+
+```bash
+gcloud secrets describe GEMINI_API_KEY --project=spartanshub
+gcloud secrets versions list GEMINI_API_KEY --project=spartanshub --filter='state=ENABLED'
+gcloud secrets get-iam-policy GEMINI_API_KEY --project=spartanshub
+```
+
+There must be an enabled version and a
+`roles/secretmanager.secretAccessor` binding for the Cloud Run runtime
+service account (currently
+`536793099017-compute@developer.gserviceaccount.com`). A key held only in
+`geminiapi-469220` does not satisfy this deployment. If either prerequisite
+is absent, have an administrator configure it privately in the live project
+before merging; do not access or copy its value through a PR or chat. After
+deployment, mention `@971hub` with a general Hub question in
+`#971app-bot-testing` and check that the reply stays in its thread. Keep
+`/status` as a separate smoke test.
+
 ## Current status
 
 Done and verified live:
