@@ -24,9 +24,8 @@ threaded reply beneath the mention.
   runtime, set it in that runtime's private environment-variable settings.
   Never prefix it with `PUBLIC_` or `VITE_`.
 - `GROQ_MODEL` is optional and defaults to `openai/gpt-oss-20b`.
-- `SLACK_HUB_ASSISTANT_CHANNEL_ID` must be set to the Slack `C...` channel ID
-  for `#971app-bot-testing`. Slack app-mention events contain an ID, not the
-  visible channel name, so the assistant fails closed when this is omitted.
+- The non-secret Slack channel ID for `#971app-bot-testing` is pinned in the
+  assistant module. No channel environment variable is required.
 
 ## Required Slack app configuration
 
