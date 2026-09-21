@@ -1,6 +1,7 @@
 import { env } from '$env/dynamic/private';
 import { getSlackClient, getSupabase } from '$lib/server/971bot.js';
-import { ACE_PIT_CHANNEL_NAME } from '$lib/server/ace_pit_notifications.js';
+
+export const HUB_ASSISTANT_CHANNEL_NAME = '971app-bot-testing';
 
 export const HUB_RECENT_CHANGES = [
   'Drive Team now shows every completed 971 match with Win/Loss/Tie and the final score.',
@@ -80,22 +81,10 @@ export async function isHubAssistantChannelAllowed(supa, channel, options = {}) 
   ).trim();
   if (configuredChannelId) return candidate === configuredChannelId;
 
-  // Slack sends an opaque channel ID in app_mention events. ACE/Pit stores the
-  // canonical ID returned by chat.postMessage, so use that durable record when
-  // an explicit runtime ID has not been supplied. The name checks keep local
-  // development and direct unit tests useful without weakening production.
-  if (candidate === ACE_PIT_CHANNEL_NAME || candidate === `#${ACE_PIT_CHANNEL_NAME}`) return true;
-  try {
-    const lookup = await supa
-      .from('ace_pit_slack_threads')
-      .select('channel')
-      .eq('channel', candidate)
-      .limit(1);
-    return !lookup.error && Array.isArray(lookup.data) && lookup.data.length > 0;
-  } catch (error) {
-    console.error('Could not verify 971hub Slack channel', error?.message || error);
-    return false;
-  }
+  // Slack app_mention events use opaque C... channel IDs. Name matching is
+  // retained only for direct/local calls; production fails closed until the
+  // testing channel's exact ID is configured.
+  return candidate === HUB_ASSISTANT_CHANNEL_NAME || candidate === `#${HUB_ASSISTANT_CHANNEL_NAME}`;
 }
 
 export async function fetchHubStatusSnapshot(supa = getSupabase()) {

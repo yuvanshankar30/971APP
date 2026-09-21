@@ -79,24 +79,13 @@ describe('Slack Hub assistant', () => {
     expect(isTeamReportStatusRequest('Have all reports for team 971 been finished?')).toBe(true);
   });
 
-  it('allows only the configured or durably recorded ACE/Pit channel', async () => {
-    const supa = {
-      from: () => {
-        const query = {
-          select: () => query,
-          eq: (_column, value) => {
-            query.channel = value;
-            return query;
-          },
-          limit: async () => ({ data: query.channel === 'C-ACE' ? [{ channel: 'C-ACE' }] : [], error: null })
-        };
-        return query;
-      }
-    };
-    expect(await isHubAssistantChannelAllowed(supa, 'C-CONFIGURED', { channelId: 'C-CONFIGURED' })).toBe(true);
-    expect(await isHubAssistantChannelAllowed(supa, 'C-OTHER', { channelId: 'C-CONFIGURED' })).toBe(false);
-    expect(await isHubAssistantChannelAllowed(supa, 'C-ACE', { channelId: '' })).toBe(true);
-    expect(await isHubAssistantChannelAllowed(supa, 'C-RANDOM', { channelId: '' })).toBe(false);
+  it('allows only the configured 971app testing channel', async () => {
+    expect(await isHubAssistantChannelAllowed(null, 'C-CONFIGURED', { channelId: 'C-CONFIGURED' })).toBe(true);
+    expect(await isHubAssistantChannelAllowed(null, 'C-OTHER', { channelId: 'C-CONFIGURED' })).toBe(false);
+    expect(await isHubAssistantChannelAllowed(null, '971app-bot-testing', { channelId: '' })).toBe(true);
+    expect(await isHubAssistantChannelAllowed(null, '#971app-bot-testing', { channelId: '' })).toBe(true);
+    expect(await isHubAssistantChannelAllowed(null, '2026-ace-pit-bot', { channelId: '' })).toBe(false);
+    expect(await isHubAssistantChannelAllowed(null, 'C-RANDOM', { channelId: '' })).toBe(false);
   });
 
   it('formats live status and recent changes', () => {
