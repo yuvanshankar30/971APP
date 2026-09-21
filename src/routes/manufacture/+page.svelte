@@ -3577,7 +3577,7 @@
   .cad-action-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.35rem;
+    gap: 0.3rem;
     width: 100%;
     min-width: 0;
   }
@@ -3589,7 +3589,7 @@
     overflow-wrap: anywhere;
     line-height: 1.2;
     font-size: var(--font-xs, 0.75rem);
-    padding: 0.35rem 0.45rem;
+    padding: 0.3rem 0.4rem;
     /* app.css's base .btn pins a fixed `height: var(--btn-height)`. These
        buttons deliberately wrap instead (white-space: normal above), and a
        label that wraps to two lines - "Open Fusion CAM" is the one that
@@ -3597,9 +3597,11 @@
        height, so the text rendered outside the button's own background
        rather than growing it. Height has to become a minimum for wrapping
        to work at all; without this the wrap settings above have nothing to
-       grow into. */
+       grow into. Set explicitly smaller than the shared --btn-height (sized
+       for full-size standalone buttons) - this is a dense 2x2 grid of
+       short labels, not a lone button, so it doesn't need that much room. */
     height: auto;
-    min-height: var(--btn-height);
+    min-height: 1.7rem;
   }
 
   .deep-link-highlight {
@@ -3955,7 +3957,7 @@
   .table .row-actions {
     align-items: flex-start;
     column-gap: var(--gap-2);
-    row-gap: var(--space-3);
+    row-gap: 0.4rem;
   }
 
   .quick-print-modal {
@@ -4012,8 +4014,13 @@
 
   .parts-row {
     cursor: pointer;
-    /* A compact floor; in-flow metadata and action content can grow it. */
-    height: 6rem;
+    /* A floor, not a fixed height - was a fixed 6rem, which forced every
+       row that tall even when its own content (a status word + a short
+       segmented track, a due-date input) needed far less, leaving visibly
+       dead vertical space in every column but Actions. min-height lets a
+       row shrink to whatever its actual content (Actions included, now
+       denser - see .cad-action-grid above) needs instead. */
+    min-height: 4.5rem;
   }
 
   .assigned-user-badge {
