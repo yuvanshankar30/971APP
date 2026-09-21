@@ -1,4 +1,5 @@
 <script>
+  import { tick } from 'svelte';
   import { page } from '$app/stores';
   import { Radio, Users, ArrowLeftCircle, Trophy } from 'lucide-svelte';
   import { MOCK_ELO, MOCK_EVENT } from '$lib/predictionMarketV2Mock.js';
@@ -19,6 +20,25 @@
 
   $: path = $page.url.pathname;
   $: isTabActive = (tab) => (tab.exact ? path === tab.href : path.startsWith(tab.href));
+  $: activeIndex = TABS.findIndex(isTabActive);
+
+  // The underline slides to the active tab rather than just appearing there
+  // - measuring the real tab element (bind:this) instead of hardcoding
+  // widths, since each label is a different length.
+  let tabEls = [];
+  let indicatorLeft = 0;
+  let indicatorWidth = 0;
+
+  async function positionIndicator() {
+    await tick();
+    const el = tabEls[activeIndex];
+    if (el) {
+      indicatorLeft = el.offsetLeft;
+      indicatorWidth = el.offsetWidth;
+    }
+  }
+
+  $: activeIndex, positionIndicator();
 </script>
 
 <svelte:head>
@@ -40,9 +60,10 @@
     </div>
 
     <nav class="pm-tabs" aria-label="Prediction Market sections">
-      {#each TABS as tab}
-        <a href={tab.href} class="pm-tab" class:active={isTabActive(tab)}>{tab.label}</a>
+      {#each TABS as tab, i}
+        <a href={tab.href} class="pm-tab" class:active={isTabActive(tab)} bind:this={tabEls[i]}>{tab.label}</a>
       {/each}
+      <span class="pm-tab-indicator" style="left:{indicatorLeft}px; width:{indicatorWidth}px"></span>
     </nav>
 
     <div class="pm-topbar-right">
@@ -145,6 +166,7 @@
   .pm-event-name { color: var(--pm-muted); }
 
   .pm-tabs {
+    position: relative;
     display: flex;
     gap: 0.25rem;
     flex: 1;
@@ -158,10 +180,20 @@
     font-weight: 500;
     white-space: nowrap;
     border-bottom: 2px solid transparent;
-    transition: color 0.12s ease, border-color 0.12s ease;
+    transition: color 0.12s ease;
   }
   .pm-tab:hover { color: var(--pm-text); }
-  .pm-tab.active { color: var(--pm-accent); border-bottom-color: var(--pm-accent); }
+  .pm-tab.active { color: var(--pm-accent); }
+
+  /* The underline itself - one shared element that slides to whichever tab
+     is active, instead of each tab drawing its own static border. */
+  .pm-tab-indicator {
+    position: absolute;
+    bottom: 0;
+    height: 2px;
+    background: var(--pm-accent);
+    transition: left 0.25s cubic-bezier(0.4, 0, 0.2, 1), width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  }
 
   .pm-topbar-right { display: flex; align-items: center; gap: 0.9rem; flex-shrink: 0; }
   .pm-elo-badge {

@@ -90,6 +90,7 @@
     font-weight: 600;
     border-bottom: 1px solid var(--pm-border);
   }
+  .pm-table th.pm-num { text-align: right; }
   .pm-table td { padding: 0.65rem 1.1rem; border-bottom: 1px solid var(--pm-border-soft); }
   .pm-table tbody tr:last-child td { border-bottom: none; }
   .pm-table tbody tr:hover { background: var(--pm-surface-raised); }

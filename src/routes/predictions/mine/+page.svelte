@@ -24,6 +24,7 @@
         <colgroup>
           <col class="pm-col-match" />
           <col class="pm-col-pick" />
+          <col class="pm-col-num" />
         </colgroup>
         <thead>
           <tr><th>Match</th><th>My Pick</th><th class="pm-num">Model Prob. at Pick</th><th></th></tr>
@@ -53,6 +54,8 @@
       <colgroup>
         <col class="pm-col-match" />
         <col class="pm-col-pick" />
+        <col class="pm-col-pick" />
+        <col class="pm-col-num" />
       </colgroup>
       <thead>
         <tr><th>Match</th><th>My Pick</th><th>Result</th><th class="pm-num">Elo Change</th></tr>
@@ -84,6 +87,7 @@
   .pm-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; table-layout: fixed; }
   .pm-col-match { width: 140px; }
   .pm-col-pick { width: 140px; }
+  .pm-col-num { width: 200px; }
   .pm-table th {
     text-align: left;
     padding: 0.6rem 1.1rem;
@@ -94,6 +98,7 @@
     font-weight: 600;
     border-bottom: 1px solid var(--pm-border);
   }
+  .pm-table th.pm-num { text-align: right; }
   .pm-table td { padding: 0.65rem 1.1rem; border-bottom: 1px solid var(--pm-border-soft); }
   .pm-table tbody tr:last-child td { border-bottom: none; }
   .pm-table tbody tr:hover { background: var(--pm-surface-raised); }
