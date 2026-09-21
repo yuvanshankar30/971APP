@@ -183,7 +183,7 @@
       <button type="button" class="btn btn-secondary btn-sm" on:click={openQuickQueueChoice}>
         <Zap size={14} /> Quick Queue
       </button>
-      <button type="button" class="btn btn-primary btn-sm" on:click={openSendToFusionCam}>
+      <button type="button" class="btn btn-secondary btn-sm" on:click={openSendToFusionCam}>
         <Send size={14} /> Send to Fusion CAM
       </button>
       {#if atcMachineId}
@@ -223,7 +223,7 @@
     <div class="cam-list-toolbar">
       {#if canManage}
         <div class="tab-actions">
-          <button type="button" class="btn btn-primary" on:click={handleAddClick}>
+          <button type="button" class="btn btn-secondary" on:click={handleAddClick}>
             <Plus size={16} /> {toolbarConfig.addLabel}
           </button>
         </div>
@@ -352,7 +352,11 @@
     gap: var(--space-4);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    background: var(--surface-2);
+    /* Every other card/panel on this page (and sitewide - see .card in
+       app.css) sits on --surface-1, one step darker than --surface-2.
+       This bar used the lighter of the two, standing out as a visibly
+       brighter box against the rest of the page instead of matching. */
+    background: var(--surface-1);
     margin: var(--space-4) 0 var(--space-6);
     padding: 0 var(--space-3);
     overflow-x: auto;
@@ -373,6 +377,20 @@
     gap: var(--space-1);
     flex-shrink: 0;
     margin: 0;
+    /* app.css has its own global, unscoped ".tab-nav" rule (a different,
+       unrelated pill-tab pattern used elsewhere) that this page's own
+       class name collides with - it drew its own border/background/
+       shadow/padding around just the tab buttons, on top of this bar's
+       own border, which is what actually looked like two stacked/
+       overlapping boxes rather than one merged bar. Reset every property
+       that rule sets, explicitly, since this rule not setting a property
+       at all just lets that global one show through underneath. */
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+    flex-wrap: nowrap;
   }
   .tab-nav button {
     display: flex;
@@ -395,6 +413,7 @@
   }
   .tab-nav button.active {
     background: none;
+    box-shadow: none;
     color: var(--accent-strong);
     font-weight: 700;
     border-bottom-color: var(--accent);

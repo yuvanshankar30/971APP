@@ -1182,7 +1182,7 @@
         </div>
       </div>
       <div class="cam-list-actions">
-        <button class="btn btn-primary" disabled={submitting} on:click={handleAddPart}>{submitting ? 'Adding...' : (quickQueueMode ? 'Add & Continue to Queue' : 'Add Part')}</button>
+        <button class="btn btn-secondary" disabled={submitting} on:click={handleAddPart}>{submitting ? 'Adding...' : (quickQueueMode ? 'Add & Continue to Queue' : 'Add Part')}</button>
         <button type="button" class="btn btn-secondary" disabled={submitting} on:click={handleCancelAddPart}>Cancel</button>
       </div>
     </div>
@@ -1558,7 +1558,7 @@
         <button class="btn btn-ghost" type="button" on:click={closeQueuePicker}>Cancel</button>
         {#if queuePickerCategoryId}
           {@const group = stockGroups.find((g) => g.categoryId === queuePickerCategoryId)}
-          <button class="btn btn-primary" type="button" disabled={!group || queueing[queuePickerCategoryId] || !!queueValidationError(group)} on:click={() => openQueueModal(group)}>
+          <button class="btn btn-secondary" type="button" disabled={!group || queueing[queuePickerCategoryId] || !!queueValidationError(group)} on:click={() => openQueueModal(group)}>
             <Send size={14} /> Queue {categoryQueueModes[queuePickerCategoryId] === 'grouped' ? 'Grouped ' : ''}CAM Job
           </button>
         {/if}
@@ -1617,7 +1617,7 @@
       </div>
       <div class="modal-footer-actions">
         <button class="btn btn-ghost" type="button" on:click={closeAttachStepModal}>Cancel</button>
-        <button class="btn btn-primary" type="button" disabled={attachingStep || !attachStepFile} on:click={saveAttachStep}>
+        <button class="btn btn-secondary" type="button" disabled={attachingStep || !attachStepFile} on:click={saveAttachStep}>
           <Upload size={14} /> {attachingStep ? 'Saving...' : 'Save'}
         </button>
       </div>
@@ -1708,7 +1708,7 @@
       </div>
       <div class="modal-footer-actions">
         <button class="btn btn-ghost" type="button" on:click={closeQueueModal}>Cancel</button>
-        <button class="btn btn-primary" type="button" disabled={queueSubmitting} on:click={confirmQueue}>
+        <button class="btn btn-secondary" type="button" disabled={queueSubmitting} on:click={confirmQueue}>
           <Send size={14} /> {queueSubmitting ? 'Queueing…' : 'Queue Job'}
         </button>
       </div>

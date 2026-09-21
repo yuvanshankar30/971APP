@@ -438,7 +438,7 @@
         </div>
       </div>
       <div class="cam-list-actions">
-        <button class="btn btn-primary" disabled={submitting} on:click={handleAdd}>{submitting ? 'Adding...' : 'Add Turning Stock'}</button>
+        <button class="btn btn-secondary" disabled={submitting} on:click={handleAdd}>{submitting ? 'Adding...' : 'Add Turning Stock'}</button>
         <button type="button" class="btn btn-secondary" disabled={submitting} on:click={cancelAdd}>Cancel</button>
       </div>
     </div>
@@ -570,7 +570,7 @@
       </div>
       <div class="modal-footer-actions">
         <button class="btn btn-ghost" type="button" on:click={closeAttachStepModal}>Cancel</button>
-        <button class="btn btn-primary" type="button" disabled={attachingStep || !attachStepFile} on:click={saveAttachStep}><Upload size={14} /> {attachingStep ? 'Saving...' : 'Save'}</button>
+        <button class="btn btn-secondary" type="button" disabled={attachingStep || !attachStepFile} on:click={saveAttachStep}><Upload size={14} /> {attachingStep ? 'Saving...' : 'Save'}</button>
       </div>
     </div>
   </div>
@@ -636,7 +636,7 @@
         <button class="btn btn-ghost" type="button" on:click={closeQueuePicker}>Cancel</button>
         {#if queuedTurningPartId}
           {@const part = turningParts.find((item) => item.id === queuedTurningPartId)}
-          <button class="btn btn-primary" type="button" disabled={!part || !turningMachineSelections[part.id]} on:click={() => handleQueue(part)}><Send size={14} /> Queue CAM Job</button>
+          <button class="btn btn-secondary" type="button" disabled={!part || !turningMachineSelections[part.id]} on:click={() => handleQueue(part)}><Send size={14} /> Queue CAM Job</button>
         {/if}
       </div>
     </div>
@@ -705,7 +705,7 @@
       </div>
       <div class="modal-footer-actions">
         <button class="btn btn-ghost" type="button" on:click={closeQueueModal}>Cancel</button>
-        <button class="btn btn-primary" type="button" disabled={queueSubmitting} on:click={confirmQueue}><Send size={14} /> {queueSubmitting ? 'Queueing...' : 'Queue Job'}</button>
+        <button class="btn btn-secondary" type="button" disabled={queueSubmitting} on:click={confirmQueue}><Send size={14} /> {queueSubmitting ? 'Queueing...' : 'Queue Job'}</button>
       </div>
     </div>
   </div>

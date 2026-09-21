@@ -737,7 +737,7 @@
       </div>
       <div class="modal-footer-actions">
         <button class="btn btn-ghost" type="button" on:click={closePostModal}>Cancel</button>
-        <button class="btn btn-primary" type="button" disabled={posting} on:click={confirmPost}>
+        <button class="btn btn-secondary" type="button" disabled={posting} on:click={confirmPost}>
           <Upload size={14} /> {posting ? 'Posting…' : 'Post'}
         </button>
       </div>
