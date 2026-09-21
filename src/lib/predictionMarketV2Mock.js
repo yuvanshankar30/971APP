@@ -94,8 +94,3 @@ export const MOCK_ALLIANCE_DRAFT = {
     { pick_round: 1, captain: '254', predicted_pick: '1868', locked: false }
   ]
 };
-
-export const MOCK_FRIENDS = {
-  accepted: [{ user_id: 'u1', name: 'Bigadult27', elo: 1284 }],
-  pending: [{ user_id: 'u6', name: 'ScoutMaster', direction: 'incoming' }]
-};

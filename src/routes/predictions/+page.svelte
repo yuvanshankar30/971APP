@@ -1,5 +1,6 @@
 <script>
-  import { Flame, Trophy, Clock, Target, CheckCircle2, Radio } from 'lucide-svelte';
+  import { onMount } from 'svelte';
+  import { Flame, Trophy, Clock, Target, CheckCircle2, Radio, Pencil, X } from 'lucide-svelte';
   import { MOCK_ELO, MOCK_MATCHES, MOCK_MY_PICKS, MOCK_LIVE_FEED } from '$lib/predictionMarketV2Mock.js';
 
   // TODO(backend): GET /api/prediction-market-v2/dashboard?event_key=...
@@ -16,6 +17,67 @@
 
   function reveal(node, { delay = 0 }) {
     return { delay, duration: 260, css: (t) => `opacity: ${t}; transform: translateY(${(1 - t) * 6}px)` };
+  }
+
+  // Livestream embed - no backend field for this yet (the dashboard
+  // contract doesn't carry a stream URL per event), so this is stored
+  // per-browser like recentTabs.js does elsewhere in the app. Whoever is
+  // watching pastes the event's real YouTube link once and it embeds here
+  // for the rest of the session.
+  const STREAM_STORAGE_KEY = 'spartanshub_pm_stream_url';
+  let streamInput = '';
+  let streamEmbedId = null;
+  let editingStream = false;
+
+  function extractYouTubeId(raw) {
+    const trimmed = (raw || '').trim();
+    if (!trimmed) return null;
+    if (/^[\w-]{11}$/.test(trimmed)) return trimmed;
+    try {
+      const url = new URL(trimmed);
+      if (url.hostname.includes('youtu.be')) return url.pathname.slice(1) || null;
+      if (url.hostname.includes('youtube.com')) {
+        if (url.searchParams.get('v')) return url.searchParams.get('v');
+        const match = url.pathname.match(/\/(?:live|embed|shorts)\/([\w-]{11})/);
+        if (match) return match[1];
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  }
+
+  onMount(() => {
+    try {
+      const saved = localStorage.getItem(STREAM_STORAGE_KEY);
+      if (saved) {
+        streamInput = saved;
+        streamEmbedId = extractYouTubeId(saved);
+      }
+    } catch {
+      // localStorage can throw in a private window - the panel just falls
+      // back to "no stream set" for that viewer.
+    }
+  });
+
+  let streamError = '';
+  function saveStream() {
+    const id = extractYouTubeId(streamInput);
+    if (!id) {
+      streamError = "That doesn't look like a YouTube video/live link.";
+      return;
+    }
+    streamError = '';
+    streamEmbedId = id;
+    editingStream = false;
+    try { localStorage.setItem(STREAM_STORAGE_KEY, streamInput.trim()); } catch {}
+  }
+
+  function clearStream() {
+    streamEmbedId = null;
+    streamInput = '';
+    streamError = '';
+    try { localStorage.removeItem(STREAM_STORAGE_KEY); } catch {}
   }
 </script>
 
@@ -107,10 +169,33 @@
     <section class="pm-panel pm-stream-panel">
       <div class="pm-panel-header">
         <h2><Radio size={14} class="pm-pulse" /> Event Stream</h2>
+        <button type="button" class="pm-link pm-stream-toggle" on:click={() => (editingStream = !editingStream)}>
+          {#if editingStream}<X size={12} /> Cancel{:else}<Pencil size={12} /> {streamEmbedId ? 'Edit' : 'Set link'}{/if}
+        </button>
       </div>
-      <div class="pm-stream-placeholder">
-        <span class="pm-live-dot"></span>
-        <p>Live stream embed lands here once an event source is wired up.</p>
+      {#if editingStream}
+        <form class="pm-stream-form" on:submit|preventDefault={saveStream}>
+          <input type="text" placeholder="Paste the event's YouTube link" bind:value={streamInput} />
+          <button type="submit" class="pm-btn-accent">Save</button>
+          {#if streamEmbedId}
+            <button type="button" class="pm-stream-remove" on:click={clearStream}>Remove</button>
+          {/if}
+        </form>
+        {#if streamError}<p class="pm-stream-error">{streamError}</p>{/if}
+      {/if}
+      <div class="pm-stream-placeholder" class:pm-stream-live={streamEmbedId}>
+        {#if streamEmbedId}
+          <iframe
+            class="pm-stream-iframe"
+            src="https://www.youtube.com/embed/{streamEmbedId}?autoplay=0&rel=0"
+            title="Event livestream"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowfullscreen
+          ></iframe>
+        {:else}
+          <span class="pm-live-dot"></span>
+          <p>No stream set for this event yet - paste a YouTube link above to watch here.</p>
+        {/if}
       </div>
       <div class="pm-reactions">
         {#each ['🔥', '👏', '🤖', '❤️', '😮', '🎉'] as emoji}
@@ -253,6 +338,44 @@
 
   /* Live/streaming rail */
   .pm-stream-panel { display: flex; flex-direction: column; }
+  .pm-stream-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font: inherit;
+  }
+  .pm-stream-form {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.75rem 1.1rem;
+    border-bottom: 1px solid var(--pm-border);
+    flex-wrap: wrap;
+  }
+  .pm-stream-form input {
+    flex: 1;
+    min-width: 160px;
+    padding: 0.45rem 0.6rem;
+    background: var(--pm-surface-raised);
+    border: 1px solid var(--pm-border);
+    color: var(--pm-text);
+    font: inherit;
+    font-family: var(--pm-font-mono);
+    font-size: 0.8rem;
+  }
+  .pm-stream-form input:focus { outline: none; border-color: var(--pm-accent); }
+  .pm-stream-remove {
+    padding: 0.45rem 0.75rem;
+    background: none;
+    border: 1px solid var(--pm-border);
+    color: var(--pm-muted);
+    font-size: 0.78rem;
+    cursor: pointer;
+  }
+  .pm-stream-remove:hover { border-color: var(--pm-red); color: var(--pm-red); }
+  .pm-stream-error { margin: 0; padding: 0 1.1rem 0.75rem; color: var(--pm-red); font-size: 0.78rem; }
   .pm-stream-placeholder {
     aspect-ratio: 16 / 9;
     min-height: 720px;
@@ -267,6 +390,8 @@
     text-align: center;
     padding: 1.5rem;
   }
+  .pm-stream-placeholder.pm-stream-live { padding: 0; }
+  .pm-stream-iframe { width: 100%; height: 100%; border: 0; display: block; }
   .pm-stream-placeholder p { margin: 0; font-size: 0.9rem; max-width: 320px; }
   .pm-live-dot {
     width: 8px;

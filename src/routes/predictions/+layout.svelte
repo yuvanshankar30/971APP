@@ -1,7 +1,7 @@
 <script>
   import { tick } from 'svelte';
   import { page } from '$app/stores';
-  import { Radio, Users, ArrowLeftCircle, Trophy } from 'lucide-svelte';
+  import { Radio, ArrowLeftCircle, Trophy } from 'lucide-svelte';
   import { MOCK_ELO, MOCK_EVENT } from '$lib/predictionMarketV2Mock.js';
 
   // TODO(backend): replace with a real fetch of hub_settings-scoped events
@@ -71,7 +71,6 @@
         <Trophy size={13} />
         {elo.elo} Elo
       </span>
-      <a href="/predictions/friends" class="pm-icon-link" title="Friends"><Users size={16} /> Friends</a>
       <a href="/" class="pm-icon-link pm-return-link" title="Return to Spartans Hub"><ArrowLeftCircle size={16} /> Return to SpartansHub</a>
     </div>
   </header>
