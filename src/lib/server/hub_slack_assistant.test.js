@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  askGroqAboutHub,
+  askGeminiAboutHub,
   fetchTeamReportSnapshot,
   formatHubStatus,
   formatTeamReportStatus,
@@ -96,20 +96,30 @@ describe('Slack Hub assistant', () => {
     expect(text).toContain('*Most recent changes:*');
   });
 
-  it('calls Groq without exposing its key in the request body and sanitizes mass mentions', async () => {
+  it('calls Gemini without exposing its key in the request body and sanitizes mass mentions', async () => {
     const fetchImpl = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ choices: [{ message: { content: '<!channel> Open Match Scouting.' } }] })
+      json: async () => ({ candidates: [{ content: { parts: [{ text: '<!channel> Open ' }, { text: 'Match Scouting.' }] } }] })
     });
-    const answer = await askGroqAboutHub('Where do I scout?', snapshot, { apiKey: 'test-secret', fetchImpl });
+    const answer = await askGeminiAboutHub('Where do I scout?', snapshot, { apiKey: 'test-secret', fetchImpl });
     const request = fetchImpl.mock.calls[0][1];
-    expect(request.headers.Authorization).toBe('Bearer test-secret');
+    expect(fetchImpl.mock.calls[0][0]).toBe('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent');
+    expect(request.headers['x-goog-api-key']).toBe('test-secret');
     expect(request.body).not.toContain('test-secret');
     expect(answer).toBe('@channel (mention suppressed) Open Match Scouting.');
     expect(request.body).toContain('dead, disabled');
+    expect(JSON.parse(request.body).contents[0].parts[0].text).toBe('Where do I scout?');
   });
 
-  it('reports assignment completion and submitted entries for a team without Groq', async () => {
+  it('rejects a missing Gemini key and an empty model response', async () => {
+    await expect(askGeminiAboutHub('hello', snapshot, { apiKey: '' })).rejects.toThrow('GEMINI_API_KEY');
+    await expect(askGeminiAboutHub('hello', snapshot, {
+      apiKey: 'test-secret',
+      fetchImpl: async () => ({ ok: true, json: async () => ({ candidates: [] }) })
+    })).rejects.toThrow('Gemini returned an empty answer');
+  });
+
+  it('reports assignment completion and submitted entries for a team without Gemini', async () => {
     const teamStatus = await fetchTeamReportSnapshot(supabaseForTeamStatus(), '971', '2026cc');
     expect(teamStatus).toMatchObject({
       totalAssignments: 3,
@@ -125,7 +135,7 @@ describe('Slack Hub assistant', () => {
     expect(text).toContain('2026cc_qm2');
   });
 
-  it('answers status in the mention thread without calling Groq', async () => {
+  it('answers status in the mention thread without calling Gemini', async () => {
     const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
     const result = await handleHubAppMention({ channel: 'C1', ts: '1.0', text: '<@U971> status' }, {
       supa: supabaseForStatus(),
@@ -138,7 +148,7 @@ describe('Slack Hub assistant', () => {
     expect(result.ok).toBe(true);
   });
 
-  it('answers team report completion from live tables without calling Groq', async () => {
+  it('answers team report completion from live tables without calling Gemini', async () => {
     const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
     const fetchImpl = vi.fn();
     await handleHubAppMention({ channel: 'C1', ts: '1.0', text: '<@U971> have all reports for team 971 been finished?' }, {
@@ -149,6 +159,19 @@ describe('Slack Hub assistant', () => {
     });
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(postMessage.mock.calls[0][0].text).toContain('2/3 complete');
+  });
+
+  it('explains when Gemini is not configured instead of implying a transient outage', async () => {
+    const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
+    const fetchImpl = vi.fn();
+    await handleHubAppMention({ channel: 'C1', ts: '1.0', text: '<@U971> where is Match Scouting?' }, {
+      supa: supabaseForStatus(),
+      slack: { chat: { postMessage } },
+      apiKey: '',
+      fetchImpl
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(postMessage.mock.calls[0][0].text).toContain('not configured on this server');
   });
 
   it('keeps replies inside an existing Slack thread for either app display name', async () => {

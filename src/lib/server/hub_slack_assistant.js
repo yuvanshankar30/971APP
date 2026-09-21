@@ -183,39 +183,38 @@ export function formatTeamReportStatus(snapshot) {
   return lines.join('\n');
 }
 
-export async function askGroqAboutHub(question, snapshot, options = {}) {
-  const apiKey = options.apiKey || env.GROQ_API_KEY;
-  if (!apiKey) throw new Error('GROQ_API_KEY is not configured');
+export async function askGeminiAboutHub(question, snapshot, options = {}) {
+  const apiKey = options.apiKey ?? env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error('GEMINI_API_KEY is not configured');
+  const model = options.model ?? env.GEMINI_MODEL ?? 'gemini-2.5-flash-lite';
   const fetchImpl = options.fetchImpl || fetch;
   const controller = new AbortController();
-  // Slack expects Events API requests to be acknowledged in roughly three
-  // seconds. Leave time for the status snapshot and chat.postMessage call.
-  const timeout = setTimeout(() => controller.abort(), options.timeoutMs || 1500);
+  // A Gemini request can outlast Slack's three-second acknowledgement window.
+  // The durable event receipt prevents Slack's retry from posting a second reply.
+  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 8000);
   try {
-    const response = await fetchImpl('https://api.groq.com/openai/v1/chat/completions', {
+    const response = await fetchImpl(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        'x-goog-api-key': apiKey,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: options.model || env.GROQ_MODEL || 'openai/gpt-oss-20b',
-        temperature: 0.2,
-        max_completion_tokens: 450,
-        messages: [
-          {
-            role: 'system',
-            content: `You are 971hub, the concise Slack assistant for Spartans Hub. Answer any question about Hub features, routes, and the supplied live status, but only from the evidence below. If the answer is not present, say you do not know and direct the user to the relevant Hub page or an administrator. Never imply that a report or assignment is complete unless the live data explicitly proves it. Use Slack markdown, no tables, and never generate @channel, @here, or @everyone mentions.\n\nHUB FEATURE CATALOG:\n${HUB_FEATURE_CATALOG}\n\nRECENT CHANGES:\n${HUB_RECENT_CHANGES.join('\n')}\n\nLIVE SNAPSHOT:\n${JSON.stringify(snapshot)}`
-          },
-          { role: 'user', content: safeSlackText(question).slice(0, 1200) }
-        ]
+        system_instruction: {
+          parts: [{ text: `You are 971hub, the concise Slack assistant for Spartans Hub. Answer any question about Hub features, routes, and the supplied live status, but only from the evidence below. If the answer is not present, say you do not know and direct the user to the relevant Hub page or an administrator. Never imply that a report or assignment is complete unless the live data explicitly proves it. Use Slack markdown, no tables, and never generate @channel, @here, or @everyone mentions.\n\nHUB FEATURE CATALOG:\n${HUB_FEATURE_CATALOG}\n\nRECENT CHANGES:\n${HUB_RECENT_CHANGES.join('\n')}\n\nLIVE SNAPSHOT:\n${JSON.stringify(snapshot)}` }]
+        },
+        contents: [{ role: 'user', parts: [{ text: safeSlackText(question).slice(0, 1200) }] }],
+        generationConfig: { maxOutputTokens: 450 }
       }),
       signal: controller.signal
     });
     const payload = await response.json().catch(() => null);
-    if (!response.ok) throw new Error(payload?.error?.message || `Groq request failed (${response.status})`);
-    const answer = safeSlackText(payload?.choices?.[0]?.message?.content);
-    if (!answer) throw new Error('Groq returned an empty answer');
+    if (!response.ok) throw new Error(`Gemini request failed (${response.status})`);
+    const answer = safeSlackText((payload?.candidates?.[0]?.content?.parts || [])
+      .filter((part) => !part.thought && typeof part.text === 'string')
+      .map((part) => part.text)
+      .join(''));
+    if (!answer) throw new Error('Gemini returned an empty answer');
     return answer;
   } finally {
     clearTimeout(timeout);
@@ -240,10 +239,12 @@ export async function handleHubAppMention(event, dependencies = {}) {
     text = formatTeamReportStatus(teamSnapshot);
   } else {
     try {
-      text = await askGroqAboutHub(question, snapshot, dependencies);
+      text = await askGeminiAboutHub(question, snapshot, dependencies);
     } catch (error) {
-      console.error('Groq Hub assistant failed', error?.message || error);
-      text = 'I could not reach the Hub question-answering service. Try `@971hub /status`, or ask again shortly.';
+      console.error('Gemini Hub assistant failed', error?.message || error);
+      text = error?.message === 'GEMINI_API_KEY is not configured'
+        ? 'AI questions are not configured on this server yet. `@971hub /status` still works.'
+        : 'I could not reach the Hub question-answering service. Try `@971hub /status`, or ask again shortly.';
     }
   }
   const response = await slack.chat.postMessage({
