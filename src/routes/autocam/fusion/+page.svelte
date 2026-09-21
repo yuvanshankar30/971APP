@@ -5,7 +5,7 @@
   import { supabase } from '$lib/supabase.js';
   import { userStore, loadUserFromUUID } from '$lib/stores/user.js';
   import { canManageCamProfiles } from '$lib/permissions.js';
-  import { Layers, Package, Box, ListChecks, SlidersHorizontal, BookOpen, HelpCircle, Send, RotateCcw, Zap, X, Wrench, Plus, Filter } from 'lucide-svelte';
+  import { Layers, Package, Box, ListChecks, SlidersHorizontal, BookOpen, HelpCircle, Send, RotateCcw, Zap, X, Wrench, Plus } from 'lucide-svelte';
   import PartsTab from './PartsTab.svelte';
   import BoxTubesTab from './BoxTubesTab.svelte';
   import JobQueueTab from './JobQueueTab.svelte';
@@ -230,7 +230,7 @@
       {/if}
       <div class="filters tab-filters">
         <div class="form-group">
-          <label class="form-label" for="fusion-tab-search">Search</label>
+          <label class="form-label sr-only" for="fusion-tab-search">Search</label>
           <input
             id="fusion-tab-search"
             type="search"
@@ -241,13 +241,13 @@
           />
         </div>
         <div class="form-group">
-          <label class="form-label" for="fusion-tab-project-filter"><Filter size={14} /> Project</label>
+          <label class="form-label sr-only" for="fusion-tab-project-filter">Project</label>
           <select id="fusion-tab-project-filter" class="form-select" bind:value={filterProject}>
             <option value="">All Projects</option>
             {#each projectIds as pid}<option value={pid}>{pid}</option>{/each}
           </select>
         </div>
-        <SeasonFilter options={seasonOptions} bind:value={filterSeason} />
+        <SeasonFilter options={seasonOptions} bind:value={filterSeason} hideLabel />
       </div>
     </div>
   {/if}
