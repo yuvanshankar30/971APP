@@ -2271,31 +2271,39 @@ textarea:focus,
 
 [data-theme^="theme-"] .brand-mark { background-image:url('/spartan-helmet-dark.png'); }
 
-/* Modern dark: warm charcoal, brighter gold, dark text on gold controls */
+/* Modern dark: neutral charcoal (not warm/yellow-tinted), brighter gold as
+   the one deliberate accent, dark text on gold controls. Every neutral
+   below (surfaces, borders, text) previously carried a warm brown/amber
+   cast - R notably higher than G and B on every one of them (e.g. the old
+   background #131109 or border #373226) - which read as "dark + yellow"
+   rather than a clean dark charcoal. Replaced with genuinely neutral grays
+   (R=G=B, or within a point) so gold is the only hue in the theme. */
 :root[data-theme="modern-dark"] {
   color-scheme: dark;
-  --color-white: #1c1913;
-  --color-black: #ece7db;
-  --neutral-100: #242019;
-  --neutral-300: #373226;
-  --neutral-500: #a49c8a;
-  --neutral-800: #ece7db;
+  --color-white: #141416;
+  /* Was #ece7db, then #d8d6d1 - still reading as too bright/too warm. A
+     neutral (not warm-tinted) light gray, dimmed further from pure white. */
+  --color-black: #cfcfd2;
+  --neutral-100: #1c1c1f;
+  --neutral-300: #2f2f33;
+  --neutral-500: #96969c;
+  --neutral-800: #cfcfd2;
 
-  --primary: #1c1913;
-  --secondary: #ece7db;
-  --background: #131109;
-  --card: #1c1913;
-  --surface-1: #1c1913;
-  --surface-2: #242019;
-  --surface-3: #2d2820;
-  --text: #ece7db;
-  --text-secondary: #a49c8a;
-  --text-muted: #a49c8a;
-  --muted: #a49c8a;
-  --muted-bg: #242019;
-  --border: #373226;
-  --divider: #373226;
-  --on-primary: #1c1913;
+  --primary: #141416;
+  --secondary: #cfcfd2;
+  --background: #0c0c0d;
+  --card: #141416;
+  --surface-1: #141416;
+  --surface-2: #1c1c1f;
+  --surface-3: #242427;
+  --text: #cfcfd2;
+  --text-secondary: #96969c;
+  --text-muted: #96969c;
+  --muted: #96969c;
+  --muted-bg: #1c1c1f;
+  --border: #2f2f33;
+  --divider: #2f2f33;
+  --on-primary: #141416;
 
   --brand-gold-base: #e9b830;
   --brand-gold-strong: #f0cd6a;
