@@ -1,8 +1,8 @@
 <script>
   import { onMount } from 'svelte';
-  import { TrendingUp, Calendar, MapPin, Sparkles, RefreshCw } from 'lucide-svelte';
+  import { TrendingUp, Calendar, MapPin, Sparkles, RefreshCw, Target } from 'lucide-svelte';
   import { fetchActiveScoutingEventKey, fetchAvailableScoutingEvents } from '$lib/scoutingEvent.js';
-  import { computeEventEpa, winProbability, calibratedScale } from '$lib/epaModel.js';
+  import { computeEventEpa, winProbability, fitEpaParameters, evaluateEpaModel } from '$lib/epaModel.js';
   import SeasonFilter from '$lib/components/SeasonFilter.svelte';
 
   // See GitHub issue #854: a Competition tab that computes our own EPA
@@ -32,8 +32,10 @@
   let matches = [];
   let oprRows = [];
   let epaByTeam = new Map();
+  let epaFit = null;
+  let epaEvaluation = null;
 
-  let activeSubtab = 'rankings'; // 'rankings' | 'events' | 'predict'
+  let activeSubtab = 'rankings'; // 'rankings' | 'events' | 'predict' | 'accuracy'
 
   let predictMatchKey = '';
   let predictRedKey = '';
@@ -46,6 +48,7 @@
   const teamNumber = (key) => String(key || '').replace(/^frc/i, '');
   const points = (value) => (Number.isFinite(value) ? value.toFixed(1) : '—');
   const pct = (value) => (Number.isFinite(value) ? `${Math.round(value * 100)}%` : '—');
+  const metric = (value, digits = 3) => (Number.isFinite(value) ? value.toFixed(digits) : '—');
 
   async function fetchJson(url, options) {
     const response = await fetch(url, options);
@@ -70,7 +73,19 @@
       oprRows = oprData || [];
       eventInfo = infoData;
       eventTeams = teamsData || [];
-      epaByTeam = computeEventEpa(matches);
+      // Two-step on purpose: a first pass measures this event's own scoring
+      // noise (residualStd), which seeds the parameter search; the search
+      // then back-tests candidate settings against the matches that have
+      // already been played and returns the pair that would actually have
+      // predicted them best. Ratings are then rebuilt with that fitted
+      // learning rate instead of a constant picked by feel.
+      const probeEpa = computeEventEpa(matches);
+      epaFit = fitEpaParameters(matches, { residualStd: probeEpa.residualStd });
+      epaByTeam = epaFit.tuned ? computeEventEpa(matches, { k: epaFit.k }) : probeEpa;
+      // This is a genuine record of what the model could have known at the
+      // time: evaluateEpaModel walks matches chronologically and predicts a
+      // match before it folds that result into the ratings.
+      epaEvaluation = evaluateEpaModel(matches, { k: epaFit.k, scale: epaFit.scale });
       if (!predictMatchKey) {
         const upcoming = matches.find((m) => !m.actual_time) || matches[matches.length - 1];
         if (upcoming) selectMatchForPredict(upcoming.key);
@@ -80,6 +95,8 @@
       matches = [];
       oprRows = [];
       epaByTeam = new Map();
+      epaFit = null;
+      epaEvaluation = null;
     } finally {
       loading = false;
     }
@@ -108,10 +125,11 @@
 
   $: predictRedTotal = predictionTeams ? allianceEpaTotal(predictionTeams.red) : null;
   $: predictBlueTotal = predictionTeams ? allianceEpaTotal(predictionTeams.blue) : null;
-  // Calibrated per-event from this event's own measured scoring variance
-  // (epaModel's residualStd) rather than a fixed guess - see calibratedScale.
-  $: predictRedWinProb = (predictRedTotal != null && predictBlueTotal != null)
-    ? winProbability(predictRedTotal, predictBlueTotal, calibratedScale(epaByTeam.residualStd))
+  // Scale comes from the back-test above (fitEpaParameters), so it is the
+  // value that actually predicted this event's played matches best - not a
+  // constant, and not just a guess from scoring variance alone.
+  $: predictRedWinProb = (predictRedTotal != null && predictBlueTotal != null && epaFit)
+    ? winProbability(predictRedTotal, predictBlueTotal, epaFit.scale)
     : null;
 
   $: rankingRows = oprRows
@@ -168,6 +186,7 @@
       <button class="subtab" class:active={activeSubtab === 'rankings'} on:click={() => activeSubtab = 'rankings'}><TrendingUp size={14} /> Rankings</button>
       <button class="subtab" class:active={activeSubtab === 'events'} on:click={() => activeSubtab = 'events'}><Calendar size={14} /> Events</button>
       <button class="subtab" class:active={activeSubtab === 'predict'} on:click={() => activeSubtab = 'predict'}><Sparkles size={14} /> Predict</button>
+      <button class="subtab" class:active={activeSubtab === 'accuracy'} on:click={() => activeSubtab = 'accuracy'}><Target size={14} /> Accuracy</button>
     </div>
 
     {#if activeSubtab === 'rankings'}
@@ -207,7 +226,7 @@
         </div>
         <p class="tba-muted">Rankings and Predict both use this event. Switch events with the picker above.</p>
       </div>
-    {:else}
+    {:else if activeSubtab === 'predict'}
       <div class="predict-card">
         <div class="form-group">
           <label class="form-label" for="epa-predict-match">Match</label>
@@ -254,12 +273,61 @@
               <span class="predict-prob">{pct(1 - predictRedWinProb)} to win</span>
             </div>
           </div>
+          {#if epaFit?.tuned}
+            <p class="predict-calibration tba-muted">
+              Tuned on this event's {epaFit.samples} played matches - it called
+              {pct(epaFit.accuracy)} of them correctly (Brier {epaFit.brier.toFixed(3)};
+              a coin flip scores 0.250). Learning rate {epaFit.k}, scale {Math.round(epaFit.scale)}.
+            </p>
+          {:else}
+            <p class="predict-calibration tba-muted">
+              Using default settings - this event has not played enough matches yet
+              to back-test the model against.
+            </p>
+          {/if}
         {:else if predictionTeams}
           <p class="tba-muted">Not enough EPA data yet for one or both alliances - they may not have played a match.</p>
         {:else}
           <p class="tba-muted">Pick a match or two teams to see a prediction.</p>
         {/if}
       </div>
+    {:else}
+      <section class="accuracy-section" aria-labelledby="accuracy-title">
+        <div class="accuracy-heading">
+          <div>
+            <h2 id="accuracy-title">Model Record</h2>
+            <p>Walk-forward results against official The Blue Alliance scores for {eventInfo?.name || resolvedEventKey}. Each match is predicted using only earlier event results.</p>
+          </div>
+          <span class="accuracy-source">Official results: TBA</span>
+        </div>
+        {#if !epaEvaluation?.samples}
+          <div class="empty-state">The model needs more completed matches before it can produce a meaningful record.</div>
+        {:else}
+          <div class="accuracy-metrics">
+            <div class="accuracy-metric">
+              <span>Winner calls</span>
+              <strong>{pct(epaEvaluation.accuracy)}</strong>
+              <small>{epaEvaluation.samples} evaluated matches</small>
+            </div>
+            <div class="accuracy-metric">
+              <span>Brier score</span>
+              <strong>{metric(epaEvaluation.brier)}</strong>
+              <small>Lower is better; coin flip is 0.250</small>
+            </div>
+            <div class="accuracy-metric">
+              <span>Log loss</span>
+              <strong>{metric(epaEvaluation.logLoss)}</strong>
+              <small>Lower rewards well-calibrated confidence</small>
+            </div>
+            <div class="accuracy-metric">
+              <span>Confidence margin</span>
+              <strong>{metric(epaEvaluation.brierStdErr)}</strong>
+              <small>Estimated uncertainty in the Brier score</small>
+            </div>
+          </div>
+          <p class="accuracy-note">This updates as official Chezy scores arrive. Warm-up matches are excluded because every team begins at the same baseline, making those calls mechanically 50/50.</p>
+        {/if}
+      </section>
     {/if}
   {/if}
 </div>
@@ -321,6 +389,7 @@
   .manual-teams { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
 
   .predict-result { display: grid; grid-template-columns: 1fr auto 1fr; gap: var(--space-4); align-items: center; }
+  .predict-calibration { margin: 0; font-size: 0.78rem; line-height: 1.5; }
   .predict-alliance { display: flex; flex-direction: column; align-items: center; gap: var(--space-1); padding: var(--space-4); }
   .predict-alliance.red { background: var(--red-soft); }
   .predict-alliance.blue { background: var(--blue-soft, #e8f1ff); }
@@ -330,11 +399,24 @@
   .predict-prob { font-size: 0.8rem; color: var(--text-secondary); }
   .predict-vs { color: var(--text-muted); font-weight: 700; }
 
+  .accuracy-section { display: grid; gap: var(--space-4); }
+  .accuracy-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-4); flex-wrap: wrap; }
+  .accuracy-heading h2 { margin: 0; font-size: var(--font-lg); }
+  .accuracy-heading p { margin: var(--space-1) 0 0; color: var(--text-secondary); max-width: 46rem; }
+  .accuracy-source { color: var(--text-muted); font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+  .accuracy-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-3); }
+  .accuracy-metric { min-height: 126px; display: flex; flex-direction: column; justify-content: space-between; padding: var(--space-4); border: 1px solid var(--border); background: var(--surface-1); }
+  .accuracy-metric span { color: var(--text-secondary); font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+  .accuracy-metric strong { color: var(--secondary); font-size: var(--font-xl); font-variant-numeric: tabular-nums; }
+  .accuracy-metric small, .accuracy-note { color: var(--text-muted); font-size: 0.78rem; line-height: 1.45; }
+  .accuracy-note { margin: 0; }
+
   .notice { border: 1px solid var(--border); padding: var(--space-4); }
   .notice-error { border-color: var(--danger, #dc3545); color: var(--danger, #dc3545); }
 
   @media (max-width: 640px) {
     .predict-result { grid-template-columns: 1fr; }
     .manual-teams { grid-template-columns: 1fr; }
+    .accuracy-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   }
 </style>

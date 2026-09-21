@@ -23,6 +23,6 @@ describe('Home scouting assignment history', () => {
     expect(source).toContain("currentMatchState === 'current' ? 'Current match'");
     expect(source).toContain('currentEventMatch.alliances?.red?.team_keys');
     expect(source).toContain('currentEventMatch.alliances?.blue?.team_keys');
-    expect(source).toContain('setInterval(() => { if (user) loadMatchAlliances(); }, 60_000)');
+    expect(source).toContain('setInterval(() => { if (user && competitionMode) loadMatchAlliances(); }, 60_000)');
   });
 });

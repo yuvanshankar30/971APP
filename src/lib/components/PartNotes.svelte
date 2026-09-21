@@ -61,7 +61,7 @@
         {/if}
       </div>
     {:else}
-      <button type="button" class="view-note-link" on:click={openModal}>
+      <button type="button" class="view-note-link" class:purchasing-notes={table === 'purchasing'} on:click={openModal}>
         <svg class="note-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"
           stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
@@ -73,7 +73,7 @@
       </button>
     {/if}
   {:else if editable}
-    <button type="button" class="view-note-link" on:click={openModal}>
+    <button type="button" class="view-note-link" class:purchasing-notes={table === 'purchasing'} on:click={openModal}>
       Add note
     </button>
   {/if}
@@ -138,6 +138,15 @@
   }
 
   .view-note-link:hover { opacity: 0.8; }
+
+  /* Purchasing tab, modern dark mode only: the shared accent-gold link
+     color reads as much more saturated/jarring against this theme's
+     near-black surface than it does on the warmer light themes - mix it
+     toward the body text color here rather than dim the token everywhere
+     PartNotes is used (manufacturing's parts table keeps the normal look). */
+  :global([data-theme="modern-dark"]) .view-note-link.purchasing-notes {
+    color: color-mix(in srgb, var(--accent-strong, #1d4ed8) 55%, var(--text, #e5e5e5) 45%);
+  }
 
   .note-icon { flex: 0 0 auto; }
 

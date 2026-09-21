@@ -50,6 +50,9 @@
 
   .team-checkbox input { cursor: pointer; margin: 0; }
 
-  .team-971 { color: var(--blue-strong, #1e3a8a); }
-  .team-9584 { color: var(--green-strong, #166534); }
+  /* Both teams read in the normal text colour. They used to be tinted blue
+     and green, which made a pair of filter checkboxes look like two
+     different kinds of thing - the number already says which team it is. */
+  .team-971,
+  .team-9584 { color: var(--text); }
 </style>

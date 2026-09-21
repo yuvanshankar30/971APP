@@ -1,3 +1,5 @@
+import { matchVideoSources } from '$lib/tbaMedia.js';
+
 function firstFinite(object, keys) {
   for (const key of keys) {
     const value = object?.[key];
@@ -78,4 +80,18 @@ export async function fetchTbaMatchReference(matchKey, authKey, fetchImpl = fetc
   });
   if (!response.ok) return null;
   return referenceFromTbaMatch(await response.json());
+}
+
+export async function fetchTbaMatchVideoSources(matchKey, authKey, fetchImpl = fetch) {
+  if (!matchKey || !authKey) return null;
+  try {
+    const response = await fetchImpl(`https://www.thebluealliance.com/api/v3/match/${encodeURIComponent(matchKey)}`, {
+      headers: { 'X-TBA-Auth-Key': authKey }
+    });
+    if (!response.ok) return null;
+    return matchVideoSources(await response.json());
+  } catch (error) {
+    console.warn('fetchTbaMatchVideoSources failed', error?.message || error);
+    return null;
+  }
 }

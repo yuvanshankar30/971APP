@@ -874,7 +874,14 @@
 </div>
 
 <style>
-  .header { margin-bottom: 2rem; }
+  /* This is a page title block, but the class name collides with the
+     global .header (a site nav bar), which sets padding: var(--space-4) 0 -
+     vertical only. That left the title sitting flush against the panel's
+     left edge. Stating both axes here restores a normal gutter. */
+  .header {
+    margin-bottom: 2rem;
+    padding: var(--space-5);
+  }
   .header h1 { margin-bottom: 0.5rem; font-size: 1.75rem; }
   .header p { color: var(--neutral-500); margin-bottom: 0; }
   .form-container {

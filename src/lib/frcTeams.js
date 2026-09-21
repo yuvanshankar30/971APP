@@ -37,6 +37,14 @@ export function isTeam9584(team) {
   return Boolean(team) && team === TEAM_9584;
 }
 
+// Short team number for display beside a record's name. An unset team means
+// 971 - the same bucketing passesTeamFilter() uses - but a Mentor row keeps
+// its own label rather than being relabelled as a team it is not.
+export function teamShortLabel(team) {
+  if (!team) return FRC_TEAM_META[TEAM_971].shortLabel;
+  return getFrcTeamMeta(team)?.shortLabel || String(team);
+}
+
 // Team-filter buckets: 9584 is explicit; everything else (971 / mentor / unset)
 // counts as 971. Returns true when the row passes the current checkbox state.
 export function passesTeamFilter(team, show971, show9584) {

@@ -81,6 +81,59 @@ def nearest_pixel_track(point, robot_tracks, timestamp_ms, max_distance_px=120, 
     return best_track, best_distance
 
 
+def pixel_track_point(track, timestamp_ms, window_ms=500):
+    """Closest pixel-space robot centre at a timestamp, or ``None``."""
+    samples = [p for p in track.get('trajectory', [])
+               if abs(p['t'] - timestamp_ms) <= window_ms
+               and (('pixel_x' in p and 'pixel_y' in p) or not p.get('calibrated'))]
+    sample = min(samples, key=lambda p: abs(p['t'] - timestamp_ms), default=None)
+    if sample is None:
+        return None
+    return sample.get('pixel_x', sample['x']), sample.get('pixel_y', sample['y'])
+
+
+def shot_candidate(trajectory, robot_tracks, *, max_distance_px=120,
+                   min_points=3, min_speed_px_s=90, min_departure_px=35,
+                   window_ms=700):
+    """Recognize a ball visibly departing a tracked robot.
+
+    This detects shots rather than scores. Stationary fuel, tracks first seen
+    in flight, and balls moving toward a robot are rejected. The result is
+    still review-only until venue footage validates the thresholds.
+    """
+    if len(trajectory) < min_points:
+        return None
+    start_t, start_x, start_y = trajectory[0]
+    eligible = [point for point in trajectory[1:] if 0 < point[0] - start_t <= window_ms]
+    if not eligible:
+        return None
+    end_t, end_x, end_y = eligible[-1]
+    elapsed_s = (end_t - start_t) / 1000
+    displacement = math.hypot(end_x - start_x, end_y - start_y)
+    speed = displacement / elapsed_s if elapsed_s > 0 else 0
+    if speed < min_speed_px_s or displacement < min_departure_px:
+        return None
+
+    track, start_distance = nearest_pixel_track(
+        (start_x, start_y), robot_tracks, start_t, max_distance_px, window_ms,
+    )
+    if track is None:
+        return None
+    robot_end = pixel_track_point(track, end_t, window_ms) or pixel_track_point(track, start_t, window_ms)
+    if robot_end is None:
+        return None
+    end_distance = math.hypot(end_x - robot_end[0], end_y - robot_end[1])
+    if end_distance - start_distance < min_departure_px:
+        return None
+    return track, {
+        'start_distance_px': start_distance,
+        'end_distance_px': end_distance,
+        'departure_px': end_distance - start_distance,
+        'initial_speed_px_s': speed,
+        'trajectory_points': len(trajectory),
+    }
+
+
 def goal_entry(trajectory, contains):
     """First observed outside-to-inside transition, or None.
 

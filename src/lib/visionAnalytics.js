@@ -238,15 +238,20 @@ export function summarizeVision(observations, tracks, options = {}) {
   const autoEndMs = Number(options.autoEndMs) || DEFAULT_AUTO_END_MS;
   const fused = fuseObservations(observations);
   const teams = {};
-  const alliances = { red: { fuelScored: 0, climbs: 0 }, blue: { fuelScored: 0, climbs: 0 } };
+  const alliances = {
+    red: { fuelScored: 0, fuelShots: 0, climbs: 0 },
+    blue: { fuelScored: 0, fuelShots: 0, climbs: 0 }
+  };
   const ensure = (teamKey) => teams[teamKey] ||= {
-    fuelScored: 0, fuelObservations: 0, climb: null, autoClimb: null,
+    fuelScored: 0, fuelObservations: 0, fuelShots: 0, fuelShotObservations: 0,
+    climb: null, autoClimb: null,
     observations: 0, mobility: null, autoStartPosition: null, deadAuto: null
   };
   for (const observation of fused) {
     if (!observation.team_key) {
       const alliance = alliances[observation.alliance];
       if (alliance && observation.observation_type === 'fuel_scored') alliance.fuelScored += Number(observation.value?.count) || 1;
+      if (alliance && observation.observation_type === 'fuel_shot') alliance.fuelShots += Number(observation.value?.count) || 1;
       if (alliance && observation.observation_type === 'climb_success') alliance.climbs += 1;
       continue;
     }
@@ -255,6 +260,10 @@ export function summarizeVision(observations, tracks, options = {}) {
     if (observation.observation_type === 'fuel_scored') {
       team.fuelScored += Number(observation.value?.count) || 1;
       team.fuelObservations += 1;
+    }
+    if (observation.observation_type === 'fuel_shot') {
+      team.fuelShots += Number(observation.value?.count) || 1;
+      team.fuelShotObservations += 1;
     }
     if (observation.observation_type === 'climb_success') {
       // A climb during auto is a different scouting field from a teleop one
@@ -285,10 +294,85 @@ export function summarizeVision(observations, tracks, options = {}) {
   return { teams, alliances, fusedObservations: fused };
 }
 
+/**
+ * Orbit-style second opinion: apportion the official alliance fuel total by
+ * each robot's observed share of shots. This is review evidence, never a
+ * value that is released to scouting automatically.
+ */
+export function estimateFuelFromShots(summary, reference) {
+  const estimates = {};
+  for (const alliance of ['red', 'blue']) {
+    const teamKeys = reference?.alliances?.[alliance]?.teamKeys || [];
+    const officialFuel = Number(reference?.alliances?.[alliance]?.fuel);
+    if (!Number.isFinite(officialFuel)) continue;
+    const allianceOnlyShots = Number(summary?.alliances?.[alliance]?.fuelShots || 0);
+    const attributedShots = teamKeys.reduce((sum, key) => sum + Number(summary?.teams?.[key]?.fuelShots || 0), 0);
+    const totalShots = attributedShots + allianceOnlyShots;
+    if (totalShots <= 0) continue;
+    for (const teamKey of teamKeys) {
+      const shotCount = Number(summary?.teams?.[teamKey]?.fuelShots || 0);
+      estimates[teamKey] = {
+        alliance,
+        shotCount,
+        allianceShotCount: totalShots,
+        shotShare: shotCount / totalShots,
+        estimatedScored: officialFuel * shotCount / totalShots,
+        directScored: Number(summary?.teams?.[teamKey]?.fuelScored || 0),
+        officialAllianceFuel: officialFuel
+      };
+    }
+  }
+  return estimates;
+}
+
+export function teamVisionAnalytics(tracks = [], observations = [], { defenseMeters = 2, sampleToleranceMs = 250 } = {}) {
+  const output = {};
+  const calibrated = tracks.filter((track) => track.team_key && track.trajectory?.some((point) => point.calibrated));
+  for (const track of calibrated) {
+    const result = output[track.team_key] ||= {
+      calibrated: true, provenance: { trackIds: [], observationIds: [] },
+      distanceMeters: 0, maxSpeedMps: null, meanAccelerationMps2: null,
+      p90TurnRateRadS: null, defenseProximitySeconds: 0,
+      cycleTimeSeconds: null, timeToFirstScoreSeconds: null
+    };
+    result.provenance.trackIds.push(track.id || track.track_key || null);
+    const metrics = trajectoryMetrics(track.trajectory);
+    result.distanceMeters += metrics.distanceMeters || 0;
+    result.maxSpeedMps = Math.max(result.maxSpeedMps || 0, metrics.maxSpeedMps || 0);
+    result.meanAccelerationMps2 = Math.max(result.meanAccelerationMps2 || 0, metrics.meanAccelerationMps2 || 0);
+    result.p90TurnRateRadS = Math.max(result.p90TurnRateRadS || 0, metrics.p90TurnRateRadS || 0);
+    let nearbySamples = 0;
+    const points = track.trajectory.filter((point) => point.calibrated);
+    for (const point of points) {
+      const defended = calibrated.some((opponent) => opponent.alliance && track.alliance && opponent.alliance !== track.alliance
+        && opponent.trajectory.some((candidate) => candidate.calibrated
+          && Math.abs(candidate.t - point.t) <= sampleToleranceMs
+          && Math.hypot(candidate.x - point.x, candidate.y - point.y) <= defenseMeters));
+      if (defended) nearbySamples += 1;
+    }
+    const coverageSeconds = (points.at(-1)?.t - points[0]?.t) / 1000;
+    if (points.length > 1 && Number.isFinite(coverageSeconds)) result.defenseProximitySeconds += coverageSeconds * nearbySamples / points.length;
+  }
+  for (const [teamKey, result] of Object.entries(output)) {
+    const scores = observations
+      .filter((observation) => observation.team_key === teamKey && observation.observation_type === 'fuel_scored'
+        && !['rejected', 'unobservable'].includes(observation.review_status))
+      .sort((left, right) => left.started_ms - right.started_ms);
+    result.provenance.observationIds = scores.map((observation) => observation.id).filter(Boolean);
+    if (scores.length) result.timeToFirstScoreSeconds = scores[0].started_ms / 1000;
+    if (scores.length > 1) {
+      const intervals = scores.slice(1).map((score, index) => (score.started_ms - scores[index].started_ms) / 1000).sort((a, b) => a - b);
+      result.cycleTimeSeconds = percentile(intervals, 0.5);
+    }
+  }
+  return output;
+}
+
 export function reconcileWithReference(summary, reference, thresholds = {}) {
   const fuelAbsolute = thresholds.fuelAbsolute ?? 3;
   const fuelPercent = thresholds.fuelPercent ?? 0.15;
   const discrepancies = [];
+  const shotEstimates = estimateFuelFromShots(summary, reference);
   for (const alliance of ['red', 'blue']) {
     const teamKeys = reference?.alliances?.[alliance]?.teamKeys || [];
     const visionFuel = (summary.alliances?.[alliance]?.fuelScored || 0) + teamKeys.reduce((sum, key) => sum + (summary.teams[key]?.fuelScored || 0), 0);
@@ -301,6 +385,21 @@ export function reconcileWithReference(summary, reference, thresholds = {}) {
         absolute_difference: difference, percent_difference: percent,
         severity: percent >= 0.35 ? 'critical' : 'warning',
         reason: 'Vision alliance fuel differs materially from the official match breakdown.'
+      });
+    }
+    for (const teamKey of teamKeys) {
+      const estimate = shotEstimates[teamKey];
+      if (!estimate || estimate.shotCount <= 0) continue;
+      const direct = estimate.directScored;
+      const difference = Math.abs(direct - estimate.estimatedScored);
+      const percent = difference / Math.max(1, estimate.estimatedScored);
+      if (difference > fuelAbsolute && percent > fuelPercent) discrepancies.push({
+        team_key: teamKey, alliance, metric: 'fuel_attribution',
+        vision_value: direct, reference_value: estimate.estimatedScored,
+        absolute_difference: difference, percent_difference: percent,
+        severity: percent >= 0.35 ? 'critical' : 'warning',
+        reason: 'Direct goal-entry attribution differs materially from the shot-share estimate.',
+        evidence: estimate
       });
     }
     const visionClimbs = (summary.alliances?.[alliance]?.climbs || 0) + teamKeys.filter((key) => summary.teams[key]?.climb).length;

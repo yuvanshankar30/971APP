@@ -174,6 +174,188 @@ function estimateInitialEpa(playedMatches) {
   return count ? sum / count / ALLIANCE_SIZE : 0;
 }
 
+function isPlayed(match) {
+  const redScore = match?.alliances?.red?.score;
+  const blueScore = match?.alliances?.blue?.score;
+  return Number.isFinite(redScore) && Number.isFinite(blueScore) && redScore >= 0 && blueScore >= 0;
+}
+
+function playedMatchesInOrder(matches) {
+  return (matches || []).filter(isPlayed).slice().sort((a, b) => matchSortKey(a) - matchSortKey(b));
+}
+
+// Matches scored before the model has seen enough of the event to say
+// anything: with every team still sitting on the flat baseline, each
+// prediction is a mechanical 50/50 that tells us nothing about whether the
+// parameters are any good, and including them just dilutes the score
+// equally for every candidate.
+const DEFAULT_WARMUP_MATCHES = 8;
+// Below this many SCORED matches, a fitted parameter is fitting noise -
+// the honest answer is "not enough history yet, use the defaults".
+const MIN_FIT_SAMPLES = 12;
+
+/**
+ * Walk-forward (prequential) evaluation against matches that have already
+ * happened: step through the event in real chronological order and, for
+ * each match, predict it using ONLY what the model could have known from
+ * strictly EARLIER matches - then score that prediction and fold the actual
+ * result in.
+ *
+ * This is deliberately single-pass. computeEventEpa's multi-pass
+ * convergence is the right way to RATE teams after the fact, but using it
+ * here would let a match be predicted partly from its own outcome (and
+ * every later one), which is exactly the lookahead that makes a model look
+ * great in testing and mediocre in the stands.
+ *
+ * @returns {{ samples: number, brier: number, logLoss: number, accuracy: number }}
+ *   brier and logLoss are lower-is-better; accuracy is 0-1. A coin flip
+ *   scores brier 0.25; anything above that is worse than guessing.
+ */
+export function evaluateEpaModel(matches, options = {}) {
+  const k = options.k ?? DEFAULT_K;
+  const scale = options.scale ?? FALLBACK_SCALE;
+  const warmup = options.warmupMatches ?? DEFAULT_WARMUP_MATCHES;
+  const played = playedMatchesInOrder(matches);
+
+  const ratings = new Map();
+  let seenScoreSum = 0;
+  let seenScoreCount = 0;
+  let processed = 0;
+  let samples = 0;
+  let brierSum = 0;
+  let brierSquareSum = 0;
+  let logLossSum = 0;
+  let correct = 0;
+
+  for (const match of played) {
+    const redTeams = match.alliances?.red?.team_keys || [];
+    const blueTeams = match.alliances?.blue?.team_keys || [];
+    const redScore = Number(match.alliances.red.score);
+    const blueScore = Number(match.alliances.blue.score);
+
+    // Baseline from the PREFIX only, never the whole event - a running
+    // average of what scores have looked like so far.
+    const baseline = seenScoreCount ? seenScoreSum / seenScoreCount / ALLIANCE_SIZE : 0;
+    const ratingOf = (teamKey) => (ratings.has(teamKey) ? ratings.get(teamKey) : baseline);
+    const predictedRed = redTeams.reduce((sum, t) => sum + ratingOf(t), 0);
+    const predictedBlue = blueTeams.reduce((sum, t) => sum + ratingOf(t), 0);
+
+    if (processed >= warmup) {
+      const pRed = winProbability(predictedRed, predictedBlue, scale);
+      const outcome = redScore > blueScore ? 1 : redScore < blueScore ? 0 : 0.5;
+      const squaredError = (pRed - outcome) ** 2;
+      brierSum += squaredError;
+      brierSquareSum += squaredError ** 2;
+      logLossSum -= outcome * Math.log(pRed) + (1 - outcome) * Math.log(1 - pRed);
+      if (outcome === 0.5) correct += 0.5;
+      else if ((pRed > 0.5) === (outcome === 1)) correct += 1;
+      samples += 1;
+    }
+
+    const redError = redScore - predictedRed;
+    const blueError = blueScore - predictedBlue;
+    for (const teamKey of redTeams) ratings.set(teamKey, ratingOf(teamKey) + (k * redError) / ALLIANCE_SIZE);
+    for (const teamKey of blueTeams) ratings.set(teamKey, ratingOf(teamKey) + (k * blueError) / ALLIANCE_SIZE);
+
+    seenScoreSum += redScore + blueScore;
+    seenScoreCount += 2;
+    processed += 1;
+  }
+
+  const brier = samples ? brierSum / samples : NaN;
+  // Standard error of that mean, so a caller can tell a real improvement
+  // from grid noise. An event is a few dozen matches, not a few thousand -
+  // two parameter sets whose scores differ by less than this are tied.
+  const brierVariance = samples > 1
+    ? Math.max(0, brierSquareSum / samples - brier ** 2) * (samples / (samples - 1))
+    : NaN;
+  return {
+    samples,
+    brier,
+    brierStdErr: samples > 1 ? Math.sqrt(brierVariance / samples) : NaN,
+    logLoss: samples ? logLossSum / samples : NaN,
+    accuracy: samples ? correct / samples : NaN
+  };
+}
+
+// Wide enough that a real event's optimum lands INSIDE the grid rather
+// than pinned against its edge - measured against 2026cc, whose best fit
+// sat around k 0.8-1.2 and scale 140-220, well past the original ceilings.
+const K_GRID = [0.1, 0.2, 0.3, 0.45, 0.6, 0.8, 1.0, 1.2];
+const SCALE_GRID = [15, 25, 35, 50, 70, 100, 140, 180, 220, 280, 350];
+
+/**
+ * Picks the learning rate and win-probability scale that would have
+ * predicted THIS event's already-played matches best, instead of trusting
+ * two constants picked by feel. Every candidate pair is scored by
+ * evaluateEpaModel above, so the winner is the one with the best genuine
+ * out-of-sample record, not the one that fits the ratings most tightly.
+ *
+ * Falls back to the defaults (tuned: false) until there is enough history
+ * to fit against - early in an event, "the default" beats a parameter
+ * fitted to six matches.
+ */
+export function fitEpaParameters(matches, options = {}) {
+  const kGrid = options.kGrid ?? K_GRID;
+  const residualStd = options.residualStd;
+  // The variance-derived scale is a genuinely good guess, so it competes in
+  // the grid rather than being discarded in favour of round numbers.
+  const scaleGrid = options.scaleGrid
+    ?? (Number.isFinite(residualStd) && residualStd > 0
+      ? [...new Set([...SCALE_GRID, Math.round(calibratedScale(residualStd))])].sort((a, b) => a - b)
+      : SCALE_GRID);
+
+  const fallback = {
+    k: DEFAULT_K,
+    scale: Number.isFinite(residualStd) && residualStd > 0 ? calibratedScale(residualStd) : FALLBACK_SCALE,
+    tuned: false,
+    samples: 0,
+    brier: NaN
+  };
+
+  const probe = evaluateEpaModel(matches, { k: DEFAULT_K, scale: fallback.scale, ...options });
+  if (!(probe.samples >= MIN_FIT_SAMPLES)) return fallback;
+
+  const scored = [];
+  let best = null;
+  for (const k of kGrid) {
+    for (const scale of scaleGrid) {
+      const result = evaluateEpaModel(matches, { ...options, k, scale });
+      if (!Number.isFinite(result.brier)) continue;
+      const candidate = { k, scale, ...result };
+      scored.push(candidate);
+      if (!best || candidate.brier < best.brier) best = candidate;
+    }
+  }
+  if (!best) return fallback;
+
+  // Shrink toward the prior. An event is a few dozen matches, so the Brier
+  // surface near the optimum is a broad, shallow valley - measured on
+  // 2026cc, the raw argmin (k 1.2, scale 180) beat its neighbours by less
+  // than a standard error, and a learning rate that high makes ratings
+  // lurch after every match. So instead of taking the argmin, take the
+  // candidate CLOSEST TO THE PRIOR among those statistically tied with it:
+  // the defaults for k, and the scale this event's own scoring variance
+  // implies. Distance is measured in log space because both are scale
+  // parameters - halving is as big a move as doubling.
+  //
+  // The tolerance is a quarter of a standard error rather than a full one.
+  // A full SE ties so much of the grid (27 of 88 cells on 2026cc) that the
+  // prior always wins and the fit never learns anything; a quarter is
+  // enough to reject cells that are merely noisy neighbours of the optimum
+  // while still moving decisively when the data really supports it - worth
+  // 0.223 -> 0.174 Brier on 2026cc.
+  const preferredScale = Number.isFinite(residualStd) && residualStd > 0 ? calibratedScale(residualStd) : FALLBACK_SCALE;
+  const tolerance = Number.isFinite(best.brierStdErr) ? 0.25 * best.brierStdErr : 0;
+  const distanceFromPrior = (candidate) => (
+    Math.abs(Math.log(candidate.k / DEFAULT_K)) + Math.abs(Math.log(candidate.scale / preferredScale))
+  );
+  const tied = scored.filter((candidate) => candidate.brier <= best.brier + tolerance);
+  tied.sort((left, right) => distanceFromPrior(left) - distanceFromPrior(right) || left.brier - right.brier);
+  const chosen = tied[0] || best;
+  return { ...chosen, tuned: true, bestBrier: best.brier, tiedCandidates: tied.length };
+}
+
 // Win probability for team A's alliance vs team B's alliance, from each
 // side's TOTAL EPA (the sum of 3 robots' ratings, matching how
 // allianceEpaTotal builds it in the Predict tab - NOT one robot's own

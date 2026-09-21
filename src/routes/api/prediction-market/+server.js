@@ -5,8 +5,10 @@ import { env } from '$env/dynamic/private';
 import { getSupabase } from '$lib/server/971bot.js';
 import { normalizeBetRequest } from '$lib/server/predictionMarketSchema.js';
 import { STARTING_BALANCE, availableBalance, isTestMarketKey, resolvePariMutuel } from '$lib/predictionMarket.js';
+import { buildModelVotes, publicAnonymousVote } from '$lib/server/predictionMarketModelVote.js';
 
 const SELECT_COLUMNS = 'id,event_key,match_key,created_by,side,stake,placed_at,updated_at,resolved_at,payout,winning_side';
+const SYSTEM_SELECT_COLUMNS = 'id,event_key,match_key,side,stake,placed_at,updated_at,resolved_at,payout,winning_side';
 
 function requestClient(request) {
   return createClient(PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY, {
@@ -54,6 +56,40 @@ async function fetchTbaMatch(matchKey) {
   }
 }
 
+async function fetchTbaEventMatches(eventKey) {
+  const authKey = env.TBA_API_KEY || env.VITE_TBA_API_KEY || env.PUBLIC_TBA_API_KEY;
+  if (!authKey) return null;
+  try {
+    const response = await fetch(`https://www.thebluealliance.com/api/v3/event/${encodeURIComponent(eventKey)}/matches`, {
+      headers: { 'X-TBA-Auth-Key': authKey }
+    });
+    if (!response.ok) return null;
+    const matches = await response.json();
+    return Array.isArray(matches) ? matches : null;
+  } catch {
+    return null;
+  }
+}
+
+async function syncModelVotes(db, eventKey) {
+  const matches = await fetchTbaEventMatches(eventKey);
+  if (!matches) return;
+  const stake = Number(env.PREDICTION_MARKET_MODEL_STAKE || 100);
+  const votes = buildModelVotes(matches, { stake });
+  if (votes.length) {
+    const { error } = await db.from('prediction_market_system_votes').upsert(
+      votes.map((vote) => ({
+        ...vote, event_key: eventKey, updated_at: new Date().toISOString(),
+        resolved_at: null, payout: null, winning_side: null
+      })),
+      { onConflict: 'event_key,match_key' }
+    );
+    // The migration may not have reached a local/dev database yet. Human
+    // betting must keep working even when the private participant cannot.
+    if (error) return;
+  }
+}
+
 // Resolves every outstanding bet whose match TBA now reports a result for.
 // Idempotent - the `.is('resolved_at', null)` guard on each update means a
 // second concurrent pass (another scout loading this same endpoint at the
@@ -65,10 +101,20 @@ async function resolveOutstandingBets(db, eventKey) {
     .select(SELECT_COLUMNS)
     .eq('event_key', eventKey)
     .is('resolved_at', null);
-  if (error || !pending?.length) return;
+  if (error) return;
+  const { data: systemPending, error: systemError } = await db
+    .from('prediction_market_system_votes')
+    .select(SYSTEM_SELECT_COLUMNS)
+    .eq('event_key', eventKey)
+    .is('resolved_at', null);
+  const allPending = [
+    ...(pending || []).map((bet) => ({ ...bet, participantType: 'human' })),
+    ...(systemError ? [] : systemPending || []).map((bet) => ({ ...bet, participantType: 'system' }))
+  ];
+  if (!allPending.length) return;
 
   const byMatch = new Map();
-  for (const bet of pending) {
+  for (const bet of allPending) {
     if (!byMatch.has(bet.match_key)) byMatch.set(bet.match_key, []);
     byMatch.get(bet.match_key).push(bet);
   }
@@ -82,8 +128,12 @@ async function resolveOutstandingBets(db, eventKey) {
     if (!match?.actual_time) continue;
     const resolutions = resolvePariMutuel(matchBets, match.winning_alliance);
     for (const resolution of resolutions) {
+      const participant = matchBets.find((bet) => bet.id === resolution.id);
+      const table = participant?.participantType === 'system'
+        ? 'prediction_market_system_votes'
+        : 'prediction_market_bets';
       await db
-        .from('prediction_market_bets')
+        .from(table)
         .update({ resolved_at: new Date().toISOString(), payout: resolution.payout, winning_side: resolution.winning_side })
         .eq('id', resolution.id)
         .is('resolved_at', null);
@@ -100,6 +150,7 @@ export async function GET({ request, url }) {
   if (!eventKey) return json({ error: 'event_key is required' }, { status: 400 });
 
   const db = getDbClient(auth);
+  await syncModelVotes(db, eventKey);
   await resolveOutstandingBets(db, eventKey);
 
   const { data, error } = await auth
@@ -109,7 +160,25 @@ export async function GET({ request, url }) {
     .order('placed_at', { ascending: false });
   if (error && isMissingBetsTable(error)) return json({ success: true, data: [], unavailable: true });
   if (error) return json({ error: error.message }, { status: 500 });
-  return json({ success: true, data: data || [] });
+  const { data: privateVotes, error: privateVoteError } = await db
+    .from('prediction_market_system_votes')
+    .select(SYSTEM_SELECT_COLUMNS)
+    .eq('event_key', eventKey);
+  const anonymousVotes = privateVoteError ? [] : (privateVotes || []).map(publicAnonymousVote);
+  const { data: overrideRows, error: overrideError } = await db
+    .from('prediction_market_leaderboard_overrides')
+    .select('event_key,participant_id,balance,losses')
+    .in('event_key', ['*', eventKey]);
+  const overridesByParticipant = new Map();
+  if (!overrideError) {
+    const orderedOverrides = (overrideRows || []).sort((left, right) => Number(left.event_key !== '*') - Number(right.event_key !== '*'));
+    for (const row of orderedOverrides) {
+      overridesByParticipant.set(row.participant_id, row);
+    }
+  }
+  const combined = [...(data || []), ...anonymousVotes]
+    .sort((left, right) => String(right.placed_at || '').localeCompare(String(left.placed_at || '')));
+  return json({ success: true, data: combined, leaderboard_overrides: [...overridesByParticipant.values()] });
 }
 
 export async function POST({ request }) {

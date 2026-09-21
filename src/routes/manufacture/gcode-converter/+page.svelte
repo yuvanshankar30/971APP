@@ -35,7 +35,7 @@
   </div>
 </div>
 
-<div class="subtabs">
+<div class="subtabs subtabs-tight">
   <a href="/manufacture" class:active={$page.url.pathname === '/manufacture'}>ToDo</a>
   <a href="/manufacture/completed" class:active={$page.url.pathname === '/manufacture/completed'}>Completed</a>
   <a href="/manufacture/router" class:active={$page.url.pathname === '/manufacture/router'}>Router</a>
@@ -115,6 +115,16 @@
 </div>
 
 <style>
+  /* Same fix as /manufacture's ToDo/Completed pages: the sub-tabs used to
+     sit right above whatever card follows, but with their own separate
+     bottom margin stacked on top of that card's own top margin - a dead
+     gap between two independently-margined blocks. */
+  .subtabs-tight {
+    margin: 0 0 var(--space-3);
+    padding-bottom: var(--space-3);
+    border-bottom: 1px solid var(--border);
+  }
+
   .converter {
     display: grid;
     grid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr);

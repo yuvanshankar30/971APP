@@ -333,11 +333,12 @@ export async function POST({ request }) {
         .eq('scouting_type', scouting_type)
         .eq('match_key', match_key)
         .eq('team_key', team_key)
+        .eq('assigned_user', user_id)
         .maybeSingle();
 
       const { data: upserted, error } = await db
         .from('scout_match_assignments')
-        .upsert({ scouting_type, match_key, team_key, assigned_user: user_id }, { onConflict: 'scouting_type,match_key,team_key' })
+        .upsert({ scouting_type, match_key, team_key, assigned_user: user_id }, { onConflict: 'scouting_type,match_key,team_key,assigned_user' })
         .select('id, assigned_user')
         .single();
 
@@ -367,11 +368,11 @@ export async function POST({ request }) {
 
       if (existingError) return json({ error: existingError.message }, { status: 500 });
 
-      const prevMap = new Map((existingRows || []).map((row) => [`${row.match_key}:${row.team_key}`, row]));
+      const prevMap = new Map((existingRows || []).map((row) => [`${row.match_key}:${row.team_key}:${row.assigned_user}`, row]));
 
-      const assignments = (existingRows || []).map((row) => ({
+      const assignments = [...new Set((existingRows || []).map((row) => row.match_key))].map((match_key) => ({
         scouting_type,
-        match_key: row.match_key,
+        match_key,
         team_key,
         assigned_user: user_id
       }));
@@ -379,13 +380,13 @@ export async function POST({ request }) {
 
       const { data: upsertedRows, error } = await db
         .from('scout_match_assignments')
-        .upsert(assignments, { onConflict: 'scouting_type,match_key,team_key' })
+        .upsert(assignments, { onConflict: 'scouting_type,match_key,team_key,assigned_user' })
         .select('id, match_key, team_key, assigned_user');
 
       if (error) return json({ error: error.message }, { status: 500 });
 
       for (const upserted of upsertedRows || []) {
-        const prev = prevMap.get(`${upserted.match_key}:${upserted.team_key}`)?.assigned_user;
+        const prev = prevMap.get(`${upserted.match_key}:${upserted.team_key}:${upserted.assigned_user}`)?.assigned_user;
         if (upserted.assigned_user && upserted.assigned_user !== prev) {
           await notifyPublishedScoutAssignment({
             assignmentId: upserted.id,
@@ -422,18 +423,18 @@ export async function POST({ request }) {
           .in('match_key', matchKeys)
           .in('team_key', teamKeys);
 
-        prevMap = new Map((existingRows || []).map((row) => [`${row.match_key}:${row.team_key}`, row]));
+        prevMap = new Map((existingRows || []).map((row) => [`${row.match_key}:${row.team_key}:${row.assigned_user}`, row]));
       }
 
       const { data: updatedRows, error } = await db
         .from('scout_match_assignments')
-        .upsert(rows, { onConflict: 'scouting_type,match_key,team_key' })
+        .upsert(rows, { onConflict: 'scouting_type,match_key,team_key,assigned_user' })
         .select('id, match_key, team_key, assigned_user');
 
       if (error) return json({ error: error.message }, { status: 500 });
 
       for (const row of updatedRows || []) {
-        const prev = prevMap.get(`${row.match_key}:${row.team_key}`)?.assigned_user;
+        const prev = prevMap.get(`${row.match_key}:${row.team_key}:${row.assigned_user}`)?.assigned_user;
         if (row.assigned_user && row.assigned_user !== prev) {
           await notifyPublishedScoutAssignment({
             assignmentId: row.id,

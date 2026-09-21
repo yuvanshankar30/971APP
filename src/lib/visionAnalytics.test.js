@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AUTO_FIELD_METERS, autoStartPosition, deadAuto, fuseObservations, reconcileVisionSources, reconcileWithReference, summarizeVision, trajectoryMetrics, visionAutoPath } from './visionAnalytics.js';
+import { AUTO_FIELD_METERS, autoStartPosition, deadAuto, estimateFuelFromShots, fuseObservations, reconcileVisionSources, reconcileWithReference, summarizeVision, teamVisionAnalytics, trajectoryMetrics, visionAutoPath } from './visionAnalytics.js';
 
 describe('vision analytics', () => {
   it('derives real-coordinate mobility metrics', () => {
@@ -41,12 +41,59 @@ describe('vision analytics', () => {
     expect(flags.some((flag) => flag.metric === 'fuel')).toBe(true);
   });
 
+  it('apportions official fuel by each robot shot share as review-only evidence', () => {
+    const summary = summarizeVision([
+      { team_key: 'frc971', alliance: 'red', observation_type: 'fuel_shot', value: { count: 3 }, started_ms: 1000 },
+      { team_key: 'frc254', alliance: 'red', observation_type: 'fuel_shot', value: { count: 1 }, started_ms: 2000 },
+      { team_key: 'frc971', alliance: 'red', observation_type: 'fuel_scored', value: { count: 2 }, started_ms: 3000 }
+    ], []);
+    const reference = { alliances: { red: { teamKeys: ['frc971', 'frc254'], fuel: 20 }, blue: { teamKeys: [], fuel: 0 } } };
+    const estimates = estimateFuelFromShots(summary, reference);
+    expect(estimates.frc971).toMatchObject({ shotCount: 3, allianceShotCount: 4, estimatedScored: 15, directScored: 2 });
+    expect(estimates.frc254.estimatedScored).toBe(5);
+    expect(reconcileWithReference(summary, reference)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ team_key: 'frc971', metric: 'fuel_attribution' })
+    ]));
+  });
+
+  it('does not invent an estimate when an alliance has no attributable shots', () => {
+    const reference = { alliances: { red: { teamKeys: ['frc971'], fuel: 20 } } };
+    expect(estimateFuelFromShots(summarizeVision([], []), reference)).toEqual({});
+  });
+
   it('flags material Qwen disagreements without mixing Qwen into pipeline totals', () => {
     const pipeline = summarizeVision([{ alliance: 'red', observation_type: 'fuel_scored', value: { count: 12 }, started_ms: 1 }], []);
     const qwen = summarizeVision([{ alliance: 'red', observation_type: 'fuel_scored', value: { count: 4 }, started_ms: 1 }], []);
     const flags = reconcileVisionSources(pipeline, qwen);
     expect(flags).toEqual(expect.arrayContaining([expect.objectContaining({ metric: 'qwen_pipeline_fuel', severity: 'critical' })]));
     expect(pipeline.alliances.red.fuelScored).toBe(12);
+  });
+});
+
+describe('calibrated team analytics', () => {
+  it('derives defense proximity, cycles, and provenance without inventing missing values', () => {
+    const tracks = [
+      { id: 'red-track', team_key: 'frc971', alliance: 'red', trajectory: [
+        { t: 0, x: 0, y: 0, calibrated: true }, { t: 1000, x: 1, y: 0, calibrated: true }, { t: 2000, x: 2, y: 0, calibrated: true }
+      ] },
+      { id: 'blue-track', team_key: 'frc254', alliance: 'blue', trajectory: [
+        { t: 0, x: 1, y: 0, calibrated: true }, { t: 1000, x: 2, y: 0, calibrated: true }, { t: 2000, x: 10, y: 0, calibrated: true }
+      ] }
+    ];
+    const observations = [
+      { id: 'score-1', team_key: 'frc971', observation_type: 'fuel_scored', started_ms: 5000, review_status: 'accepted' },
+      { id: 'score-2', team_key: 'frc971', observation_type: 'fuel_scored', started_ms: 11000, review_status: 'accepted' }
+    ];
+    const result = teamVisionAnalytics(tracks, observations);
+    expect(result.frc971.defenseProximitySeconds).toBeCloseTo(4 / 3);
+    expect(result.frc971.cycleTimeSeconds).toBe(6);
+    expect(result.frc971.timeToFirstScoreSeconds).toBe(5);
+    expect(result.frc971.provenance).toEqual({ trackIds: ['red-track'], observationIds: ['score-1', 'score-2'] });
+    expect(result.frc254.cycleTimeSeconds).toBeNull();
+  });
+
+  it('omits uncalibrated teams instead of returning fake zeroes', () => {
+    expect(teamVisionAnalytics([{ team_key: 'frc971', trajectory: [{ t: 0, x: 10, y: 10, calibrated: false }] }], [])).toEqual({});
   });
 });
 

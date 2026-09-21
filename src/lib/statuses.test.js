@@ -2,10 +2,17 @@ import { describe, it, expect } from 'vitest';
 import { getWorkflowStatuses, getDisplayStatus, getBadgeClass, isAutocamEligible, ALL_STATUSES } from './statuses.js';
 
 describe('getWorkflowStatuses', () => {
-  it('returns the unified status set regardless of workflow', () => {
+  it('keeps router stages separate from the compact shop workflows', () => {
     expect(getWorkflowStatuses('router')).toBe(ALL_STATUSES);
-    expect(getWorkflowStatuses('lathe')).toBe(ALL_STATUSES);
-    expect(getWorkflowStatuses(undefined)).toBe(ALL_STATUSES);
+    expect(getWorkflowStatuses('router')).toHaveLength(8);
+    for (const workflow of ['lathe', 'mill', 'laser-cut', undefined]) {
+      expect(getWorkflowStatuses(workflow).map((stage) => stage.value)).toEqual([
+        'pending', 'in-progress', 'machined', 'complete'
+      ]);
+    }
+    expect(getWorkflowStatuses('3d-print').map((stage) => stage.value)).toEqual([
+      'pending', 'in-progress', 'printed', 'complete'
+    ]);
   });
 });
 
@@ -17,6 +24,7 @@ describe('getDisplayStatus', () => {
     expect(getDisplayStatus('cammed')).toBe('CAM Reviewed');
     expect(getDisplayStatus('postprocessed')).toBe('Postprocessed');
     expect(getDisplayStatus('jprogged')).toBe('Jprogged');
+    expect(getDisplayStatus('printed')).toBe('Printed');
     expect(getDisplayStatus('machined')).toBe('Machined');
     expect(getDisplayStatus('inspected')).toBe('Machined');
     expect(getDisplayStatus('kitted')).toBe('Kitted');

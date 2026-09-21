@@ -6,6 +6,14 @@ robots, emits trajectory/action/scoring evidence, and reports results to the
 authenticated runner API. The web app never receives model weights or the
 runner token.
 
+The detector boundary is versioned as `vision-detector/v1`. A minimal
+checkpoint may contain only `robot_red` and `robot_blue`; climb classes are
+optional and their absence disables climb detection without disabling robot
+tracking. Fuel classes are rejected because fuel belongs to the independent
+trajectory pipeline. `model_contract.py` validates names at startup and can
+write a manifest alongside exported weights. A matching training config is
+`../training/data.robot-only.example.yaml`.
+
 **Hybrid pipeline** (adapted from community R&D shared on Chief Delphi,
 "Computer Vision Scouting" - see `docs/guides/scoutingvision.md` for the full writeup):
 

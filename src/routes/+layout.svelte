@@ -7,6 +7,9 @@
   import { fetchActiveScoutingEventKey } from '$lib/scoutingEvent.js';
   import navConfig from '$lib/navigation.json';
   import { defaultHeaderTabs, mergeDefaultHeaderTabs, ensurePowerRankingsTab, ensureMatchRankingsTab, ensureRobotRatingsTab, ensurePredictionMarketTab, ensureBlueAllianceTab, ensureScoutingAdminTab, ensureStrategyTab, ensureDriveTeamTab, ensurePicklistTab, ensureGcodeConverterTab, ensureFilesTab, ensureFusionAutocamTab, promoteChildrenOfDisabledFolders } from '$lib/defaultTabs.js';
+  import { COMPETITION_FOLDER_LABEL, COMPETITION_ROUTE, competitionNavChildren } from '$lib/competitionTabs.js';
+  import { CAD_FOLDER_LABEL, cadNavChildren } from '$lib/cadHubTabs.js';
+  import { MANUFACTURING_FOLDER_LABEL, manufacturingNavChildren } from '$lib/manufacturingHubTabs.js';
   import { Move3d, Hammer, Wrench, Receipt, Home, Briefcase, Coins, Package, User, ChevronDown, Menu, X, Camera, CalendarDays, Cpu, FileText, Trophy, Eye, ClipboardCheck, ListChecks, Target, Folder, Search, Star, Dice5, Zap, Radar } from 'lucide-svelte';
   import { goto, afterNavigate } from '$app/navigation';
   import { page } from '$app/stores';
@@ -28,6 +31,13 @@
   $: activeProfile = profile;
   $: currentPath = $page.url.pathname;
   $: requiresAuth = !PUBLIC_ROUTES.includes(currentPath);
+  // Prediction Market v2 gets its own fully self-contained dark shell (own
+  // top bar, own subnav, own theme) rather than the shared site chrome -
+  // direct instruction: it doesn't need to follow Spartans Hub's design
+  // system at all. Hiding the real header here (rather than the page just
+  // visually covering it) means no stray site nav ever peeks out at an odd
+  // viewport size or before the page's own CSS finishes loading.
+  $: hideGlobalChrome = currentPath.startsWith('/predictions');
   $: isAuthenticated = !!(authUser || activeProfile);
   $: shouldHoldProtectedContent = requiresAuth && !authReady;
   $: shouldRedirectToLogin = requiresAuth && authReady && !isAuthenticated;
@@ -558,6 +568,29 @@
   $: visibleNavTabs = promoteChildrenOfDisabledFolders(baseNavTabs, navConfig);
   $: navItems = isApproved ? buildNavItems(visibleNavTabs) : [];
 
+  // The Competition folder opens /competition (a tile page) instead of a
+  // dropdown - fourteen entries is past what a hover menu can show usefully.
+  // Its resolved children feed that page from here, so the page mirrors this
+  // user's actual folder rather than maintaining a second list of its own.
+  function isCompetitionFolder(item) {
+    return item?.type === 'folder' && item?.label === COMPETITION_FOLDER_LABEL;
+  }
+  $: competitionNavChildren.set(navItems.find(isCompetitionFolder)?.children || []);
+
+  // Same idea, feeding /cad-hub (home page's "CAD" card only - the CAD
+  // folder's own top-nav dropdown is untouched and still opens normally).
+  function isCadFolder(item) {
+    return item?.type === 'folder' && item?.label === CAD_FOLDER_LABEL;
+  }
+  $: cadNavChildren.set(navItems.find(isCadFolder)?.children || []);
+
+  // Same idea, feeding /manufacture-hub (home page's "Manufacturing" card
+  // only - the Manufacturing folder's own top-nav dropdown is untouched).
+  function isManufacturingFolder(item) {
+    return item?.type === 'folder' && item?.label === MANUFACTURING_FOLDER_LABEL;
+  }
+  $: manufacturingNavChildren.set(navItems.find(isManufacturingFolder)?.children || []);
+
   // Drag-to-reorder for the desktop nav's top-level tabs/folders. Home is
   // rendered outside this list entirely, and Admin is appended by
   // addAdminTabIfAllowed() rather than stored in header_tabs — so both are
@@ -636,7 +669,7 @@
   }
 </script>
 
-{#if authReady && isAuthenticated}
+{#if authReady && isAuthenticated && !hideGlobalChrome}
   <header class="nav-header">
     <div class="nav-container">
       <!-- Brand. The side slots are equal-weight flex items, which is what
@@ -679,28 +712,39 @@
                 on:drop={(e) => handleTabDrop(e, item)}
                 on:dragend={handleTabDragEnd}
               >
-                <button
-                  type="button"
-                  class="nav-item"
-                  class:active={isFolderActive(item)}
-                  aria-haspopup="true"
-                  aria-expanded={openDesktopFolder === idx}
-                  on:click={(e) => toggleDesktopFolder(e, idx)}
-                >
-                  <span>{item.label}</span>
-                  <ChevronDown size={14} class="caret" />
-                </button>
-                <div
-                  class="dropdown-menu"
-                  style={openDesktopFolder === idx ? `top: ${desktopFolderPosition.top}px; left: ${desktopFolderPosition.left}px;` : ''}
-                >
-                  {#each item.children as child}
-                    <a href={child.href} class="dropdown-link" class:active={isActive(child.href)} on:click={closeDesktopFolders}>
-                      <svelte:component this={child.icon} size={16} />
-                      <span>{child.label}</span>
-                    </a>
-                  {/each}
-                </div>
+                {#if isCompetitionFolder(item)}
+                  <a
+                    href={COMPETITION_ROUTE}
+                    class="nav-item"
+                    class:active={isActive(COMPETITION_ROUTE) || isFolderActive(item)}
+                    on:click={closeDesktopFolders}
+                  >
+                    <span>{item.label}</span>
+                  </a>
+                {:else}
+                  <button
+                    type="button"
+                    class="nav-item"
+                    class:active={isFolderActive(item)}
+                    aria-haspopup="true"
+                    aria-expanded={openDesktopFolder === idx}
+                    on:click={(e) => toggleDesktopFolder(e, idx)}
+                  >
+                    <span>{item.label}</span>
+                    <ChevronDown size={14} class="caret" />
+                  </button>
+                  <div
+                    class="dropdown-menu"
+                    style={openDesktopFolder === idx ? `top: ${desktopFolderPosition.top}px; left: ${desktopFolderPosition.left}px;` : ''}
+                  >
+                    {#each item.children as child}
+                      <a href={child.href} class="dropdown-link" class:active={isActive(child.href)} on:click={closeDesktopFolders}>
+                        <svelte:component this={child.icon} size={16} />
+                        <span>{child.label}</span>
+                      </a>
+                    {/each}
+                  </div>
+                {/if}
               </div>
             {:else}
               <a
@@ -763,7 +807,17 @@
 
     {#if isApproved}
       {#each navItems as item, idx}
-        {#if item.type === 'folder'}
+        {#if isCompetitionFolder(item)}
+          <a
+            href={COMPETITION_ROUTE}
+            class="mobile-link"
+            class:active={isActive(COMPETITION_ROUTE) || isFolderActive(item)}
+            on:click={closeMobileMenu}
+          >
+            <Trophy size={18} />
+            <span>{item.label}</span>
+          </a>
+        {:else if item.type === 'folder'}
           <div class="mobile-folder" class:open={openMobileFolders[idx]}>
             <button
               type="button"
@@ -807,7 +861,7 @@
 <GlobalSiteSearch bind:open={siteSearchOpen} canViewAdmin={canViewAdmin} canViewScoutingAdmin={canViewScoutingAdmin} />
 
 {#if canRenderPageContent}
-  <main class="container page-container">
+  <main class="container page-container" class:predictions-shell={hideGlobalChrome}>
     <slot />
   </main>
 {:else if shouldHoldProtectedContent}
@@ -1272,6 +1326,23 @@
     max-width: var(--page-max-width);
     margin: 0 auto;
     padding: 0 var(--space-4);
+  }
+
+  /* Prediction Market v2's own full-bleed dark shell - no shared container
+     width/padding, no inherited site background (the page's own root
+     element, src/routes/predictions/+layout.svelte, paints the real
+     background; this fallback color only matters for the instant before
+     that CSS applies, so it never flashes the light site background).
+     Needs the full "main.container.page-container" prefix, not just
+     ".predictions-shell" alone, to out-specificity the rule above - both
+     are scoped to this same component, and the extra element+class in
+     that selector otherwise wins the tie. */
+  main.container.page-container.predictions-shell {
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    background: #0a0d13;
+    min-height: 100vh;
   }
 
   .auth-loading-shell {

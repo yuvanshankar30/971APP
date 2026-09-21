@@ -30,3 +30,24 @@ export function matchVideoUrl(match) {
   if (youtube) return `https://www.youtube.com/watch?v=${encodeURIComponent(youtube.key)}`;
   return match?.key ? `https://www.thebluealliance.com/match/${encodeURIComponent(match.key)}` : '';
 }
+
+export function matchVideoSources(match) {
+  const matchKey = String(match?.key || '').trim();
+  const sources = [];
+  for (const video of match?.videos || []) {
+    const provider = String(video?.type || '').trim().toLowerCase();
+    const externalId = String(video?.key || '').trim();
+    if (!provider || !externalId) continue;
+    let url = '';
+    if (provider === 'youtube') url = `https://www.youtube.com/watch?v=${encodeURIComponent(externalId)}`;
+    else if (provider === 'twitch') url = `https://www.twitch.tv/videos/${encodeURIComponent(externalId)}`;
+    if (!url) continue;
+    sources.push({
+      provider, external_id: externalId, url,
+      label: `${provider === 'youtube' ? 'YouTube' : 'Twitch'} · ${externalId}`,
+      review_only: true, calibrated: false,
+      provenance: { resolver: 'tba_match_videos', match_key: matchKey }
+    });
+  }
+  return sources;
+}

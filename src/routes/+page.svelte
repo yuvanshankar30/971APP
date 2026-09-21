@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { supabase, getAuthHeader } from '$lib/supabase.js';
   import { initAuth, userStore, signOut, authReady as authReadyStore, user as authUserStore } from '$lib/stores/auth.js';
-  import { LogIn, UserPlus, Mail, Lock, User, Shield, CheckCircle, AlertCircle, LogOut, Users, GripVertical, X, Plus, LayoutGrid, ClipboardCheck, Factory, ShoppingCart, ListChecks, ListOrdered, Target } from 'lucide-svelte';
+  import { LogIn, UserPlus, Mail, Lock, User, Shield, CheckCircle, AlertCircle, LogOut, Users, GripVertical, X, Plus, LayoutGrid, ClipboardCheck, Factory, ShoppingCart, ListChecks, ListOrdered, Target, Box, Trophy } from 'lucide-svelte';
   import { goto } from '$app/navigation';
   import { FRC_TEAMS, hasPermission } from '$lib/permissions.js';
   import { theme, setTheme } from '$lib/stores/theme.js';
@@ -160,14 +160,42 @@
     }
   }
 
+  // Global admin toggle (hub_settings.competition_mode, see the Admin
+  // panel's Site Settings card) - hides every competition-only home page
+  // surface (this section, and the Latest/Current/Upcoming match card
+  // below) for everyone, regardless of a user's own saved dashboard_sections.
+  // Direct instruction: off by default between competitions; an admin turns
+  // it on once the next event starts. Starts true (not false) so a returning
+  // user's assignment cards don't visibly flash away while this loads -
+  // loadCompetitionMode() below corrects it before any of the gated content
+  // or data fetches actually run.
+  let competitionMode = true;
+  let competitionModeLoaded = false;
+  async function loadCompetitionMode() {
+    try {
+      const { data, error } = await supabase.from('hub_settings').select('competition_mode').eq('id', 1).maybeSingle();
+      if (error) throw error;
+      competitionMode = data?.competition_mode ?? false;
+    } catch (e) {
+      console.error('Failed to load hub_settings:', e);
+      // Fails closed - an unreachable settings table shouldn't leave a
+      // dead/broken competition surface showing on the home page.
+      competitionMode = false;
+    } finally {
+      competitionModeLoaded = true;
+    }
+  }
+
   $: canViewAdmin = can('VIEW_ADMIN_PANEL');
   $: customSectionKeys = sanitizeSectionKeys(user?.dashboard_sections);
   $: rawVisibleKeys = (customSectionKeys && customSectionKeys.length ? customSectionKeys : defaultSectionKeyList(canViewAdmin))
     .filter(k => k !== 'admin' || canViewAdmin)
-    .filter(k => k === 'admin' || ALL_DASHBOARD_SECTIONS.some(d => d.key === k));
+    .filter(k => k === 'admin' || ALL_DASHBOARD_SECTIONS.some(d => d.key === k))
+    .filter(k => k !== 'assignment-queue' || competitionMode);
   $: visibleSections = rawVisibleKeys.map(k => ({ key: k, label: sectionLabel(k) }));
   $: hiddenSections = [...ALL_DASHBOARD_SECTIONS.map(d => d.key), ...(canViewAdmin ? ['admin'] : [])]
     .filter(k => !rawVisibleKeys.includes(k))
+    .filter(k => k !== 'assignment-queue' || competitionMode)
     .map(k => ({ key: k, label: sectionLabel(k) }));
 
   async function persistDashboardSections(keys) {
@@ -247,8 +275,14 @@
   // a fixed minimum width just means an ever-taller stack of rows. Shrink
   // the grid's own minimum column width as the count climbs past a normal
   // event's worth, so more of them fit per row instead of only adding rows.
-  // Never shrinks below 110px (still fits "Match #qm123 / Team 9999").
-  $: assignmentGridMinWidth = Math.max(110, 200 - Math.max(0, myScoutAssignments.length - 8) * 6);
+  // Never shrinks below 100px (h5/p now truncate with an ellipsis instead of
+  // wrapping, so a narrower card never looks broken).
+  // Base width dropped from 200 to 145: with 8 or fewer live assignments the
+  // old 200px basis + auto-fit's row-filling stretch is what made a short
+  // card grid balloon out to full-width, wide cards - direct report: "data
+  // scouting - Match #qm61" had room to wrap onto a second line at that
+  // width instead of fitting on one.
+  $: assignmentGridMinWidth = Math.max(100, 145 - Math.max(0, myScoutAssignments.length - 8) * 6);
 
   // Pre-scouting assignment state - teams assigned to this user to research
   // ahead of the event (see /scouting-admin's PitAssignmentPanel,
@@ -464,7 +498,8 @@
         };
       }
     }, 5000);
-    const currentMatchTimer = setInterval(() => { if (user) loadMatchAlliances(); }, 60_000);
+    const currentMatchTimer = setInterval(() => { if (user && competitionMode) loadMatchAlliances(); }, 60_000);
+    loadCompetitionMode();
     return () => { clearTimeout(profileWaitTimer); clearInterval(currentMatchTimer); unsub?.(); unsubAuthUser?.(); unsubReady?.(); uninit?.(); };
   });
 
@@ -474,12 +509,18 @@
   // together (dashboardDataReady) instead of each section popping in on
   // its own as its own fetch happens to resolve - the "top loads, then
   // everything else trickles in one at a time" effect that was really just
-  // three independent loaders finishing at different times.
+  // three independent loaders finishing at different times. Waits on
+  // competitionModeLoaded too - none of these three are worth fetching at
+  // all while competition mode is off (see loadCompetitionMode above).
   let dashboardDataReady = false;
-  $: if (user && !scoutingLoaded) {
+  $: if (user && competitionModeLoaded && !scoutingLoaded) {
     scoutingLoaded = true;
-    Promise.all([loadScoutAssignments(), loadPrescoutAssignments(), loadMatchAlliances()])
-      .finally(() => { dashboardDataReady = true; });
+    if (competitionMode) {
+      Promise.all([loadScoutAssignments(), loadPrescoutAssignments(), loadMatchAlliances()])
+        .finally(() => { dashboardDataReady = true; });
+    } else {
+      dashboardDataReady = true;
+    }
   }
 
   // Keep this browser's login-screen cache in sync with the account's saved
@@ -694,15 +735,25 @@
               <div class="dashboard-actions">
                 <h3>Team Workspace</h3>
                 <div class="workspace-grid">
-                  <a href="/manufacture" class="workspace-card">
+                  <a href="/manufacture-hub" class="workspace-card">
                     <Factory size={24} />
                     <h4>Manufacturing</h4>
                     <p>Manage active parts and production work</p>
+                  </a>
+                  <a href="/cad-hub" class="workspace-card">
+                    <Box size={24} />
+                    <h4>CAD</h4>
+                    <p>Browse subsystems, builds, and design files</p>
                   </a>
                   <a href="/cad/purchasing" class="workspace-card">
                     <ShoppingCart size={24} />
                     <h4>Purchasing</h4>
                     <p>Review purchase requests, orders, and needed components</p>
+                  </a>
+                  <a href="/competition" class="workspace-card">
+                    <Trophy size={24} />
+                    <h4>Competition</h4>
+                    <p>Strategy, scouting, rankings, and every other competition tool</p>
                   </a>
                   {#if homeEventKey}
                     <a href="/matchscout" class="workspace-card">
@@ -722,22 +773,24 @@
                     </a>
                   {/if}
                 </div>
-                <div class="stat-strip">
-                  {#if homeEventKey}
+                {#if competitionMode}
+                  <div class="stat-strip">
+                    {#if homeEventKey}
+                      <div class="stat-tile">
+                        <span class="stat-label">Competition</span>
+                        <strong class="stat-value stat-value-text">{homeEventKey}</strong>
+                      </div>
+                    {/if}
                     <div class="stat-tile">
-                      <span class="stat-label">Competition</span>
-                      <strong class="stat-value stat-value-text">{homeEventKey}</strong>
+                      <span class="stat-label">Assignments Open</span>
+                      <strong class="stat-value">{incompleteScoutAssignments.length}</strong>
                     </div>
-                  {/if}
-                  <div class="stat-tile">
-                    <span class="stat-label">Assignments Open</span>
-                    <strong class="stat-value">{incompleteScoutAssignments.length}</strong>
+                    <div class="stat-tile">
+                      <span class="stat-label">Assignments Done</span>
+                      <strong class="stat-value">{completedScoutAssignmentCount}</strong>
+                    </div>
                   </div>
-                  <div class="stat-tile">
-                    <span class="stat-label">Assignments Done</span>
-                    <strong class="stat-value">{completedScoutAssignmentCount}</strong>
-                  </div>
-                </div>
+                {/if}
               </div>
             {:else if section.key === 'admin'}
               <div class="dashboard-actions">
@@ -765,7 +818,7 @@
                 {#if myScoutAssignments.length === 0}
                   <p class="muted">No open scouting assignments right now.</p>
                 {:else}
-                  <div class="card-grid" style="grid-template-columns: repeat(auto-fit, minmax({assignmentGridMinWidth}px, 1fr));">
+                  <div class="card-grid" style="grid-template-columns: repeat(auto-fill, minmax({assignmentGridMinWidth}px, 1fr));">
                     {#each myScoutAssignments as assignment}
                       <a class="assignment-card" class:completed={!!assignment.completed_at} href={scoutAssignmentHref(assignment)}>
                         <h5>{assignment.scouting_type} scouting - Match #{assignment.match_key.split('_').pop()}</h5>
@@ -958,9 +1011,9 @@
       </div>
       {/if}
 
-      {#if currentMatchLoading && !currentEventMatch}
+      {#if competitionMode && currentMatchLoading && !currentEventMatch}
         <div class="current-match-card current-match-loading">Loading the {homeEventKey || 'active event'} field...</div>
-      {:else if currentEventMatch}
+      {:else if competitionMode && currentEventMatch}
         <div class="current-match-card" class:live={currentMatchState === 'current'} class:has-my-team={currentMatchHasMyTeam}>
           <div class="current-match-heading">
             <div>
@@ -978,7 +1031,7 @@
           </div>
           {#if currentMatchState === 'complete'}<small>TBA reports this event’s published matches complete.</small>{/if}
         </div>
-      {:else if currentMatchError}
+      {:else if competitionMode && currentMatchError}
         <div class="current-match-card current-match-loading">Current match unavailable: {currentMatchError}</div>
       {/if}
     {/if}
@@ -2108,8 +2161,12 @@
 
   .card-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: var(--gap-3);
+    /* auto-fill (not auto-fit) so a short list on a wide screen keeps
+       compact, basis-width cards instead of stretching each one to fill
+       the leftover row width - that stretch was why "data scouting - Match
+       #qm61" had room to wrap onto a second line instead of fitting on one. */
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: var(--gap-2);
     margin-top: var(--space-2);
     /* Caps how tall a long assignment list can push the page - scrolls
        internally past that instead (part of the page-wide no-scroll
@@ -2125,7 +2182,7 @@
     background: var(--surface-1);
     border: 1px solid var(--border);
     border-left: 3px solid var(--brand-gold-strong);
-    padding: var(--space-4) var(--space-5);
+    padding: var(--space-2) var(--space-3);
     transition: border-color 0.1s ease, background-color 0.1s ease;
   }
 
@@ -2135,8 +2192,22 @@
     border-left-color: var(--accent-strong);
   }
 
-  .assignment-card h5 { margin: 0 0 var(--space-1) 0; color: var(--secondary); }
-  .assignment-card p { margin: 0; color: var(--neutral-500); font-size: var(--font-xs); }
+  /* Was truncated with an ellipsis at one point - direct report: that cut
+     "Match #qm61" off entirely instead of just tightening the layout. Left
+     free to wrap (its natural behavior) so the full match number always
+     stays visible; a smaller font is what actually keeps most cards to one
+     line at this width, not clipping the text. */
+  .assignment-card h5 {
+    margin: 0 0 var(--space-1) 0;
+    color: var(--secondary);
+    font-size: 0.8rem;
+    line-height: 1.25;
+  }
+  .assignment-card p {
+    margin: 0;
+    color: var(--neutral-500);
+    font-size: var(--font-xs);
+  }
   .assignment-card.completed { opacity: 0.72; border-left-color: var(--success, #2e7d32); }
   .assignment-card.completed:hover { opacity: 1; }
   .completed-badge {

@@ -5,7 +5,7 @@
   import { supabase } from '$lib/supabase.js';
   import { page } from '$app/stores';
   import { userStore, loadUserFromUUID, upsertProfileIfMissing, setUserUUID } from '$lib/stores/user.js';
-  import { isTeam9584, passesTeamFilter } from '$lib/frcTeams.js';
+  import { passesTeamFilter, teamShortLabel } from '$lib/frcTeams.js';
   import TeamFilter from '$lib/components/TeamFilter.svelte';
   import { getSeasonBucket, getCurrentSeasonBucket, getAllSeasonBuckets, passesSeasonFilter } from '$lib/frcSeason.js';
   import SeasonFilter from '$lib/components/SeasonFilter.svelte';
@@ -15,7 +15,7 @@
   import { searchFolderTree } from '$lib/fusionFolderSearch.js';
   import ROUTER_FLOW from '$lib/router_flow.json';
   import { convertGcodeToInches } from '$autocam/fusion/gcodeUnitConvert.js';
-  import { getDisplayStatus, BUTTONS, getBadgeClass, getWorkflowStatuses } from '$lib/statuses.js';
+  import { getDisplayStatus, BUTTONS, getBadgeClass, getWorkflowStatuses, WORKFLOW_STATUSES } from '$lib/statuses.js';
   import { summarizeRouterStages, isFullyKitted, buildRouterProgressUpdate, canAdvanceRouterToCamReview } from '$lib/router_progress.js';
   import { isManufacturingLead, canCamReview as camReviewAllowed, canDeleteParts } from '$lib/permissions.js';
   import CadViewer from '$lib/components/CadViewer.svelte';
@@ -151,6 +151,9 @@
     { value: 'inspection', label: 'Inspection' },
     { value: 'cammed', label: 'CAM Reviewed' },
     { value: 'cam_review', label: 'CAM Review Pending' },
+    { value: 'postprocessed', label: 'Postprocessed' },
+    { value: 'jprogged', label: 'Jprogged' },
+    { value: 'printed', label: 'Printed' },
     { value: 'machined', label: 'Machined' },
     { value: 'complete', label: 'Complete' }
   ];
@@ -161,6 +164,45 @@
   function isPartFullyCompleted(part) {
     if (part?.workflow === 'router') return isFullyKitted(part);
     return part?.status === 'complete';
+  }
+
+  // The manufacturing list advances every request through the same visible
+  // status ladder. Workflow-specific detail (such as router unit counts)
+  // remains elsewhere, but the list must never lose its route after Start.
+  function partRoute(part) {
+    const stages = getWorkflowStatuses(part?.workflow);
+    const status = (part?.status || 'pending').toString().toLowerCase();
+    let index = stages.findIndex((stage) => stage.value === status);
+    // Terminal status is spelled several ways across older rows.
+    if (index === -1 && (status === 'complete' || status === 'kitted' || status === 'done')) {
+      index = stages.length - 1;
+    }
+    return { stages, index };
+  }
+
+  function nextProcessStep(part) {
+    const status = String(part?.status || 'pending').toLowerCase();
+    if (status === 'pending') return { status: 'in-progress', label: 'Start', icon: 'start' };
+    if (part?.workflow !== 'router') {
+      if (part.workflow === '3d-print') {
+        if (['in-progress', 'cammed', 'postprocessed', 'jprogged'].includes(status)) {
+          return { status: 'printed', label: 'Printed', icon: 'print' };
+        }
+        if (status === 'printed' || status === 'machined') return { status: 'complete', label: 'Kit', icon: 'kit' };
+        return null;
+      }
+      if (['in-progress', 'cammed', 'postprocessed', 'jprogged'].includes(status)) {
+        return { status: 'machined', label: 'Machined', icon: 'machine' };
+      }
+      if (status === 'machined') return { status: 'complete', label: 'Kit', icon: 'kit' };
+      return null;
+    }
+    if (status === 'in-progress') return { status: 'cammed', label: 'CAM Complete', icon: 'cam' };
+    if (status === 'cammed') return { status: 'postprocessed', label: 'Postprocess', icon: 'machine' };
+    if (status === 'postprocessed') return { status: 'jprogged', label: 'JProg', icon: 'jprog' };
+    if (status === 'jprogged') return { status: 'machined', label: 'Machine', icon: 'machine' };
+    if (status === 'machined') return { status: 'complete', label: 'Kit', icon: 'kit' };
+    return null;
   }
 
   function getQuantitySummary(part) {
@@ -1034,9 +1076,17 @@
       await sendNotification('router-status', { part_id: partId, status: newStatus });
       // NOTE: no loadParts() here — callers use setLocalStatus for an optimistic update
       // so the hub doesn't flash/reload on every button click.
+      return true;
     } catch (error) {
       console.error('Error updating part status:', error);
       alert('Error updating part status. Please try again.');
+      return false;
+    }
+  }
+
+  async function advancePartStatus(part, nextStatus) {
+    if (await updatePartStatus(part.id, nextStatus)) {
+      setLocalStatus(part.id, nextStatus);
     }
   }
 
@@ -2072,7 +2122,7 @@
   // Reactive statement that filters parts when search term, filters, or parts array changes
   // ToDo tab: hide completed parts
   $: filteredParts = parts.filter(part => {
-    const matchesSearch = !searchTerm || 
+    const matchesSearch = !searchTerm ||
       part.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       part.requester.toLowerCase().includes(searchTerm.toLowerCase()) ||
       part.project_id.toLowerCase().includes(searchTerm.toLowerCase());
@@ -2201,18 +2251,18 @@
   </div>
 </div>
 
-<!-- Manufacture Sub-Tabs -->
-<div class="subtabs">
-  <a href="/manufacture" class:active={$page.url.pathname === '/manufacture'}>ToDo</a>
-  <a href="/manufacture/completed" class:active={$page.url.pathname === '/manufacture/completed'}>Completed</a>
-  <a href="/manufacture/router" class:active={$page.url.pathname === '/manufacture/router'}>Router</a>
-  <a href="/manufacture/post-processing" class:active={$page.url.pathname === '/manufacture/post-processing'}>Post Processing</a>
-  <a href="/manufacture/bins" class:active={$page.url.pathname === '/manufacture/bins'}>Bins</a>
-  <a href="/manufacture/gcode-converter" class:active={$page.url.pathname === '/manufacture/gcode-converter'}>G-code Converter</a>
-  <a href="/manufacture/files" class:active={$page.url.pathname === '/manufacture/files'}>Files</a>
-</div>
-
 <div class="card">
+  <!-- Manufacture Sub-Tabs -->
+  <div class="subtabs subtabs-in-card">
+    <a href="/manufacture" class:active={$page.url.pathname === '/manufacture'}>ToDo</a>
+    <a href="/manufacture/completed" class:active={$page.url.pathname === '/manufacture/completed'}>Completed</a>
+    <a href="/manufacture/router" class:active={$page.url.pathname === '/manufacture/router'}>Router</a>
+    <a href="/manufacture/post-processing" class:active={$page.url.pathname === '/manufacture/post-processing'}>Post Processing</a>
+    <a href="/manufacture/bins" class:active={$page.url.pathname === '/manufacture/bins'}>Bins</a>
+    <a href="/manufacture/gcode-converter" class:active={$page.url.pathname === '/manufacture/gcode-converter'}>G-code Converter</a>
+    <a href="/manufacture/files" class:active={$page.url.pathname === '/manufacture/files'}>Files</a>
+  </div>
+
   <div class="filters" style="--filters-columns: 2fr 1fr 1fr 1fr 1fr;">
     <div class="form-group">
       <label class="form-label">
@@ -2331,9 +2381,7 @@
               />
             {/if}
             <strong>{part.name}</strong>
-            {#if isTeam9584(part.frc_team)}
-              <span class="tag team-tag tag-9584">9584</span>
-            {/if}
+            <span class="name-team"><span class="name-team-dot" aria-hidden="true"></span>{teamShortLabel(part.frc_team)}</span>
             {#if stepFileWarning(part) === 'missing'}
               <span class="tag tag-warning" title="No STEP file uploaded for this router part">⚠ No STEP</span>
             {:else if stepFileWarning(part) === 'invalid'}
@@ -2453,6 +2501,14 @@
               <button class="btn btn-secondary btn-sm" on:click={() => installCadStepFile(part)} title="Download STEP file">
                 <Download size={14} /> Install CAD
               </button>
+              {#if part.workflow === 'lathe' && canViewPdf(part)}
+                <button class="btn btn-secondary btn-sm" on:click={() => openPdfViewer(part)} title="View drawing PDF">
+                  <FileText size={14} /> View PDF
+                </button>
+                <button class="btn btn-secondary btn-sm" on:click={() => installPdfFile(part)} title="Download drawing PDF">
+                  <Download size={14} /> Install PDF
+                </button>
+              {/if}
               {#if fusionJob && fusionJob.params?.fusionJobKind !== 'plate:arrange'}
                 <button class="btn btn-secondary btn-sm" on:click={() => openJobDetailsModal(fusionJob)} title="View Fusion CAM job details">
                   <ListChecks size={14} /> Job Details
@@ -2470,7 +2526,7 @@
                 <button class="fusion-cam-failed part-card-fusion-status" on:click={() => openFusionCamModal(part, fusionJob)} title={fusionJob.errors?.[0] || 'Unknown error'}>Fusion CAM failed - retry AutoCAM</button>
               {/if}
             {/if}
-          {:else if part.workflow === 'router' || part.workflow === 'lathe' || part.workflow === '3d-print'}
+          {:else if (part.workflow === 'router' || part.workflow === 'lathe' || part.workflow === '3d-print') && !(part.workflow === 'lathe' && canViewPdf(part))}
             <button
               class="btn btn-secondary btn-sm"
               on:click|stopPropagation={() => openCamProfileModal(part)}
@@ -2482,7 +2538,7 @@
 
           <!-- Lathe drawing PDF - independent of the STEP/CAD controls above,
                since a lathe part can have a PDF, a STEP, or both. -->
-          {#if part.workflow === 'lathe' && canViewPdf(part)}
+          {#if part.workflow === 'lathe' && canViewPdf(part) && !canViewCad(part)}
             <div class="cad-action-grid" on:click|stopPropagation on:keydown|stopPropagation role="presentation">
               <button class="btn btn-secondary btn-sm" on:click={() => openPdfViewer(part)} title="View drawing PDF">
                 <FileText size={14} /> View PDF
@@ -2490,57 +2546,37 @@
               <button class="btn btn-secondary btn-sm" on:click={() => installPdfFile(part)} title="Download drawing PDF">
                 <Download size={14} /> Install PDF
               </button>
-            </div>
-          {/if}
-
-          <!-- Status action buttons -->
-          {#if part.status === 'pending'}
-            <!-- Start always shows for a pending part regardless of
-                 workflow - direct instruction, restoring the plain
-                 pending -> in-progress action every workflow used to have.
-                 Router additionally gets Review CAM once real Fusion CAM
-                 output exists, as its own separate action rather than a
-                 replacement for Start. -->
-            {#if part.workflow === 'router' && canAdvanceRouterToCamReview(part, fusionJob)}
-              <button class="btn btn-secondary btn-sm" on:click|stopPropagation={() => advanceRouterToCamReview(part)}>
-                <CircleCheck size={14} /> Review CAM
-              </button>
-            {/if}
-            <button
-              class="btn btn-secondary btn-sm"
-              on:click|stopPropagation={async () => { await updatePartStatus(part.id, 'in-progress'); setLocalStatus(part.id, 'in-progress'); }}
-            >
-              <Clock size={14} /> Start
-            </button>
-          {:else if part.status === 'in-progress'}
-            {#if part.workflow === 'router'}
-              {#if (!getRouterMeta(part).step || getRouterMeta(part).step === 'cam_ing') && canAdvanceRouterToCamReview(part, fusionJob)}
+              {#if !canViewCad(part)}
                 <button
-                  class="btn btn-primary btn-sm"
-                  on:click|stopPropagation={() => advanceRouterToCamReview(part)}
+                  class="btn btn-secondary btn-sm"
+                  on:click|stopPropagation={() => openCamProfileModal(part)}
+                  title="This part was created before a file was required for its workflow - attach one to unlock the 3D viewer"
                 >
-                  <CircleCheck size={14} /> Review CAM
+                  <Upload size={14} /> Attach STEP or PDF
                 </button>
-              {:else if getRouterMeta(part).step === 'cam_review'}
-                {#if canCamReview}
-                  <button
-                    class="btn btn-primary btn-sm"
-                    on:click|stopPropagation={async () => { await updatePartStatus(part.id, 'cammed'); await updateRouterMeta(part, { step: 'cammed' }); setLocalStatus(part.id, 'cammed'); setLocalRouterMeta(part.id, { step: 'cammed' }); }}
-                  >
-                    {BUTTONS.CAM_REVIEWED}
+                {#if nextProcessStep(part)}
+                  <button class="btn btn-secondary btn-sm" on:click|stopPropagation={() => advancePartStatus(part, nextProcessStep(part).status)}>
+                    {#if nextProcessStep(part).icon === 'start'}<Clock size={14} />
+                    {:else if nextProcessStep(part).icon === 'print'}<Upload size={14} />
+                    {:else if nextProcessStep(part).icon === 'kit'}<Package size={14} />
+                    {:else}<Wrench size={14} />{/if}
+                    {nextProcessStep(part).label}
                   </button>
                 {/if}
               {/if}
-            {/if}
-          {:else if part.status === 'cammed'}
-            {#if part.workflow === 'router'}
-              <button
-                class="btn btn-primary btn-sm"
-                on:click|stopPropagation={() => markPartMachined(part)}
-              >
-                <Wrench size={14} /> Machine
-              </button>
-            {/if}
+            </div>
+          {/if}
+
+          {#if nextProcessStep(part) && !(part.workflow === 'lathe' && !canViewCad(part) && canViewPdf(part))}
+            <button class="btn btn-secondary btn-sm" class:part-card-process-action={part.workflow === 'lathe' && canViewCad(part) && canViewPdf(part)} on:click|stopPropagation={() => advancePartStatus(part, nextProcessStep(part).status)}>
+              {#if nextProcessStep(part).icon === 'start'}<Clock size={14} />
+              {:else if nextProcessStep(part).icon === 'cam'}<CircleCheck size={14} />
+              {:else if nextProcessStep(part).icon === 'jprog'}<ListChecks size={14} />
+              {:else if nextProcessStep(part).icon === 'print'}<Upload size={14} />
+              {:else if nextProcessStep(part).icon === 'kit'}<Package size={14} />
+              {:else}<Wrench size={14} />{/if}
+              {nextProcessStep(part).label}
+            </button>
           {/if}
         </div>
       </div>
@@ -2557,21 +2593,23 @@
               <input type="checkbox" checked={allFilteredSelected} on:change={toggleSelectAllFiltered} aria-label="Select all filtered parts" />
             </th>
           {/if}
-          <th class="name-col">Name</th>
+          <!-- Eleven columns gave every field the same weight, so nothing
+               was scannable. Project, stock, requester and created now sit
+               as a secondary line under the part name (the anchor column),
+               and Status becomes Route - where the part is along its
+               workflow, which is the question the shop actually asks. -->
+          <th class="name-col">Part</th>
           <th class="workflow-col">Workflow</th>
-          <th class="project-col mono" class:hidden={assignMode}>Project ID</th>
+          <th class="route-col">Route</th>
           <th class="quantity-col" class:hidden={assignMode}>Qty</th>
-          <th class="stock-col" class:hidden={assignMode}>Stock</th>
-          <th class="metadata-col">Status</th>
           <th class="metadata-col" class:hidden={assignMode}>Due</th>
-          <th class="metadata-col" class:hidden={assignMode}>Created</th>
-          <th class="requester-col" class:hidden={assignMode}>Requested By</th>
           <th class="actions-table-col" class:hidden={assignMode}>Actions</th>
         </tr>
       </thead>
       <tbody>
         {#each filteredParts as part (part.id)}
           {@const fusionJob = part.workflow === 'router' ? fusionJobsByPart[part.id] : null}
+          {@const route = partRoute(part)}
           <tr
             id="part-{part.id}"
             class="parts-row"
@@ -2598,14 +2636,27 @@
             <td class="name-col">
               <div class="name-line">
                 <strong>{part.name}</strong>
-                {#if isTeam9584(part.frc_team)}
-                  <span class="tag team-tag tag-9584" title="Requested by Team 9584">9584</span>
-                {/if}
+                <!-- Every part shows its team, not just 9584 - a tag that
+                     only appears for one team means the other team's parts
+                     are identified by the absence of a label, which is not
+                     something you can scan for. -->
+                <span class="name-team"><span class="name-team-dot" aria-hidden="true"></span>{teamShortLabel(part.frc_team)}</span>
                 {#if stepFileWarning(part) === 'missing'}
                   <span class="tag tag-warning" title="No STEP file uploaded for this router part">⚠ No STEP</span>
                 {:else if stepFileWarning(part) === 'invalid'}
                   <span class="tag tag-warning" title="The uploaded STEP file failed validation">⚠ Bad STEP</span>
                 {/if}
+              </div>
+              <!-- Compact identifying metadata beneath the part name. -->
+              <div class="name-meta" class:hidden={assignMode}>
+                <div class="name-meta-line">
+                  {#if part.project_id}<span class="mono">{part.project_id}</span>{/if}
+                  {#if part.stock_assignment}<span class="name-meta-stock"><span class="name-meta-sep">·</span>{part.stock_assignment}</span>{/if}
+                </div>
+                <div class="name-meta-line">
+                  {#if part.requester}<span class="name-meta-requester" title={part.requester}>{part.requester}</span>{/if}
+                  <span class="name-meta-date">{#if part.requester}<span class="name-meta-sep">·</span>{/if}{formatDate(part.created_at)}</span>
+                </div>
               </div>
               <PartNotes item={part} table="parts" inline on:update={() => loadParts()} />
               {#if part.assigned_to}
@@ -2619,35 +2670,39 @@
                 {getWorkflowLabel(part.workflow)}
               </span>
             </td>
-            <td class="project-col mono" class:hidden={assignMode}>{part.project_id}</td>
-            <td class="quantity-col" class:hidden={assignMode}>{getQuantitySummary(part)}</td>
-            <td class="stock-col text-muted" class:hidden={assignMode}>{part.stock_assignment || '-'}</td>
-            <td class="metadata-col">
-              <div class="metadata-line">
-                <span class="status-badge {getBadgeClass(part.status, getRouterMeta(part))} status-table status-fade">{getStatusDisplay(part)}</span>
-              </div>
+            <td class="route-col">
+              <span class="status-badge {getBadgeClass(part.status, getRouterMeta(part))} status-table status-fade">{getStatusDisplay(part)}</span>
+              <!-- Segmented track: one segment per stop on this workflow's
+                   route, filled up to where the part currently is. Gives
+                   "how far along" at a glance, which a status word alone
+                   cannot - "Pending" on an 8-stop router route is a very
+                   different amount of remaining work than on a 3-stop
+                   laser route. -->
+              {#if route.index >= 0}
+                <span
+                  class="route-track"
+                  title={`Stage ${route.index + 1} of ${route.stages.length}: ${route.stages[route.index].label}`}
+                >
+                  {#each route.stages as stage, stageIndex (stage.value)}
+                    <span
+                      class="route-seg"
+                      class:done={stageIndex < route.index}
+                      class:current={stageIndex === route.index}
+                    ></span>
+                  {/each}
+                  <span class="route-count">{route.index + 1}/{route.stages.length}</span>
+                </span>
+              {/if}
               {#if part.workflow === 'router' && getRouterProgressSummary(part)}
                 <div class="metadata-sub router-progress-note">{getRouterProgressSummary(part)}</div>
               {/if}
             </td>
+            <td class="quantity-col" class:hidden={assignMode}>{getQuantitySummary(part)}</td>
             <!-- svelte-ignore a11y_no_static_element_interactions -->
             <td class="metadata-col" class:hidden={assignMode} on:click|stopPropagation on:keydown|stopPropagation>
               <div class="metadata-line">
                 <PartDueDate {part} on:update={() => loadParts()} />
               </div>
-            </td>
-            <td class="metadata-col" class:hidden={assignMode}>
-              <div class="metadata-line">{formatDate(part.created_at)}</div>
-              {#if getSeasonBucket(part.created_at)}
-                <div class="metadata-sub">
-                  <span class="tag season-tag {getSeasonBucket(part.created_at).isOffseason ? 'tag-offseason' : 'tag-season'}">
-                    {getSeasonBucket(part.created_at).label}
-                  </span>
-                </div>
-              {/if}
-            </td>
-            <td class="requester-col" class:hidden={assignMode} title={part.requester || 'Requester not recorded'}>
-              <div class="metadata-line requester-line"><span class="requester-text">{part.requester || '—'}</span></div>
             </td>
             <td class="actions-table-col" class:hidden={assignMode}>
               <div class="row-actions">
@@ -2664,30 +2719,33 @@
                     <button class="btn btn-secondary btn-sm" on:click={() => installCadStepFile(part)} title="Download STEP file">
                       <Download size={13} /> Install CAD
                     </button>
+                    {#if part.workflow === 'lathe' && canViewPdf(part)}
+                      <button class="btn btn-secondary btn-sm" on:click={() => openPdfViewer(part)} title="View drawing PDF">
+                        <FileText size={13} /> View PDF
+                      </button>
+                      <button class="btn btn-secondary btn-sm" on:click={() => installPdfFile(part)} title="Download drawing PDF">
+                        <Download size={13} /> Install PDF
+                      </button>
+                    {/if}
                     {#if fusionJob && fusionJob.params?.fusionJobKind !== 'plate:arrange'}
                       <button class="btn btn-secondary btn-sm" on:click={() => openJobDetailsModal(fusionJob)} title="View Fusion CAM job details">
                         <ListChecks size={13} /> Job Details
                       </button>
                     {/if}
-                    <!-- Start/Review CAM live inside this grid too (not as
-                         separate siblings below, the old layout) so a
-                         pending part's action buttons form one even 2-column
-                         grid instead of a lopsided stack. See the duplicate
-                         block below .row-actions for the !canViewCad(part)
-                         case, where there's no grid for this to join. -->
-                    {#if part.status === 'pending'}
-                      {#if part.workflow === 'router' && canAdvanceRouterToCamReview(part, fusionJob)}
-                        <button class="btn btn-secondary btn-sm" on:click={() => advanceRouterToCamReview(part)} title="Review completed Fusion CAM output">
-                          <CircleCheck size={13} /> Review CAM
+                    {#if !(part.workflow === 'lathe' && canViewPdf(part))}
+                      <div class="process-status-action">
+                      {#if nextProcessStep(part)}
+                        <button class="btn btn-secondary btn-sm" on:click={() => advancePartStatus(part, nextProcessStep(part).status)} title={nextProcessStep(part).label}>
+                          {#if nextProcessStep(part).icon === 'start'}<Clock size={13} />
+                          {:else if nextProcessStep(part).icon === 'cam'}<CircleCheck size={13} />
+                          {:else if nextProcessStep(part).icon === 'jprog'}<ListChecks size={13} />
+                          {:else if nextProcessStep(part).icon === 'print'}<Upload size={13} />
+                          {:else if nextProcessStep(part).icon === 'kit'}<Package size={13} />
+                          {:else}<Wrench size={13} />{/if}
+                          {nextProcessStep(part).label}
                         </button>
                       {/if}
-                      <button
-                        class="btn btn-secondary btn-sm"
-                        on:click={async () => { await updatePartStatus(part.id, 'in-progress'); setLocalStatus(part.id, 'in-progress'); }}
-                        title="Start Work"
-                      >
-                        <Clock size={13} /> Start
-                      </button>
+                      </div>
                     {/if}
                   </div>
                   {#if fusionJob}
@@ -2701,16 +2759,18 @@
                       <button class="fusion-cam-failed" on:click={() => openFusionCamModal(part, fusionJob)} title={fusionJob.errors?.[0] || 'Unknown error'}>Fusion CAM failed - retry AutoCAM</button>
                     {/if}
                   {/if}
-                {:else if part.workflow === 'router' || part.workflow === 'lathe' || part.workflow === '3d-print'}
-                  <button
-                    class="btn btn-secondary btn-sm"
-                    on:click={() => openCamProfileModal(part)}
-                    title="This part was created before a file was required for its workflow - attach one to unlock the 3D viewer{part.workflow === 'router' ? ' and Fusion CAM' : ''}"
-                  >
-                    <Upload size={13} /> Attach STEP{part.workflow === 'lathe' ? ' or PDF' : ''}
-                  </button>
+                {:else if (part.workflow === 'router' || part.workflow === 'lathe' || part.workflow === '3d-print') && !(part.workflow === 'lathe' && canViewPdf(part))}
+                  <div class="cad-action-grid attach-file-action" on:click|stopPropagation on:keydown|stopPropagation role="presentation">
+                    <button
+                      class="btn btn-secondary btn-sm"
+                      on:click={() => openCamProfileModal(part)}
+                      title="This part was created before a file was required for its workflow - attach one to unlock the 3D viewer{part.workflow === 'router' ? ' and Fusion CAM' : ''}"
+                    >
+                      <Upload size={13} /> Attach STEP{part.workflow === 'lathe' ? ' or PDF' : ''}
+                    </button>
+                  </div>
                 {/if}
-                {#if part.workflow === 'lathe' && canViewPdf(part)}
+                {#if part.workflow === 'lathe' && canViewPdf(part) && !canViewCad(part)}
                   <div class="cad-action-grid" on:click|stopPropagation on:keydown|stopPropagation role="presentation">
                     <button class="btn btn-secondary btn-sm" on:click={() => openPdfViewer(part)} title="View drawing PDF">
                       <FileText size={13} /> View PDF
@@ -2718,63 +2778,43 @@
                     <button class="btn btn-secondary btn-sm" on:click={() => installPdfFile(part)} title="Download drawing PDF">
                       <Download size={13} /> Install PDF
                     </button>
+                    {#if !canViewCad(part)}
+                      <button
+                        class="btn btn-secondary btn-sm"
+                        on:click={() => openCamProfileModal(part)}
+                        title="This part was created before a file was required for its workflow - attach one to unlock the 3D viewer"
+                      >
+                        <Upload size={13} /> Attach STEP or PDF
+                      </button>
+                      {#if nextProcessStep(part)}
+                        <button class="btn btn-secondary btn-sm" on:click={() => advancePartStatus(part, nextProcessStep(part).status)} title={nextProcessStep(part).label}>
+                          {#if nextProcessStep(part).icon === 'start'}<Clock size={13} />
+                          {:else if nextProcessStep(part).icon === 'print'}<Upload size={13} />
+                          {:else if nextProcessStep(part).icon === 'kit'}<Package size={13} />
+                          {:else}<Wrench size={13} />{/if}
+                          {nextProcessStep(part).label}
+                        </button>
+                      {/if}
+                    {/if}
                   </div>
                 {/if}
               </div>
-              {#if part.status === 'pending' && !canViewCad(part)}
-                {#if part.workflow === 'router' && canAdvanceRouterToCamReview(part, fusionJob)}
-                  <button class="btn btn-secondary btn-sm" on:click={() => advanceRouterToCamReview(part)} title="Review completed Fusion CAM output">
-                    <CircleCheck size={13} /> Review CAM
-                  </button>
-                {/if}
-                <button
-                  class="btn btn-secondary btn-sm"
-                  on:click={async () => { await updatePartStatus(part.id, 'in-progress'); setLocalStatus(part.id, 'in-progress'); }}
-                  title="Start Work"
-                >
-                  <Clock size={13} /> Start
-                </button>
-
-              {:else if part.status === 'in-progress'}
-                {#if part.workflow === 'router'}
-                  <!-- Fusion completion is the only path from CAMing to review. -->
-                  {#if (!getRouterMeta(part).step || getRouterMeta(part).step === 'cam_ing') && canAdvanceRouterToCamReview(part, fusionJob)}
-                  <div class="actions-col">
-                    <button
-                      class="btn btn-primary btn-sm"
-                      on:click={() => advanceRouterToCamReview(part)}
-                      title="Review completed Fusion CAM output"
-                    >
-                      <CircleCheck size={13} /> Review CAM
-                    </button>
-                  </div>
-              {:else if getRouterMeta(part).step === 'cam_review'}
-                  {#if canCamReview}
-                    <div class="actions-col">
-                      <button
-                        class="btn btn-primary btn-sm"
-                        on:click={async () => { await updatePartStatus(part.id, 'cammed'); await updateRouterMeta(part, { step: 'cammed' }); setLocalStatus(part.id, 'cammed'); setLocalRouterMeta(part.id, { step: 'cammed' }); }}
-                        title={BUTTONS.CAM_REVIEWED}
-                      >
-                        {BUTTONS.CAM_REVIEWED}
+              {#if (!canViewCad(part) && !(part.workflow === 'lathe' && canViewPdf(part))) || (part.workflow === 'lathe' && canViewCad(part) && canViewPdf(part))}
+                <div class="cad-action-grid process-action-grid" class:process-action-grid-full={part.workflow === 'lathe' && canViewCad(part) && canViewPdf(part)}>
+                  <div class="process-status-action">
+                    {#if nextProcessStep(part)}
+                      <button class="btn btn-secondary btn-sm" on:click={() => advancePartStatus(part, nextProcessStep(part).status)} title={nextProcessStep(part).label}>
+                        {#if nextProcessStep(part).icon === 'start'}<Clock size={13} />
+                        {:else if nextProcessStep(part).icon === 'cam'}<CircleCheck size={13} />
+                        {:else if nextProcessStep(part).icon === 'jprog'}<ListChecks size={13} />
+                        {:else if nextProcessStep(part).icon === 'print'}<Upload size={13} />
+                        {:else if nextProcessStep(part).icon === 'kit'}<Package size={13} />
+                        {:else}<Wrench size={13} />{/if}
+                        {nextProcessStep(part).label}
                       </button>
-                    </div>
-                  {/if}
-                  {/if}
-                {/if}
-              {:else if part.status === 'cammed'}
-                {#if part.workflow === 'router'}
-                  <div class="actions-col">
-                    <button
-                      class="btn btn-primary btn-sm"
-                      on:click={() => markPartMachined(part)}
-                      title="Machine"
-                    >
-                      <Wrench size={14} />
-                      Machine
-                    </button>
+                    {/if}
                   </div>
-                {/if}
+                </div>
               {/if}
             </td>
           </tr>
@@ -3436,6 +3476,19 @@
 {/if}
 
 <style>
+  /* The ToDo/Completed/Router/etc. sub-tabs used to sit in their own block
+     above the filters card - two separately-margined containers stacked on
+     top of each other, which read as a dead gap between them. Moved inside
+     the same card as the filters; this just tightens the tab row's own
+     bottom margin and adds a hairline so it still reads as a distinct row
+     from the filters below it, instead of doubling the card's own padding
+     on top of the tab row's margin. */
+  .subtabs-in-card {
+    margin: 0 0 var(--space-3);
+    padding-bottom: var(--space-3);
+    border-bottom: 1px solid var(--border);
+  }
+
   /* No hover effects on the manufacture tab (dense buttons + table rows).
      Use theme tokens so rows flip correctly in dark mode. Ruled hairlines
      only — no zebra striping, matching the rest of the app's tables. */
@@ -3524,7 +3577,7 @@
   .cad-action-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.35rem;
+    gap: 0.3rem;
     width: 100%;
     min-width: 0;
   }
@@ -3536,7 +3589,7 @@
     overflow-wrap: anywhere;
     line-height: 1.2;
     font-size: var(--font-xs, 0.75rem);
-    padding: 0.35rem 0.45rem;
+    padding: 0.3rem 0.4rem;
     /* app.css's base .btn pins a fixed `height: var(--btn-height)`. These
        buttons deliberately wrap instead (white-space: normal above), and a
        label that wraps to two lines - "Open Fusion CAM" is the one that
@@ -3544,9 +3597,11 @@
        height, so the text rendered outside the button's own background
        rather than growing it. Height has to become a minimum for wrapping
        to work at all; without this the wrap settings above have nothing to
-       grow into. */
+       grow into. Set explicitly smaller than the shared --btn-height (sized
+       for full-size standalone buttons) - this is a dense 2x2 grid of
+       short labels, not a lone button, so it doesn't need that much room. */
     height: auto;
-    min-height: var(--btn-height);
+    min-height: 1.7rem;
   }
 
   .deep-link-highlight {
@@ -3593,9 +3648,13 @@
 
   .table th.name-col,
   .table td.name-col {
-    /* The largest share - part names are the longest real content here and
-       were the first thing to run out of room. */
-    width: 17%;
+    /* The largest share - part names are the longest real content here,
+       and this column also carries the project/stock/requester/date line
+       folded in beneath them. The six columns now sum to exactly 100%:
+       they previously summed to 69%, leaving nearly a third of the table
+       unallocated for the browser to scatter between columns, which is
+       what opened the wide empty gaps between them. */
+    width: 32%;
     /* Part names wrap onto a second line rather than being cut off with
        an ellipsis - a truncated "P006950_Rev_x60 stiffn..." hides exactly
        the part of the name that distinguishes it from its neighbours.
@@ -3604,7 +3663,20 @@
     white-space: normal;
     overflow-wrap: anywhere;
   }
+  .process-status-action {
+    grid-column: 2;
+    min-width: 0;
+  }
+  .process-status-action .btn {
+    width: 100%;
+  }
+  .process-action-grid-full .process-status-action {
+    grid-column: 1 / -1;
+  }
   .table {
+    /* 12px (--font-xs, the app-wide table default) is too small for a list
+       read at arm's length off a shop monitor. */
+    font-size: var(--font-sm);
     table-layout: fixed;
     /* Fills the container and shares it out proportionally, rather than
        being sized to the sum of fixed column widths. Those fixed widths
@@ -3613,31 +3685,143 @@
        columns keep the same relative layout at every width and simply get
        tighter, which is far better than hiding controls off-screen. */
     width: 100%;
+    /* No max-width: the table uses the full bleed. The proportion problem
+       was never the overall width - it was the column percentages summing
+       to 69% and letting the browser scatter the remaining third into gaps.
+       With them summing to 100% the columns stay balanced at any width, so
+       capping the table would only give back empty margins. */
     margin: 0 auto;
   }
   .table th.workflow-col,
   .table td.workflow-col {
-    width: 7.5%;
+    width: 10%;
   }
-  .table th.project-col,
-  .table td.project-col {
-    width: 6.5%;
-    /* Subsystem names are often CamelCase with no spaces
-       ("2026ThirdRobotDrivetrain") - same overflow the name column already
-       guards against (see its comment above), so it needs the same escape
-       hatch or a long one overflows straight into the Stock column. */
-    white-space: normal;
-    overflow-wrap: anywhere;
+  /* The WORKFLOW label sits over a chip, not over bare text. Both cells
+     share the same padding, so the header text lines up with the chip's
+     BORDER edge - but the chip's own label is pushed a further 1px border
+     + var(--space-3) padding inward, which is what read as misaligned.
+     Indenting the header by exactly that inset puts the two words on the
+     same left edge. */
+  /* Workflow chip, scaled up with the rest of the table. The global .tag
+     is 28px at --font-xs, which looked undersized next to the enlarged
+     part name beside it. */
+  .table td.workflow-col .workflow-tag {
+    height: 34px;
+    padding: 0 var(--space-4);
+    font-size: 0.8rem;
   }
+  /* Kept in step with the chip's own left inset above (1px border +
+     --space-4 padding) so the WORKFLOW label stays on the same left edge
+     as the word inside the chip. */
+  .table th.workflow-col {
+    padding-left: calc(var(--space-3) + var(--space-4) + 1px);
+  }
+
+  /* Due input, same treatment. PartDueDate is shared with other pages, so
+     this is scoped to this table rather than changed in the component. */
+  .table td.metadata-col :global(.due-input) {
+    height: 34px;
+    font-size: 0.85rem;
+    padding: 0 0.6rem;
+  }
+  /* The anchor's metadata is deliberately two stable lines: project/stock,
+     then requester/date. */
+  .name-meta {
+    display: grid;
+    gap: 1px;
+    min-width: 0;
+    margin-top: 2px;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    line-height: 1.35;
+  }
+  .name-meta-line { display: flex; align-items: baseline; gap: 4px; min-width: 0; white-space: nowrap; overflow: hidden; }
+  .name-meta-sep { opacity: 0.45; }
+  .name-meta-stock, .name-meta-requester { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .name-meta-stock { flex: 1 1 auto; }
+
+  /* Team number trailing the part name. Muted and unweighted so it reads as
+     a qualifier on the name rather than competing with it, and uncoloured -
+     the number itself says which team it is. */
+  .name-team {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  /* Drawn, not typed. A "·" glyph sits wherever the font's metrics put it -
+     which is low, small, and different in every face - and no amount of
+     vertical-align reliably fixes that. A real circle centred as a flex
+     item lands exactly between the two words at exactly the size asked
+     for. */
+  .name-team-dot {
+    flex: none;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: 0.8;
+  }
+  .name-meta-requester { flex: 0 1 auto; }
+  .name-meta-date { flex: 0 0 auto; }
+
+  /* Route: the status word, then a segmented track of this workflow's
+     stops filled up to the current one. Kept monochrome - position along
+     the track is what carries the meaning, so adding hue per stage would
+     be the same arbitrary rainbow the workflow tags already lost. */
+  .table th.route-col,
+  .table td.route-col {
+    width: 17%;
+    text-align: center;
+    vertical-align: middle;
+  }
+  .route-track {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    margin-top: 7px;
+    justify-content: center;
+  }
+  /* Segments were 10x3px - at that size the whole track read as a speck of
+     dust rather than a progress indicator you could count stops on. */
+  .route-seg {
+    height: 6px;
+    flex: 1 1 auto;
+    max-width: 22px;
+    min-width: 8px;
+    background: var(--border);
+  }
+  .route-seg.done { background: color-mix(in srgb, var(--text-muted) 70%, transparent); }
+  .route-seg.current { background: var(--brand-gold-strong); }
+  .route-count {
+    margin-left: 4px;
+    font-family: var(--font-mono-stack);
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+  }
+
   .table th.quantity-col,
   .table td.quantity-col {
-    width: 3%;
+    width: 5%;
     text-align: center;
+    /* Tabular figures so a column of quantities does not jitter in width
+       from row to row. Kept centered rather than right-aligned (the usual
+       rule for numbers) because every other column in this table is
+       centered by design - one right-aligned column would read as a ragged
+       edge against its centered neighbours, not as precision. */
+    font-variant-numeric: tabular-nums;
   }
-  .table th.stock-col,
-  .table td.stock-col {
-    /* Real values are full stock descriptions ('1/8" Polycarbonate Sheet'). */
-    width: 9%;
+  /* The VALUE only. This was previously set on the th as well, which blew
+     the QTY label up out of line with every other column heading - the
+     headers are a uniform mono caption row and one of them was shouting. */
+  .table td.quantity-col {
+    font-size: 1rem;
+    font-weight: 600;
   }
   /* Status, Due, and Created all share this width so the three columns
      stay horizontally even with equal spacing - sized to the longest real
@@ -3645,7 +3829,7 @@
      rendered), not just Status's own longest label. */
   .table th.metadata-col,
   .table td.metadata-col {
-    width: 11.5%;
+    width: 12%;
     /* Centred, like every other column in the row (app.css's .table td
        default). These four were the only cells pinned to the top, so on a
        tall row - one with the full CAD action grid - Status, Due and
@@ -3674,19 +3858,10 @@
     min-height: var(--control-height);
     width: 100%;
   }
-  .requester-line {
-    justify-content: flex-start;
-  }
-  .requester-text {
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
   /* Keep the date/status and their secondary badge as one in-flow stack.
      The table cell's vertical-align: middle then centres the whole group,
      instead of absolutely positioning the badge against the bottom edge. */
-  .metadata-col .metadata-sub {
+  .route-col .metadata-sub {
     margin-top: 0.3rem;
     display: flex;
     justify-content: center;
@@ -3702,25 +3877,12 @@
     box-sizing: border-box;
     width: min(10.75rem, 100%);
   }
-  .table th.requester-col,
-  .table td.requester-col {
-    width: 7.5%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    /* Centred with the rest of the row. This was pinned to the top back
-       when each of these cells rendered a differently-sized box and top
-       alignment was the only thing keeping them level with each other;
-       they now share one fixed-height line box (.metadata-line), so they
-       stay level with each other AND with the row. */
-    vertical-align: middle;
-  }
   .table th.actions-table-col,
   .table td.actions-table-col {
     box-sizing: border-box;
     position: sticky;
     right: 0;
-    width: 15%;
+    width: 24%;
     box-shadow: -1px 0 0 var(--border);
   }
   .table thead th.actions-table-col {
@@ -3745,6 +3907,15 @@
     align-items: center;
     gap: 0.3rem 0.4rem;
   }
+  /* The anchor needs to actually out-weigh the muted spec line under it.
+     At the table's base size everything sat at the same visual weight,
+     which is most of why the row read as flat. */
+  .name-line strong {
+    font-size: 1.05rem;
+    font-weight: 650;
+    line-height: 1.25;
+    color: var(--text);
+  }
 
   .notes-indicator {
     display: inline-flex;
@@ -3766,7 +3937,6 @@
     resize: vertical;
     font-family: inherit;
   }
-
   .version-text {
     font-size: 0.75rem;
     color: var(--neutral-500);
@@ -3787,7 +3957,7 @@
   .table .row-actions {
     align-items: flex-start;
     column-gap: var(--gap-2);
-    row-gap: var(--space-3);
+    row-gap: 0.4rem;
   }
 
   .quick-print-modal {
@@ -3844,8 +4014,13 @@
 
   .parts-row {
     cursor: pointer;
-    /* A compact floor; in-flow metadata and action content can grow it. */
-    height: 6rem;
+    /* A floor, not a fixed height - was a fixed 6rem, which forced every
+       row that tall even when its own content (a status word + a short
+       segmented track, a due-date input) needed far less, leaving visibly
+       dead vertical space in every column but Actions. min-height lets a
+       row shrink to whatever its actual content (Actions included, now
+       denser - see .cad-action-grid above) needs instead. */
+    min-height: 4.5rem;
   }
 
   .assigned-user-badge {
@@ -4076,6 +4251,9 @@
     flex: 1 1 auto;
     min-width: 80px;
     justify-content: center;
+  }
+  .part-card-actions .part-card-process-action {
+    flex-basis: 100%;
   }
 
   .part-card-actions .cad-action-grid .btn {

@@ -8,8 +8,7 @@
   import { isTeam9584, passesTeamFilter } from '$lib/frcTeams.js';
   import TeamFilter from '$lib/components/TeamFilter.svelte';
   import { getSeasonBucket, getCurrentSeasonBucket, getAllSeasonBuckets, passesSeasonFilter } from '$lib/frcSeason.js';
-  import SeasonFilter from '$lib/components/SeasonFilter.svelte';
-  import { ShoppingCart, Package, DollarSign, Truck, CheckCircle, Clock, AlertTriangle, Edit, MapPin, Download, Settings, X, Link as LinkIcon, Target, Pin } from 'lucide-svelte';
+  import { ShoppingCart, Search, Package, DollarSign, Truck, CheckCircle, Clock, AlertTriangle, Edit, MapPin, Download, Settings, X, Link as LinkIcon, Target, Pin } from 'lucide-svelte';
   import { toastActions } from '$lib/toast.js';
   import { formatPacificDate } from '$lib/timezone.js';
   import { purchasingLineTotal } from '$lib/purchasingLineTotal.js';
@@ -42,12 +41,34 @@
   let loading = true;
   let parts = [];
   // Filters
+  let searchTerm = '';
   let vendorFilter = '';
   let projectFilter = '';
   let statusFilter = '';
   let seasonFilter = getCurrentSeasonBucket()?.value || '';
   let show971 = true;
   let show9584 = true;
+
+  // Only counts filters the user actually set. Season defaults to the
+  // current bucket, so it is not "active" until it differs from that.
+  $: activeFilterCount = [
+    searchTerm.trim(),
+    vendorFilter,
+    projectFilter,
+    statusFilter,
+    seasonFilter !== (getCurrentSeasonBucket()?.value || '') ? seasonFilter || 'all' : '',
+    show971 && show9584 ? '' : 'team'
+  ].filter(Boolean).length;
+
+  function clearFilters() {
+    searchTerm = '';
+    vendorFilter = '';
+    projectFilter = '';
+    statusFilter = '';
+    seasonFilter = getCurrentSeasonBucket()?.value || '';
+    show971 = true;
+    show9584 = true;
+  }
   $: showPurchasingLineTotals = user?.show_purchasing_line_totals !== false;
 
   // Derived options and filtered view
@@ -69,6 +90,17 @@
       if (!isRejector && !isRequesterByName && !isRequesterById) return false;
     }
     
+    // Search covers every field someone would recognise an item by - what
+    // it is, who it came from, what it is for, who asked. A filter needs
+    // you to already know which dropdown the answer lives behind; search
+    // does not.
+    if (searchTerm.trim()) {
+      const needle = searchTerm.trim().toLowerCase();
+      const haystack = [p.name, p.vendor, p.project_id, p.requester]
+        .map((field) => (field || '').toString().toLowerCase())
+        .join(' ');
+      if (!haystack.includes(needle)) return false;
+    }
     if (vendorFilter && vendorFilter !== '') {
       const pv = (p.vendor || '').toString().toLowerCase();
       if (pv !== vendorFilter.toString().toLowerCase()) return false;
@@ -86,12 +118,6 @@
     return true;
   });
 
-  // Debug logging
-  $: if (parts.length > 0) {
-    console.log(`Filtering: ${parts.length} total parts -> ${filteredParts.length} filtered parts`);
-    console.log('Active filters:', { vendorFilter, projectFilter, statusFilter, seasonFilter });
-  }
-  
   let showKittingModal = false;
   let selectedPart = null;
   let showLinkModal = false;
@@ -986,46 +1012,41 @@
         </div>
     </div>
 
-    <!-- Pinned Budgets Section -->
-    {#if pinnedBudgets.length > 0}
-      <div class="budgets-section">
-        <div class="section-header-row">
-          <h3>Pinned Budgets</h3>
-          <button class="btn btn-sm btn-outline" on:click={() => showPinModal = true}>
-            <Settings size={14} /> Manage Pins
+    <!-- Two columns: budgets live in their own rail on the left (the space
+         the centered layout used to waste), the working list on the right.
+         Pinning a budget now has somewhere to show up. -->
+    <div class="purchasing-layout">
+      <aside class="budget-rail">
+        <div class="budget-rail-head">
+          <h3>Budgets</h3>
+          <button class="btn btn-sm btn-text" on:click={() => showPinModal = true}>
+            <Settings size={14} /> Manage
           </button>
         </div>
-        <div class="budgets-grid">
-          {#each pinnedBudgets as budget}
-            <div class="budget-card">
-              <div class="budget-header">
-                <span class="budget-name">{budget.name}</span>
-                <span class="badge scope-{budget.scope_type}">{budget.scope_type === 'project' ? 'Proj' : budget.scope_type}</span>
+
+        {#if pinnedBudgets.length > 0}
+          {#each pinnedBudgets as budget (budget.id)}
+            {@const over = budget.spent > budget.amount}
+            <div class="budget-card" class:over>
+              <div class="budget-card-head">
+                <span class="budget-name" title={budget.name}>{budget.name}</span>
+                <span class="badge scope-{budget.scope_type} small">{budget.scope_type === 'project' ? 'Proj' : budget.scope_type}</span>
               </div>
-              <div class="budget-progress">
-                <div class="progress-bar">
-                  <div 
-                    class="progress-fill" 
-                    class:over={budget.spent > budget.amount}
-                    style="width: {Math.min((budget.spent / budget.amount) * 100, 100)}%"
-                  ></div>
-                </div>
+              <div class="progress-bar">
+                <div class="progress-fill" class:over style="width: {Math.min((budget.spent / budget.amount) * 100, 100)}%"></div>
               </div>
               <div class="budget-stats">
-                <span class:text-danger={budget.spent > budget.amount}>${budget.spent.toLocaleString()}</span>
-                <span class="text-muted"> / ${Number(budget.amount).toLocaleString()}</span>
+                <span class:text-danger={over}>${budget.spent.toLocaleString()}</span>
+                <span class="text-muted">/ ${Number(budget.amount).toLocaleString()}</span>
               </div>
             </div>
           {/each}
-        </div>
-      </div>
-    {:else if !loading && user}
-       <div style="margin-bottom: 2rem; display: flex; justify-content: flex-end;">
-          <button class="btn btn-sm btn-text" on:click={() => showPinModal = true}>
-            <Settings size={14} /> Manage Budget Pins
-          </button>
-       </div>
-    {/if}
+        {:else if !loading}
+          <p class="budget-rail-empty">No budgets pinned. Use <strong>Manage</strong> to pin the ones you want to watch while ordering.</p>
+        {/if}
+      </aside>
+
+      <div class="purchasing-main">
 
     {#if orderMode}
       <div class="order-mode-banner">
@@ -1039,48 +1060,66 @@
       </div>
     {/if}
 
-    <div class="card">
-      <div class="filters">
-        <div class="form-group">
-          <label class="form-label">Vendor</label>
-          <select class="form-select" bind:value={vendorFilter}>
-            <option value="">All vendors</option>
-            {#each vendorOptions as v}
-              <option value={v}>{v}</option>
-            {/each}
-          </select>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label">Project</label>
-          <select class="form-select" bind:value={projectFilter}>
-            <option value="">All projects</option>
-            {#each projectOptions as p}
-              <option value={p}>{p}</option>
-            {/each}
-          </select>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label">Status</label>
-          <select class="form-select" bind:value={statusFilter}>
-            <option value="">Any</option>
-            <option value="pending">Pending</option>
-            <option value="rejected">Rejected</option>
-            <option value="approved">Approved</option>
-            <option value="pickup">Pickup</option>
-            <option value="picked_up">Picked Up</option>
-            <option value="ordered">Ordered</option>
-            <option value="delivered">Delivered</option>
-            <option value="kitted">Kitted</option>
-          </select>
-        </div>
-
-        <SeasonFilter options={seasonOptions} bind:value={seasonFilter} />
+    <!-- One toolbar row instead of a grid of labelled dropdowns stacked
+         over a separate team row. Each control states its own default
+         ("All vendors", "Any status"), so the standing labels above them
+         were spending a line of height to repeat what the control already
+         said. Search leads, because finding a known item by name is the
+         most common thing done here and there was no way to do it. -->
+    <div class="purchasing-toolbar">
+      <div class="toolbar-search">
+        <Search size={16} />
+        <input
+          type="search"
+          bind:value={searchTerm}
+          placeholder="Search parts or vendors&hellip;"
+          aria-label="Search purchasing items"
+        />
+        {#if searchTerm}
+          <button type="button" class="toolbar-search-clear" aria-label="Clear search" on:click={() => (searchTerm = '')}>×</button>
+        {/if}
       </div>
-      <div class="team-filter-row">
-        <TeamFilter bind:show971 bind:show9584 />
-      </div>
+
+      <select class="form-select toolbar-select" bind:value={vendorFilter} aria-label="Vendor">
+        <option value="">All vendors</option>
+        {#each vendorOptions as v}
+          <option value={v}>{v}</option>
+        {/each}
+      </select>
+
+      <select class="form-select toolbar-select" bind:value={projectFilter} aria-label="Project">
+        <option value="">All projects</option>
+        {#each projectOptions as p}
+          <option value={p}>{p}</option>
+        {/each}
+      </select>
+
+      <select class="form-select toolbar-select" bind:value={statusFilter} aria-label="Status">
+        <option value="">Any status</option>
+        <option value="pending">Pending</option>
+        <option value="rejected">Rejected</option>
+        <option value="approved">Approved</option>
+        <option value="pickup">Pickup</option>
+        <option value="picked_up">Picked Up</option>
+        <option value="ordered">Ordered</option>
+        <option value="delivered">Delivered</option>
+        <option value="kitted">Kitted</option>
+      </select>
+
+      <select class="form-select toolbar-select" bind:value={seasonFilter} aria-label="Season">
+        <option value="">All seasons</option>
+        {#each seasonOptions as option (option.value)}
+          <option value={option.value}>{option.label}</option>
+        {/each}
+      </select>
+
+      <div class="toolbar-team"><TeamFilter bind:show971 bind:show9584 /></div>
+
+      {#if activeFilterCount}
+        <button type="button" class="toolbar-clear" on:click={clearFilters}>
+          Clear {activeFilterCount}
+        </button>
+      {/if}
     </div>
 
     {#if (orderMode ? displayedOrderItems : filteredParts).length > 0}
@@ -1107,10 +1146,10 @@
               <th>Vendor</th>
               <th>Project ID</th>
               <th>Requester</th>
-              <th>Quantity</th>
-              <th>Price</th>
+              <th class="quantity">Qty</th>
+              <th class="price">Price</th>
               {#if showPurchasingLineTotals}
-                <th>Total</th>
+                <th class="num">Total</th>
               {/if}
               {#if !orderMode}
                 <th>Link</th>
@@ -1174,7 +1213,7 @@
                   <div class="requester-content">
                     <span title={part.requester || ''}>{purchasingDisplayName(part.requester)}</span>
                     {#if isTeam9584(part.frc_team)}
-                      <span class="tag team-tag tag-9584" title="Team 9584">9584</span>
+                      <span class="requester-team" title="Team 9584">&bull; 9584</span>
                     {/if}
                   </div>
                 </td>
@@ -1351,6 +1390,8 @@
   <p>Add COTS items via your BOM flow or purchasing tools.</p>
       </div>
     {/if}
+      </div>
+    </div>
   </div>
 
   <!-- Kitting modal removed; inline input used instead -->
@@ -1680,51 +1721,149 @@
 {/if}
 
 <style>
-  /* Budgets Styles */
-  .budgets-section {
-    margin: 0 0 2rem 0;
-    padding: 0;
-  }
-  .section-header-row {
+  /* One row: search first, then the narrowing controls, then team, then a
+     clear that only exists when there is something to clear. Wraps rather
+     than scrolls, so nothing hides off the edge on a laptop. */
+  .purchasing-toolbar {
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    margin-bottom: 1rem;
-  }
-  .section-header-row h3 {
-    margin: 0;
-    font-size: 1.25rem;
-    color: var(--text);
-  }
-  .budgets-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-    gap: var(--gap-3);
-  }
-  .budget-card {
-    background: var(--surface-1);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
+    gap: var(--space-2);
+    flex-wrap: wrap;
     padding: var(--space-3);
-    display: flex;
-    flex-direction: column;
-    gap: var(--gap-2);
+    border: 1px solid var(--border);
+    background: var(--surface-1);
+    margin-bottom: var(--space-3);
   }
-  .budget-header {
+
+  /* Search holds a fixed, modest width rather than absorbing the row's
+     slack - a search field only needs to fit the few words you are typing,
+     whereas the dropdowns have to show real vendor and project names, so
+     the spare width is worth more to them. */
+  .toolbar-search {
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    gap: var(--gap-2);
+    gap: var(--space-2);
+    flex: 0 1 360px;
+    min-width: 290px;
+    padding: 0 var(--space-3);
+    border: 1px solid var(--border);
+    background: var(--primary);
+    height: 36px;
   }
-  .budget-name {
-    font-weight: 600;
-    font-size: 0.875rem;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+  .toolbar-search:focus-within { border-color: var(--brand-gold-strong); }
+  .toolbar-search :global(svg) { color: var(--text-muted); flex-shrink: 0; }
+  .toolbar-search input {
     flex: 1;
     min-width: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    font-size: 0.85rem;
+    padding: 0;
   }
+  .toolbar-search input:focus { outline: none; }
+  .toolbar-search input::-webkit-search-cancel-button { display: none; }
+  .toolbar-search-clear {
+    border: 0; background: none; cursor: pointer;
+    color: var(--text-muted); font-size: 1.1rem; line-height: 1; padding: 0 2px;
+  }
+  .toolbar-search-clear:hover { color: var(--text); }
+
+  /* The dropdowns share whatever the row has left, so vendor and project
+     names get room to show in full instead of truncating. */
+  .toolbar-select {
+    flex: 1 1 185px;
+    width: auto;
+    min-width: 170px;
+    height: 36px;
+    font-size: 0.85rem;
+  }
+
+  .toolbar-team { display: flex; align-items: center; }
+
+  .toolbar-clear {
+    height: 36px;
+    padding: 0 var(--space-3);
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: 0.8rem;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .toolbar-clear:hover { border-color: var(--brand-gold-strong); color: var(--text); }
+
+  @media (max-width: 760px) {
+    .toolbar-search { flex-basis: 100%; }
+    .toolbar-select { flex: 1 1 45%; }
+  }
+
+  /* Budgets rail + working list. The rail is fixed-width so the table gets
+     every remaining pixel, and it sits where the centered layout used to
+     leave dead space. */
+  .purchasing-layout {
+    display: grid;
+    grid-template-columns: 240px minmax(0, 1fr);
+    gap: var(--space-5);
+    align-items: start;
+  }
+  .purchasing-main { min-width: 0; }
+  /* The global .card carries margin: var(--space-4) 0, so the first card in
+     this column started a notch lower than the rail beside it, which has no
+     top margin. Zeroing it on whichever element leads the column puts both
+     columns on the same top edge. */
+  .purchasing-main > :first-child { margin-top: 0; }
+
+  .budget-rail {
+    /* Not sticky: once you have scrolled past the budgets you are working
+       the parts list, and a panel that follows you down the page is just
+       taking width from it. The rail scrolls away with the rest. */
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    border: 1px solid var(--border);
+    background: var(--surface-1);
+    padding: var(--space-4);
+  }
+  .budget-rail-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+  .budget-rail-head h3 { margin: 0; font-size: 0.95rem; }
+  .budget-rail-empty { margin: 0; font-size: 0.78rem; color: var(--text-muted); line-height: 1.5; }
+
+  .budget-card {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: var(--space-3);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--border);
+    background: var(--surface-2);
+  }
+  /* Only a budget that is actually over its number takes colour. */
+  .budget-card.over { border-left-color: var(--red-base); }
+  .budget-card-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+  .budget-name {
+    font-weight: 600; font-size: 0.82rem;
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .budget-stats {
+    display: flex; gap: 4px; align-items: baseline;
+    font-family: var(--font-mono-stack); font-size: 0.75rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .progress-bar { height: 5px; background: var(--surface-3); overflow: hidden; }
+  .progress-fill { height: 100%; background: var(--brand-gold-strong); }
+  .progress-fill.over { background: var(--red-base); }
+  .text-danger { color: var(--red-base); font-weight: 700; }
+
+  /* Below the breakout width the rail stops being a rail: budgets go back
+     above the list rather than squeezing the table into a narrow column. */
+  @media (max-width: 1200px) {
+    .purchasing-layout { grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
+  }
+
   .badge {
     display: inline-flex;
     align-items: center;
@@ -1739,34 +1878,27 @@
     flex-shrink: 0;
   }
   .badge.small { font-size: 0.6rem; height: 20px; }
-  .scope-overall { background: var(--blue-soft); color: var(--blue-strong); border: 1px solid var(--blue-base); }
-  .scope-global { background: var(--blue-soft); color: var(--blue-strong); border: 1px solid var(--blue-base); }
-  .scope-team { background: var(--green-soft); color: var(--green-strong); border: 1px solid var(--green-base); }
-  .scope-project { background: var(--purple-soft); color: var(--purple-strong); border: 1px solid var(--purple-base); }
-  .scope-subsystem { background: var(--green-soft); color: var(--green-strong); border: 1px solid var(--green-base); }
-  .scope-build { background: var(--brand-gold-soft); color: var(--brand-gold-strong); border: 1px solid var(--brand-gold-base); }
-  .scope-build_group { background: var(--red-soft); color: var(--red-strong); border: 1px solid var(--red-base); }
-
-  .progress-bar {
-    height: 6px;
+  /* Budget scope is a CATEGORY, not a state - "team" is not more urgent
+     than "project". It used to be painted across six saturated hues
+     (blue/green/purple/gold/red), which read as a status rainbow and made
+     the budget cards the loudest thing on the page for no information
+     gain. The label word already says which scope it is, so the chip is
+     now neutral and color is reserved for things that actually mean
+     something (spend against budget, order status). */
+  .scope-overall,
+  .scope-global,
+  .scope-team,
+  .scope-project,
+  .scope-subsystem,
+  .scope-build,
+  .scope-build_group {
     background: var(--surface-2);
-    border-radius: 3px;
-    overflow: hidden;
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    letter-spacing: 0.04em;
   }
-  .progress-fill {
-    height: 100%;
-    background: var(--brand-gold-strong);
-    border-radius: 3px;
-  }
-  .progress-fill.over { background: var(--red-strong); }
 
-  .budget-stats {
-    display: flex;
-    justify-content: flex-end;
-    font-size: 0.75rem;
-    font-weight: 500;
-  }
-  .text-danger { color: var(--red-strong); }
+
   
   .btn-text {
     background: none;
@@ -1862,10 +1994,19 @@
   }
 
   .parts-container {
-    /* Shared page width rather than a third bespoke value. */
-    max-width: var(--page-max-width);
-    margin: 2rem auto;
-    padding: 0 1rem;
+    /* Full-bleed breakout, same technique the manufacturing page and the
+       homepage already use. This was a centered column capped at
+       --page-max-width, which left a dead gutter down the left of the
+       screen while the parts table - vendor, project, requester, qty,
+       price, total, status, actions - was squeezed for room inside it.
+       Escaping the shell puts the Manage Budget Pins control at the true
+       left edge and gives the table the width it was short of. */
+    width: 100vw;
+    margin-left: calc(50% - 50vw);
+    margin-right: calc(50% - 50vw);
+    margin-top: 2rem;
+    margin-bottom: 2rem;
+    padding: 0 var(--space-5);
   }
 
   .page-header { padding: 2rem; margin-bottom: 2rem; box-shadow: var(--shadow-sm); }
@@ -1924,6 +2065,15 @@
     min-width: 0;
   }
 
+  /* Team 9584's requesters used to get a colored box badge here - replaced
+     with a plain "name · team#" suffix so the requester column reads as
+     text, not another status-chip-like element competing for attention. */
+  .requester-team {
+    color: var(--text-muted, var(--neutral-500));
+    font-size: 0.85em;
+    white-space: nowrap;
+  }
+
   .download {
     text-align: center;
   }
@@ -1946,6 +2096,18 @@
     border-radius: 4px;
     outline: 2px solid transparent;
     outline-offset: 1px;
+    /* A bare <select> gets the browser's own bevel/highlight rendering,
+       which shows up as a soft gradient band across a saturated fill -
+       that's the "AI gradient" look on the colored statuses below. Killing
+       native appearance and drawing our own arrow removes it entirely. */
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23888' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='4 6 8 10 12 6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.4rem center;
+    background-size: 11px;
+    padding-right: 1.6rem !important;
     transition: border-color 0.15s ease, outline-color 0.15s ease;
   }
 
@@ -1979,10 +2141,6 @@
 
   .status-select.colorful {
     box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.4);
-  }
-  /* The white inner ring reads as a glare on dark surfaces */
-  :global([data-theme="modern-dark"]) .status-select.colorful {
-    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
   }
   /* Status palette: each lifecycle stage gets its own muted, warm-toned
      hue (teal / plum / terracotta / sage) instead of reusing the same
@@ -2034,31 +2192,57 @@
     border-color: color-mix(in srgb, var(--red-strong) 35%, transparent);
   }
 
+  /* Modern dark only: swap the tinted/saturated fill for a flat neutral
+     surface with a colored left accent bar - the tinted-fill approach
+     (same family used on the light themes above) reads as a soft glowing
+     gradient on this theme's near-black surfaces, not as a flat chip.
+     This is a different coloring approach entirely, not just a retint. */
+  :global([data-theme="modern-dark"]) .status-select.colorful {
+    border-left-width: 3px;
+    box-shadow: none;
+  }
+  :global([data-theme="modern-dark"]) .status-select.colorful[data-status="pending"] {
+    background: var(--surface-2);
+    color: var(--brand-gold-strong);
+    border-color: var(--border);
+    border-left-color: var(--brand-gold-base);
+  }
   :global([data-theme="modern-dark"]) .status-select.colorful[data-status="approved"] {
-    background: var(--status-approved-bg);
-    color: var(--status-approved-text);
-    border-color: color-mix(in srgb, var(--status-approved-text) 50%, transparent);
+    background: var(--surface-2);
+    color: var(--green-strong);
+    border-color: var(--border);
+    border-left-color: var(--green-base);
   }
   :global([data-theme="modern-dark"]) .status-select.colorful[data-status="ordered"] {
-    background: var(--status-ordered-bg);
-    color: var(--status-ordered-text);
-    border-color: color-mix(in srgb, var(--status-ordered-text) 50%, transparent);
+    background: var(--surface-2);
+    color: var(--blue-strong);
+    border-color: var(--border);
+    border-left-color: var(--blue-base);
   }
   :global([data-theme="modern-dark"]) .status-select.colorful[data-status="pickup"] {
-    background: var(--status-pickup-bg);
-    color: var(--status-pickup-text);
-    border-color: color-mix(in srgb, var(--status-pickup-text) 50%, transparent);
+    background: var(--surface-2);
+    color: var(--orange-strong);
+    border-color: var(--border);
+    border-left-color: var(--orange-base);
   }
   :global([data-theme="modern-dark"]) .status-select.colorful[data-status="delivered"],
   :global([data-theme="modern-dark"]) .status-select.colorful[data-status="picked_up"] {
-    background: var(--status-delivered-bg);
-    color: var(--status-delivered-text);
-    border-color: color-mix(in srgb, var(--status-delivered-text) 50%, transparent);
+    background: var(--surface-2);
+    color: var(--green-strong);
+    border-color: var(--border);
+    border-left-color: var(--green-base);
   }
   :global([data-theme="modern-dark"]) .status-select.colorful[data-status="kitted"] {
-    background: var(--status-kitted-bg);
+    background: var(--surface-2);
     color: var(--status-kitted-text);
-    border-color: color-mix(in srgb, var(--status-kitted-text) 50%, transparent);
+    border-color: var(--border);
+    border-left-color: var(--status-kitted-text);
+  }
+  :global([data-theme="modern-dark"]) .status-select.colorful[data-status="rejected"] {
+    background: var(--surface-2);
+    color: var(--red-strong);
+    border-color: var(--border);
+    border-left-color: var(--red-base);
   }
 
   .status-select.colorful option[value="pending"] { background: var(--brand-gold-soft); }
@@ -2106,8 +2290,11 @@
 
   .modal textarea { min-height: 72px; }
 
-  @media (max-width: 1200px) { 
-    .parts-container { margin: 1rem; padding: 0; } 
+  @media (max-width: 1200px) {
+    /* Below the shell's own max-width there is no gutter to reclaim, so
+       the breakout is cancelled and the container goes back to normal
+       flow - otherwise 100vw would overflow the viewport sideways. */
+    .parts-container { width: auto; margin: 1rem; padding: 0; }
     .page-header { padding: 1.5rem; } 
     .header-content { flex-direction: column; align-items: flex-start; }
   }
@@ -2118,9 +2305,6 @@
     .header-content h1 { font-size: var(--font-xl); }
     .header-content p { font-size: var(--font-base); }
 
-    .filters { display: grid; grid-template-columns: 1fr; gap: 0.75rem; }
-    .filters .form-group { margin: 0; }
-    .team-filter-row { margin-top: 0.75rem; }
 
     .table-container {
       margin: 0;
@@ -2199,9 +2383,4 @@
     .table-container .table td.delivery .season-tag { justify-self: start; }
   }
 
-  .team-filter-row {
-    margin-top: 0.75rem;
-    padding-top: 0.75rem;
-    border-top: 1px solid var(--border);
-  }
 </style>

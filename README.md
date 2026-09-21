@@ -30,6 +30,11 @@ browser confirmation or prompt popups.
   (CAM review, CAM reviewed, postprocessed, jprogged, machined, kitted -
   Router's the only workflow with this many distinct steps). See the
   **AutoCAM** section below for automatic G-code generation specifically.
+  The Manufacturing ToDo list keeps the next valid action visible after
+  Start: lathe, mill, and laser-cut requests advance directly from in
+  progress to machined and then kitted; 3D-print requests use Printed in
+  place of Machined. Router requests alone use the
+  complete CAM, postprocessing, and JProg handoff sequence before machining.
   Router request cards link only to the Fusion AutoCAM workflow and derive their
   job status/G-code downloads from actual Fusion generation jobs (not
   arrangement-only runs); a request cannot advance to CAM review until its
@@ -39,6 +44,12 @@ browser confirmation or prompt popups.
   connection state - a saved layout from while CAD was briefly hidden still
   resolves correctly (see `promoteChildrenOfDisabledFolders` in
   `src/lib/defaultTabs.js`).
+- **Competition analytics**: the EPA page uses The Blue Alliance match data
+  to rank teams, project alliance outcomes, and show a live walk-forward
+  accuracy record for the selected event. Winner-call accuracy, Brier score,
+  log loss, and uncertainty update as official results arrive; each evaluated
+  match is predicted only from earlier results, so the record does not use
+  hindsight from the match being scored.
 - **AutoCAM**: automatic STEP → G-code generation for lathe turning, router
   routering, and indexed tube-stock drilling jobs run on the router with the
   operator flipping the tube between faces by hand - either manually queued
@@ -104,7 +115,8 @@ browser confirmation or prompt popups.
   that ports the shop's manual JProg sheet workflow to the web: searchable
   persistent stock sheets/cuts, a reloadable Storage-backed grouped part
   library, thickness-specific bundled hole programs, G-code inspection,
-  measurement, reusable click-to-place canvas placement,
+  measurement, reusable click-to-place placement, direct `.ngc`/`.tap`
+  drop-to-place on the canvas,
   selection/drag/rotation/pan/zoom/undo, and suffix-grouped LinuxCNC or
   WinCNC G-code emission. Before a multi-tool WinCNC emit, the operator can
   reorder the complete detected tool list; the output groups every part by
@@ -168,6 +180,9 @@ browser confirmation or prompt popups.
   The signed-in home dashboard balances direct links to Manufacturing,
   Purchasing, and Scouting, while keeping each scout's personal assignment
   queue available without filling the page with duplicate scouting tools.
+  **My Scout** also puts up to 20 incomplete match, note, and quick-scout
+  assignments in a fixed two-row worklist above that scout's submitted reports,
+  so the page remains stable while completed work leaves the queue.
   It polls The Blue Alliance for the configured competition every minute and
   shows the current/up-next match number plus both alliances' team numbers.
   The Drive Team page shows every completed 971 match newest-first with a
@@ -195,7 +210,13 @@ browser confirmation or prompt popups.
   match when the real schedule is empty. Robot Ratings orders rated teams by
   overall average from best to worst, followed by unrated teams. The Prediction
   Market uses play points throughout and shares the same non-settling practice
-  match so scouts can test placing, updating, and cancelling predictions. The
+  match so scouts can test placing, updating, and cancelling predictions. Its
+  EPA participant contributes one fixed-stake alliance vote per unlocked match
+  through a service-only table; the public market receives it as an ordinary
+  pseudonymous scout vote, includes its results in the leaderboard, and never
+  receives the model probability or source marker. Per-event or global service-
+  managed leaderboard overrides can set a participant's displayed balance and
+  loss count without rewriting their underlying bet history. The
   event picker always includes the active event and resolves keys such as
   `2026cc` to their TBA name (for example, Chezy Champs) when available.
 - **Vision Scouting**: a real Competition-folder nav tab, open to every
@@ -209,17 +230,25 @@ browser confirmation or prompt popups.
   reversal as a crash candidate; every suggestion stays editable. Preload,
   points, ratings, roles, intake, cards, and mechanical calls remain scout
   judgement. A calibrated red/blue field-occupancy heatmap fills as trajectory
-  results arrive.
+  results arrive. Reviewers can resolve and save every supported TBA
+  match-video source with provenance; broadcast links remain explicitly
+  review-only and uncalibrated, while footage used for inference must still be
+  uploaded to private storage.
   Generic robot-only YOLO weights are supported: a conservative second stage
   reads the lower bumper band for alliance colour and rejects unclear crops;
   roster-constrained bumper-number reads remain review-required before a
   track is attached to a team.
   A full BF16 Qwen3-VL-30B-A3B-Instruct service on NVIDIA DGX Spark proposes semantic
-  events from bounded multi-camera clips; a
+  events from bounded multi-camera clips. Clips with robot activity inside
+  configured goal/climb regions are prioritized, with an auditable low-rate
+  fallback and fail-open behavior when regions are absent; a
   separate versioned YOLO/ByteTrack runner supplies dense tracking and
   mobility. Fuel uses an HSV/contour baseline with motion-predicted association,
   observed goal-entry candidates, and pixel-space shooter matching (not ball
-  pixels compared to robot metres). Each camera video gets fresh tracker state.
+  pixels compared to robot metres). It also records review-only outgoing-shot
+  candidates and shows an Orbit-style second opinion that apportions TBA's
+  official alliance fuel by each robot's observed shot share; that estimate is
+  never released automatically. Each camera video gets fresh tracker state.
   Both feed a human-reviewed evidence queue rather than silently
   treating model predictions as ground truth; compatible alliance totals are
   reconciled with TBA and material differences enter an evidence-backed
@@ -245,7 +274,10 @@ browser confirmation or prompt popups.
   explicit acknowledgement for incomplete shadow runs, shows selected upload
   size, and provides keyboard observation review. A `VISION_RELEASE` holder
   must generate and inspect the exact proposed `scout_data_events` rows before
-  the release button is enabled. The Chezy capture, storage, review, fallback,
+  the release button is enabled. Events may also opt into an approved-model
+  gate; approvals retain approver, timestamp, expiry, revocation, and notes,
+  and an expired or revoked model is blocked before preview or release. The
+  Chezy capture, storage, review, fallback,
   and ownership procedure is in `docs/guides/chezy-vision-runbook.md`; runner
   hosts have a read-only `vision/runner/preflight.py` check.
 - **Planning**: Gantt-based build/task scheduling (`wx-svelte-gantt`),

@@ -215,6 +215,37 @@
   }
 
   $: eventNameByKey = Object.fromEntries(events.map((event) => [event.key, event.name]));
+  $: eventStartByKey = Object.fromEntries(events.map((event) => [event.key, event.start_date || '']));
+
+  // Grouped by EVENT first, then by comp level inside it. Flattening the
+  // whole season into one "Qualification" list put Qual 1 from March
+  // directly under Qual 117 from May, repeated every match number once per
+  // event, and forced the event name onto every single row (where it wrapped
+  // to three lines and made every row a different height).
+  $: seasonMatchGroups = (() => {
+    const byEvent = new Map();
+    for (const match of seasonMatches) {
+      const key = match?.event_key || '';
+      if (!byEvent.has(key)) byEvent.set(key, []);
+      byEvent.get(key).push(match);
+    }
+    return [...byEvent.entries()]
+      .sort((left, right) => String(eventStartByKey[left[0]] || '').localeCompare(String(eventStartByKey[right[0]] || '')))
+      .map(([eventKey, eventMatches]) => ({
+        eventKey,
+        eventName: eventNameByKey[eventKey] || eventKey,
+        startDate: eventStartByKey[eventKey] || '',
+        levels: COMP_LEVEL_ORDER
+          .map((level) => ({
+            level,
+            label: COMP_LEVEL_LABEL[level],
+            matches: eventMatches
+              .filter((match) => String(match?.comp_level || '').toLowerCase() === level)
+              .sort((left, right) => (left.match_number || 0) - (right.match_number || 0))
+          }))
+          .filter((group) => group.matches.length)
+      }));
+  })();
 
   onMount(() => {
     loadTeam(normalizeTeamKey(DEFAULT_TEAM_NUMBER));
@@ -391,17 +422,21 @@
                                 {@const redWin = (match.alliances?.red?.score ?? -1) > (match.alliances?.blue?.score ?? -1) && match.alliances?.red?.score >= 0}
                                 {@const blueWin = (match.alliances?.blue?.score ?? -1) > (match.alliances?.red?.score ?? -1) && match.alliances?.blue?.score >= 0}
                                 <div class="match-row">
-                                  <div class="match-row-label">{matchLabel(match)}</div>
+                                  <div class="match-row-label"><span class="match-row-name">{matchLabel(match)}</span></div>
                                   <div class="match-alliance red" class:winner={redWin}>
-                                    {#each match.alliances?.red?.team_keys || [] as teamKey}
-                                      <span class="match-team" class:us={teamKey === activeTeamKey}>#{teamNumber(teamKey)}</span>
-                                    {/each}
+                                    <span class="match-teams">
+                                      {#each match.alliances?.red?.team_keys || [] as teamKey}
+                                        <span class="match-team" class:us={teamKey === activeTeamKey}>{teamNumber(teamKey)}</span>
+                                      {/each}
+                                    </span>
                                     <strong class="match-score">{match.alliances?.red?.score ?? match.score_breakdown?.red?.total_points ?? '—'}</strong>
                                   </div>
                                   <div class="match-alliance blue" class:winner={blueWin}>
-                                    {#each match.alliances?.blue?.team_keys || [] as teamKey}
-                                      <span class="match-team" class:us={teamKey === activeTeamKey}>#{teamNumber(teamKey)}</span>
-                                    {/each}
+                                    <span class="match-teams">
+                                      {#each match.alliances?.blue?.team_keys || [] as teamKey}
+                                        <span class="match-team" class:us={teamKey === activeTeamKey}>{teamNumber(teamKey)}</span>
+                                      {/each}
+                                    </span>
                                     <strong class="match-score">{match.alliances?.blue?.score ?? match.score_breakdown?.blue?.total_points ?? '—'}</strong>
                                   </div>
                                 </div>
@@ -431,37 +466,46 @@
       {:else if !seasonMatches.length}
         <div class="empty-state">No matches found for team {teamProfile.team_number} in {selectedYear}.</div>
       {:else}
-        <div class="event-list">
-          {#each COMP_LEVEL_ORDER as level}
-            {@const levelMatches = seasonMatches.filter((match) => String(match?.comp_level || '').toLowerCase() === level)}
-            {#if levelMatches.length}
-              <div class="match-level-group">
-                <div class="match-level-heading">{COMP_LEVEL_LABEL[level]}</div>
-                {#each levelMatches as match}
-                  {@const redWin = (match.alliances?.red?.score ?? -1) > (match.alliances?.blue?.score ?? -1) && match.alliances?.red?.score >= 0}
-                  {@const blueWin = (match.alliances?.blue?.score ?? -1) > (match.alliances?.red?.score ?? -1) && match.alliances?.blue?.score >= 0}
-                  <div class="match-row season">
-                    <div class="match-row-label">
-                      <div>{matchLabel(match)}</div>
-                      <div class="match-row-event">{eventNameByKey[match.event_key] || match.event_key}</div>
-                      {#if matchTime(match)}<div class="match-row-time">{matchTime(match)}</div>{/if}
+        <div class="season-schedule">
+          {#each seasonMatchGroups as group (group.eventKey)}
+            <section class="season-event">
+              <header class="season-event-header">
+                <h3>{group.eventName}</h3>
+                {#if group.startDate}<span class="season-event-date">{group.startDate}</span>{/if}
+              </header>
+              {#each group.levels as levelGroup (levelGroup.level)}
+                <div class="match-level-group">
+                  <div class="match-level-heading">{levelGroup.label}</div>
+                  {#each levelGroup.matches as match (match.key)}
+                    {@const redScore = match.alliances?.red?.score ?? -1}
+                    {@const blueScore = match.alliances?.blue?.score ?? -1}
+                    {@const played = redScore >= 0 && blueScore >= 0}
+                    <div class="match-row season" class:unplayed={!played}>
+                      <div class="match-row-label">
+                        <span class="match-row-name">{matchLabel(match)}</span>
+                        {#if matchTime(match)}<span class="match-row-time">{matchTime(match)}</span>{/if}
+                      </div>
+                      <div class="match-alliance red" class:winner={played && redScore > blueScore}>
+                        <span class="match-teams">
+                          {#each match.alliances?.red?.team_keys || [] as teamKey}
+                            <span class="match-team" class:us={teamKey === activeTeamKey}>{teamNumber(teamKey)}</span>
+                          {/each}
+                        </span>
+                        <strong class="match-score">{played ? redScore : '—'}</strong>
+                      </div>
+                      <div class="match-alliance blue" class:winner={played && blueScore > redScore}>
+                        <span class="match-teams">
+                          {#each match.alliances?.blue?.team_keys || [] as teamKey}
+                            <span class="match-team" class:us={teamKey === activeTeamKey}>{teamNumber(teamKey)}</span>
+                          {/each}
+                        </span>
+                        <strong class="match-score">{played ? blueScore : '—'}</strong>
+                      </div>
                     </div>
-                    <div class="match-alliance red" class:winner={redWin}>
-                      {#each match.alliances?.red?.team_keys || [] as teamKey}
-                        <span class="match-team" class:us={teamKey === activeTeamKey}>#{teamNumber(teamKey)}</span>
-                      {/each}
-                      <strong class="match-score">{match.alliances?.red?.score ?? '—'}</strong>
-                    </div>
-                    <div class="match-alliance blue" class:winner={blueWin}>
-                      {#each match.alliances?.blue?.team_keys || [] as teamKey}
-                        <span class="match-team" class:us={teamKey === activeTeamKey}>#{teamNumber(teamKey)}</span>
-                      {/each}
-                      <strong class="match-score">{match.alliances?.blue?.score ?? '—'}</strong>
-                    </div>
-                  </div>
-                {/each}
-              </div>
-            {/if}
+                  {/each}
+                </div>
+              {/each}
+            </section>
           {/each}
         </div>
       {/if}
@@ -605,22 +649,64 @@
   .award-recipient { margin-left: var(--space-2); color: var(--text-secondary); }
   .award-recipient.us { color: var(--secondary); font-weight: 700; }
 
-  .match-level-group { display: grid; gap: var(--space-1); }
-  .match-level-heading { font-size: 0.75rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.03em; margin-top: var(--space-2); }
-  .match-row { display: grid; grid-template-columns: 6.5rem 1fr 1fr; gap: var(--space-2); align-items: center; font-size: 0.8rem; }
-  .match-row.season { grid-template-columns: 9rem 1fr 1fr; }
-  .match-row-label { color: var(--text-muted); font-size: 0.76rem; }
-  .match-row-event { color: var(--text-secondary); font-size: 0.72rem; }
-  .match-row-time { color: var(--text-muted); font-size: 0.7rem; }
-  .match-alliance { display: flex; align-items: center; gap: var(--space-1); padding: var(--space-1) var(--space-2); }
-  .match-alliance.red { background: var(--red-soft); }
-  .match-alliance.blue { background: var(--blue-soft, #e8f1ff); }
-  .match-alliance.winner { outline: 2px solid currentColor; }
-  .match-alliance.red.winner { color: var(--red-strong); }
-  .match-alliance.blue.winner { color: var(--blue-strong, #174ea6); }
-  .match-team { font-weight: 600; }
-  .match-team.us { text-decoration: underline; }
-  .match-score { margin-left: auto; font-variant-numeric: tabular-nums; }
+  .season-schedule { display: grid; gap: var(--space-5); }
+  .season-event-header {
+    display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3);
+    border-bottom: 1px solid var(--border); padding-bottom: var(--space-2); margin-bottom: var(--space-2);
+  }
+  .season-event-header h3 { margin: 0; font-size: 1rem; }
+  .season-event-date { color: var(--text-muted); font-size: 0.75rem; font-variant-numeric: tabular-nums; }
+
+  .match-level-group { display: grid; gap: 4px; }
+  .match-level-heading { font-size: 0.72rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; margin-top: var(--space-3); margin-bottom: var(--space-1); }
+  .match-row { display: grid; grid-template-columns: 6.5rem 1fr 1fr; gap: var(--space-3); align-items: stretch; font-size: 0.8rem; }
+  .match-row.season { grid-template-columns: 11rem 1fr 1fr; }
+
+  /* min-width:0 is the fix for the label running underneath the red panel:
+     a grid item defaults to min-width:auto, so a long "Sep 19, 12:10 PM"
+     refused to shrink and simply overflowed into the next column instead of
+     staying in its own. The two lines are stacked rather than inline for
+     the same reason - half the width each. */
+  .match-row-label {
+    display: flex; flex-direction: column; justify-content: center; gap: 1px;
+    min-width: 0; overflow: hidden;
+    color: var(--text-secondary); font-size: 0.78rem; padding: var(--space-1) 0;
+  }
+  .match-row-name { font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .match-row-time { color: var(--text-muted); font-size: 0.7rem; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* A thin colored edge carries the alliance identity instead of a heavy
+     filled slab. The slabs were dark enough that the team numbers sank into
+     them, and with two of them flush in the middle of the row the pair read
+     as one continuous block rather than two alliances. */
+  .match-alliance {
+    display: flex; align-items: center; gap: var(--space-3);
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--border);
+    background: var(--surface-1);
+  }
+  .match-alliance.red { border-left: 3px solid var(--red-base, #dc3545); }
+  .match-alliance.blue { border-left: 3px solid var(--blue-base, #2563eb); }
+  /* The winner is the tinted one - one tinted cell per row, so which side
+     won is readable at a glance down the column instead of every row being
+     two full-strength blocks with a ring somewhere. */
+  .match-alliance.red.winner { background: var(--red-soft); border-color: color-mix(in srgb, var(--red-base, #dc3545) 40%, var(--border)); border-left-color: var(--red-base, #dc3545); }
+  .match-alliance.blue.winner { background: var(--blue-soft, #e8f1ff); border-color: color-mix(in srgb, var(--blue-base, #2563eb) 40%, var(--border)); border-left-color: var(--blue-base, #2563eb); }
+  .match-alliance.winner .match-score { font-weight: 800; color: var(--text); }
+
+  /* Fixed-width team slots so the numbers line up as columns down the page
+     instead of drifting with digit count (27 vs 11297). */
+  .match-teams { display: flex; gap: var(--space-2); flex: 1; min-width: 0; }
+  .match-team {
+    min-width: 3.2rem; font-weight: 600; font-variant-numeric: tabular-nums;
+    color: var(--text); white-space: nowrap;
+  }
+  .match-team.us { color: var(--brand-gold-strong); font-weight: 800; }
+  .match-score { margin-left: auto; font-variant-numeric: tabular-nums; font-size: 0.9rem; font-weight: 700; color: var(--text-secondary); }
+
+  /* A match that has not happened yet should not look as loud as a result. */
+  .match-row.unplayed .match-alliance { background: none; border-color: var(--border); opacity: 0.75; }
+  .match-row.unplayed .match-score { color: var(--text-muted); font-weight: 600; }
 
   .notice { border: 1px solid var(--border); padding: var(--space-4); }
   .notice-error { border-color: var(--danger, #dc3545); color: var(--danger, #dc3545); }
