@@ -165,11 +165,110 @@ section is a placeholder for that pass.
    unknown, sequenced last on purpose).
 8. Livestream panel (placeholder box only, per decision above).
 
+## Interface contract (UI/backend split)
+
+UI (Claude) and backend (Codex) are being built in parallel against this
+fixed contract, so neither side blocks on the other. UI builds against
+mocked data matching these exact shapes; backend implements exactly this
+(or updates this section in the same PR if a field genuinely needs to
+change, rather than silently drifting from it).
+
+### Tables
+
+```sql
+pm_elo_ratings (
+  user_id uuid PRIMARY KEY REFERENCES auth.users(id),
+  elo numeric NOT NULL DEFAULT 1000,
+  events_participated integer NOT NULL DEFAULT 0,
+  updated_at timestamptz NOT NULL DEFAULT now()
+)
+
+pm_elo_history (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES auth.users(id),
+  event_key text NOT NULL,
+  match_key text NOT NULL,
+  picked_side text NOT NULL CHECK (picked_side IN ('red','blue')),
+  model_probability numeric NOT NULL,     -- frozen at pick time, never rewritten
+  elo_delta numeric NOT NULL,
+  elo_after numeric NOT NULL,
+  resolved_at timestamptz NOT NULL DEFAULT now()
+)
+
+pm_match_picks (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES auth.users(id),
+  event_key text NOT NULL,
+  match_key text NOT NULL,
+  side text NOT NULL CHECK (side IN ('red','blue')),
+  picked_at timestamptz NOT NULL DEFAULT now(),
+  locked boolean NOT NULL DEFAULT false,  -- true once the match starts; immutable after
+  UNIQUE (user_id, event_key, match_key)
+)
+
+pm_alliance_draft_picks (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES auth.users(id),
+  event_key text NOT NULL,
+  predicted_captain text NOT NULL,   -- team key, e.g. "frc971"
+  predicted_pick text NOT NULL,      -- team key predicted to be picked
+  pick_round integer NOT NULL,       -- 1 = first pick, 2 = second pick, etc.
+  placed_at timestamptz NOT NULL DEFAULT now(),
+  resolved_at timestamptz,
+  correct boolean                    -- null until real alliance selection happens
+)
+
+pm_friends (
+  user_id uuid NOT NULL REFERENCES auth.users(id),
+  friend_id uuid NOT NULL REFERENCES auth.users(id),
+  status text NOT NULL CHECK (status IN ('pending','accepted')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, friend_id)
+)
+
+pm_reactions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES auth.users(id),
+  event_key text NOT NULL,
+  emoji text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+)
+```
+
+All RLS-protected, `approved_user()` read gate, matching
+`prediction_market_bets`' existing policy shape. `pm_friends`/`pm_reactions`
+need a policy that only lets a user see their own `pm_friends` rows (both
+directions of the pair) - reactions are public within an event, same as
+picks.
+
+### API endpoints (new, under `/api/prediction-market-v2/`)
+
+- `GET /dashboard?event_key=X` → `{ elo, active_predictions, accuracy, scored_predictions, matches: [{ match_key, red_teams, blue_teams, model_probability_red, my_pick, community_red_pct, community_blue_pct, status }] }`
+- `POST /picks` body `{ event_key, match_key, side }` → upserts `pm_match_picks` (rejects if `locked`)
+- `GET /picks/mine?event_key=X` → my picks for that event
+- `GET /matches?event_key=X` → full match list, same match shape as dashboard
+- `GET /matches/[matchKey]` → `{ match_key, red_teams, blue_teams, model_probability_red, my_pick, model_probability_at_my_pick, community_breakdown: { red, blue, total }, elo_history_series: [{ t, model_prob, community_prob }] }`
+- `GET /leaderboard?event_key=X` (event) or no param (season-wide across 971/9584 events only, per the scope decision above) → `[{ user_id, name, elo, wins, losses }]`
+- `GET/POST /alliance-draft?event_key=X` → list/submit `pm_alliance_draft_picks`
+- `GET/POST /friends` → list/request friends (`pm_friends`)
+- `POST /reactions` body `{ event_key, emoji }` → insert `pm_reactions`; UI subscribes to this and to `pm_match_picks` inserts via Supabase Realtime channels (`pm_reactions:${event_key}`, `pm_picks:${event_key}`) for the live feed, not polling.
+
+### Elo resolution
+
+`actual = 1 if picked_side won else 0; delta = K * (actual - model_probability_for_picked_side)`.
+Runs lazily on `GET /dashboard` and `GET /matches` (same pattern as
+`resolveOutstandingBets` in the existing `/api/prediction-market` route:
+per-request, idempotent, no background job) - resolve any `pm_match_picks`
+row for a since-completed match into `pm_elo_history` + update
+`pm_elo_ratings`, exactly once. `model_probability` comes from
+`src/lib/epaModel.js`'s `computeEventEpa` + `winProbability` over that
+event's own matches - no external API call.
+
 ## Open items / risks
 
-- **Elo K-factor** value not yet chosen.
-- **Starting Elo** value not yet chosen (defaulting to a plan of 1000
-  unless told otherwise).
+- **Elo K-factor**: default to `K = 32` (standard chess-Elo starting point)
+  unless testing against real data says otherwise - not precious, just
+  needs a fixed value so nobody is blocked on picking one.
 - **Alliance Draft resolution**: no existing code path reads real alliance
   selection results from TBA anywhere in this app today — this is new
   integration work, not a reuse of something that exists.
