@@ -6,9 +6,8 @@
   import { fetchFusionJobs, fetchFusionJobUpdates, fetchFusionJobNcFiles, fetchFusionPartStepFiles, fetchFusionPartProjectIds, installFusionPartCad, cancelFusionJob, deleteFusionJob, deleteAllFailedFusionJobs, updateFusionJobMaterial, fusionNcDestinationName } from '$lib/fusionCam.js';
   import CadViewer from '$lib/components/CadViewer.svelte';
   import { formatPacificDateTimeWithZone } from '$lib/timezone.js';
-  import SeasonFilter from '$lib/components/SeasonFilter.svelte';
   import { getAllSeasonBuckets, passesSeasonFilter } from '$lib/frcSeason.js';
-  import { ListChecks, X, Download, Trash2, Upload, AlertTriangle, ChevronDown, Box, Folder, Pencil, Check, Filter } from 'lucide-svelte';
+  import { ListChecks, X, Download, Trash2, Upload, AlertTriangle, ChevronDown, Box, Folder, Pencil, Check } from 'lucide-svelte';
   import { convertGcodeToInches } from '$autocam/fusion/gcodeUnitConvert.js';
 
   let jobs = [];
@@ -228,7 +227,10 @@
   // search only reaches jobs already loaded - the "Load older jobs" hint
   // below the list makes that limit visible instead of silently missing
   // older matches.
-  let jobsSearch = '';
+  // Lifted to the shell's shared header bar (see /autocam/fusion/+page.svelte)
+  // rather than rendered here - exported so the shell can bind:value the
+  // inputs it owns, and can read the two computed option lists below.
+  export let jobsSearch = '';
   $: jobsSearchTerm = jobsSearch.trim().toLowerCase();
   // Dedicated Project/Season filters, same convention as the Parts and Tube
   // Stock tabs - "show everything" by default, not /manufacture's own
@@ -237,8 +239,10 @@
   // currently loaded (this tab is paginated - see load/loadMore), same
   // "only as complete as what's on screen" limit the search box above
   // already has.
-  let jobsFilterProject = '';
-  let jobsFilterSeason = '';
+  export let jobsFilterProject = '';
+  export let jobsFilterSeason = '';
+  export let jobsProjectIds = [];
+  export let jobsSeasonOptions = [];
   $: jobsProjectIds = Array.from(new Set(jobs.map(jobProjectId).filter(Boolean))).sort();
   $: jobsSeasonOptions = getAllSeasonBuckets(jobs);
   $: filteredJobs = jobs.filter((job) =>
@@ -347,7 +351,11 @@
     }
   }
 
-  let deletingFailed = false;
+  // Exported (not just local state) so the shell's shared header bar can
+  // show "Deleting..." / disable its own button while this runs - the
+  // button itself moved up there, same as Parts/Tube Stock/Turning's Add
+  // button did, so the shell needs both the state and a way to trigger it.
+  export let deletingFailed = false;
 
   // A real, server-side bulk delete rather than looping over whatever's
   // currently loaded - the list is paginated (see fetchFusionJobs), so
@@ -355,7 +363,7 @@
   // them, while others sit further back in the history. Confirming with
   // a count instead of a generic warning means someone can see exactly
   // what they're about to remove before committing to it.
-  async function handleDeleteAllFailed() {
+  export async function handleDeleteAllFailed() {
     if (!await requestConfirmation({
       title: 'Delete all failed jobs',
       message: 'Permanently delete every failed Fusion job and its saved output? This is not limited to the jobs currently shown on this page.',
@@ -513,32 +521,6 @@
 {:else if jobs.length === 0}
   <p class="empty-state">No Fusion CAM jobs yet - queue one from the Plates or Box Tubes tab.</p>
 {:else}
-  <div class="cam-list-toolbar">
-    <div class="filters tab-filters">
-      <div class="form-group">
-        <label class="form-label" for="jobs-search">Search</label>
-        <input
-          id="jobs-search"
-          type="search"
-          class="form-input"
-          placeholder="Search jobs by name, machine, tool, or status..."
-          bind:value={jobsSearch}
-          aria-label="Search jobs"
-        />
-      </div>
-      <div class="form-group">
-        <label class="form-label" for="jobs-project-filter"><Filter size={14} /> Project</label>
-        <select id="jobs-project-filter" class="form-select" bind:value={jobsFilterProject}>
-          <option value="">All Projects</option>
-          {#each jobsProjectIds as pid}<option value={pid}>{pid}</option>{/each}
-        </select>
-      </div>
-      <SeasonFilter options={jobsSeasonOptions} bind:value={jobsFilterSeason} />
-    </div>
-    <button type="button" class="btn btn-ghost btn-sm" on:click={handleDeleteAllFailed} disabled={deletingFailed}>
-      <Trash2 size={14} /> {deletingFailed ? 'Deleting...' : 'Delete all failed jobs'}
-    </button>
-  </div>
   {#if filteredJobs.length === 0}
     <p class="empty-state">No jobs match the current search/filters.</p>
   {/if}
@@ -737,7 +719,7 @@
       </div>
       <div class="modal-footer-actions">
         <button class="btn btn-ghost" type="button" on:click={closePostModal}>Cancel</button>
-        <button class="btn btn-primary" type="button" disabled={posting} on:click={confirmPost}>
+        <button class="btn btn-secondary" type="button" disabled={posting} on:click={confirmPost}>
           <Upload size={14} /> {posting ? 'Posting…' : 'Post'}
         </button>
       </div>

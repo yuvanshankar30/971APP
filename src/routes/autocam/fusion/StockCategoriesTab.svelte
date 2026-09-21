@@ -174,7 +174,7 @@
             stock will fail until someone adds feed/speed presets for it in the CAM templates.
           </p>
         {/if}
-        <button class="btn btn-primary" type="button" disabled={submitting} on:click={handleAdd}>
+        <button class="btn btn-secondary" type="button" disabled={submitting} on:click={handleAdd}>
           <Plus size={16} /> {submitting ? 'Adding...' : 'Add Stock Category'}
         </button>
       {:else}

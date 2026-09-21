@@ -5,13 +5,14 @@
   import { supabase } from '$lib/supabase.js';
   import { userStore, loadUserFromUUID } from '$lib/stores/user.js';
   import { canManageCamProfiles } from '$lib/permissions.js';
-  import { Layers, Package, Box, ListChecks, SlidersHorizontal, BookOpen, HelpCircle, Send, RotateCcw, Zap, X, Wrench } from 'lucide-svelte';
+  import { Layers, Package, Box, ListChecks, SlidersHorizontal, BookOpen, HelpCircle, Send, RotateCcw, Zap, X, Wrench, Plus, Trash2 } from 'lucide-svelte';
   import PartsTab from './PartsTab.svelte';
   import BoxTubesTab from './BoxTubesTab.svelte';
   import JobQueueTab from './JobQueueTab.svelte';
   import StockCategoriesTab from './StockCategoriesTab.svelte';
   import TurningTab from './TurningTab.svelte';
   import AtcSlotConfig from '$autocam/components/AtcSlotConfig.svelte';
+  import SeasonFilter from '$lib/components/SeasonFilter.svelte';
 
   // Deep link from Manufacturing's "Open Fusion CAM" button
   // (/manufacture's fusionCamHref) - ?tab=parts&manufacturingPart=<id>
@@ -48,6 +49,7 @@
   let partsTabRef;
   let boxTubesTabRef;
   let turningTabRef;
+  let jobQueueTabRef;
   // "Quick Queue": add a brand new part/tube and queue it in one flow,
   // instead of the normal two separate steps (add stock, then separately
   // find and queue it). This page-level button only needs to ask Plate vs
@@ -81,7 +83,51 @@
 
   $: canManage = canManageCamProfiles(user);
 
+  // Add button + Search/Project/Season filters used to live inside each of
+  // Parts/Tube Stock/Turning's own toolbar, repeated three times - moved up
+  // here onto the shared tab bar (direct instruction) so there's one Add
+  // button and one filter row instead of three near-identical copies, and
+  // it visually merges into the same bar as the Parts/Tube Stock/Turning
+  // tabs themselves rather than floating as its own separate box below.
+  // Each tab still owns its actual list/filtering logic - these are bound
+  // straight through to whichever tab is active (see the template below).
+  let search = '';
+  let filterProject = '';
+  let filterSeason = '';
+  let projectIds = [];
+  let seasonOptions = [];
+  // 'action' is 'add' for the three stock tabs (a primary button that opens
+  // that tab's New X form) or 'delete-failed' for Jobs (a ghost/danger
+  // button with its own disabled/label state) - different enough from a
+  // plain Add button that the template branches on it below rather than
+  // pretending both are the same button with a different label.
+  const TOOLBAR_CONFIG = {
+    parts: { action: 'add', addLabel: 'Add Part', searchPlaceholder: 'Search parts by name, project, or material...' },
+    'box-tubes': { action: 'add', addLabel: 'Add Tube Stock', searchPlaceholder: 'Search tube stock by name or project...' },
+    turning: { action: 'add', addLabel: 'Add Turning Stock', searchPlaceholder: 'Search turning stock by name or project...' },
+    queue: { action: 'delete-failed', searchPlaceholder: 'Search jobs by name, machine, tool, or status...' }
+  };
+  $: toolbarConfig = TOOLBAR_CONFIG[activeTab] || null;
+  let deletingFailedJobs = false;
+
+  function handleAddClick() {
+    if (activeTab === 'parts') partsTabRef?.openAddForm();
+    else if (activeTab === 'box-tubes') boxTubesTabRef?.openAddForm();
+    else if (activeTab === 'turning') turningTabRef?.openAddForm();
+  }
+
+  function handleDeleteFailedClick() {
+    jobQueueTabRef?.handleDeleteAllFailed();
+  }
+
   function setActiveTab(tab) {
+    // Each tab's own list/filters are independent - starting fresh on
+    // every switch matches what already happened before this moved up
+    // here, since {#if activeTab === ...} below destroys and remounts the
+    // previous tab's component (and its now-lifted state) either way.
+    search = '';
+    filterProject = '';
+    filterSeason = '';
     goto(TAB_PATHS[tab]);
   }
 
@@ -149,7 +195,7 @@
       <button type="button" class="btn btn-secondary btn-sm" on:click={openQuickQueueChoice}>
         <Zap size={14} /> Quick Queue
       </button>
-      <button type="button" class="btn btn-primary btn-sm" on:click={openSendToFusionCam}>
+      <button type="button" class="btn btn-secondary btn-sm" on:click={openSendToFusionCam}>
         <Send size={14} /> Send to Fusion CAM
       </button>
       {#if atcMachineId}
@@ -167,34 +213,87 @@
   </div>
 </div>
 
-<nav class="tab-nav" aria-label="Fusion AutoCAM sections">
-  <button type="button" class:active={activeTab === 'parts'} on:click={() => setActiveTab('parts')}>
-    <Package size={16} /> Parts
-  </button>
-  <button type="button" class:active={activeTab === 'box-tubes'} on:click={() => setActiveTab('box-tubes')}>
-    <Box size={16} /> Tube Stock
-  </button>
-  <button type="button" class:active={activeTab === 'turning'} on:click={() => setActiveTab('turning')}>
-    <RotateCcw size={16} /> Turning
-  </button>
-  <button type="button" class:active={activeTab === 'queue'} on:click={() => setActiveTab('queue')}>
-    <ListChecks size={16} /> Jobs
-  </button>
-  <button type="button" class:active={activeTab === 'stock-categories'} on:click={() => setActiveTab('stock-categories')}>
-    <SlidersHorizontal size={16} /> Stock Categories
-  </button>
-</nav>
+<div class="tab-nav-bar">
+  <nav class="tab-nav" aria-label="Fusion AutoCAM sections">
+    <button type="button" class:active={activeTab === 'parts'} on:click={() => setActiveTab('parts')}>
+      <Package size={16} /> Parts
+    </button>
+    <button type="button" class:active={activeTab === 'box-tubes'} on:click={() => setActiveTab('box-tubes')}>
+      <Box size={16} /> Tube Stock
+    </button>
+    <button type="button" class:active={activeTab === 'turning'} on:click={() => setActiveTab('turning')}>
+      <RotateCcw size={16} /> Turning
+    </button>
+    <button type="button" class:active={activeTab === 'queue'} on:click={() => setActiveTab('queue')}>
+      <ListChecks size={16} /> Jobs
+    </button>
+    <button type="button" class:active={activeTab === 'stock-categories'} on:click={() => setActiveTab('stock-categories')}>
+      <SlidersHorizontal size={16} /> Stock Categories
+    </button>
+  </nav>
+  {#if toolbarConfig}
+    <div class="cam-list-toolbar">
+      {#if toolbarConfig.action === 'add' && canManage}
+        <div class="tab-actions">
+          <button type="button" class="btn btn-secondary" on:click={handleAddClick}>
+            <Plus size={16} /> {toolbarConfig.addLabel}
+          </button>
+        </div>
+      {:else if toolbarConfig.action === 'delete-failed'}
+        <div class="tab-actions">
+          <button type="button" class="btn btn-ghost" on:click={handleDeleteFailedClick} disabled={deletingFailedJobs}>
+            <Trash2 size={16} /> {deletingFailedJobs ? 'Deleting...' : 'Delete all failed jobs'}
+          </button>
+        </div>
+      {/if}
+      <div class="filters tab-filters">
+        <div class="form-group">
+          <label class="form-label sr-only" for="fusion-tab-search">Search</label>
+          <input
+            id="fusion-tab-search"
+            type="search"
+            class="form-input"
+            placeholder={toolbarConfig.searchPlaceholder}
+            bind:value={search}
+            aria-label="Search"
+          />
+        </div>
+        <div class="form-group">
+          <label class="form-label sr-only" for="fusion-tab-project-filter">Project</label>
+          <select id="fusion-tab-project-filter" class="form-select" bind:value={filterProject}>
+            <option value="">All Projects</option>
+            {#each projectIds as pid}<option value={pid}>{pid}</option>{/each}
+          </select>
+        </div>
+        <SeasonFilter options={seasonOptions} bind:value={filterSeason} hideLabel />
+      </div>
+    </div>
+  {/if}
+</div>
 
 {#if activeTab === 'parts'}
-  <PartsTab bind:this={partsTabRef} {user} {canManage} {initialManufacturingPartId} />
+  <PartsTab
+    bind:this={partsTabRef} {user} {canManage} {initialManufacturingPartId}
+    bind:partsListSearch={search} bind:filterProject bind:filterSeason bind:projectIds bind:seasonOptions
+  />
 {:else if activeTab === 'stock-categories'}
   <StockCategoriesTab {canManage} />
 {:else if activeTab === 'box-tubes'}
-  <BoxTubesTab bind:this={boxTubesTabRef} {user} {canManage} />
+  <BoxTubesTab
+    bind:this={boxTubesTabRef} {user} {canManage}
+    bind:boxTubesListSearch={search} bind:filterProject bind:filterSeason bind:projectIds bind:seasonOptions
+  />
 {:else if activeTab === 'turning'}
-  <TurningTab bind:this={turningTabRef} {user} {canManage} />
+  <TurningTab
+    bind:this={turningTabRef} {user} {canManage}
+    bind:turningListSearch={search} bind:filterProject bind:filterSeason bind:projectIds bind:seasonOptions
+  />
 {:else if activeTab === 'queue'}
-  <JobQueueTab />
+  <JobQueueTab
+    bind:this={jobQueueTabRef}
+    bind:jobsSearch={search} bind:jobsFilterProject={filterProject} bind:jobsFilterSeason={filterSeason}
+    bind:jobsProjectIds={projectIds} bind:jobsSeasonOptions={seasonOptions} bind:deletingFailed={deletingFailedJobs}
+  />
 {/if}
 
 {#if quickQueueChoiceOpen}
@@ -232,6 +331,12 @@
 />
 
 <style>
+  /* .cam-list-toolbar/.tab-actions/.tab-filters below come from here - the
+     Add button + filters row used to live inside each of Parts/Tube
+     Stock/Turning's own <style> (which already @imports this), now it
+     lives up here instead since the row itself moved up to this shell. */
+  @import '../fusion/_autocam-shared.css';
+
   /* This page used to redefine the site's own --background/--accent/etc.
      custom properties to force a black/blue/gold look
      regardless of which Spartans Hub theme (light/dark/modern/legacy) was
@@ -257,18 +362,63 @@
     align-items: center;
     gap: var(--space-2);
   }
+  /* One horizontal row - tabs, Add button, and filters all inline, instead
+     of the tabs stacked above a second Add-button/filters row. .tab-nav
+     and .cam-list-toolbar are each already their own internal flex row
+     (tab buttons; Add button + filter fields), so laying THIS wrapper out
+     as a row too, with those two as its only two flex items, is enough to
+     put everything on one line without restructuring either of them. */
+  .tab-nav-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    /* Every other card/panel on this page (and sitewide - see .card in
+       app.css) sits on --surface-1, one step darker than --surface-2.
+       This bar used the lighter of the two, standing out as a visibly
+       brighter box against the rest of the page instead of matching. */
+    background: var(--surface-1);
+    margin: var(--space-4) 0 var(--space-6);
+    padding: 0 var(--space-3);
+    overflow-x: auto;
+  }
+  .tab-nav-bar .cam-list-toolbar {
+    flex: 1 1 auto;
+    flex-wrap: nowrap;
+    align-items: center;
+    border: none;
+    border-radius: 0;
+    margin: 0;
+    padding: var(--space-2) 0;
+    background: none;
+  }
   .tab-nav {
     display: flex;
+    align-items: center;
     gap: var(--space-1);
-    border-bottom: 1px solid var(--border);
-    margin: var(--space-4) 0 var(--space-6);
-    overflow-x: auto;
+    flex-shrink: 0;
+    margin: 0;
+    /* app.css has its own global, unscoped ".tab-nav" rule (a different,
+       unrelated pill-tab pattern used elsewhere) that this page's own
+       class name collides with - it drew its own border/background/
+       shadow/padding around just the tab buttons, on top of this bar's
+       own border, which is what actually looked like two stacked/
+       overlapping boxes rather than one merged bar. Reset every property
+       that rule sets, explicitly, since this rule not setting a property
+       at all just lets that global one show through underneath. */
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+    flex-wrap: nowrap;
   }
   .tab-nav button {
     display: flex;
     align-items: center;
     gap: 0.4rem;
-    padding: var(--space-3) var(--space-4);
+    padding: var(--space-3) var(--space-3);
     background: none;
     border: none;
     border-bottom: 2px solid transparent;
@@ -285,6 +435,7 @@
   }
   .tab-nav button.active {
     background: none;
+    box-shadow: none;
     color: var(--accent-strong);
     font-weight: 700;
     border-bottom-color: var(--accent);
