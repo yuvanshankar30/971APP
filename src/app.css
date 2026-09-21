@@ -2271,35 +2271,49 @@ textarea:focus,
 
 [data-theme^="theme-"] .brand-mark { background-image:url('/spartan-helmet-dark.png'); }
 
-/* Modern dark: warm charcoal, brighter gold, dark text on gold controls */
+/* Modern dark: neutral charcoal (not warm/yellow-tinted), brighter gold as
+   the one deliberate accent, dark text on gold controls. Every neutral
+   below (surfaces, borders, text) previously carried a warm brown/amber
+   cast - R notably higher than G and B on every one of them (e.g. the old
+   background #131109 or border #373226) - which read as "dark + yellow"
+   rather than a clean dark charcoal. Replaced with genuinely neutral grays
+   (R=G=B, or within a point) so gold is the only hue in the theme. */
 :root[data-theme="modern-dark"] {
   color-scheme: dark;
-  --color-white: #1c1913;
-  --color-black: #ece7db;
-  --neutral-100: #242019;
-  --neutral-300: #373226;
-  --neutral-500: #a49c8a;
-  --neutral-800: #ece7db;
+  --color-white: #141416;
+  /* Was #ece7db, then #d8d6d1, then #cfcfd2 - each pass still read as too
+     bright/too popping against the neutral dark surfaces. Dimmed further;
+     still comfortably legible, just no longer the loudest thing on the
+     page. */
+  --color-black: #b5b5b9;
+  --neutral-100: #1c1c1f;
+  --neutral-300: #2f2f33;
+  --neutral-500: #86868c;
+  --neutral-800: #b5b5b9;
 
-  --primary: #1c1913;
-  --secondary: #ece7db;
-  --background: #131109;
-  --card: #1c1913;
-  --surface-1: #1c1913;
-  --surface-2: #242019;
-  --surface-3: #2d2820;
-  --text: #ece7db;
-  --text-secondary: #a49c8a;
-  --text-muted: #a49c8a;
-  --muted: #a49c8a;
-  --muted-bg: #242019;
-  --border: #373226;
-  --divider: #373226;
-  --on-primary: #1c1913;
+  --primary: #141416;
+  --secondary: #b5b5b9;
+  --background: #0c0c0d;
+  --card: #141416;
+  --surface-1: #141416;
+  --surface-2: #1c1c1f;
+  --surface-3: #242427;
+  --text: #b5b5b9;
+  --text-secondary: #86868c;
+  --text-muted: #86868c;
+  --muted: #86868c;
+  --muted-bg: #1c1c1f;
+  --border: #2f2f33;
+  --divider: #2f2f33;
+  --on-primary: #141416;
 
-  --brand-gold-base: #e9b830;
-  --brand-gold-strong: #f0cd6a;
-  --brand-gold-soft: rgba(233, 184, 48, 0.14);
+  /* Gold accent, dialed back - was a fairly saturated, bright yellow-gold
+     that popped hard against the dark neutrals. Desaturated and dimmed
+     toward a muted brass/amber so it still reads as "the accent" without
+     shouting. */
+  --brand-gold-base: #b8934a;
+  --brand-gold-strong: #cbab6e;
+  --brand-gold-soft: rgba(184, 147, 74, 0.14);
   --blue-soft: rgba(96, 165, 250, 0.16);
   --green-soft: rgba(74, 222, 128, 0.16);
   --red-soft: rgba(248, 113, 113, 0.16);
@@ -2345,9 +2359,9 @@ textarea:focus,
    rule above for why) - only Purchase keeps a dark-mode tint, matching its
    own light-mode gold. */
 [data-theme="modern-dark"] .tag-workflow-purchase {
-  background: rgba(212, 165, 60, 0.22);
-  color: #e6c877;
-  border-color: rgba(212, 165, 60, 0.5);
+  background: var(--brand-gold-soft);
+  color: var(--brand-gold-strong);
+  border-color: color-mix(in srgb, var(--brand-gold-base) 45%, transparent);
 }
 
 /* Solid-fill helpers become tints too (ordered / delivered / ready) */

@@ -1213,7 +1213,7 @@
                   <div class="requester-content">
                     <span title={part.requester || ''}>{purchasingDisplayName(part.requester)}</span>
                     {#if isTeam9584(part.frc_team)}
-                      <span class="tag team-tag tag-9584" title="Team 9584">9584</span>
+                      <span class="requester-team" title="Team 9584">&bull; 9584</span>
                     {/if}
                   </div>
                 </td>
@@ -2065,6 +2065,15 @@
     min-width: 0;
   }
 
+  /* Team 9584's requesters used to get a colored box badge here - replaced
+     with a plain "name · team#" suffix so the requester column reads as
+     text, not another status-chip-like element competing for attention. */
+  .requester-team {
+    color: var(--text-muted, var(--neutral-500));
+    font-size: 0.85em;
+    white-space: nowrap;
+  }
+
   .download {
     text-align: center;
   }
@@ -2087,6 +2096,18 @@
     border-radius: 4px;
     outline: 2px solid transparent;
     outline-offset: 1px;
+    /* A bare <select> gets the browser's own bevel/highlight rendering,
+       which shows up as a soft gradient band across a saturated fill -
+       that's the "AI gradient" look on the colored statuses below. Killing
+       native appearance and drawing our own arrow removes it entirely. */
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23888' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='4 6 8 10 12 6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.4rem center;
+    background-size: 11px;
+    padding-right: 1.6rem !important;
     transition: border-color 0.15s ease, outline-color 0.15s ease;
   }
 
@@ -2120,10 +2141,6 @@
 
   .status-select.colorful {
     box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.4);
-  }
-  /* The white inner ring reads as a glare on dark surfaces */
-  :global([data-theme="modern-dark"]) .status-select.colorful {
-    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
   }
   /* Status palette: each lifecycle stage gets its own muted, warm-toned
      hue (teal / plum / terracotta / sage) instead of reusing the same
@@ -2175,31 +2192,57 @@
     border-color: color-mix(in srgb, var(--red-strong) 35%, transparent);
   }
 
+  /* Modern dark only: swap the tinted/saturated fill for a flat neutral
+     surface with a colored left accent bar - the tinted-fill approach
+     (same family used on the light themes above) reads as a soft glowing
+     gradient on this theme's near-black surfaces, not as a flat chip.
+     This is a different coloring approach entirely, not just a retint. */
+  :global([data-theme="modern-dark"]) .status-select.colorful {
+    border-left-width: 3px;
+    box-shadow: none;
+  }
+  :global([data-theme="modern-dark"]) .status-select.colorful[data-status="pending"] {
+    background: var(--surface-2);
+    color: var(--brand-gold-strong);
+    border-color: var(--border);
+    border-left-color: var(--brand-gold-base);
+  }
   :global([data-theme="modern-dark"]) .status-select.colorful[data-status="approved"] {
-    background: var(--status-approved-bg);
-    color: var(--status-approved-text);
-    border-color: color-mix(in srgb, var(--status-approved-text) 50%, transparent);
+    background: var(--surface-2);
+    color: var(--green-strong);
+    border-color: var(--border);
+    border-left-color: var(--green-base);
   }
   :global([data-theme="modern-dark"]) .status-select.colorful[data-status="ordered"] {
-    background: var(--status-ordered-bg);
-    color: var(--status-ordered-text);
-    border-color: color-mix(in srgb, var(--status-ordered-text) 50%, transparent);
+    background: var(--surface-2);
+    color: var(--blue-strong);
+    border-color: var(--border);
+    border-left-color: var(--blue-base);
   }
   :global([data-theme="modern-dark"]) .status-select.colorful[data-status="pickup"] {
-    background: var(--status-pickup-bg);
-    color: var(--status-pickup-text);
-    border-color: color-mix(in srgb, var(--status-pickup-text) 50%, transparent);
+    background: var(--surface-2);
+    color: var(--orange-strong);
+    border-color: var(--border);
+    border-left-color: var(--orange-base);
   }
   :global([data-theme="modern-dark"]) .status-select.colorful[data-status="delivered"],
   :global([data-theme="modern-dark"]) .status-select.colorful[data-status="picked_up"] {
-    background: var(--status-delivered-bg);
-    color: var(--status-delivered-text);
-    border-color: color-mix(in srgb, var(--status-delivered-text) 50%, transparent);
+    background: var(--surface-2);
+    color: var(--green-strong);
+    border-color: var(--border);
+    border-left-color: var(--green-base);
   }
   :global([data-theme="modern-dark"]) .status-select.colorful[data-status="kitted"] {
-    background: var(--status-kitted-bg);
+    background: var(--surface-2);
     color: var(--status-kitted-text);
-    border-color: color-mix(in srgb, var(--status-kitted-text) 50%, transparent);
+    border-color: var(--border);
+    border-left-color: var(--status-kitted-text);
+  }
+  :global([data-theme="modern-dark"]) .status-select.colorful[data-status="rejected"] {
+    background: var(--surface-2);
+    color: var(--red-strong);
+    border-color: var(--border);
+    border-left-color: var(--red-base);
   }
 
   .status-select.colorful option[value="pending"] { background: var(--brand-gold-soft); }
