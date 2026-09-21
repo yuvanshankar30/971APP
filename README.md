@@ -540,10 +540,11 @@ file: update its diagram alongside this section, not separately from it.
 - **3D/CAD**: `occt-import-js` (STEP file parsing, WASM) + `three.js`
   (client-side 3D viewing, `CadViewer.svelte`).
 - **Other integrations**: Slack (`@slack/web-api`, bot notifications/DMs,
-  ACE/Pit alerts, and signed `app_mention` handling: `@971app status` reports
-  live Hub/database/scouting status plus recent releases, while other Hub
-  questions receive read-only, context-bounded answers from Groq using the
-  server-only `GROQ_API_KEY`; Slack retry IDs are durably deduplicated in
+  ACE/Pit alerts, and signed `app_mention` handling: `@971hub /status` reports
+  live Hub/database/scouting status plus recent releases, team-report questions
+  use live assignment and report rows, and other Hub feature questions receive
+  read-only, context-bounded answers from Groq using the ordinary server-side
+  `GROQ_API_KEY`; Slack retry IDs are durably deduplicated in
   `slack_event_receipts`),
   Onshape API (CAD source of truth for parts - see the Onshape-key exposure
   note under **Known gaps** below), The Blue Alliance API (scouting), Sentry
@@ -551,7 +552,7 @@ file: update its diagram alongside this section, not separately from it.
   rolled, no `googleapis` dependency - see `autocam/docs/drive-watcher-folder-layout.md`),
   and Hugging Face Qwen3-VL (private DGX Spark inference for Vision Scouting).
   See `docs/guides/slack-hub-assistant.md` for the required Slack event scope,
-  subscription, and production-secret wiring.
+  subscription, and private runtime environment variables.
 
 ## AutoCAM (`autocam/`, top-level - not under `src/lib/`)
 

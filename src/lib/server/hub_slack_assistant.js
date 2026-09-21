@@ -9,7 +9,7 @@ export const HUB_RECENT_CHANGES = [
   'Home shows the current or upcoming TBA match and Match Scouting supports competition selection.'
 ];
 
-const HUB_KNOWLEDGE = `
+export const HUB_FEATURE_CATALOG = `
 Spartans Hub is the internal web workspace for FRC teams 971 and 9584.
 Major areas include Manufacturing and AutoCAM, CAD/build tracking, Purchasing,
 Planner/tasks, Competition scouting, Strategy, Drive Team, Vision Scouting,
@@ -19,10 +19,28 @@ Useful routes include /matchscout for recording match observations,
 scouting, /driveteam for completed 971 match results, /predictions for the
 prediction market, /manufacture for manufacturing requests, and /autocam for
 CAM automation.
-Match Scouting reports are stored in Supabase. Mechanical breaks, disabled or
-dead robots, and manually flagged pit problems create ACE/Pit issues. The bot
-must never claim that an action was performed, change data, reveal credentials,
-or invent status that is absent from the supplied snapshot.
+Match Scouting lets a scout choose the competition, match, robot, alliance,
+starting position, and preload; record autonomous movement, cycles, point band,
+fuel source, collisions, and a drawn or saved autonomous path; record teleop
+roles, fuel/scoring observations, intake source, intake speed, jams, defense,
+driving, accuracy, and speed; mark a robot active, stopped, dead, disabled,
+mechanically broken, beached, or carded; record climb results and post-match
+notes; file the required ACE/Pit handoff for mechanical, disabled, or dead
+robots; and reopen a scout's own reports for corrections.
+Scouting Admin manages match, note, quick, pit, and pre-scout assignments and
+exports submitted match-scouting results as CSV. My Scout shows each scout's
+open assignments and submitted report history. Pit Scouting records robot
+capabilities, mechanisms, autonomous options, climb options, technical details,
+photos, and likely failure points. Strategy combines the match schedule,
+scouting summaries, pit issues, rankings, and team comparisons. Drive Team
+shows the 971 match schedule and completed results. Vision Scouting is a
+review-only evidence workflow until an authorized reviewer explicitly releases
+results. Manufacturing covers requests, routing, turning, printing, laser work,
+post-processing, files, and AutoCAM/Fusion job status. Purchasing tracks orders,
+budgets, approvals, receiving, and delivery status. Planner tracks tasks,
+dependencies, schedules, ownership, and Slack reminders.
+The bot is read-only. It must never claim that an action was performed, change
+data, reveal credentials, or invent status that is absent from supplied data.
 `.trim();
 
 function safeSlackText(value) {
@@ -38,7 +56,19 @@ export function stripAppMention(text) {
 }
 
 export function isHubStatusRequest(question) {
-  return /^(?:hub\s+)?status\b/i.test(String(question || '').trim());
+  return /^\/?(?:hub\s+)?status\b/i.test(String(question || '').trim());
+}
+
+export function teamNumberFromQuestion(question) {
+  return String(question || '').match(/\b(?:team|frc)\s*#?\s*(\d{1,5})\b/i)?.[1] || null;
+}
+
+export function isTeamReportStatusRequest(question) {
+  return Boolean(
+    teamNumberFromQuestion(question)
+    && /\b(report|scout|assignment)s?\b/i.test(String(question || ''))
+    && /\b(all|complete|completed|done|finish|finished|missing|remaining|status)\b/i.test(String(question || ''))
+  );
 }
 
 export async function fetchHubStatusSnapshot(supa = getSupabase()) {
@@ -79,6 +109,70 @@ export function formatHubStatus(snapshot) {
   ].join('\n');
 }
 
+export async function fetchTeamReportSnapshot(supa, teamNumber, eventKey) {
+  const teamKeys = [`frc${teamNumber}`, String(teamNumber)];
+  let assignmentsQuery = supa
+    .from('scout_match_assignments')
+    .select('id,match_key,scouting_type,completed_at')
+    .in('team_key', teamKeys);
+  let reportsQuery = supa
+    .from('match_scout_entries')
+    .select('id,match_key,created_at')
+    .in('team_key', teamKeys);
+  let pitQuery = supa
+    .from('pit_scout_entries')
+    .select('id,updated_at')
+    .in('team_key', teamKeys);
+  if (eventKey) {
+    assignmentsQuery = assignmentsQuery.like('match_key', `${eventKey}_%`);
+    reportsQuery = reportsQuery.eq('event_key', eventKey);
+    pitQuery = pitQuery.eq('event_key', eventKey);
+  }
+  const [assignments, reports, pit] = await Promise.all([assignmentsQuery, reportsQuery, pitQuery]);
+  const rows = assignments.error ? [] : assignments.data || [];
+  const byType = {};
+  for (const row of rows) {
+    const type = String(row.scouting_type || 'unknown');
+    if (!byType[type]) byType[type] = { total: 0, completed: 0, remainingMatches: [] };
+    byType[type].total += 1;
+    if (row.completed_at) byType[type].completed += 1;
+    else byType[type].remainingMatches.push(row.match_key);
+  }
+  const completedAssignments = rows.filter((row) => row.completed_at).length;
+  const reportRows = reports.error ? [] : reports.data || [];
+  return {
+    databaseOk: !assignments.error && !reports.error && !pit.error,
+    eventKey,
+    teamNumber: String(teamNumber),
+    totalAssignments: rows.length,
+    completedAssignments,
+    remainingAssignments: rows.length - completedAssignments,
+    allAssignedReportsComplete: rows.length > 0 && completedAssignments === rows.length,
+    byType,
+    submittedMatchReports: reportRows.length,
+    submittedMatchCount: new Set(reportRows.map((row) => row.match_key).filter(Boolean)).size,
+    pitReportPresent: pit.error ? null : (pit.data || []).length > 0
+  };
+}
+
+export function formatTeamReportStatus(snapshot) {
+  const lines = [`*Team ${snapshot.teamNumber} scouting status${snapshot.eventKey ? ` — ${snapshot.eventKey}` : ''}:*`];
+  if (!snapshot.databaseOk) lines.push(':warning: One or more scouting tables could not be checked.');
+  if (!snapshot.totalAssignments) {
+    lines.push('*Assigned reports:* none found, so I cannot claim that every expected report is finished.');
+  } else {
+    lines.push(`*Assigned reports:* ${snapshot.completedAssignments}/${snapshot.totalAssignments} complete${snapshot.allAssignedReportsComplete ? ' :white_check_mark:' : ` — ${snapshot.remainingAssignments} remaining`}`);
+    for (const [type, status] of Object.entries(snapshot.byType).sort()) {
+      lines.push(`• ${type}: ${status.completed}/${status.total} complete`);
+    }
+    const remainingMatches = [...new Set(Object.values(snapshot.byType).flatMap((status) => status.remainingMatches))];
+    if (remainingMatches.length) lines.push(`*Still open:* ${remainingMatches.slice(0, 12).join(', ')}${remainingMatches.length > 12 ? ` and ${remainingMatches.length - 12} more` : ''}`);
+  }
+  lines.push(`*Submitted match-scout entries:* ${snapshot.submittedMatchReports} across ${snapshot.submittedMatchCount} match${snapshot.submittedMatchCount === 1 ? '' : 'es'}`);
+  lines.push(`*Pit scouting:* ${snapshot.pitReportPresent === null ? 'unavailable' : snapshot.pitReportPresent ? 'report present' : 'no report found'}`);
+  return lines.join('\n');
+}
+
 export async function askGroqAboutHub(question, snapshot, options = {}) {
   const apiKey = options.apiKey || env.GROQ_API_KEY;
   if (!apiKey) throw new Error('GROQ_API_KEY is not configured');
@@ -101,7 +195,7 @@ export async function askGroqAboutHub(question, snapshot, options = {}) {
         messages: [
           {
             role: 'system',
-            content: `You are 971app, the concise Slack assistant for Spartans Hub. Answer only from the supplied Hub knowledge and live snapshot. If the answer is not present, say you do not know and direct the user to the relevant Hub page or an administrator. Use Slack markdown, no tables, and never generate @channel, @here, or @everyone mentions.\n\nHUB KNOWLEDGE:\n${HUB_KNOWLEDGE}\n\nRECENT CHANGES:\n${HUB_RECENT_CHANGES.join('\n')}\n\nLIVE SNAPSHOT:\n${JSON.stringify(snapshot)}`
+            content: `You are 971hub, the concise Slack assistant for Spartans Hub. Answer any question about Hub features, routes, and the supplied live status, but only from the evidence below. If the answer is not present, say you do not know and direct the user to the relevant Hub page or an administrator. Never imply that a report or assignment is complete unless the live data explicitly proves it. Use Slack markdown, no tables, and never generate @channel, @here, or @everyone mentions.\n\nHUB FEATURE CATALOG:\n${HUB_FEATURE_CATALOG}\n\nRECENT CHANGES:\n${HUB_RECENT_CHANGES.join('\n')}\n\nLIVE SNAPSHOT:\n${JSON.stringify(snapshot)}`
           },
           { role: 'user', content: safeSlackText(question).slice(0, 1200) }
         ]
@@ -128,15 +222,18 @@ export async function handleHubAppMention(event, dependencies = {}) {
   const snapshot = await fetchHubStatusSnapshot(supa);
   let text;
   if (!question) {
-    text = 'Ask me about Spartans Hub, or use `@971app status` for live status and recent changes.';
+    text = 'Ask me about Spartans Hub, or use `@971hub /status` for live status and recent changes.';
   } else if (isHubStatusRequest(question)) {
     text = formatHubStatus(snapshot);
+  } else if (isTeamReportStatusRequest(question)) {
+    const teamSnapshot = await fetchTeamReportSnapshot(supa, teamNumberFromQuestion(question), snapshot.eventKey);
+    text = formatTeamReportStatus(teamSnapshot);
   } else {
     try {
       text = await askGroqAboutHub(question, snapshot, dependencies);
     } catch (error) {
       console.error('Groq Hub assistant failed', error?.message || error);
-      text = 'I could not reach the Hub question-answering service. Try `@971app status`, or ask again shortly.';
+      text = 'I could not reach the Hub question-answering service. Try `@971hub /status`, or ask again shortly.';
     }
   }
   const response = await slack.chat.postMessage({
