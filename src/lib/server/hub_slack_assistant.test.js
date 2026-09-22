@@ -103,7 +103,7 @@ describe('Slack Hub assistant', () => {
     });
     const answer = await askGeminiAboutHub('Where do I scout?', snapshot, { apiKey: 'test-secret', fetchImpl });
     const request = fetchImpl.mock.calls[0][1];
-    expect(fetchImpl.mock.calls[0][0]).toBe('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent');
+    expect(fetchImpl.mock.calls[0][0]).toBe('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent');
     expect(request.headers['x-goog-api-key']).toBe('test-secret');
     expect(request.body).not.toContain('test-secret');
     expect(answer).toBe('@channel (mention suppressed) Open Match Scouting.');
@@ -117,6 +117,38 @@ describe('Slack Hub assistant', () => {
       apiKey: 'test-secret',
       fetchImpl: async () => ({ ok: true, json: async () => ({ candidates: [] }) })
     })).rejects.toThrow('Gemini returned an empty answer');
+  });
+
+  it('reports rejected Gemini credentials without exposing provider details', async () => {
+    const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
+    await handleHubAppMention({ channel: 'C1', ts: '1.0', text: '<@U971> where do I scout?' }, {
+      supa: supabaseForStatus(),
+      slack: { chat: { postMessage } },
+      apiKey: 'test-secret',
+      fetchImpl: async () => ({
+        ok: false,
+        status: 400,
+        json: async () => ({ error: { status: 'INVALID_ARGUMENT', message: 'API key not valid: test-secret' } })
+      })
+    });
+    const reply = postMessage.mock.calls[0][0].text;
+    expect(reply).toContain('rejected the server credential');
+    expect(reply).not.toContain('test-secret');
+  });
+
+  it('reports unavailable models separately from credential failures', async () => {
+    const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
+    await handleHubAppMention({ channel: 'C1', ts: '1.0', text: '<@U971> where do I scout?' }, {
+      supa: supabaseForStatus(),
+      slack: { chat: { postMessage } },
+      apiKey: 'test-secret',
+      fetchImpl: async () => ({
+        ok: false,
+        status: 404,
+        json: async () => ({ error: { status: 'NOT_FOUND' } })
+      })
+    });
+    expect(postMessage.mock.calls[0][0].text).toContain('model is unavailable');
   });
 
   it('reports assignment completion and submitted entries for a team without Gemini', async () => {
