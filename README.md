@@ -902,11 +902,14 @@ AutoCAM's own code (engine, Drive watcher, `camJobs.js`, its components) is
 
 ## Deployment & CI
 
-- **Cloud Run** (`geminiapi-469220` project, `spartanshub` service,
+- **Cloud Run** (`spartanshub` project, `spartanshub` service,
   `spartanshub.spartanrobotics.org`): builds via Cloud Build
   (`cloudbuild.yaml`), triggered on push to `main` on the `spartanshub`
   GitHub remote. See `docs/deployment/google-cloud-run.md` for the full
-  setup/secrets checklist.
+  setup/secrets checklist. The 971hub Slack assistant reads `GEMINI_API_KEY`
+  from a Cloud Run runtime-only Secret Manager mapping; the secret must exist
+  in the `spartanshub` project with an enabled version and runtime access
+  before that mapping is deployed.
 - **Vercel**: the original deployment target, being phased out per
   `implementations/vercel-and-supabase-to-google-plan.md` - not yet
   decommissioned as of this writing (see that plan doc's TODOs).
