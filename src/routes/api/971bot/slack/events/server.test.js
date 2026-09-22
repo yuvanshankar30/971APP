@@ -1,8 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { handleHubAppMention, isHubAssistantChannelAllowed, getSupabase, claimSlackEvent, completeSlackEvent, failSlackEvent } = vi.hoisted(() => ({
+const { handleHubAppMention, getSupabase, claimSlackEvent, completeSlackEvent, failSlackEvent } = vi.hoisted(() => ({
   handleHubAppMention: vi.fn(),
-  isHubAssistantChannelAllowed: vi.fn(),
   getSupabase: vi.fn(() => ({ name: 'test-supabase' })),
   claimSlackEvent: vi.fn(),
   completeSlackEvent: vi.fn(),
@@ -19,7 +18,7 @@ vi.mock('$lib/server/971bot', () => ({
 }));
 vi.mock('$lib/server/planner_notifications.js', () => ({ handlePlannerReaction: vi.fn() }));
 vi.mock('$lib/server/slack_notifications.js', () => ({ handleP0BugAssignmentReaction: vi.fn() }));
-vi.mock('$lib/server/hub_slack_assistant.js', () => ({ handleHubAppMention, isHubAssistantChannelAllowed }));
+vi.mock('$lib/server/hub_slack_assistant.js', () => ({ handleHubAppMention }));
 vi.mock('$lib/server/slack_event_receipts.js', () => ({ claimSlackEvent, completeSlackEvent, failSlackEvent }));
 
 const { POST } = await import('./+server.js');
@@ -35,20 +34,21 @@ function slackRequest(payload) {
 describe('Slack app mention events', () => {
   beforeEach(() => {
     handleHubAppMention.mockReset().mockResolvedValue({ ok: true });
-    isHubAssistantChannelAllowed.mockReset().mockResolvedValue(true);
     claimSlackEvent.mockReset().mockResolvedValue({ claimed: true, retried: false });
     completeSlackEvent.mockReset().mockResolvedValue(undefined);
     failSlackEvent.mockReset().mockResolvedValue(undefined);
   });
 
-  it('ignores mentions outside the 971app testing channel before claiming a receipt', async () => {
-    isHubAssistantChannelAllowed.mockResolvedValueOnce(false);
+  it('routes mentions from any channel where Slack delivers an app_mention event', async () => {
     const event = { type: 'app_mention', channel: 'C-RANDOM', ts: '1.5', text: '<@U971APP> status' };
-    const response = await POST({ request: slackRequest({ type: 'event_callback', event_id: 'Ev-wrong-channel', event }) });
+    const response = await POST({ request: slackRequest({ type: 'event_callback', event_id: 'Ev-member-channel', event }) });
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ ok: true, ignored: true, reason: 'channel-not-allowed' });
-    expect(claimSlackEvent).not.toHaveBeenCalled();
-    expect(handleHubAppMention).not.toHaveBeenCalled();
+    expect(claimSlackEvent).toHaveBeenCalledWith(
+      { name: 'test-supabase' },
+      expect.objectContaining({ eventId: 'Ev-member-channel', channelId: 'C-RANDOM' })
+    );
+    expect(handleHubAppMention).toHaveBeenCalledWith(event, { supa: { name: 'test-supabase' } });
+    expect(await response.json()).toMatchObject({ ok: true, handled: true });
   });
 
   it('routes app_mention events to the Hub assistant', async () => {

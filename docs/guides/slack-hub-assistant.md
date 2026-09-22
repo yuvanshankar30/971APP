@@ -10,10 +10,11 @@ feature catalog and status snapshot. Mentions using the old `@971app` or
 `@971hub` display names continue to work in existing messages because Slack
 identifies the app by ID rather than by its visible name.
 
-The assistant only responds in `#971app-bot-testing`. Mentions in every other
-channel are acknowledged and ignored before an event receipt is claimed, a
-database status snapshot is loaded, or Gemini is called. Replies to a mention in
-an existing thread remain in that thread; channel-level mentions start one
+The assistant responds to direct mentions in every conversation where the bot
+is a member. Slack membership is the access boundary: the app does not read
+ambient channel messages, and Slack does not deliver ordinary `app_mention`
+events from conversations the app has not joined. Replies to a mention in an
+existing thread remain in that thread; channel-level mentions start one
 threaded reply beneath the mention.
 
 ## Required runtime configuration
@@ -26,8 +27,8 @@ threaded reply beneath the mention.
 - `GEMINI_MODEL` is optional and defaults to `gemini-3.5-flash-lite`. Google
   limits Gemini 2.5 model access for new projects, so do not switch the default
   back merely because the older model name is still documented.
-- The non-secret Slack channel ID for `#971app-bot-testing` is pinned in the
-  assistant module. No channel environment variable is required.
+- No channel allowlist or channel environment variable is required. Add or
+  remove the app from a Slack conversation to grant or revoke mention access.
 
 ## Required Slack app configuration
 
@@ -42,7 +43,7 @@ In the Slack app configuration at `api.slack.com/apps`:
    `https://spartanshub.spartanrobotics.org/api/971bot/slack/events`.
 5. Subscribe to the bot event `app_mention` while retaining existing reaction
    subscriptions.
-6. Invite the app to `#971app-bot-testing`.
+6. Invite the app to each channel where direct-mention access is wanted.
 
 The endpoint verifies Slack request signatures, ignores bot-authored mentions,
 deduplicates Slack retries through the service-role-only

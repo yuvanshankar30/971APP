@@ -545,9 +545,9 @@ file: update its diagram alongside this section, not separately from it.
   use live assignment and report rows, and other Hub feature questions receive
   read-only, context-bounded answers from Gemini using the ordinary server-side
   `GEMINI_API_KEY` and the current `gemini-3.5-flash-lite` default; the
-  assistant is restricted to `#971app-bot-testing`, keeps replies in the
-  originating thread, reports safe credential/model/quota/timeout failure
-  categories, and durably deduplicates Slack retry IDs in
+  assistant responds to direct mentions in every conversation where the bot is
+  a member, keeps replies in the originating thread, reports safe
+  credential/model/quota/timeout failure categories, and durably deduplicates Slack retry IDs in
   `slack_event_receipts`),
   Onshape API (CAD source of truth for parts - see the Onshape-key exposure
   note under **Known gaps** below), The Blue Alliance API (scouting), Sentry

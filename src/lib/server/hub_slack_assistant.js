@@ -1,9 +1,6 @@
 import { env } from '$env/dynamic/private';
 import { getSlackClient, getSupabase } from '$lib/server/971bot.js';
 
-export const HUB_ASSISTANT_CHANNEL_NAME = '971app-bot-testing';
-export const HUB_ASSISTANT_CHANNEL_ID = 'C0C36BSST46';
-
 export const HUB_RECENT_CHANGES = [
   'Drive Team now shows every completed 971 match with Win/Loss/Tie and the final score.',
   'Match Scouting sends mechanical, disabled, and dead-robot ACE handoffs only to #2026-ace-pit-bot.',
@@ -72,13 +69,6 @@ export function isTeamReportStatusRequest(question) {
     && /\b(report|scout|assignment)s?\b/i.test(String(question || ''))
     && /\b(all|complete|completed|done|finish|finished|missing|remaining|status)\b/i.test(String(question || ''))
   );
-}
-
-export async function isHubAssistantChannelAllowed(supa, channel, options = {}) {
-  const candidate = String(channel || '').trim();
-  if (!candidate) return false;
-  const allowedChannelId = String(options.channelId ?? HUB_ASSISTANT_CHANNEL_ID).trim();
-  return candidate === allowedChannelId;
 }
 
 export async function fetchHubStatusSnapshot(supa = getSupabase()) {
