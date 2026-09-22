@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getWorkflowStatuses, getDisplayStatus, getBadgeClass, isAutocamEligible, ALL_STATUSES } from './statuses.js';
+import { getWorkflowStatuses, getDisplayStatus, getBadgeClass, isAutocamEligible, ALL_STATUSES, DISPLAY_ORDER, WORKFLOW_STATUSES } from './statuses.js';
 
 describe('getWorkflowStatuses', () => {
   it('keeps router stages separate from the compact shop workflows', () => {
@@ -13,6 +13,20 @@ describe('getWorkflowStatuses', () => {
     expect(getWorkflowStatuses('3d-print').map((stage) => stage.value)).toEqual([
       'pending', 'in-progress', 'printed', 'complete'
     ]);
+  });
+});
+
+describe('router workflow ordering', () => {
+  // Direct instruction: a part can't be postprocessed (deburred/cleaned up)
+  // before it's actually been machined - Postprocessed must come after
+  // Machined, not before it.
+  it('places Postprocessed after Machined in the display order', () => {
+    expect(DISPLAY_ORDER.indexOf('Postprocessed')).toBeGreaterThan(DISPLAY_ORDER.indexOf('Machined'));
+  });
+
+  it('places postprocessed after machined in the router workflow status list', () => {
+    const values = WORKFLOW_STATUSES.router.map((option) => option.value);
+    expect(values.indexOf('postprocessed')).toBeGreaterThan(values.indexOf('machined'));
   });
 });
 
