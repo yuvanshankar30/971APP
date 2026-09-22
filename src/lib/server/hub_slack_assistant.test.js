@@ -7,10 +7,12 @@ import {
   fetchTeamReportSnapshot,
   formatAdminProfile,
   formatHubStatus,
+  formatFusionRunnerSetupHelp,
   formatScoutingAssignments,
   formatTeamReportStatus,
   handleHubAppMention,
   isAdminProfileQuestion,
+  isFusionRunnerSetupQuestion,
   isScoutingAssignmentQuestion,
   isHubStatusRequest,
   isTeamReportStatusRequest,
@@ -309,6 +311,54 @@ describe('Slack Hub assistant', () => {
     expect(executed).toHaveLength(0);
     const secondBody = JSON.parse(fetchImpl.mock.calls[1][1].body);
     expect(secondBody.contents.at(-1).parts[0].functionResponse.response.error).toContain('Unknown table');
+  });
+
+  it('answers Fusion Runner install questions deterministically and pings the two token contacts', async () => {
+    expect(isFusionRunnerSetupQuestion('how do I install the fusion runner?')).toBe(true);
+    expect(isFusionRunnerSetupQuestion('how do I set up autocam?')).toBe(true);
+    expect(isFusionRunnerSetupQuestion('how do I scout a match?')).toBe(false);
+
+    const supa = {
+      from: () => ({
+        select: async () => ({
+          data: [
+            { id: 'u1', email: 'yuvan262626@gmail.com', full_name: 'Yuvan Something', slack_user_id: 'U-YUVAN' },
+            { id: 'u2', email: 'arin.rao12@gmail.com', full_name: 'Arin Rao', slack_user_id: 'U-ARIN' },
+            { id: 'u3', email: 'someone.else@gmail.com', full_name: 'Someone Else', slack_user_id: 'U-OTHER' }
+          ],
+          error: null
+        })
+      })
+    };
+    const text = await formatFusionRunnerSetupHelp(supa);
+    expect(text).toContain('curl -fsSL');
+    expect(text).toContain('install/fusion-runner');
+    expect(text).toContain('<@U-YUVAN>');
+    expect(text).toContain('<@U-ARIN>');
+    expect(text).not.toContain('U-OTHER');
+  });
+
+  it('routes Fusion Runner install questions away from Gemini entirely', async () => {
+    const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
+    const fetchImpl = vi.fn();
+    const base = supabaseForStatus();
+    const supa = {
+      from: (table) => {
+        if (table === 'user_profiles') {
+          return { select: async () => ({ data: [{ id: 'u1', email: 'yuvan262626@gmail.com', full_name: 'Yuvan', slack_user_id: 'U-YUVAN' }], error: null }) };
+        }
+        return base.from(table);
+      }
+    };
+    await handleHubAppMention({ channel: 'C1', user: 'U1', ts: '1.0', text: '<@U971> how do I install the fusion runner?' }, {
+      supa,
+      slack: { chat: { postMessage } },
+      apiKey: 'test-secret',
+      fetchImpl
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(postMessage.mock.calls[0][0].text).toContain('curl -fsSL');
+    expect(postMessage.mock.calls[0][0].text).toContain('<@U-YUVAN>');
   });
 
   it('reads all assignment types for admins and only the requester rows for members', async () => {
