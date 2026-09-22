@@ -123,9 +123,10 @@ function uncommentedCode(line) {
 // the part (or its holding tabs) while other operations still need the
 // material secured.
 const RELEASE_CUT_NAME_PATTERN = /\b(2d\s*slot\s*cut|slot\s*cut\s*for\s*edges)\b/i;
-// Direct instruction: only Tool 6 is approved to cut a release/slot cut for
-// now - see emitNestingGcode's own validation using this constant.
-const APPROVED_RELEASE_CUT_TOOL = 6;
+// Direct instruction: only Tool 6 or Tool 1 are approved to cut a
+// release/slot cut for now - see emitNestingGcode's own validation using
+// this constant.
+const APPROVED_RELEASE_CUT_TOOLS = [6, 1];
 
 function winCncToolBlocks(source) {
   const blocks = new Map();
@@ -272,15 +273,15 @@ export function emitNestingGcode({ name, placements, programs, suffix = '', file
       }
     }
     // Direct operator report, with a real posted G-code snippet: a plate
-    // part's release/slot cut ran under "[Tool 2]" / T2 - only Tool 6 is
-    // approved to cut a release/slot cut for now. Fail emission loudly
-    // here, before JProg ever writes the file a router would run, rather
-    // than letting an unapproved tool reach the machine.
+    // part's release/slot cut ran under "[Tool 2]" / T2 - only Tool 6 or
+    // Tool 1 are approved to cut a release/slot cut for now. Fail emission
+    // loudly here, before JProg ever writes the file a router would run,
+    // rather than letting an unapproved tool reach the machine.
     for (const [tool, toolPrograms] of byReleaseTool) {
-      if (tool === APPROVED_RELEASE_CUT_TOOL) continue;
+      if (APPROVED_RELEASE_CUT_TOOLS.includes(tool)) continue;
       const offender = toolPrograms[0]?.placement?.label || 'a placed part';
       throw new Error(
-        `${offender}'s release/slot cut is assigned Tool ${tool} - only Tool ${APPROVED_RELEASE_CUT_TOOL} is approved to cut a release/slot cut. Check the AutoCAM job's tool library for whatever tool matched the template's release-cut tool.`
+        `${offender}'s release/slot cut is assigned Tool ${tool} - only Tool ${APPROVED_RELEASE_CUT_TOOLS.join(' or Tool ')} are approved to cut a release/slot cut. Check the AutoCAM job's tool library for whatever tool matched the template's release-cut tool.`
       );
     }
     const orderedTools = configuredWinCncToolOrder(toolOrder, [...byTool.keys()].sort((left, right) => left - right));

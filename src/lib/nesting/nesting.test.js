@@ -474,12 +474,12 @@ describe("nesting emission", () => {
     expect(result.text.indexOf("[Tool 1]")).toBeLessThan(result.text.indexOf("[Slot Cut for Edges]"));
   });
 
-  it("refuses to emit a release/slot cut assigned any tool other than Tool 6", () => {
+  it("refuses to emit a release/slot cut assigned any tool other than Tool 6 or Tool 1", () => {
     // Direct operator report, with a real posted G-code snippet: a plate
-    // part's release cut ran under "[Tool 2]" / T2. Only Tool 6 is approved
-    // to cut a release/slot cut - this must fail emission loudly, before
-    // JProg ever writes a file a router would run, rather than shipping an
-    // unapproved tool to the machine.
+    // part's release cut ran under "[Tool 2]" / T2. Only Tool 6 or Tool 1
+    // are approved to cut a release/slot cut - this must fail emission
+    // loudly, before JProg ever writes a file a router would run, rather
+    // than shipping an unapproved tool to the machine.
     const input = {
       name: "wrong-release-tool",
       dialect: "wincnc",
@@ -490,7 +490,22 @@ describe("nesting emission", () => {
         },
       },
     };
-    expect(() => emitNestingGcode(input)).toThrow(/Tool 2.*only Tool 6/s);
+    expect(() => emitNestingGcode(input)).toThrow(/Tool 2.*only Tool 6 or Tool 1/s);
+  });
+
+  it("allows a release/slot cut assigned Tool 1, not just Tool 6", () => {
+    const input = {
+      name: "t1-release-tool",
+      dialect: "wincnc",
+      placements: [{ label: "FrontSupportPlate-AUTOCAM", x: 2, y: 2, part_library_path: "plate" }],
+      programs: {
+        plate: {
+          source: ["G90", "T2", "G0 X0 Y0", "T1", "[Slot Cut for Edges]", "G0 X1 Y1", "M5"].join("\n"),
+        },
+      },
+    };
+    const result = emitNestingGcode(input);
+    expect(result.text).toContain("Slot Cut for Edges");
   });
 
   it("still runs a program with no release cut exactly as before", () => {
