@@ -564,8 +564,31 @@ def _tool_nc_number(tool: dict) -> Optional[int]:
 # sync with gcodeEmit.js's RELEASE_CUT_NAME_PATTERN and camPlate.py's own
 # group_tabs-based identification of the same operation on the posted side.
 _RELEASE_CUT_TEMPLATE_DESCRIPTION_RE = re.compile(r"\b(2d\s*slot\s*cut|slot\s*cut\s*for\s*edges)\b", re.IGNORECASE)
-# Direct instruction: only Tool 6 is approved to cut a release/slot cut.
+# Direct instruction: only Tool 6 is approved to cut a release/slot cut in
+# multi-tool mode - the release cut's tool there is a fixed machine constant
+# (Tool 6 lives permanently in the shop's ATC), not a per-job cutting-tool
+# choice. Single-tool mode is different: the release cut should use the
+# job's one selected tool when that tool is Tool 1 or Tool 6, otherwise it
+# falls back to Tool 1 - see resolve_required_release_cut_tool_number.
 _REQUIRED_RELEASE_CUT_TOOL_NUMBER = 6
+_SINGLE_TOOL_RELEASE_CUT_FALLBACK_NUMBER = 1
+_ELIGIBLE_SINGLE_TOOL_RELEASE_CUT_NUMBERS = (1, 6)
+
+
+def resolve_required_release_cut_tool_number(
+    multi_tool_mode: bool, single_tool_number: Optional[int]
+) -> int:
+    """Direct instruction: in single-tool mode, the release/slot cut should
+    match the job's one selected tool when that tool is Tool 1 or Tool 6,
+    otherwise it falls back to Tool 1. Multi-tool mode keeps the original
+    fixed-machine-constant rule (Tool 6 only, see _REQUIRED_RELEASE_CUT_
+    TOOL_NUMBER's own comment) - unaffected by which tool(s) were selected.
+    """
+    if multi_tool_mode:
+        return _REQUIRED_RELEASE_CUT_TOOL_NUMBER
+    if single_tool_number in _ELIGIBLE_SINGLE_TOOL_RELEASE_CUT_NUMBERS:
+        return single_tool_number
+    return _SINGLE_TOOL_RELEASE_CUT_FALLBACK_NUMBER
 
 
 def _tool_with_nc_number(indexes: list[dict], number: int) -> Optional[Tuple[dict, dict]]:
@@ -1164,18 +1187,24 @@ def patch_cam_template_with_tool_libraries(
     material_name: Optional[str] = None,
     filter_guids: Optional[set[str]] = None,
     multi_tool_mode: bool = False,
+    single_tool_number: Optional[int] = None,
 ) -> dict:
     if not tool_library_paths:
         raise ValueError("tool_library_paths must not be empty")
 
     indexes: list[dict] = []
-    # The release/slot cut's tool is a fixed machine constant (Tool 6 lives
-    # permanently in the shop's ATC), not a per-job cutting-tool choice - it
-    # must resolve independently of filter_guids, which represents only the
-    # tools an operator selected for this part's own geometry and would
-    # otherwise silently exclude Tool 6 from a job that never had reason to
-    # select it. Built from the same already-loaded libraries below rather
-    # than re-reading each path a second time.
+    # In multi-tool mode the release/slot cut's tool is a fixed machine
+    # constant (Tool 6 lives permanently in the shop's ATC), not a per-job
+    # cutting-tool choice - it must resolve independently of filter_guids,
+    # which represents only the tools an operator selected for this part's
+    # own geometry and would otherwise silently exclude Tool 6 from a job
+    # that never had reason to select it. In single-tool mode the required
+    # tool is derived from the job's own single selection instead (see
+    # resolve_required_release_cut_tool_number), but still looked up here
+    # rather than via filter_guids for the same reason: a single-tool job
+    # whose tool falls back to Tool 1 has no obligation to have selected
+    # Tool 1 itself. Built from the same already-loaded libraries below
+    # rather than re-reading each path a second time.
     unfiltered_indexes: list[dict] = []
     for path in tool_library_paths:
         lib = load_tool_library_json(path)
@@ -1287,12 +1316,15 @@ def patch_cam_template_with_tool_libraries(
         if _RELEASE_CUT_TEMPLATE_DESCRIPTION_RE.search(str(template_elem.get("description") or ""))
     ]
     if release_cut_templates:
-        release_cut_match = _tool_with_nc_number(unfiltered_indexes, _REQUIRED_RELEASE_CUT_TOOL_NUMBER)
+        required_release_cut_tool_number = resolve_required_release_cut_tool_number(
+            multi_tool_mode, single_tool_number
+        )
+        release_cut_match = _tool_with_nc_number(unfiltered_indexes, required_release_cut_tool_number)
         if release_cut_match is None:
             raise ValueError(
-                f"No Tool {_REQUIRED_RELEASE_CUT_TOOL_NUMBER} is loaded in this job's tool "
+                f"No Tool {required_release_cut_tool_number} is loaded in this job's tool "
                 "library - the release/slot cut is only ever allowed to run on Tool "
-                f"{_REQUIRED_RELEASE_CUT_TOOL_NUMBER}, and cannot be posted without it."
+                f"{required_release_cut_tool_number}, and cannot be posted without it."
             )
         release_cut_tool, release_cut_idx = release_cut_match
         for template_elem in release_cut_templates:

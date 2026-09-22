@@ -430,17 +430,41 @@ def _require_release_contour(cam) -> None:
 
 
 _APPROVED_RELEASE_CUT_TOOL_NUMBERS = (6,)
+_SINGLE_TOOL_RELEASE_CUT_FALLBACK_NUMBER = 1
+_ELIGIBLE_SINGLE_TOOL_RELEASE_CUT_NUMBERS = (1, 6)
 
 
-def _require_approved_release_cut_tool(cam) -> None:
+def _approved_release_cut_tool_numbers_for_job(multi_tool_mode, single_tool_number):
+    """Direct instruction: in single-tool mode, the release/slot cut should
+    match the job's one selected tool when that tool is Tool 1 or Tool 6,
+    otherwise it falls back to Tool 1. Multi-tool mode keeps the original
+    fixed-machine-constant rule (_APPROVED_RELEASE_CUT_TOOL_NUMBERS, Tool 6
+    only - see that constant's own history) - unaffected by which tool(s)
+    were selected. Mirrors templateTools.py's own
+    resolve_required_release_cut_tool_number - kept as an independent copy
+    rather than a cross-module import since camPlate.py imports Fusion's
+    runtime-only modules at import time and this function (like
+    _require_approved_release_cut_tool itself) is loaded standalone in
+    tests via source-slicing.
+    """
+    if multi_tool_mode:
+        return _APPROVED_RELEASE_CUT_TOOL_NUMBERS
+    if single_tool_number in _ELIGIBLE_SINGLE_TOOL_RELEASE_CUT_NUMBERS:
+        return (single_tool_number,)
+    return (_SINGLE_TOOL_RELEASE_CUT_FALLBACK_NUMBER,)
+
+
+def _require_approved_release_cut_tool(cam, approved_tool_numbers=_APPROVED_RELEASE_CUT_TOOL_NUMBERS) -> None:
     """Raise if the release-contour operation (group_tabs=true, posted in
     G-code as "2D Slot Cut" / "Slot Cut for Edges") is assigned any tool
-    other than Tool 6.
+    not in approved_tool_numbers (see _approved_release_cut_tool_numbers_
+    for_job - the caller computes this per-job: Tool 6 only in multi-tool
+    mode, or the job's single selected tool when it's Tool 1 or 6, else
+    Tool 1, in single-tool mode).
 
     Direct operator report, with a real posted G-code snippet: a plate job's
     release cut posted under "[Tool 2]" / T2 - Tool 2 must never cut a
-    release contour. Direct instruction: only Tool 6 is approved for now.
-    The template's own tool is "971 Main Bit" (NC number 1 in the template
+    release contour. The template's own tool is "971 Main Bit" (NC number 1 in the template
     XML itself), but _index_tools/_find_matching_tool in templateTools.py
     resolves the actual posted tool from whatever the job's own tool
     library maps that description (or, on a diameter-only fallback match,
@@ -482,14 +506,17 @@ def _require_approved_release_cut_tool(cam) -> None:
                 tool_number = int(str(op.tool.parameters.itemByName("tool_number").expression).strip())
             except Exception:
                 continue
-            if tool_number not in _APPROVED_RELEASE_CUT_TOOL_NUMBERS:
+            if tool_number not in approved_tool_numbers:
+                approved_description = " or ".join(
+                    "Tool {}".format(number) for number in approved_tool_numbers
+                )
                 raise RuntimeError(
                     "The release-contour operation ('{}') is assigned Tool {} - "
-                    "only Tool 6 is approved to cut a release/slot cut. Check "
+                    "only {} is approved to cut a release/slot cut. Check "
                     "the tool library used for this job: whatever tool matched "
                     "the template's '971 Main Bit' entry (or, on a diameter "
                     "fallback, its type and diameter) is assigned the wrong "
-                    "NC number there.".format(op.name, tool_number)
+                    "NC number there.".format(op.name, tool_number, approved_description)
                 )
 
 
@@ -1184,6 +1211,13 @@ def start(data, session):
             if not filter_guids:
                 filter_guids = None
         multi_tool_mode = isinstance(payload, dict) and payload.get("multi_tool_mode") is True
+        # Single-tool mode's one joined cam_tools row carries the real NC
+        # tool number the release/slot cut should match (or fall back from -
+        # see _approved_release_cut_tool_numbers_for_job). Multi-tool mode
+        # has no single selection at all (see the spacing_diameter comment
+        # just below), so this stays None there and the release cut keeps
+        # its fixed Tool 6 machine-constant requirement.
+        single_tool_number = None if multi_tool_mode else (data.get("cam_tools") or {}).get("tool_number")
 
         # Loaded ahead of plate_spacing below (moved earlier from its
         # original position, right before patch_cam_template_with_tool_libraries)
@@ -1251,6 +1285,7 @@ def start(data, session):
             material_name=material_name,
             filter_guids=filter_guids,
             multi_tool_mode=multi_tool_mode,
+            single_tool_number=single_tool_number,
         )
         if patch_info.get("tool_plan"):
             app.log(f"Tool plan: {patch_info['tool_plan']}")
@@ -1314,7 +1349,9 @@ def start(data, session):
             app.log("Failed to resolve the CAM product after DeleteToolpaths:\n{}".format(traceback.format_exc()))
 
         _require_release_contour(cam)
-        _require_approved_release_cut_tool(cam)
+        _require_approved_release_cut_tool(
+            cam, _approved_release_cut_tool_numbers_for_job(multi_tool_mode, single_tool_number)
+        )
         _require_through_hole_for_finishing_pass(cam)
         _require_pocket_finishing_pass_pairing(cam)
 

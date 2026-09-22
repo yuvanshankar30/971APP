@@ -200,12 +200,18 @@ def start(data, session):
             TOOLS_PATH, f"Tubestock_job{job_id}.f3dhsm-template"
         )
         patched_template_path = patched_template
+        # Tube jobs have no multi-tool/grouping mode (see the "AutoCAM: support
+        # tube grouping" backlog issue) - always effectively single-tool, so
+        # the release/slot cut should match this job's one selected tool when
+        # it's Tool 1 or 6, else fall back to Tool 1. Same rule as camPlate.py.
+        single_tool_number = (data.get("cam_tools") or {}).get("tool_number")
         patch_info = patch_cam_template_with_tool_libraries(
             template_path,
             patched_template,
             [tool_json_path],
             material_name=material_name,
             filter_guids=filter_guids,
+            single_tool_number=single_tool_number,
         )
         if patch_info.get("missing"):
             app.log(f"Template tool matches missing: {patch_info.get('missing')}")
