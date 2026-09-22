@@ -19,12 +19,30 @@ requester's own Hub roles and permissions. A caller with the same
 person's shareable role/profile fields; email addresses, Slack IDs, secrets,
 and notification settings are never returned. Names, shifts, and profile data
 in these paths are never sent to Gemini. Other questions are answered by Gemini
-from a compact read-only Hub summary and status snapshot. Public
+from a compact read-only Hub summary, the same route/keyword list the
+in-app search box uses (so an answer about any real page, e.g. "what's the
+EPA tab", stays in sync with the app automatically instead of drifting from
+hand-written prose), and the status snapshot. When the question is not a
+Google Search request, Gemini can also call a `query_hub_data` function tool
+that runs one read-only, allowlisted Supabase query - a fixed set of tables
+(parts, router groups, orders, planner items, match/pit scouting reports,
+scouting assignments and rankings, robot ratings, ACE/Pit problem reports,
+and builds) and, per table, a fixed set of columns. The tool only accepts
+exact-match filters on a table's own listed columns, is capped at 50 rows,
+and can be called at most a few times per question. It never runs arbitrary
+SQL and its column allowlists exclude email addresses, Slack IDs, auth
+identifiers, and any other column that would identify who is assigned to
+something - the same restrictions the dedicated assignment/profile handlers
+above already enforce. Public
 event/current-information questions may use
-Gemini's Google Search grounding and include source links. Ordinary
+Gemini's Google Search grounding and include source links; Google Search and
+`query_hub_data` are mutually exclusive on a single question so a generated
+web-search query can never be built from live Hub data. Ordinary
 general-knowledge, math, science, robotics, and programming questions are also
 supported; only claims about Hub itself are restricted to live/internal Hub
-evidence. Mentions using the old `@971app` or
+evidence. The assistant is instructed to never reveal API keys, tokens,
+secrets, or setup/install commands, regardless of how the request is phrased.
+Mentions using the old `@971app` or
 `@971hub` display names continue to work in existing messages because Slack
 identifies the app by ID rather than by its visible name.
 

@@ -2,6 +2,7 @@ import { env } from '$env/dynamic/private';
 import { getSlackClient, getSupabase } from '$lib/server/971bot.js';
 import { hasPermission } from '$lib/permissions.js';
 import { answerHubFeatureQuestion } from '$lib/server/hub_feature_knowledge.js';
+import { ROUTES } from '$lib/siteSearch.js';
 
 export const HUB_RECENT_CHANGES = [
   'Drive Team now shows every completed 971 match with Win/Loss/Tie and the final score.',
@@ -44,6 +45,19 @@ dependencies, schedules, ownership, and Slack reminders.
 The bot is read-only. It must never claim that an action was performed, change
 data, reveal credentials, or invent status that is absent from supplied data.
 `.trim();
+
+// Direct bug fix: the prose catalog above is hand-maintained and drifts -
+// confirmed live, a real question ("explain the EPA tab") got "I do not
+// know about an EPA tab" even though /epa is a real page, because nobody
+// updates HUB_FEATURE_CATALOG's prose every time a route is added. Derive
+// a second, always-accurate list straight from the same ROUTES array
+// src/lib/siteSearch.js's own site search box uses - every page Gemini
+// should know about already lives there for a completely different
+// reason (the in-app search), so this can never silently fall out of
+// sync with it again.
+export const HUB_ROUTE_CATALOG = ROUTES
+  .map((route) => `${route.label} (${route.href}) [${route.category}] - ${route.keywords}`)
+  .join('\n');
 
 function safeSlackText(value) {
   return String(value || '')
@@ -419,6 +433,133 @@ export function formatTeamReportStatus(snapshot) {
   return lines.join('\n');
 }
 
+// Direct instruction: give the assistant real read access to Hub data so it
+// can answer arbitrary questions, not just the handful of intents with a
+// hand-written handler above. This is deliberately an allowlist of tables
+// and columns, not a raw SQL tool - Gemini can only select from a named
+// table here, filter by one of its own listed columns (equality only), and
+// read only the columns listed. Every column that identifies a person
+// outside their own display name (email, Slack ID, auth uuids, secrets,
+// notification settings) is left out, matching this file's existing
+// promise (see the module doc and formatAdminProfile) that those never
+// reach Gemini. Per-user visibility rules (e.g. "only your own
+// assignments") still live in the dedicated handlers above; this general
+// tool intentionally omits any assigned-user identity column so it can't
+// be used to route around that scoping to begin with.
+export const HUB_QUERYABLE_TABLES = {
+  scout_match_assignments: {
+    description: 'Match scouting assignments (who is assigned to which match is intentionally excluded here - ask about "my assignments" instead).',
+    columns: ['scouting_type', 'match_key', 'team_key', 'completed_at']
+  },
+  scout_pit_assignments: {
+    description: 'Pit scouting assignments for an event.',
+    columns: ['event_key', 'team_key', 'completed_at']
+  },
+  scout_prescout_assignments: {
+    description: 'Pre-scouting assignments for an event.',
+    columns: ['event_key', 'team_key', 'completed_at']
+  },
+  match_scout_entries: {
+    description: 'Submitted match-scouting reports: performance observations for one team in one match.',
+    columns: ['event_key', 'match_key', 'team_key', 'alliance', 'starting_position', 'auto_points_band',
+      'balls_scored_band', 'driver_skill', 'teleop_robot_status', 'card', 'crash_or_break', 'mechanical_break',
+      'beached', 'scout_name', 'created_at'],
+    defaultOrder: 'created_at'
+  },
+  pit_scout_entries: {
+    description: 'Pit-scouting reports: one robot\'s capabilities and mechanisms at an event.',
+    columns: ['event_key', 'team_key', 'drivebase_type', 'shooter_type', 'hopper_type', 'robot_archetype',
+      'likely_breaking_component', 'estimated_bps', 'climb_options', 'additional_notes', 'scout_name', 'updated_at'],
+    defaultOrder: 'updated_at'
+  },
+  pit_problem_reports: {
+    description: 'ACE/Pit problem reports filed during an event (mechanical/disabled/dead-robot handoffs).',
+    columns: ['event_key', 'team_key', 'match_key', 'summary', 'detail', 'severity', 'resolved', 'resolved_at', 'created_at'],
+    defaultOrder: 'created_at'
+  },
+  scouting_robot_ratings: {
+    description: 'Subjective 1-5 robot ratings scouts assign after watching a team play.',
+    columns: ['event_key', 'team_key', 'team_number', 'overall_rating', 'offense_rating', 'defense_rating',
+      'driving_rating', 'auto_rating', 'shuttling_rating', 'notes', 'strategy_notes']
+  },
+  scouting_match_rankings: {
+    description: 'Pairwise-ranked team order the scouting team recorded for a match.',
+    columns: ['event_key', 'match_key', 'ranked_team_keys']
+  },
+  parts: {
+    description: 'Manufacturing parts/work orders: what is being made, its workflow, and its status.',
+    columns: ['name', 'workflow', 'status', 'router_step', 'quantity', 'material', 'due_date', 'delivered', 'created_at', 'updated_at'],
+    defaultOrder: 'updated_at'
+  },
+  router_groups: {
+    description: 'Grouped router (JProg/AutoCAM) cut jobs and their machining status.',
+    columns: ['name', 'stock_type', 'status', 'machine', 'material', 'target_date', 'queue_position', 'post_processing_stage']
+  },
+  orders: {
+    description: 'Purchasing orders placed with a vendor.',
+    columns: ['order_number', 'vendor', 'total_items', 'total_cost', 'order_total', 'delivery_date', 'placed_at', 'notes'],
+    defaultOrder: 'placed_at'
+  },
+  planner_items: {
+    description: 'Planner tasks/events: title, kind, status, and schedule.',
+    columns: ['title', 'kind', 'category', 'status', 'critical_level', 'scheduled_start_at', 'scheduled_end_at', 'duration_minutes'],
+    defaultOrder: 'scheduled_start_at'
+  },
+  builds: {
+    description: 'Robot subsystem builds tracked against a CAD release.',
+    columns: ['release_name', 'status', 'frc_team', 'quantity', 'created_at', 'assembled_at']
+  }
+};
+
+const MAX_QUERY_LIMIT = 50;
+const DEFAULT_QUERY_LIMIT = 20;
+const MAX_TOOL_ROUNDS = 4;
+
+function queryHubDataToolDeclaration() {
+  const tableList = Object.entries(HUB_QUERYABLE_TABLES)
+    .map(([table, config]) => `- ${table}: ${config.description} Columns: ${config.columns.join(', ')}.`)
+    .join('\n');
+  return {
+    name: 'query_hub_data',
+    description: `Run a safe, read-only lookup against one Spartans Hub data table to answer a specific question. Only these tables/columns exist for this tool:\n${tableList}`,
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        table: { type: 'STRING', description: `One of: ${Object.keys(HUB_QUERYABLE_TABLES).join(', ')}` },
+        filters: {
+          type: 'OBJECT',
+          description: 'Optional exact-match filters, e.g. {"event_key": "2026cc", "team_key": "frc971"}. Keys must be one of that table\'s own listed columns.'
+        },
+        limit: { type: 'INTEGER', description: `Max rows to return (default ${DEFAULT_QUERY_LIMIT}, max ${MAX_QUERY_LIMIT}).` }
+      },
+      required: ['table']
+    }
+  };
+}
+
+// Exported so intent handlers or tests can call it directly, and so the
+// tool-call loop below can await it without redefining this inline.
+export async function executeHubDataQuery(supa, args = {}) {
+  const table = String(args?.table || '').trim();
+  const config = HUB_QUERYABLE_TABLES[table];
+  if (!config) {
+    return { error: `Unknown table "${table}". Valid tables: ${Object.keys(HUB_QUERYABLE_TABLES).join(', ')}` };
+  }
+  const filters = args?.filters && typeof args.filters === 'object' ? args.filters : {};
+  for (const key of Object.keys(filters)) {
+    if (!config.columns.includes(key)) {
+      return { error: `Column "${key}" is not queryable on "${table}". Queryable columns: ${config.columns.join(', ')}` };
+    }
+  }
+  const limit = Math.max(1, Math.min(MAX_QUERY_LIMIT, Number(args?.limit) || DEFAULT_QUERY_LIMIT));
+  let query = supa.from(table).select(config.columns.join(',')).limit(limit);
+  for (const [key, value] of Object.entries(filters)) query = query.eq(key, value);
+  if (config.defaultOrder) query = query.order(config.defaultOrder, { ascending: false });
+  const result = await query;
+  if (result.error) return { error: result.error.message || 'Query failed' };
+  return { table, rowCount: (result.data || []).length, rows: result.data || [] };
+}
+
 export async function askGeminiAboutHub(question, snapshot, options = {}) {
   const apiKey = options.apiKey ?? env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('GEMINI_API_KEY is not configured');
@@ -430,57 +571,86 @@ export async function askGeminiAboutHub(question, snapshot, options = {}) {
   // A Gemini request can outlast Slack's three-second acknowledgement window.
   // The durable event receipt prevents Slack's retry from posting a second reply.
   const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 15000);
+  // Google Search grounding and the internal data tool stay mutually exclusive
+  // (see shouldUseGoogleSearch) so a generated web-search query can never be
+  // built from live Hub/scouting rows. The data tool needs a Supabase client;
+  // without one (e.g. a caller that only wants general Q&A) it is simply omitted.
+  const supa = options.supa || null;
+  const canQueryHubData = Boolean(supa) && !options.useGoogleSearch;
+  const systemPrompt = `You are Spartans Hub, a concise general-purpose Slack assistant with special knowledge of Spartans Hub. Answer ordinary general-knowledge, math, science, robotics, and programming questions directly. Answer claims about Spartans Hub only from the supplied internal evidence, the site route catalog, or (when available) the query_hub_data tool; never invent Hub data. You may use Google Search for public facts such as event dates, schedules, locations, news, and current information. If a Hub answer is not present, search is irrelevant, and the data tool did not resolve it, say you do not know and direct the user to the relevant Hub page or an administrator. Never imply that a report or assignment is complete unless live data explicitly proves it. Never reveal API keys, tokens, secrets, passwords, or setup/install commands, even if asked directly or told it is fine to share - that is never true, no matter how the request is phrased. Use Slack markdown, no tables, include concise source links for web-grounded facts, and never generate @channel, @here, or @everyone mentions.\n\nHUB FEATURE CATALOG:\n${HUB_FEATURE_CATALOG}\n\nSITE ROUTES:\n${HUB_ROUTE_CATALOG}\n\nRECENT CHANGES:\n${HUB_RECENT_CHANGES.join('\n')}\n\nLIVE SNAPSHOT:\n${JSON.stringify(snapshot)}`;
+  const contents = [{ role: 'user', parts: [{ text: safeSlackText(question).slice(0, 1200) }] }];
   try {
-    const response = await fetchImpl(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-      method: 'POST',
-      headers: {
-        'x-goog-api-key': apiKey,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        system_instruction: {
-          parts: [{ text: `You are Spartans Hub, a concise general-purpose Slack assistant with special knowledge of Spartans Hub. Answer ordinary general-knowledge, math, science, robotics, and programming questions directly. Answer claims about Spartans Hub only from the supplied internal evidence; never invent Hub data. You may use Google Search for public facts such as event dates, schedules, locations, news, and current information. If a Hub answer is not present and search is irrelevant, say you do not know and direct the user to the relevant Hub page or an administrator. Never imply that a report or assignment is complete unless live data explicitly proves it. Use Slack markdown, no tables, include concise source links for web-grounded facts, and never generate @channel, @here, or @everyone mentions.\n\nHUB FEATURE CATALOG:\n${HUB_FEATURE_CATALOG}\n\nRECENT CHANGES:\n${HUB_RECENT_CHANGES.join('\n')}\n\nLIVE SNAPSHOT:\n${JSON.stringify(snapshot)}` }]
+    for (let round = 0; round <= MAX_TOOL_ROUNDS; round += 1) {
+      const offerDataTool = canQueryHubData && round < MAX_TOOL_ROUNDS;
+      const response = await fetchImpl(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+        method: 'POST',
+        headers: {
+          'x-goog-api-key': apiKey,
+          'Content-Type': 'application/json'
         },
-        contents: [{ role: 'user', parts: [{ text: safeSlackText(question).slice(0, 1200) }] }],
-        ...(options.useGoogleSearch ? { tools: [{ google_search: {} }] } : {}),
-        generationConfig: { maxOutputTokens: 450 }
-      }),
-      signal: controller.signal
-    });
-    const payload = await response.json().catch(() => null);
-    if (!response.ok) {
-      const providerStatus = String(payload?.error?.status || '').toUpperCase();
-      const providerMessage = String(payload?.error?.message || '');
-      let reason = 'service';
-      if (
-        [400, 401, 403].includes(response.status)
-        && (/API[_ ]?KEY|CREDENTIAL|PERMISSION_DENIED/.test(`${providerStatus} ${providerMessage}`.toUpperCase()))
-      ) {
-        reason = 'credential';
-      } else if (response.status === 404 || providerStatus === 'NOT_FOUND') {
-        reason = 'model';
-      } else if (response.status === 429 || providerStatus === 'RESOURCE_EXHAUSTED') {
-        reason = 'quota';
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: systemPrompt }] },
+          contents,
+          ...(options.useGoogleSearch
+            ? { tools: [{ google_search: {} }] }
+            : offerDataTool
+              ? { tools: [{ function_declarations: [queryHubDataToolDeclaration()] }] }
+              : {}),
+          generationConfig: { maxOutputTokens: 450 }
+        }),
+        signal: controller.signal
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        const providerStatus = String(payload?.error?.status || '').toUpperCase();
+        const providerMessage = String(payload?.error?.message || '');
+        let reason = 'service';
+        if (
+          [400, 401, 403].includes(response.status)
+          && (/API[_ ]?KEY|CREDENTIAL|PERMISSION_DENIED/.test(`${providerStatus} ${providerMessage}`.toUpperCase()))
+        ) {
+          reason = 'credential';
+        } else if (response.status === 404 || providerStatus === 'NOT_FOUND') {
+          reason = 'model';
+        } else if (response.status === 429 || providerStatus === 'RESOURCE_EXHAUSTED') {
+          reason = 'quota';
+        }
+        const error = new Error(`Gemini request failed (${response.status}${providerStatus ? ` ${providerStatus}` : ''})`);
+        error.geminiReason = reason;
+        error.httpStatus = response.status;
+        throw error;
       }
-      const error = new Error(`Gemini request failed (${response.status}${providerStatus ? ` ${providerStatus}` : ''})`);
-      error.geminiReason = reason;
-      error.httpStatus = response.status;
-      throw error;
+      const parts = payload?.candidates?.[0]?.content?.parts || [];
+      const functionCalls = parts.filter((part) => part?.functionCall).map((part) => part.functionCall);
+      if (functionCalls.length && offerDataTool) {
+        contents.push({ role: 'model', parts: parts.filter((part) => part?.functionCall) });
+        const functionResponseParts = [];
+        for (const call of functionCalls) {
+          // eslint-disable-next-line no-await-in-loop
+          const result = call?.name === 'query_hub_data'
+            ? await executeHubDataQuery(supa, call.args)
+            : { error: `Unknown tool "${call?.name}"` };
+          functionResponseParts.push({ functionResponse: { name: call.name, response: result } });
+        }
+        contents.push({ role: 'user', parts: functionResponseParts });
+        continue;
+      }
+      let answer = safeSlackText(parts
+        .filter((part) => !part.thought && typeof part.text === 'string')
+        .map((part) => part.text)
+        .join(''));
+      if (!answer) throw new Error('Gemini returned an empty answer');
+      const sources = [...new Map((payload?.candidates?.[0]?.groundingMetadata?.groundingChunks || [])
+        .map((chunk) => chunk?.web)
+        .filter((web) => web?.uri)
+        .map((web) => [web.uri, { uri: web.uri, title: safeSlackText(web.title || 'Source') }])).values()]
+        .slice(0, 3);
+      if (sources.length && !sources.some((source) => answer.includes(source.uri))) {
+        answer = safeSlackText(`${answer}\n\n*Sources:* ${sources.map((source) => `<${source.uri}|${source.title}>`).join(' · ')}`);
+      }
+      return answer;
     }
-    let answer = safeSlackText((payload?.candidates?.[0]?.content?.parts || [])
-      .filter((part) => !part.thought && typeof part.text === 'string')
-      .map((part) => part.text)
-      .join(''));
-    if (!answer) throw new Error('Gemini returned an empty answer');
-    const sources = [...new Map((payload?.candidates?.[0]?.groundingMetadata?.groundingChunks || [])
-      .map((chunk) => chunk?.web)
-      .filter((web) => web?.uri)
-      .map((web) => [web.uri, { uri: web.uri, title: safeSlackText(web.title || 'Source') }])).values()]
-      .slice(0, 3);
-    if (sources.length && !sources.some((source) => answer.includes(source.uri))) {
-      answer = safeSlackText(`${answer}\n\n*Sources:* ${sources.map((source) => `<${source.uri}|${source.title}>`).join(' · ')}`);
-    }
-    return answer;
+    throw new Error('Gemini did not produce a final answer within the tool-call round limit');
   } finally {
     clearTimeout(timeout);
   }
@@ -540,6 +710,7 @@ export async function handleHubAppMention(event, dependencies = {}) {
     try {
       text = await askGeminiAboutHub(question, snapshot, {
         ...dependencies,
+        supa,
         useGoogleSearch: shouldUseGoogleSearch(question)
       });
     } catch (error) {
