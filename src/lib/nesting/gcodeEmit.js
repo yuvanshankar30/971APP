@@ -123,9 +123,50 @@ function uncommentedCode(line) {
 // the part (or its holding tabs) while other operations still need the
 // material secured.
 const RELEASE_CUT_NAME_PATTERN = /\b(2d\s*slot\s*cut|slot\s*cut\s*for\s*edges)\b/i;
-// Direct instruction: only Tool 6 is approved to cut a release/slot cut for
-// now - see emitNestingGcode's own validation using this constant.
-const APPROVED_RELEASE_CUT_TOOL = 6;
+// Direct instruction: only Tool 6 or Tool 1 are approved to cut a
+// release/slot cut for now - see emitNestingGcode's own validation using
+// this constant.
+const APPROVED_RELEASE_CUT_TOOLS = [6, 1];
+
+// Mirrors the original Java JProg's Sheet.getOptimizedPartOrder: for a set
+// of parts sharing one tool, tries every part as a starting point and runs
+// nearest-neighbor from there, keeping whichever full tour has the least
+// total travel distance between placement centers (placement.x/y - the
+// same center point Java's own getCenterPoint()-based distance calc used).
+// Minimizes rapid-travel time when several parts share a tool, matching
+// Java's own behavior instead of just cutting parts in placement/insertion
+// order. Same early-abort optimization as Java: stop extending a candidate
+// tour as soon as its running total can no longer beat the best found so
+// far.
+function optimizedPartOrder(programs) {
+  if (programs.length <= 1) return programs;
+  const distance = (a, b) => Math.hypot(a.placement.x - b.placement.x, a.placement.y - b.placement.y);
+  let best = null;
+  let bestDistance = Infinity;
+  for (let start = 0; start < programs.length; start += 1) {
+    const unvisited = programs.slice();
+    let current = unvisited.splice(start, 1)[0];
+    const order = [current];
+    let total = 0;
+    while (unvisited.length) {
+      let nearestIndex = -1;
+      let nearestDistance = Infinity;
+      for (let i = 0; i < unvisited.length; i += 1) {
+        const d = distance(current, unvisited[i]);
+        if (d < nearestDistance) { nearestDistance = d; nearestIndex = i; }
+      }
+      total += nearestDistance;
+      if (total >= bestDistance) break;
+      current = unvisited.splice(nearestIndex, 1)[0];
+      order.push(current);
+    }
+    if (!unvisited.length && total < bestDistance) {
+      bestDistance = total;
+      best = order;
+    }
+  }
+  return best || programs;
+}
 
 function winCncToolBlocks(source) {
   const blocks = new Map();
@@ -272,35 +313,62 @@ export function emitNestingGcode({ name, placements, programs, suffix = '', file
       }
     }
     // Direct operator report, with a real posted G-code snippet: a plate
-    // part's release/slot cut ran under "[Tool 2]" / T2 - only Tool 6 is
-    // approved to cut a release/slot cut for now. Fail emission loudly
-    // here, before JProg ever writes the file a router would run, rather
-    // than letting an unapproved tool reach the machine.
+    // part's release/slot cut ran under "[Tool 2]" / T2 - only Tool 6 or
+    // Tool 1 are approved to cut a release/slot cut for now. Fail emission
+    // loudly here, before JProg ever writes the file a router would run,
+    // rather than letting an unapproved tool reach the machine.
     for (const [tool, toolPrograms] of byReleaseTool) {
-      if (tool === APPROVED_RELEASE_CUT_TOOL) continue;
+      if (APPROVED_RELEASE_CUT_TOOLS.includes(tool)) continue;
       const offender = toolPrograms[0]?.placement?.label || 'a placed part';
       throw new Error(
-        `${offender}'s release/slot cut is assigned Tool ${tool} - only Tool ${APPROVED_RELEASE_CUT_TOOL} is approved to cut a release/slot cut. Check the AutoCAM job's tool library for whatever tool matched the template's release-cut tool.`
+        `${offender}'s release/slot cut is assigned Tool ${tool} - only Tool ${APPROVED_RELEASE_CUT_TOOLS.join(' or Tool ')} are approved to cut a release/slot cut. Check the AutoCAM job's tool library for whatever tool matched the template's release-cut tool.`
       );
     }
     const orderedTools = configuredWinCncToolOrder(toolOrder, [...byTool.keys()].sort((left, right) => left - right));
+    // Tracks whichever tool the machine is actually left loaded with, so the
+    // release-cut loop below can tell whether it needs a real swap - see its
+    // own comment.
+    let lastToolEmitted = null;
     for (const tool of orderedTools) {
-      const toolPrograms = byTool.get(tool) || [];
+      const toolPrograms = optimizedPartOrder(byTool.get(tool) || []);
       // GCodeParserWinCNC emits all parts using a tool together, with the safe
       // machine-coordinate retract/tool-change sequence before each group.
       lines.push('G53 Z', 'M5', `[Tool ${tool}]`, `T${tool}`);
+      lastToolEmitted = tool;
       for (const { placement, source, bounds } of toolPrograms) {
         emitted += 1;
         lines.push(`[Part: ${placement.label}]`, ...transformedProgram(source, placement, bounds));
       }
     }
     // Release/outer-profile cuts always run last, after every configured
-    // tool group above - see RELEASE_CUT_NAME_PATTERN's own comment. Sorted
-    // by tool number only for a stable, deterministic order among
-    // themselves; their position relative to everything else is fixed.
-    for (const tool of [...byReleaseTool.keys()].sort((left, right) => left - right)) {
-      const toolPrograms = byReleaseTool.get(tool) || [];
-      lines.push('G53 Z', 'M5', `[Tool ${tool}]`, `T${tool}`);
+    // tool group above - see RELEASE_CUT_NAME_PATTERN's own comment.
+    //
+    // Direct instruction: when a release cut's tool is the same tool the
+    // machine is already loaded with from the group immediately before it,
+    // don't re-issue a redundant tool-change - matching the original Java
+    // JProg, which groups every occurrence of a given tool number into a
+    // single pass and never swaps back to a tool it's already on (see
+    // NGCDocument.toolScripts / Sheet.emitGCode). This keeps the release
+    // cut structurally last (the one guarantee JProg adds beyond Java, for
+    // real safety reasons Java never needed - see RELEASE_CUT_NAME_PATTERN's
+    // comment) without wasting a real tool-change when nothing physically
+    // needs to swap.
+    //
+    // Whichever release tool matches lastToolEmitted (if any) goes first,
+    // regardless of a user-configured main toolOrder - otherwise, with more
+    // than one release tool present, a custom main order could leave the
+    // machine on a tool that DOES have release work waiting, but process a
+    // different release tool first (sorted ascending) and force two swaps
+    // where only one is actually needed. Everything else stays in stable
+    // ascending order among themselves.
+    const releaseToolKeys = [...byReleaseTool.keys()].sort((left, right) => left - right);
+    const orderedReleaseTools = releaseToolKeys.includes(lastToolEmitted)
+      ? [lastToolEmitted, ...releaseToolKeys.filter(tool => tool !== lastToolEmitted)]
+      : releaseToolKeys;
+    for (const tool of orderedReleaseTools) {
+      const toolPrograms = optimizedPartOrder(byReleaseTool.get(tool) || []);
+      if (tool !== lastToolEmitted) lines.push('G53 Z', 'M5', `[Tool ${tool}]`, `T${tool}`);
+      lastToolEmitted = tool;
       for (const { placement, source, bounds } of toolPrograms) {
         emitted += 1;
         lines.push(`[Part: ${placement.label}]`, ...transformedProgram(source, placement, bounds));

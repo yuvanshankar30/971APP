@@ -41,6 +41,7 @@ _NS = {"x": "http://www.hsmworks.com/namespace/hsmworks/document/template"}
 # known-stale duplicate - see that function's own docstring).
 _REAL_TOOL_6_GUID = "e7813c26-af06-4d6c-9aba-324fa1b402c1"  # "4mm sized for toolchager"
 _LARGE_ENDMILL_GUID = "29331875-1efc-47c5-9742-f39efcb697ed"  # 6mm, 0.2362in, NOT Tool 6
+_REAL_TOOL_1_GUID = "10a2caeb-dec0-49b2-8701-96fdb212bad9"  # "971 Main Bit"
 
 
 def _release_cut_templates(root):
@@ -51,7 +52,7 @@ def _release_cut_templates(root):
 
 
 class ReleaseCutForcedToTool6Tests(unittest.TestCase):
-    def _patch(self, filter_guids, template_path=_NEW_ROUTER_TEMPLATE_PATH, library_json=None, multi_tool_mode=True):
+    def _patch(self, filter_guids, template_path=_NEW_ROUTER_TEMPLATE_PATH, library_json=None, multi_tool_mode=True, single_tool_number=None):
         if library_json is None:
             with zipfile.ZipFile(_LIBRARY_PATH) as archive:
                 library_json = archive.read("tools.json").decode("utf-8")
@@ -66,6 +67,7 @@ class ReleaseCutForcedToTool6Tests(unittest.TestCase):
                 material_name="Aluminum 6061",
                 filter_guids=filter_guids,
                 multi_tool_mode=multi_tool_mode,
+                single_tool_number=single_tool_number,
             )
             return ET.parse(output).getroot()
 
@@ -95,7 +97,65 @@ class ReleaseCutForcedToTool6Tests(unittest.TestCase):
         release_cuts = _release_cut_templates(root)
         self.assertEqual(release_cuts[0].find("x:tool", _NS).get("guid"), _REAL_TOOL_6_GUID)
 
-    def test_raises_when_no_tool_6_exists_in_any_loaded_library(self):
+    # Direct instruction: in single-tool mode, the release/slot cut should
+    # match the job's one selected tool when that tool is Tool 1 or Tool 6,
+    # otherwise it falls back to Tool 1.
+
+    def test_single_tool_mode_release_cut_matches_tool_1_when_that_is_the_selected_tool(self):
+        root = self._patch({_REAL_TOOL_1_GUID}, multi_tool_mode=False, single_tool_number=1)
+        release_cuts = _release_cut_templates(root)
+        self.assertEqual(release_cuts[0].find("x:tool", _NS).get("guid"), _REAL_TOOL_1_GUID)
+
+    def test_single_tool_mode_release_cut_matches_tool_6_when_that_is_the_selected_tool(self):
+        root = self._patch({_REAL_TOOL_6_GUID}, multi_tool_mode=False, single_tool_number=6)
+        release_cuts = _release_cut_templates(root)
+        self.assertEqual(release_cuts[0].find("x:tool", _NS).get("guid"), _REAL_TOOL_6_GUID)
+
+    def test_single_tool_mode_release_cut_falls_back_to_tool_1_when_selected_tool_is_neither(self):
+        # The selected tool is the large endmill (an ordinary cutting tool,
+        # not NC number 1 or 6) - the release cut must fall back to Tool 1,
+        # not stay on the large endmill and not require Tool 6.
+        root = self._patch({_LARGE_ENDMILL_GUID}, multi_tool_mode=False, single_tool_number=2)
+        release_cuts = _release_cut_templates(root)
+        self.assertEqual(release_cuts[0].find("x:tool", _NS).get("guid"), _REAL_TOOL_1_GUID)
+
+    def test_multi_tool_mode_ignores_single_tool_number_and_still_requires_tool_6(self):
+        # multi_tool_mode=True must win even if a caller also passed a
+        # single_tool_number (defensive - camPlate.py never does this, but
+        # the function's own contract should not depend on that).
+        root = self._patch({_LARGE_ENDMILL_GUID, _REAL_TOOL_6_GUID}, multi_tool_mode=True, single_tool_number=1)
+        release_cuts = _release_cut_templates(root)
+        self.assertEqual(release_cuts[0].find("x:tool", _NS).get("guid"), _REAL_TOOL_6_GUID)
+
+    def test_raises_when_no_tool_1_or_6_exists_in_single_tool_mode_with_no_explicit_selection(self):
+        # No single_tool_number passed (defaults to None, same as a job
+        # with no joined cam_tools row) - resolve_required_release_cut_tool_
+        # number falls back to requiring Tool 1. Neither Tool 1 nor Tool 6
+        # exist in this library (only Tool 3), so it must still raise.
+        library_json = json.dumps({
+            "version": 1,
+            "data": [
+                {
+                    "description": "971 Main Bit",
+                    "type": "flat end mill",
+                    "guid": _LARGE_ENDMILL_GUID,
+                    "post-process": {"number": 3},
+                    "geometry": {"DC": 0.2362},
+                },
+            ],
+        })
+        with self.assertRaises(ValueError) as ctx:
+            self._patch({_LARGE_ENDMILL_GUID}, library_json=library_json, multi_tool_mode=False)
+        self.assertIn("Tool 1", str(ctx.exception))
+
+    def test_raises_when_no_tool_6_exists_in_any_loaded_library_in_multi_tool_mode(self):
+        # Multi-tool mode keeps the original fixed-machine-constant rule
+        # (Tool 6 only) unconditionally - see
+        # resolve_required_release_cut_tool_number's own comment. A real
+        # preset is required here (unlike the single-tool-mode fixture
+        # above) since multi-tool mode's own reviewed-preset filtering
+        # would otherwise reject this fixture's only tool before the
+        # release-cut lookup is ever reached, masking the thing under test.
         library_json = json.dumps({
             "version": 1,
             "data": [
@@ -105,11 +165,14 @@ class ReleaseCutForcedToTool6Tests(unittest.TestCase):
                     "guid": _LARGE_ENDMILL_GUID,
                     "post-process": {"number": 1},
                     "geometry": {"DC": 0.2362},
+                    "start-values": {
+                        "presets": [{"name": "Default preset", "spindleSpeed": 12000, "cuttingFeedrate": 40}]
+                    },
                 },
             ],
         })
         with self.assertRaises(ValueError) as ctx:
-            self._patch({_LARGE_ENDMILL_GUID}, library_json=library_json, multi_tool_mode=False)
+            self._patch({_LARGE_ENDMILL_GUID}, library_json=library_json, multi_tool_mode=True)
         self.assertIn("Tool 6", str(ctx.exception))
 
 

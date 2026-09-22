@@ -2,7 +2,7 @@
 // Keep this file minimal: it maps DB status + router_meta into the
 // canonical display labels used across the app.
 
-export const DISPLAY_ORDER = ['Pending','In Progress','CAM Review Pending','CAM Reviewed','Postprocessed','Jprogged','Machined','Kitted'];
+export const DISPLAY_ORDER = ['Pending','In Progress','CAM Review Pending','CAM Reviewed','Jprogged','Machined','Postprocessed','Kitted'];
 
 export const BUTTONS = {
   PENDING: 'Pending',
@@ -39,9 +39,9 @@ export const WORKFLOW_STATUSES = {
     { value: 'in-progress', label: 'In Progress' },
     { value: 'cam_review', label: 'CAM Review Pending' },
     { value: 'cammed', label: 'CAM Reviewed' },
-    { value: 'postprocessed', label: 'Postprocessed' },
     { value: 'jprogged', label: 'Jprogged' },
     { value: 'machined', label: 'Machined' },
+    { value: 'postprocessed', label: 'Postprocessed' },
     { value: 'complete', label: 'Kitted' }
   ],
   '3d-print': THREE_D_PRINT_STATUSES,

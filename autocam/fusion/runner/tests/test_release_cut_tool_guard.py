@@ -26,16 +26,18 @@ from pathlib import Path
 import unittest
 
 
-def _load_require_approved_release_cut_tool():
+def _load_release_cut_tool_guard_namespace():
     source = (Path(__file__).parents[1] / "workflows/camPlate.py").read_text()
     start = source.index("_APPROVED_RELEASE_CUT_TOOL_NUMBERS = ")
     end = source.index("def _require_through_hole_for_finishing_pass", start)
     namespace = {}
     exec(compile(source[start:end], "camPlate_require_approved_release_cut_tool", "exec"), namespace)
-    return namespace["_require_approved_release_cut_tool"]
+    return namespace
 
 
-require_approved_release_cut_tool = _load_require_approved_release_cut_tool()
+_namespace = _load_release_cut_tool_guard_namespace()
+require_approved_release_cut_tool = _namespace["_require_approved_release_cut_tool"]
+approved_release_cut_tool_numbers_for_job = _namespace["_approved_release_cut_tool_numbers_for_job"]
 
 
 def _param(expression):
@@ -83,9 +85,11 @@ class RequireApprovedReleaseCutToolTests(unittest.TestCase):
         self.assertIn("Tool 2", str(ctx.exception))
         self.assertIn("Tool 6", str(ctx.exception))
 
-    def test_raises_when_the_release_cut_uses_tool_1(self):
-        # Tool 1 was floated as a second acceptable option but the direct
-        # follow-up instruction narrowed this to Tool 6 only.
+    def test_raises_when_the_release_cut_uses_tool_1_with_the_default_approved_numbers(self):
+        # The default approved_tool_numbers (used when a caller doesn't
+        # pass one explicitly, e.g. multi-tool mode) is still Tool 6 only -
+        # see _approved_release_cut_tool_numbers_for_job's own tests below
+        # for single-tool mode's Tool-1-or-6 behavior.
         cam = _cam(_op("contour2d", "true", tool_number=1))
         with self.assertRaises(RuntimeError):
             require_approved_release_cut_tool(cam)
@@ -135,6 +139,54 @@ class RequireApprovedReleaseCutToolTests(unittest.TestCase):
         )
         cam = _cam(op)
         require_approved_release_cut_tool(cam)  # must not raise
+
+
+class ApprovedReleaseCutToolNumbersForJobTests(unittest.TestCase):
+    """Direct instruction: in single-tool mode, the release/slot cut should
+    match the job's one selected tool when that tool is Tool 1 or Tool 6,
+    otherwise it falls back to Tool 1. Multi-tool mode is unaffected (fixed
+    Tool 6 requirement, independent of any single-tool selection)."""
+
+    def test_multi_tool_mode_always_requires_tool_6_regardless_of_single_tool_number(self):
+        self.assertEqual(approved_release_cut_tool_numbers_for_job(True, None), (6,))
+        self.assertEqual(approved_release_cut_tool_numbers_for_job(True, 1), (6,))
+        self.assertEqual(approved_release_cut_tool_numbers_for_job(True, 2), (6,))
+
+    def test_single_tool_mode_with_tool_1_selected_requires_tool_1(self):
+        self.assertEqual(approved_release_cut_tool_numbers_for_job(False, 1), (1,))
+
+    def test_single_tool_mode_with_tool_6_selected_requires_tool_6(self):
+        self.assertEqual(approved_release_cut_tool_numbers_for_job(False, 6), (6,))
+
+    def test_single_tool_mode_with_any_other_tool_falls_back_to_tool_1(self):
+        self.assertEqual(approved_release_cut_tool_numbers_for_job(False, 2), (1,))
+        self.assertEqual(approved_release_cut_tool_numbers_for_job(False, None), (1,))
+
+
+class RequireApprovedReleaseCutToolWithDynamicApprovedNumbersTests(unittest.TestCase):
+    """End-to-end: _require_approved_release_cut_tool honoring an explicit
+    approved_tool_numbers, the way camPlate.py's start() actually calls it -
+    approved_release_cut_tool_numbers_for_job(multi_tool_mode,
+    single_tool_number)."""
+
+    def test_single_tool_mode_release_cut_on_tool_1_passes_when_tool_1_was_selected(self):
+        cam = _cam(_op("contour2d", "true", tool_number=1))
+        require_approved_release_cut_tool(cam, approved_release_cut_tool_numbers_for_job(False, 1))  # must not raise
+
+    def test_single_tool_mode_release_cut_on_tool_2_falls_back_and_still_requires_tool_1(self):
+        # The job's selected tool (Tool 2) isn't itself an approved
+        # release-cut tool, so the release cut posting under Tool 2 must
+        # still raise - it should have fallen back to Tool 1, not stayed
+        # on Tool 2.
+        cam = _cam(_op("contour2d", "true", tool_number=2))
+        with self.assertRaises(RuntimeError) as ctx:
+            require_approved_release_cut_tool(cam, approved_release_cut_tool_numbers_for_job(False, 2))
+        self.assertIn("Tool 2", str(ctx.exception))
+        self.assertIn("Tool 1", str(ctx.exception))
+
+    def test_single_tool_mode_release_cut_on_tool_1_passes_as_the_fallback_when_tool_2_was_selected(self):
+        cam = _cam(_op("contour2d", "true", tool_number=1))
+        require_approved_release_cut_tool(cam, approved_release_cut_tool_numbers_for_job(False, 2))  # must not raise
 
 
 if __name__ == "__main__":
