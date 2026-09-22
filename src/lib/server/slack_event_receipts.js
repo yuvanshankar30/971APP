@@ -47,3 +47,21 @@ export async function failSlackEvent(supa, eventId, error) {
     .eq('event_id', eventId);
   if (result.error) throw new Error(`Could not fail Slack event: ${cleanError(result.error)}`);
 }
+
+export async function isHubAssistantThread(supa, channelId, threadTs) {
+  if (!channelId || !threadTs) return false;
+  const result = await supa
+    .from('slack_event_receipts')
+    .select('event_id')
+    .eq('event_type', 'app_mention')
+    .eq('channel_id', channelId)
+    .eq('event_ts', threadTs)
+    .in('status', ['processing', 'completed'])
+    .limit(1)
+    .maybeSingle();
+  if (result.error) {
+    console.error('Could not identify Slack assistant thread', result.error?.message || result.error);
+    return false;
+  }
+  return Boolean(result.data?.event_id);
+}

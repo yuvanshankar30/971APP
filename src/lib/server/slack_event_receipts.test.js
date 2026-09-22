@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
-import { claimSlackEvent, completeSlackEvent, failSlackEvent } from './slack_event_receipts.js';
+import { claimSlackEvent, completeSlackEvent, failSlackEvent, isHubAssistantThread } from './slack_event_receipts.js';
 
 function queryResult(result) {
   const query = {
     eq: vi.fn(() => query),
     select: vi.fn(() => query),
     maybeSingle: vi.fn(async () => result),
+    in: vi.fn(() => query),
+    limit: vi.fn(() => query),
     then: (resolve, reject) => Promise.resolve(result).then(resolve, reject)
   };
   return query;
@@ -56,5 +58,14 @@ describe('Slack event receipts', () => {
     expect(table.update.mock.calls[0][0]).toMatchObject({ status: 'completed', last_error: null });
     expect(table.update.mock.calls[1][0].status).toBe('failed');
     expect(table.update.mock.calls[1][0].last_error).toHaveLength(500);
+  });
+
+  it('recognizes only a receipt-backed assistant thread', async () => {
+    const query = queryResult({ error: null, data: { event_id: 'Ev-root' } });
+    const client = { from: vi.fn(() => query) };
+    await expect(isHubAssistantThread(client, 'C1', '1.0')).resolves.toBe(true);
+    expect(query.eq).toHaveBeenCalledWith('event_type', 'app_mention');
+    expect(query.eq).toHaveBeenCalledWith('channel_id', 'C1');
+    expect(query.eq).toHaveBeenCalledWith('event_ts', '1.0');
   });
 });

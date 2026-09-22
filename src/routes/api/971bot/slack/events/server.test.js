@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { handleHubAppMention, getSupabase, claimSlackEvent, completeSlackEvent, failSlackEvent } = vi.hoisted(() => ({
+const { handleHubAppMention, getSupabase, claimSlackEvent, completeSlackEvent, failSlackEvent, isHubAssistantThread } = vi.hoisted(() => ({
   handleHubAppMention: vi.fn(),
   getSupabase: vi.fn(() => ({ name: 'test-supabase' })),
   claimSlackEvent: vi.fn(),
   completeSlackEvent: vi.fn(),
-  failSlackEvent: vi.fn()
+  failSlackEvent: vi.fn(),
+  isHubAssistantThread: vi.fn()
 }));
 
 vi.mock('$lib/server/971bot', () => ({
@@ -19,7 +20,7 @@ vi.mock('$lib/server/971bot', () => ({
 vi.mock('$lib/server/planner_notifications.js', () => ({ handlePlannerReaction: vi.fn() }));
 vi.mock('$lib/server/slack_notifications.js', () => ({ handleP0BugAssignmentReaction: vi.fn() }));
 vi.mock('$lib/server/hub_slack_assistant.js', () => ({ handleHubAppMention }));
-vi.mock('$lib/server/slack_event_receipts.js', () => ({ claimSlackEvent, completeSlackEvent, failSlackEvent }));
+vi.mock('$lib/server/slack_event_receipts.js', () => ({ claimSlackEvent, completeSlackEvent, failSlackEvent, isHubAssistantThread }));
 
 const { POST } = await import('./+server.js');
 
@@ -37,6 +38,7 @@ describe('Slack app mention events', () => {
     claimSlackEvent.mockReset().mockResolvedValue({ claimed: true, retried: false });
     completeSlackEvent.mockReset().mockResolvedValue(undefined);
     failSlackEvent.mockReset().mockResolvedValue(undefined);
+    isHubAssistantThread.mockReset().mockResolvedValue(false);
   });
 
   it('routes mentions from any channel where Slack delivers an app_mention event', async () => {
@@ -58,6 +60,15 @@ describe('Slack app mention events', () => {
     expect(handleHubAppMention).toHaveBeenCalledWith(event, { supa: { name: 'test-supabase' } });
     expect(completeSlackEvent).toHaveBeenCalledWith({ name: 'test-supabase' }, 'Ev-one');
     expect(await response.json()).toMatchObject({ ok: true, handled: true });
+  });
+
+  it('records an in-thread mention against the thread root for later follow-ups', async () => {
+    const event = { type: 'app_mention', channel: 'C1', ts: '1.5', thread_ts: '1.0', text: '<@U971> status' };
+    await POST({ request: slackRequest({ type: 'event_callback', event_id: 'Ev-in-thread', event }) });
+    expect(claimSlackEvent).toHaveBeenCalledWith(
+      { name: 'test-supabase' },
+      expect.objectContaining({ eventId: 'Ev-in-thread', eventTs: '1.0' })
+    );
   });
 
   it('deduplicates Slack retries by event_id', async () => {
@@ -92,5 +103,27 @@ describe('Slack app mention events', () => {
     const response = await POST({ request: slackRequest({ type: 'event_callback', event_id: 'Ev-five', event }) });
     expect(response.status).toBe(200);
     expect(failSlackEvent).not.toHaveBeenCalled();
+  });
+
+  it('answers an unmentioned human reply in a thread started by the assistant', async () => {
+    isHubAssistantThread.mockResolvedValueOnce(true);
+    const event = { type: 'message', channel: 'C1', ts: '6.0', thread_ts: '1.0', user: 'U1', text: 'What role am I?' };
+    const response = await POST({ request: slackRequest({ type: 'event_callback', event_id: 'Ev-thread', event }) });
+    expect(isHubAssistantThread).toHaveBeenCalledWith({ name: 'test-supabase' }, 'C1', '1.0');
+    expect(handleHubAppMention).toHaveBeenCalledWith(event, { supa: { name: 'test-supabase' } });
+    expect(claimSlackEvent).toHaveBeenCalledWith(
+      { name: 'test-supabase' },
+      expect.objectContaining({ eventId: 'Ev-thread', eventType: 'message.thread_reply' })
+    );
+    expect(response.status).toBe(200);
+  });
+
+  it('ignores ambient messages and replies in threads the assistant did not start', async () => {
+    const ambient = { type: 'message', channel: 'C1', ts: '7.0', user: 'U1', text: 'hello' };
+    await POST({ request: slackRequest({ type: 'event_callback', event_id: 'Ev-ambient', event: ambient }) });
+    const unrelatedThread = { ...ambient, ts: '7.1', thread_ts: '2.0', text: 'follow up' };
+    await POST({ request: slackRequest({ type: 'event_callback', event_id: 'Ev-other-thread', event: unrelatedThread }) });
+    expect(handleHubAppMention).not.toHaveBeenCalled();
+    expect(claimSlackEvent).not.toHaveBeenCalled();
   });
 });

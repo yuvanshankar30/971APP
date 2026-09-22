@@ -1,5 +1,6 @@
 import { env } from '$env/dynamic/private';
 import { getSlackClient, getSupabase } from '$lib/server/971bot.js';
+import { hasPermission } from '$lib/permissions.js';
 
 export const HUB_RECENT_CHANGES = [
   'Drive Team now shows every completed 971 match with Win/Loss/Tie and the final score.',
@@ -77,6 +78,13 @@ export function isScoutingAssignmentQuestion(question) {
     && /\b(scout|scouts|scouting|match|pit|prescout)\b/i.test(value);
 }
 
+export function isAdminProfileQuestion(question) {
+  const value = String(question || '');
+  const profileSubject = /\b(role|roles|permission|permissions|profile|account|team role|roster role|info|information)\b/i.test(value);
+  const personSubject = /\b(i|me|my|myself|who am i|does|is|has|have|about|for)\b/i.test(value);
+  return profileSubject && personSubject;
+}
+
 export function shouldUseGoogleSearch(question) {
   if (isScoutingAssignmentQuestion(question)) return false;
   if (/\b(spartans\s*hub|971hub|scouting admin|match scouting|pit scouting|planner|manufacturing|autocam|prediction market)\b/i.test(String(question || ''))) {
@@ -113,38 +121,48 @@ function assignmentRow(row, names, kind) {
   };
 }
 
+const PROFILE_COLUMNS = 'id, full_name, role, permissions, banned, general_role, purchasing_role, team_role, frc_team';
+
+async function attachRosterKeys(supa, profile) {
+  if (!profile?.id) return profile;
+  const rosterResult = await supa
+    .from('roster_entries')
+    .select('key:key_id(key_name)')
+    .eq('user_id', profile.id);
+  return {
+    ...profile,
+    roster_keys: (rosterResult.data || []).map((row) => row?.key?.key_name).filter(Boolean)
+  };
+}
+
+export async function resolveHubProfileForSlackUser(supa, slackUserId, slack) {
+  const normalizedSlackId = String(slackUserId || '').trim();
+  if (!normalizedSlackId) return null;
+  let result = await supa
+    .from('user_profiles')
+    .select(PROFILE_COLUMNS)
+    .eq('slack_user_id', normalizedSlackId)
+    .maybeSingle();
+  if (!result.data && slack?.users?.info) {
+    const slackResult = await slack.users.info({ user: normalizedSlackId }).catch(() => null);
+    const email = String(slackResult?.user?.profile?.email || '').trim().toLowerCase();
+    if (email) {
+      result = await supa.from('user_profiles').select(PROFILE_COLUMNS).ilike('email', email).maybeSingle();
+    }
+  }
+  if (result.error || !result.data) return null;
+  return attachRosterKeys(supa, result.data);
+}
+
 export async function fetchScoutingAssignmentsForSlackUser(supa, slackUserId, eventKey, options = {}) {
   const normalizedSlackId = String(slackUserId || '').trim();
   if (!normalizedSlackId) return { available: false, reason: 'missing-slack-user' };
   if (!eventKey) return { available: false, reason: 'no-active-event' };
 
-  let profileResult = await supa
-    .from('user_profiles')
-    .select('id, full_name, role, banned')
-    .eq('slack_user_id', normalizedSlackId)
-    .maybeSingle();
-  if (!profileResult.data && options.slack?.users?.info) {
-    const slackResult = await options.slack.users.info({ user: normalizedSlackId }).catch(() => null);
-    const email = String(slackResult?.user?.profile?.email || '').trim().toLowerCase();
-    if (email) {
-      profileResult = await supa
-        .from('user_profiles')
-        .select('id, full_name, role, banned')
-        .ilike('email', email)
-        .maybeSingle();
-    }
-  }
-  const profile = profileResult.data;
-  if (profileResult.error || !profile?.id) return { available: false, reason: 'slack-profile-not-linked' };
+  const profile = await resolveHubProfileForSlackUser(supa, normalizedSlackId, options.slack);
+  if (!profile?.id) return { available: false, reason: 'slack-profile-not-linked' };
   if (profile.banned) return { available: false, reason: 'account-disabled' };
-
-  const rosterResult = await supa
-    .from('roster_entries')
-    .select('key:key_id(key_name)')
-    .eq('user_id', profile.id);
-  const rosterKeys = new Set((rosterResult.data || [])
-    .map((row) => String(row?.key?.key_name || '').trim().toLowerCase())
-    .filter(Boolean));
+  const rosterKeys = new Set((profile.roster_keys || []).map((key) => String(key).trim().toLowerCase()));
   // Match the Scouting Admin page's full-roster access boundary exactly.
   const canViewAll = profile.role === 'admin' || rosterKeys.has('scouting admin');
 
@@ -216,12 +234,24 @@ export function formatScoutingAssignments(context, question = '') {
   }
 
   let rows = context.assignments || [];
-  if (context.visibility === 'all-scouts') {
-    const normalizedQuestion = String(question || '').toLowerCase();
-    const namedScouts = [...new Set(rows.map((row) => row.scout))]
-      .filter((name) => name !== 'Unknown scout' && normalizedQuestion.includes(name.toLowerCase()));
-    if (namedScouts.length) rows = rows.filter((row) => namedScouts.includes(row.scout));
+  const normalizedQuestion = String(question || '').toLowerCase();
+  const selfRequested = /\b(my|me|i|myself)\b/i.test(question);
+  const knownScouts = [...new Set(rows.map((row) => row.scout))].filter((name) => name !== 'Unknown scout');
+  const namedScouts = knownScouts.filter((name) => normalizedQuestion.includes(name.toLowerCase()));
+  let selectedScout = null;
+  if (selfRequested && context.requester) selectedScout = context.requester;
+  if (namedScouts.length === 1 && (!selectedScout || namedScouts[0] === selectedScout)) selectedScout = namedScouts[0];
+  else if (namedScouts.length > 1 || (namedScouts.length === 1 && selectedScout && namedScouts[0] !== selectedScout)) {
+    selectedScout = null;
   }
+  if (!selectedScout) {
+    const example = knownScouts[0] || context.requester || 'First Last';
+    return `Please specify exactly one scout by full name (for example: \`${example}\`).`;
+  }
+  if (context.visibility === 'requester-only' && selectedScout !== context.requester) {
+    return 'You can only view your own scouting assignments.';
+  }
+  rows = rows.filter((row) => row.scout === selectedScout);
   if (!rows.length) {
     return context.visibility === 'requester-only'
       ? `You have no assignments for ${context.eventKey}.`
@@ -234,14 +264,56 @@ export function formatScoutingAssignments(context, question = '') {
     const target = row.match ? `${compactMatch(row.match)}/T${row.team}` : `T${row.team}`;
     byScout.get(row.scout).push(`${row.kind}: ${target}${row.completed ? ' ✓' : ''}`);
   }
-  const heading = context.visibility === 'requester-only'
-    ? `*Your scouting assignments — ${context.eventKey}:*`
-    : `*Scouting assignments — ${context.eventKey}:*`;
+  const heading = `*${selectedScout}'s scouting assignments — ${context.eventKey}:*`;
   const lines = [heading];
   for (const [scout, assignments] of [...byScout.entries()].sort(([a], [b]) => a.localeCompare(b))) {
     lines.push(`• *${scout}:* ${assignments.join(', ')}`);
   }
   return safeSlackText(lines.join('\n'));
+}
+
+export async function fetchAdminProfileForSlackUser(supa, slackUserId, question, options = {}) {
+  const caller = await resolveHubProfileForSlackUser(supa, slackUserId, options.slack);
+  if (!caller?.id) return { available: false, reason: 'slack-profile-not-linked' };
+  if (caller.banned) return { available: false, reason: 'account-disabled' };
+
+  const value = String(question || '').toLowerCase();
+  const selfRequested = /\b(i|me|my|myself|who am i)\b/i.test(value);
+  if (selfRequested) return { available: true, target: caller, self: true };
+  if (!hasPermission(caller, 'VIEW_ADMIN_PANEL')) return { available: false, reason: 'permission-denied' };
+
+  const profilesResult = await supa.from('user_profiles').select(PROFILE_COLUMNS);
+  if (profilesResult.error) return { available: false, reason: 'profile-query-failed' };
+  const matches = (profilesResult.data || []).filter((profile) => {
+    const name = String(profile.full_name || '').trim().toLowerCase();
+    return name && value.includes(name);
+  });
+  if (matches.length !== 1) return { available: false, reason: 'specify-one-person' };
+  return { available: true, target: await attachRosterKeys(supa, matches[0]), self: matches[0].id === caller.id };
+}
+
+export function formatAdminProfile(context) {
+  if (!context?.available) {
+    if (context?.reason === 'permission-denied') return 'You can view your own Hub role, but only Admin-page users can look up another person.';
+    if (context?.reason === 'specify-one-person') return 'Please specify exactly one person by full name.';
+    if (context?.reason === 'account-disabled') return 'This Spartans Hub account is disabled.';
+    if (context?.reason === 'slack-profile-not-linked') return 'I cannot find a Spartans Hub profile linked to this Slack account.';
+    return 'I could not read Hub profile information right now.';
+  }
+  const profile = context.target;
+  const permissions = Array.isArray(profile.permissions) && profile.permissions.length ? profile.permissions.join(', ') : 'none explicitly assigned';
+  const rosterRoles = profile.roster_keys?.length ? profile.roster_keys.join(', ') : 'none';
+  return safeSlackText([
+    `*${profile.full_name || 'Hub user'}*`,
+    `• Account status: ${profile.banned ? 'disabled' : 'active'}`,
+    `• Account role: ${profile.role || 'member'}`,
+    `• General role: ${profile.general_role || 'none'}`,
+    `• Team role: ${profile.team_role || 'none'}`,
+    `• FRC affiliation: ${profile.frc_team || 'not set'}`,
+    `• Purchasing role: ${profile.purchasing_role || 'basic'}`,
+    `• Roster roles: ${rosterRoles}`,
+    `• Explicit permissions: ${permissions}`
+  ].join('\n'));
 }
 
 export async function fetchHubStatusSnapshot(supa = getSupabase()) {
@@ -457,6 +529,9 @@ export async function handleHubAppMention(event, dependencies = {}) {
       { slack }
     );
     text = formatScoutingAssignments(assignmentContext, question);
+  } else if (isAdminProfileQuestion(question)) {
+    const profileContext = await fetchAdminProfileForSlackUser(supa, event.user, question, { slack });
+    text = formatAdminProfile(profileContext);
   } else {
     try {
       text = await askGeminiAboutHub(question, snapshot, {
