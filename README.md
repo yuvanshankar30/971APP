@@ -548,8 +548,11 @@ file: update its diagram alongside this section, not separately from it.
   only their own assignments; every assignment response is restricted to one
   explicitly named scout. Linked users can inspect their own Hub roles, while
   `VIEW_ADMIN_PANEL` users can inspect one named person's shareable Admin-page
-  role/profile fields. Other Hub questions receive read-only,
-  context-bounded answers from Gemini using the server-side `GEMINI_API_KEY`
+  role/profile fields. Questions about Hub tabs, routes, subtabs, terminology,
+  and where to find a feature are answered deterministically from the
+  server-side catalog in `src/lib/server/hub_feature_knowledge.js`; that full
+  internal product map is never sent to Gemini. Other Hub questions receive
+  read-only, context-bounded answers from Gemini using the server-side `GEMINI_API_KEY`
   and the current `gemini-3.5-flash-lite` default, with Google Search grounding
   available only for public event/current-information questions. The same bot
   also answers ordinary general-knowledge, math, science, robotics, and

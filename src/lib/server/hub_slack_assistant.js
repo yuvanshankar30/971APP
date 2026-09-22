@@ -1,6 +1,7 @@
 import { env } from '$env/dynamic/private';
 import { getSlackClient, getSupabase } from '$lib/server/971bot.js';
 import { hasPermission } from '$lib/permissions.js';
+import { answerHubFeatureQuestion } from '$lib/server/hub_feature_knowledge.js';
 import { ROUTES } from '$lib/siteSearch.js';
 
 export const HUB_RECENT_CHANGES = [
@@ -682,6 +683,7 @@ export async function handleHubAppMention(event, dependencies = {}) {
   const supa = dependencies.supa || getSupabase();
   const slack = dependencies.slack || getSlackClient();
   const snapshot = await fetchHubStatusSnapshot(supa);
+  const featureAnswer = answerHubFeatureQuestion(question);
   let text;
   if (!question) {
     text = 'Ask me about Spartans Hub, or use `@971hub /status` for live status and recent changes.';
@@ -702,6 +704,8 @@ export async function handleHubAppMention(event, dependencies = {}) {
   } else if (isAdminProfileQuestion(question)) {
     const profileContext = await fetchAdminProfileForSlackUser(supa, event.user, question, { slack });
     text = formatAdminProfile(profileContext);
+  } else if (featureAnswer) {
+    text = featureAnswer;
   } else {
     try {
       text = await askGeminiAboutHub(question, snapshot, {
