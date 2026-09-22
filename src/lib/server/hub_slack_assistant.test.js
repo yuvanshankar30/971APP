@@ -1,12 +1,17 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   askGeminiAboutHub,
+  assignmentEventKey,
+  fetchScoutingAssignmentsForSlackUser,
   fetchTeamReportSnapshot,
   formatHubStatus,
+  formatScoutingAssignments,
   formatTeamReportStatus,
   handleHubAppMention,
+  isScoutingAssignmentQuestion,
   isHubStatusRequest,
   isTeamReportStatusRequest,
+  shouldUseGoogleSearch,
   stripAppMention
 } from './hub_slack_assistant.js';
 
@@ -69,6 +74,57 @@ function supabaseForTeamStatus() {
   };
 }
 
+function supabaseForAssignments({ admin = true } = {}) {
+  const profile = { id: 'u-requester', full_name: 'Arin Rao', role: admin ? 'admin' : 'member', banned: false };
+  const tables = {
+    scout_match_assignments: [
+      { scouting_type: 'data', match_key: '2026cc_qm1', team_key: 'frc971', assigned_user: 'u-requester', completed_at: null },
+      { scouting_type: 'note', match_key: '2026cc_qm2', team_key: 'frc254', assigned_user: 'u-other', completed_at: 'now' }
+    ],
+    scout_pit_assignments: [
+      { event_key: '2026cc', team_key: 'frc971', assigned_user: 'u-other', completed_at: null }
+    ],
+    scout_prescout_assignments: []
+  };
+  return {
+    from: (table) => {
+      const filters = {};
+      let head = false;
+      const query = {
+        select: (_columns, options = {}) => { head = Boolean(options.head); return query; },
+        eq: (key, value) => { filters[key] = value; return query; },
+        is: (key, value) => { filters[key] = value; return query; },
+        like: (key, value) => { filters[key] = value; return query; },
+        in: (key, value) => { filters[`${key}In`] = value; return query; },
+        limit: () => query,
+        maybeSingle: async () => result(),
+        then: (resolve, reject) => Promise.resolve(result()).then(resolve, reject)
+      };
+      function result() {
+        if (table === 'scouting_settings') return { data: { event_key: '2026cc' }, error: null };
+        if (head) {
+          const count = table === 'scout_match_assignments' ? 2 : 0;
+          return { data: null, error: null, count };
+        }
+        if (table === 'user_profiles' && filters.slack_user_id) return { data: profile, error: null };
+        if (table === 'user_profiles' && filters.idIn) {
+          return { data: [profile, { id: 'u-other', full_name: 'Casey Scout' }]
+            .filter((row) => filters.idIn.includes(row.id)), error: null };
+        }
+        if (table === 'roster_entries') {
+          return { data: admin ? [{ key: { key_name: 'Scouting Admin' } }] : [], error: null };
+        }
+        let rows = [...(tables[table] || [])];
+        if (filters.event_key) rows = rows.filter((row) => row.event_key === filters.event_key);
+        if (filters.match_key) rows = rows.filter((row) => row.match_key?.startsWith(filters.match_key.replace('%', '')));
+        if (filters.assigned_user) rows = rows.filter((row) => row.assigned_user === filters.assigned_user);
+        return { data: rows, error: null, count: rows.length };
+      }
+      return query;
+    }
+  };
+}
+
 describe('Slack Hub assistant', () => {
   it('removes Slack mention markup and recognizes the status command', () => {
     expect(stripAppMention('<@U123ABC> status')).toBe('status');
@@ -76,6 +132,12 @@ describe('Slack Hub assistant', () => {
     expect(isHubStatusRequest('/status')).toBe(true);
     expect(isHubStatusRequest('Where is Match Scouting?')).toBe(false);
     expect(isTeamReportStatusRequest('Have all reports for team 971 been finished?')).toBe(true);
+    expect(isScoutingAssignmentQuestion('What tasks were scouts assigned for Chezy?')).toBe(true);
+    expect(shouldUseGoogleSearch('When does Madtown start?')).toBe(true);
+    expect(shouldUseGoogleSearch('What shifts were scouts assigned?')).toBe(false);
+    expect(shouldUseGoogleSearch('What does Scouting Admin do?')).toBe(false);
+    expect(assignmentEventKey('What was assigned for Chezy?', '2026mrcmp')).toBe('2026cc');
+    expect(assignmentEventKey('What was assigned for 2025 Chezy?', '2026mrcmp')).toBe('2025cc');
   });
 
   it('formats live status and recent changes', () => {
@@ -99,6 +161,82 @@ describe('Slack Hub assistant', () => {
     expect(answer).toBe('@channel (mention suppressed) Open Match Scouting.');
     expect(request.body).toContain('dead, disabled');
     expect(JSON.parse(request.body).contents[0].parts[0].text).toBe('Where do I scout?');
+  });
+
+  it('enables Google Search only when requested and appends grounded sources', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [{
+          content: { parts: [{ text: 'Madtown starts November 13.' }] },
+          groundingMetadata: { groundingChunks: [{ web: { uri: 'https://example.test/madtown', title: 'Madtown event' } }] }
+        }]
+      })
+    });
+    const answer = await askGeminiAboutHub('When does Madtown start?', snapshot, {
+      apiKey: 'test-secret',
+      fetchImpl,
+      useGoogleSearch: true
+    });
+    const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    expect(body.tools).toEqual([{ google_search: {} }]);
+    expect(answer).toContain('<https://example.test/madtown|Madtown event>');
+  });
+
+  it('answers a general math question without invoking web search', async () => {
+    const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: '2' }] } }] })
+    });
+    await handleHubAppMention({ channel: 'C1', user: 'U1', ts: '1.0', text: '<@U971> what is 1+1?' }, {
+      supa: supabaseForStatus(),
+      slack: { chat: { postMessage } },
+      apiKey: 'test-secret',
+      fetchImpl
+    });
+    const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    expect(body.tools).toBeUndefined();
+    expect(postMessage.mock.calls[0][0].text).toBe('2');
+  });
+
+  it('reads all assignment types for admins and only the requester rows for members', async () => {
+    const adminContext = await fetchScoutingAssignmentsForSlackUser(
+      supabaseForAssignments({ admin: true }),
+      'U-ADMIN',
+      '2026cc'
+    );
+    expect(adminContext.visibility).toBe('all-scouts');
+    expect(formatScoutingAssignments(adminContext, 'What tasks were scouts assigned?')).toContain('Casey Scout');
+    expect(formatScoutingAssignments(adminContext)).toContain('pit: T971');
+
+    const memberContext = await fetchScoutingAssignmentsForSlackUser(
+      supabaseForAssignments({ admin: false }),
+      'U-MEMBER',
+      '2026cc'
+    );
+    expect(memberContext.visibility).toBe('requester-only');
+    expect(memberContext.assignments).toHaveLength(1);
+    expect(formatScoutingAssignments(memberContext)).not.toContain('Casey Scout');
+  });
+
+  it('answers assignment questions locally without sending scout data to Gemini', async () => {
+    const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
+    const fetchImpl = vi.fn();
+    await handleHubAppMention({
+      channel: 'C1',
+      user: 'U-ADMIN',
+      ts: '1.0',
+      text: '<@U971> what tasks were scouts assigned in for Chezy?'
+    }, {
+      supa: supabaseForAssignments({ admin: true }),
+      slack: { chat: { postMessage } },
+      apiKey: 'test-secret',
+      fetchImpl
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(postMessage.mock.calls[0][0].text).toContain('Casey Scout');
+    expect(postMessage.mock.calls[0][0].text).toContain('Q2/T254');
   });
 
   it('rejects a missing Gemini key and an empty model response', async () => {

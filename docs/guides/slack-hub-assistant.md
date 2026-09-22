@@ -5,8 +5,19 @@
 database reachability, the active scouting event, open assignments, open
 ACE/Pit issues, stored match-report count, and curated recent changes. Team
 report-completion questions are answered directly from live assignment and
-report rows. Other questions are answered by Gemini from the read-only Hub
-feature catalog and status snapshot. Mentions using the old `@971app` or
+report rows. Questions about scout assignments are also answered directly from
+Supabase: users linked by `user_profiles.slack_user_id` can see their own rows;
+if that ID is absent, the bot resolves the Slack account email through the
+already-approved `users:read.email` scope and matches the Hub profile without
+persisting a new identifier. Hub admins and users holding the `Scouting Admin`
+roster key can see the
+full event assignment roster. Names and shifts in this path are never sent to
+Gemini. Other questions are answered by Gemini from the read-only Hub feature
+catalog and status snapshot. Public event/current-information questions may use
+Gemini's Google Search grounding and include source links. Ordinary
+general-knowledge, math, science, robotics, and programming questions are also
+supported; only claims about Hub itself are restricted to live/internal Hub
+evidence. Mentions using the old `@971app` or
 `@971hub` display names continue to work in existing messages because Slack
 identifies the app by ID rather than by its visible name.
 
@@ -54,4 +65,5 @@ timeout; if Slack retries while a reply is still processing, the durable
 receipt acknowledges the duplicate without posting again. Credential, model,
 quota, and timeout failures produce distinct safe replies without including a
 secret or raw provider response. The model has no mutation tools and cannot
-change Hub data.
+change Hub data. Google Search is disabled for assignment questions so internal
+scouting data cannot become part of a generated web-search query.
