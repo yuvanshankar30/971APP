@@ -9,7 +9,7 @@ import {
 } from '$lib/server/971bot';
 import { handlePlannerReaction } from '$lib/server/planner_notifications.js';
 import { handleP0BugAssignmentReaction } from '$lib/server/slack_notifications.js';
-import { handleHubAppMention, isHubAssistantChannelAllowed } from '$lib/server/hub_slack_assistant.js';
+import { handleHubAppMention } from '$lib/server/hub_slack_assistant.js';
 import { claimSlackEvent, completeSlackEvent, failSlackEvent } from '$lib/server/slack_event_receipts.js';
 
 // Avoid approving the same purchase repeatedly when multiple reactions are added.
@@ -42,9 +42,6 @@ export async function POST({ request }) {
       if (event.bot_id || event.subtype === 'bot_message') return json({ ok: true, ignored: true });
       const eventId = payload.event_id || `app_mention:${event.channel || ''}:${event.ts || ''}`;
       const supa = getSupabase();
-      if (!(await isHubAssistantChannelAllowed(supa, event.channel))) {
-        return json({ ok: true, ignored: true, reason: 'channel-not-allowed' });
-      }
       let claim;
       try {
         claim = await claimSlackEvent(supa, {

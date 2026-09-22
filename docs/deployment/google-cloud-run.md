@@ -40,8 +40,8 @@ service account (currently
 `geminiapi-469220` does not satisfy this deployment. If either prerequisite
 is absent, have an administrator configure it privately in the live project
 before merging; do not access or copy its value through a PR or chat. After
-deployment, mention `@971hub` with a general Hub question in
-`#971app-bot-testing` and check that the reply stays in its thread. Keep
+deployment, mention `@Spartans Hub` with a general Hub question in any channel
+where the bot is a member and check that the reply stays in its thread. Keep
 `/status` as a separate smoke test.
 
 ## Current status

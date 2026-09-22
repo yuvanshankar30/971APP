@@ -5,7 +5,6 @@ import {
   formatHubStatus,
   formatTeamReportStatus,
   handleHubAppMention,
-  isHubAssistantChannelAllowed,
   isHubStatusRequest,
   isTeamReportStatusRequest,
   stripAppMention
@@ -77,15 +76,6 @@ describe('Slack Hub assistant', () => {
     expect(isHubStatusRequest('/status')).toBe(true);
     expect(isHubStatusRequest('Where is Match Scouting?')).toBe(false);
     expect(isTeamReportStatusRequest('Have all reports for team 971 been finished?')).toBe(true);
-  });
-
-  it('allows only the configured 971app testing channel', async () => {
-    expect(await isHubAssistantChannelAllowed(null, 'C0C36BSST46')).toBe(true);
-    expect(await isHubAssistantChannelAllowed(null, 'C-RANDOM')).toBe(false);
-    expect(await isHubAssistantChannelAllowed(null, 'C-CONFIGURED', { channelId: 'C-CONFIGURED' })).toBe(true);
-    expect(await isHubAssistantChannelAllowed(null, 'C-OTHER', { channelId: 'C-CONFIGURED' })).toBe(false);
-    expect(await isHubAssistantChannelAllowed(null, '971app-bot-testing')).toBe(false);
-    expect(await isHubAssistantChannelAllowed(null, '2026-ace-pit-bot')).toBe(false);
   });
 
   it('formats live status and recent changes', () => {
