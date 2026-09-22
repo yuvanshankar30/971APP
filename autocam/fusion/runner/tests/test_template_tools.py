@@ -90,7 +90,19 @@ class IndexToolsAppliesDedupeTests(unittest.TestCase):
 
 
 class TemplateToolPresetTests(unittest.TestCase):
-    def test_conservative_router_preset_quarters_every_motion_feed(self):
+    def test_router_feed_rate_scale_is_full_speed(self):
+        # Pins the actual constant, not just _conservative_router_preset's
+        # behavior with it - a regression here is exactly the "AutoCAM'd
+        # job runs ~6.5x longer than the same part's manual CAM" bug this
+        # was fixed for.
+        self.assertEqual(template_tools._ROUTER_FEED_RATE_SCALE, 1.0)
+
+    def test_conservative_router_preset_now_leaves_every_motion_feed_at_full_speed(self):
+        # _ROUTER_FEED_RATE_SCALE is 1.0 (direct instruction, after an
+        # AutoCAM'd job's machining-time estimate ran ~6.5x longer than the
+        # same part's manually-set-up CAM - see that constant's own
+        # comment). This still exercises the real scaling code path (not a
+        # no-op skip), just pinned at "no scaling" instead of quartering.
         preset = {
             "n": 22000,
             "v_f": 80,
@@ -105,13 +117,13 @@ class TemplateToolPresetTests(unittest.TestCase):
         scaled = template_tools._conservative_router_preset(preset)
 
         self.assertEqual(scaled["n"], 22000)
-        self.assertEqual(scaled["v_f"], 20)
-        self.assertEqual(scaled["v_f_leadIn"], 20)
-        self.assertEqual(scaled["v_f_leadOut"], 20)
-        self.assertEqual(scaled["v_f_transition"], 20)
-        self.assertEqual(scaled["v_f_plunge"], 3.33325)
-        self.assertEqual(scaled["v_f_ramp"], 5)
-        self.assertEqual(scaled["v_f_retract"], 10)
+        self.assertEqual(scaled["v_f"], 80)
+        self.assertEqual(scaled["v_f_leadIn"], 80)
+        self.assertEqual(scaled["v_f_leadOut"], 80)
+        self.assertEqual(scaled["v_f_transition"], 80)
+        self.assertEqual(scaled["v_f_plunge"], 13.333)
+        self.assertEqual(scaled["v_f_ramp"], 20)
+        self.assertEqual(scaled["v_f_retract"], 40)
         self.assertEqual(preset["v_f"], 80)
 
     def test_default_preset_is_allowed_for_aluminum(self):

@@ -20,18 +20,24 @@ except ImportError:
 _TEMPLATE_NS = "http://www.hsmworks.com/namespace/hsmworks/document/template"
 _NUM_RE = re.compile(r"[-+]?(?:\d+\.\d+|\d+|\.\d+)(?:[eE][-+]?\d+)?")
 
-# Keep newly generated Fusion Router toolpaths conservative while the team
-# validates the templates on the physical machine. This applies to every
-# cutting motion, including the through-slot operation, without changing
-# spindle speed or the reviewed source values in the tool library.
-#
-# Started at 0.5 (half of the tool library's own programmed feeds). Direct
-# feedback after watching a real generated job run: still visibly too fast
-# on the slot/contour cutting motion even at that reduction. Dropped to
-# 0.25 (quarter of the original) - still a real, working feed (the tool
-# library's own baseline, e.g. 80 in/min main cutting feed -> 20 in/min),
-# not a token gesture.
-_ROUTER_FEED_RATE_SCALE = 0.25
+# Was a deliberate conservative knob while the team validated templates on
+# the physical machine: started at 0.5 (half the tool library's own
+# programmed feeds), dropped to 0.25 after 0.5 still looked visibly too
+# fast on a real cut. That's since produced its own real problem: an
+# AutoCAM'd job's estimated machining time ran ~6.5x longer than the same
+# part's manually-set-up CAM (confirmed live via Fusion's own
+# CAM.getMachiningTime on two open documents for the same part - 1233s
+# AutoCAM'd vs 188s manual), because every feed was still quartered while
+# the manual setup ran the tool library's real reviewed feeds. Direct
+# instruction: restore full-speed feeds (1.0, i.e. no scaling) so an
+# AutoCAM'd job matches a manually-set-up one for the same part - the
+# templates have had enough real runs since the 0.25 era to trust the
+# library's own reviewed values again. Spindle speed was never touched by
+# this scale either way. assert_safe_entry_feeds below still enforces the
+# plunge/ramp-vs-cutting safety ratio regardless of this value, so the
+# issue #360 protection this scale was layered on top of is unaffected by
+# raising it back to 1.0.
+_ROUTER_FEED_RATE_SCALE = 1.0
 _FEED_PRESET_KEYS = (
     "v_f",
     "v_f_leadIn",
