@@ -186,12 +186,14 @@ export function formatTeamReportStatus(snapshot) {
 export async function askGeminiAboutHub(question, snapshot, options = {}) {
   const apiKey = options.apiKey ?? env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('GEMINI_API_KEY is not configured');
-  const model = options.model ?? env.GEMINI_MODEL ?? 'gemini-2.5-flash-lite';
+  // Google limits Gemini 2.5 access for new projects. Use the current stable
+  // Flash-Lite model unless an administrator deliberately overrides it.
+  const model = options.model ?? env.GEMINI_MODEL ?? 'gemini-3.5-flash-lite';
   const fetchImpl = options.fetchImpl || fetch;
   const controller = new AbortController();
   // A Gemini request can outlast Slack's three-second acknowledgement window.
   // The durable event receipt prevents Slack's retry from posting a second reply.
-  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 8000);
+  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 15000);
   try {
     const response = await fetchImpl(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
       method: 'POST',
@@ -209,7 +211,25 @@ export async function askGeminiAboutHub(question, snapshot, options = {}) {
       signal: controller.signal
     });
     const payload = await response.json().catch(() => null);
-    if (!response.ok) throw new Error(`Gemini request failed (${response.status})`);
+    if (!response.ok) {
+      const providerStatus = String(payload?.error?.status || '').toUpperCase();
+      const providerMessage = String(payload?.error?.message || '');
+      let reason = 'service';
+      if (
+        [400, 401, 403].includes(response.status)
+        && (/API[_ ]?KEY|CREDENTIAL|PERMISSION_DENIED/.test(`${providerStatus} ${providerMessage}`.toUpperCase()))
+      ) {
+        reason = 'credential';
+      } else if (response.status === 404 || providerStatus === 'NOT_FOUND') {
+        reason = 'model';
+      } else if (response.status === 429 || providerStatus === 'RESOURCE_EXHAUSTED') {
+        reason = 'quota';
+      }
+      const error = new Error(`Gemini request failed (${response.status}${providerStatus ? ` ${providerStatus}` : ''})`);
+      error.geminiReason = reason;
+      error.httpStatus = response.status;
+      throw error;
+    }
     const answer = safeSlackText((payload?.candidates?.[0]?.content?.parts || [])
       .filter((part) => !part.thought && typeof part.text === 'string')
       .map((part) => part.text)
@@ -219,6 +239,25 @@ export async function askGeminiAboutHub(question, snapshot, options = {}) {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function geminiFailureReply(error) {
+  if (error?.message === 'GEMINI_API_KEY is not configured') {
+    return 'AI questions are not configured on this server yet. `@Spartans Hub /status` still works.';
+  }
+  if (error?.name === 'AbortError') {
+    return 'The Hub question-answering service timed out. Try again shortly or use `@Spartans Hub /status`.';
+  }
+  if (error?.geminiReason === 'credential') {
+    return 'Gemini rejected the server credential. An administrator must replace `GEMINI_API_KEY` with an active Google AI Studio authorization key.';
+  }
+  if (error?.geminiReason === 'model') {
+    return 'The configured Gemini model is unavailable to this project. An administrator must update `GEMINI_MODEL` or the app default.';
+  }
+  if (error?.geminiReason === 'quota') {
+    return 'The Hub question-answering service has exhausted its Gemini quota. Try again later or use `@Spartans Hub /status`.';
+  }
+  return 'I could not reach the Hub question-answering service. Try `@Spartans Hub /status`, or ask again shortly.';
 }
 
 export async function handleHubAppMention(event, dependencies = {}) {
@@ -242,9 +281,7 @@ export async function handleHubAppMention(event, dependencies = {}) {
       text = await askGeminiAboutHub(question, snapshot, dependencies);
     } catch (error) {
       console.error('Gemini Hub assistant failed', error?.message || error);
-      text = error?.message === 'GEMINI_API_KEY is not configured'
-        ? 'AI questions are not configured on this server yet. `@971hub /status` still works.'
-        : 'I could not reach the Hub question-answering service. Try `@971hub /status`, or ask again shortly.';
+      text = geminiFailureReply(error);
     }
   }
   const response = await slack.chat.postMessage({
