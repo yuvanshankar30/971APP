@@ -215,6 +215,20 @@ describe('Slack Hub assistant', () => {
     expect(postMessage.mock.calls[0][0].text).toBe('2');
   });
 
+  it('answers detailed Hub tab questions locally instead of sending product knowledge to Gemini', async () => {
+    const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
+    const fetchImpl = vi.fn();
+    await handleHubAppMention({ channel: 'C1', user: 'U1', ts: '1.0', text: '<@U971> where are the JProg settings?' }, {
+      supa: supabaseForStatus(),
+      slack: { chat: { postMessage } },
+      apiKey: 'test-secret',
+      fetchImpl
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(postMessage.mock.calls[0][0].text).toContain('/jprog/settings');
+    expect(postMessage.mock.calls[0][0].text).toContain('Sheet editor');
+  });
+
   it('reads all assignment types for admins and only the requester rows for members', async () => {
     const adminContext = await fetchScoutingAssignmentsForSlackUser(
       supabaseForAssignments({ admin: true }),
@@ -373,10 +387,10 @@ describe('Slack Hub assistant', () => {
     expect(postMessage.mock.calls[0][0].text).toContain('2/3 complete');
   });
 
-  it('explains when Gemini is not configured instead of implying a transient outage', async () => {
+  it('explains when a model-backed question needs Gemini but Gemini is not configured', async () => {
     const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
     const fetchImpl = vi.fn();
-    await handleHubAppMention({ channel: 'C1', ts: '1.0', text: '<@U971> where is Match Scouting?' }, {
+    await handleHubAppMention({ channel: 'C1', ts: '1.0', text: '<@U971> summarize what changed recently' }, {
       supa: supabaseForStatus(),
       slack: { chat: { postMessage } },
       apiKey: '',

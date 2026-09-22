@@ -19,7 +19,7 @@ requester's own Hub roles and permissions. A caller with the same
 person's shareable role/profile fields; email addresses, Slack IDs, secrets,
 and notification settings are never returned. Names, shifts, and profile data
 in these paths are never sent to Gemini. Other questions are answered by Gemini
-from the read-only Hub feature catalog and status snapshot. Public
+from a compact read-only Hub summary and status snapshot. Public
 event/current-information questions may use
 Gemini's Google Search grounding and include source links. Ordinary
 general-knowledge, math, science, robotics, and programming questions are also
@@ -27,6 +27,14 @@ supported; only claims about Hub itself are restricted to live/internal Hub
 evidence. Mentions using the old `@971app` or
 `@971hub` display names continue to work in existing messages because Slack
 identifies the app by ID rather than by its visible name.
+
+Questions that name a Hub tab or ask where to find a page are resolved before
+Gemini from `src/lib/server/hub_feature_knowledge.js`. The local catalog covers
+default navigation, important hidden/direct routes, feature subtabs, common
+workflows, and distinctions such as EPA versus OPR versus Scout Power. These
+answers include the exact route and are deterministic; the detailed product map
+is never included in a Gemini or Google Search request. Update the catalog in
+the same change whenever a user-facing route, subtab, or workflow changes.
 
 The assistant responds to direct mentions in every conversation where the bot
 is a member. A human can continue the conversation without another mention by
