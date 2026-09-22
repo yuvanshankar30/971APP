@@ -198,7 +198,7 @@ describe('Slack Hub assistant', () => {
     expect(answer).toContain('<https://example.test/madtown|Madtown event>');
   });
 
-  it('answers a general math question without invoking web search', async () => {
+  it('answers a general math question without invoking web search, but still offers the data tool', async () => {
     const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
     const fetchImpl = vi.fn().mockResolvedValue({
       ok: true,
@@ -211,8 +211,90 @@ describe('Slack Hub assistant', () => {
       fetchImpl
     });
     const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
-    expect(body.tools).toBeUndefined();
+    expect(body.tools).toEqual([{ function_declarations: [expect.objectContaining({ name: 'query_hub_data' })] }]);
     expect(postMessage.mock.calls[0][0].text).toBe('2');
+  });
+
+  it('never offers the data tool alongside Google Search', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: 'Madtown starts November 13.' }] } }] })
+    });
+    await askGeminiAboutHub('When does Madtown start?', snapshot, {
+      apiKey: 'test-secret',
+      fetchImpl,
+      supa: supabaseForStatus(),
+      useGoogleSearch: true
+    });
+    const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    expect(body.tools).toEqual([{ google_search: {} }]);
+  });
+
+  it('runs a query_hub_data round trip against an allowlisted table and answers from the result', async () => {
+    const queried = { table: null, columns: null };
+    const supa = {
+      from: (table) => {
+        queried.table = table;
+        const query = {
+          select: (columns) => { queried.columns = columns; return query; },
+          eq: () => query,
+          limit: () => query,
+          order: () => query,
+          then: (resolve) => Promise.resolve({
+            data: [{ label: 'EPA', href: '/epa', category: 'Competition', keywords: 'expected points added model ratings' }],
+            error: null
+          }).then(resolve)
+        };
+        return query;
+      }
+    };
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          candidates: [{
+            content: {
+              parts: [{ functionCall: { name: 'query_hub_data', args: { table: 'parts', filters: { status: 'active' }, limit: 5 } } }]
+            }
+          }]
+        })
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ candidates: [{ content: { parts: [{ text: 'You have 1 active part.' }] } }] })
+      });
+    const answer = await askGeminiAboutHub('How many active parts are there?', snapshot, {
+      apiKey: 'test-secret',
+      fetchImpl,
+      supa
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(queried.table).toBe('parts');
+    const secondBody = JSON.parse(fetchImpl.mock.calls[1][1].body);
+    const functionResponsePart = secondBody.contents.at(-1).parts[0].functionResponse;
+    expect(functionResponsePart.name).toBe('query_hub_data');
+    expect(functionResponsePart.response.rows).toHaveLength(1);
+    expect(answer).toBe('You have 1 active part.');
+  });
+
+  it('rejects a query_hub_data call against a table that is not on the allowlist', async () => {
+    const executed = [];
+    const supa = { from: (table) => { executed.push(table); throw new Error('should never query a disallowed table'); } };
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          candidates: [{ content: { parts: [{ functionCall: { name: 'query_hub_data', args: { table: 'user_profiles' } } }] } }]
+        })
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ candidates: [{ content: { parts: [{ text: 'I could not look that up.' }] } }] })
+      });
+    await askGeminiAboutHub('What is my email?', snapshot, { apiKey: 'test-secret', fetchImpl, supa });
+    expect(executed).toHaveLength(0);
+    const secondBody = JSON.parse(fetchImpl.mock.calls[1][1].body);
+    expect(secondBody.contents.at(-1).parts[0].functionResponse.response.error).toContain('Unknown table');
   });
 
   it('reads all assignment types for admins and only the requester rows for members', async () => {

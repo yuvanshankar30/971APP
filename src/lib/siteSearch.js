@@ -1,4 +1,4 @@
-const ROUTES = [
+export const ROUTES = [
   ['Home', '/', 'General', 'dashboard start overview'],
   ['Account Settings', '/profile', 'Account', 'profile password theme appearance navigation notifications'],
   ['Manufacturing', '/manufacture', 'Manufacturing', 'requests work orders shop'],
