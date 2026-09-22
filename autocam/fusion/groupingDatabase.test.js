@@ -36,6 +36,7 @@ beforeAll(async () => {
  await db.exec(migration('20260909_fusion_multi_tool_snapshot_check.sql'));
  await db.exec(migration('20260909_fusion_atomic_plate_queue.sql'));
  await db.exec(migration('20260909_fusion_atomic_plate_queue.sql'));
+ await db.exec(migration('20260922_fusion_plate_tool_mode_drop_aluminum_restriction.sql'));
  await db.exec('GRANT USAGE ON SCHEMA public, auth TO authenticated; GRANT ALL ON ALL TABLES IN SCHEMA public TO authenticated');
 }, 30000);
 afterAll(async () => { await db?.close(); });
@@ -156,14 +157,19 @@ describe('Fusion grouping PostgreSQL migration', () => {
    expect((await run('SELECT part_id,quantity FROM fusion_part_category_assignments WHERE plate_id=$1',[id(10)])).rows)
      .toEqual([{ part_id: id(20), quantity: 2 }]);
  });
- it('enforces New Router and Aluminum 6061 for automatic tool swaps in the database', async () => {
+ it('enforces New Router (but no longer Aluminum 6061) for automatic tool swaps in the database', async () => {
+   // Direct instruction: automatic tool swaps are no longer restricted to
+   // Aluminum 6061 - the shop manually adjusts feed rate at the router for
+   // whatever material is actually loaded. A non-aluminum material on the
+   // New Router must now succeed.
    await assign(2);
    await run("UPDATE cam_materials SET name='SRPP' WHERE id=$1", [id(50)]);
    await expect(run(`INSERT INTO cam_jobs (operation_type,params,machine_id,tool_id,status) VALUES
      ('milling',$1,$2,NULL,'queued')`, [{
        fusionJobKind:'plate:cam', plateId:id(10), fusionGroupingMode:'single', selectedPartId:id(20), multiToolMode:true
-     }, id(30)])).rejects.toThrow(/only for Aluminum 6061/);
-   await run("UPDATE cam_materials SET name='Aluminum 6061' WHERE id=$1", [id(50)]);
+     }, id(30)])).resolves.not.toThrow();
+   // The New Router hardware requirement is real (UNC Router cannot swap
+   // tools) and stays enforced regardless of material.
    await run("UPDATE cam_machines SET name='UNC Router' WHERE id=$1", [id(30)]);
    await expect(run(`INSERT INTO cam_jobs (operation_type,params,machine_id,tool_id,status) VALUES
      ('milling',$1,$2,NULL,'queued')`, [{
