@@ -2,12 +2,15 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   askGeminiAboutHub,
   assignmentEventKey,
+  fetchAdminProfileForSlackUser,
   fetchScoutingAssignmentsForSlackUser,
   fetchTeamReportSnapshot,
+  formatAdminProfile,
   formatHubStatus,
   formatScoutingAssignments,
   formatTeamReportStatus,
   handleHubAppMention,
+  isAdminProfileQuestion,
   isScoutingAssignmentQuestion,
   isHubStatusRequest,
   isTeamReportStatusRequest,
@@ -75,7 +78,16 @@ function supabaseForTeamStatus() {
 }
 
 function supabaseForAssignments({ admin = true } = {}) {
-  const profile = { id: 'u-requester', full_name: 'Arin Rao', role: admin ? 'admin' : 'member', banned: false };
+  const profile = {
+    id: 'u-requester', full_name: 'Arin Rao', role: admin ? 'admin' : 'member', banned: false,
+    permissions: [], general_role: admin ? 'lead' : 'member', purchasing_role: 'basic',
+    team_role: admin ? 'Competition Lead' : 'Software Member', frc_team: '971', task_general_categories: ['Software']
+  };
+  const otherProfile = {
+    id: 'u-other', full_name: 'Casey Scout', role: 'member', banned: false,
+    permissions: ['DATA_SCOUT_MEMBER'], general_role: 'member', purchasing_role: 'basic',
+    team_role: 'Other', frc_team: '9584', task_general_categories: ['Competition']
+  };
   const tables = {
     scout_match_assignments: [
       { scouting_type: 'data', match_key: '2026cc_qm1', team_key: 'frc971', assigned_user: 'u-requester', completed_at: null },
@@ -108,9 +120,10 @@ function supabaseForAssignments({ admin = true } = {}) {
         }
         if (table === 'user_profiles' && filters.slack_user_id) return { data: profile, error: null };
         if (table === 'user_profiles' && filters.idIn) {
-          return { data: [profile, { id: 'u-other', full_name: 'Casey Scout' }]
+          return { data: [profile, otherProfile]
             .filter((row) => filters.idIn.includes(row.id)), error: null };
         }
+        if (table === 'user_profiles') return { data: [profile, otherProfile], error: null };
         if (table === 'roster_entries') {
           return { data: admin ? [{ key: { key_name: 'Scouting Admin' } }] : [], error: null };
         }
@@ -133,6 +146,8 @@ describe('Slack Hub assistant', () => {
     expect(isHubStatusRequest('Where is Match Scouting?')).toBe(false);
     expect(isTeamReportStatusRequest('Have all reports for team 971 been finished?')).toBe(true);
     expect(isScoutingAssignmentQuestion('What tasks were scouts assigned for Chezy?')).toBe(true);
+    expect(isAdminProfileQuestion('What role am I?')).toBe(true);
+    expect(isAdminProfileQuestion('What role does Casey Scout have?')).toBe(true);
     expect(shouldUseGoogleSearch('When does Madtown start?')).toBe(true);
     expect(shouldUseGoogleSearch('What shifts were scouts assigned?')).toBe(false);
     expect(shouldUseGoogleSearch('What does Scouting Admin do?')).toBe(false);
@@ -207,8 +222,11 @@ describe('Slack Hub assistant', () => {
       '2026cc'
     );
     expect(adminContext.visibility).toBe('all-scouts');
-    expect(formatScoutingAssignments(adminContext, 'What tasks were scouts assigned?')).toContain('Casey Scout');
-    expect(formatScoutingAssignments(adminContext)).toContain('pit: T971');
+    expect(formatScoutingAssignments(adminContext, 'What tasks were scouts assigned?')).toContain('specify exactly one scout');
+    const casey = formatScoutingAssignments(adminContext, 'What tasks was Casey Scout assigned?');
+    expect(casey).toContain('Casey Scout');
+    expect(casey).toContain('pit: T971');
+    expect(casey).not.toContain('Arin Rao');
 
     const memberContext = await fetchScoutingAssignmentsForSlackUser(
       supabaseForAssignments({ admin: false }),
@@ -217,7 +235,7 @@ describe('Slack Hub assistant', () => {
     );
     expect(memberContext.visibility).toBe('requester-only');
     expect(memberContext.assignments).toHaveLength(1);
-    expect(formatScoutingAssignments(memberContext)).not.toContain('Casey Scout');
+    expect(formatScoutingAssignments(memberContext, 'What are my scouting assignments?')).not.toContain('Casey Scout');
   });
 
   it('answers assignment questions locally without sending scout data to Gemini', async () => {
@@ -227,7 +245,7 @@ describe('Slack Hub assistant', () => {
       channel: 'C1',
       user: 'U-ADMIN',
       ts: '1.0',
-      text: '<@U971> what tasks were scouts assigned in for Chezy?'
+      text: '<@U971> what tasks was Casey Scout assigned in for Chezy?'
     }, {
       supa: supabaseForAssignments({ admin: true }),
       slack: { chat: { postMessage } },
@@ -237,6 +255,40 @@ describe('Slack Hub assistant', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(postMessage.mock.calls[0][0].text).toContain('Casey Scout');
     expect(postMessage.mock.calls[0][0].text).toContain('Q2/T254');
+  });
+
+  it('requires one scout for broad assignment questions', async () => {
+    const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
+    const fetchImpl = vi.fn();
+    await handleHubAppMention({ channel: 'C1', user: 'U-ADMIN', ts: '1.0', text: '<@U971> what tasks were scouts assigned?' }, {
+      supa: supabaseForAssignments({ admin: true }),
+      slack: { chat: { postMessage } },
+      apiKey: 'test-secret',
+      fetchImpl
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(postMessage.mock.calls[0][0].text).toContain('specify exactly one scout');
+  });
+
+  it('answers self profile questions and lets Admin-page users inspect one named profile', async () => {
+    const supa = supabaseForAssignments({ admin: true });
+    const self = await fetchAdminProfileForSlackUser(supa, 'U-ADMIN', 'What role am I?');
+    expect(formatAdminProfile(self)).toContain('General role: lead');
+
+    const named = await fetchAdminProfileForSlackUser(supa, 'U-ADMIN', 'What permissions does Casey Scout have?');
+    const formatted = formatAdminProfile(named);
+    expect(formatted).toContain('*Casey Scout*');
+    expect(formatted).toContain('DATA_SCOUT_MEMBER');
+    expect(formatted).not.toContain('Arin Rao');
+  });
+
+  it('does not let ordinary users inspect another profile', async () => {
+    const context = await fetchAdminProfileForSlackUser(
+      supabaseForAssignments({ admin: false }),
+      'U-MEMBER',
+      'What role does Casey Scout have?'
+    );
+    expect(formatAdminProfile(context)).toContain('only Admin-page users');
   });
 
   it('rejects a missing Gemini key and an empty model response', async () => {

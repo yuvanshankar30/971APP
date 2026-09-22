@@ -545,14 +545,18 @@ file: update its diagram alongside this section, not separately from it.
   use live report rows, and scouting-assignment questions are answered directly
   from Supabase without sending scout names or shifts to Gemini; authorized
   Scouting Admins can inspect the full event roster while other linked users see
-  only their own assignments. Other Hub questions receive read-only,
+  only their own assignments; every assignment response is restricted to one
+  explicitly named scout. Linked users can inspect their own Hub roles, while
+  `VIEW_ADMIN_PANEL` users can inspect one named person's shareable Admin-page
+  role/profile fields. Other Hub questions receive read-only,
   context-bounded answers from Gemini using the server-side `GEMINI_API_KEY`
   and the current `gemini-3.5-flash-lite` default, with Google Search grounding
   available only for public event/current-information questions. The same bot
   also answers ordinary general-knowledge, math, science, robotics, and
   programming questions without pretending those answers came from Hub; the
   assistant responds to direct mentions in every conversation where the bot is
-  a member, keeps replies in the originating thread, reports safe
+  a member, supports unmentioned follow-ups only inside assistant-started
+  threads, reports safe
   credential/model/quota/timeout failure categories, and durably deduplicates
   Slack retry IDs in `slack_event_receipts`),
   Onshape API (CAD source of truth for parts - see the Onshape-key exposure

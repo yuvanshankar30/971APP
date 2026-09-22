@@ -10,10 +10,46 @@ import {
 import { handlePlannerReaction } from '$lib/server/planner_notifications.js';
 import { handleP0BugAssignmentReaction } from '$lib/server/slack_notifications.js';
 import { handleHubAppMention } from '$lib/server/hub_slack_assistant.js';
-import { claimSlackEvent, completeSlackEvent, failSlackEvent } from '$lib/server/slack_event_receipts.js';
+import { claimSlackEvent, completeSlackEvent, failSlackEvent, isHubAssistantThread } from '$lib/server/slack_event_receipts.js';
 
 // Avoid approving the same purchase repeatedly when multiple reactions are added.
 const recentlyApprovedPurchases = new Set();
+
+async function processHubAssistantEvent({ event, eventId, eventType, supa }) {
+  let claim;
+  try {
+    claim = await claimSlackEvent(supa, {
+      eventId,
+      eventType,
+      channelId: event.channel || null,
+      eventTs: event.thread_ts || event.ts || null
+    });
+  } catch (error) {
+    console.error('Failed to claim Slack assistant event', error?.message || error);
+    return json({ ok: false, handled: false }, { status: 503 });
+  }
+  if (!claim.claimed) return json({ ok: true, duplicate: true });
+
+  let result;
+  try {
+    result = await handleHubAppMention(event, { supa });
+    if (!result.ok) throw new Error(`Slack did not accept the assistant reply (${result.reason || 'unknown reason'})`);
+  } catch (error) {
+    console.error('Failed to answer Slack assistant event', error?.data?.error || error?.message || error);
+    try {
+      await failSlackEvent(supa, eventId, error);
+    } catch (receiptError) {
+      console.error('Failed to update Slack event receipt', receiptError?.message || receiptError);
+    }
+    return json({ ok: false, handled: false }, { status: 503 });
+  }
+  try {
+    await completeSlackEvent(supa, eventId);
+  } catch (error) {
+    console.error('Failed to complete Slack event receipt', error?.message || error);
+  }
+  return json({ ok: true, handled: result.ok });
+}
 
 export async function POST({ request }) {
   const rawBody = await request.text();
@@ -42,43 +78,18 @@ export async function POST({ request }) {
       if (event.bot_id || event.subtype === 'bot_message') return json({ ok: true, ignored: true });
       const eventId = payload.event_id || `app_mention:${event.channel || ''}:${event.ts || ''}`;
       const supa = getSupabase();
-      let claim;
-      try {
-        claim = await claimSlackEvent(supa, {
-          eventId,
-          eventType: event_type,
-          channelId: event.channel || null,
-          eventTs: event.ts || null
-        });
-      } catch (error) {
-        console.error('Failed to claim Slack app mention', error?.message || error);
-        return json({ ok: false, handled: false }, { status: 503 });
-      }
-      if (!claim.claimed) return json({ ok: true, duplicate: true });
+      return processHubAssistantEvent({ event, eventId, eventType: event_type, supa });
+    }
 
-      let result;
-      try {
-        result = await handleHubAppMention(event, { supa });
-        if (!result.ok) throw new Error(`Slack did not accept the app mention reply (${result.reason || 'unknown reason'})`);
-      } catch (error) {
-        console.error('Failed to answer Slack app mention', error?.data?.error || error?.message || error);
-        try {
-          await failSlackEvent(supa, eventId, error);
-        } catch (receiptError) {
-          console.error('Failed to update Slack event receipt', receiptError?.message || receiptError);
-        }
-        // A non-2xx response asks Slack to retry transient failures. The
-        // durable receipt ensures retries cannot double-post across instances.
-        return json({ ok: false, handled: false }, { status: 503 });
+    // An unmentioned human reply is accepted only inside a thread that this
+    // assistant started. Ambient channel messages are never read or answered.
+    if (event_type === 'message' && event.thread_ts && !event.bot_id && !event.subtype && !/<@[A-Z0-9]+>/i.test(event.text || '')) {
+      const supa = getSupabase();
+      if (!(await isHubAssistantThread(supa, event.channel, event.thread_ts))) {
+        return json({ ok: true, ignored: true });
       }
-      try {
-        await completeSlackEvent(supa, eventId);
-      } catch (error) {
-        // The reply is already in Slack. Keep the receipt in processing state
-        // rather than marking it failed and allowing a duplicate response.
-        console.error('Failed to complete Slack event receipt', error?.message || error);
-      }
-      return json({ ok: true, handled: result.ok });
+      const eventId = payload.event_id || `thread_reply:${event.channel || ''}:${event.ts || ''}`;
+      return processHubAssistantEvent({ event, eventId, eventType: 'message.thread_reply', supa });
     }
 
     if (event_type === 'reaction_added') {
