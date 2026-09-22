@@ -71,6 +71,179 @@ export function isTeamReportStatusRequest(question) {
   );
 }
 
+export function isScoutingAssignmentQuestion(question) {
+  const value = String(question || '');
+  return /\b(assign(?:ed|ment|ments)?|shift|shifts|task|tasks)\b/i.test(value)
+    && /\b(scout|scouts|scouting|match|pit|prescout)\b/i.test(value);
+}
+
+export function shouldUseGoogleSearch(question) {
+  if (isScoutingAssignmentQuestion(question)) return false;
+  if (/\b(spartans\s*hub|971hub|scouting admin|match scouting|pit scouting|planner|manufacturing|autocam|prediction market)\b/i.test(String(question || ''))) {
+    return false;
+  }
+  const possibleArithmetic = String(question || '')
+    .trim()
+    .replace(/^(?:what\s+is|calculate|compute)\s+/i, '')
+    .replace(/\?+$/, '')
+    .trim();
+  if (/^[\d\s()+\-*/%.^]+$/.test(possibleArithmetic)) return false;
+  return /\b(when|where|who|what|which|date|start|schedule|event|competition|regional|district|championship|q2|quarterfinal|latest|today|current|news|price|weather)\b/i
+    .test(String(question || ''));
+}
+
+export function assignmentEventKey(question, activeEventKey) {
+  const value = String(question || '');
+  if (/\bchezy(?:\s+champs?)?\b/i.test(value)) {
+    const explicitYear = value.match(/\b(20\d{2})\b/)?.[1];
+    const activeYear = String(activeEventKey || '').match(/^(20\d{2})/)?.[1];
+    return `${explicitYear || activeYear || new Date().getFullYear()}cc`;
+  }
+  return activeEventKey;
+}
+
+function assignmentRow(row, names, kind) {
+  if (!row?.assigned_user) return null;
+  return {
+    scout: names.get(row.assigned_user) || 'Unknown scout',
+    kind,
+    match: row.match_key || null,
+    team: String(row.team_key || '').replace(/^frc/i, '') || null,
+    completed: Boolean(row.completed_at)
+  };
+}
+
+export async function fetchScoutingAssignmentsForSlackUser(supa, slackUserId, eventKey, options = {}) {
+  const normalizedSlackId = String(slackUserId || '').trim();
+  if (!normalizedSlackId) return { available: false, reason: 'missing-slack-user' };
+  if (!eventKey) return { available: false, reason: 'no-active-event' };
+
+  let profileResult = await supa
+    .from('user_profiles')
+    .select('id, full_name, role, banned')
+    .eq('slack_user_id', normalizedSlackId)
+    .maybeSingle();
+  if (!profileResult.data && options.slack?.users?.info) {
+    const slackResult = await options.slack.users.info({ user: normalizedSlackId }).catch(() => null);
+    const email = String(slackResult?.user?.profile?.email || '').trim().toLowerCase();
+    if (email) {
+      profileResult = await supa
+        .from('user_profiles')
+        .select('id, full_name, role, banned')
+        .ilike('email', email)
+        .maybeSingle();
+    }
+  }
+  const profile = profileResult.data;
+  if (profileResult.error || !profile?.id) return { available: false, reason: 'slack-profile-not-linked' };
+  if (profile.banned) return { available: false, reason: 'account-disabled' };
+
+  const rosterResult = await supa
+    .from('roster_entries')
+    .select('key:key_id(key_name)')
+    .eq('user_id', profile.id);
+  const rosterKeys = new Set((rosterResult.data || [])
+    .map((row) => String(row?.key?.key_name || '').trim().toLowerCase())
+    .filter(Boolean));
+  // Match the Scouting Admin page's full-roster access boundary exactly.
+  const canViewAll = profile.role === 'admin' || rosterKeys.has('scouting admin');
+
+  let matchQuery = supa
+    .from('scout_match_assignments')
+    .select('scouting_type, match_key, team_key, assigned_user, completed_at')
+    .like('match_key', `${eventKey}_%`)
+    .limit(2000);
+  let pitQuery = supa
+    .from('scout_pit_assignments')
+    .select('event_key, team_key, assigned_user, completed_at')
+    .eq('event_key', eventKey)
+    .limit(1000);
+  let prescoutQuery = supa
+    .from('scout_prescout_assignments')
+    .select('event_key, team_key, assigned_user, completed_at')
+    .eq('event_key', eventKey)
+    .limit(1000);
+  if (!canViewAll) {
+    matchQuery = matchQuery.eq('assigned_user', profile.id);
+    pitQuery = pitQuery.eq('assigned_user', profile.id);
+    prescoutQuery = prescoutQuery.eq('assigned_user', profile.id);
+  }
+
+  const [matchResult, pitResult, prescoutResult] = await Promise.all([matchQuery, pitQuery, prescoutQuery]);
+  if ([matchResult, pitResult, prescoutResult].some((result) => result.error)) {
+    return { available: false, reason: 'assignment-query-failed' };
+  }
+
+  const matchRows = matchResult.data || [];
+  const pitRows = pitResult.data || [];
+  const prescoutRows = prescoutResult.data || [];
+  const userIds = [...new Set([...matchRows, ...pitRows, ...prescoutRows]
+    .map((row) => row.assigned_user)
+    .filter(Boolean))];
+  const names = new Map([[profile.id, profile.full_name || 'Requesting scout']]);
+  if (canViewAll && userIds.length) {
+    const usersResult = await supa.from('user_profiles').select('id, full_name').in('id', userIds);
+    for (const row of usersResult.data || []) names.set(row.id, row.full_name || 'Unknown scout');
+  }
+
+  return {
+    available: true,
+    eventKey,
+    visibility: canViewAll ? 'all-scouts' : 'requester-only',
+    requester: profile.full_name || null,
+    assignments: [
+      ...matchRows.map((row) => assignmentRow(row, names, String(row.scouting_type || 'match'))),
+      ...pitRows.map((row) => assignmentRow(row, names, 'pit')),
+      ...prescoutRows.map((row) => assignmentRow(row, names, 'prescout'))
+    ].filter(Boolean)
+  };
+}
+
+function compactMatch(matchKey) {
+  const value = String(matchKey || '');
+  const qualification = value.match(/_qm(\d+)$/i);
+  return qualification ? `Q${qualification[1]}` : value.split('_').at(-1) || value;
+}
+
+export function formatScoutingAssignments(context, question = '') {
+  if (!context?.available) {
+    if (context?.reason === 'no-active-event') return 'No active scouting event is configured, so I cannot resolve assignments.';
+    if (context?.reason === 'slack-profile-not-linked' || context?.reason === 'missing-slack-user') {
+      return 'I cannot read scouting assignments for this Slack account because it is not linked to a Spartans Hub profile.';
+    }
+    if (context?.reason === 'account-disabled') return 'This Spartans Hub account is disabled.';
+    return 'I could not read scouting assignments from Spartans Hub right now.';
+  }
+
+  let rows = context.assignments || [];
+  if (context.visibility === 'all-scouts') {
+    const normalizedQuestion = String(question || '').toLowerCase();
+    const namedScouts = [...new Set(rows.map((row) => row.scout))]
+      .filter((name) => name !== 'Unknown scout' && normalizedQuestion.includes(name.toLowerCase()));
+    if (namedScouts.length) rows = rows.filter((row) => namedScouts.includes(row.scout));
+  }
+  if (!rows.length) {
+    return context.visibility === 'requester-only'
+      ? `You have no assignments for ${context.eventKey}.`
+      : `No matching scouting assignments were found for ${context.eventKey}.`;
+  }
+
+  const byScout = new Map();
+  for (const row of rows) {
+    if (!byScout.has(row.scout)) byScout.set(row.scout, []);
+    const target = row.match ? `${compactMatch(row.match)}/T${row.team}` : `T${row.team}`;
+    byScout.get(row.scout).push(`${row.kind}: ${target}${row.completed ? ' ✓' : ''}`);
+  }
+  const heading = context.visibility === 'requester-only'
+    ? `*Your scouting assignments — ${context.eventKey}:*`
+    : `*Scouting assignments — ${context.eventKey}:*`;
+  const lines = [heading];
+  for (const [scout, assignments] of [...byScout.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    lines.push(`• *${scout}:* ${assignments.join(', ')}`);
+  }
+  return safeSlackText(lines.join('\n'));
+}
+
 export async function fetchHubStatusSnapshot(supa = getSupabase()) {
   const settings = await supa.from('scouting_settings').select('event_key, updated_at').eq('id', 1).maybeSingle();
   const eventKey = String(settings.data?.event_key || '').trim() || null;
@@ -193,9 +366,10 @@ export async function askGeminiAboutHub(question, snapshot, options = {}) {
       },
       body: JSON.stringify({
         system_instruction: {
-          parts: [{ text: `You are 971hub, the concise Slack assistant for Spartans Hub. Answer any question about Hub features, routes, and the supplied live status, but only from the evidence below. If the answer is not present, say you do not know and direct the user to the relevant Hub page or an administrator. Never imply that a report or assignment is complete unless the live data explicitly proves it. Use Slack markdown, no tables, and never generate @channel, @here, or @everyone mentions.\n\nHUB FEATURE CATALOG:\n${HUB_FEATURE_CATALOG}\n\nRECENT CHANGES:\n${HUB_RECENT_CHANGES.join('\n')}\n\nLIVE SNAPSHOT:\n${JSON.stringify(snapshot)}` }]
+          parts: [{ text: `You are Spartans Hub, a concise general-purpose Slack assistant with special knowledge of Spartans Hub. Answer ordinary general-knowledge, math, science, robotics, and programming questions directly. Answer claims about Spartans Hub only from the supplied internal evidence; never invent Hub data. You may use Google Search for public facts such as event dates, schedules, locations, news, and current information. If a Hub answer is not present and search is irrelevant, say you do not know and direct the user to the relevant Hub page or an administrator. Never imply that a report or assignment is complete unless live data explicitly proves it. Use Slack markdown, no tables, include concise source links for web-grounded facts, and never generate @channel, @here, or @everyone mentions.\n\nHUB FEATURE CATALOG:\n${HUB_FEATURE_CATALOG}\n\nRECENT CHANGES:\n${HUB_RECENT_CHANGES.join('\n')}\n\nLIVE SNAPSHOT:\n${JSON.stringify(snapshot)}` }]
         },
         contents: [{ role: 'user', parts: [{ text: safeSlackText(question).slice(0, 1200) }] }],
+        ...(options.useGoogleSearch ? { tools: [{ google_search: {} }] } : {}),
         generationConfig: { maxOutputTokens: 450 }
       }),
       signal: controller.signal
@@ -220,11 +394,19 @@ export async function askGeminiAboutHub(question, snapshot, options = {}) {
       error.httpStatus = response.status;
       throw error;
     }
-    const answer = safeSlackText((payload?.candidates?.[0]?.content?.parts || [])
+    let answer = safeSlackText((payload?.candidates?.[0]?.content?.parts || [])
       .filter((part) => !part.thought && typeof part.text === 'string')
       .map((part) => part.text)
       .join(''));
     if (!answer) throw new Error('Gemini returned an empty answer');
+    const sources = [...new Map((payload?.candidates?.[0]?.groundingMetadata?.groundingChunks || [])
+      .map((chunk) => chunk?.web)
+      .filter((web) => web?.uri)
+      .map((web) => [web.uri, { uri: web.uri, title: safeSlackText(web.title || 'Source') }])).values()]
+      .slice(0, 3);
+    if (sources.length && !sources.some((source) => answer.includes(source.uri))) {
+      answer = safeSlackText(`${answer}\n\n*Sources:* ${sources.map((source) => `<${source.uri}|${source.title}>`).join(' · ')}`);
+    }
     return answer;
   } finally {
     clearTimeout(timeout);
@@ -266,9 +448,21 @@ export async function handleHubAppMention(event, dependencies = {}) {
   } else if (isTeamReportStatusRequest(question)) {
     const teamSnapshot = await fetchTeamReportSnapshot(supa, teamNumberFromQuestion(question), snapshot.eventKey);
     text = formatTeamReportStatus(teamSnapshot);
+  } else if (isScoutingAssignmentQuestion(question)) {
+    const requestedEventKey = assignmentEventKey(question, snapshot.eventKey);
+    const assignmentContext = await fetchScoutingAssignmentsForSlackUser(
+      supa,
+      event.user,
+      requestedEventKey,
+      { slack }
+    );
+    text = formatScoutingAssignments(assignmentContext, question);
   } else {
     try {
-      text = await askGeminiAboutHub(question, snapshot, dependencies);
+      text = await askGeminiAboutHub(question, snapshot, {
+        ...dependencies,
+        useGoogleSearch: shouldUseGoogleSearch(question)
+      });
     } catch (error) {
       console.error('Gemini Hub assistant failed', error?.message || error);
       text = geminiFailureReply(error);
