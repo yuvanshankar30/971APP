@@ -508,6 +508,126 @@ describe("nesting emission", () => {
     expect(result.text).toContain("Slot Cut for Edges");
   });
 
+  it("does not re-swap to the same tool for a release cut that shares its main-work tool", () => {
+    // Direct instruction, matching the original Java JProg (which groups
+    // every occurrence of a tool into a single pass and never swaps back to
+    // a tool it's already on): a release cut on the SAME tool as the main
+    // work immediately before it must not get its own redundant
+    // G53 Z / M5 / [Tool N] / TN block - the machine is already on that
+    // tool, nothing physically needs to change.
+    const input = {
+      name: "same-tool-release",
+      dialect: "wincnc",
+      placements: [{ label: "Plate-AUTOCAM", x: 2, y: 2, part_library_path: "plate" }],
+      programs: {
+        plate: {
+          source: ["G90", "T1", "G0 X0 Y0", "[Slot Cut for Edges]", "G0 X1 Y1", "M5"].join("\n"),
+        },
+      },
+    };
+    const result = emitNestingGcode(input);
+    const toolHeaders = result.text.match(/^\[Tool \d+\]$/gm) || [];
+    expect(toolHeaders).toEqual(["[Tool 1]"]);
+  });
+
+  it("still swaps to a different tool for a release cut, even after this optimization", () => {
+    const input = {
+      name: "different-tool-release",
+      dialect: "wincnc",
+      placements: [{ label: "Plate-AUTOCAM", x: 2, y: 2, part_library_path: "plate" }],
+      programs: {
+        plate: {
+          source: ["G90", "T1", "G0 X0 Y0", "T6", "[Slot Cut for Edges]", "G0 X1 Y1", "M5"].join("\n"),
+        },
+      },
+    };
+    const result = emitNestingGcode(input);
+    const toolHeaders = result.text.match(/^\[Tool \d+\]$/gm) || [];
+    expect(toolHeaders).toEqual(["[Tool 1]", "[Tool 6]"]);
+    // The release cut must still land after every line of Tool 1's work.
+    const tool1Index = result.text.indexOf("[Tool 1]");
+    const tool6Index = result.text.indexOf("[Tool 6]");
+    const releaseIndex = result.text.indexOf("Slot Cut for Edges");
+    expect(tool1Index).toBeLessThan(tool6Index);
+    expect(tool6Index).toBeLessThan(releaseIndex);
+  });
+
+  it("skips the redundant release-tool swap even with a user-reordered toolOrder", () => {
+    // Two parts: one whose only tool is 6 (Tool 6 loaded last by the custom
+    // order below), one single-tool part whose release cut is also Tool 6 -
+    // the machine is already on Tool 6 by the time the release cut runs, so
+    // no second swap should appear regardless of which tool the user put
+    // last in toolOrder.
+    const input = {
+      name: "custom-order-same-tool-release",
+      dialect: "wincnc",
+      placements: [
+        { label: "OnlyTool6-AUTOCAM", x: 2, y: 2, part_library_path: "onlyTool6" },
+        { label: "Tool6Release-AUTOCAM", x: 10, y: 2, part_library_path: "tool6Release" },
+      ],
+      programs: {
+        onlyTool6: { source: ["G90", "T6", "G0 X0 Y0", "M5"].join("\n") },
+        tool6Release: { source: ["G90", "T6", "G0 X0 Y0", "[Slot Cut for Edges]", "G0 X1 Y1", "M5"].join("\n") },
+      },
+      toolOrder: [6],
+    };
+    const result = emitNestingGcode(input);
+    const toolHeaders = result.text.match(/^\[Tool \d+\]$/gm) || [];
+    expect(toolHeaders).toEqual(["[Tool 6]"]);
+  });
+
+  it("orders release tools to match whichever tool is already loaded, even with several release tools", () => {
+    // Custom order ends on Tool 6. Release work exists for BOTH Tool 1 and
+    // Tool 6 - Tool 6's release must be processed first (no swap, matches
+    // what's already loaded), Tool 1's release still needs its own real
+    // swap after that. A naive ascending sort of release tools (1 before 6)
+    // would instead force two swaps here instead of one.
+    const input = {
+      name: "custom-order-multi-release",
+      dialect: "wincnc",
+      placements: [
+        { label: "Tool1Body-AUTOCAM", x: 2, y: 2, part_library_path: "tool1Body" },
+        { label: "Tool6Body-AUTOCAM", x: 10, y: 2, part_library_path: "tool6Body" },
+        { label: "Tool1Release-AUTOCAM", x: 18, y: 2, part_library_path: "tool1Release" },
+        { label: "Tool6Release-AUTOCAM", x: 26, y: 2, part_library_path: "tool6Release" },
+      ],
+      programs: {
+        tool1Body: { source: ["G90", "T1", "G0 X0 Y0", "M5"].join("\n") },
+        tool6Body: { source: ["G90", "T6", "G0 X0 Y0", "M5"].join("\n") },
+        tool1Release: { source: ["G90", "T1", "G0 X0 Y0", "[Slot Cut for Edges]", "G0 X1 Y1", "M5"].join("\n") },
+        tool6Release: { source: ["G90", "T6", "G0 X0 Y0", "[Slot Cut for Edges]", "G0 X1 Y1", "M5"].join("\n") },
+      },
+      toolOrder: [1, 6],
+    };
+    const result = emitNestingGcode(input);
+    const toolHeaders = result.text.match(/^\[Tool \d+\]$/gm) || [];
+    // Main pass: Tool 1 then Tool 6 (as configured). Release pass: Tool 6
+    // first (already loaded, free), then Tool 1 (one real swap back).
+    expect(toolHeaders).toEqual(["[Tool 1]", "[Tool 6]", "[Tool 1]"]);
+  });
+
+  it("orders parts sharing a tool by nearest-neighbor travel distance, matching Java's getOptimizedPartOrder", () => {
+    // Three parts on a line at x = 0, 10, 20. Placed in the input in the
+    // "wrong" order (middle, far, near) - nearest-neighbor from the best
+    // starting point must still visit them in spatial order (0, 10, 20 or
+    // its reverse), not the input's insertion order.
+    const input = {
+      name: "nearest-neighbor-order",
+      dialect: "wincnc",
+      placements: [
+        { label: "Middle-AUTOCAM", x: 10, y: 0, part_library_path: "plate" },
+        { label: "Far-AUTOCAM", x: 20, y: 0, part_library_path: "plate" },
+        { label: "Near-AUTOCAM", x: 0, y: 0, part_library_path: "plate" },
+      ],
+      programs: { plate: { source: "G90\nT1\nG0 X0 Y0\nM5" } },
+    };
+    const result = emitNestingGcode(input);
+    const order = [...result.text.matchAll(/\[Part: (\S+)-AUTOCAM\]/g)].map((m) => m[1]);
+    const spatialOrder = ["Near", "Middle", "Far"];
+    const isSpatialOrder = order.join() === spatialOrder.join() || order.join() === [...spatialOrder].reverse().join();
+    expect(isSpatialOrder).toBe(true);
+  });
+
   it("still runs a program with no release cut exactly as before", () => {
     const result = emitNestingGcode({
       name: "no-release",
