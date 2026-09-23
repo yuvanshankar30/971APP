@@ -26,13 +26,25 @@ const normalize = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9
 
 export function identifyRosterQuestion(question, members) {
   const text = normalize(question);
-  const named = members.filter((member) => {
+  const paddedText = ` ${text} `;
+  const fullMatches = members.map((member) => {
     const name = normalize(member.name);
-    if (name && text.includes(name)) return true;
-    const first = name.split(' ')[0];
-    return first?.length >= 3 && new RegExp(`\\b${first}\\b`).test(text);
+    const start = name ? paddedText.indexOf(` ${name} `) : -1;
+    return { member, start, end: start + name.length + 2 };
+  }).filter((match) => match.start >= 0);
+  if (fullMatches.length) {
+    // A shorter name can be contained in a longer, explicitly supplied name.
+    // Keep distinct full names mentioned together, but drop overlapping ones.
+    const exact = fullMatches.filter((match) => !fullMatches.some((other) =>
+      other !== match && other.start <= match.start && other.end >= match.end
+      && (other.start < match.start || other.end > match.end)));
+    return { aboutPerson: true, members: exact.map((match) => match.member), searchName: null, requestedRole: null };
+  }
+  const firstNameMatches = members.filter((member) => {
+    const first = normalize(member.name).split(' ')[0];
+    return first?.length >= 3 && paddedText.includes(` ${first} `);
   });
-  if (named.length) return { aboutPerson: true, members: named, searchName: null, requestedRole: null };
+  if (firstNameMatches.length) return { aboutPerson: true, members: firstNameMatches, searchName: null, requestedRole: null };
 
   const roleQuestion = text.match(/\bwho (?:is|are) (?:the |our )?(.+?)(?: on (?:the )?team)?$/);
   if (roleQuestion) {
