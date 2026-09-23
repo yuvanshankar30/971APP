@@ -19,8 +19,23 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.branch }}
-          fetch-depth: 1
-          persist-credentials: false
+          fetch-depth: 0
+          # Left at the default (true), not false: the merge-main step right
+          # below needs read access to fetch this (private) repo's own main.
+          # The later push to the external preview repo never uses this
+          # credential anyway - it authenticates with its own explicit
+          # TESTING_REPO_TOKEN embedded in that push's URL, so there's
+          # nothing to gain security-wise from stripping this one early.
+
+      - name: Merge current main so the preview isn't stale
+        run: |
+          git fetch origin main
+          git config user.name "Spartans Hub Preview"
+          git config user.email "preview-deploy@spartanshub.spartanrobotics.org"
+          if ! git merge origin/main --no-edit; then
+            echo "::error::'${{ inputs.branch }}' does not merge cleanly with the current main - resolve the conflict on that branch (or update it against main) before requesting a preview."
+            exit 1
+          fi
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -66,8 +81,6 @@ jobs:
             exit 1
           fi
 
-          git config user.name "Spartans Hub Preview"
-          git config user.email "preview-deploy@spartanshub.spartanrobotics.org"
           git add package.json package-lock.json svelte.config.js
           if ! git diff --cached --quiet; then
             git commit -m "Configure Vercel edit preview"
