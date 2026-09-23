@@ -247,6 +247,23 @@ describe('Slack Hub assistant', () => {
     ]);
   });
 
+  it('handles eight earlier thread messages and retries a temporary Gemini outage', async () => {
+    const messages = Array.from({ length: 8 }, (_, index) => ({
+      role: index % 2 ? 'assistant' : 'user', text: `Turn ${index + 1}`
+    }));
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 503 })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({
+        candidates: [{ content: { parts: [{ text: 'The answer follows the thread.' }] } }]
+      }) });
+    const answer = await askGeminiAboutHub('And then?', snapshot, {
+      apiKey: 'test-secret', fetchImpl, threadMessages: messages, retryDelayMs: 0
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(fetchImpl.mock.calls[0][1].body).contents).toHaveLength(9);
+    expect(answer).toBe('The answer follows the thread.');
+  });
+
   it('reads only messages before the current Slack event', async () => {
     const replies = vi.fn().mockResolvedValue({ ok: true, messages: [
       { ts: '1.0', user: 'U1', text: '<@U971> What is AutoCAM?' },
@@ -733,6 +750,17 @@ describe('Slack Hub assistant', () => {
       fetchImpl: async () => ({ ok: false, status: 400, json: async () => ({ error: { status: 'INVALID_ARGUMENT' } }) })
     });
     expect(postMessage.mock.calls[0][0].text).toContain('API request-format fix');
+  });
+
+  it('reports a persistent upstream outage after bounded retries', async () => {
+    const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
+    const fetchImpl = vi.fn().mockResolvedValue({ ok: false, status: 503, json: async () => ({ error: { status: 'UNAVAILABLE' } }) });
+    await handleHubAppMention({ channel: 'C1', ts: '1.0', text: '<@U971> explain a robot mechanism' }, {
+      supa: supabaseForStatus(), slack: { chat: { postMessage } }, apiKey: 'test-secret', fetchImpl,
+      retryDelayMs: 0
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    expect(postMessage.mock.calls[0][0].text).toContain('HTTP 503');
   });
 
   it('reports assignment completion and submitted entries for a team without Gemini', async () => {

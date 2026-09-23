@@ -773,6 +773,25 @@ async function reviewAnswer(question, answer, { apiKey, model, fetchImpl, roster
   catch { throw new Error('Gemini relevance review returned invalid JSON'); }
 }
 
+async function fetchGeminiWithRetry(fetchImpl, url, request, retryDelayMs = 400) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const response = await fetchImpl(url, request);
+      if (![408, 500, 502, 503, 504].includes(response.status) || attempt === 2) return response;
+      console.warn('Retrying temporary Gemini response', { status: response.status, attempt: attempt + 1 });
+    } catch (error) {
+      if (error?.name === 'AbortError' || request.signal?.aborted) throw error;
+      if (attempt === 2) {
+        const networkError = new Error('Gemini connection failed after retries');
+        networkError.geminiReason = 'network';
+        throw networkError;
+      }
+      console.warn('Retrying Gemini connection', { attempt: attempt + 1 });
+    }
+    await new Promise((resolve) => setTimeout(resolve, retryDelayMs * (attempt + 1)));
+  }
+}
+
 export async function askGeminiAboutHub(question, snapshot, options = {}) {
   const apiKey = options.apiKey ?? env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('GEMINI_API_KEY is not configured');
@@ -801,7 +820,7 @@ export async function askGeminiAboutHub(question, snapshot, options = {}) {
   try {
     for (let round = 0; round <= MAX_TOOL_ROUNDS; round += 1) {
       const offerDataTool = canQueryHubData && round < MAX_TOOL_ROUNDS;
-      const response = await fetchImpl(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+      const response = await fetchGeminiWithRetry(fetchImpl, `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
         method: 'POST',
         headers: {
           'x-goog-api-key': apiKey,
@@ -821,7 +840,7 @@ export async function askGeminiAboutHub(question, snapshot, options = {}) {
           }
         }),
         signal: controller.signal
-      });
+      }, options.retryDelayMs ?? 400);
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
         const providerStatus = String(payload?.error?.status || '').toUpperCase();
@@ -838,6 +857,8 @@ export async function askGeminiAboutHub(question, snapshot, options = {}) {
           reason = 'quota';
         } else if ([400, 422].includes(response.status)) {
           reason = 'request';
+        } else if (response.status >= 500 || response.status === 408) {
+          reason = 'upstream';
         }
         const error = new Error(`Gemini request failed (${response.status}${providerStatus ? ` ${providerStatus}` : ''})`);
         error.geminiReason = reason;
@@ -928,6 +949,12 @@ function geminiFailureReply(error) {
   }
   if (error?.geminiReason === 'empty') {
     return 'Gemini returned no answer for this question. Please try again or ask a more specific question.';
+  }
+  if (error?.geminiReason === 'upstream') {
+    return `Gemini is temporarily unavailable (HTTP ${error.httpStatus}) after several attempts. Please try again shortly.`;
+  }
+  if (error?.geminiReason === 'network') {
+    return 'The Hub server could not connect to Gemini after several attempts. Please try again shortly.';
   }
   return 'I could not reach the Hub question-answering service. Try `@Spartans Hub /status`, or ask again shortly.';
 }
