@@ -1,6 +1,7 @@
 import { env } from '$env/dynamic/private';
 import { getFileContent, listDirectory, createBranch, putFile, createPullRequest } from '$lib/server/github_repo.js';
 import { queryHubDataToolDeclaration, executeHubDataQuery } from '$lib/server/hub_data_query.js';
+import { queueEditPreview } from '$lib/server/edit_preview.js';
 
 // The GitHub token lives in Supabase Vault, not process env - see the
 // get_app_secret migration and the conversation that led to it (a token
@@ -234,6 +235,21 @@ export async function draftCodeChangePr(description, options = {}) {
       head: branch,
       base: 'main'
     });
+    if (options.previewContext?.slackChannel && options.previewContext?.slackThreadTs) {
+      try {
+        await queueEditPreview({
+          supa,
+          fetchImpl,
+          githubToken,
+          prNumber: pr.number,
+          branch,
+          slackChannel: options.previewContext.slackChannel,
+          slackThreadTs: options.previewContext.slackThreadTs
+        });
+      } catch (error) {
+        console.error('Could not queue edit preview follow-up', error?.message || error);
+      }
+    }
     return { prUrl: pr.url, prNumber: pr.number, summary: summary || 'Opened a draft pull request for this change.' };
   }
 

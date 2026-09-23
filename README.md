@@ -961,7 +961,9 @@ AutoCAM's own code (engine, Drive watcher, `camJobs.js`, its components) is
   branch to refresh that preview; it requires the `TESTING_REPO_TOKEN` repo
   secret configured by an organization admin. It is separate from the
   canonical Cloud Run deployment and is never updated automatically by a PR
-  or push.
+  or push. Once an authorized Slack `/edit` request opens its unmerged PR,
+  the app dispatches that same workflow and a two-minute cron sweep posts its
+  Vercel result back into the original Slack thread.
 - **Vision GPU worker**: use the bare-metal `vision-runner.service` and
   `vision/qwen/qwen.service` on NVIDIA DGX Spark; no Docker installation is
   required. Qwen binds only to `127.0.0.1:8000`, with explicit CUDA placement

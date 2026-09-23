@@ -1010,7 +1010,12 @@ export async function handleHubAppMention(event, dependencies = {}) {
       text = 'Only a Change Lead can ask me to draft a code change.';
     } else {
       try {
-        const result = await draftCodeChangePr(parseCodeChangeRequest(question), { ...dependencies, supa, requesterName: actorProfile.full_name || null });
+        const result = await draftCodeChangePr(parseCodeChangeRequest(question), {
+          ...dependencies,
+          supa,
+          requesterName: actorProfile.full_name || null,
+          previewContext: { slackChannel: event.channel, slackThreadTs: event.thread_ts || event.ts }
+        });
         // Real bug: Gemini's own summary text described a change in
         // completed past tense ("I have updated the login screen...")
         // even on a run where it never called write_file and no PR was
