@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { claimSlackEvent, completeSlackEvent, failSlackEvent, isHubAssistantThread, recordSlackAssistantQuestion, readSlackAssistantThread } from './slack_event_receipts.js';
+import { claimSlackEvent, completeSlackEvent, failSlackEvent, recordSlackAssistantQuestion, readSlackAssistantThread } from './slack_event_receipts.js';
 
 function queryResult(result) {
   const query = {
@@ -103,14 +103,5 @@ describe('Slack event receipts', () => {
       'Original topic', 'Original answer', 'Later question', 'Later answer'
     ]);
     expect(root.eq).toHaveBeenCalledWith('event_type', 'app_mention');
-  });
-
-  it('recognizes only a receipt-backed assistant thread', async () => {
-    const query = queryResult({ error: null, data: { event_id: 'Ev-root' } });
-    const client = { from: vi.fn(() => query) };
-    await expect(isHubAssistantThread(client, 'C1', '1.0')).resolves.toBe(true);
-    expect(query.eq).toHaveBeenCalledWith('event_type', 'app_mention');
-    expect(query.eq).toHaveBeenCalledWith('channel_id', 'C1');
-    expect(query.eq).toHaveBeenCalledWith('event_ts', '1.0');
   });
 });

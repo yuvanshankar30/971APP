@@ -86,11 +86,11 @@ requester/rejector visibility. General live-data tools are not offered to an
 unlinked or disabled Slack account.
 
 The assistant responds to direct mentions in every conversation where the bot
-is a member. A human can continue the conversation without another mention by
-replying inside a thread that began with an app mention. Other ambient messages
-and unrelated threads are ignored. Slack membership remains the access
-boundary. Replies to a mention in an existing thread remain in that thread;
-channel-level mentions start one threaded reply beneath the mention.
+is a member. Every follow-up must mention `@Spartans Hub`, including replies
+in an existing assistant thread. Unmentioned messages are ignored. Slack
+membership remains the access boundary. Replies to a mention in an existing
+thread remain in that thread; channel-level mentions start one threaded reply
+beneath the mention.
 
 ## Required runtime configuration
 
@@ -108,16 +108,17 @@ channel-level mentions start one threaded reply beneath the mention.
 In the Slack app configuration at `api.slack.com/apps`:
 
 1. Set the app and bot display name to `Spartans Hub`.
-2. Under **OAuth & Permissions**, add the bot scopes `app_mentions:read` and
-   `channels:history`. Add `groups:history` too if the assistant is used in
-   private channels. Keep the existing `chat:write` scope used to post replies.
+2. Under **OAuth & Permissions**, add the bot scope `app_mentions:read` and
+   keep the existing `chat:write` scope used to post replies. The optional
+   `channels:history` and `groups:history` scopes let the bot recover context
+   from older public- and private-channel threads, respectively.
 3. Reinstall the app to the workspace if Slack requests it after the scope
    change.
 4. Under **Event Subscriptions**, enable events and set the request URL to
    `https://spartanshub.spartanrobotics.org/api/971bot/slack/events`.
-5. Subscribe to the bot events `app_mention` and `message.channels`. Subscribe
-   to `message.groups` too if private-channel thread follow-ups are required,
-   while retaining existing reaction subscriptions.
+5. Subscribe to the bot event `app_mention`, while retaining existing reaction
+   subscriptions. `message.channels` and `message.groups` are not needed for
+   targeted assistant replies.
 6. Invite the app to each channel where direct-mention access is wanted.
 
 Gemini 3.5 Flash tool replies include the matching function-call ID so the
@@ -130,15 +131,11 @@ times before the bot reports the safe failure category. The thread-context
 window has no special failure at eight messages.
 
 The endpoint verifies Slack request signatures, ignores bot-authored messages,
-and accepts ordinary messages only when their root timestamp matches a durable
-assistant mention receipt. This lets thread follow-ups work without allowing
-the bot to answer general channel chatter. Both mentioned and unmentioned Hub
-feature follow-ups use saved receipt context, with `conversations.replies` as
-a fallback for older threads. New thread memory does not depend on a history
-scope; keep `channels:history` (and `groups:history` for private channels) for
-that fallback. It
-deduplicates Slack retries through the service-role-only
-`slack_event_receipts` table, and replies in the mention thread. Failed
+and handles only direct app mentions. Mentioned Hub feature follow-ups use
+saved receipt context, with `conversations.replies` as a fallback for older
+threads when the relevant history scope is available. New thread memory does
+not depend on a history scope. The endpoint deduplicates Slack retries through
+the service-role-only `slack_event_receipts` table, and replies in the mention thread. Failed
 deliveries are marked retryable; completed or in-progress event IDs cannot
 double-post from another server instance. Gemini has a 60-second request
 timeout; if Slack retries while a reply is still processing, the durable
