@@ -90,6 +90,11 @@ function supabaseForAssignments({ admin = true } = {}) {
     permissions: ['DATA_SCOUT_MEMBER'], general_role: 'member', purchasing_role: 'basic',
     team_role: 'Other', frc_team: '9584', task_general_categories: ['Competition']
   };
+  const arnavProfile = {
+    id: 'u-arnav', full_name: 'Arnav Gathani', role: 'member', banned: false,
+    permissions: [], general_role: 'member', purchasing_role: 'basic',
+    team_role: 'Mechanical Member', frc_team: '971'
+  };
   const tables = {
     scout_match_assignments: [
       { scouting_type: 'data', match_key: '2026cc_qm1', team_key: 'frc971', assigned_user: 'u-requester', completed_at: null },
@@ -98,7 +103,12 @@ function supabaseForAssignments({ admin = true } = {}) {
     scout_pit_assignments: [
       { event_key: '2026cc', team_key: 'frc971', assigned_user: 'u-other', completed_at: null }
     ],
-    scout_prescout_assignments: []
+    scout_prescout_assignments: [],
+    purchasing: [
+      { name: 'Rejected private prototype', project_id: 'Secret Prototype', vendor: 'Example', requester: 'Arnav Gathani', status: 'rejected', approved: false, approver: 'Someone Else', created_at: '2026-09-21T18:00:00Z' },
+      { name: '1/4-20 rivet nuts', project_id: '2026 Robot', vendor: 'McMaster', requester: 'Arnav Gathani', status: 'pending', approved: false, created_at: '2026-09-20T18:00:00Z' },
+      { name: 'Older bearings', project_id: 'Practice Bot', vendor: 'REV', requester: 'Arnav Gathani', status: 'ordered', approved: true, created_at: '2026-09-10T18:00:00Z' }
+    ]
   };
   return {
     from: (table) => {
@@ -110,6 +120,7 @@ function supabaseForAssignments({ admin = true } = {}) {
         is: (key, value) => { filters[key] = value; return query; },
         like: (key, value) => { filters[key] = value; return query; },
         in: (key, value) => { filters[`${key}In`] = value; return query; },
+        order: () => query,
         limit: () => query,
         maybeSingle: async () => result(),
         then: (resolve, reject) => Promise.resolve(result()).then(resolve, reject)
@@ -122,10 +133,10 @@ function supabaseForAssignments({ admin = true } = {}) {
         }
         if (table === 'user_profiles' && filters.slack_user_id) return { data: profile, error: null };
         if (table === 'user_profiles' && filters.idIn) {
-          return { data: [profile, otherProfile]
+          return { data: [profile, otherProfile, arnavProfile]
             .filter((row) => filters.idIn.includes(row.id)), error: null };
         }
-        if (table === 'user_profiles') return { data: [profile, otherProfile], error: null };
+        if (table === 'user_profiles') return { data: [profile, otherProfile, arnavProfile], error: null };
         if (table === 'roster_entries') {
           return { data: admin ? [{ key: { key_name: 'Scouting Admin' } }] : [], error: null };
         }
@@ -133,6 +144,7 @@ function supabaseForAssignments({ admin = true } = {}) {
         if (filters.event_key) rows = rows.filter((row) => row.event_key === filters.event_key);
         if (filters.match_key) rows = rows.filter((row) => row.match_key?.startsWith(filters.match_key.replace('%', '')));
         if (filters.assigned_user) rows = rows.filter((row) => row.assigned_user === filters.assigned_user);
+        if (filters.requester) rows = rows.filter((row) => row.requester === filters.requester);
         return { data: rows, error: null, count: rows.length };
       }
       return query;
@@ -200,7 +212,7 @@ describe('Slack Hub assistant', () => {
     expect(answer).toContain('<https://example.test/madtown|Madtown event>');
   });
 
-  it('answers a general math question without invoking web search, but still offers the data tool', async () => {
+  it('answers a general math question without offering live Hub data to an unlinked Slack user', async () => {
     const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
     const fetchImpl = vi.fn().mockResolvedValue({
       ok: true,
@@ -213,7 +225,24 @@ describe('Slack Hub assistant', () => {
       fetchImpl
     });
     const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
-    expect(body.tools).toEqual([{ function_declarations: [expect.objectContaining({ name: 'query_hub_data' })] }]);
+    expect(body.tools).toBeUndefined();
+    expect(postMessage.mock.calls[0][0].text).toBe('2');
+  });
+
+  it('offers the allowlisted live-data tool to a linked active Hub user', async () => {
+    const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: '2' }] } }] })
+    });
+    await handleHubAppMention({ channel: 'C1', user: 'U-ADMIN', ts: '1.0', text: '<@U971> what is 1+1?' }, {
+      supa: supabaseForAssignments({ admin: true }),
+      slack: { chat: { postMessage } },
+      apiKey: 'test-secret',
+      fetchImpl
+    });
+    const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    expect(body.tools[0].function_declarations[0].name).toBe('query_hub_data');
     expect(postMessage.mock.calls[0][0].text).toBe('2');
   });
 
@@ -228,7 +257,38 @@ describe('Slack Hub assistant', () => {
     });
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(postMessage.mock.calls[0][0].text).toContain('/jprog/settings');
-    expect(postMessage.mock.calls[0][0].text).toContain('Sheet editor');
+    expect(postMessage.mock.calls[0][0].text).toContain('*Settings — JProg*');
+  });
+
+  it('answers an authorized named-person purchasing-history question locally', async () => {
+    const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
+    const fetchImpl = vi.fn();
+    await handleHubAppMention({
+      channel: 'C1', user: 'U-ADMIN', ts: '1.0',
+      text: "<@U971> what was Arnav Gathani's last purchasing request?"
+    }, {
+      supa: supabaseForAssignments({ admin: true }),
+      slack: { chat: { postMessage } },
+      apiKey: 'test-secret',
+      fetchImpl
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(postMessage.mock.calls[0][0].text).toContain("Arnav Gathani's latest purchasing request");
+    expect(postMessage.mock.calls[0][0].text).toContain('1/4-20 rivet nuts');
+    expect(postMessage.mock.calls[0][0].text).not.toContain('Rejected private prototype');
+    expect(postMessage.mock.calls[0][0].text).not.toContain('Older bearings');
+  });
+
+  it('blocks ordinary members from reading another person’s purchasing history', async () => {
+    const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
+    await handleHubAppMention({
+      channel: 'C1', user: 'U-MEMBER', ts: '1.0',
+      text: "<@U971> what was Arnav Gathani's last purchasing request?"
+    }, {
+      supa: supabaseForAssignments({ admin: false }),
+      slack: { chat: { postMessage } }
+    });
+    expect(postMessage.mock.calls[0][0].text).toContain('require Purchasing Admin access');
   });
 
   it('never offers the data tool alongside Google Search', async () => {

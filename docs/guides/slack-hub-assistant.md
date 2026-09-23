@@ -60,6 +60,13 @@ workflows, and distinctions such as EPA versus OPR versus Scout Power. These
 answers include the exact route and are deterministic; the detailed product map
 is never included in a Gemini or Google Search request. Update the catalog in
 the same change whenever a user-facing route, subtab, or workflow changes.
+Subtab names resolve independently (for example, `Accuracy` resolves to EPA);
+generic names shared by multiple parents prompt for the parent tab rather than
+guessing. Named-person purchasing-history questions also stay local. A linked
+user may read their own latest request; reading someone else's requires
+`VIEW_PURCHASING_ADMIN`, and rejected rows follow the Purchasing page's
+requester/rejector visibility. General live-data tools are not offered to an
+unlinked or disabled Slack account.
 
 The assistant responds to direct mentions in every conversation where the bot
 is a member. A human can continue the conversation without another mention by

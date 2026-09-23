@@ -20,11 +20,23 @@ describe('Slack Hub feature knowledge', () => {
   });
 
   it('explains JProg screens, output, and exact routes', () => {
-    const answer = answerHubFeatureQuestion('Where are the JProg settings and sheet editor?');
+    const answer = answerHubFeatureQuestion('Where are the JProg settings?');
     expect(answer).toContain('Manufacturing → JustinProg');
     expect(answer).toContain('/jprog/settings');
-    expect(answer).toContain('/jprog/sheets/{sheet id}');
-    expect(answer).toContain('JustinProgOutput/YYYYMMDD');
+    expect(answer).toContain('*Settings — JProg*');
+  });
+
+  it('answers a uniquely named subtab even when the parent tab is omitted', () => {
+    const answer = answerHubFeatureQuestion('What does the Accuracy subtab show?');
+    expect(answer).toContain('*Accuracy — EPA*');
+    expect(answer).toContain('chronological back-test');
+    expect(answer).toContain('Competition → EPA → Accuracy');
+  });
+
+  it('uses the named parent to disambiguate generic subtabs', () => {
+    const answer = answerHubFeatureQuestion('Where is the Jobs tab inside Fusion AutoCAM?');
+    expect(answer).toContain('*Jobs — Fusion AutoCAM*');
+    expect(answer).toContain('queued, running, completed, and failed work');
   });
 
   it('lists navigation without sending a broad tab question to a model', () => {
