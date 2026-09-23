@@ -32,7 +32,7 @@
   // Appearance / customization
   let header_tabs = null; // array structure stored in DB
   let dashboard_layout = 'grid';
-  let login_screen_style = 'legacy';
+  let login_screen_style = 'modern';
   let show_purchasing_line_totals = true;
   let newFolderName = '';
   let addTabKey = '';
@@ -238,7 +238,7 @@
         // load appearance settings if present
         header_tabs = user.header_tabs || null;
         dashboard_layout = user.dashboard_layout || 'grid';
-        login_screen_style = user.login_screen_style || 'legacy';
+        login_screen_style = user.login_screen_style || 'modern';
         show_purchasing_line_totals = user.show_purchasing_line_totals !== false;
         // Sync this browser's cache so the signed-out screen (which can't
         // read user_profiles before auth) picks up the account's saved
@@ -349,7 +349,7 @@
         if (refreshed) {
           header_tabs = refreshed.header_tabs || null;
           dashboard_layout = refreshed.dashboard_layout || 'grid';
-          login_screen_style = refreshed.login_screen_style || 'legacy';
+          login_screen_style = refreshed.login_screen_style || 'modern';
           show_purchasing_line_totals = refreshed.show_purchasing_line_totals !== false;
         }
       } catch (e) {

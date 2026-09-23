@@ -1,5 +1,7 @@
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
+  import { slide, fade } from 'svelte/transition';
+  import { cubicOut } from 'svelte/easing';
   import { supabase, getAuthHeader } from '$lib/supabase.js';
   import { initAuth, userStore, signOut, authReady as authReadyStore, user as authUserStore } from '$lib/stores/auth.js';
   import { LogIn, UserPlus, Mail, Lock, User, Shield, CheckCircle, AlertCircle, LogOut, Users, GripVertical, X, Plus, LayoutGrid, ClipboardCheck, Factory, ShoppingCart, ListChecks, ListOrdered, Target, Box, Trophy } from 'lucide-svelte';
@@ -253,6 +255,23 @@
     await persistDashboardSections([...rawVisibleKeys, key]);
   }
   let authMode = 'login'; // 'login', 'register', or 'forgot'
+
+  // Sliding underline indicator for the modern login screen's Sign In /
+  // Register tabs (see .ml-tabs below) - measured from the real button
+  // elements rather than assuming equal widths, since "Sign In" and
+  // "Register" aren't the same length.
+  let mlLoginTabEl;
+  let mlRegisterTabEl;
+  let mlIndicatorX = 0;
+  let mlIndicatorW = 0;
+  async function updateMlIndicator() {
+    await tick();
+    const el = authMode === 'register' ? mlRegisterTabEl : mlLoginTabEl;
+    if (!el) return;
+    mlIndicatorX = el.offsetLeft;
+    mlIndicatorW = el.offsetWidth;
+  }
+  $: authMode, updateMlIndicator();
   let formData = {
     email: '',
     password: '',
@@ -500,7 +519,13 @@
     }, 5000);
     const currentMatchTimer = setInterval(() => { if (user && competitionMode) loadMatchAlliances(); }, 60_000);
     loadCompetitionMode();
-    return () => { clearTimeout(profileWaitTimer); clearInterval(currentMatchTimer); unsub?.(); unsubAuthUser?.(); unsubReady?.(); uninit?.(); };
+    // Keeps the Sign In / Register sliding indicator (see updateMlIndicator)
+    // aligned if the viewport crosses the login screen's phone breakpoint
+    // while open - e.g. rotating a phone, or resizing a devtools viewport
+    // during QA - rather than leaving it sized for whichever width it last
+    // measured at.
+    window.addEventListener('resize', updateMlIndicator);
+    return () => { clearTimeout(profileWaitTimer); clearInterval(currentMatchTimer); unsub?.(); unsubAuthUser?.(); unsubReady?.(); uninit?.(); window.removeEventListener('resize', updateMlIndicator); };
   });
 
   $: if (user) profileWaitExpired = false;
@@ -657,8 +682,11 @@
     <p>Loading...</p>
   </div>
 {:else if user}
-  <!-- User Dashboard -->
-  <div class="dashboard-container">
+  <!-- User Dashboard. transition:fade (not just in:) so this also fades
+       out if the branch above ever swaps back (e.g. a sign-out that
+       resolves before navigation completes), matching the fade-out on the
+       login screens below instead of a one-sided smooth-in/hard-out feel. -->
+  <div class="dashboard-container" transition:fade={{ duration: 240 }}>
     <div class="user-welcome">
       <div class="user-welcome-text">
         <h2>Welcome back, {user.full_name || user.email}!</h2>
@@ -1037,8 +1065,9 @@
     {/if}
   </div>
 {:else if $loginScreenStyle === 'modern'}
-  <!-- Authentication Forms: Modern (split-hero) -->
-  <div class="ml-hero-split">
+  <!-- Authentication Forms: Modern (split-hero). transition:fade so signing
+       in crossfades into the dashboard above instead of hard-cutting. -->
+  <div class="ml-hero-split" transition:fade={{ duration: 240 }}>
     <div class="ml-brand-panel">
       <div class="ml-brand-inner">
         <span class="ml-eyebrow">FRC Team 971 &amp; 9584</span>
@@ -1079,28 +1108,40 @@
           </p>
         {:else}
           <div class="ml-tabs">
-            <button class:active={authMode === 'login'} on:click={() => { authMode = 'login'; resetForm(); }}>
+            <button bind:this={mlLoginTabEl} class:active={authMode === 'login'} on:click={() => { authMode = 'login'; resetForm(); }}>
               <LogIn size={16} /> Sign In
             </button>
-            <button class:active={authMode === 'register'} on:click={() => { authMode = 'register'; resetForm(); }}>
+            <button bind:this={mlRegisterTabEl} class:active={authMode === 'register'} on:click={() => { authMode = 'register'; resetForm(); }}>
               <UserPlus size={16} /> Register
             </button>
+            <span class="ml-tab-indicator" style="transform: translateX({mlIndicatorX}px); width: {mlIndicatorW}px;"></span>
           </div>
           <form on:submit|preventDefault={handleAuth}>
             {#if authMode === 'register'}
-              <label class="ml-field">
-                <span><User size={15} /> Full Name</span>
-                <input type="text" bind:value={formData.name} placeholder="Enter your full name" required />
-              </label>
-              <label class="ml-field">
-                <span><Users size={15} /> Team Affiliation</span>
-                <select bind:value={formData.frc_team} required>
-                  <option value="" disabled>Select your team...</option>
-                  <option value={FRC_TEAMS.TEAM_971}>Team 971</option>
-                  <option value={FRC_TEAMS.TEAM_9584}>Team 9584</option>
-                  <option value={FRC_TEAMS.MENTOR}>Mentor</option>
-                </select>
-              </label>
+              <!-- Two nested transitions, not one: a bare height slide makes
+                   the fields "pop" in at full opacity the instant there's
+                   room for them, which is the mechanical/robotic part - the
+                   inner fade staggers slightly after the outer slide starts
+                   (in) and finishes well before it stops collapsing (out),
+                   so content visibly fades rather than getting revealed or
+                   squashed like a blind opening/closing. -->
+              <div class="ml-register-fields" transition:slide={{ duration: 320, easing: cubicOut }}>
+                <div class="ml-register-fields-inner" in:fade={{ duration: 240, delay: 90, easing: cubicOut }} out:fade={{ duration: 140, easing: cubicOut }}>
+                  <label class="ml-field">
+                    <span><User size={15} /> Full Name</span>
+                    <input type="text" bind:value={formData.name} placeholder="Enter your full name" required />
+                  </label>
+                  <label class="ml-field">
+                    <span><Users size={15} /> Team Affiliation</span>
+                    <select bind:value={formData.frc_team} required>
+                      <option value="" disabled>Select your team...</option>
+                      <option value={FRC_TEAMS.TEAM_971}>Team 971</option>
+                      <option value={FRC_TEAMS.TEAM_9584}>Team 9584</option>
+                      <option value={FRC_TEAMS.MENTOR}>Mentor</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
             {/if}
             <label class="ml-field">
               <span><Mail size={15} /> Email</span>
@@ -1141,19 +1182,31 @@
             <button type="submit" class="ml-btn" disabled={authLoading}>
               {#if authLoading}
                 <div class="loading-spinner small"></div>
-              {:else if authMode === 'login'}
-                <LogIn size={18} />
               {:else}
-                <UserPlus size={18} />
+                <!-- key: crossfades the icon+label together on mode switch
+                     instead of "Sign In" hard-cutting to "Create Account". -->
+                {#key authMode}
+                  <span class="ml-btn-label" in:fade={{ duration: 160, delay: 120 }} out:fade={{ duration: 120 }}>
+                    {#if authMode === 'login'}
+                      <LogIn size={18} />
+                    {:else}
+                      <UserPlus size={18} />
+                    {/if}
+                    {authMode === 'login' ? 'Sign In' : 'Create Account'}
+                  </span>
+                {/key}
               {/if}
-              {authMode === 'login' ? 'Sign In' : 'Create Account'}
             </button>
           </form>
           <p class="ml-footnote">
-            {authMode === 'login' ? "Don't have an account?" : 'Already have an account?'}
-            <button class="link-btn" on:click={switchMode}>
-              {authMode === 'login' ? 'Register here' : 'Sign in here'}
-            </button>
+            {#key authMode}
+              <span class="ml-footnote-inner" in:fade={{ duration: 180, delay: 90 }} out:fade={{ duration: 120 }}>
+                {authMode === 'login' ? "Don't have an account?" : 'Already have an account?'}
+                <button class="link-btn" on:click={switchMode}>
+                  {authMode === 'login' ? 'Register here' : 'Sign in here'}
+                </button>
+              </span>
+            {/key}
           </p>
         {/if}
 
@@ -1171,8 +1224,9 @@
     </div>
   </div>
 {:else}
-  <!-- Authentication Forms: Legacy -->
-  <div class="auth-container" style="min-height:60vh">
+  <!-- Authentication Forms: Legacy. transition:fade so signing in crossfades
+       into the dashboard above instead of hard-cutting. -->
+  <div class="auth-container" style="min-height:60vh" transition:fade={{ duration: 240 }}>
     <div class="auth-card">      <div class="auth-header">
         <div class="brand">
           <span class="brand-mark lg" aria-hidden="true"></span>
@@ -1389,27 +1443,69 @@
      styles below (same component, so no scoping issue), and defines its
      own ml-* classes for the layout so nothing collides. ===== */
   .ml-hero-split {
-    max-width: 1040px;
-    margin: var(--space-8) auto;
+    /* Full-bleed: escape the centered <main> column (capped at
+       --page-max-width) the same way Home/Manufacturing already do, so the
+       hero actually fills the screen instead of floating as a card in the
+       middle of a lot of empty page. Safe from the page-wide horizontal
+       scroll that trick can otherwise cause - body has overflow-x: hidden
+       as a guard (see app.css). No header/footer render on this signed-out
+       page, so 100vh is the whole screen, not an estimate. */
+    width: 100vw;
+    margin-left: calc(50% - 50vw);
+    margin-right: calc(50% - 50vw);
     display: grid;
     grid-template-columns: 1.15fr 1fr;
-    min-height: 560px;
-    border: 1px solid var(--border);
-    border-radius: 18px;
-    overflow: hidden;
+    min-height: 100vh;
   }
   @media (max-width: 900px) {
-    .ml-hero-split { grid-template-columns: 1fr; min-height: auto; margin: var(--space-4) auto; }
+    .ml-hero-split { grid-template-columns: 1fr; min-height: auto; }
+  }
+
+  /* Phone: everything above was sized (padding via vw/clamp, big type) for
+     the desktop split-hero, where the two halves share a big viewport. Once
+     it's a single stacked column on a narrow screen, those same clamps
+     floor out at their desktop-scale minimums - a 48px wordmark plus 48px
+     of padding above AND below it, then the same again for the form panel,
+     pushes the actual Sign In button several screens down before a phone
+     visitor sees it at all. Everything below is a deliberate second pass,
+     not a fallback: smaller type, tighter padding, a shallower brand panel,
+     so the form is reachable almost immediately. */
+  @media (max-width: 640px) {
+    .ml-brand-panel { padding: 2.25rem 1.5rem 1.75rem; }
+    .ml-mesh { filter: blur(40px); }
+    .ml-brand-inner { max-width: none; }
+    .ml-eyebrow { font-size: 0.68rem; margin-bottom: var(--space-3); }
+    .ml-word { font-size: 2.5rem; }
+    .ml-form-panel { padding: 1.75rem 1.25rem 2.75rem; }
+    .ml-tabs { gap: var(--space-5); margin-bottom: var(--space-6); }
+    .ml-tabs button { font-size: 1.05rem; padding-bottom: 0.8rem; }
+    .ml-field { margin-bottom: var(--space-5); }
+    .ml-field input, .ml-field select { font-size: 1.05rem; padding: 0.7rem 0.1rem; }
+    .ml-btn { padding: 1rem; font-size: 1.05rem; }
   }
 
   .ml-brand-panel {
+    /* Deliberately NOT var(--secondary)/var(--primary): those two flip which
+       one is dark between Modern Dark and the other two themes (Modern Dark
+       makes --secondary a light gray), which would fight the override below.
+       --color-white/--color-black/--brand-gold-soft don't have that problem
+       (Modern Dark keeps the same warm --color-black as Modern Light), so
+       this default is the light-theme look (Legacy and Modern Light share
+       it, each in their own palette); Modern Dark overrides to the dark
+       gradient right after. */
     position: relative;
-    background: var(--secondary);
-    color: var(--primary);
+    background: linear-gradient(165deg, var(--color-white) 0%, var(--brand-gold-soft) 90%);
+    color: var(--color-black);
     display: flex;
     align-items: center;
-    padding: clamp(2.5rem, 6vw, 5rem);
+    justify-content: center;
+    text-align: center;
+    padding: clamp(3rem, 7vw, 6.5rem);
     overflow: hidden;
+  }
+  :root[data-theme="modern-dark"] .ml-brand-panel {
+    background: linear-gradient(165deg, #14110b 0%, #1f1608 75%);
+    color: #f7f4ed;
   }
   .ml-mesh {
     position: absolute;
@@ -1430,86 +1526,128 @@
   .ml-brand-inner { position: relative; z-index: 1; max-width: 480px; }
   .ml-eyebrow {
     font-family: var(--font-mono-stack, monospace);
-    font-size: 0.72rem;
-    letter-spacing: 0.14em;
+    font-size: 0.95rem;
+    font-weight: 700;
+    letter-spacing: 0.18em;
     text-transform: uppercase;
-    opacity: 0.6;
+    color: var(--accent);
+    opacity: 1;
     display: block;
-    margin-bottom: var(--space-4);
+    margin-bottom: var(--space-5);
   }
   .ml-word {
-    /* Explicit color: the global h1,h2,h3,h4 rule sets color:var(--secondary),
-       which is also this panel's own background - without overriding it here
-       the wordmark would be nearly invisible (same color as behind it). */
-    color: var(--primary);
+    /* Inherit from .ml-brand-panel rather than repeating var(--secondary) -
+       the global h1,h2,h3,h4 rule sets color:var(--secondary), which flips
+       per theme (see .ml-brand-panel) and would fight its own background. */
+    color: inherit;
     font-family: var(--font-display, inherit);
     font-weight: 800;
-    font-size: clamp(2.6rem, 5.5vw, 4.25rem);
+    font-size: clamp(3rem, 6.5vw, 5.5rem);
     line-height: 0.96;
     letter-spacing: -0.02em;
     margin: 0;
   }
 
   .ml-form-panel {
+    /* var(--primary) is the one side of this screen that SHOULD track the
+       active theme (white/off-white in Legacy and Modern Light, near-black
+       in Modern Dark) - it's what makes the form legible and on-theme in
+       all three, in contrast to the brand panel's fixed color above. */
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: clamp(2rem, 4vw, 3.5rem);
+    padding: clamp(2rem, 5vw, 4.5rem);
     background: var(--primary);
   }
-  .ml-form-card { width: 100%; max-width: 360px; }
+  .ml-form-card { width: 100%; max-width: 480px; }
 
   .ml-tabs {
+    position: relative;
     display: flex;
-    gap: var(--space-6);
-    margin-bottom: var(--space-7);
+    gap: var(--space-7);
+    margin-bottom: var(--space-8);
     border-bottom: 1px solid var(--border);
   }
   .ml-tabs button {
     display: flex;
     align-items: center;
-    gap: 0.35rem;
+    gap: 0.5rem;
     background: none;
     border: none;
-    padding: 0 0 0.85rem;
+    padding: 0 0 1.1rem;
     font-family: var(--font-display, inherit);
     font-weight: 600;
-    font-size: 1rem;
+    font-size: 1.3rem;
     color: var(--neutral-500);
     cursor: pointer;
-    border-bottom: 2px solid transparent;
-    margin-bottom: -1px;
+    transition: color 0.2s ease;
   }
   .ml-tabs button.active {
     color: var(--secondary);
-    border-bottom-color: var(--accent);
   }
+  /* Slides between Sign In / Register instead of the underline just
+     jumping - width/position come from the real button elements (see
+     updateMlIndicator in the script) since the two labels aren't the same
+     length, so a fixed 50/50 split wouldn't line up under either one. */
+  .ml-tab-indicator {
+    position: absolute;
+    left: 0;
+    bottom: -1px;
+    height: 3px;
+    background: var(--accent);
+    /* Same duration/curve as the register-fields slide (svelte/easing's
+       cubicOut, cubic-bezier(0.215,0.61,0.355,1)) so the two simultaneous
+       animations feel like one motion instead of drifting out of sync. */
+    transition: transform 0.28s cubic-bezier(0.215, 0.61, 0.355, 1), width 0.28s cubic-bezier(0.215, 0.61, 0.355, 1);
+  }
+
+  .ml-register-fields-inner { display: block; }
 
   .ml-field {
     display: flex;
     flex-direction: column;
-    gap: 0.4rem;
-    margin-bottom: var(--space-6);
+    gap: 0.55rem;
+    margin-bottom: var(--space-7);
   }
   .ml-field span {
     display: flex;
     align-items: center;
-    gap: 0.35rem;
-    font-size: 0.72rem;
+    gap: 0.4rem;
+    font-size: 0.85rem;
     text-transform: uppercase;
     letter-spacing: 0.07em;
     color: var(--neutral-500);
     font-family: var(--font-mono-stack, monospace);
   }
   .ml-field input, .ml-field select {
+    box-sizing: border-box;
+    width: 100%;
     border: none;
-    border-bottom: 1.5px solid var(--border);
+    border-bottom: 2px solid var(--border);
     background: transparent;
-    padding: 0.6rem 0.1rem;
-    font-size: 1rem;
+    padding: 0.9rem 0.15rem;
+    font-size: 1.25rem;
     font-family: inherit;
     color: var(--secondary);
     transition: border-color 0.15s ease;
+  }
+  .ml-field select {
+    /* Team Affiliation was the one field that visibly "snapped" instead of
+       fading in with the rest of the Register fields - a plain <select>
+       keeps its native chrome (its own reserved arrow gutter, and a
+       browser-dependent intrinsic height that can differ slightly from a
+       same-CSS <input>), so it can settle into its final box a frame late
+       and read as a jump right as the slide/fade finishes. Stripping that
+       chrome and drawing our own arrow makes it size exactly like the
+       input above it, with nothing left to resettle mid-animation. */
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%236b7280%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.15rem center;
+    background-size: 0.7em auto;
+    padding-right: 1.5rem;
   }
   .ml-field input:focus, .ml-field select:focus {
     outline: none;
@@ -1517,8 +1655,8 @@
   }
   .ml-help {
     display: block;
-    margin-top: var(--space-1);
-    font-size: var(--font-xs);
+    margin-top: var(--space-2);
+    font-size: var(--font-sm, 0.85rem);
     color: var(--neutral-500);
   }
   .ml-forgot-link {
@@ -1526,8 +1664,8 @@
     border: none;
     color: var(--neutral-500);
     cursor: pointer;
-    font-size: var(--font-xs);
-    padding: var(--space-1) 0 0;
+    font-size: var(--font-sm, 0.85rem);
+    padding: var(--space-2) 0 0;
     display: block;
     text-decoration: underline;
   }
@@ -1538,29 +1676,35 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 0.5rem;
-    background: var(--secondary);
-    color: var(--primary);
+    gap: 0.6rem;
+    background: var(--accent);
+    color: var(--on-primary, var(--color-black));
     border: none;
     border-radius: 999px;
-    padding: 0.95rem;
+    padding: 1.25rem;
     font-family: var(--font-display, inherit);
-    font-weight: 600;
-    font-size: 0.95rem;
+    font-weight: 700;
+    font-size: 1.15rem;
     cursor: pointer;
-    margin-top: var(--space-4);
-    margin-bottom: var(--space-4);
+    margin-top: var(--space-5);
+    margin-bottom: var(--space-5);
     transition: transform 0.15s ease, opacity 0.15s ease;
   }
   .ml-btn:hover { transform: translateY(-1px); opacity: 0.9; }
   .ml-btn:disabled { cursor: default; transform: none; opacity: 0.7; }
+  .ml-btn-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
 
   .ml-footnote {
     text-align: center;
-    font-size: 0.82rem;
+    font-size: 1rem;
     color: var(--neutral-500);
-    margin: var(--space-6) 0 0;
+    margin: var(--space-7) 0 0;
   }
+  .ml-footnote-inner { display: inline-block; }
 
   .ml-bottom {
     display: flex;

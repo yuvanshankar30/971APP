@@ -8,7 +8,13 @@ import { browser } from '$app/environment';
 // here whenever the account's saved value is known (see +page.svelte and
 // profile/+page.svelte).
 const STORAGE_KEY = 'login-screen-style';
-const DEFAULT_STYLE = 'legacy';
+// The split-hero redesign is now the default for anyone without an explicit
+// saved preference (new signed-out browsers, and new accounts - see the
+// matching `|| 'modern'` fallbacks in profile/+page.svelte). Existing
+// accounts with a saved 'legacy' value keep seeing it until they change it
+// themselves in Profile > Login Screen, same as any other per-account
+// preference - this only changes what an unset preference resolves to.
+const DEFAULT_STYLE = 'modern';
 
 export const LOGIN_SCREEN_STYLES = ['legacy', 'modern'];
 
