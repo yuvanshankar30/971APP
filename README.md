@@ -967,10 +967,10 @@ AutoCAM's own code (engine, Drive watcher, `camJobs.js`, its components) is
   files remain an optional artifact, not an instruction to install Docker.
   Schedule large-model inference and detector training separately until actual
   peak memory/throughput are measured; see `vision/runner/README.md`.
-- **No GitHub Actions CI** - "the GitHub workflow" for this project is the
-  branch/PR process below, not a `.github/workflows/*.yml` file (none
-  exists). The closest thing to a CI check is the Cloud Build trigger
-  itself, which runs on real pushes to `spartanshub`'s `main`.
+- **GitHub Actions CI**: `.github/workflows/test.yml` runs `npm ci` and the
+  full test suite for PRs to `main`, with Pacific time and inert public
+  Supabase values for tests that initialize the client at import time.
+  Cloud Build still handles deployment on pushes to `spartanshub`'s `main`.
 
 ## Contribution workflow
 
