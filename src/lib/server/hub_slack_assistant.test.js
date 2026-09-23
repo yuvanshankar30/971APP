@@ -1,4 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
+// Real bug: draftCodeChangePr's own summary text can describe a change in
+// completed past tense ("I have updated the login screen...") even when it
+// never called write_file and returned prUrl: null - handleHubAppMention
+// must never trust that narrative and pass it through unqualified. Mocked
+// here so the test can force exactly that "hallucinated success" shape
+// without depending on a real Gemini call.
+const draftCodeChangePr = vi.fn();
+vi.mock('$lib/server/hub_change_request.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, draftCodeChangePr: (...args) => draftCodeChangePr(...args) };
+});
 import {
   askGeminiAboutHub,
   assignmentEventKey,
@@ -614,6 +625,38 @@ describe('Slack Hub assistant', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(postMessage.mock.calls[0][0].text).toContain('curl -fsSL');
     expect(postMessage.mock.calls[0][0].text).toContain('<@U-YUVAN>');
+  });
+
+  it('never lets a code-change summary read as a completed edit when no PR was opened', async () => {
+    draftCodeChangePr.mockResolvedValueOnce({
+      prUrl: null,
+      summary: 'I have updated the login screen (src/routes/+page.svelte) to remove the spartan helmet icon from the modern login view.'
+    });
+    const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
+    await handleHubAppMention({ channel: 'C1', user: 'U-ADMIN', ts: '1.0', text: '<@U971> /edit remove the spartan helmet from the login screen' }, {
+      supa: supabaseForAssignments({ admin: true }),
+      slack: { chat: { postMessage } }
+    });
+    const text = postMessage.mock.calls[0][0].text;
+    expect(text).toContain('I did not make any changes');
+    expect(text).toContain('no pull request was opened');
+    expect(text).not.toMatch(/\*Unmerged pull request:\*/);
+  });
+
+  it('links the real PR when a code change was actually staged', async () => {
+    draftCodeChangePr.mockResolvedValueOnce({
+      prUrl: 'https://github.com/frc971/spartanshub/pull/1234',
+      prNumber: 1234,
+      summary: 'Removed the spartan helmet span from the login hero panel.'
+    });
+    const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
+    await handleHubAppMention({ channel: 'C1', user: 'U-ADMIN', ts: '1.0', text: '<@U971> /edit remove the spartan helmet from the login screen' }, {
+      supa: supabaseForAssignments({ admin: true }),
+      slack: { chat: { postMessage } }
+    });
+    const text = postMessage.mock.calls[0][0].text;
+    expect(text).toContain('<https://github.com/frc971/spartanshub/pull/1234|#1234>');
+    expect(text).not.toContain('I did not make any changes');
   });
 
   it('reads all assignment types for admins and only the requester rows for members', async () => {

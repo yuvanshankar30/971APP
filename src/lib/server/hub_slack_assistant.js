@@ -1011,9 +1011,18 @@ export async function handleHubAppMention(event, dependencies = {}) {
     } else {
       try {
         const result = await draftCodeChangePr(parseCodeChangeRequest(question), { ...dependencies, supa, requesterName: actorProfile.full_name || null });
+        // Real bug: Gemini's own summary text described a change in
+        // completed past tense ("I have updated the login screen...")
+        // even on a run where it never called write_file and no PR was
+        // opened - the model's own narrative is not trustworthy proof
+        // that anything happened. result.prUrl (a real GitHub API
+        // response) is the only fact that can ever be trusted here, so
+        // the "no PR" case is now unconditionally, unambiguously framed
+        // as nothing having happened regardless of what the summary
+        // text itself claims.
         text = result.prUrl
-          ? `${safeSlackText(result.summary)}\n\n*Unmerged pull request:* <${result.prUrl}|#${result.prNumber}>`
-          : safeSlackText(result.summary);
+          ? `${safeSlackText(result.summary)}\n\n*Unmerged pull request:* <${result.prUrl}|#${result.prNumber}> - please review before merging; no tests were run against this change locally (CI will run the suite on the PR).`
+          : `I did not make any changes - no pull request was opened.\n${safeSlackText(result.summary)}`;
       } catch (error) {
         console.error('Code-change request failed', error?.message || error);
         text = `I couldn't draft that change: ${safeSlackText(error?.message || 'unknown error')}`;
