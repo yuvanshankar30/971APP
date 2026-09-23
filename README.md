@@ -579,7 +579,9 @@ file: update its diagram alongside this section, not separately from it.
   and the current `gemini-3.5-flash` default, with higher reasoning effort,
   a longer response window, and a relevance check that retries an off-topic
   draft. Gemini function calls carry matching reply IDs, and a failed review
-  no longer discards an otherwise completed answer. Google Search grounding is available for public facts and people
+  no longer discards an otherwise completed answer. Transient Gemini server or
+  connection errors are retried before a specific safe failure reply. Google
+  Search grounding is available for public facts and people
   absent from the Hub roster. The same bot
   also answers ordinary general-knowledge, math, science, robotics, and
   programming questions without pretending those answers came from Hub; the

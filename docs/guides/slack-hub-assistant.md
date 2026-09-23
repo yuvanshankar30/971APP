@@ -123,6 +123,9 @@ model can continue after a Hub data lookup. The answer review uses a smaller
 thinking budget; if only that review fails, the completed answer is still
 posted. Request-format errors and empty model replies have distinct safe
 messages to make failures diagnosable without exposing provider details.
+Temporary Gemini HTTP 5xx/408 and connection failures are retried up to three
+times before the bot reports the safe failure category. The thread-context
+window has no special failure at eight messages.
 
 The endpoint verifies Slack request signatures, ignores bot-authored messages,
 and accepts ordinary messages only when their root timestamp matches a durable
