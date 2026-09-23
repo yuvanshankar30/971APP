@@ -99,7 +99,15 @@ async function callGemini(fetchImpl, apiKey, model, systemPrompt, contents, tool
         system_instruction: { parts: [{ text: systemPrompt }] },
         contents,
         tools: [{ function_declarations: tools }],
-        generationConfig: { maxOutputTokens: 2000 }
+        // Real bug this fixes: the system prompt requires write_file to
+        // carry a FILE'S COMPLETE new content, not a diff - 2000 tokens
+        // (borrowed from the much shorter Slack-reply-sized Q&A fallback)
+        // wasn't remotely enough to rewrite an ordinary real source file
+        // (e.g. +page.svelte here is 2700+ lines), so Gemini correctly
+        // refused rather than emit a truncated/corrupted file, and every
+        // request against a file of normal size silently failed with "could
+        // not find a safe way to make that change."
+        generationConfig: { maxOutputTokens: 32768 }
       }),
       signal: controller.signal
     });
@@ -166,7 +174,9 @@ export async function draftCodeChangePr(description, options = {}) {
   const model = options.model ?? env.GEMINI_MODEL ?? 'gemini-3.5-flash-lite';
   const fetchImpl = options.fetchImpl || fetch;
   const supa = options.supa || null;
-  const timeoutMs = options.timeoutMs ?? 45000;
+  // Generous room for a large full-file rewrite (see maxOutputTokens above)
+  // to actually finish generating within one round, not just start it.
+  const timeoutMs = options.timeoutMs ?? 90000;
   const githubToken = options.githubToken ?? await fetchGithubToken(supa);
 
   const trimmedDescription = String(description || '').trim();
