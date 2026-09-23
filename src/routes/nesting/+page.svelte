@@ -821,7 +821,7 @@
   .tool-order-row { display: grid; grid-template-columns: minmax(3rem, 1fr) minmax(4rem, auto) auto; align-items: center; gap: 8px; padding: 7px 8px; border: 1px solid var(--border); border-radius: 4px; }
   .tool-order-row span { color: var(--text-muted); font-size: .78rem; }
   .tool-order-row > div { display: flex; gap: 4px; }
-  .tool-order-row-fixed { grid-template-columns: minmax(3rem, 1fr) auto; background: var(--surface-secondary, #f2f4f7); cursor: default; }
+  .tool-order-row-fixed { grid-template-columns: minmax(3rem, 1fr) auto; background: var(--surface-2); cursor: default; }
   .tool-order-row-fixed span { font-style: italic; }
   .workspace-body aside .placement-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .workspace-body aside .placement-actions .btn { min-width: 0; width: 100%; min-height: 38px; padding-inline: 8px; white-space: nowrap; font-size: .82rem; justify-content: center; }
