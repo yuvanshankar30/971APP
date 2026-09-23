@@ -760,7 +760,8 @@ async function reviewAnswer(question, answer, { apiKey, model, fetchImpl, roster
       generationConfig: {
         responseMimeType: 'application/json',
         responseSchema: { type: 'OBJECT', properties: { relevant: { type: 'BOOLEAN' }, problem: { type: 'STRING' } }, required: ['relevant', 'problem'] },
-        maxOutputTokens: 1024
+        maxOutputTokens: 2048,
+        ...(/^gemini-3\./.test(model) ? { thinkingConfig: { thinkingLevel: 'MINIMAL' } } : {})
       }
     }),
     signal
@@ -784,7 +785,7 @@ export async function askGeminiAboutHub(question, snapshot, options = {}) {
   const controller = new AbortController();
   // A Gemini request can outlast Slack's three-second acknowledgement window.
   // The durable event receipt prevents Slack's retry from posting a second reply.
-  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 60000);
+  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 120000);
   // Google Search grounding and the internal data tool stay mutually exclusive
   // (see shouldUseGoogleSearch) so a generated web-search query can never be
   // built from live Hub/scouting rows. The data tool needs a Supabase client;
@@ -815,7 +816,7 @@ export async function askGeminiAboutHub(question, snapshot, options = {}) {
               ? { tools: [{ function_declarations: [queryHubDataToolDeclaration()] }] }
               : {}),
           generationConfig: {
-            maxOutputTokens: 4096,
+            maxOutputTokens: 8192,
             ...(/^gemini-3\./.test(model) ? { thinkingConfig: { thinkingLevel: 'HIGH' } } : {})
           }
         }),
@@ -835,6 +836,8 @@ export async function askGeminiAboutHub(question, snapshot, options = {}) {
           reason = 'model';
         } else if (response.status === 429 || providerStatus === 'RESOURCE_EXHAUSTED') {
           reason = 'quota';
+        } else if ([400, 422].includes(response.status)) {
+          reason = 'request';
         }
         const error = new Error(`Gemini request failed (${response.status}${providerStatus ? ` ${providerStatus}` : ''})`);
         error.geminiReason = reason;
@@ -851,7 +854,10 @@ export async function askGeminiAboutHub(question, snapshot, options = {}) {
           const result = call?.name === 'query_hub_data'
             ? await executeHubDataQuery(supa, call.args)
             : { error: `Unknown tool "${call?.name}"` };
-          functionResponseParts.push({ functionResponse: { name: call.name, response: result } });
+          functionResponseParts.push({ functionResponse: {
+            name: call.name, response: result,
+            ...(call.id ? { id: call.id } : {})
+          } });
         }
         contents.push({ role: 'user', parts: functionResponseParts });
         continue;
@@ -860,7 +866,11 @@ export async function askGeminiAboutHub(question, snapshot, options = {}) {
         .filter((part) => !part.thought && typeof part.text === 'string')
         .map((part) => part.text)
         .join(''));
-      if (!answer) throw new Error('Gemini returned an empty answer');
+      if (!answer) {
+        const error = new Error('Gemini returned an empty answer');
+        error.geminiReason = 'empty';
+        throw error;
+      }
       const sources = [...new Map((payload?.candidates?.[0]?.groundingMetadata?.groundingChunks || [])
         .map((chunk) => chunk?.web)
         .filter((web) => web?.uri)
@@ -871,7 +881,13 @@ export async function askGeminiAboutHub(question, snapshot, options = {}) {
       }
       if (options.verifyRelevance) {
         const reviewOptions = { apiKey, model, fetchImpl, rosterMember: options.rosterMember, threadMessages: options.threadMessages, signal: controller.signal };
-        const review = await reviewAnswer(question, answer, reviewOptions);
+        let review;
+        try {
+          review = await reviewAnswer(question, answer, reviewOptions);
+        } catch (error) {
+          console.warn('Gemini relevance review unavailable; using completed answer', error?.message || error);
+          return answer;
+        }
         if (!review.relevant) {
           const corrected = await askGeminiAboutHub(question, snapshot, {
             ...options,
@@ -906,6 +922,12 @@ function geminiFailureReply(error) {
   }
   if (error?.geminiReason === 'quota') {
     return 'The Hub question-answering service has exhausted its Gemini quota. Try again later or use `@Spartans Hub /status`.';
+  }
+  if (error?.geminiReason === 'request') {
+    return 'Gemini rejected this question request. The Hub assistant needs an API request-format fix; please report this to an administrator.';
+  }
+  if (error?.geminiReason === 'empty') {
+    return 'Gemini returned no answer for this question. Please try again or ask a more specific question.';
   }
   return 'I could not reach the Hub question-answering service. Try `@Spartans Hub /status`, or ask again shortly.';
 }

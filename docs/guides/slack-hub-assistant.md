@@ -118,6 +118,12 @@ In the Slack app configuration at `api.slack.com/apps`:
    while retaining existing reaction subscriptions.
 6. Invite the app to each channel where direct-mention access is wanted.
 
+Gemini 3.5 Flash tool replies include the matching function-call ID so the
+model can continue after a Hub data lookup. The answer review uses a smaller
+thinking budget; if only that review fails, the completed answer is still
+posted. Request-format errors and empty model replies have distinct safe
+messages to make failures diagnosable without exposing provider details.
+
 The endpoint verifies Slack request signatures, ignores bot-authored messages,
 and accepts ordinary messages only when their root timestamp matches a durable
 assistant mention receipt. This lets thread follow-ups work without allowing
