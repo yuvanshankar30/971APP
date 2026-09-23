@@ -85,4 +85,16 @@ jobs:
           if ! git diff --cached --quiet; then
             git commit -m "Configure Vercel edit preview"
           fi
+
+          # Real bug this fixes: actions/checkout (run with its default
+          # persist-credentials: true, needed by the merge-main step above)
+          # configures git to inject GitHub's own ambient job token as an
+          # HTTP extraheader for *any* github.com request for the rest of
+          # this job. That ambient credential silently took priority over
+          # the explicit token embedded in the push URL below, so this was
+          # actually always pushing as "github-actions[bot]" - which has no
+          # access to the external preview repo at all - regardless of
+          # whether TESTING_REPO_TOKEN itself was valid. Clearing it here,
+          # scoped to just this one push, lets the URL's own token be used.
+          git config --unset-all http.https://github.com/.extraheader || true
           git push --force "https://x-access-token:${TESTING_REPO_TOKEN}@github.com/yuvanshankar30/971APP.git" HEAD:refs/heads/main
