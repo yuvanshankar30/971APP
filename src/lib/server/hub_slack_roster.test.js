@@ -3,7 +3,8 @@ import { identifyRosterQuestion, loadHubRoster } from './hub_slack_roster.js';
 
 const members = [
   { name: 'Alex Smith', teamRole: 'Mechanical Member', roles: ['Manufacturing Roles: Router Lead'] },
-  { name: 'Casey Scout', teamRole: 'Competition Lead', roles: ['Scouting Roles: Match Scout'] }
+  { name: 'Casey Scout', teamRole: 'Competition Lead', roles: ['Scouting Roles: Match Scout'] },
+  { name: 'Jordan Lee', teamRole: 'Mechanical Member', roles: ['Manufacturing Roles: Lead'] }
 ];
 
 describe('Hub Slack roster lookup', () => {
@@ -22,6 +23,7 @@ describe('Hub Slack roster lookup', () => {
   it('uses the roster for named and role questions and searches only after a miss', () => {
     expect(identifyRosterQuestion('What do you think of Alex Smith?', members).members).toEqual([members[0]]);
     expect(identifyRosterQuestion('Who is the router lead?', members).members).toEqual([members[0]]);
+    expect(identifyRosterQuestion('Who is manufacturing lead?', members).members).toEqual([members[2]]);
     expect(identifyRosterQuestion('Who is Morgan Lee?', members)).toMatchObject({ aboutPerson: true, members: [], searchName: 'morgan lee' });
     expect(identifyRosterQuestion('Is Morgan Lee a good engineer?', members)).toMatchObject({ aboutPerson: true, members: [], searchName: 'Morgan Lee' });
     expect(identifyRosterQuestion('How does a Haas TL-1 work?', members).aboutPerson).toBe(false);

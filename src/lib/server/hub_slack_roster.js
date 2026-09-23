@@ -32,22 +32,26 @@ export function identifyRosterQuestion(question, members) {
     const first = name.split(' ')[0];
     return first?.length >= 3 && new RegExp(`\\b${first}\\b`).test(text);
   });
-  if (named.length) return { aboutPerson: true, members: named, searchName: null };
+  if (named.length) return { aboutPerson: true, members: named, searchName: null, requestedRole: null };
 
   const roleQuestion = text.match(/\bwho (?:is|are) (?:the |our )?(.+?)(?: on (?:the )?team)?$/);
   if (roleQuestion) {
     const role = roleQuestion[1].replace(/\b(on|at) (?:spartans |spartan robotics|team 971|the hub).*$/, '').trim();
-    const roleWords = role.split(' ').filter((word) => word.length >= 3);
-    const matches = members.filter((member) => roleWords.length > 0 && [member.teamRole, ...member.roles]
-      .some((value) => roleWords.every((word) => normalize(value).includes(word))));
-    if (matches.length) return { aboutPerson: true, members: matches, searchName: null };
+    if (/\b(lead|captain|mentor|admin|scout|operator)\b/.test(role)) {
+      const matches = members.filter((member) => [member.teamRole, ...member.roles]
+        .some((value) => {
+          const label = normalize(value).replace(/\broles\b/g, '').replace(/\s+/g, ' ').trim();
+          return label === role || label.endsWith(` ${role}`);
+        }));
+      return { aboutPerson: true, members: matches, searchName: null, requestedRole: role };
+    }
   }
 
   const personPrompt = text.match(/\b(?:who is|who s|tell me about|what do you think of|what is your opinion of|opinion on)\s+(.+)$/);
-  if (personPrompt) return { aboutPerson: true, members: [], searchName: personPrompt[1] };
+  if (personPrompt) return { aboutPerson: true, members: [], searchName: personPrompt[1], requestedRole: null };
   const namedUnknown = String(question || '').match(/\b(?:[Ii]s|[Ww]as|[Dd]oes|[Dd]id|[Cc]an|[Cc]ould|[Ss]hould|[Ww]ould)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b/);
   if (namedUnknown && normalize(namedUnknown[1]) !== 'spartans hub') {
-    return { aboutPerson: true, members: [], searchName: namedUnknown[1] };
+    return { aboutPerson: true, members: [], searchName: namedUnknown[1], requestedRole: null };
   }
-  return { aboutPerson: false, members: [], searchName: null };
+  return { aboutPerson: false, members: [], searchName: null, requestedRole: null };
 }

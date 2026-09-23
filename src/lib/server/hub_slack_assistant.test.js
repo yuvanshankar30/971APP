@@ -3,6 +3,7 @@ import {
   askGeminiAboutHub,
   assignmentEventKey,
   fetchAdminProfileForSlackUser,
+  fetchSlackThreadMessages,
   fetchScoutingAssignmentsForSlackUser,
   fetchTeamReportSnapshot,
   formatAdminProfile,
@@ -137,8 +138,12 @@ function supabaseForAssignments({ admin = true } = {}) {
             .filter((row) => filters.idIn.includes(row.id)), error: null };
         }
         if (table === 'user_profiles') return { data: [profile, otherProfile, arnavProfile], error: null };
+        if (table === 'rosters') return { data: [{ id: 'r-manufacturing', name: 'Manufacturing Roles' }], error: null };
         if (table === 'roster_entries') {
-          return { data: admin ? [{ key: { key_name: 'Scouting Admin' } }] : [], error: null };
+          return { data: admin ? [
+            { key: { key_name: 'Scouting Admin' } },
+            { user_id: 'u-arnav', roster_id: 'r-manufacturing', key: { key_name: 'Lead' } }
+          ] : [], error: null };
         }
         let rows = [...(tables[table] || [])];
         if (filters.event_key) rows = rows.filter((row) => row.event_key === filters.event_key);
@@ -223,6 +228,53 @@ describe('Slack Hub assistant', () => {
     expect(answer).toContain('<https://example.test/madtown|Madtown event>');
   });
 
+  it('sends bounded earlier thread turns to Gemini in chronological order', async () => {
+    const messages = [
+      { role: 'user', text: 'Tell me about the router.' },
+      { role: 'assistant', text: 'The router cuts sheet material.' }
+    ];
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: 'It uses toolpaths.' }] } }] })
+    });
+    await askGeminiAboutHub('How does it work?', snapshot, {
+      apiKey: 'test-secret', fetchImpl, threadMessages: messages
+    });
+    const contents = JSON.parse(fetchImpl.mock.calls[0][1].body).contents;
+    expect(contents.map((item) => item.role)).toEqual(['user', 'model', 'user']);
+    expect(contents.map((item) => item.parts[0].text)).toEqual([
+      'Tell me about the router.', 'The router cuts sheet material.', 'How does it work?'
+    ]);
+  });
+
+  it('reads only messages before the current Slack event', async () => {
+    const replies = vi.fn().mockResolvedValue({ ok: true, messages: [
+      { ts: '1.0', user: 'U1', text: '<@U971> What is AutoCAM?' },
+      { ts: '2.0', bot_id: 'B1', text: 'It generates G-code.' },
+      { ts: '3.0', user: 'U1', text: 'How does it work?' },
+      { ts: '4.0', user: 'U2', text: 'A later message' }
+    ] });
+    const history = await fetchSlackThreadMessages({ conversations: { replies } }, {
+      channel: 'C1', thread_ts: '1.0', ts: '3.0'
+    });
+    expect(history).toEqual([
+      { role: 'user', text: 'What is AutoCAM?' },
+      { role: 'assistant', text: 'It generates G-code.' }
+    ]);
+  });
+
+  it('paginates long threads and remembers the most recent turns', async () => {
+    const replies = vi.fn()
+      .mockResolvedValueOnce({ ok: true, messages: [{ ts: '1.0', text: 'Old question' }], response_metadata: { next_cursor: 'next' } })
+      .mockResolvedValueOnce({ ok: true, messages: [{ ts: '8.0', text: 'Recent question' }, { ts: '9.0', bot_id: 'B1', text: 'Recent answer' }] });
+    const history = await fetchSlackThreadMessages({ conversations: { replies } }, {
+      channel: 'C1', thread_ts: '1.0', ts: '10.0'
+    });
+    expect(replies).toHaveBeenCalledTimes(2);
+    expect(replies.mock.calls[1][0].cursor).toBe('next');
+    expect(history.at(-1)).toEqual({ role: 'assistant', text: 'Recent answer' });
+  });
+
   it('revises an off-topic draft before returning it', async () => {
     const reply = (text) => ({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text }] } }] }) });
     const fetchImpl = vi.fn()
@@ -252,6 +304,70 @@ describe('Slack Hub assistant', () => {
     expect(body.system_instruction.parts[0].text).toContain('Competition Lead');
     expect(body.tools?.[0]?.google_search).toBeUndefined();
     expect(postMessage.mock.calls[0][0].text).toContain('Competition Lead');
+  });
+
+  it('answers who holds a manufacturing role directly from the Admin roster', async () => {
+    const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
+    const fetchImpl = vi.fn();
+    await handleHubAppMention({ channel: 'C1', user: 'U-ADMIN', ts: '1.0', text: '<@U971> Who is manufacturing lead?' }, {
+      supa: supabaseForAssignments({ admin: true }),
+      slack: { chat: { postMessage } }, apiKey: 'test-secret', fetchImpl
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(postMessage.mock.calls[0][0].text).toContain('Arnav Gathani');
+    expect(postMessage.mock.calls[0][0].text).toContain('Manufacturing Roles: Lead');
+  });
+
+  it('remembers a named person and the bot reply in a follow-up', async () => {
+    const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '3.0' });
+    const reply = (text) => ({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text }] } }] }) });
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(reply('Arnav is assigned as the Manufacturing Lead.'))
+      .mockResolvedValueOnce(reply(JSON.stringify({ relevant: true, problem: '' })));
+    await handleHubAppMention({ channel: 'C1', user: 'U-ADMIN', ts: '3.0', thread_ts: '1.0', text: 'What about his role?' }, {
+      supa: supabaseForAssignments({ admin: true }),
+      slack: { chat: { postMessage } }, apiKey: 'test-secret', fetchImpl,
+      threadMessages: [
+        { role: 'user', text: 'Tell me about Arnav Gathani.' },
+        { role: 'assistant', text: 'Arnav is on the manufacturing team.' }
+      ]
+    });
+    const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    expect(body.contents.map((item) => item.role)).toEqual(['user', 'model', 'user']);
+    expect(body.system_instruction.parts[0].text).toContain('Arnav Gathani');
+    expect(body.tools?.[0]?.google_search).toBeUndefined();
+    expect(postMessage.mock.calls[0][0].text).toContain('Manufacturing Lead');
+  });
+
+  it('uses the roster member from a prior role question without repeating the role list', async () => {
+    const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '3.0' });
+    const reply = (text) => ({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text }] } }] }) });
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(reply('The lead coordinates manufacturing work. That responsibility is an inference from the role.'))
+      .mockResolvedValueOnce(reply(JSON.stringify({ relevant: true, problem: '' })));
+    await handleHubAppMention({ channel: 'C1', user: 'U-ADMIN', ts: '3.0', thread_ts: '1.0', text: 'What does he do?' }, {
+      supa: supabaseForAssignments({ admin: true }),
+      slack: { chat: { postMessage } }, apiKey: 'test-secret', fetchImpl,
+      threadMessages: [
+        { role: 'user', text: 'Who is manufacturing lead?' },
+        { role: 'assistant', text: 'Arnav Gathani is the manufacturing lead.' }
+      ]
+    });
+    const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    expect(body.system_instruction.parts[0].text).toContain('Arnav Gathani');
+    expect(postMessage.mock.calls[0][0].text).toContain('coordinates manufacturing work');
+  });
+
+  it('asks for the subject when Slack thread history is unavailable', async () => {
+    const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '3.0' });
+    const fetchImpl = vi.fn();
+    await handleHubAppMention({ channel: 'C1', user: 'U-ADMIN', ts: '3.0', thread_ts: '1.0', text: 'What about his role?' }, {
+      supa: supabaseForAssignments({ admin: true }),
+      slack: { chat: { postMessage } }, apiKey: 'test-secret', fetchImpl,
+      threadMessages: []
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(postMessage.mock.calls[0][0].text).toContain('restate the person or topic');
   });
 
   it('offers Google Search after a person is absent from the roster', async () => {
@@ -683,7 +799,7 @@ describe('Slack Hub assistant', () => {
       apiKey: 'unused',
       fetchImpl
     });
-    expect(replies).toHaveBeenCalledWith({ channel: 'C1', ts: '1.0', limit: 30 });
+    expect(replies).toHaveBeenCalledWith({ channel: 'C1', ts: '1.0', limit: 100 });
     expect(fetchImpl).not.toHaveBeenCalled();
     const answer = postMessage.mock.calls[0][0].text;
     expect(answer).toContain('*EPA*');

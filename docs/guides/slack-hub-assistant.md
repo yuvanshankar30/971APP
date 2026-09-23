@@ -66,8 +66,12 @@ guessing. Feature and subtab answers include absolute, clickable Hub links;
 EPA subtabs and Fusion AutoCAM subtabs have deep links that open the requested
 screen. In an existing assistant thread, a related mention such as “what
 subtabs does it have?” resolves the most recently discussed known Hub feature
-from Slack history locally. Earlier thread text is not sent to Gemini or Google
-Search. Named-person purchasing-history questions also stay local. A linked
+from Slack history locally. Other follow-ups send up to eight earlier thread
+turns to Gemini, including the bot's replies, so references like “it” or
+“his role” retain their subject. Google Search requests do not include earlier
+thread turns. The bot checks the Admin-managed people and role rosters before
+feature routing, and answers role-holder questions directly from those records.
+Named-person purchasing-history questions also stay local. A linked
 user may read their own latest request; reading someone else's requires
 `VIEW_PURCHASING_ADMIN`, and rejected rows follow the Purchasing page's
 requester/rejector visibility. General live-data tools are not offered to an
@@ -87,9 +91,7 @@ channel-level mentions start one threaded reply beneath the mention.
   local development, place it in the gitignored `.env` file. For a deployed
   runtime, set it in that runtime's private environment-variable settings.
   Never prefix it with `PUBLIC_` or `VITE_`.
-- `GEMINI_MODEL` is optional and defaults to `gemini-3.5-flash-lite`. Google
-  limits Gemini 2.5 model access for new projects, so do not switch the default
-  back merely because the older model name is still documented.
+- `GEMINI_MODEL` is optional and defaults to `gemini-3.5-flash`.
 - No channel allowlist or channel environment variable is required. Add or
   remove the app from a Slack conversation to grant or revoke mention access.
 
@@ -119,7 +121,7 @@ feature follow-ups use `conversations.replies`, so `channels:history` (and
 deduplicates Slack retries through the service-role-only
 `slack_event_receipts` table, and replies in the mention thread. Failed
 deliveries are marked retryable; completed or in-progress event IDs cannot
-double-post from another server instance. Gemini has a 15-second request
+double-post from another server instance. Gemini has a 60-second request
 timeout; if Slack retries while a reply is still processing, the durable
 receipt acknowledges the duplicate without posting again. Credential, model,
 quota, and timeout failures produce distinct safe replies without including a

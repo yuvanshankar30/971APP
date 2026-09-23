@@ -560,8 +560,11 @@ file: update its diagram alongside this section, not separately from it.
   ask for the parent instead of guessing. Feature answers include absolute
   clickable Hub links, with deep links for EPA and Fusion AutoCAM subtabs.
   Related mentions in an existing Slack thread recover the last known Hub
-  feature locally from Slack history without forwarding earlier thread text to
-  Gemini or Google Search. Named-person purchasing-history
+  feature locally from Slack history. Other follow-ups pass up to eight earlier
+  thread messages to Gemini so references to prior questions and replies work;
+  web-grounded questions do not forward that history to Google Search. Person
+  and role questions check the Admin roster before feature routing, so "who is
+  manufacturing lead?" is answered from actual assignments. Named-person purchasing-history
   questions are also answered locally: users may read their own latest request,
   while another person's history requires `VIEW_PURCHASING_ADMIN`, and rejected
   rows retain the same requester/rejector visibility as the Purchasing page.
