@@ -72,7 +72,9 @@ replies, so references like “it” or “his role” retain their subject even
 Slack's thread-history API is unavailable. The bot records each directed
 question before answering and records its reply after Slack accepts it.
 Threads started before this storage was deployed still use Slack history as a
-fallback. Google Search requests do not include earlier
+fallback. If that older history is unavailable, the bot answers from the
+current question or asks which person or topic a reference means; it does not
+repeat a fixed history-error reply. Google Search requests do not include earlier
 thread turns. The bot checks the Admin-managed people and role rosters before
 feature routing, and answers role-holder questions directly from those records.
 Named-person purchasing-history questions also stay local. A linked
