@@ -563,7 +563,9 @@ file: update its diagram alongside this section, not separately from it.
   feature locally from private, durable assistant event receipts. Each directed
   question and posted reply is saved, including the original exchange, so
   follow-ups retain context across server instances even when Slack history is
-  unavailable. Older threads use Slack history as a fallback. Gemini receives
+  unavailable. Older threads use Slack history as a fallback; when that history
+  cannot be read, the bot handles the current question and asks for a missing
+  subject only when needed. Gemini receives
   the original exchange and recent messages to resolve references;
   web-grounded questions do not forward that history to Google Search. Person
   and role questions check the Admin roster before feature routing, so "who is

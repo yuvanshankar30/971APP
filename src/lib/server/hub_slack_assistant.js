@@ -954,8 +954,6 @@ export async function handleHubAppMention(event, dependencies = {}) {
   let text;
   if (!question) {
     text = 'Ask me about Spartans Hub, or use `@971hub /status` for live status and recent changes.';
-  } else if (event.thread_ts && !threadMessages.length && isFeatureFollowUp(question)) {
-    text = 'I could not read the earlier messages in this thread. Please restate the person or topic you mean.';
   } else if (isHubStatusRequest(question)) {
     text = formatHubStatus(snapshot);
   } else if (isTeamReportStatusRequest(question)) {
@@ -996,7 +994,7 @@ export async function handleHubAppMention(event, dependencies = {}) {
       } else {
         const useGoogleSearch = person.aboutPerson
           ? !person.members.length
-          : shouldUseGoogleSearch(question) && !(threadMessages.length && isFeatureFollowUp(question));
+          : shouldUseGoogleSearch(question) && !isFeatureFollowUp(question);
         const searchSubject = person.aboutPerson && !person.members.length && person.searchName
           && !question.toLowerCase().includes(String(person.searchName).toLowerCase())
           ? ` The person referred to is ${person.searchName}.` : '';

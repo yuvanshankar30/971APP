@@ -358,16 +358,20 @@ describe('Slack Hub assistant', () => {
     expect(postMessage.mock.calls[0][0].text).toContain('coordinates manufacturing work');
   });
 
-  it('asks for the subject when Slack thread history is unavailable', async () => {
+  it('handles a follow-up without older thread history without repeating the canned failure', async () => {
     const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '3.0' });
-    const fetchImpl = vi.fn();
+    const reply = (text) => ({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text }] } }] }) });
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(reply('Whose role do you mean?'))
+      .mockResolvedValueOnce(reply(JSON.stringify({ relevant: true, problem: '' })));
     await handleHubAppMention({ channel: 'C1', user: 'U-ADMIN', ts: '3.0', thread_ts: '1.0', text: 'What about his role?' }, {
       supa: supabaseForAssignments({ admin: true }),
       slack: { chat: { postMessage } }, apiKey: 'test-secret', fetchImpl,
       threadMessages: []
     });
-    expect(fetchImpl).not.toHaveBeenCalled();
-    expect(postMessage.mock.calls[0][0].text).toContain('restate the person or topic');
+    expect(fetchImpl).toHaveBeenCalled();
+    expect(JSON.parse(fetchImpl.mock.calls[0][1].body).tools?.[0]?.google_search).toBeUndefined();
+    expect(postMessage.mock.calls[0][0].text).toBe('Whose role do you mean?');
   });
 
   it('offers Google Search after a person is absent from the roster', async () => {
