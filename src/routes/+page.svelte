@@ -1070,8 +1070,9 @@
   <div class="ml-hero-split" transition:fade={{ duration: 240 }}>
     <div class="ml-brand-panel">
       <div class="ml-brand-inner">
-        <span class="ml-eyebrow">FRC Team 971 &amp; 9584</span>
-        <h1 class="ml-word">Spartans<br />Hub</h1>
+        <span class="ml-logo" aria-hidden="true"></span>
+        <span class="ml-eyebrow">Spartan Robotics</span>
+        <h1 class="ml-word">Spartans Hub</h1>
       </div>
       <div class="ml-mesh" aria-hidden="true"></div>
     </div>
@@ -1473,7 +1474,8 @@
   @media (max-width: 640px) {
     .ml-brand-panel { padding: 2.25rem 1.5rem 1.75rem; }
     .ml-mesh { filter: blur(40px); }
-    .ml-brand-inner { max-width: none; }
+    .ml-brand-inner { max-width: none; margin-top: 0; }
+    .ml-logo { width: 84px; height: 84px; margin-bottom: var(--space-4); }
     .ml-eyebrow { font-size: 0.68rem; margin-bottom: var(--space-3); }
     .ml-word { font-size: 2.5rem; }
     .ml-form-panel { padding: 1.75rem 1.25rem 2.75rem; }
@@ -1523,7 +1525,35 @@
     to { transform: translate(3%, -3%) scale(1.08); }
   }
 
-  .ml-brand-inner { position: relative; z-index: 1; max-width: 480px; }
+  .ml-brand-inner {
+    position: relative;
+    z-index: 1;
+    max-width: 640px;
+    /* The panel centers this whole block (logo + eyebrow + wordmark), but
+       the logo/eyebrow sitting above the wordmark pull the wordmark's own
+       midline below that center - shift the block up by roughly half the
+       logo+eyebrow's height so the "Spartans Hub" text itself, not the
+       group as a whole, lines up with the form panel's vertical center. */
+    margin-top: -6.5rem;
+  }
+  /* Same two pre-colored source PNGs as the header's .brand-mark (see
+     app.css) - light-theme variant (dark helmet) by default, since this
+     panel is a light cream/gold gradient there, swapped for the gold
+     variant under Modern Dark to match .ml-brand-panel's own dark-gradient
+     override right below. */
+  .ml-logo {
+    display: block;
+    width: 150px;
+    height: 150px;
+    margin: 0 auto var(--space-5);
+    background-image: url('/spartan-helmet-light.png');
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center;
+  }
+  :root[data-theme="modern-dark"] .ml-logo {
+    background-image: url('/spartan-helmet-dark.png');
+  }
   .ml-eyebrow {
     font-family: var(--font-mono-stack, monospace);
     font-size: 0.95rem;
@@ -1542,9 +1572,13 @@
     color: inherit;
     font-family: var(--font-display, inherit);
     font-weight: 800;
-    font-size: clamp(3rem, 6.5vw, 5.5rem);
-    line-height: 0.96;
+    /* One line now ("Spartans Hub", no <br/>), so this is sized to fit
+       within .ml-brand-inner's max-width instead of the old two-line
+       per-word sizing. */
+    font-size: clamp(2.2rem, 4.2vw, 3.8rem);
+    line-height: 1.05;
     letter-spacing: -0.02em;
+    white-space: nowrap;
     margin: 0;
   }
 
