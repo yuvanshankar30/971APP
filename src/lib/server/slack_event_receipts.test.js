@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { claimSlackEvent, completeSlackEvent, failSlackEvent, isHubAssistantThread } from './slack_event_receipts.js';
+import { claimSlackEvent, completeSlackEvent, failSlackEvent, isHubAssistantThread, recordSlackAssistantQuestion, readSlackAssistantThread } from './slack_event_receipts.js';
 
 function queryResult(result) {
   const query = {
@@ -7,6 +7,7 @@ function queryResult(result) {
     select: vi.fn(() => query),
     maybeSingle: vi.fn(async () => result),
     in: vi.fn(() => query),
+    order: vi.fn(() => query),
     limit: vi.fn(() => query),
     then: (resolve, reject) => Promise.resolve(result).then(resolve, reject)
   };
@@ -58,6 +59,50 @@ describe('Slack event receipts', () => {
     expect(table.update.mock.calls[0][0]).toMatchObject({ status: 'completed', last_error: null });
     expect(table.update.mock.calls[1][0].status).toBe('failed');
     expect(table.update.mock.calls[1][0].last_error).toHaveLength(500);
+  });
+
+  it('recalls the root question, replies, and an in-progress question in chronological order', async () => {
+    const { client, table } = supabase();
+    await recordSlackAssistantQuestion(client, 'Ev-current', { ts: '3.0', question: 'And then?' });
+    const current = table.update.mock.calls[0][0].last_error;
+    await completeSlackEvent(client, 'Ev-root', { ts: '1.0', question: '<@U1> Tell me about Alice', answer: 'Alice is the lead.' });
+    const completedRoot = table.update.mock.calls[1][0].last_error;
+    await completeSlackEvent(client, 'Ev-next', { ts: '2.0', question: 'What does she do?', answer: 'She leads manufacturing.' });
+    const completedNext = table.update.mock.calls[2][0].last_error;
+    const query = queryResult({ error: null, data: [
+      { last_error: current }, // current event is excluded by timestamp
+      { last_error: completedNext },
+      { last_error: completedRoot },
+      { last_error: 'old failure' }
+    ] });
+    const history = await readSlackAssistantThread({ from: () => query }, {
+      channel: 'C1', threadTs: '1.0', beforeTs: '3.0'
+    });
+    expect(history).toEqual([
+      { role: 'user', text: '<@U1> Tell me about Alice' },
+      { role: 'assistant', text: 'Alice is the lead.' },
+      { role: 'user', text: 'What does she do?' },
+      { role: 'assistant', text: 'She leads manufacturing.' }
+    ]);
+    expect(query.eq).toHaveBeenCalledWith('event_ts', '1.0');
+  });
+
+  it('retrieves the original exchange when a long thread fills the recent receipt window', async () => {
+    const { client, table } = supabase();
+    await completeSlackEvent(client, 'Ev-root', { ts: '1.0', question: 'Original topic', answer: 'Original answer' });
+    const rootContext = table.update.mock.calls[0][0].last_error;
+    await completeSlackEvent(client, 'Ev-later', { ts: '50.0', question: 'Later question', answer: 'Later answer' });
+    const laterContext = table.update.mock.calls[1][0].last_error;
+    const recent = queryResult({ error: null, data: [{ last_error: laterContext }] });
+    const root = queryResult({ error: null, data: { last_error: rootContext } });
+    const from = vi.fn().mockReturnValueOnce(recent).mockReturnValueOnce(root);
+    const history = await readSlackAssistantThread({ from }, {
+      channel: 'C1', threadTs: '1.0', beforeTs: '51.0'
+    });
+    expect(history.map((turn) => turn.text)).toEqual([
+      'Original topic', 'Original answer', 'Later question', 'Later answer'
+    ]);
+    expect(root.eq).toHaveBeenCalledWith('event_type', 'app_mention');
   });
 
   it('recognizes only a receipt-backed assistant thread', async () => {

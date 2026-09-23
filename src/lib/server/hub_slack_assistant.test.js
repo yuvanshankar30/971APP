@@ -806,4 +806,28 @@ describe('Slack Hub assistant', () => {
     expect(answer).toContain('https://spartanshub.spartanrobotics.org/epa?tab=accuracy');
     expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ thread_ts: '1.0' }));
   });
+
+  it('uses saved root context when Slack thread history is unavailable', async () => {
+    const base = supabaseForStatus();
+    const context = 'assistant_context_v1:' + JSON.stringify({
+      ts: '1.0', question: '<@U971> tell me about EPA', answer: '*EPA* — Competition → EPA'
+    });
+    const supa = { from: (table) => {
+      if (table !== 'slack_event_receipts') return base.from(table);
+      const query = {
+        select: () => query, eq: () => query, in: () => query,
+        order: () => query, limit: () => query,
+        then: (resolve) => Promise.resolve({ error: null, data: [{ last_error: context }] }).then(resolve)
+      };
+      return query;
+    } };
+    const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '3.0' });
+    const replies = vi.fn().mockRejectedValue(new Error('missing_scope'));
+    await handleHubAppMention({
+      channel: 'C1', ts: '2.0', thread_ts: '1.0', user: 'U1',
+      text: '<@U971> what subtabs does it have?'
+    }, { supa, slack: { chat: { postMessage }, conversations: { replies } } });
+    expect(replies).not.toHaveBeenCalled();
+    expect(postMessage.mock.calls[0][0].text).toContain('*EPA*');
+  });
 });

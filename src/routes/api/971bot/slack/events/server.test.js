@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { handleHubAppMention, getSupabase, claimSlackEvent, completeSlackEvent, failSlackEvent, isHubAssistantThread } = vi.hoisted(() => ({
+const { handleHubAppMention, getSupabase, claimSlackEvent, completeSlackEvent, failSlackEvent, isHubAssistantThread, recordSlackAssistantQuestion } = vi.hoisted(() => ({
   handleHubAppMention: vi.fn(),
   getSupabase: vi.fn(() => ({ name: 'test-supabase' })),
   claimSlackEvent: vi.fn(),
   completeSlackEvent: vi.fn(),
   failSlackEvent: vi.fn(),
-  isHubAssistantThread: vi.fn()
+  isHubAssistantThread: vi.fn(),
+  recordSlackAssistantQuestion: vi.fn()
 }));
 
 vi.mock('$lib/server/971bot', () => ({
@@ -20,7 +21,7 @@ vi.mock('$lib/server/971bot', () => ({
 vi.mock('$lib/server/planner_notifications.js', () => ({ handlePlannerReaction: vi.fn() }));
 vi.mock('$lib/server/slack_notifications.js', () => ({ handleP0BugAssignmentReaction: vi.fn() }));
 vi.mock('$lib/server/hub_slack_assistant.js', () => ({ handleHubAppMention }));
-vi.mock('$lib/server/slack_event_receipts.js', () => ({ claimSlackEvent, completeSlackEvent, failSlackEvent, isHubAssistantThread }));
+vi.mock('$lib/server/slack_event_receipts.js', () => ({ claimSlackEvent, completeSlackEvent, failSlackEvent, isHubAssistantThread, recordSlackAssistantQuestion }));
 
 const { POST } = await import('./+server.js');
 
@@ -34,11 +35,12 @@ function slackRequest(payload) {
 
 describe('Slack app mention events', () => {
   beforeEach(() => {
-    handleHubAppMention.mockReset().mockResolvedValue({ ok: true });
+    handleHubAppMention.mockReset().mockResolvedValue({ ok: true, text: 'Answer' });
     claimSlackEvent.mockReset().mockResolvedValue({ claimed: true, retried: false });
     completeSlackEvent.mockReset().mockResolvedValue(undefined);
     failSlackEvent.mockReset().mockResolvedValue(undefined);
     isHubAssistantThread.mockReset().mockResolvedValue(false);
+    recordSlackAssistantQuestion.mockReset().mockResolvedValue(undefined);
   });
 
   it('routes mentions from any channel where Slack delivers an app_mention event', async () => {
@@ -58,7 +60,12 @@ describe('Slack app mention events', () => {
     const response = await POST({ request: slackRequest({ type: 'event_callback', event_id: 'Ev-one', event }) });
     expect(response.status).toBe(200);
     expect(handleHubAppMention).toHaveBeenCalledWith(event, { supa: { name: 'test-supabase' } });
-    expect(completeSlackEvent).toHaveBeenCalledWith({ name: 'test-supabase' }, 'Ev-one');
+    expect(recordSlackAssistantQuestion).toHaveBeenCalledWith({ name: 'test-supabase' }, 'Ev-one', {
+      ts: '1.0', question: '<@U971> status'
+    });
+    expect(completeSlackEvent).toHaveBeenCalledWith({ name: 'test-supabase' }, 'Ev-one', {
+      ts: '1.0', question: '<@U971> status', answer: 'Answer'
+    });
     expect(await response.json()).toMatchObject({ ok: true, handled: true });
   });
 
@@ -95,6 +102,15 @@ describe('Slack app mention events', () => {
     expect(response.status).toBe(503);
     expect(handleHubAppMention).not.toHaveBeenCalled();
     expect(failSlackEvent).not.toHaveBeenCalled();
+  });
+
+  it('retries without answering if the incoming question cannot be saved', async () => {
+    recordSlackAssistantQuestion.mockRejectedValueOnce(new Error('storage unavailable'));
+    const event = { type: 'app_mention', channel: 'C1', ts: '4.5', text: '<@U971> remember this' };
+    const response = await POST({ request: slackRequest({ type: 'event_callback', event_id: 'Ev-memory-fail', event }) });
+    expect(response.status).toBe(503);
+    expect(handleHubAppMention).not.toHaveBeenCalled();
+    expect(failSlackEvent).toHaveBeenCalledWith({ name: 'test-supabase' }, 'Ev-memory-fail', expect.any(Error));
   });
 
   it('does not make an already-posted reply retryable when receipt completion fails', async () => {

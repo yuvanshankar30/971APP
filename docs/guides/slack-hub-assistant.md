@@ -66,9 +66,13 @@ guessing. Feature and subtab answers include absolute, clickable Hub links;
 EPA subtabs and Fusion AutoCAM subtabs have deep links that open the requested
 screen. In an existing assistant thread, a related mention such as “what
 subtabs does it have?” resolves the most recently discussed known Hub feature
-from Slack history locally. Other follow-ups send up to eight earlier thread
-turns to Gemini, including the bot's replies, so references like “it” or
-“his role” retain their subject. Google Search requests do not include earlier
+from private, durable assistant event receipts locally. Other follow-ups send
+the original exchange and recent thread turns to Gemini, including the bot's
+replies, so references like “it” or “his role” retain their subject even if
+Slack's thread-history API is unavailable. The bot records each directed
+question before answering and records its reply after Slack accepts it.
+Threads started before this storage was deployed still use Slack history as a
+fallback. Google Search requests do not include earlier
 thread turns. The bot checks the Admin-managed people and role rosters before
 feature routing, and answers role-holder questions directly from those records.
 Named-person purchasing-history questions also stay local. A linked
@@ -116,8 +120,10 @@ The endpoint verifies Slack request signatures, ignores bot-authored messages,
 and accepts ordinary messages only when their root timestamp matches a durable
 assistant mention receipt. This lets thread follow-ups work without allowing
 the bot to answer general channel chatter. Both mentioned and unmentioned Hub
-feature follow-ups use `conversations.replies`, so `channels:history` (and
-`groups:history` for private channels) must remain installed. It
+feature follow-ups use saved receipt context, with `conversations.replies` as
+a fallback for older threads. New thread memory does not depend on a history
+scope; keep `channels:history` (and `groups:history` for private channels) for
+that fallback. It
 deduplicates Slack retries through the service-role-only
 `slack_event_receipts` table, and replies in the mention thread. Failed
 deliveries are marked retryable; completed or in-progress event IDs cannot

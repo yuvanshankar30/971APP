@@ -560,8 +560,11 @@ file: update its diagram alongside this section, not separately from it.
   ask for the parent instead of guessing. Feature answers include absolute
   clickable Hub links, with deep links for EPA and Fusion AutoCAM subtabs.
   Related mentions in an existing Slack thread recover the last known Hub
-  feature locally from Slack history. Other follow-ups pass up to eight earlier
-  thread messages to Gemini so references to prior questions and replies work;
+  feature locally from private, durable assistant event receipts. Each directed
+  question and posted reply is saved, including the original exchange, so
+  follow-ups retain context across server instances even when Slack history is
+  unavailable. Older threads use Slack history as a fallback. Gemini receives
+  the original exchange and recent messages to resolve references;
   web-grounded questions do not forward that history to Google Search. Person
   and role questions check the Admin roster before feature routing, so "who is
   manufacturing lead?" is answered from actual assignments. Named-person purchasing-history
