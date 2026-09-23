@@ -206,6 +206,15 @@ export async function signOut() {
   const { error } = await supabase.auth.signOut();
   registerSpecialThemes([]);
   if (error) console.error('Error logging out:', error);
+  // Clear these synchronously rather than waiting on the SIGNED_OUT event
+  // from onAuthStateChange above - that event is real but its timing isn't
+  // guaranteed relative to whatever the caller does right after awaiting
+  // this (typically goto('/')), so a caller that navigates immediately
+  // could land on a page that still reads the old signed-in user for a
+  // beat. Setting both here makes "signed out" true the instant this
+  // resolves, no matter when the event actually arrives.
+  user.set(null);
+  userProfile.set(null);
 }
 
 // Back-compat alias for existing code that reads from "userStore"
