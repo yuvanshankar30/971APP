@@ -35,25 +35,24 @@ describe('defaultHeaderTabs', () => {
     expect(order).toEqual(['home', 'Manufacturing', 'Competition', 'CAD', 'purchasing', 'admin']);
   });
 
-  it('groups CAD, Build, and Files together in the CAD folder', () => {
+  it('groups CAD and Build together in the CAD folder, without Files', () => {
     const tabs = defaultHeaderTabs();
     const cad = tabs.find((tab) => tab.type === 'folder' && tab.label === 'CAD');
     expect(cad?.children).toEqual([
       { key: 'cad', label: 'CAD' },
-      { key: 'build', label: 'Build' },
-      { key: 'files', label: 'Files' }
+      { key: 'build', label: 'Build' }
     ]);
   });
 
-  it('drops a disabled CAD or Build entry from the folder without hiding the others', () => {
+  it('drops a disabled CAD or Build entry from the folder without hiding the other', () => {
     expect(defaultHeaderTabs({ tabs: { cad: false } }).find((tab) => tab.label === 'CAD').children)
-      .toEqual([{ key: 'build', label: 'Build' }, { key: 'files', label: 'Files' }]);
+      .toEqual([{ key: 'build', label: 'Build' }]);
     expect(defaultHeaderTabs({ tabs: { build: false } }).find((tab) => tab.label === 'CAD').children)
-      .toEqual([{ key: 'cad', label: 'CAD' }, { key: 'files', label: 'Files' }]);
+      .toEqual([{ key: 'cad', label: 'CAD' }]);
   });
 
-  it('omits the CAD folder entirely once CAD, Build, and Files are all disabled', () => {
-    const tabs = defaultHeaderTabs({ tabs: { cad: false, build: false, files: false } });
+  it('omits the CAD folder entirely once CAD and Build are both disabled', () => {
+    const tabs = defaultHeaderTabs({ tabs: { cad: false, build: false } });
     expect(tabs.some((tab) => tab.label === 'CAD')).toBe(false);
   });
 
@@ -452,8 +451,7 @@ describe('mergeDefaultHeaderTabs', () => {
     const cad = tabs.find((item) => item.label === 'CAD');
     expect(cad?.children).toEqual([
       { key: 'cad', label: 'CAD' },
-      { key: 'build', label: 'Build' },
-      { key: 'files', label: 'Files' }
+      { key: 'build', label: 'Build' }
     ]);
   });
 });

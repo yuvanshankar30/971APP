@@ -119,11 +119,10 @@ export function defaultHeaderTabs(navConfig = navigation) {
   const cadChildren = [];
   if (navConfig?.tabs?.cad !== false) cadChildren.push({ key: 'cad', label: 'CAD' });
   if (navConfig?.tabs?.build !== false) cadChildren.push({ key: 'build', label: 'Build' });
-  // Same key/route as Manufacturing's Files entry (the shared manufacturing-
-  // drive file browser) - CAD needs it too now that build BOM CSV exports
-  // and STEP/PDF drawings live in there (see the "BOM Files" folder on the
-  // /cad page).
-  if (navConfig?.tabs?.files !== false) cadChildren.push({ key: 'files', label: 'Files' });
+  // Files (the shared manufacturing-drive file browser) used to also default
+  // into CAD here - removed by direct instruction. It's the same key/route as
+  // Manufacturing's own Files entry, so it's still reachable via that tab or
+  // by URL, and by anyone who already added it to their own saved CAD nav.
   if (cadChildren.length) {
     tabs.push({ type: 'folder', label: 'CAD', children: cadChildren });
   }

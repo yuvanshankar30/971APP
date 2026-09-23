@@ -393,6 +393,17 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+  /* Several pages (Home, Manufacturing) intentionally break out of the
+     centered page column with `width: 100vw` + negative margins to reach
+     the true viewport edge. On any platform where the vertical scrollbar
+     takes up layout space, 100vw is wider than the visible area by the
+     scrollbar's width (100vw includes it, the rest of the layout doesn't),
+     which pushed the whole page a few pixels past the right edge and put a
+     horizontal scrollbar on Manufacturing specifically, since it's tall
+     enough to always have a vertical one. Clipping here is the standard,
+     low-risk guard against that class of bug without touching the
+     full-bleed math those pages depend on.*/
+  overflow-x: hidden;
 }
 
 /* Headings carry the brand voice (all themes): a characterful grotesque,

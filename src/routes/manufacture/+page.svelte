@@ -2258,8 +2258,6 @@
     <a href="/manufacture/completed" class:active={$page.url.pathname === '/manufacture/completed'}>Completed</a>
     <a href="/manufacture/router" class:active={$page.url.pathname === '/manufacture/router'}>Router</a>
     <a href="/manufacture/post-processing" class:active={$page.url.pathname === '/manufacture/post-processing'}>Post Processing</a>
-    <a href="/manufacture/bins" class:active={$page.url.pathname === '/manufacture/bins'}>Bins</a>
-    <a href="/manufacture/gcode-converter" class:active={$page.url.pathname === '/manufacture/gcode-converter'}>G-code Converter</a>
     <a href="/manufacture/files" class:active={$page.url.pathname === '/manufacture/files'}>Files</a>
   </div>
 
@@ -3551,12 +3549,22 @@
   }
 
   .fusion-cam-failed {
+    /* This is a <button>, and without a reset it kept the browser's native
+       button chrome (a light system control background/border) behind the
+       red text - barely visible in light theme but a jarring mismatched box
+       in dark theme, since that native background doesn't follow the app's
+       theme at all. */
     display: inline-flex;
     align-items: center;
     gap: 0.35rem;
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
     color: var(--danger, #e05252);
     font-size: var(--font-xs, 0.75rem);
     font-weight: 600;
+    cursor: pointer;
   }
 
   .fusion-cam-spinner {
