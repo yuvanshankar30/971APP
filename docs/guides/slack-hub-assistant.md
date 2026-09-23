@@ -62,7 +62,12 @@ is never included in a Gemini or Google Search request. Update the catalog in
 the same change whenever a user-facing route, subtab, or workflow changes.
 Subtab names resolve independently (for example, `Accuracy` resolves to EPA);
 generic names shared by multiple parents prompt for the parent tab rather than
-guessing. Named-person purchasing-history questions also stay local. A linked
+guessing. Feature and subtab answers include absolute, clickable Hub links;
+EPA subtabs and Fusion AutoCAM subtabs have deep links that open the requested
+screen. In an existing assistant thread, a related mention such as “what
+subtabs does it have?” resolves the most recently discussed known Hub feature
+from Slack history locally. Earlier thread text is not sent to Gemini or Google
+Search. Named-person purchasing-history questions also stay local. A linked
 user may read their own latest request; reading someone else's requires
 `VIEW_PURCHASING_ADMIN`, and rejected rows follow the Purchasing page's
 requester/rejector visibility. General live-data tools are not offered to an
@@ -108,7 +113,9 @@ In the Slack app configuration at `api.slack.com/apps`:
 The endpoint verifies Slack request signatures, ignores bot-authored messages,
 and accepts ordinary messages only when their root timestamp matches a durable
 assistant mention receipt. This lets thread follow-ups work without allowing
-the bot to answer general channel chatter. It
+the bot to answer general channel chatter. Both mentioned and unmentioned Hub
+feature follow-ups use `conversations.replies`, so `channels:history` (and
+`groups:history` for private channels) must remain installed. It
 deduplicates Slack retries through the service-role-only
 `slack_event_receipts` table, and replies in the mention thread. Failed
 deliveries are marked retryable; completed or in-progress event IDs cannot

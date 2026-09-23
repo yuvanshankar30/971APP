@@ -605,4 +605,32 @@ describe('Slack Hub assistant', () => {
     });
     expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ channel: 'C-ACE', thread_ts: '7.0' }));
   });
+
+  it('uses prior thread mentions locally to answer related Hub feature follow-ups with subtab links', async () => {
+    const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '3.0' });
+    const replies = vi.fn().mockResolvedValue({
+      ok: true,
+      messages: [
+        { ts: '1.0', user: 'U1', text: '<@U971> tell me about EPA' },
+        { ts: '2.0', bot_id: 'B971', text: '*EPA* — Competition → EPA' },
+        { ts: '2.5', user: 'U1', text: '<@U971> what subtabs does it have, and give me the links?' }
+      ]
+    });
+    const fetchImpl = vi.fn();
+    await handleHubAppMention({
+      channel: 'C1', ts: '2.5', thread_ts: '1.0', user: 'U1',
+      text: '<@U971> what subtabs does it have, and give me the links?'
+    }, {
+      supa: supabaseForStatus(),
+      slack: { chat: { postMessage }, conversations: { replies } },
+      apiKey: 'unused',
+      fetchImpl
+    });
+    expect(replies).toHaveBeenCalledWith({ channel: 'C1', ts: '1.0', limit: 30 });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    const answer = postMessage.mock.calls[0][0].text;
+    expect(answer).toContain('*EPA*');
+    expect(answer).toContain('https://spartanshub.spartanrobotics.org/epa?tab=accuracy');
+    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ thread_ts: '1.0' }));
+  });
 });
