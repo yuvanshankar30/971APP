@@ -10,7 +10,7 @@ import {
 import { handlePlannerReaction } from '$lib/server/planner_notifications.js';
 import { handleP0BugAssignmentReaction } from '$lib/server/slack_notifications.js';
 import { handleHubAppMention } from '$lib/server/hub_slack_assistant.js';
-import { claimSlackEvent, completeSlackEvent, failSlackEvent, isHubAssistantThread, recordSlackAssistantQuestion } from '$lib/server/slack_event_receipts.js';
+import { claimSlackEvent, completeSlackEvent, failSlackEvent, recordSlackAssistantQuestion } from '$lib/server/slack_event_receipts.js';
 
 // Avoid approving the same purchase repeatedly when multiple reactions are added.
 const recentlyApprovedPurchases = new Set();
@@ -80,17 +80,6 @@ export async function POST({ request }) {
       const eventId = payload.event_id || `app_mention:${event.channel || ''}:${event.ts || ''}`;
       const supa = getSupabase();
       return processHubAssistantEvent({ event, eventId, eventType: event_type, supa });
-    }
-
-    // An unmentioned human reply is accepted only inside a thread that this
-    // assistant started. Ambient channel messages are never read or answered.
-    if (event_type === 'message' && event.thread_ts && !event.bot_id && !event.subtype && !/<@[A-Z0-9]+>/i.test(event.text || '')) {
-      const supa = getSupabase();
-      if (!(await isHubAssistantThread(supa, event.channel, event.thread_ts))) {
-        return json({ ok: true, ignored: true });
-      }
-      const eventId = payload.event_id || `thread_reply:${event.channel || ''}:${event.ts || ''}`;
-      return processHubAssistantEvent({ event, eventId, eventType: 'message.thread_reply', supa });
     }
 
     if (event_type === 'reaction_added') {
