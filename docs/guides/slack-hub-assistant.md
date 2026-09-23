@@ -1,7 +1,14 @@
 # Slack Hub assistant
 
 `@Spartans Hub` questions are handled by the signed Slack Events endpoint at
-`/api/971bot/slack/events`. `@Spartans Hub /status` is deterministic and reports
+`/api/971bot/slack/events`. Fusion Runner install questions are also answered
+deterministically, without going through Gemini at all: the reply always
+contains the real, public install command
+(`sh -c "$(curl -fsSL <origin>/install/fusion-runner)"`) and @-mentions the
+two people who hand out the one-time Runner token, resolved server-side by
+their known Hub account email (`yuvan262626@gmail.com`, `arin.rao12@gmail.com`)
+so the ping is real and never a name the model guessed. The bot itself never
+knows or reveals the token value. `@Spartans Hub /status` is deterministic and reports
 database reachability, the active scouting event, open assignments, open
 ACE/Pit issues, stored match-report count, and curated recent changes. Team
 report-completion questions are answered directly from live assignment and

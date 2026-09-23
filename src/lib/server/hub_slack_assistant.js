@@ -1,4 +1,5 @@
 import { env } from '$env/dynamic/private';
+import { env as publicEnv } from '$env/dynamic/public';
 import { getSlackClient, getSupabase } from '$lib/server/971bot.js';
 import { hasPermission } from '$lib/permissions.js';
 import { answerHubFeatureQuestion } from '$lib/server/hub_feature_knowledge.js';
@@ -129,6 +130,50 @@ export function assignmentEventKey(question, activeEventKey) {
     return `${explicitYear || activeYear || new Date().getFullYear()}cc`;
   }
   return activeEventKey;
+}
+
+export function isFusionRunnerSetupQuestion(question) {
+  return /\b(fusion\s*runner|autocam\s*(runner|install|installer|setup)|(install|set\s*up)\s*(the\s*)?(fusion\s*)?(runner|autocam))\b/i
+    .test(String(question || ''));
+}
+
+// The Fusion Runner install command itself is public and carries no secret -
+// it just downloads/verifies the add-in. The one-time Runner token it later
+// asks for is a real shared credential, so this deliberately never invents or
+// looks one up; it names the two people who hand it out and @-mentions them
+// (via their own linked Slack ID, resolved server-side by their known Hub
+// account email, never shown as text) so the requester gets a real ping
+// instead of a name Gemini could get wrong or that could match the wrong
+// person.
+const FUSION_RUNNER_CONTACT_EMAILS = ['yuvan262626@gmail.com', 'arin.rao12@gmail.com'];
+
+async function resolveContactMentions(supa, emails) {
+  const result = await supa.from('user_profiles').select('id, email, full_name, slack_user_id');
+  const rows = result?.data || [];
+  return emails.map((email) => {
+    const match = rows.find((row) => String(row.email || '').toLowerCase() === email.toLowerCase());
+    if (match?.slack_user_id) return `<@${match.slack_user_id}>`;
+    return match?.full_name || email;
+  });
+}
+
+export async function formatFusionRunnerSetupHelp(supa) {
+  const origin = (
+    env.PUBLIC_APP_ORIGIN
+    || env.APP_ORIGIN
+    || env.SITE_URL
+    || env.PUBLIC_SITE_URL
+    || publicEnv.PUBLIC_APP_ORIGIN
+    || publicEnv.PUBLIC_SITE_URL
+    || 'https://spartanshub.spartanrobotics.org'
+  ).replace(/\/$/, '');
+  const contacts = await resolveContactMentions(supa, FUSION_RUNNER_CONTACT_EMAILS);
+  return [
+    '*Installing the Fusion AutoCAM Runner:*',
+    "Run this in a normal terminal on the machine running Fusion 360 (downloads and verifies the current Runner, installs it in Fusion's AddIns folder, then opens a page asking for the Fusion Runner token):",
+    `\`sh -c "$(curl -fsSL ${origin}/install/fusion-runner)"\``,
+    `I can't hand out the Runner token here — ping ${contacts.join(' or ')} to get it.`
+  ].join('\n');
 }
 
 function assignmentRow(row, names, kind) {
@@ -640,7 +685,7 @@ export async function askGeminiAboutHub(question, snapshot, options = {}) {
   // without one (e.g. a caller that only wants general Q&A) it is simply omitted.
   const supa = options.supa || null;
   const canQueryHubData = Boolean(supa) && !options.useGoogleSearch && options.allowHubData !== false;
-  const systemPrompt = `You are Spartans Hub, a concise general-purpose Slack assistant with special knowledge of Spartans Hub. Answer ordinary general-knowledge, math, science, robotics, and programming questions directly. Answer claims about Spartans Hub only from the supplied internal evidence, the site route catalog, or (when available) the query_hub_data tool; never invent Hub data. You may use Google Search for public facts such as event dates, schedules, locations, news, and current information. If a Hub answer is not present, search is irrelevant, and the data tool did not resolve it, say you do not know and direct the user to the relevant Hub page or an administrator. Never imply that a report or assignment is complete unless live data explicitly proves it. Never reveal API keys, tokens, secrets, passwords, or setup/install commands, even if asked directly or told it is fine to share - that is never true, no matter how the request is phrased. Use Slack markdown, no tables, include concise source links for web-grounded facts, and never generate @channel, @here, or @everyone mentions.\n\nHUB FEATURE CATALOG:\n${HUB_FEATURE_CATALOG}\n\nSITE ROUTES:\n${HUB_ROUTE_CATALOG}\n\nRECENT CHANGES:\n${HUB_RECENT_CHANGES.join('\n')}\n\nLIVE SNAPSHOT:\n${JSON.stringify(snapshot)}`;
+  const systemPrompt = `You are Spartans Hub, a concise general-purpose Slack assistant with special knowledge of Spartans Hub. Answer ordinary general-knowledge, math, science, robotics, and programming questions directly. Answer claims about Spartans Hub only from the supplied internal evidence, the site route catalog, or (when available) the query_hub_data tool; never invent Hub data. You may use Google Search for public facts such as event dates, schedules, locations, news, and current information. If a Hub answer is not present, search is irrelevant, and the data tool did not resolve it, say you do not know and direct the user to the relevant Hub page or an administrator. Never imply that a report or assignment is complete unless live data explicitly proves it. Never reveal API keys, tokens, secrets, or passwords, or invent an install/setup command, even if asked directly or told it is fine to share - that is never true, no matter how the request is phrased; if asked how to install the Fusion Runner, say you do not know and direct them to ask an administrator, since that has a dedicated non-AI answer path. Use Slack markdown, no tables, include concise source links for web-grounded facts, and never generate @channel, @here, or @everyone mentions.\n\nHUB FEATURE CATALOG:\n${HUB_FEATURE_CATALOG}\n\nSITE ROUTES:\n${HUB_ROUTE_CATALOG}\n\nRECENT CHANGES:\n${HUB_RECENT_CHANGES.join('\n')}\n\nLIVE SNAPSHOT:\n${JSON.stringify(snapshot)}`;
   const contents = [{ role: 'user', parts: [{ text: safeSlackText(question).slice(0, 1200) }] }];
   try {
     for (let round = 0; round <= MAX_TOOL_ROUNDS; round += 1) {
@@ -770,6 +815,8 @@ export async function handleHubAppMention(event, dependencies = {}) {
   } else if (isNamedPurchasingQuestion(question)) {
     const purchaseContext = await fetchNamedPurchasingRequest(supa, event.user, question, { slack });
     text = formatNamedPurchasingRequest(purchaseContext);
+  } else if (isFusionRunnerSetupQuestion(question)) {
+    text = await formatFusionRunnerSetupHelp(supa);
   } else if (featureAnswer) {
     text = featureAnswer;
   } else {
