@@ -507,7 +507,7 @@ describe('Slack Hub assistant', () => {
         json: async () => ({
           candidates: [{
             content: {
-              parts: [{ functionCall: { name: 'query_hub_data', args: { table: 'parts', filters: { status: 'active' }, limit: 5 } } }]
+              parts: [{ functionCall: { id: 'call-123', name: 'query_hub_data', args: { table: 'parts', filters: { status: 'active' }, limit: 5 } } }]
             }
           }]
         })
@@ -526,6 +526,7 @@ describe('Slack Hub assistant', () => {
     const secondBody = JSON.parse(fetchImpl.mock.calls[1][1].body);
     const functionResponsePart = secondBody.contents.at(-1).parts[0].functionResponse;
     expect(functionResponsePart.name).toBe('query_hub_data');
+    expect(functionResponsePart.id).toBe('call-123');
     expect(functionResponsePart.response.rows).toHaveLength(1);
     expect(answer).toBe('You have 1 active part.');
   });
@@ -712,6 +713,26 @@ describe('Slack Hub assistant', () => {
       })
     });
     expect(postMessage.mock.calls[0][0].text).toContain('model is unavailable');
+  });
+
+  it('returns a completed answer when only the relevance review fails', async () => {
+    const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: 'Use the Match Scouting tab.' }] } }] }) })
+      .mockResolvedValueOnce({ ok: false, status: 503 });
+    await handleHubAppMention({ channel: 'C1', ts: '1.0', text: '<@U971> where do I scout?' }, {
+      supa: supabaseForStatus(), slack: { chat: { postMessage } }, apiKey: 'test-secret', fetchImpl
+    });
+    expect(postMessage.mock.calls[0][0].text).toBe('Use the Match Scouting tab.');
+  });
+
+  it('reports a rejected request format separately from an unreachable service', async () => {
+    const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
+    await handleHubAppMention({ channel: 'C1', ts: '1.0', text: '<@U971> explain a robot mechanism' }, {
+      supa: supabaseForStatus(), slack: { chat: { postMessage } }, apiKey: 'test-secret',
+      fetchImpl: async () => ({ ok: false, status: 400, json: async () => ({ error: { status: 'INVALID_ARGUMENT' } }) })
+    });
+    expect(postMessage.mock.calls[0][0].text).toContain('API request-format fix');
   });
 
   it('reports assignment completion and submitted entries for a team without Gemini', async () => {
