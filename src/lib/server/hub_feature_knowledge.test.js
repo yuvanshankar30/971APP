@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { answerHubFeatureQuestion, HUB_FEATURES } from './hub_feature_knowledge.js';
+import { answerHubFeatureQuestion, classifyHubFeatureQuestion, HUB_FEATURES } from './hub_feature_knowledge.js';
 
 describe('Slack Hub feature knowledge', () => {
   it('documents every default navigation feature with routes and sections', () => {
@@ -51,5 +51,11 @@ describe('Slack Hub feature knowledge', () => {
   it('does not hijack unrelated general questions', () => {
     expect(answerHubFeatureQuestion('What is computer vision?')).toBeNull();
     expect(answerHubFeatureQuestion('What is 1+1?')).toBeNull();
+  });
+
+  it('asks for clarification instead of routing a generic feature keyword', () => {
+    expect(classifyHubFeatureQuestion('What is strategy in chess?')).toMatchObject({ kind: 'clarify', feature: { name: 'Strategy' } });
+    expect(answerHubFeatureQuestion('What is strategy in chess?')).toContain('Do you mean the Spartans Hub *Strategy* area?');
+    expect(answerHubFeatureQuestion('What does the Strategy tab do in Spartans Hub?')).toContain('Competition → Strategy');
   });
 });

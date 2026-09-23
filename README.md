@@ -551,12 +551,11 @@ file: update its diagram alongside this section, not separately from it.
   role/profile fields. For general questions about a person, the bot first
   checks the Admin-managed people and roster-role tables; linked active Hub
   users can get a role-grounded answer or opinion without exposing emails or
-  permissions. If the person is absent, the bot uses Google Search grounding
-  and asks for clarification when identity is unclear. A full roster name takes
+  permissions. If the person is absent, the bot says that it cannot verify a
+  Hub roster record and asks for clarification when identity is unclear. A full roster name takes
   priority over other people sharing its first name. Questions about Hub tabs, routes, subtabs, terminology,
   and where to find a feature are answered deterministically from the
-  server-side catalog in `src/lib/server/hub_feature_knowledge.js`; that full
-  internal product map is never sent to Gemini. Individual subtabs/screens are
+  server-side catalog in `src/lib/server/hub_feature_knowledge.js`. Individual subtabs/screens are
   directly addressable even when the parent tab is omitted; ambiguous names
   ask for the parent instead of guessing. Feature answers include absolute
   clickable Hub links, with deep links for EPA and Fusion AutoCAM subtabs.
@@ -567,8 +566,7 @@ file: update its diagram alongside this section, not separately from it.
   unavailable. Older threads use Slack history as a fallback; when that history
   cannot be read, the bot handles the current question and asks for a missing
   subject only when needed. Gemini receives
-  the original exchange and recent messages to resolve references;
-  web-grounded questions do not forward that history to Google Search. Person
+  the original exchange and recent messages to resolve references. Person
   and role questions check the Admin roster before feature routing, so "who is
   manufacturing lead?" is answered from actual assignments. Named-person purchasing-history
   questions are also answered locally: users may read their own latest request,
@@ -581,12 +579,10 @@ file: update its diagram alongside this section, not separately from it.
   a longer response window, and a relevance check that retries an off-topic
   draft. Gemini function calls carry matching reply IDs, and a failed review
   no longer discards an otherwise completed answer. Transient Gemini server or
-  connection errors are retried before a specific safe failure reply. Google
-  Search grounding is available for public facts and people
-  absent from the Hub roster. The same bot
-  also answers ordinary general-knowledge, math, science, robotics, and
-  programming questions without pretending those answers came from Hub; the
-  assistant responds to direct mentions in every conversation where the bot is
+  connection errors are retried before a specific safe failure reply. The
+  assistant rejects unrelated/general prompts before any model call, never
+  uses external web search, and requires a linked active Hub profile for
+  model-backed answers. The assistant responds to direct mentions in every conversation where the bot is
   a member, supports unmentioned follow-ups only inside assistant-started
   threads, reports safe
   credential/model/quota/timeout failure categories, and durably deduplicates
