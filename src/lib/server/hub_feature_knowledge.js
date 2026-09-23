@@ -1,6 +1,8 @@
 // Deterministic, server-side product knowledge for Slack. These entries are
 // answered locally and are never included in Gemini or Google Search requests.
 // Keep routes/subtabs aligned with the user-facing implementation and README.
+const HUB_ORIGIN = 'https://spartanshub.spartanrobotics.org';
+
 export const HUB_FEATURES = [
   {
     name: 'Home', aliases: ['home page', 'home tab', 'dashboard'], route: '/', location: 'Home (always the first navigation item)',
@@ -11,7 +13,7 @@ export const HUB_FEATURES = [
   {
     name: 'EPA', aliases: ['epa', 'expected points added'], route: '/epa', location: 'Competition → EPA',
     summary: "Spartans Hub's own Expected Points Added model computed from raw TBA match results. It is not Statbotics EPA, TBA OPR, 971 Scout Power, Robot Ratings, or the official event rank.",
-    sections: ['Rankings: local EPA beside OPR, win percentage, average score, matches, and record', 'Events: event details, team count, and matches played', 'Predict: alliance EPA totals and estimated red/blue win probability', 'Accuracy: chronological back-test and model record'],
+    sections: ['Rankings (/epa?tab=rankings): local EPA beside OPR, win percentage, average score, matches, and record', 'Events (/epa?tab=events): event details, team count, and matches played', 'Predict (/epa?tab=predict): alliance EPA totals and estimated red/blue win probability', 'Accuracy (/epa?tab=accuracy): chronological back-test and model record'],
     details: 'The model predicts each match before learning its result, then fits its learning rate and win-probability scale against played matches. Use the event picker for past events; Scouting Admin sets the active event.'
   },
   {
@@ -23,7 +25,7 @@ export const HUB_FEATURES = [
   {
     name: 'Fusion AutoCAM', aliases: ['fusion autocam', 'fusion cam', 'autocam fusion'], route: '/autocam/fusion', location: 'Manufacturing → Fusion AutoCAM',
     summary: 'Queues and tracks Fusion 360 CAM work handled by the installed Fusion runner.',
-    sections: ['Parts: plate/part stock and jobs', 'Tube Stock: box-tube jobs and face setups', 'Turning: lathe/turning jobs', 'Jobs: queued, running, completed, and failed work', 'Stock Categories: reusable stock definitions', 'Usage Guide (/autocam/fusion/usage)', 'Runner Setup (/autocam/fusion/setup)'],
+    sections: ['Parts (/autocam/fusion/parts): plate/part stock and jobs', 'Tube Stock (/autocam/fusion/tubes): box-tube jobs and face setups', 'Turning (/autocam/fusion/turning): lathe/turning jobs', 'Jobs (/autocam/fusion/jobs): queued, running, completed, and failed work', 'Stock Categories (/autocam/fusion/stock-categories): reusable stock definitions', 'Usage Guide (/autocam/fusion/usage)', 'Runner Setup (/autocam/fusion/setup)'],
     details: 'Authorized users also get Quick Queue, Send to Fusion CAM, and ATC Slots controls. Job output and status return from the separate Fusion runner.'
   },
   {
@@ -267,6 +269,19 @@ function sectionMetadata(section) {
   return { label: section.slice(0, end).trim(), route, description: colon >= 0 ? section.slice(colon + 1).trim() : section };
 }
 
+function absoluteHubUrl(route) {
+  return `${HUB_ORIGIN}${route || '/'}`;
+}
+
+function formatSectionWithLink(section) {
+  const metadata = sectionMetadata(section);
+  if (!metadata.route || metadata.route.includes('{')) return section;
+  return section.replace(
+    `(${metadata.route})`,
+    `(<${absoluteHubUrl(metadata.route)}|Open ${metadata.label}>)`
+  );
+}
+
 function formatSubtabAnswer(feature, section) {
   const metadata = sectionMetadata(section);
   const route = metadata.route || feature.route;
@@ -274,7 +289,7 @@ function formatSubtabAnswer(feature, section) {
     `*${metadata.label} — ${feature.name}*`,
     metadata.description,
     `*Location:* ${feature.location} → ${metadata.label}`,
-    `*Open:* ${route}`,
+    `*Open:* <${absoluteHubUrl(route)}|Open ${metadata.label}>`,
     '',
     `*Parent tab:* ${feature.summary}`
   ].join('\n');
@@ -316,9 +331,9 @@ export function answerHubFeatureQuestion(question) {
     feature.summary,
     '',
     '*What is there:*',
-    ...feature.sections.map((section) => `• ${section}`),
+    ...feature.sections.map((section) => `• ${formatSectionWithLink(section)}`),
     '',
     feature.details,
-    `*Open:* ${feature.route}`
+    `*Open:* <${absoluteHubUrl(feature.route)}|Open ${feature.name}>`
   ].join('\n');
 }

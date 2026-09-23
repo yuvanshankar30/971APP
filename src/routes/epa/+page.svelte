@@ -1,5 +1,7 @@
 <script>
   import { onMount } from 'svelte';
+  import { goto } from '$app/navigation';
+  import { page } from '$app/stores';
   import { TrendingUp, Calendar, MapPin, Sparkles, RefreshCw, Target } from 'lucide-svelte';
   import { fetchActiveScoutingEventKey, fetchAvailableScoutingEvents } from '$lib/scoutingEvent.js';
   import { computeEventEpa, winProbability, fitEpaParameters, evaluateEpaModel } from '$lib/epaModel.js';
@@ -35,7 +37,17 @@
   let epaFit = null;
   let epaEvaluation = null;
 
-  let activeSubtab = 'rankings'; // 'rankings' | 'events' | 'predict' | 'accuracy'
+  const VALID_SUBTABS = ['rankings', 'events', 'predict', 'accuracy'];
+  const requestedSubtab = $page.url.searchParams.get('tab');
+  let activeSubtab = VALID_SUBTABS.includes(requestedSubtab) ? requestedSubtab : 'rankings';
+
+  function setActiveSubtab(subtab) {
+    if (!VALID_SUBTABS.includes(subtab)) return;
+    activeSubtab = subtab;
+    const url = new URL($page.url);
+    url.searchParams.set('tab', subtab);
+    void goto(`${url.pathname}${url.search}`, { replaceState: true, noScroll: true, keepFocus: true });
+  }
 
   let predictMatchKey = '';
   let predictRedKey = '';
@@ -183,10 +195,10 @@
     <div class="notice notice-error">{error}</div>
   {:else}
     <div class="subtab-strip" role="tablist">
-      <button class="subtab" class:active={activeSubtab === 'rankings'} on:click={() => activeSubtab = 'rankings'}><TrendingUp size={14} /> Rankings</button>
-      <button class="subtab" class:active={activeSubtab === 'events'} on:click={() => activeSubtab = 'events'}><Calendar size={14} /> Events</button>
-      <button class="subtab" class:active={activeSubtab === 'predict'} on:click={() => activeSubtab = 'predict'}><Sparkles size={14} /> Predict</button>
-      <button class="subtab" class:active={activeSubtab === 'accuracy'} on:click={() => activeSubtab = 'accuracy'}><Target size={14} /> Accuracy</button>
+      <button class="subtab" class:active={activeSubtab === 'rankings'} on:click={() => setActiveSubtab('rankings')}><TrendingUp size={14} /> Rankings</button>
+      <button class="subtab" class:active={activeSubtab === 'events'} on:click={() => setActiveSubtab('events')}><Calendar size={14} /> Events</button>
+      <button class="subtab" class:active={activeSubtab === 'predict'} on:click={() => setActiveSubtab('predict')}><Sparkles size={14} /> Predict</button>
+      <button class="subtab" class:active={activeSubtab === 'accuracy'} on:click={() => setActiveSubtab('accuracy')}><Target size={14} /> Accuracy</button>
     </div>
 
     {#if activeSubtab === 'rankings'}

@@ -2,7 +2,7 @@ import { env } from '$env/dynamic/private';
 import { env as publicEnv } from '$env/dynamic/public';
 import { getSlackClient, getSupabase } from '$lib/server/971bot.js';
 import { hasPermission } from '$lib/permissions.js';
-import { answerHubFeatureQuestion } from '$lib/server/hub_feature_knowledge.js';
+import { answerHubFeatureQuestion, HUB_FEATURES } from '$lib/server/hub_feature_knowledge.js';
 import { ROUTES } from '$lib/siteSearch.js';
 
 export const HUB_RECENT_CHANGES = [
@@ -135,6 +135,48 @@ export function assignmentEventKey(question, activeEventKey) {
 export function isFusionRunnerSetupQuestion(question) {
   return /\b(fusion\s*runner|autocam\s*(runner|install|installer|setup)|(install|set\s*up)\s*(the\s*)?(fusion\s*)?(runner|autocam))\b/i
     .test(String(question || ''));
+}
+
+function normalizedWords(value) {
+  return ` ${String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()} `;
+}
+
+export async function fetchSlackThreadMessages(slack, event) {
+  if (!event?.channel || !event?.thread_ts || !slack?.conversations?.replies) return [];
+  try {
+    const result = await slack.conversations.replies({ channel: event.channel, ts: event.thread_ts, limit: 30 });
+    if (!result?.ok || !Array.isArray(result.messages)) return [];
+    return result.messages
+      .filter((message) => message?.ts !== event.ts && typeof message?.text === 'string' && message.text.trim())
+      .slice(-12)
+      .map((message) => ({
+        role: message.bot_id || message.subtype === 'bot_message' ? 'assistant' : 'user',
+        text: stripAppMention(message.text).slice(0, 1200)
+      }));
+  } catch (error) {
+    console.warn('Could not read Slack thread context', error?.data?.error || error?.message || error);
+    return [];
+  }
+}
+
+function featureFromThread(messages) {
+  for (const message of [...(messages || [])].reverse()) {
+    const words = normalizedWords(message.text);
+    const match = HUB_FEATURES
+      .flatMap((feature) => feature.aliases.map((alias) => ({
+        feature,
+        alias,
+        index: words.indexOf(normalizedWords(alias))
+      })))
+      .filter(({ index }) => index >= 0)
+      .sort((a, b) => a.index - b.index || b.alias.length - a.alias.length)[0];
+    if (match) return match.feature;
+  }
+  return null;
+}
+
+function isFeatureFollowUp(question) {
+  return /\b(it|its|that|this|those|these|they|them|there|above|previous|earlier|subtabs?|link|links)\b/i.test(String(question || ''));
 }
 
 // The Fusion Runner install command itself is public and carries no secret -
@@ -790,8 +832,14 @@ export async function handleHubAppMention(event, dependencies = {}) {
   const question = stripAppMention(event.text);
   const supa = dependencies.supa || getSupabase();
   const slack = dependencies.slack || getSlackClient();
+  // Thread history stays local. It is used only to recover a known Hub feature
+  // name for deterministic follow-ups; arbitrary prior Slack text is never sent
+  // to Gemini or a search provider.
+  const threadMessages = dependencies.threadMessages ?? await fetchSlackThreadMessages(slack, event);
+  const threadFeature = isFeatureFollowUp(question) ? featureFromThread(threadMessages) : null;
   const snapshot = await fetchHubStatusSnapshot(supa);
-  const featureAnswer = answerHubFeatureQuestion(question);
+  const featureAnswer = answerHubFeatureQuestion(question)
+    || (threadFeature ? answerHubFeatureQuestion(`${question} ${threadFeature.name}`) : null);
   let text;
   if (!question) {
     text = 'Ask me about Spartans Hub, or use `@971hub /status` for live status and recent changes.';
