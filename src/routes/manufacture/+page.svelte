@@ -3154,7 +3154,7 @@
     tabindex="0"
     on:keydown={(e) => { if (e.key === 'Escape') { e.preventDefault(); closePdfViewer(); } }}
   >
-    <div class="modal cad-modal" role="dialog" aria-modal="true">
+    <div class="modal cad-modal pdf-modal" role="dialog" aria-modal="true">
       <div class="modal-header">
         <h3>{pdfViewerPart.name || 'Drawing'} - PDF</h3>
         <div class="cad-modal-header-actions">
@@ -3167,7 +3167,13 @@
         </div>
       </div>
       <div class="modal-body">
-        <iframe class="pdf-viewer-frame" src={pdfViewerUrl} title="Drawing PDF">
+        <!-- #view=FitH tells the browser's built-in PDF viewer to fit the page
+             to the frame's WIDTH rather than its default "fit whole page",
+             which was rendering large-format drawing sheets (e.g. D-size) at
+             as little as ~18% zoom - unreadable without the viewer's own zoom
+             controls. Fitting to width keeps title-block text legible and
+             just lets the sheet scroll vertically instead. -->
+        <iframe class="pdf-viewer-frame" src={`${pdfViewerUrl}#view=FitH`} title="Drawing PDF">
           <p>PDF preview isn't supported here - use the download button above.</p>
         </iframe>
       </div>
@@ -4517,6 +4523,13 @@
     max-width: 95vw;
   }
 
+  /* Drawing sheets (D-size and similar) need much more room than the 3D CAD
+     viewer to stay legible at a sane zoom - see the #view=FitH comment above. */
+  .cad-modal.pdf-modal {
+    width: min(1400px, 96vw);
+    max-width: 96vw;
+  }
+
   .cad-modal-hint {
     margin: var(--space-2) 0 0 0;
     text-align: center;
@@ -4526,7 +4539,7 @@
 
   .pdf-viewer-frame {
     width: 100%;
-    height: 75vh;
+    height: 85vh;
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     background: var(--surface-1);

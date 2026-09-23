@@ -908,9 +908,9 @@
                           <option value={BUTTONS.IN_PROGRESS}>{BUTTONS.IN_PROGRESS}</option>
                           <option value={BUTTONS.CAM_REVIEW_PENDING}>{BUTTONS.CAM_REVIEW_PENDING}</option>
                           <option value={BUTTONS.CAM_REVIEWED}>{BUTTONS.CAM_REVIEWED}</option>
-                          <option value={BUTTONS.POSTPROCESSED}>{BUTTONS.POSTPROCESSED}</option>
                           <option value={BUTTONS.JPROGGED}>{BUTTONS.JPROGGED}</option>
                           <option value={BUTTONS.MACHINED}>{BUTTONS.MACHINED}</option>
+                          <option value={BUTTONS.POSTPROCESSED}>{BUTTONS.POSTPROCESSED}</option>
                           <option value={BUTTONS.KITTED}>{BUTTONS.KITTED}</option>
                         </select>
                       {/each}
