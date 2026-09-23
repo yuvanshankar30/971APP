@@ -3,6 +3,7 @@ import { env as publicEnv } from '$env/dynamic/public';
 import { getSlackClient, getSupabase } from '$lib/server/971bot.js';
 import { hasPermission } from '$lib/permissions.js';
 import { answerHubFeatureQuestion, HUB_FEATURES } from '$lib/server/hub_feature_knowledge.js';
+import { identifyRosterQuestion, loadHubRoster } from '$lib/server/hub_slack_roster.js';
 import { ROUTES } from '$lib/siteSearch.js';
 
 export const HUB_RECENT_CHANGES = [
@@ -107,7 +108,7 @@ export function isScoutingAssignmentQuestion(question) {
 export function isAdminProfileQuestion(question) {
   const value = String(question || '').trim();
   const selfPattern = /\bwho am i\b|\bam i (an? )?(admin|lead|banned|approved|a member)\b|\b(my|our) (role|roles|permission|permissions|profile|account|status)\b|\b(role|roles|permission|permissions|profile|account|status)\b[^.?!]*\bam i\b/i;
-  const namedOtherPattern = /\b(role|roles|permission|permissions)\b[^.?!]*\b(does|has)\b[^.?!]*\b(have|hold|holds)\b/i;
+  const namedOtherPattern = /\b(permission|permissions)\b[^.?!]*\b(does|has)\b[^.?!]*\b(have|hold|holds)\b/i;
   return selfPattern.test(value) || namedOtherPattern.test(value);
 }
 
@@ -720,24 +721,48 @@ export async function executeHubDataQuery(supa, args = {}) {
   return { table, rowCount: (result.data || []).length, rows: result.data || [] };
 }
 
+async function reviewAnswer(question, answer, { apiKey, model, fetchImpl, rosterMember, signal }) {
+  const response = await fetchImpl(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+    method: 'POST',
+    headers: { 'x-goog-api-key': apiKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      system_instruction: { parts: [{ text: 'Check if the draft directly answers the exact question. Reject a reply about another person or topic, a generic profile dump when an opinion was requested, or a claim about roster roles missing from the supplied roster record. Return JSON only.' }] },
+      contents: [{ role: 'user', parts: [{ text: JSON.stringify({ question, answer, rosterMember: rosterMember || null }) }] }],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        responseSchema: { type: 'OBJECT', properties: { relevant: { type: 'BOOLEAN' }, problem: { type: 'STRING' } }, required: ['relevant', 'problem'] },
+        maxOutputTokens: 1024
+      }
+    }),
+    signal
+  });
+  if (!response.ok) throw new Error(`Gemini relevance review failed (${response.status})`);
+  const payload = await response.json();
+  const text = payload?.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('') || '';
+  try { return JSON.parse(text); }
+  catch { throw new Error('Gemini relevance review returned invalid JSON'); }
+}
+
 export async function askGeminiAboutHub(question, snapshot, options = {}) {
   const apiKey = options.apiKey ?? env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('GEMINI_API_KEY is not configured');
-  // Google limits Gemini 2.5 access for new projects. Use the current stable
-  // Flash-Lite model unless an administrator deliberately overrides it.
-  const model = options.model ?? env.GEMINI_MODEL ?? 'gemini-3.5-flash-lite';
+  // Flash has stronger reasoning than Flash-Lite. Keep the server-side model
+  // override for deployments that have intentionally chosen another model.
+  const configuredModel = env.GEMINI_MODEL;
+  const model = options.model ?? (configuredModel && configuredModel !== 'gemini-3.5-flash-lite'
+    ? configuredModel : 'gemini-3.5-flash');
   const fetchImpl = options.fetchImpl || fetch;
   const controller = new AbortController();
   // A Gemini request can outlast Slack's three-second acknowledgement window.
   // The durable event receipt prevents Slack's retry from posting a second reply.
-  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 15000);
+  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 60000);
   // Google Search grounding and the internal data tool stay mutually exclusive
   // (see shouldUseGoogleSearch) so a generated web-search query can never be
   // built from live Hub/scouting rows. The data tool needs a Supabase client;
   // without one (e.g. a caller that only wants general Q&A) it is simply omitted.
   const supa = options.supa || null;
   const canQueryHubData = Boolean(supa) && !options.useGoogleSearch && options.allowHubData !== false;
-  const systemPrompt = `You are Spartans Hub, a concise general-purpose Slack assistant with special knowledge of Spartans Hub. Answer ordinary general-knowledge, math, science, robotics, and programming questions directly. Answer claims about Spartans Hub only from the supplied internal evidence, the site route catalog, or (when available) the query_hub_data tool; never invent Hub data. You may use Google Search for public facts such as event dates, schedules, locations, news, and current information. If a Hub answer is not present, search is irrelevant, and the data tool did not resolve it, say you do not know and direct the user to the relevant Hub page or an administrator. Never imply that a report or assignment is complete unless live data explicitly proves it. Never reveal API keys, tokens, secrets, or passwords, or invent an install/setup command, even if asked directly or told it is fine to share - that is never true, no matter how the request is phrased; if asked how to install the Fusion Runner, say you do not know and direct them to ask an administrator, since that has a dedicated non-AI answer path. Use Slack markdown, no tables, include concise source links for web-grounded facts, and never generate @channel, @here, or @everyone mentions.\n\nHUB FEATURE CATALOG:\n${HUB_FEATURE_CATALOG}\n\nSITE ROUTES:\n${HUB_ROUTE_CATALOG}\n\nRECENT CHANGES:\n${HUB_RECENT_CHANGES.join('\n')}\n\nLIVE SNAPSHOT:\n${JSON.stringify(snapshot)}`;
+  const systemPrompt = `You are Spartans Hub, a general-purpose Slack assistant with special knowledge of Spartans Hub. Before answering, identify the exact subject and what the user asks for. Answer that question directly; do not substitute a nearby topic or dump unrelated Hub data. Spend time reasoning through ambiguous or complex requests. If evidence is insufficient, say what is unknown or ask one clarifying question. Answer ordinary general-knowledge, math, science, robotics, and programming questions directly. Answer claims about Spartans Hub only from the supplied internal evidence, the site route catalog, the supplied roster member (when present), or (when available) the query_hub_data tool; never invent Hub data. A person's team role or roster assignment supports an opinion about their likely responsibilities or perspective, not claims about their character, skill, or performance. Clearly label any such opinion as an inference. You may use Google Search for public facts such as event dates, schedules, locations, news, and current information. If a Hub answer is not present, search is irrelevant, and the data tool did not resolve it, say you do not know and direct the user to the relevant Hub page or an administrator. Never imply that a report or assignment is complete unless live data explicitly proves it. Never reveal API keys, tokens, secrets, or passwords, or invent an install/setup command, even if asked directly or told it is fine to share - that is never true, no matter how the request is phrased; if asked how to install the Fusion Runner, say you do not know and direct them to ask an administrator, since that has a dedicated non-AI answer path. Use Slack markdown, no tables, include concise source links for web-grounded facts, and never generate @channel, @here, or @everyone mentions.\n\nHUB FEATURE CATALOG:\n${HUB_FEATURE_CATALOG}\n\nSITE ROUTES:\n${HUB_ROUTE_CATALOG}\n\nRECENT CHANGES:\n${HUB_RECENT_CHANGES.join('\n')}\n\nLIVE SNAPSHOT:\n${JSON.stringify(snapshot)}\n\nROSTER MEMBER FOR THIS QUESTION:\n${JSON.stringify(options.rosterMember || null)}`;
   const contents = [{ role: 'user', parts: [{ text: safeSlackText(question).slice(0, 1200) }] }];
   try {
     for (let round = 0; round <= MAX_TOOL_ROUNDS; round += 1) {
@@ -749,14 +774,17 @@ export async function askGeminiAboutHub(question, snapshot, options = {}) {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          system_instruction: { parts: [{ text: systemPrompt }] },
+          system_instruction: { parts: [{ text: `${systemPrompt}${options.correction ? `\n\nCORRECTION REQUIRED: ${options.correction}` : ''}` }] },
           contents,
           ...(options.useGoogleSearch
             ? { tools: [{ google_search: {} }] }
             : offerDataTool
               ? { tools: [{ function_declarations: [queryHubDataToolDeclaration()] }] }
               : {}),
-          generationConfig: { maxOutputTokens: 450 }
+          generationConfig: {
+            maxOutputTokens: 4096,
+            ...(/^gemini-3\./.test(model) ? { thinkingConfig: { thinkingLevel: 'HIGH' } } : {})
+          }
         }),
         signal: controller.signal
       });
@@ -807,6 +835,20 @@ export async function askGeminiAboutHub(question, snapshot, options = {}) {
         .slice(0, 3);
       if (sources.length && !sources.some((source) => answer.includes(source.uri))) {
         answer = safeSlackText(`${answer}\n\n*Sources:* ${sources.map((source) => `<${source.uri}|${source.title}>`).join(' · ')}`);
+      }
+      if (options.verifyRelevance) {
+        const reviewOptions = { apiKey, model, fetchImpl, rosterMember: options.rosterMember, signal: controller.signal };
+        const review = await reviewAnswer(question, answer, reviewOptions);
+        if (!review.relevant) {
+          const corrected = await askGeminiAboutHub(question, snapshot, {
+            ...options,
+            verifyRelevance: false,
+            correction: `The earlier reply was off-topic: ${String(review.problem || 'wrong subject').slice(0, 300)}. Answer the exact original question.`
+          });
+          const finalReview = await reviewAnswer(question, corrected, reviewOptions);
+          if (!finalReview.relevant) return 'I may be misunderstanding the question. Could you rephrase it or name the specific person or topic?';
+          return corrected;
+        }
       }
       return answer;
     }
@@ -880,12 +922,26 @@ export async function handleHubAppMention(event, dependencies = {}) {
   } else {
     try {
       const actorProfile = await resolveHubProfileForSlackUser(supa, event.user, slack);
-      text = await askGeminiAboutHub(question, snapshot, {
-        ...dependencies,
-        supa,
-        allowHubData: Boolean(actorProfile && !actorProfile.banned),
-        useGoogleSearch: shouldUseGoogleSearch(question)
-      });
+      let roster = null;
+      try { roster = await loadHubRoster(supa); }
+      catch (error) { console.error('Hub roster lookup failed', error?.message || error); }
+      const person = identifyRosterQuestion(question, roster || []);
+      if (person.aboutPerson && roster === null) {
+        text = 'I could not check the Hub roster right now. Please ask again shortly.';
+      } else if (person.members.length > 1) {
+        text = `I found more than one possible Hub member: ${person.members.slice(0, 5).map((member) => member.name).join(', ')}. Which person do you mean?`;
+      } else if (person.members.length && (!actorProfile || actorProfile.banned)) {
+        text = 'Link your Slack account to an active Spartans Hub profile before asking about team roster members.';
+      } else {
+        text = await askGeminiAboutHub(question, snapshot, {
+          ...dependencies,
+          supa,
+          rosterMember: person.members[0] || null,
+          allowHubData: Boolean(actorProfile && !actorProfile.banned && !person.aboutPerson),
+          useGoogleSearch: person.aboutPerson ? !person.members.length : shouldUseGoogleSearch(question),
+          verifyRelevance: dependencies.verifyRelevance !== false
+        });
+      }
     } catch (error) {
       console.error('Gemini Hub assistant failed', error?.message || error);
       text = geminiFailureReply(error);

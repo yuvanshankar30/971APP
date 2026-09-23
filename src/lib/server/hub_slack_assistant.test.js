@@ -88,7 +88,7 @@ function supabaseForAssignments({ admin = true } = {}) {
   const otherProfile = {
     id: 'u-other', full_name: 'Casey Scout', role: 'member', banned: false,
     permissions: ['DATA_SCOUT_MEMBER'], general_role: 'member', purchasing_role: 'basic',
-    team_role: 'Other', frc_team: '9584', task_general_categories: ['Competition']
+    team_role: 'Competition Lead', frc_team: '9584', task_general_categories: ['Competition']
   };
   const arnavProfile = {
     id: 'u-arnav', full_name: 'Arnav Gathani', role: 'member', banned: false,
@@ -161,7 +161,7 @@ describe('Slack Hub assistant', () => {
     expect(isTeamReportStatusRequest('Have all reports for team 971 been finished?')).toBe(true);
     expect(isScoutingAssignmentQuestion('What tasks were scouts assigned for Chezy?')).toBe(true);
     expect(isAdminProfileQuestion('What role am I?')).toBe(true);
-    expect(isAdminProfileQuestion('What role does Casey Scout have?')).toBe(true);
+    expect(isAdminProfileQuestion('What role does Casey Scout have?')).toBe(false);
     expect(isAdminProfileQuestion('What permissions does Casey Scout have?')).toBe(true);
     expect(isAdminProfileQuestion('who am i')).toBe(true);
     expect(isAdminProfileQuestion('am I an admin?')).toBe(true);
@@ -194,12 +194,13 @@ describe('Slack Hub assistant', () => {
     });
     const answer = await askGeminiAboutHub('Where do I scout?', snapshot, { apiKey: 'test-secret', fetchImpl });
     const request = fetchImpl.mock.calls[0][1];
-    expect(fetchImpl.mock.calls[0][0]).toBe('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent');
+    expect(fetchImpl.mock.calls[0][0]).toBe('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent');
     expect(request.headers['x-goog-api-key']).toBe('test-secret');
     expect(request.body).not.toContain('test-secret');
     expect(answer).toBe('@channel (mention suppressed) Open Match Scouting.');
     expect(request.body).toContain('dead, disabled');
     expect(JSON.parse(request.body).contents[0].parts[0].text).toBe('Where do I scout?');
+    expect(JSON.parse(request.body).generationConfig.thinkingConfig.thinkingLevel).toBe('HIGH');
   });
 
   it('enables Google Search only when requested and appends grounded sources', async () => {
@@ -222,6 +223,50 @@ describe('Slack Hub assistant', () => {
     expect(answer).toContain('<https://example.test/madtown|Madtown event>');
   });
 
+  it('revises an off-topic draft before returning it', async () => {
+    const reply = (text) => ({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text }] } }] }) });
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(reply('Here is a random profile dump.'))
+      .mockResolvedValueOnce(reply(JSON.stringify({ relevant: false, problem: 'Wrong subject' })))
+      .mockResolvedValueOnce(reply('A Haas TL-1 is a CNC toolroom lathe.'))
+      .mockResolvedValueOnce(reply(JSON.stringify({ relevant: true, problem: '' })));
+    const answer = await askGeminiAboutHub('What is a Haas TL-1?', snapshot, {
+      apiKey: 'test-secret', fetchImpl, verifyRelevance: true
+    });
+    expect(answer).toContain('CNC toolroom lathe');
+    expect(JSON.parse(fetchImpl.mock.calls[2][1].body).system_instruction.parts[0].text).toContain('Wrong subject');
+  });
+
+  it('checks the Admin roster before answering a named person question', async () => {
+    const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
+    const reply = (text) => ({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text }] } }] }) });
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(reply('Casey is listed as a Competition Lead. My opinion: they can speak to competition planning.'))
+      .mockResolvedValueOnce(reply(JSON.stringify({ relevant: true, problem: '' })));
+    await handleHubAppMention({ channel: 'C1', user: 'U-ADMIN', ts: '1.0', text: '<@U971> What do you think of Casey Scout?' }, {
+      supa: supabaseForAssignments({ admin: true }),
+      slack: { chat: { postMessage } }, apiKey: 'test-secret', fetchImpl
+    });
+    const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    expect(body.system_instruction.parts[0].text).toContain('Casey Scout');
+    expect(body.system_instruction.parts[0].text).toContain('Competition Lead');
+    expect(body.tools?.[0]?.google_search).toBeUndefined();
+    expect(postMessage.mock.calls[0][0].text).toContain('Competition Lead');
+  });
+
+  it('offers Google Search after a person is absent from the roster', async () => {
+    const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
+    const reply = (text) => ({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text }] } }] }) });
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(reply('Several people share that name. Which Morgan Lee do you mean?'))
+      .mockResolvedValueOnce(reply(JSON.stringify({ relevant: true, problem: '' })));
+    await handleHubAppMention({ channel: 'C1', user: 'U-ADMIN', ts: '1.0', text: '<@U971> Who is Morgan Lee?' }, {
+      supa: supabaseForAssignments({ admin: true }),
+      slack: { chat: { postMessage } }, apiKey: 'test-secret', fetchImpl
+    });
+    expect(JSON.parse(fetchImpl.mock.calls[0][1].body).tools).toEqual([{ google_search: {} }]);
+  });
+
   it('answers a general math question without offering live Hub data to an unlinked Slack user', async () => {
     const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
     const fetchImpl = vi.fn().mockResolvedValue({
@@ -232,7 +277,8 @@ describe('Slack Hub assistant', () => {
       supa: supabaseForStatus(),
       slack: { chat: { postMessage } },
       apiKey: 'test-secret',
-      fetchImpl
+      fetchImpl,
+      verifyRelevance: false
     });
     const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
     expect(body.tools).toBeUndefined();
@@ -249,7 +295,8 @@ describe('Slack Hub assistant', () => {
       supa: supabaseForAssignments({ admin: true }),
       slack: { chat: { postMessage } },
       apiKey: 'test-secret',
-      fetchImpl
+      fetchImpl,
+      verifyRelevance: false
     });
     const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
     expect(body.tools[0].function_declarations[0].name).toBe('query_hub_data');
