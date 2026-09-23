@@ -28,4 +28,16 @@ describe('Hub Slack roster lookup', () => {
     expect(identifyRosterQuestion('Is Morgan Lee a good engineer?', members)).toMatchObject({ aboutPerson: true, members: [], searchName: 'Morgan Lee' });
     expect(identifyRosterQuestion('How does a Haas TL-1 work?', members).aboutPerson).toBe(false);
   });
+
+  it('prefers Omer Har Gil when the question specifies that full name', () => {
+    const omers = [
+      { name: 'Omer', teamRole: 'Software Member', roles: [] },
+      { name: 'Omer Har Gil', teamRole: 'Mechanical Member', roles: [] }
+    ];
+    expect(identifyRosterQuestion('Tell me about Omer Har Gil', omers).members).toEqual([omers[1]]);
+    expect(identifyRosterQuestion('What do you think of Omer?', omers).members).toEqual([omers[0]]);
+    expect(identifyRosterQuestion('Tell me about Omer', [
+      { ...omers[0], name: 'Omer Levy' }, omers[1]
+    ]).members).toHaveLength(2);
+  });
 });

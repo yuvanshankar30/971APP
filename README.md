@@ -552,7 +552,8 @@ file: update its diagram alongside this section, not separately from it.
   checks the Admin-managed people and roster-role tables; linked active Hub
   users can get a role-grounded answer or opinion without exposing emails or
   permissions. If the person is absent, the bot uses Google Search grounding
-  and asks for clarification when identity is unclear. Questions about Hub tabs, routes, subtabs, terminology,
+  and asks for clarification when identity is unclear. A full roster name takes
+  priority over other people sharing its first name. Questions about Hub tabs, routes, subtabs, terminology,
   and where to find a feature are answered deterministically from the
   server-side catalog in `src/lib/server/hub_feature_knowledge.js`; that full
   internal product map is never sent to Gemini. Individual subtabs/screens are

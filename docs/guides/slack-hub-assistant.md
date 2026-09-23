@@ -77,6 +77,8 @@ current question or asks which person or topic a reference means; it does not
 repeat a fixed history-error reply. Google Search requests do not include earlier
 thread turns. The bot checks the Admin-managed people and role rosters before
 feature routing, and answers role-holder questions directly from those records.
+An explicitly supplied full name wins over roster members who share its first
+name; first-name-only questions can still ask for clarification.
 Named-person purchasing-history questions also stay local. A linked
 user may read their own latest request; reading someone else's requires
 `VIEW_PURCHASING_ADMIN`, and rejected rows follow the Purchasing page's
