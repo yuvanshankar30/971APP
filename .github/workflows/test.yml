@@ -22,3 +22,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+        env:
+          TZ: America/Los_Angeles
+          PUBLIC_SUPABASE_URL: https://example.invalid
+          PUBLIC_SUPABASE_ANON_KEY: ci-test-key
