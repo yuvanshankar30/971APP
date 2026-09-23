@@ -260,6 +260,41 @@ function hasAlias(question, alias) {
   return haystack.includes(needle);
 }
 
+const AMBIGUOUS_FEATURE_ALIASES = new Set([
+  'account', 'autocam', 'builds', 'cad', 'dashboard', 'documentation', 'docs tab',
+  'drive team', 'files tab', 'gantt', 'help guide', 'home page', 'home tab',
+  'kitting', 'kits', 'manufacture', 'manufacturing', 'onshape', 'orders',
+  'planner', 'purchasing', 'receiving', 'strategy', 'tasks', 'tba'
+]);
+
+function asksForFeatureInformation(value) {
+  return /\?|\b(?:where|how|what|which|who|when|why|does|do|is|are|can|could|would|show|list|explain|tell|help|find|open|navigate|settings|tab|page|screen|route|feature)\b/.test(value);
+}
+
+function hasExplicitHubContext(value) {
+  return /\b(?:spartans\s*hub|971\s*(?:hub|app)|this\s+(?:hub|app|site)|the\s+(?:hub|app|site)|in\s+(?:the\s+)?hub|on\s+(?:the\s+)?hub)\b/.test(value);
+}
+
+export function classifyHubFeatureQuestion(question) {
+  const value = normalized(question);
+  if (!value) return { kind: 'none', feature: null };
+  const matches = HUB_FEATURES.flatMap((feature) => feature.aliases
+    .filter((alias) => hasAlias(value, alias))
+    .map((alias) => ({ feature, alias })));
+  if (!matches.length) return { kind: 'none', feature: null };
+
+  const best = [...matches].sort((left, right) => normalized(right.alias).length - normalized(left.alias).length)[0];
+  const aliasesAreAmbiguous = matches.every(({ alias }) => AMBIGUOUS_FEATURE_ALIASES.has(normalized(alias)));
+  const exactTopic = matches.some(({ alias }) => value === normalized(alias));
+  if (exactTopic || (aliasesAreAmbiguous && !hasExplicitHubContext(value))) {
+    return { kind: 'clarify', feature: best.feature };
+  }
+  if (!asksForFeatureInformation(value) && !hasExplicitHubContext(value)) {
+    return { kind: 'clarify', feature: best.feature };
+  }
+  return { kind: 'answer', feature: best.feature };
+}
+
 function sectionMetadata(section) {
   const route = section.match(/\((\/[^)]+)\)/)?.[1] || null;
   const colon = section.indexOf(':');
@@ -301,6 +336,10 @@ export function answerHubFeatureQuestion(question) {
   if (/\b(all|list|what|which)\b/.test(value) && /\b(tabs|pages|features|navigation)\b/.test(value)) {
     return `*Spartans Hub navigation:*\n${HUB_NAVIGATION_OVERVIEW}`;
   }
+  const featureIntent = classifyHubFeatureQuestion(question);
+  if (featureIntent.kind === 'clarify') {
+    return `Do you mean the Spartans Hub *${featureIntent.feature.name}* area? Ask what you want to know about that page, or name the Hub feature you mean.`;
+  }
   const candidates = HUB_FEATURES
     .map((feature) => ({
       feature,
@@ -324,6 +363,7 @@ export function answerHubFeatureQuestion(question) {
     const choices = [...new Set(subtabCandidates.map(({ feature, metadata }) => `${feature.name} → ${metadata.label}`))];
     return `That subtab name is ambiguous. Specify its parent tab: ${choices.slice(0, 6).join(', ')}.`;
   }
+  if (featureIntent.kind !== 'answer') return null;
   if (!candidates.length) return null;
   const feature = candidates[0].feature;
   return [
