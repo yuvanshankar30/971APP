@@ -6,6 +6,7 @@ import { answerHubFeatureQuestion, HUB_FEATURES } from '$lib/server/hub_feature_
 import { identifyRosterQuestion, loadHubRoster } from '$lib/server/hub_slack_roster.js';
 import { readSlackAssistantThread } from '$lib/server/slack_event_receipts.js';
 import { ROUTES } from '$lib/siteSearch.js';
+import { isCodeChangeRequest, parseCodeChangeRequest, draftCodeChangePr } from '$lib/server/hub_change_request.js';
 
 export const HUB_RECENT_CHANGES = [
   'Drive Team now shows every completed 971 match with Win/Loss/Tie and the final score.',
@@ -1003,6 +1004,21 @@ export async function handleHubAppMention(event, dependencies = {}) {
   let text;
   if (!question) {
     text = 'Ask me about Spartans Hub, or use `@971hub /status` for live status and recent changes.';
+  } else if (isCodeChangeRequest(question)) {
+    const actorProfile = await resolveHubProfileForSlackUser(supa, event.user, slack);
+    if (!actorProfile || actorProfile.banned || !hasPermission(actorProfile, 'REQUEST_CODE_CHANGES')) {
+      text = 'Only a Change Lead can ask me to draft a code change.';
+    } else {
+      try {
+        const result = await draftCodeChangePr(parseCodeChangeRequest(question), { ...dependencies, supa, requesterName: actorProfile.full_name || null });
+        text = result.prUrl
+          ? `${safeSlackText(result.summary)}\n\n*Unmerged pull request:* <${result.prUrl}|#${result.prNumber}>`
+          : safeSlackText(result.summary);
+      } catch (error) {
+        console.error('Code-change request failed', error?.message || error);
+        text = `I couldn't draft that change: ${safeSlackText(error?.message || 'unknown error')}`;
+      }
+    }
   } else if (isHubStatusRequest(question)) {
     text = formatHubStatus(snapshot);
   } else if (isTeamReportStatusRequest(question)) {

@@ -1,0 +1,24 @@
+name: Tests
+
+# Real gap this closes: nothing previously ran the test suite on a pull
+# request at all (only .github/workflows/claude.yml, which is unrelated -
+# it invokes Claude Code from a PR/issue comment). The Slack /edit
+# code-change command (see src/lib/server/hub_change_request.js) has no
+# sandboxed place of its own to run tests against a proposed change before
+# opening its PR, so every PR - bot-authored or not - now gets a real,
+# isolated test run and its pass/fail shows up as a normal PR check.
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test

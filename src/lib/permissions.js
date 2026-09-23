@@ -23,7 +23,14 @@ export const PERMISSIONS = [
   // same as the rest of Competition - only the "push results into real
   // scout_data_events/power rankings" action is gated, since that's a
   // meaningfully higher-stakes action than just using the tool.
-  'VISION_RELEASE'
+  'VISION_RELEASE',
+  // "Change Lead": authorized to ask the Spartans Hub Slack bot to draft a
+  // code-change PR (see hub_slack_assistant.js's /edit command). Every
+  // Subsystem Lead and Lead has this automatically (see
+  // GENERAL_ROLE_PERMISSIONS below); it's also independently grantable via
+  // the "Change Lead" roster key (Admin > Rosters) for anyone else who
+  // should have it without being a subsystem/team lead.
+  'REQUEST_CODE_CHANGES'
 ];
 
 export const GENERAL_ROLES = {
@@ -72,8 +79,8 @@ export const ROSTER_TARGET_OPTIONS = {
 export const GENERAL_ROLE_PERMISSIONS = {
   [GENERAL_ROLES.NONE]: [],
   [GENERAL_ROLES.MEMBER]: ['CAN_SEE_ROUTES', 'PLACE_ORDERS_MISC', 'CREATE_BUILDS'],
-  [GENERAL_ROLES.SUBSYSTEM_LEAD]: ['CAN_SEE_ROUTES', 'PLACE_ORDERS_MISC', 'CREATE_BUILDS', 'CREATE_SUBSYSTEMS', 'MANAGE_ATTENDANCE'],
-  [GENERAL_ROLES.LEAD]: ['CAN_SEE_ROUTES', 'PLACE_ORDERS_MISC', 'CREATE_BUILDS', 'CREATE_SUBSYSTEMS', 'VIEW_ADMIN_PANEL', 'PROMOTE_USERS', 'APPROVE_USERS', 'EDIT_PERMISSIONS', 'MANAGE_ATTENDANCE']
+  [GENERAL_ROLES.SUBSYSTEM_LEAD]: ['CAN_SEE_ROUTES', 'PLACE_ORDERS_MISC', 'CREATE_BUILDS', 'CREATE_SUBSYSTEMS', 'MANAGE_ATTENDANCE', 'REQUEST_CODE_CHANGES'],
+  [GENERAL_ROLES.LEAD]: ['CAN_SEE_ROUTES', 'PLACE_ORDERS_MISC', 'CREATE_BUILDS', 'CREATE_SUBSYSTEMS', 'VIEW_ADMIN_PANEL', 'PROMOTE_USERS', 'APPROVE_USERS', 'EDIT_PERMISSIONS', 'MANAGE_ATTENDANCE', 'REQUEST_CODE_CHANGES']
 };
 
 export const PURCHASING_ROLE_PERMISSIONS = {
@@ -88,7 +95,11 @@ const ROSTER_KEY_PERMISSIONS = {
   'Video Scout Member': ['VIDEO_SCOUT_MEMBER'],
   'Data Scout Member': ['DATA_SCOUT_MEMBER'],
   'Video Scout Lead': [], // Add if needed
-  'Data Scout Lead': ['DATA_SCOUT_ADMIN', 'NOTE_SCOUT_ADMIN']
+  'Data Scout Lead': ['DATA_SCOUT_ADMIN', 'NOTE_SCOUT_ADMIN'],
+  // Grants REQUEST_CODE_CHANGES to someone who isn't otherwise a Subsystem
+  // Lead/Lead (those two already get it via GENERAL_ROLE_PERMISSIONS above) -
+  // the "also individually assignable" half of Change Lead.
+  'Change Lead': ['REQUEST_CODE_CHANGES']
 };
 
 // Some team roles carry permissions of their own, independent of the general /
