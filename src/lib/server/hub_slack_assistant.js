@@ -94,11 +94,21 @@ export function isScoutingAssignmentQuestion(question) {
     && /\b(scout|scouts|scouting|match|pit|prescout)\b/i.test(value);
 }
 
+// Real bug this fixes: a genuinely unrelated question ("give me as much info
+// on haas tl-1 and is it worth it") got misrouted here and answered with the
+// asker's own admin profile dump instead. The old check was "does the
+// message contain any word from {role, permission, profile, account, info,
+// information} AND any word from {i, me, my, myself, does, is, has, have,
+// about, for}" - "info" and "is"/"has"/"for"/"about" are so common that
+// almost any sentence trips both halves. This only matches the handful of
+// actual phrasings this intent needs to catch (see the tests), requiring
+// the profile noun and a real self/named-person question shape, not just
+// any two of those words appearing anywhere in the message.
 export function isAdminProfileQuestion(question) {
-  const value = String(question || '');
-  const profileSubject = /\b(role|roles|permission|permissions|profile|account|team role|roster role|info|information)\b/i.test(value);
-  const personSubject = /\b(i|me|my|myself|who am i|does|is|has|have|about|for)\b/i.test(value);
-  return profileSubject && personSubject;
+  const value = String(question || '').trim();
+  const selfPattern = /\bwho am i\b|\bam i (an? )?(admin|lead|banned|approved|a member)\b|\b(my|our) (role|roles|permission|permissions|profile|account|status)\b|\b(role|roles|permission|permissions|profile|account|status)\b[^.?!]*\bam i\b/i;
+  const namedOtherPattern = /\b(role|roles|permission|permissions)\b[^.?!]*\b(does|has)\b[^.?!]*\b(have|hold|holds)\b/i;
+  return selfPattern.test(value) || namedOtherPattern.test(value);
 }
 
 export function isNamedPurchasingQuestion(question) {

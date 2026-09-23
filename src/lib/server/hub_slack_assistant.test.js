@@ -162,6 +162,16 @@ describe('Slack Hub assistant', () => {
     expect(isScoutingAssignmentQuestion('What tasks were scouts assigned for Chezy?')).toBe(true);
     expect(isAdminProfileQuestion('What role am I?')).toBe(true);
     expect(isAdminProfileQuestion('What role does Casey Scout have?')).toBe(true);
+    expect(isAdminProfileQuestion('What permissions does Casey Scout have?')).toBe(true);
+    expect(isAdminProfileQuestion('who am i')).toBe(true);
+    expect(isAdminProfileQuestion('am I an admin?')).toBe(true);
+    expect(isAdminProfileQuestion('what is my role')).toBe(true);
+    // Real reported bug: a completely unrelated question ("info" + "is") was
+    // misrouted here and answered with the asker's own permissions dump
+    // instead of the machine question they actually asked.
+    expect(isAdminProfileQuestion('give me as much info on haas tl-1 and is it worth it')).toBe(false);
+    expect(isAdminProfileQuestion('is the router free right now?')).toBe(false);
+    expect(isAdminProfileQuestion('does the tube stock have enough 1x1 left for this part?')).toBe(false);
     expect(shouldUseGoogleSearch('When does Madtown start?')).toBe(true);
     expect(shouldUseGoogleSearch('What shifts were scouts assigned?')).toBe(false);
     expect(shouldUseGoogleSearch('What does Scouting Admin do?')).toBe(false);
