@@ -4,6 +4,7 @@ import { getSlackClient, getSupabase } from '$lib/server/971bot.js';
 import { hasPermission } from '$lib/permissions.js';
 import { answerHubFeatureQuestion, HUB_FEATURES } from '$lib/server/hub_feature_knowledge.js';
 import { identifyRosterQuestion, loadHubRoster } from '$lib/server/hub_slack_roster.js';
+import { readSlackAssistantThread } from '$lib/server/slack_event_receipts.js';
 import { ROUTES } from '$lib/siteSearch.js';
 
 export const HUB_RECENT_CHANGES = [
@@ -202,7 +203,10 @@ function isFeatureFollowUp(question) {
 }
 
 function recentConversation(messages) {
-  return (messages || []).slice(-8)
+  const all = messages || [];
+  // Preserve the original exchange as well as recent turns in a long thread.
+  const selected = all.length > 12 ? [...all.slice(0, 2), ...all.slice(-10)] : all;
+  return selected
     .filter((message) => (message.role === 'user' || message.role === 'assistant') && message.text)
     .map((message) => ({
       role: message.role === 'assistant' ? 'model' : 'user',
@@ -749,7 +753,9 @@ async function reviewAnswer(question, answer, { apiKey, model, fetchImpl, roster
       system_instruction: { parts: [{ text: 'Check if the draft directly answers the exact question. Reject a reply about another person or topic, a generic profile dump when an opinion was requested, or a claim about roster roles missing from the supplied roster record. Return JSON only.' }] },
       contents: [{ role: 'user', parts: [{ text: JSON.stringify({
         question, answer, rosterMember: rosterMember || null,
-        recentConversation: (threadMessages || []).slice(-8)
+        recentConversation: recentConversation(threadMessages).map((turn) => ({
+          role: turn.role, text: turn.parts[0].text
+        }))
       }) }] }],
       generationConfig: {
         responseMimeType: 'application/json',
@@ -911,9 +917,20 @@ export async function handleHubAppMention(event, dependencies = {}) {
   const question = stripAppMention(event.text);
   const supa = dependencies.supa || getSupabase();
   const slack = dependencies.slack || getSlackClient();
-  // Slack is the source of truth for conversation memory. Only this assistant
-  // thread is read, and only a bounded window is sent to Gemini.
-  const threadMessages = dependencies.threadMessages ?? await fetchSlackThreadMessages(slack, event);
+  let threadMessages = dependencies.threadMessages;
+  if (threadMessages === undefined && event.thread_ts) {
+    try {
+      threadMessages = await readSlackAssistantThread(supa, {
+        channel: event.channel, threadTs: event.thread_ts, beforeTs: event.ts
+      });
+    } catch (error) {
+      console.warn('Could not read stored Slack thread context', error?.message || error);
+    }
+    // Slack's history API helps older threads created before receipts carried
+    // conversation text. New threads do not depend on that API or its scopes.
+    if (!threadMessages?.length) threadMessages = await fetchSlackThreadMessages(slack, event);
+  }
+  threadMessages ||= [];
   const threadFeature = isFeatureFollowUp(question) ? featureFromThread(threadMessages) : null;
   let roster = null;
   if (question) {
@@ -1003,5 +1020,5 @@ export async function handleHubAppMention(event, dependencies = {}) {
     thread_ts: event.thread_ts || event.ts,
     text
   });
-  return { ok: !!response?.ok, channel: response?.channel || event.channel, ts: response?.ts || null };
+  return { ok: !!response?.ok, channel: response?.channel || event.channel, ts: response?.ts || null, text };
 }

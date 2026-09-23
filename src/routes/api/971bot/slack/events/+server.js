@@ -10,7 +10,7 @@ import {
 import { handlePlannerReaction } from '$lib/server/planner_notifications.js';
 import { handleP0BugAssignmentReaction } from '$lib/server/slack_notifications.js';
 import { handleHubAppMention } from '$lib/server/hub_slack_assistant.js';
-import { claimSlackEvent, completeSlackEvent, failSlackEvent, isHubAssistantThread } from '$lib/server/slack_event_receipts.js';
+import { claimSlackEvent, completeSlackEvent, failSlackEvent, isHubAssistantThread, recordSlackAssistantQuestion } from '$lib/server/slack_event_receipts.js';
 
 // Avoid approving the same purchase repeatedly when multiple reactions are added.
 const recentlyApprovedPurchases = new Set();
@@ -32,6 +32,7 @@ async function processHubAssistantEvent({ event, eventId, eventType, supa }) {
 
   let result;
   try {
+    await recordSlackAssistantQuestion(supa, eventId, { ts: event.ts, question: event.text || '' });
     result = await handleHubAppMention(event, { supa });
     if (!result.ok) throw new Error(`Slack did not accept the assistant reply (${result.reason || 'unknown reason'})`);
   } catch (error) {
@@ -44,7 +45,7 @@ async function processHubAssistantEvent({ event, eventId, eventType, supa }) {
     return json({ ok: false, handled: false }, { status: 503 });
   }
   try {
-    await completeSlackEvent(supa, eventId);
+    await completeSlackEvent(supa, eventId, { ts: event.ts, question: event.text || '', answer: result.text || '' });
   } catch (error) {
     console.error('Failed to complete Slack event receipt', error?.message || error);
   }
