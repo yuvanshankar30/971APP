@@ -15,8 +15,8 @@ describe('Slack Hub feature knowledge', () => {
     expect(answer).toContain('Competition → EPA');
     expect(answer).toContain('Expected Points Added');
     expect(answer).toContain('not Statbotics EPA');
-    expect(answer).toContain('Accuracy (<https://spartanshub.spartanrobotics.org/epa?tab=accuracy|Open Accuracy>):');
-    expect(answer).toContain('<https://spartanshub.spartanrobotics.org/epa|Open EPA>');
+    expect(answer).toContain('Accuracy (<https://spartanshub.spartanrobotics.org/epa?tab=accuracy|Open>):');
+    expect(answer).toContain('<https://spartanshub.spartanrobotics.org/epa|EPA>');
   });
 
   it('explains JProg screens, output, and exact routes', () => {
@@ -31,14 +31,14 @@ describe('Slack Hub feature knowledge', () => {
     expect(answer).toContain('*Accuracy — EPA*');
     expect(answer).toContain('chronological back-test');
     expect(answer).toContain('Competition → EPA → Accuracy');
-    expect(answer).toContain('<https://spartanshub.spartanrobotics.org/epa?tab=accuracy|Open Accuracy>');
+    expect(answer).toContain('<https://spartanshub.spartanrobotics.org/epa?tab=accuracy|Accuracy>');
   });
 
   it('uses the named parent to disambiguate generic subtabs', () => {
     const answer = answerHubFeatureQuestion('Where is the Jobs tab inside Fusion AutoCAM?');
     expect(answer).toContain('*Jobs — Fusion AutoCAM*');
     expect(answer).toContain('queued, running, completed, and failed work');
-    expect(answer).toContain('<https://spartanshub.spartanrobotics.org/autocam/fusion/jobs|Open Jobs>');
+    expect(answer).toContain('<https://spartanshub.spartanrobotics.org/autocam/fusion/jobs|Jobs>');
   });
 
   it('lists navigation without sending a broad tab question to a model', () => {

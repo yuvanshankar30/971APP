@@ -313,7 +313,7 @@ function formatSectionWithLink(section) {
   if (!metadata.route || metadata.route.includes('{')) return section;
   return section.replace(
     `(${metadata.route})`,
-    `(<${absoluteHubUrl(metadata.route)}|Open ${metadata.label}>)`
+    `(<${absoluteHubUrl(metadata.route)}|Open>)`
   );
 }
 
@@ -324,7 +324,7 @@ function formatSubtabAnswer(feature, section) {
     `*${metadata.label} — ${feature.name}*`,
     metadata.description,
     `*Location:* ${feature.location} → ${metadata.label}`,
-    `*Open:* <${absoluteHubUrl(route)}|Open ${metadata.label}>`,
+    `*Open:* <${absoluteHubUrl(route)}|${metadata.label}>`,
     '',
     `*Parent tab:* ${feature.summary}`
   ].join('\n');
@@ -374,6 +374,6 @@ export function answerHubFeatureQuestion(question) {
     ...feature.sections.map((section) => `• ${formatSectionWithLink(section)}`),
     '',
     feature.details,
-    `*Open:* <${absoluteHubUrl(feature.route)}|Open ${feature.name}>`
+    `*Open:* <${absoluteHubUrl(feature.route)}|${feature.name}>`
   ].join('\n');
 }
