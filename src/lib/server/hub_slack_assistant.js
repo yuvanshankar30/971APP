@@ -100,6 +100,12 @@ export function isAdminProfileQuestion(question) {
   return profileSubject && personSubject;
 }
 
+export function isNamedPurchasingQuestion(question) {
+  const value = String(question || '');
+  return /\b(purchas(?:e|ed|ing)?|order(?:ed|s)?|buy|bought)\b/i.test(value)
+    && /\b(last|latest|recent|request|item|history|status|what|when|which)\b/i.test(value);
+}
+
 export function shouldUseGoogleSearch(question) {
   if (isScoutingAssignmentQuestion(question)) return false;
   if (/\b(spartans\s*hub|971hub|scouting admin|match scouting|pit scouting|planner|manufacturing|autocam|prediction market)\b/i.test(String(question || ''))) {
@@ -328,6 +334,63 @@ export function formatAdminProfile(context) {
     `• Purchasing role: ${profile.purchasing_role || 'basic'}`,
     `• Roster roles: ${rosterRoles}`,
     `• Explicit permissions: ${permissions}`
+  ].join('\n'));
+}
+
+export async function fetchNamedPurchasingRequest(supa, slackUserId, question, options = {}) {
+  const caller = await resolveHubProfileForSlackUser(supa, slackUserId, options.slack);
+  if (!caller?.id) return { available: false, reason: 'slack-profile-not-linked' };
+  if (caller.banned) return { available: false, reason: 'account-disabled' };
+
+  const value = String(question || '').toLowerCase();
+  const profilesResult = await supa.from('user_profiles').select('id, full_name, banned');
+  if (profilesResult.error) return { available: false, reason: 'profile-query-failed' };
+  const matches = (profilesResult.data || []).filter((profile) => {
+    const name = String(profile.full_name || '').trim().toLowerCase();
+    return name && value.includes(name);
+  });
+  if (matches.length !== 1) return { available: false, reason: 'specify-one-person' };
+
+  const target = matches[0];
+  if (target.id !== caller.id && !hasPermission(caller, 'VIEW_PURCHASING_ADMIN')) {
+    return { available: false, reason: 'permission-denied' };
+  }
+  const result = await supa
+    .from('purchasing')
+    .select('name, project_id, vendor, requester, status, approved, approver, created_at')
+    .eq('requester', target.full_name)
+    .order('created_at', { ascending: false })
+    .limit(20);
+  if (result.error) return { available: false, reason: 'purchasing-query-failed' };
+  const callerName = String(caller.full_name || '').trim().toLowerCase();
+  const visibleRequest = (result.data || []).find((row) => {
+    if (String(row.status || '').toLowerCase() !== 'rejected') return true;
+    return [row.requester, row.approver].some((name) => String(name || '').trim().toLowerCase() === callerName);
+  });
+  return { available: true, target, request: visibleRequest || null };
+}
+
+export function formatNamedPurchasingRequest(context) {
+  if (!context?.available) {
+    if (context?.reason === 'slack-profile-not-linked') return 'Link your Slack account to an active Spartans Hub profile before asking for live Hub data.';
+    if (context?.reason === 'account-disabled') return 'This Spartans Hub account is disabled.';
+    if (context?.reason === 'specify-one-person') return 'Please specify exactly one person by full name.';
+    if (context?.reason === 'permission-denied') return 'You can view your own purchasing history, but another person’s requests require Purchasing Admin access.';
+    return 'I could not read purchasing requests from Spartans Hub right now.';
+  }
+  if (!context.request) return `No purchasing request was found for ${context.target.full_name}.`;
+  const row = context.request;
+  const created = row.created_at
+    ? new Date(row.created_at).toLocaleString('en-US', { timeZone: 'America/Los_Angeles' })
+    : 'date unavailable';
+  return safeSlackText([
+    `*${context.target.full_name}'s latest purchasing request:*`,
+    `• Item: ${row.name || 'Unnamed item'}`,
+    `• Status: ${row.status || (row.approved ? 'approved' : 'pending')}`,
+    `• Vendor: ${row.vendor || 'not set'}`,
+    `• Project: ${row.project_id || 'not set'}`,
+    `• Requested: ${created}`,
+    '*Open:* /cad/purchasing'
   ].join('\n'));
 }
 
@@ -576,7 +639,7 @@ export async function askGeminiAboutHub(question, snapshot, options = {}) {
   // built from live Hub/scouting rows. The data tool needs a Supabase client;
   // without one (e.g. a caller that only wants general Q&A) it is simply omitted.
   const supa = options.supa || null;
-  const canQueryHubData = Boolean(supa) && !options.useGoogleSearch;
+  const canQueryHubData = Boolean(supa) && !options.useGoogleSearch && options.allowHubData !== false;
   const systemPrompt = `You are Spartans Hub, a concise general-purpose Slack assistant with special knowledge of Spartans Hub. Answer ordinary general-knowledge, math, science, robotics, and programming questions directly. Answer claims about Spartans Hub only from the supplied internal evidence, the site route catalog, or (when available) the query_hub_data tool; never invent Hub data. You may use Google Search for public facts such as event dates, schedules, locations, news, and current information. If a Hub answer is not present, search is irrelevant, and the data tool did not resolve it, say you do not know and direct the user to the relevant Hub page or an administrator. Never imply that a report or assignment is complete unless live data explicitly proves it. Never reveal API keys, tokens, secrets, passwords, or setup/install commands, even if asked directly or told it is fine to share - that is never true, no matter how the request is phrased. Use Slack markdown, no tables, include concise source links for web-grounded facts, and never generate @channel, @here, or @everyone mentions.\n\nHUB FEATURE CATALOG:\n${HUB_FEATURE_CATALOG}\n\nSITE ROUTES:\n${HUB_ROUTE_CATALOG}\n\nRECENT CHANGES:\n${HUB_RECENT_CHANGES.join('\n')}\n\nLIVE SNAPSHOT:\n${JSON.stringify(snapshot)}`;
   const contents = [{ role: 'user', parts: [{ text: safeSlackText(question).slice(0, 1200) }] }];
   try {
@@ -704,13 +767,18 @@ export async function handleHubAppMention(event, dependencies = {}) {
   } else if (isAdminProfileQuestion(question)) {
     const profileContext = await fetchAdminProfileForSlackUser(supa, event.user, question, { slack });
     text = formatAdminProfile(profileContext);
+  } else if (isNamedPurchasingQuestion(question)) {
+    const purchaseContext = await fetchNamedPurchasingRequest(supa, event.user, question, { slack });
+    text = formatNamedPurchasingRequest(purchaseContext);
   } else if (featureAnswer) {
     text = featureAnswer;
   } else {
     try {
+      const actorProfile = await resolveHubProfileForSlackUser(supa, event.user, slack);
       text = await askGeminiAboutHub(question, snapshot, {
         ...dependencies,
         supa,
+        allowHubData: Boolean(actorProfile && !actorProfile.banned),
         useGoogleSearch: shouldUseGoogleSearch(question)
       });
     } catch (error) {

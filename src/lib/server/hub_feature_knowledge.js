@@ -258,6 +258,28 @@ function hasAlias(question, alias) {
   return haystack.includes(needle);
 }
 
+function sectionMetadata(section) {
+  const route = section.match(/\((\/[^)]+)\)/)?.[1] || null;
+  const colon = section.indexOf(':');
+  const parenthesis = section.indexOf(' (');
+  const boundaries = [colon, parenthesis].filter((index) => index >= 0);
+  const end = boundaries.length ? Math.min(...boundaries) : section.length;
+  return { label: section.slice(0, end).trim(), route, description: colon >= 0 ? section.slice(colon + 1).trim() : section };
+}
+
+function formatSubtabAnswer(feature, section) {
+  const metadata = sectionMetadata(section);
+  const route = metadata.route || feature.route;
+  return [
+    `*${metadata.label} — ${feature.name}*`,
+    metadata.description,
+    `*Location:* ${feature.location} → ${metadata.label}`,
+    `*Open:* ${route}`,
+    '',
+    `*Parent tab:* ${feature.summary}`
+  ].join('\n');
+}
+
 export function answerHubFeatureQuestion(question) {
   const value = normalized(question);
   if (!value) return null;
@@ -271,6 +293,22 @@ export function answerHubFeatureQuestion(question) {
     }))
     .filter(({ score }) => score > 0)
     .sort((a, b) => b.score - a.score);
+
+  const subtabCandidates = HUB_FEATURES.flatMap((feature) => feature.sections.map((section) => {
+    const metadata = sectionMetadata(section);
+    return { feature, section, metadata, matches: metadata.label.length >= 4 && hasAlias(value, metadata.label) };
+  })).filter((candidate) => candidate.matches);
+  const parentFeature = candidates[0]?.feature || null;
+  const withinParent = parentFeature ? subtabCandidates.filter((candidate) => candidate.feature === parentFeature) : [];
+  if (withinParent.length === 1) return formatSubtabAnswer(withinParent[0].feature, withinParent[0].section);
+  const asksAboutSubtab = /\b(subtab|tab|section|screen|page|inside|within|find|where)\b/.test(value);
+  if (!parentFeature && asksAboutSubtab && subtabCandidates.length === 1) {
+    return formatSubtabAnswer(subtabCandidates[0].feature, subtabCandidates[0].section);
+  }
+  if (!parentFeature && asksAboutSubtab && subtabCandidates.length > 1) {
+    const choices = [...new Set(subtabCandidates.map(({ feature, metadata }) => `${feature.name} → ${metadata.label}`))];
+    return `That subtab name is ambiguous. Specify its parent tab: ${choices.slice(0, 6).join(', ')}.`;
+  }
   if (!candidates.length) return null;
   const feature = candidates[0].feature;
   return [

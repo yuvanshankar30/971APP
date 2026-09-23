@@ -551,7 +551,14 @@ file: update its diagram alongside this section, not separately from it.
   role/profile fields. Questions about Hub tabs, routes, subtabs, terminology,
   and where to find a feature are answered deterministically from the
   server-side catalog in `src/lib/server/hub_feature_knowledge.js`; that full
-  internal product map is never sent to Gemini. Other Hub questions receive
+  internal product map is never sent to Gemini. Individual subtabs/screens are
+  directly addressable even when the parent tab is omitted; ambiguous names
+  ask for the parent instead of guessing. Named-person purchasing-history
+  questions are also answered locally: users may read their own latest request,
+  while another person's history requires `VIEW_PURCHASING_ADMIN`, and rejected
+  rows retain the same requester/rejector visibility as the Purchasing page.
+  Live-data tools are offered only to Slack accounts linked to an active Hub
+  profile. Other Hub questions receive
   read-only, context-bounded answers from Gemini using the server-side `GEMINI_API_KEY`
   and the current `gemini-3.5-flash-lite` default, with Google Search grounding
   available only for public event/current-information questions. The same bot
