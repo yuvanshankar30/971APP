@@ -954,9 +954,14 @@ AutoCAM's own code (engine, Drive watcher, `camJobs.js`, its components) is
   from a Cloud Run runtime-only Secret Manager mapping; the secret must exist
   in the `spartanshub` project with an enabled version and runtime access
   before that mapping is deployed.
-- **Vercel**: the original deployment target, being phased out per
-  `implementations/vercel-and-supabase-to-google-plan.md` - not yet
-  decommissioned as of this writing (see that plan doc's TODOs).
+- **Vercel edit previews**: the disposable
+  [`yuvanshankar30/971APP`](https://github.com/yuvanshankar30/971APP) mirror
+  deploys its `main` branch through Vercel. Run the manual-only
+  `.github/workflows/preview-deploy.yml` workflow with an approved draft
+  branch to refresh that preview; it requires the `TESTING_REPO_TOKEN` repo
+  secret configured by an organization admin. It is separate from the
+  canonical Cloud Run deployment and is never updated automatically by a PR
+  or push.
 - **Vision GPU worker**: use the bare-metal `vision-runner.service` and
   `vision/qwen/qwen.service` on NVIDIA DGX Spark; no Docker installation is
   required. Qwen binds only to `127.0.0.1:8000`, with explicit CUDA placement

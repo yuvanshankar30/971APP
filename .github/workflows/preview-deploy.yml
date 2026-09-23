@@ -1,0 +1,75 @@
+name: Deploy edit preview
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Branch to deploy to the disposable edit-preview repository
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out requested branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Configure the disposable Vercel preview
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+
+          const packagePath = 'package.json';
+          const packageJson = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+          packageJson.devDependencies ??= {};
+          delete packageJson.devDependencies['@sveltejs/adapter-auto'];
+          packageJson.devDependencies['@sveltejs/adapter-vercel'] = '^5.10.3';
+          fs.writeFileSync(packagePath, `${JSON.stringify(packageJson, null, '\t')}\n`);
+
+          const configPath = 'svelte.config.js';
+          const config = fs.readFileSync(configPath, 'utf8');
+          const previewConfig = config.replace(
+            "import adapter from '@sveltejs/adapter-node';",
+            "import adapter from '@sveltejs/adapter-vercel';"
+          ).replace(
+            "import adapter from '@sveltejs/adapter-auto';",
+            "import adapter from '@sveltejs/adapter-vercel';"
+          );
+          if (previewConfig === config && !config.includes("@sveltejs/adapter-vercel")) {
+            throw new Error('Could not configure a SvelteKit adapter for the Vercel preview');
+          }
+          fs.writeFileSync(configPath, previewConfig);
+          NODE
+          npm install --package-lock-only --ignore-scripts --legacy-peer-deps
+
+      - name: Push the preview repository
+        env:
+          # An organization admin must create TESTING_REPO_TOKEN with push access to
+          # yuvanshankar30/971APP in frc971/spartanshub repository secrets.
+          TESTING_REPO_TOKEN: ${{ secrets.TESTING_REPO_TOKEN }}
+        run: |
+          if [ -z "$TESTING_REPO_TOKEN" ]; then
+            echo "::error::TESTING_REPO_TOKEN is not configured for this repository."
+            exit 1
+          fi
+
+          git config user.name "Spartans Hub Preview"
+          git config user.email "preview-deploy@spartanshub.spartanrobotics.org"
+          git add package.json package-lock.json svelte.config.js
+          if ! git diff --cached --quiet; then
+            git commit -m "Configure Vercel edit preview"
+          fi
+          git push --force "https://x-access-token:${TESTING_REPO_TOKEN}@github.com/yuvanshankar30/971APP.git" HEAD:refs/heads/main
