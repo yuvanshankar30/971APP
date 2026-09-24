@@ -7,8 +7,10 @@ operation) running under "[Tool 2]" / T2. The template's own tool is
 "971 Main Bit", but the tool actually posted comes from whatever the job's
 own tool library maps that template tool to (see templateTools.py's
 _find_matching_tool) - a library where that entry carries a different NC
-number silently posts the wrong physical tool. Direct instruction: only
-Tool 6 is approved for release/slot cuts.
+number silently posts the wrong physical tool. Direct instruction: the
+release/slot cut is always Tool 1 now (previously Tool 6) - Tool 6 is
+reserved exclusively for genuinely sized hole operations that aren't also
+a big-endmill tier, and a release/slot cut is neither.
 
 The tool-number mock shape here (tool.parameters.itemByName("tool_number").
 expression, not tool.number) is confirmed against a real live Fusion
@@ -52,7 +54,7 @@ def _tool(tool_number):
     )
 
 
-def _op(strategy, group_tabs_expression=None, tool_number=6, name="Slot Cut for Edges"):
+def _op(strategy, group_tabs_expression=None, tool_number=1, name="Slot Cut for Edges"):
     params = {}
     if group_tabs_expression is not None:
         params["group_tabs"] = _param(group_tabs_expression)
@@ -70,10 +72,10 @@ def _cam(*operations):
 
 
 class RequireApprovedReleaseCutToolTests(unittest.TestCase):
-    def test_passes_when_the_release_cut_uses_tool_6(self):
+    def test_passes_when_the_release_cut_uses_tool_1(self):
         cam = _cam(
             _op("contour2d", "false", tool_number=2),  # an unrelated finishing pass
-            _op("contour2d", "true", tool_number=6),   # the real release cut
+            _op("contour2d", "true", tool_number=1),   # the real release cut
         )
         require_approved_release_cut_tool(cam)  # must not raise
 
@@ -83,16 +85,19 @@ class RequireApprovedReleaseCutToolTests(unittest.TestCase):
         with self.assertRaises(RuntimeError) as ctx:
             require_approved_release_cut_tool(cam)
         self.assertIn("Tool 2", str(ctx.exception))
-        self.assertIn("Tool 6", str(ctx.exception))
+        self.assertIn("Tool 1", str(ctx.exception))
 
-    def test_raises_when_the_release_cut_uses_tool_1_with_the_default_approved_numbers(self):
+    def test_raises_when_the_release_cut_uses_tool_6_with_the_default_approved_numbers(self):
         # The default approved_tool_numbers (used when a caller doesn't
-        # pass one explicitly, e.g. multi-tool mode) is still Tool 6 only -
-        # see _approved_release_cut_tool_numbers_for_job's own tests below
-        # for single-tool mode's Tool-1-or-6 behavior.
-        cam = _cam(_op("contour2d", "true", tool_number=1))
-        with self.assertRaises(RuntimeError):
+        # pass one explicitly, e.g. multi-tool mode) is Tool 1 only now -
+        # Tool 6 is no longer an approved release-cut tool at all, even
+        # though it's still the approved tool for genuinely sized holes
+        # elsewhere in the pipeline.
+        cam = _cam(_op("contour2d", "true", tool_number=6))
+        with self.assertRaises(RuntimeError) as ctx:
             require_approved_release_cut_tool(cam)
+        self.assertIn("Tool 6", str(ctx.exception))
+        self.assertIn("Tool 1", str(ctx.exception))
 
     def test_ignores_operations_that_are_not_the_release_contour(self):
         cam = _cam(
@@ -142,21 +147,22 @@ class RequireApprovedReleaseCutToolTests(unittest.TestCase):
 
 
 class ApprovedReleaseCutToolNumbersForJobTests(unittest.TestCase):
-    """Direct instruction: in single-tool mode, the release/slot cut should
-    match the job's one selected tool when that tool is Tool 1 or Tool 6,
-    otherwise it falls back to Tool 1. Multi-tool mode is unaffected (fixed
-    Tool 6 requirement, independent of any single-tool selection)."""
+    """Direct instruction: the release/slot cut always requires Tool 1 now,
+    in both multi-tool and single-tool mode, regardless of which tool(s) a
+    job selected. Tool 6 is reserved exclusively for genuinely sized hole
+    operations elsewhere in the pipeline and is never an eligible release-
+    cut tool anymore, even when it's a job's one single selected tool."""
 
-    def test_multi_tool_mode_always_requires_tool_6_regardless_of_single_tool_number(self):
-        self.assertEqual(approved_release_cut_tool_numbers_for_job(True, None), (6,))
-        self.assertEqual(approved_release_cut_tool_numbers_for_job(True, 1), (6,))
-        self.assertEqual(approved_release_cut_tool_numbers_for_job(True, 2), (6,))
+    def test_multi_tool_mode_always_requires_tool_1_regardless_of_single_tool_number(self):
+        self.assertEqual(approved_release_cut_tool_numbers_for_job(True, None), (1,))
+        self.assertEqual(approved_release_cut_tool_numbers_for_job(True, 1), (1,))
+        self.assertEqual(approved_release_cut_tool_numbers_for_job(True, 6), (1,))
 
     def test_single_tool_mode_with_tool_1_selected_requires_tool_1(self):
         self.assertEqual(approved_release_cut_tool_numbers_for_job(False, 1), (1,))
 
-    def test_single_tool_mode_with_tool_6_selected_requires_tool_6(self):
-        self.assertEqual(approved_release_cut_tool_numbers_for_job(False, 6), (6,))
+    def test_single_tool_mode_with_tool_6_selected_falls_back_to_tool_1(self):
+        self.assertEqual(approved_release_cut_tool_numbers_for_job(False, 6), (1,))
 
     def test_single_tool_mode_with_any_other_tool_falls_back_to_tool_1(self):
         self.assertEqual(approved_release_cut_tool_numbers_for_job(False, 2), (1,))

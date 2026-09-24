@@ -429,18 +429,20 @@ def _require_release_contour(cam) -> None:
     )
 
 
-_APPROVED_RELEASE_CUT_TOOL_NUMBERS = (6,)
+_APPROVED_RELEASE_CUT_TOOL_NUMBERS = (1,)
 _SINGLE_TOOL_RELEASE_CUT_FALLBACK_NUMBER = 1
-_ELIGIBLE_SINGLE_TOOL_RELEASE_CUT_NUMBERS = (1, 6)
+_ELIGIBLE_SINGLE_TOOL_RELEASE_CUT_NUMBERS = (1,)
 
 
 def _approved_release_cut_tool_numbers_for_job(multi_tool_mode, single_tool_number):
-    """Direct instruction: in single-tool mode, the release/slot cut should
-    match the job's one selected tool when that tool is Tool 1 or Tool 6,
-    otherwise it falls back to Tool 1. Multi-tool mode keeps the original
-    fixed-machine-constant rule (_APPROVED_RELEASE_CUT_TOOL_NUMBERS, Tool 6
-    only - see that constant's own history) - unaffected by which tool(s)
-    were selected. Mirrors templateTools.py's own
+    """Direct instruction: the release/slot cut is always Tool 1 now, in
+    both multi-tool and single-tool mode, regardless of which tool(s) a
+    job selected - Tool 6 is reserved exclusively for genuinely sized
+    (dimensioned/toleranced) hole operations that aren't also a big-
+    endmill tier, and a release/slot cut is neither. Scoped to the New
+    Router (ShopSabre-only) template's "Slot Cut for Edges" operation, and
+    (via the same shared description pattern) the older templates' "2D
+    Slot Cut". Mirrors templateTools.py's own
     resolve_required_release_cut_tool_number - kept as an independent copy
     rather than a cross-module import since camPlate.py imports Fusion's
     runtime-only modules at import time and this function (like
@@ -458,9 +460,8 @@ def _require_approved_release_cut_tool(cam, approved_tool_numbers=_APPROVED_RELE
     """Raise if the release-contour operation (group_tabs=true, posted in
     G-code as "2D Slot Cut" / "Slot Cut for Edges") is assigned any tool
     not in approved_tool_numbers (see _approved_release_cut_tool_numbers_
-    for_job - the caller computes this per-job: Tool 6 only in multi-tool
-    mode, or the job's single selected tool when it's Tool 1 or 6, else
-    Tool 1, in single-tool mode).
+    for_job - the caller computes this per-job: always Tool 1, in both
+    multi-tool and single-tool mode).
 
     Direct operator report, with a real posted G-code snippet: a plate job's
     release cut posted under "[Tool 2]" / T2 - Tool 2 must never cut a
@@ -1216,7 +1217,7 @@ def start(data, session):
         # see _approved_release_cut_tool_numbers_for_job). Multi-tool mode
         # has no single selection at all (see the spacing_diameter comment
         # just below), so this stays None there and the release cut keeps
-        # its fixed Tool 6 machine-constant requirement.
+        # its fixed Tool 1 requirement.
         single_tool_number = None if multi_tool_mode else (data.get("cam_tools") or {}).get("tool_number")
 
         # Loaded ahead of plate_spacing below (moved earlier from its

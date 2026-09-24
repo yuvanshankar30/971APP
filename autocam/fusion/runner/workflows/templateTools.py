@@ -570,25 +570,29 @@ def _tool_nc_number(tool: dict) -> Optional[int]:
 # sync with gcodeEmit.js's RELEASE_CUT_NAME_PATTERN and camPlate.py's own
 # group_tabs-based identification of the same operation on the posted side.
 _RELEASE_CUT_TEMPLATE_DESCRIPTION_RE = re.compile(r"\b(2d\s*slot\s*cut|slot\s*cut\s*for\s*edges)\b", re.IGNORECASE)
-# Direct instruction: only Tool 6 is approved to cut a release/slot cut in
-# multi-tool mode - the release cut's tool there is a fixed machine constant
-# (Tool 6 lives permanently in the shop's ATC), not a per-job cutting-tool
-# choice. Single-tool mode is different: the release cut should use the
-# job's one selected tool when that tool is Tool 1 or Tool 6, otherwise it
-# falls back to Tool 1 - see resolve_required_release_cut_tool_number.
-_REQUIRED_RELEASE_CUT_TOOL_NUMBER = 6
+# Direct instruction: the release/slot cut is always Tool 1 now, in both
+# multi-tool and single-tool mode - Tool 6 is reserved exclusively for
+# genuinely sized (dimensioned/toleranced) hole operations that are not
+# also a big-endmill tier (see _is_sized_description and largest_endmill/
+# detail_endmill's own exclusion of "sized" tools above), and a release/
+# slot cut is neither. This is scoped to the New Router (ShopSabre-only)
+# template's "Slot Cut for Edges" operation - the same rule applies to the
+# older templates' "2D Slot Cut" too since both are matched by the one
+# shared _RELEASE_CUT_TEMPLATE_DESCRIPTION_RE pattern and resolved through
+# this same function.
+_REQUIRED_RELEASE_CUT_TOOL_NUMBER = 1
 _SINGLE_TOOL_RELEASE_CUT_FALLBACK_NUMBER = 1
-_ELIGIBLE_SINGLE_TOOL_RELEASE_CUT_NUMBERS = (1, 6)
+_ELIGIBLE_SINGLE_TOOL_RELEASE_CUT_NUMBERS = (1,)
 
 
 def resolve_required_release_cut_tool_number(
     multi_tool_mode: bool, single_tool_number: Optional[int]
 ) -> int:
-    """Direct instruction: in single-tool mode, the release/slot cut should
-    match the job's one selected tool when that tool is Tool 1 or Tool 6,
-    otherwise it falls back to Tool 1. Multi-tool mode keeps the original
-    fixed-machine-constant rule (Tool 6 only, see _REQUIRED_RELEASE_CUT_
-    TOOL_NUMBER's own comment) - unaffected by which tool(s) were selected.
+    """Direct instruction: the release/slot cut always requires Tool 1 now,
+    regardless of multi-tool vs single-tool mode or which tool(s) a job
+    selected (see _REQUIRED_RELEASE_CUT_TOOL_NUMBER's own comment). The
+    multi_tool_mode/single_tool_number parameters are kept for interface
+    compatibility with existing callers rather than removed.
     """
     if multi_tool_mode:
         return _REQUIRED_RELEASE_CUT_TOOL_NUMBER
@@ -1217,18 +1221,14 @@ def patch_cam_template_with_tool_libraries(
         raise ValueError("tool_library_paths must not be empty")
 
     indexes: list[dict] = []
-    # In multi-tool mode the release/slot cut's tool is a fixed machine
-    # constant (Tool 6 lives permanently in the shop's ATC), not a per-job
-    # cutting-tool choice - it must resolve independently of filter_guids,
-    # which represents only the tools an operator selected for this part's
-    # own geometry and would otherwise silently exclude Tool 6 from a job
-    # that never had reason to select it. In single-tool mode the required
-    # tool is derived from the job's own single selection instead (see
-    # resolve_required_release_cut_tool_number), but still looked up here
-    # rather than via filter_guids for the same reason: a single-tool job
-    # whose tool falls back to Tool 1 has no obligation to have selected
-    # Tool 1 itself. Built from the same already-loaded libraries below
-    # rather than re-reading each path a second time.
+    # Direct instruction: the release/slot cut always uses Tool 1 now, not
+    # Tool 6 - it must resolve independently of filter_guids, which
+    # represents only the tools an operator selected for this part's own
+    # cutting geometry and has no obligation to have selected Tool 1 for
+    # that reason (the release cut's tool is a fixed rule, not a per-job
+    # cutting-tool choice, whether or not the operator happened to pick it
+    # for anything else). Built from the same already-loaded libraries
+    # below rather than re-reading each path a second time.
     unfiltered_indexes: list[dict] = []
     for path in tool_library_paths:
         lib = load_tool_library_json(path)
