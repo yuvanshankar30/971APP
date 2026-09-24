@@ -94,18 +94,19 @@ class Tool2ReservedForBigEndmillTests(unittest.TestCase):
             )
 
     def test_big_endmill_operations_still_get_tool_2(self):
+        # Only "Shape Through Hole big endmill" is a real operation here -
+        # ">.3 Circular Through Hole (sized) big endmill" is not (and must
+        # never be synthesized - see
+        # test_sized_circular_hole_never_clones_big_endmill.py).
         root = self._patch()
         by_description = {
             str(t.get("description") or ""): t.find("x:tool", _NS)
             for t in root.findall("x:template", _NS)
         }
-        for description in (
-            "Shape Through Hole big endmill",
-            ">.3 Circular Through Hole (sized) big endmill",
-        ):
-            tool_elem = by_description.get(description)
-            self.assertIsNotNone(tool_elem, f"expected an operation named {description!r}")
-            self.assertEqual(tool_elem.get("guid"), _LARGE_ENDMILL_GUID)
+        tool_elem = by_description.get("Shape Through Hole big endmill")
+        self.assertIsNotNone(tool_elem)
+        self.assertEqual(tool_elem.get("guid"), _LARGE_ENDMILL_GUID)
+        self.assertNotIn(">.3 Circular Through Hole (sized) big endmill", by_description)
 
     def test_sized_hole_still_gets_tool_6_not_tool_1_or_tool_2(self):
         root = self._patch()

@@ -1408,52 +1408,36 @@ def patch_cam_template_with_tool_libraries(
             root.remove(template_elem)
             roughing_templates.remove(template_elem)
 
-    # Direct instruction, New Router multi-tool only: a "decently large"
-    # recognized hole should use the bigger loaded endmill on the
-    # dedicated big-hole operation ("[.]3 Circular Through Hole (sized)"),
-    # not whichever cutter this operation would otherwise get uniformly.
-    # Clone it into a "regular" (kept, gets the sized cutter below - this
-    # operation's own name says it's for a genuinely sized/dimensioned
-    # hole, so it keeps using the real Tool 6, unlike every other
-    # roughing/contour template's now-T1-by-default detail role) and a
-    # "big endmill" (gets largest_endmill below, like every other roughing/
-    # contour template) tier - DeleteToolpaths.py's own
-    # _split_big_circular_holes then routes each real recognized hole to
-    # whichever tier its actual diameter calls for. Gated on the exact
-    # same through_shape_tool_swaps_enabled flag as the Shape Through Hole
-    # family for the same reason: that flag is already only ever true for
-    # a real New Router multi-tool ATC swap plan (multi-tool mode itself
-    # is application-gated to New Router only), so no separate machine
-    # check is needed here - a single-cutter job (New Router or Old
-    # Router) keeps exactly the one operation it always has.
+    # Direct instruction: ">.3 Circular Through Hole (sized) big endmill"
+    # is not a real Fusion operation and must never exist - this used to
+    # clone the dedicated sized-hole operation ("[.]3 Circular Through Hole
+    # (sized)") into a "regular"/"big endmill" pair the same way the Shape
+    # Through Hole family does, but that family's tiers are real, manually-
+    # authored operations in the template export; this one never was, so
+    # synthesizing a "big endmill" sibling for it via XML cloning invented
+    # an operation with no basis in the actual Fusion template. The sized
+    # hole is a single operation, always: it resolves to regular_hole_tool
+    # below (the real sized cutter, Tool 6, when one is loaded for this
+    # job) regardless of what else is loaded or which mode the job runs in
+    # - no diameter-based split, no clone.
     #
     # regular_hole_tool prefers the real sized cutter (sized_endmill) over
     # the general detail_endmill - this op is the one place in the whole
     # file that SHOULD still resolve to Tool 6, per direct instruction that
     # Tool 6 is now reserved for genuinely sized holes. Falls back to
     # detail_endmill only when no sized cutter is loaded for this job at
-    # all, so the split still degrades sensibly rather than disappearing.
-    circular_hole_detail_template = None
+    # all, so it still degrades sensibly rather than being left unassigned.
+    sized_hole_template = next(
+        (
+            template_elem
+            for template_elem in roughing_templates
+            if template_elem.get("strategy") == "pocket2d"
+            and "circular" in str(template_elem.get("description") or "").lower()
+            and "hole" in str(template_elem.get("description") or "").lower()
+        ),
+        None,
+    )
     regular_hole_tool = sized_endmill or detail_endmill
-    if through_shape_tool_swaps_enabled and regular_hole_tool and largest_endmill:
-        big_hole_template = next(
-            (
-                template_elem
-                for template_elem in roughing_templates
-                if template_elem.get("strategy") == "pocket2d"
-                and "circular" in str(template_elem.get("description") or "").lower()
-                and "hole" in str(template_elem.get("description") or "").lower()
-            ),
-            None,
-        )
-        if big_hole_template is not None and regular_hole_tool[0].get("guid") != largest_endmill[0].get("guid"):
-            big_hole_clone = _clone_template(big_hole_template)
-            big_hole_clone.set(
-                "description", f"{big_hole_template.get('description') or ''} big endmill".strip()
-            )
-            _replace_template(root, big_hole_template, [big_hole_template, big_hole_clone])
-            roughing_templates.append(big_hole_clone)
-            circular_hole_detail_template = big_hole_template
 
     if multi_tool_swaps_enabled and bore_template_native is not None and endmill_candidates:
         # Real, confirmed live bug: the New Router's own template already
@@ -1683,17 +1667,18 @@ def patch_cam_template_with_tool_libraries(
             if " ".join(str(template_elem.get("description") or "").lower().split())
             == "shape through finishing pass"
         )
-        # The dedicated big-hole operation's own "regular" tier (see the
-        # circular_hole_detail_template clone above) is its own separate
-        # list, NOT folded into detail_through_roughing_templates: that
-        # operation's name says it's for a genuinely sized/dimensioned
-        # hole, so it keeps using regular_hole_tool (the real sized cutter
-        # when one is loaded), while every other detail-tier template here
-        # now gets the general-purpose detail_endmill (T1) instead - the
-        # two are different tools whenever both a sized cutter and a
-        # general detail cutter are loaded for the same job.
+        # The dedicated sized-hole operation (see sized_hole_template above)
+        # is its own separate list, NOT folded into
+        # detail_through_roughing_templates: that operation's name says
+        # it's for a genuinely sized/dimensioned hole, so it keeps using
+        # regular_hole_tool (the real sized cutter when one is loaded),
+        # while every other detail-tier template here now gets the
+        # general-purpose detail_endmill (T1) instead - the two are
+        # different tools whenever both a sized cutter and a general detail
+        # cutter are loaded for the same job. Always exactly this one
+        # static operation, never a cloned "big endmill" sibling.
         sized_hole_templates = (
-            [circular_hole_detail_template] if circular_hole_detail_template is not None else []
+            [sized_hole_template] if sized_hole_template is not None else []
         )
         # Real, confirmed bug caught before merge: this loop applies its
         # tool unconditionally, with no handled_templates check at all -
