@@ -12,7 +12,7 @@ describe('JProg program types', () => {
 		expect(() => singleProgramType(['plate.ngc', 'plate.tap'])).toThrow('cannot mix');
 	});
 
-	it('locks a sheet to its initial program type and derives its dialect', () => {
+	it('locks a cut to its initial program type and derives its dialect', () => {
 		expect(() => assertProgramTypeCompatible('tap', 'ngc')).toThrow('uses .tap');
 		expect(dialectForProgramType('tap')).toBe('wincnc');
 		expect(dialectForProgramType('ngc')).toBe('linuxcnc');

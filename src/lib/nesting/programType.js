@@ -14,8 +14,19 @@ export function dialectForProgramType(type) {
   return type === 'tap' ? 'wincnc' : 'linuxcnc';
 }
 
-export function assertProgramTypeCompatible(sheetType, programType) {
-  if (sheetType && programType && sheetType !== programType) {
-    throw new Error(`This sheet uses .${sheetType} programs and cannot add .${programType} programs.`);
+export function assertProgramTypeCompatible(cutType, programType) {
+  if (cutType && programType && cutType !== programType) {
+    throw new Error(`This cut uses .${cutType} programs and cannot add .${programType} programs.`);
   }
+}
+
+// A cut locks to whichever type its first part was (assertProgramTypeCompatible
+// above). Once every part is removed there is nothing left to be locked to,
+// so the lock should release and let the cut accept the other type next -
+// otherwise an emptied cut stays stuck on its old type forever. Placements
+// are the cut's current placements (parts and holes); holes never carry a
+// file type and don't keep the lock held.
+export function nextCutProgramType(currentType, placements) {
+  if (currentType && !(placements || []).some((item) => item.kind === 'part')) return null;
+  return currentType;
 }

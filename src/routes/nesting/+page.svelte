@@ -10,7 +10,7 @@
   import { requestConfirmation } from '$lib/confirmation.js';
   import { Plus, Save, Undo2, Redo2, RotateCw, RotateCcw, Download, Upload, Crosshair, FolderOpen, FolderInput, Files, Search, RefreshCw, Ruler, FileCode, Trash2, Copy, Settings, X, Pencil, ExternalLink, AlertTriangle, Cpu, ArrowDown, ArrowUp, FolderCog, HelpCircle } from 'lucide-svelte';
   import OutputEditorModal from './OutputEditorModal.svelte';
-  import { listSheets, createSheet, getSheet, updateSheet, deleteSheet, savePlacements, createCut, renameCut, deleteCut, setActiveCut, setSheetProgramType, recordEmission } from '$lib/nesting/db.js';
+  import { listSheets, createSheet, getSheet, updateSheet, deleteSheet, savePlacements, createCut, renameCut, deleteCut, setActiveCut, setCutProgramType, recordEmission } from '$lib/nesting/db.js';
   import { listAllPartsLibrary, listAutoCamPrograms, listPartsLibrary, listPartLibraryAtPath, renamePartLibraryGroup, sheetPartLibraryRoot, uploadPartFile, downloadText, uploadEmittedGcode } from '$lib/nesting/storage.js';
   import { makePlacement, placementContains, placementHasEdgeClearance, rotatePlacement } from '$lib/nesting/sheetModel.js';
   import { screenToSheet, sheetToScreen, zoomAt } from '$lib/nesting/coords.js';
@@ -18,7 +18,7 @@
   import { parseGcodeDocument } from '$lib/nesting/gcodeDocument.js';
   import { emitNestingGcode, nestingEmissionTools } from '$lib/nesting/gcodeEmit.js';
   import { HOLE_HEAD_SIZE_IN } from '$lib/nesting/holePrograms.js';
-  import { assertProgramTypeCompatible, dialectForProgramType, programTypeForName, singleProgramType } from '$lib/nesting/programType.js';
+  import { assertProgramTypeCompatible, dialectForProgramType, nextCutProgramType, programTypeForName, singleProgramType } from '$lib/nesting/programType.js';
   import { placementIssueIds, placementsOverlap, validateCut } from '$lib/nesting/validation.js';
   import { convertGcodeToInches } from '$autocam/fusion/gcodeUnitConvert.js';
 
@@ -54,8 +54,14 @@
     ...(emitPlacements.some(item => item.kind === 'hole') ? ['holes'] : []),
     ...emitPlacements.flatMap(item => gcodePrograms[item.part_library_path]?.variants?.map(variant => variant.suffix) || partGroups.find(group => group.key === item.part_library_path)?.suffixes || [])
   ])].sort();
-  $: programType = sheet?.program_extension || 'ngc';
-  $: dialect = dialectForProgramType(programType);
+  // programType/dialect describe the ACTIVE cut (sidebar display, placement
+  // gating below) - a separate emitProgramType/dialect pair describes
+  // whichever cut is chosen in the Emit dialog, which is not always the
+  // active one. Each cut carries its own program_extension so different
+  // cuts on the same sheet can use different G-code types.
+  $: programType = activeCut?.program_extension || 'ngc';
+  $: emitProgramType = emitCut?.program_extension || 'ngc';
+  $: dialect = dialectForProgramType(emitProgramType);
   $: defaultGroupLabel = emitCut?.name || 'default';
   // Holes always emit as their own separate program using JProg's bundled
   // hole tool (T1 - see holePrograms.js) regardless of whatever tools the
@@ -251,9 +257,29 @@
     return operation;
   }
   async function save({ quiet = false } = {}) { if (!activeCutId) return false; clearTimeout(autosaveTimer); return persistPlacements(activeCutId, structuredClone(placements), quiet); }
-  function commit(next) { placements = undo.commit(next); placementRevision += 1; selectedId = selectedId && placements.some(p => p.id === selectedId) ? selectedId : null; updateCutInMemory(activeCutId, placements); persistHistory(); scheduleAutosave(); draw(); }
-  function undoChange() { placements = undo.undo(); placementRevision += 1; persistHistory(); scheduleAutosave(); draw(); }
-  function redoChange() { placements = undo.redo(); placementRevision += 1; persistHistory(); scheduleAutosave(); draw(); }
+  function setCutProgramTypeInMemory(cutId, type) { sheet = { ...sheet, nesting_cuts: (sheet?.nesting_cuts || []).map(cut => cut.id === cutId ? { ...cut, program_extension: type } : cut) }; }
+  // Real bug this fixes: program_extension locks a cut to its first placed
+  // part's file type (see assertProgramTypeCompatible below), but nothing
+  // ever cleared it back out - deleting every part from a cut still left it
+  // permanently locked to the old type, so the other type could never be
+  // placed there again even though the cut was empty. Only ever clears the
+  // lock, never re-derives it - an undo that brings a part back onto an
+  // already-emptied (and thus unlocked) cut leaves the type unlocked rather
+  // than guessing it back from the restored part. The Emit dialog's own
+  // "WinCNC (.tap)" / "971 / LinuxCNC (.ngc)" hint (driven by the same
+  // per-cut type) is the operator's check against emitting the wrong dialect
+  // for whatever is actually placed, same as any other JProg output review.
+  function maybeUnlockCutProgramType() {
+    const cutId = activeCutId, cut = sheet?.nesting_cuts?.find(item => item.id === cutId);
+    if (!cutId) return;
+    const nextType = nextCutProgramType(cut?.program_extension, placements);
+    if (nextType === (cut?.program_extension || null)) return;
+    setCutProgramTypeInMemory(cutId, nextType);
+    setCutProgramType(cutId, nextType).catch(error => toastActions.show(error.message));
+  }
+  function commit(next) { placements = undo.commit(next); placementRevision += 1; selectedId = selectedId && placements.some(p => p.id === selectedId) ? selectedId : null; updateCutInMemory(activeCutId, placements); maybeUnlockCutProgramType(); persistHistory(); scheduleAutosave(); draw(); }
+  function undoChange() { placements = undo.undo(); placementRevision += 1; maybeUnlockCutProgramType(); persistHistory(); scheduleAutosave(); draw(); }
+  function redoChange() { placements = undo.redo(); placementRevision += 1; maybeUnlockCutProgramType(); persistHistory(); scheduleAutosave(); draw(); }
   async function addCut() {
     const name = `Cut ${(sheet.nesting_cuts?.length || 0) + 1}`;
     if (!await save({ quiet: true })) return;
@@ -360,14 +386,14 @@
     const extension = /\.tap$/i.test(job.gcode_file_name || '') ? 'tap' : 'ngc';
     const fileName = `${partName}.${extension}`;
     try {
-      assertProgramTypeCompatible(sheet?.program_extension, extension);
+      assertProgramTypeCompatible(activeCut?.program_extension, extension);
       const file = new File([job.gcode], fileName, { type: 'text/plain' });
       await uploadPartFile(file, sheet.name, partName);
       const variant = await parseGcodeDocument(job.gcode, fileName);
       const key = `${sheetPartLibraryRoot(sheet.name)}/${partName}`;
       gcodePrograms[key] = { variants: [variant], bounds: variant.bounds };
       const candidate = makePlacement({ kind: 'part', label: partName, part_library_path: key, width_in: variant.bounds.width, height_in: variant.bounds.height, x: -Number(sheet.width_in) / 2, y: Number(sheet.height_in) / 2 });
-      if (!sheet?.program_extension) { await setSheetProgramType(sheet.id, extension); sheet = { ...sheet, program_extension: extension }; }
+      if (!activeCut?.program_extension) { await setCutProgramType(activeCutId, extension); setCutProgramTypeInMemory(activeCutId, extension); }
       activePart = { kind: 'part', label: partName, part_library_path: key, width_in: variant.bounds.width, height_in: variant.bounds.height };
       commit([...placements, candidate]);
       selectedId = candidate.id;
@@ -415,8 +441,8 @@
   async function armStoredPart(group) {
     try {
       const type = group.programType || singleProgramType(group.files.map(file => file.name));
-      assertProgramTypeCompatible(sheet?.program_extension, type);
-      if (!sheet?.program_extension && type) { await setSheetProgramType(sheet.id, type); sheet = { ...sheet, program_extension: type }; }
+      assertProgramTypeCompatible(activeCut?.program_extension, type);
+      if (!activeCut?.program_extension && type) { await setCutProgramType(activeCutId, type); setCutProgramTypeInMemory(activeCutId, type); }
       const program = await readPartGroup(group); gcodePrograms[group.key] = program;
       activePart = { label: group.label, part_library_path: group.key, width_in: program.bounds.width, height_in: program.bounds.height };
       placing = { ...activePart }; placingWithShortcut = false;
@@ -429,7 +455,7 @@
     let type;
     try {
       type = singleProgramType(programs.map(file => file.name));
-      assertProgramTypeCompatible(sheet?.program_extension, type);
+      assertProgramTypeCompatible(activeCut?.program_extension, type);
     } catch (error) { toastActions.show(error.message); return; }
     const firstStem = programs[0].name.replace(/\.[^.]+$/, '');
     const partName = firstStem.replace(/_[^_]+$/, '') || firstStem;
@@ -448,7 +474,7 @@
       const variants = await Promise.all(programs.map(async file => parseGcodeDocument(convertGcodeToInches(await file.text()).gcode, file.name)));
       const primary = variants[0], bounds = variants.reduce((largest, item) => item.bounds.width * item.bounds.height > largest.width * largest.height ? item.bounds : largest, primary.bounds);
       const key = `${sheetPartLibraryRoot(sheet.name)}/${partName}`; gcodePrograms[key] = { variants, bounds };
-      if (!sheet?.program_extension && type) { await setSheetProgramType(sheet.id, type); sheet = { ...sheet, program_extension: type }; }
+      if (!activeCut?.program_extension && type) { await setCutProgramType(activeCutId, type); setCutProgramTypeInMemory(activeCutId, type); }
       activePart = { label: partName, part_library_path: key, width_in: bounds.width, height_in: bounds.height };
       if (dropPoint) {
         const candidate = makePlacement({ ...activePart, x: dropPoint.x, y: dropPoint.y });
@@ -719,7 +745,7 @@
       <h2>Emit G-code</h2>
       <label>Cut<select bind:value={emitCutId} on:change={() => { emitSuffix = 'all'; void ensurePrograms(emitPlacements).then(() => gcodePrograms = { ...gcodePrograms }); }}>{#each sheet?.nesting_cuts || [] as cut}<option value={cut.id}>{cut.name}</option>{/each}</select></label>
       <label>Program name<input bind:value={emitName}/></label>
-      <p class="hint">{programType === 'tap' ? 'WinCNC (.tap)' : '971 / LinuxCNC (.ngc)'}</p>
+      <p class="hint">{emitProgramType === 'tap' ? 'WinCNC (.tap)' : '971 / LinuxCNC (.ngc)'}</p>
       {#if emitValidation.length}<div class="emit-validation"><AlertTriangle size={16}/><span>Fix {emitValidation.length} validation issue{emitValidation.length === 1 ? '' : 's'} before emitting.</span></div>{/if}
       <fieldset><legend>Program group</legend><label class="radio"><input type="radio" bind:group={emitSuffix} value="all"/> All available groups</label>{#each availableSuffixes as suffix}<label class="radio"><input type="radio" bind:group={emitSuffix} value={suffix}/> {suffix || defaultGroupLabel}</label>{/each}{#if !availableSuffixes.length}<p class="hint">Add a part or hole before emitting.</p>{/if}</fieldset>
       {#if dialect === 'wincnc' && (emitToolOrderDisplay.length > 1 || emitHolesInScope)}
