@@ -9,7 +9,7 @@ import {
 } from '$lib/server/971bot';
 import { handlePlannerReaction } from '$lib/server/planner_notifications.js';
 import { handleP0BugAssignmentReaction } from '$lib/server/slack_notifications.js';
-import { handleHubAppMention } from '$lib/server/hub_slack_assistant.js';
+import { handleHubAppMention, resolveHubMentionThreadTs } from '$lib/server/hub_slack_assistant.js';
 import { claimSlackEvent, completeSlackEvent, failSlackEvent, recordSlackAssistantQuestion } from '$lib/server/slack_event_receipts.js';
 
 // Avoid approving the same purchase repeatedly when multiple reactions are added.
@@ -35,6 +35,11 @@ async function processHubAssistantEvent({ event, eventId, eventType, supa }) {
     await recordSlackAssistantQuestion(supa, eventId, { ts: event.ts, question: event.text || '' });
     result = await handleHubAppMention(event, { supa });
     if (!result.ok) throw new Error(`Slack did not accept the assistant reply (${result.reason || 'unknown reason'})`);
+    console.log('Slack assistant reply accepted', {
+      event_id: eventId, channel: result.channel || event.channel || null,
+      question_ts: event.ts || null, thread_ts: event.thread_ts || event.ts || null,
+      reply_ts: result.ts || null
+    });
   } catch (error) {
     console.error('Failed to answer Slack assistant event', error?.data?.error || error?.message || error);
     try {
@@ -76,10 +81,19 @@ export async function POST({ request }) {
     console.log('Slack event callback received', { event_type, event_id: payload.event_id || null });
 
     if (event_type === 'app_mention') {
-      if (event.bot_id || event.subtype === 'bot_message') return json({ ok: true, ignored: true });
+      if (event.bot_id || event.subtype === 'bot_message') {
+        console.log('Ignoring bot-authored Slack mention', { event_id: payload.event_id || null });
+        return json({ ok: true, ignored: true });
+      }
       const eventId = payload.event_id || `app_mention:${event.channel || ''}:${event.ts || ''}`;
       const supa = getSupabase();
-      return processHubAssistantEvent({ event, eventId, eventType: event_type, supa });
+      const threadTs = await resolveHubMentionThreadTs(getSlackClient(), event);
+      const mention = threadTs && threadTs !== event.ts ? { ...event, thread_ts: threadTs } : event;
+      console.log('Processing Slack mention', {
+        event_id: eventId, channel: event.channel || null, ts: event.ts || null,
+        thread_ts: mention.thread_ts || null
+      });
+      return processHubAssistantEvent({ event: mention, eventId, eventType: event_type, supa });
     }
 
     if (event_type === 'reaction_added') {
