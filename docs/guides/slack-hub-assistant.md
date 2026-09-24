@@ -90,7 +90,8 @@ is a member. Every follow-up must mention `@Spartans Hub`, including replies
 in an existing assistant thread. Unmentioned messages are ignored. Slack
 membership remains the access boundary. Replies to a mention in an existing
 thread remain in that thread; channel-level mentions start one threaded reply
-beneath the mention.
+beneath the mention. When Slack omits `thread_ts` from an `app_mention`, the bot
+looks up the message's parent before posting and storing thread context.
 
 ## Required runtime configuration
 
@@ -109,9 +110,11 @@ In the Slack app configuration at `api.slack.com/apps`:
 
 1. Set the app and bot display name to `Spartans Hub`.
 2. Under **OAuth & Permissions**, add the bot scope `app_mentions:read` and
-   keep the existing `chat:write` scope used to post replies. The optional
-   `channels:history` and `groups:history` scopes let the bot recover context
-   from older public- and private-channel threads, respectively.
+   keep the existing `chat:write` scope used to post replies. Add
+   `channels:history` for reliable replies in public-channel threads and
+   `groups:history` for private-channel threads: Slack can omit the parent
+   timestamp from a mention event, so the bot needs `conversations.replies` to
+   find it. These scopes also let it recover context from older threads.
 3. Reinstall the app to the workspace if Slack requests it after the scope
    change.
 4. Under **Event Subscriptions**, enable events and set the request URL to

@@ -23,6 +23,7 @@ import {
   formatScoutingAssignments,
   formatTeamReportStatus,
   handleHubAppMention,
+  resolveHubMentionThreadTs,
   isAdminProfileQuestion,
   isFusionRunnerSetupQuestion,
   isScoutingAssignmentQuestion,
@@ -286,6 +287,23 @@ describe('Slack Hub assistant', () => {
       { role: 'user', text: 'What is AutoCAM?' },
       { role: 'assistant', text: 'It generates G-code.' }
     ]);
+  });
+
+  it('resolves the parent of a mention whose event omits thread_ts', async () => {
+    const replies = vi.fn().mockResolvedValue({ ok: true, messages: [{ ts: '1.0', reply_count: 2 }] });
+    const threadTs = await resolveHubMentionThreadTs({ conversations: { replies } }, {
+      channel: 'C1', ts: '2.0'
+    });
+    expect(threadTs).toBe('1.0');
+    expect(replies).toHaveBeenCalledWith({ channel: 'C1', ts: '2.0', limit: 1 });
+  });
+
+  it('does not query Slack when the mention already includes its parent', async () => {
+    const replies = vi.fn();
+    expect(await resolveHubMentionThreadTs({ conversations: { replies } }, {
+      channel: 'C1', ts: '2.0', thread_ts: '1.0'
+    })).toBe('1.0');
+    expect(replies).not.toHaveBeenCalled();
   });
 
   it('paginates long threads and remembers the most recent turns', async () => {
