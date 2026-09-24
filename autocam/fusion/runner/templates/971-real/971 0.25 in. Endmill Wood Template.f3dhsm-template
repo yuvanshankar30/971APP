@@ -811,7 +811,7 @@
     <parameter expression="0in" name="minimumCuttingRadius"/>
     <parameter expression="minimumCuttingRadius" name="minimumCuttingRadiusJl"/>
     <parameter expression="true" name="machineCavities"/>
-    <parameter expression="true" name="useSlotClearing"/>
+    <parameter expression="false" name="useSlotClearing"/>
     <parameter expression="1.25 * tool_diameter" name="slotClearingWidth"/>
     <parameter expression="'climb'" name="direction"/>
     <parameter expression="true" name="doMultipleDepths"/>
@@ -1104,7 +1104,7 @@
     <parameter expression="0in" name="minimumCuttingRadius"/>
     <parameter expression="minimumCuttingRadius" name="minimumCuttingRadiusJl"/>
     <parameter expression="true" name="machineCavities"/>
-    <parameter expression="true" name="useSlotClearing"/>
+    <parameter expression="false" name="useSlotClearing"/>
     <parameter expression="1.25 * tool_diameter" name="slotClearingWidth"/>
     <parameter expression="'climb'" name="direction"/>
     <parameter expression="true" name="doMultipleDepths"/>
