@@ -169,24 +169,6 @@ export async function fetchSlackThreadMessages(slack, event) {
   }
 }
 
-// Slack's app_mention payload may omit thread_ts. Resolve the parent before
-// claiming the event so both the reply and durable context use the same root.
-export async function resolveHubMentionThreadTs(slack, event) {
-  if (event?.thread_ts || !event?.channel || !event?.ts) return event?.thread_ts || event?.ts || null;
-  try {
-    const result = await slack.conversations.replies({ channel: event.channel, ts: event.ts, limit: 1 });
-    if (!result?.ok) throw new Error(result?.error || 'unknown Slack error');
-    const parentTs = result.messages?.[0]?.thread_ts || result.messages?.[0]?.ts;
-    if (!parentTs) throw new Error('Slack returned no thread messages');
-    return parentTs;
-  } catch (error) {
-    console.warn('Could not resolve Slack mention thread parent', {
-      channel: event.channel, ts: event.ts, reason: error?.data?.error || error?.message || String(error)
-    });
-    return event.ts;
-  }
-}
-
 function featureFromThread(messages) {
   for (const message of [...(messages || [])].reverse()) {
     const words = normalizedWords(message.text);

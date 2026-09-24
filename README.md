@@ -583,9 +583,9 @@ file: update its diagram alongside this section, not separately from it.
   assistant rejects unrelated/general prompts before any model call, never
   uses external web search, and requires a linked active Hub profile for
   model-backed answers. The assistant responds to direct mentions in every conversation where the bot is
-  a member, requires a direct mention for every thread follow-up, resolves the
-  parent with Slack history when a mention event omits its thread timestamp,
-  reports safe
+  a member, requires a direct mention for every thread follow-up, identifies
+  each mention receipt by its own message timestamp while storing the thread
+  parent separately, reports safe
   credential/model/quota/timeout failure categories, and durably deduplicates
   Slack retry IDs in `slack_event_receipts`),
   Onshape API (CAD source of truth for parts - see the Onshape-key exposure

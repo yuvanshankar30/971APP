@@ -1,9 +1,10 @@
 const DUPLICATE_KEY_CODE = '23505';
 const CONTEXT_PREFIX = 'assistant_context_v1:';
 
-function conversationContext({ ts, question, answer = null }) {
+function conversationContext({ ts, threadTs = ts, question, answer = null }) {
   return `${CONTEXT_PREFIX}${JSON.stringify({
     ts: String(ts || ''),
+    threadTs: String(threadTs || ts || ''),
     question: String(question || '').slice(0, 1200),
     answer: answer === null ? null : String(answer).slice(0, 1500)
   })}`;
@@ -50,9 +51,9 @@ export async function claimSlackEvent(supa, { eventId, eventType, channelId = nu
 
 // The service-role-only receipt already exists in production. Its last_error
 // text holds context while processing/completed and an error when failed.
-export async function recordSlackAssistantQuestion(supa, eventId, { ts, question }) {
+export async function recordSlackAssistantQuestion(supa, eventId, { ts, threadTs = ts, question }) {
   const result = await supa.from('slack_event_receipts')
-    .update({ last_error: conversationContext({ ts, question }), updated_at: new Date().toISOString() })
+    .update({ last_error: conversationContext({ ts, threadTs, question }), updated_at: new Date().toISOString() })
     .eq('event_id', eventId);
   if (result.error) throw new Error(`Could not remember Slack question: ${cleanError(result.error)}`);
 }
@@ -69,34 +70,36 @@ export async function completeSlackEvent(supa, eventId, context = null) {
 
 export async function readSlackAssistantThread(supa, { channel, threadTs, beforeTs }) {
   if (!channel || !threadTs || !beforeTs) return [];
-  const result = await supa.from('slack_event_receipts')
+  // event_ts identifies each message for the unique receipt constraint.
+  // Context stores the shared parent separately, so follow-ups cannot collide.
+  const recent = await supa.from('slack_event_receipts')
     .select('last_error,received_at')
     .eq('channel_id', channel)
-    .eq('event_ts', threadTs)
     .in('status', ['processing', 'completed'])
     .in('event_type', ['app_mention', 'message.thread_reply'])
+    .like('last_error', `${CONTEXT_PREFIX}%"threadTs":"${threadTs}"%`)
     .order('received_at', { ascending: false })
     .limit(40);
-  if (result.error) throw new Error(`Could not read Slack thread memory: ${cleanError(result.error)}`);
-  const contexts = (result.data || []).map((row) => parseConversationContext(row.last_error))
-    .filter((context) => context && Number(context.ts) < Number(beforeTs))
+  if (recent.error) throw new Error(`Could not read Slack thread memory: ${cleanError(recent.error)}`);
+  // Older root receipts predate threadTs in their context, but event_ts was
+  // already the root message's own timestamp, so they remain readable.
+  const root = await supa.from('slack_event_receipts')
+    .select('last_error')
+    .eq('channel_id', channel)
+    .eq('event_ts', threadTs)
+    .eq('event_type', 'app_mention')
+    .in('status', ['processing', 'completed'])
+    .limit(1)
+    .maybeSingle();
+  if (root.error) throw new Error(`Could not read Slack thread root: ${cleanError(root.error)}`);
+  const rootContext = parseConversationContext(root.data?.last_error);
+  const contexts = [rootContext, ...(recent.data || [])
+    .map((row) => parseConversationContext(row?.last_error))
+    .filter((context) => context?.threadTs === threadTs)]
+    .filter((context) => context && Number(context.ts) < Number(beforeTs));
+  const unique = [...new Map(contexts.map((context) => [context.ts, context])).values()]
     .sort((a, b) => Number(a.ts) - Number(b.ts));
-  if (contexts.length && !contexts.some((context) => context.ts === threadTs)) {
-    const root = await supa.from('slack_event_receipts')
-      .select('last_error')
-      .eq('channel_id', channel)
-      .eq('event_ts', threadTs)
-      .eq('event_type', 'app_mention')
-      .in('status', ['processing', 'completed'])
-      .order('received_at', { ascending: true })
-      .limit(1)
-      .maybeSingle();
-    if (root.error) throw new Error(`Could not read Slack thread root: ${cleanError(root.error)}`);
-    const rootContext = parseConversationContext(root.data?.last_error);
-    if (rootContext && Number(rootContext.ts) < Number(beforeTs)
-      && !contexts.some((context) => context.ts === rootContext.ts)) contexts.unshift(rootContext);
-  }
-  return contexts.flatMap(({ question, answer }) => [
+  return unique.flatMap(({ question, answer }) => [
     ...(question ? [{ role: 'user', text: question }] : []),
     ...(answer ? [{ role: 'assistant', text: answer }] : [])
   ]);
