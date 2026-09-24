@@ -455,6 +455,62 @@ describe("nesting emission", () => {
     expect(result.text.slice(slotIndex)).toContain("G1 X2.5000 Y2.0000");
   });
 
+  it("attaches an ordinary operation's own name to the tool that actually runs it, not the previous one", () => {
+    // Real bug, confirmed against a real posted job (1001.tap): AutoCAM's
+    // WinCNC post writes every operation's name comment BEFORE that
+    // operation's own T-word, same as the release cut's own label. Before
+    // the fix, only the release cut got the "look at the next line" lookahead
+    // - every other operation's label was swept into whichever tool was
+    // still active from the PREVIOUS operation, so JProg's own re-grouped
+    // multi-tool output printed the wrong operation name over each tool's
+    // real work (e.g. the sized-hole tool's section printed the big-endmill
+    // operation's name, and vice versa).
+    const result = emitNestingGcode({
+      name: "label-before-tool",
+      dialect: "wincnc",
+      placements: [{ label: "Part", x: 2, y: 2, part_library_path: "part" }],
+      programs: {
+        part: {
+          source: [
+            "G90",
+            "T1",
+            "[.3 Circluar Through Hole]",
+            "S22000",
+            "G0 X0 Y0",
+            "[Shape Through Hole big endmill]",
+            "T2",
+            "S22000",
+            "G0 X1 Y1",
+            "[Shape Through Hole]",
+            "T1",
+            "S22000",
+            "G0 X2 Y2",
+            "M5",
+          ].join("\n"),
+        },
+      },
+    });
+    // Real JProg behavior this test relies on: winCncToolBlocks buckets by
+    // tool NUMBER, so every T1 stretch from anywhere in the source (both
+    // before and after the T2 detour) merges into one "[Tool 1]" section -
+    // there is exactly one of each tool header, not one per source
+    // occurrence.
+    const tool1Index = result.text.indexOf("[Tool 1]");
+    const tool2Index = result.text.indexOf("[Tool 2]");
+    const tool1Body = result.text.slice(tool1Index, tool2Index);
+    const tool2Body = result.text.slice(tool2Index);
+    // T2's own section carries its own real label ("Shape Through Hole big
+    // endmill"), not the label that happened to precede its T-word... wait,
+    // the label that precedes T2's own T-word IS "Shape Through Hole big
+    // endmill" (correct already), and the label that precedes the LATER
+    // "T1" re-entry is "Shape Through Hole" - that one must land in T1's
+    // merged section, not stay behind in T2's.
+    expect(tool2Body).toContain("[Shape Through Hole big endmill]");
+    expect(tool2Body).not.toContain("[Shape Through Hole]\n");
+    expect(tool1Body).toContain("[Shape Through Hole]");
+    expect(tool1Body).not.toContain("[Shape Through Hole big endmill]");
+  });
+
   it("keeps a release-only tool out of the reorderable tool list", () => {
     const input = {
       name: "release-only-tool",

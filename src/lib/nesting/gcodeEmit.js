@@ -199,6 +199,29 @@ function winCncToolBlocks(source) {
       releaseBlocks.get(releaseTool).push(line);
       continue;
     }
+    // Real bug this fixes: the release cut's own label got the lookahead
+    // treatment just above, but every OTHER operation's name comment gets
+    // the exact same "label before T-word" treatment from AutoCAM's WinCNC
+    // post - a comment-only line naming an operation (e.g. "[Shape Through
+    // Hole big endmill]") that appears immediately before that operation's
+    // own T-word was, before this, swept into whichever tool was still
+    // active from the PREVIOUS operation instead of the tool it actually
+    // names. JProg's own re-grouped multi-tool output then printed the
+    // wrong operation name next to each tool's real work - confirmed
+    // against a real posted job (1001.tap): its T6 section printed
+    // "[Shape Through Hole big endmill]" (T2's real op) and its T2 section
+    // printed "[Shape Through Hole]" (T1's real op). Same lookahead as the
+    // release cut's own fix just above, generalized to any comment-only
+    // label line.
+    if (!code.trim() && /^\[[^\]]+\]$/.test(line.trim())) {
+      const nextTool = uncommentedCode(programLines[index + 1] || '').match(/^\s*T(\d+)\b/i);
+      if (nextTool) {
+        const labelTool = Number(nextTool[1]);
+        if (!blocks.has(labelTool)) blocks.set(labelTool, []);
+        blocks.get(labelTool).push(line);
+        continue;
+      }
+    }
     if (releaseTriggered.has(activeTool)) {
       if (!releaseBlocks.has(activeTool)) releaseBlocks.set(activeTool, []);
       releaseBlocks.get(activeTool).push(line);
