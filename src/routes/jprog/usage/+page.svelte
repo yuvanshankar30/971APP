@@ -4,8 +4,17 @@
 
   // Mirrors autocam/fusion/usage/+page.svelte's approach - see that file's
   // comment for why a direct ?raw import is simpler than the /docs browser's
-  // glob machinery for a single document.
-  import usageGuideRaw from '/docs/guides/jprog-usage-guide.md?raw';
+  // glob machinery for a single document. Real, confirmed production
+  // outage this avoids: a copy of this file previously lived under the
+  // top-level docs/ folder, which .dockerignore excludes entirely from the
+  // Cloud Build image (`docs` with no leading slash there - Docker's own
+  // ignore matching is root-relative for a bare pattern like this, not
+  // recursive like .gitignore's, so it only ever excluded the top-level
+  // docs/ and never autocam/fusion/runner/docs/, which is why that sibling
+  // guide never broke) - `npm run build` then had nothing on disk to
+  // resolve, failing every Cloud Build from the moment this route was
+  // merged until this file was moved out of docs/ entirely.
+  import usageGuideRaw from './jprog-usage-guide.md?raw';
 
   $: renderedHtml = marked.parse(usageGuideRaw);
 </script>
@@ -22,7 +31,7 @@
 </div>
 
 <p class="setup-docs-link">
-  This guide also lives in <a href="/docs?file=docs/guides/jprog-usage-guide.md">Docs</a>, alongside every other markdown file in the repo.
+  This guide also lives in <a href="/docs?file=src/routes/jprog/usage/jprog-usage-guide.md">Docs</a>, alongside every other markdown file in the repo.
 </p>
 
 <style>
