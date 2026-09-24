@@ -28,7 +28,13 @@ _TEMPLATE_PATH = ROOT / "templates/971-real/new router metal sheet (shopsabre on
 _LIBRARY_PATH = ROOT / "tools/Normal router tools (use this).tools"
 _NS = {"x": "http://www.hsmworks.com/namespace/hsmworks/document/template"}
 
-_SMALL_ENDMILL_GUID = "e7813c26-af06-4d6c-9aba-324fa1b402c1"  # 4mm, 0.1575in
+# The real "971 Main Bit" (Tool 1), NOT the "4mm sized for toolchager"
+# Tool 6 entry that happens to share its 0.1575in diameter - this op
+# ("<.3 Circluar Through Hole") has no "(sized)" in its name, so it's the
+# small-hole recognition fallback, not the dedicated dimensioned-hole
+# operation, and must resolve to the general-purpose main bit, not the
+# cutter reserved for genuinely sized holes.
+_SMALL_ENDMILL_GUID = "10a2caeb-dec0-49b2-8701-96fdb212bad9"  # 971 Main Bit, 0.1575in
 _LARGE_ENDMILL_GUID = "29331875-1efc-47c5-9742-f39efcb697ed"  # 6mm, 0.2362in
 
 
@@ -114,8 +120,8 @@ class NativeBoreToolAssignmentTests(unittest.TestCase):
         # A real, distinct physical tool, not sharing an NC tool number with
         # the source it was cloned from - `dict(source)` is a shallow copy,
         # so without this override the clone would still carry the SAME
-        # post-process dict (and its tool number 6) as the real "4mm sized
-        # for toolchager" tool it was cloned from, spuriously tripping
+        # post-process dict (and its tool number) as the real "971 Main
+        # Bit" tool it was cloned from, spuriously tripping
         # _drop_stale_duplicate_tool_numbers's real-duplicate-number
         # detection and dropping this clone entirely before it ever reaches
         # the description-match path this test exists to exercise.

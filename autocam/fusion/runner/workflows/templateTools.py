@@ -1137,6 +1137,24 @@ def _find_smallest_endmill(indexes: list[dict]) -> Optional[tuple[dict, dict]]:
     return None
 
 
+def _find_sized_endmill(indexes: list[dict]) -> Optional[tuple[dict, dict]]:
+    """The shop's one dedicated dimensioned/toleranced-hole cutter - an
+    endmill whose own description is flagged "sized" (see
+    _is_sized_description; real library: "4mm sized for toolchager", tool
+    number 6). Direct instruction: reserved exclusively for genuinely
+    sized/dimensioned holes from now on, never a general roughing/detail
+    default - looked up independently of largest_endmill/detail_endmill
+    (which now deliberately exclude it, see their own call sites) so a
+    dedicated sized-hole operation can still resolve the real tool even
+    though it no longer wins the general-purpose picks.
+    """
+    candidates = _select_tools(indexes, lambda tool: _is_endmill_tool(tool) and _is_sized_description(tool))
+    if not candidates:
+        return None
+    tool, idx, _diameter = candidates[0]
+    return tool, idx
+
+
 _NESTED_SHEET_LEAD_STRATEGIES = {"contour2d", "pocket2d"}
 
 
@@ -1283,17 +1301,37 @@ def patch_cam_template_with_tool_libraries(
     through_shape_tool_swaps_enabled = (
         multi_tool_swaps_enabled and len(endmill_plan["tools"]) > 1
     )
-    largest_endmill = _find_largest_endmill([{"tools": [entry[0] for entry in endmill_candidates]}])
+    # Direct instruction: Tool 6 (the shop's "sized" dimensioned-hole
+    # cutter) is reserved for genuinely sized holes from now on - every
+    # other roughing/contour default should land on the general-purpose
+    # 971 Main Bit (T1), falling back to the big endmill (T2) only where a
+    # bigger cutter is genuinely required. Excluded from the candidate pool
+    # largest_endmill/detail_endmill pick from below so it can no longer
+    # silently win either role by diameter alone (real, confirmed case: the
+    # sized tool and the 971 Main Bit are both 0.1575in, and the sized
+    # entry used to win the tie purely by appearing earlier in the loaded
+    # tool library's own list order). Falls back to the full candidate list
+    # only when nothing non-"sized" is loaded at all, so a job that somehow
+    # only has the sized cutter loaded still gets a usable default instead
+    # of none.
+    general_endmill_candidates = [
+        entry for entry in endmill_candidates if not _is_sized_description(entry[0])
+    ] or endmill_candidates
+    largest_endmill = _find_largest_endmill([{"tools": [entry[0] for entry in general_endmill_candidates]}])
     # Only meaningful with a real second, genuinely-smaller candidate loaded
     # (see plan_endmills's own "only when materially smaller" detail-cutter
     # rule) - with one endmill or two near-identical ones, this comes back
     # None and every roughing/contour template below falls back to
     # largest_endmill exactly as before, so single-tool jobs are unaffected.
     detail_endmill = (
-        _find_smallest_endmill([{"tools": [entry[0] for entry in endmill_candidates]}])
-        if len(endmill_candidates) > 1
+        _find_smallest_endmill([{"tools": [entry[0] for entry in general_endmill_candidates]}])
+        if len(general_endmill_candidates) > 1
         else None
     )
+    # The real, calibrated sized cutter itself (independent of
+    # largest_endmill/detail_endmill above) - only ever used below for the
+    # dedicated ">.3 Circular Through Hole (sized)" operation.
+    sized_endmill = _find_sized_endmill(indexes)
 
     drill_template = _find_template(root, strategy="drill")
     bore_template_native = _find_template(root, strategy="bore")
@@ -1374,7 +1412,10 @@ def patch_cam_template_with_tool_libraries(
     # recognized hole should use the bigger loaded endmill on the
     # dedicated big-hole operation ("[.]3 Circular Through Hole (sized)"),
     # not whichever cutter this operation would otherwise get uniformly.
-    # Clone it into a "regular" (kept, gets the detail cutter below) and a
+    # Clone it into a "regular" (kept, gets the sized cutter below - this
+    # operation's own name says it's for a genuinely sized/dimensioned
+    # hole, so it keeps using the real Tool 6, unlike every other
+    # roughing/contour template's now-T1-by-default detail role) and a
     # "big endmill" (gets largest_endmill below, like every other roughing/
     # contour template) tier - DeleteToolpaths.py's own
     # _split_big_circular_holes then routes each real recognized hole to
@@ -1385,8 +1426,16 @@ def patch_cam_template_with_tool_libraries(
     # is application-gated to New Router only), so no separate machine
     # check is needed here - a single-cutter job (New Router or Old
     # Router) keeps exactly the one operation it always has.
+    #
+    # regular_hole_tool prefers the real sized cutter (sized_endmill) over
+    # the general detail_endmill - this op is the one place in the whole
+    # file that SHOULD still resolve to Tool 6, per direct instruction that
+    # Tool 6 is now reserved for genuinely sized holes. Falls back to
+    # detail_endmill only when no sized cutter is loaded for this job at
+    # all, so the split still degrades sensibly rather than disappearing.
     circular_hole_detail_template = None
-    if through_shape_tool_swaps_enabled and detail_endmill and largest_endmill:
+    regular_hole_tool = sized_endmill or detail_endmill
+    if through_shape_tool_swaps_enabled and regular_hole_tool and largest_endmill:
         big_hole_template = next(
             (
                 template_elem
@@ -1397,7 +1446,7 @@ def patch_cam_template_with_tool_libraries(
             ),
             None,
         )
-        if big_hole_template is not None and detail_endmill[0].get("guid") != largest_endmill[0].get("guid"):
+        if big_hole_template is not None and regular_hole_tool[0].get("guid") != largest_endmill[0].get("guid"):
             big_hole_clone = _clone_template(big_hole_template)
             big_hole_clone.set(
                 "description", f"{big_hole_template.get('description') or ''} big endmill".strip()
@@ -1437,9 +1486,14 @@ def patch_cam_template_with_tool_libraries(
         # the SMALLEST loaded endmill - the one most able to actually
         # reach into this op's own smallest real holes - is the correct
         # tool here, not whichever one happens to name-match the template's
-        # original captured tool.
+        # original captured tool. This op's own name ("<.3 Circluar Through
+        # Hole") has no "(sized)" in it - it's a small-hole recognition
+        # fallback, not the dedicated dimensioned-hole operation - so it
+        # draws from general_endmill_candidates (the sized cutter excluded)
+        # same as largest_endmill/detail_endmill above, not the raw
+        # endmill_candidates list.
         tool, idx, diameter = min(
-            endmill_candidates, key=lambda entry: (entry[2] if entry[2] is not None else float("inf"))
+            general_endmill_candidates, key=lambda entry: (entry[2] if entry[2] is not None else float("inf"))
         )
         tool_elem = bore_template_native.find(_q("tool"))
         if tool_elem is not None:
@@ -1536,9 +1590,14 @@ def patch_cam_template_with_tool_libraries(
                     "hole_diameter_range_in": hole_range,
                 })
 
-    if pocket_template is not None and endmill_candidates:
+    if pocket_template is not None and general_endmill_candidates:
+        # "Pocket1" (the only strategy="pocket_new" template shipped,
+        # templates/Plates.f3dhsm-template) is a generic multi-pass
+        # clearing operation, not a sized/dimensioned-hole op - drawn from
+        # general_endmill_candidates so the reserved sized cutter never
+        # joins this generic rest-machining chain.
         sorted_endmills = sorted(
-            endmill_candidates, key=lambda entry: (entry[2] or 0.0), reverse=True
+            general_endmill_candidates, key=lambda entry: (entry[2] or 0.0), reverse=True
         )
         clones: list[ET.Element] = []
         for index, (tool, idx, _) in enumerate(sorted_endmills):
@@ -1625,12 +1684,17 @@ def patch_cam_template_with_tool_libraries(
             == "shape through finishing pass"
         )
         # The dedicated big-hole operation's own "regular" tier (see the
-        # circular_hole_detail_template clone above) - same detail cutter,
-        # same reasoning: only its "big endmill" sibling clone should get
-        # largest_endmill, matching the Shape Through Hole family's own
-        # regular/big split.
-        if circular_hole_detail_template is not None:
-            detail_through_roughing_templates.append(circular_hole_detail_template)
+        # circular_hole_detail_template clone above) is its own separate
+        # list, NOT folded into detail_through_roughing_templates: that
+        # operation's name says it's for a genuinely sized/dimensioned
+        # hole, so it keeps using regular_hole_tool (the real sized cutter
+        # when one is loaded), while every other detail-tier template here
+        # now gets the general-purpose detail_endmill (T1) instead - the
+        # two are different tools whenever both a sized cutter and a
+        # general detail cutter are loaded for the same job.
+        sized_hole_templates = (
+            [circular_hole_detail_template] if circular_hole_detail_template is not None else []
+        )
         # Real, confirmed bug caught before merge: this loop applies its
         # tool unconditionally, with no handled_templates check at all -
         # the release/slot cut's forced Tool 6 assignment above got
@@ -1643,10 +1707,12 @@ def patch_cam_template_with_tool_libraries(
         other_templates = [
             template_elem for template_elem in contour_templates + roughing_templates
             if template_elem not in detail_through_roughing_templates
+            and template_elem not in sized_hole_templates
             and id(template_elem) not in handled_templates
         ]
         for templates, (tool, idx) in (
             (detail_through_roughing_templates, detail_endmill or largest_endmill),
+            (sized_hole_templates, regular_hole_tool or largest_endmill),
             (other_templates, largest_endmill),
         ):
             for template_elem in templates:

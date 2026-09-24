@@ -16,6 +16,19 @@ def _diameter(tool: dict) -> Optional[float]:
         return None
 
 
+def _is_sized(tool: dict) -> bool:
+    # Mirrors templateTools.py's own _is_sized_description: the shop's
+    # established convention for flagging its one dimensioned/toleranced-
+    # hole cutter (real library: "4mm sized for toolchager", tool number 6).
+    # Direct instruction: that tool is reserved for genuinely sized holes
+    # from now on, never a general roughing/detail default - excluded from
+    # the ordinary diameter-driven roughing/detail picks below so a tie
+    # against an identically-sized general-purpose tool (the real library's
+    # own 971 Main Bit, also 0.1575in) can no longer silently win "detail"
+    # by list order alone, the exact bug this comment replaces.
+    return "sized" in str(tool.get("description") or "").lower()
+
+
 def _feed(tool: dict) -> float:
     for preset in (tool.get("start-values") or {}).get("presets") or []:
         try:
@@ -58,18 +71,36 @@ def plan_endmills(tools: list[dict], *, multi_tool_mode: bool) -> dict:
     if not multi_tool_mode:
         return {"tools": [endmills[0]], "reason": "single-tool mode"}
 
+    # The "sized" cutter (see _is_sized) is reserved for genuinely sized
+    # holes, not this roughing/detail diameter optimization - pick roughing
+    # and detail from the general-purpose candidates only, so a same-
+    # diameter sized tool can never win "detail" over a real general-
+    # purpose tool by tie order. Falls back to every loaded endmill only
+    # when nothing non-"sized" is loaded at all, so a job that loaded only
+    # the sized cutter still gets a usable plan instead of an empty one.
+    general = [tool for tool in endmills if not _is_sized(tool)] or endmills
+
     # Diameter first, feed only as a tiebreak among equal-diameter tools -
     # see _rate's docstring for the real, confirmed case this fixes.
-    roughing = max(endmills, key=lambda tool: (_diameter(tool) or 0.0, _rate(tool)))
-    detail = min(endmills, key=lambda tool: _diameter(tool) or float("inf"))
+    roughing = max(general, key=lambda tool: (_diameter(tool) or 0.0, _rate(tool)))
+    detail = min(general, key=lambda tool: _diameter(tool) or float("inf"))
     chosen = [roughing]
     # A near-identical cutter cannot unlock tighter geometry. Avoid paying an
     # ATC cycle for it; 10% is deliberately below the library's 4 mm vs 6 mm
     # distinction while treating duplicate/similar tools as interchangeable.
     if detail is not roughing and (_diameter(detail) or 0) < (_diameter(roughing) or 0) * 0.9:
         chosen.append(detail)
+    # A loaded "sized" cutter is never picked by the roughing/detail
+    # optimization above (it's excluded from `general`), but it's still a
+    # real tool the operator selected for this job - keep it in the ATC
+    # plan unconditionally so the dedicated sized-hole operation can still
+    # resolve it, independent of whatever roughing/detail diameters were
+    # chosen for everything else.
+    for tool in endmills:
+        if _is_sized(tool) and tool not in chosen:
+            chosen.append(tool)
     return {
         "tools": chosen,
-        "reason": "roughing plus detail" if len(chosen) == 2 else "one cutter dominates loaded alternatives",
+        "reason": "roughing plus detail" if len(chosen) >= 2 else "one cutter dominates loaded alternatives",
         "skipped_guids": [tool.get("guid") for tool in endmills if tool not in chosen],
     }

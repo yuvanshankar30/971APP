@@ -41,7 +41,14 @@ _OLD_ROUTER_TEMPLATE_PATH = ROOT / "templates/971-real/(DEPRECATED)971 Metal She
 _LIBRARY_PATH = ROOT / "tools/Normal router tools (use this).tools"
 _NS = {"x": "http://www.hsmworks.com/namespace/hsmworks/document/template"}
 
-_SMALL_ENDMILL_GUID = "e7813c26-af06-4d6c-9aba-324fa1b402c1"  # 4mm, 0.1575in
+# The real "971 Main Bit" (Tool 1), NOT the "4mm sized for toolchager"
+# Tool 6 entry that happens to share its 0.1575in diameter - Tool 6 is
+# reserved for genuinely sized/dimensioned holes (see
+# test_big_circular_hole_tier_gets_detail_tool.py) and must never be the
+# general-purpose detail cutter this fixture's "4mm and 6mm endmills
+# loaded" scenario means (a real angad_part job loaded its main bit and
+# its big endmill, not the sized cutter).
+_SMALL_ENDMILL_GUID = "10a2caeb-dec0-49b2-8701-96fdb212bad9"  # 971 Main Bit, 0.1575in
 _LARGE_ENDMILL_GUID = "29331875-1efc-47c5-9742-f39efcb697ed"  # 6mm, 0.2362in
 
 
