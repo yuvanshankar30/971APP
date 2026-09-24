@@ -1710,10 +1710,27 @@ def patch_cam_template_with_tool_libraries(
             and template_elem not in sized_hole_templates
             and id(template_elem) not in handled_templates
         ]
+        # Direct instruction: Tool 2 (the big endmill) is reserved for
+        # operations whose own description literally says "big endmill" -
+        # every other template that used to fall through to largest_endmill
+        # here (Shape Pocket, Shape Pocket Finishing Pass, >.3 Circular
+        # Pocket, Slot Cut for Features, etc. - none of which name a big
+        # endmill) must default to the general detail cutter (T1) instead,
+        # matching the same T1-by-default convention already applied to
+        # detail_through_roughing_templates above.
+        big_endmill_other_templates = [
+            template_elem for template_elem in other_templates
+            if "big endmill" in str(template_elem.get("description") or "").lower()
+        ]
+        general_other_templates = [
+            template_elem for template_elem in other_templates
+            if template_elem not in big_endmill_other_templates
+        ]
         for templates, (tool, idx) in (
             (detail_through_roughing_templates, detail_endmill or largest_endmill),
             (sized_hole_templates, regular_hole_tool or largest_endmill),
-            (other_templates, largest_endmill),
+            (big_endmill_other_templates, largest_endmill),
+            (general_other_templates, detail_endmill or largest_endmill),
         ):
             for template_elem in templates:
                 tool_elem = template_elem.find(_q("tool"))
