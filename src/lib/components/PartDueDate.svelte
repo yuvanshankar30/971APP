@@ -117,6 +117,13 @@
     opacity: 0.6;
   }
 
+  /* Chromium renders its native date-picker glyph at full white in the
+     dark Hub theme. Let it blend to the same muted gray as the empty-date
+     text instead of making the calendar the brightest object in the cell. */
+  :global([data-theme="modern-dark"]) .due-input::-webkit-calendar-picker-indicator {
+    opacity: 0.55;
+  }
+
   .due-text {
     font-size: 0.8rem;
     color: var(--text, #1f2933);

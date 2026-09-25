@@ -1,7 +1,7 @@
 <script>
   import { browser } from '$app/environment';
   import { requestConfirmation } from '$lib/confirmation.js';
-  import { onMount, tick } from 'svelte';
+  import { onDestroy, onMount, tick } from 'svelte';
   import { supabase } from '$lib/supabase.js';
   import { page } from '$app/stores';
   import { userStore, loadUserFromUUID, upsertProfileIfMissing, setUserUUID } from '$lib/stores/user.js';
@@ -11,12 +11,12 @@
   import SeasonFilter from '$lib/components/SeasonFilter.svelte';
   import { goto } from '$app/navigation';
   import { PUBLIC_ONSHAPE_BASE_URL } from '$env/static/public';
-  import { Search, Filter, Clock, Truck, Package, Download, Zap, Wrench, FileText, Upload, ExternalLink, Pencil, Trash2, X, Users, Box, CircleCheck, Layers, Folder, ListChecks, BookOpen, Scissors } from 'lucide-svelte';
+  import { Search, Clock, Truck, Package, Download, Zap, Wrench, FileText, Upload, ExternalLink, Pencil, Trash2, X, Users, Box, CircleCheck, Layers, Folder, ListChecks, BookOpen, Scissors } from 'lucide-svelte';
   import { searchFolderTree } from '$lib/fusionFolderSearch.js';
   import ROUTER_FLOW from '$lib/router_flow.json';
   import { convertGcodeToInches } from '$autocam/fusion/gcodeUnitConvert.js';
   import { getDisplayStatus, BUTTONS, getBadgeClass, getWorkflowStatuses, WORKFLOW_STATUSES } from '$lib/statuses.js';
-  import { summarizeRouterStages, isFullyKitted, buildRouterProgressUpdate, canAdvanceRouterToCamReview } from '$lib/router_progress.js';
+  import { summarizeRouterStages, isFullyKitted, buildRouterProgressUpdate } from '$lib/router_progress.js';
   import { isManufacturingLead, canCamReview as camReviewAllowed, canDeleteParts } from '$lib/permissions.js';
   import CadViewer from '$lib/components/CadViewer.svelte';
   import stockData from '$lib/stock.json';
@@ -27,6 +27,7 @@
   import { fetchFusionJobsByManufacturingPartIds, fetchFusionJobUpdates, fetchFusionJobNcFiles, fetchPartCategories, fetchPlates, createPart, createPlate, createBoxTube, queueFusionJob, queueFusionPlateJob, fetchFusionFolderTree } from '$lib/fusionCam.js';
   import AtcSlotConfig from '$autocam/components/AtcSlotConfig.svelte';
   import { buildStockMaterialIndex, materialIdForStockAssignment, stockCatalogIdForStockAssignment } from '$autocam/stockMaterial.js';
+  import ManufactureLoadingOverlay from './ManufactureLoadingOverlay.svelte';
 
   const LAST_SUBSYSTEM_STORAGE_KEY = '971hub:lastSubsystem';
   // Same labels JobQueueTab.svelte's own STATUS_LABELS uses, for the
@@ -50,6 +51,12 @@
   let searchTerm = '';
   let filterWorkflow = '';
   let filterStatus = '';
+  let completingPartIds = [];
+  let queueView = 'all';
+  // Keep the current rows in place until their short transition has finished.
+  // `queueView` is the immediate rail selection; this value controls the
+  // actual table query so a newly selected tab never flashes before loading.
+  let appliedQueueView = 'all';
   let filterProject = '';
   let filterSeason = getCurrentSeasonBucket()?.value || '';
   let show971 = true;
@@ -57,6 +64,8 @@
   let toastMessage = '';
   let toastTone = 'neutral';
   let showToast = false;
+  let queueTransitioning = false;
+  let queueTransitionTimer = null;
   // Fusion CAM job status per manufacturing request, keyed by part id -
   // traced through fusion_parts/fusion_box_tubes to whichever plate/tube
   // they're nested on (see fetchFusionJobsByManufacturingPartIds). Replaces
@@ -166,12 +175,52 @@
     return part?.status === 'complete';
   }
 
+  function matchesQueueView(part, view) {
+    const status = normalizedWorkflowStatus(part?.status);
+    if (view === 'all') return true;
+    if (view === 'cam_review') return getRouterMeta(part).step === 'cam_review';
+    if (view === 'in_progress') return ['in-progress', 'drawing', 'print-started', 'machining', 'inspection'].includes(status);
+    // Printing is the manufacturing equivalent of machining, so it belongs
+    // in one shared operator-facing bucket rather than a separate dead-end.
+    if (view === 'machined') return ['machined', 'printed'].includes(status);
+    return status === view;
+  }
+
+  function normalizedWorkflowStatus(status) {
+    return String(status || 'pending').trim().toLowerCase().replace(/[\s_]+/g, '-');
+  }
+
+  function selectQueueView(view) {
+    queueView = view;
+    showQueueTransition(() => {
+      filterStatus = '';
+      appliedQueueView = view;
+    });
+  }
+
+  function showQueueTransition(afterTransition) {
+    queueTransitioning = true;
+    if (queueTransitionTimer) clearTimeout(queueTransitionTimer);
+    queueTransitionTimer = setTimeout(() => {
+      afterTransition?.();
+      queueTransitioning = false;
+      queueTransitionTimer = null;
+    }, 220);
+  }
+
+  onDestroy(() => {
+    if (queueTransitionTimer) clearTimeout(queueTransitionTimer);
+  });
+
   // The manufacturing list advances every request through the same visible
   // status ladder. Workflow-specific detail (such as router unit counts)
   // remains elsewhere, but the list must never lose its route after Start.
   function partRoute(part) {
     const stages = getWorkflowStatuses(part?.workflow);
-    const status = (part?.status || 'pending').toString().toLowerCase();
+    const meta = part?.workflow === 'router' ? getRouterMeta(part) : {};
+    const status = meta.step === 'cam_review'
+      ? 'cam_review'
+      : normalizedWorkflowStatus(part?.status);
     let index = stages.findIndex((stage) => stage.value === status);
     // Terminal status is spelled several ways across older rows.
     if (index === -1 && (status === 'complete' || status === 'kitted' || status === 'done')) {
@@ -181,7 +230,7 @@
   }
 
   function nextProcessStep(part) {
-    const status = String(part?.status || 'pending').toLowerCase();
+    const status = normalizedWorkflowStatus(part?.status);
     if (status === 'pending') return { status: 'in-progress', label: 'Start', icon: 'start' };
     if (part?.workflow !== 'router') {
       if (part.workflow === '3d-print') {
@@ -197,15 +246,15 @@
       if (status === 'machined') return { status: 'complete', label: 'Kit', icon: 'kit' };
       return null;
     }
-    // Real bug this fixes: this ladder must match WORKFLOW_STATUSES.router
-    // in statuses.js (cammed -> jprogged -> machined -> postprocessed ->
-    // complete), which is what the progress bar's own stage index
-    // (partRoute -> getWorkflowStatuses) already renders - this function
-    // had postprocessed and jprogged swapped relative to that canonical
-    // order, so after "Machined" (correctly shown as position 6/8 by the
-    // progress bar) the action button jumped straight to "Kit", skipping
-    // the "Postprocessed" stage the bar itself still expected next.
-    if (status === 'in-progress') return { status: 'cammed', label: 'CAM Complete', icon: 'cam' };
+    // CAM review is the next explicit handoff after a router job starts.
+    // Its pending state is stored in router_meta rather than pretending that
+    // review has already completed in the status column.
+    if (status === 'in-progress') {
+      if (getRouterMeta(part).step === 'cam_review') {
+        return { status: 'cammed', label: 'CAM Complete', icon: 'cam' };
+      }
+      return { status: 'cam_review', label: 'CAM Review', icon: 'cam-review' };
+    }
     if (status === 'cammed') return { status: 'jprogged', label: 'JProg', icon: 'jprog' };
     if (status === 'jprogged') return { status: 'machined', label: 'Machine', icon: 'machine' };
     if (status === 'machined') return { status: 'postprocessed', label: 'Postprocess', icon: 'machine' };
@@ -1093,8 +1142,37 @@
   }
 
   async function advancePartStatus(part, nextStatus) {
-    if (await updatePartStatus(part.id, nextStatus)) {
+    if (part?.workflow === 'router' && nextStatus === 'cam_review') {
+      await advanceRouterToCamReview(part);
+      return;
+    }
+    if (part?.workflow === 'router' && nextStatus === 'cammed') {
+      const previousStatus = part.status;
+      const previousMeta = getRouterMeta(part);
       setLocalStatus(part.id, nextStatus);
+      setLocalRouterMeta(part.id, { step: null });
+      if (await updatePartStatus(part.id, nextStatus)) {
+        await updateRouterMeta(part, { step: null });
+      } else {
+        setLocalStatus(part.id, previousStatus);
+        setLocalRouterMeta(part.id, previousMeta);
+      }
+      return;
+    }
+    const previousStatus = part.status;
+    const isCompleting = nextStatus === 'complete';
+    const partKey = getPartKey(part);
+    if (isCompleting) completingPartIds = [...completingPartIds, partKey];
+    setLocalStatus(part.id, nextStatus);
+    if (!await updatePartStatus(part.id, nextStatus)) {
+      setLocalStatus(part.id, previousStatus);
+      if (isCompleting) completingPartIds = completingPartIds.filter((id) => id !== partKey);
+      return;
+    }
+    if (isCompleting) {
+      setTimeout(() => {
+        completingPartIds = completingPartIds.filter((id) => id !== partKey);
+      }, 650);
     }
   }
 
@@ -1516,18 +1594,19 @@
   // (extend Fusion CAM to turning, or build a real lathe entry point) is
   // settled with the team.
 
-  // A router request may enter human CAM review only after the real Fusion
-  // pipeline has completed its job. This replaces the old manual Start ->
-  // CAM Done ladder, which could claim CAM was ready without any generated
-  // Fusion output behind it.
+  // Enter the explicit human CAM-review handoff after Start. Fusion job state
+  // stays visible separately, but does not hide this workflow action.
   async function advanceRouterToCamReview(part) {
-    const fusionJob = fusionJobsByPart[part.id];
-    if (!canAdvanceRouterToCamReview(part, fusionJob)) return;
-
-    if (part.status === 'pending') await updatePartStatus(part.id, 'in-progress');
-    await updateRouterMeta(part, { step: 'cam_review' });
+    const previousStatus = part.status;
+    const previousMeta = getRouterMeta(part);
     if (part.status === 'pending') setLocalStatus(part.id, 'in-progress');
     setLocalRouterMeta(part.id, { step: 'cam_review' });
+    if (part.status === 'pending' && !await updatePartStatus(part.id, 'in-progress')) {
+      setLocalStatus(part.id, previousStatus);
+      setLocalRouterMeta(part.id, previousMeta);
+      return;
+    }
+    await updateRouterMeta(part, { step: 'cam_review' });
   }
 
   function openCadViewer(part) {
@@ -2142,16 +2221,38 @@
       part.status === filterStatus ||
       (filterStatus === 'cam_review' && meta.step === 'cam_review');
     const matchesProject = !filterProject || part.project_id === filterProject;
-    const notCompleted = !isPartFullyCompleted(part);
+    const isCompleting = completingPartIds.includes(getPartKey(part));
+    // Keep a newly-kitted row mounted long enough for its completion fade,
+    // even when the active queue is a narrower workflow bucket.
+    const matchesQueueStatus = matchesQueueView(part, appliedQueueView) || isCompleting;
+    const notCompleted = !isPartFullyCompleted(part) || isCompleting;
     const matchesTeam = passesTeamFilter(part.frc_team, show971, show9584);
     const matchesSeason = passesSeasonFilter(part.created_at, filterSeason);
 
-    return matchesSearch && matchesWorkflow && matchesStatus && matchesProject && notCompleted && matchesTeam && matchesSeason;
+    return matchesSearch && matchesWorkflow && matchesStatus && matchesQueueStatus && matchesProject && notCompleted && matchesTeam && matchesSeason;
   });
 
   $: filteredPartKeys = filteredParts.map(getPartKey);
   $: selectedFilteredCount = filteredPartKeys.filter((key) => selectedPartIds.includes(key)).length;
   $: allFilteredSelected = filteredPartKeys.length > 0 && selectedFilteredCount === filteredPartKeys.length;
+  // These counts deliberately ignore the current workflow/status/search
+  // selection. They keep the rail useful as a navigation tool instead of
+  // collapsing every other view to zero after one is selected.
+  $: queueScopeParts = parts.filter((part) =>
+    !isPartFullyCompleted(part) &&
+    passesTeamFilter(part.frc_team, show971, show9584) &&
+    passesSeasonFilter(part.created_at, filterSeason)
+  );
+  $: queueMetrics = {
+    total: queueScopeParts.length,
+    pending: queueScopeParts.filter((part) => part.status === 'pending').length,
+    inProgress: queueScopeParts.filter((part) => matchesQueueView(part, 'in_progress')).length,
+    camReview: queueScopeParts.filter((part) => getRouterMeta(part).step === 'cam_review').length,
+    cammed: queueScopeParts.filter((part) => part.status === 'cammed').length,
+    jprogged: queueScopeParts.filter((part) => part.status === 'jprogged').length,
+    machined: queueScopeParts.filter((part) => matchesQueueView(part, 'machined')).length,
+    postprocessed: queueScopeParts.filter((part) => part.status === 'postprocessed').length
+  };
 
   // Toast notification functions
   function showToastMessage(message, tone = 'neutral') {
@@ -2212,83 +2313,119 @@
   <title>Parts List - Manufacturing Management</title>
 </svelte:head>
 
-<div class="manufacture-page-container">
-<div class="page-header">
-  <h1>Parts List</h1>
+<div class="manufacture-page-container manufacture-workspace-page">
+<header class="manufacture-command-bar">
+  <div class="manufacture-command-title">
+    <div class="workspace-heading-row">
+      <h1>Manufacturing</h1>
+    </div>
+  </div>
   <div class="page-actions">
-    <a href="/jprog" class="btn btn-secondary">
-      <Scissors size={16} />
-      JProg
-    </a>
-    {#if canDelete}
-      <button class="btn {batchSelectMode ? 'btn-primary' : 'btn-secondary'}" on:click={toggleBatchSelectMode}>
-        <Package size={16} />
-        {batchSelectMode ? 'Exit Batch Select' : 'Batch Select'}
-      </button>
-    {/if}
-    {#if canDelete && batchSelectMode && selectedFilteredCount > 0}
-      <button class="btn btn-danger" on:click={bulkDeleteSelected}>
-        <Trash2 size={16} />
-        Delete Selected ({selectedFilteredCount})
-      </button>
-    {/if}
-    {#if canUseAssignMode}
-      <button 
-        class="btn {assignMode ? 'btn-primary' : 'btn-secondary'}"
-        on:click={toggleAssignMode}
+    <div class="manufacture-utility-actions">
+      <a href="/jprog" class="btn btn-secondary">
+        <Scissors size={16} />
+        JProg
+      </a>
+      <a href="/manufacture/files" class="btn btn-secondary">
+        <Folder size={16} />
+        Files
+      </a>
+      {#if canDelete}
+        <button class="btn {batchSelectMode ? 'btn-primary' : 'btn-secondary'}" on:click={toggleBatchSelectMode}>
+          <Package size={16} />
+          {batchSelectMode ? 'Exit Batch Select' : 'Batch Select'}
+        </button>
+      {/if}
+      {#if canDelete && batchSelectMode && selectedFilteredCount > 0}
+        <button class="btn btn-danger" on:click={bulkDeleteSelected}>
+          <Trash2 size={16} />
+          Delete Selected ({selectedFilteredCount})
+        </button>
+      {/if}
+      {#if canUseAssignMode}
+        <button
+          class="btn {assignMode ? 'btn-primary' : 'btn-secondary'}"
+          on:click={toggleAssignMode}
+        >
+          <Users size={16} />
+          {assignMode ? 'Exit Assign Mode' : 'Assign Mode'}
+        </button>
+      {/if}
+      <button
+        class="btn btn-secondary"
+        on:click={exportToCSV}
       >
-        <Users size={16} />
-        {assignMode ? 'Exit Assign Mode' : 'Assign Mode'}
+        <Download size={16} />
+        Export CSV
       </button>
-    {/if}
-    <button class="btn btn-primary" on:click={openQuickPrintModal}>
+    </div>
+    <div class="manufacture-primary-actions">
+      <button class="btn btn-primary" on:click={openQuickPrintModal}>
       <Upload size={16} />
       Quick Print Add
-    </button>
-    <a href="/manufacture/create" class="btn btn-primary page-actions-primary">
+      </button>
+      <a href="/manufacture/create" class="btn btn-primary page-actions-primary">
       <Upload size={16} />
       Create New Part
-    </a>
-    <button
-      class="btn btn-secondary"
-      on:click={exportToCSV}
-    >
-      <Download size={16} />
-      Export CSV
-    </button>
-  </div>
-</div>
-
-<div class="card">
-  <!-- Manufacture Sub-Tabs -->
-  <div class="subtabs subtabs-in-card">
-    <a href="/manufacture" class:active={$page.url.pathname === '/manufacture'}>ToDo</a>
-    <a href="/manufacture/completed" class:active={$page.url.pathname === '/manufacture/completed'}>Completed</a>
-    <a href="/manufacture/router" class:active={$page.url.pathname === '/manufacture/router'}>Router</a>
-    <a href="/manufacture/post-processing" class:active={$page.url.pathname === '/manufacture/post-processing'}>Post Processing</a>
-    <a href="/manufacture/files" class:active={$page.url.pathname === '/manufacture/files'}>Files</a>
-  </div>
-
-  <div class="filters" style="--filters-columns: 2fr 1fr 1fr 1fr 1fr;">
-    <div class="form-group">
-      <label class="form-label">
-        <Search size={16} />
-        Search
-      </label>
-      <input
-        type="text"
-        class="form-input"
-        placeholder="Search by name, requester, or project ID..."
-        bind:value={searchTerm}
-      />
+      </a>
     </div>
+  </div>
+</header>
 
+<div class="manufacture-workspace">
+  <aside class="queue-rail" aria-label="Manufacturing queue controls">
+    <nav class="queue-navigation" aria-label="Manufacturing sections">
+      <a href="/manufacture" class:active={$page.url.pathname === '/manufacture'}>Work Queue</a>
+      <a href="/manufacture/completed" class:active={$page.url.pathname === '/manufacture/completed'}>Completed</a>
+    </nav>
+
+    <section class="queue-rail-section" aria-labelledby="queue-view-heading">
+      <span id="queue-view-heading" class="rail-section-label">Queue View</span>
+      <div class="queue-view-list">
+        <button class:active={queueView === 'all'} on:click={() => selectQueueView('all')}>
+          <span>All open</span><strong>{queueMetrics.total}</strong>
+        </button>
+        <button class:active={queueView === 'pending'} on:click={() => selectQueueView('pending')}>
+          <span>Ready to start</span><strong>{queueMetrics.pending}</strong>
+        </button>
+        <button class:active={queueView === 'in_progress'} on:click={() => selectQueueView('in_progress')}>
+          <span>In progress</span><strong>{queueMetrics.inProgress}</strong>
+        </button>
+        <button class:active={queueView === 'cam_review'} on:click={() => selectQueueView('cam_review')}>
+          <span>CAM review</span><strong>{queueMetrics.camReview}</strong>
+        </button>
+        <button class:active={queueView === 'cammed'} on:click={() => selectQueueView('cammed')}>
+          <span>CAM complete</span><strong>{queueMetrics.cammed}</strong>
+        </button>
+        <button class:active={queueView === 'jprogged'} on:click={() => selectQueueView('jprogged')}>
+          <span>JProg</span><strong>{queueMetrics.jprogged}</strong>
+        </button>
+        <button class:active={queueView === 'machined'} on:click={() => selectQueueView('machined')}>
+          <span>Machined</span><strong>{queueMetrics.machined}</strong>
+        </button>
+        <button class:active={queueView === 'postprocessed'} on:click={() => selectQueueView('postprocessed')}>
+          <span>Postprocessed</span><strong>{queueMetrics.postprocessed}</strong>
+        </button>
+      </div>
+    </section>
+
+    <section class="queue-rail-section queue-filter-section" aria-labelledby="queue-filter-heading">
+      <span id="queue-filter-heading" class="rail-section-label">Filter</span>
+      <div class="rail-search">
+        <Search size={15} aria-hidden="true" />
+        <input
+          id="manufacture-search"
+          type="text"
+          class="form-input"
+          placeholder="Search parts"
+          aria-label="Search manufacturing parts"
+          bind:value={searchTerm}
+          on:input={showQueueTransition}
+        />
+      </div>
     <div class="form-group">
-      <label class="form-label">
-        <Filter size={16} />
-        Workflow
-      </label>
-      <select class="form-select" bind:value={filterWorkflow}>
+      <label class="form-label" for="manufacture-workflow-filter">Workflow</label>
+      <select id="manufacture-workflow-filter" class="form-select" bind:value={filterWorkflow} on:change={showQueueTransition}>
         <option value="">All Workflows</option>
         {#each workflows as workflow}
           <option value={workflow.value}>{workflow.label}</option>
@@ -2297,11 +2434,8 @@
     </div>
 
     <div class="form-group">
-      <label class="form-label">
-        <Filter size={16} />
-        Status
-      </label>
-      <select class="form-select" bind:value={filterStatus}>
+      <label class="form-label" for="manufacture-status-filter">Status</label>
+      <select id="manufacture-status-filter" class="form-select" bind:value={filterStatus} on:change={() => { queueView = 'all'; appliedQueueView = 'all'; showQueueTransition(); }}>
         <option value="">All Statuses</option>
         {#each statuses as status}
           <option value={status.value}>{status.label}</option>
@@ -2310,11 +2444,8 @@
     </div>
 
     <div class="form-group">
-      <label class="form-label">
-        <Filter size={16} />
-        Project
-      </label>
-      <select class="form-select" bind:value={filterProject}>
+      <label class="form-label" for="manufacture-project-filter">Project</label>
+      <select id="manufacture-project-filter" class="form-select" bind:value={filterProject} on:change={showQueueTransition}>
         <option value="">All Projects</option>
         {#each projectIds as pid}
           <option value={pid}>{pid}</option>
@@ -2322,19 +2453,26 @@
       </select>
     </div>
 
-    <SeasonFilter options={seasonOptions} bind:value={filterSeason} />
-  </div>
-  <div class="team-filter-row">
-    <TeamFilter bind:show971 bind:show9584 />
-  </div>
-</div>
+    <div on:change={showQueueTransition}>
+      <SeasonFilter options={seasonOptions} bind:value={filterSeason} />
+    </div>
+      <div class="team-filter-row" on:change={showQueueTransition}>
+        <TeamFilter bind:show971 bind:show9584 />
+      </div>
+      {#if filterWorkflow || filterStatus || filterProject || searchTerm}
+        <button class="btn btn-secondary btn-sm rail-clear-filters" on:click={() => { searchTerm = ''; filterWorkflow = ''; filterStatus = ''; filterProject = ''; queueView = 'all'; appliedQueueView = 'all'; showQueueTransition(); }}>
+          <X size={14} /> Clear filters
+        </button>
+      {/if}
+    </section>
+  </aside>
 
+  <section class="queue-work-surface" aria-label="Manufacturing work queue">
+    <div class="queue-results" class:queue-results-updating={queueTransitioning}>
 {#if loading}
-  <div class="card">
-    <p>Loading parts...</p>
-  </div>
+  <div class="queue-empty-state"><ManufactureLoadingOverlay compact inline label="Loading parts" /></div>
 {:else if filteredParts.length === 0}
-  <div class="card">
+  <div class="queue-empty-state">
     <p>No parts found. {parts.length === 0 ? 'Create your first part!' : 'Try adjusting your filters.'}</p>
   </div>
 {:else}
@@ -2370,6 +2508,7 @@
         id="part-{part.id}"
         class="part-card"
         class:deep-link-highlight={highlightedPartId === String(part.id)}
+        class:part-completing={completingPartIds.includes(getPartKey(part))}
         on:click={(e) => onRowClick(e, part)}
         on:keydown={(e) => onRowKeyDown(e, part)}
         role="button"
@@ -2521,17 +2660,6 @@
                 </button>
               {/if}
             </div>
-            {#if fusionJob}
-              {#if ['queued', 'claimed', 'processing'].includes(fusionJob.status)}
-                <span class="btn btn-secondary btn-sm fusion-cam-running part-card-fusion-status" title="Fusion CAM is processing this part">
-                  <span class="fusion-cam-spinner"></span> {FUSION_JOB_STATUS_LABELS[fusionJob.status] || fusionJob.status}
-                </span>
-              {:else if fusionJob.status === 'completed'}
-                <span class="fusion-cam-completed part-card-fusion-status"><CircleCheck size={14} /> Fusion CAM completed</span>
-              {:else if fusionJob.status === 'failed'}
-                <button class="fusion-cam-failed part-card-fusion-status" on:click={() => openFusionCamModal(part, fusionJob)} title={fusionJob.errors?.[0] || 'Unknown error'}>Fusion CAM failed - retry AutoCAM</button>
-              {/if}
-            {/if}
           {:else if (part.workflow === 'router' || part.workflow === 'lathe' || part.workflow === '3d-print') && !(part.workflow === 'lathe' && canViewPdf(part))}
             <button
               class="btn btn-secondary btn-sm"
@@ -2563,6 +2691,7 @@
                 {#if nextProcessStep(part)}
                   <button class="btn btn-secondary btn-sm" on:click|stopPropagation={() => advancePartStatus(part, nextProcessStep(part).status)}>
                     {#if nextProcessStep(part).icon === 'start'}<Clock size={14} />
+                    {:else if nextProcessStep(part).icon === 'cam-review'}<ListChecks size={14} />
                     {:else if nextProcessStep(part).icon === 'print'}<Upload size={14} />
                     {:else if nextProcessStep(part).icon === 'kit'}<Package size={14} />
                     {:else}<Wrench size={14} />{/if}
@@ -2576,6 +2705,7 @@
           {#if nextProcessStep(part) && !(part.workflow === 'lathe' && !canViewCad(part) && canViewPdf(part))}
             <button class="btn btn-secondary btn-sm" class:part-card-process-action={part.workflow === 'lathe' && canViewCad(part) && canViewPdf(part)} on:click|stopPropagation={() => advancePartStatus(part, nextProcessStep(part).status)}>
               {#if nextProcessStep(part).icon === 'start'}<Clock size={14} />
+              {:else if nextProcessStep(part).icon === 'cam-review'}<ListChecks size={14} />
               {:else if nextProcessStep(part).icon === 'cam'}<CircleCheck size={14} />
               {:else if nextProcessStep(part).icon === 'jprog'}<ListChecks size={14} />
               {:else if nextProcessStep(part).icon === 'print'}<Upload size={14} />
@@ -2606,7 +2736,7 @@
                workflow, which is the question the shop actually asks. -->
           <th class="name-col">Part</th>
           <th class="workflow-col">Workflow</th>
-          <th class="route-col">Route</th>
+          <th class="route-col">Progress</th>
           <th class="quantity-col" class:hidden={assignMode}>Qty</th>
           <th class="metadata-col" class:hidden={assignMode}>Due</th>
           <th class="actions-table-col" class:hidden={assignMode}>Actions</th>
@@ -2620,6 +2750,7 @@
             id="part-{part.id}"
             class="parts-row"
             class:deep-link-highlight={highlightedPartId === String(part.id)}
+            class:part-completing={completingPartIds.includes(getPartKey(part))}
             on:click={(e) => onRowClick(e, part)}
             on:keydown={(e) => onRowKeyDown(e, part)}
             on:dragover={handleDragOver}
@@ -2677,7 +2808,9 @@
               </span>
             </td>
             <td class="route-col">
-              <span class="status-badge {getBadgeClass(part.status, getRouterMeta(part))} status-table status-fade">{getStatusDisplay(part)}</span>
+              {#key getStatusDisplay(part)}
+                <span class="status-badge {getBadgeClass(part.status, getRouterMeta(part))} status-table status-fade">{getStatusDisplay(part)}</span>
+              {/key}
               <!-- Segmented track: one segment per stop on this workflow's
                    route, filled up to where the part currently is. Gives
                    "how far along" at a glance, which a status word alone
@@ -2743,6 +2876,7 @@
                       {#if nextProcessStep(part)}
                         <button class="btn btn-secondary btn-sm" on:click={() => advancePartStatus(part, nextProcessStep(part).status)} title={nextProcessStep(part).label}>
                           {#if nextProcessStep(part).icon === 'start'}<Clock size={13} />
+                          {:else if nextProcessStep(part).icon === 'cam-review'}<ListChecks size={13} />
                           {:else if nextProcessStep(part).icon === 'cam'}<CircleCheck size={13} />
                           {:else if nextProcessStep(part).icon === 'jprog'}<ListChecks size={13} />
                           {:else if nextProcessStep(part).icon === 'print'}<Upload size={13} />
@@ -2754,17 +2888,6 @@
                       </div>
                     {/if}
                   </div>
-                  {#if fusionJob}
-                    {#if ['queued', 'claimed', 'processing'].includes(fusionJob.status)}
-                      <span class="fusion-cam-running" title="Fusion CAM is processing this part">
-                        <span class="fusion-cam-spinner"></span> {FUSION_JOB_STATUS_LABELS[fusionJob.status] || fusionJob.status}
-                      </span>
-                    {:else if fusionJob.status === 'completed'}
-                      <span class="fusion-cam-completed"><CircleCheck size={14} /> Fusion CAM completed</span>
-                    {:else if fusionJob.status === 'failed'}
-                      <button class="fusion-cam-failed" on:click={() => openFusionCamModal(part, fusionJob)} title={fusionJob.errors?.[0] || 'Unknown error'}>Fusion CAM failed - retry AutoCAM</button>
-                    {/if}
-                  {/if}
                 {:else if (part.workflow === 'router' || part.workflow === 'lathe' || part.workflow === '3d-print') && !(part.workflow === 'lathe' && canViewPdf(part))}
                   <div class="cad-action-grid attach-file-action" on:click|stopPropagation on:keydown|stopPropagation role="presentation">
                     <button
@@ -2795,6 +2918,7 @@
                       {#if nextProcessStep(part)}
                         <button class="btn btn-secondary btn-sm" on:click={() => advancePartStatus(part, nextProcessStep(part).status)} title={nextProcessStep(part).label}>
                           {#if nextProcessStep(part).icon === 'start'}<Clock size={13} />
+                          {:else if nextProcessStep(part).icon === 'cam-review'}<ListChecks size={13} />
                           {:else if nextProcessStep(part).icon === 'print'}<Upload size={13} />
                           {:else if nextProcessStep(part).icon === 'kit'}<Package size={13} />
                           {:else}<Wrench size={13} />{/if}
@@ -2811,6 +2935,7 @@
                     {#if nextProcessStep(part)}
                       <button class="btn btn-secondary btn-sm" on:click={() => advancePartStatus(part, nextProcessStep(part).status)} title={nextProcessStep(part).label}>
                         {#if nextProcessStep(part).icon === 'start'}<Clock size={13} />
+                        {:else if nextProcessStep(part).icon === 'cam-review'}<ListChecks size={13} />
                         {:else if nextProcessStep(part).icon === 'cam'}<CircleCheck size={13} />
                         {:else if nextProcessStep(part).icon === 'jprog'}<ListChecks size={13} />
                         {:else if nextProcessStep(part).icon === 'print'}<Upload size={13} />
@@ -2830,6 +2955,12 @@
   </div>
   </div>
 {/if}
+    </div>
+    {#if queueTransitioning && !loading}
+      <ManufactureLoadingOverlay compact label="Updating queue" />
+    {/if}
+</section>
+</div>
 </div>
 
 <!-- Edit Part Modal -->
@@ -3479,18 +3610,208 @@
 {/if}
 
 <style>
-  /* The ToDo/Completed/Router/etc. sub-tabs used to sit in their own block
-     above the filters card - two separately-margined containers stacked on
-     top of each other, which read as a dead gap between them. Moved inside
-     the same card as the filters; this just tightens the tab row's own
-     bottom margin and adds a hairline so it still reads as a distinct row
-     from the filters below it, instead of doubling the card's own padding
-     on top of the tab row's margin. */
-  .subtabs-in-card {
-    margin: 0 0 var(--space-3);
+  /* A workbench, rather than a stack of cards: queue navigation and
+     filtering stay in one narrow rail while the live table gets the width
+     and visual priority it needs on a shop monitor. */
+  .manufacture-workspace-page {
+    display: grid;
+    gap: var(--space-3);
+    padding-top: var(--space-2);
+    padding-bottom: var(--space-5);
+  }
+
+  .manufacture-command-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
+    padding: var(--space-3) 0;
+    border-bottom: 2px solid var(--text);
+  }
+
+  .manufacture-command-title {
+    display: grid;
+    gap: 0.1rem;
+    min-width: 0;
+  }
+
+  .workspace-eyebrow,
+  .rail-section-label {
+    color: var(--text-muted);
+    font-size: var(--font-xs);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .workspace-heading-row {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+  }
+
+  .manufacture-command-bar h1,
+  .queue-surface-header h2 {
+    margin: 0;
+    color: var(--text);
+    font-size: var(--font-xl);
+    line-height: 1.1;
+  }
+
+  .manufacture-command-bar h1 { font-size: var(--font-2xl); }
+
+  @media (min-width: 769px) {
+    .manufacture-command-bar .page-actions {
+      flex: 1 1 auto;
+      min-width: 0;
+      justify-content: flex-end;
+    }
+
+    .manufacture-utility-actions,
+    .manufacture-primary-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--gap-1);
+    }
+
+    .manufacture-primary-actions {
+      justify-content: flex-end;
+    }
+  }
+
+  .manufacture-workspace {
+    display: grid;
+    grid-template-columns: 13.5rem minmax(0, 1fr);
+    align-items: start;
+    gap: var(--space-4);
+    width: 100%;
+  }
+
+  .queue-rail {
+    position: sticky;
+    top: var(--space-3);
+    /* Start on the same line as the first part row beside the rail. */
+    margin-top: 0;
+    display: grid;
+    gap: var(--space-4);
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    padding-right: var(--space-2);
+    border-right: 1px solid var(--border);
+  }
+
+  .queue-navigation,
+  .queue-view-list,
+  .queue-filter-section {
+    display: grid;
+    gap: var(--gap-1);
+  }
+
+  .queue-navigation {
     padding-bottom: var(--space-3);
     border-bottom: 1px solid var(--border);
   }
+
+  .queue-navigation a {
+    display: flex;
+    align-items: center;
+    min-height: var(--control-height);
+    padding: 0 var(--space-2);
+    color: var(--text-secondary);
+    font-size: var(--font-sm);
+    text-decoration: none;
+  }
+
+  .queue-navigation a:hover {
+    color: var(--text);
+    background: var(--surface-2);
+  }
+
+  .queue-navigation a.active {
+    color: var(--text);
+    font-weight: 650;
+    box-shadow: inset 3px 0 0 var(--brand-gold-strong);
+    background: var(--accent-subtle);
+  }
+
+  .queue-rail-section {
+    display: grid;
+    gap: var(--space-2);
+  }
+
+  .queue-view-list button {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    min-height: 2rem;
+    padding: 0 var(--space-2);
+    color: var(--text-secondary);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font: inherit;
+    font-size: var(--font-sm);
+    text-align: left;
+  }
+
+  .queue-view-list button:hover { background: var(--surface-2); color: var(--text); }
+  .queue-view-list button.active { color: var(--text); border-color: var(--border); background: var(--surface-1); }
+  .queue-view-list strong { min-width: 1.5rem; color: var(--text); font-size: var(--font-xs); font-weight: 600; line-height: 1; text-align: right; font-variant-numeric: tabular-nums; }
+
+  .queue-filter-section {
+    padding-top: var(--space-3);
+    min-width: 0;
+    border-top: 1px solid var(--border);
+  }
+
+  .rail-search {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+
+  .rail-search :global(svg) {
+    position: absolute;
+    left: var(--space-2);
+    color: var(--text-muted);
+    pointer-events: none;
+  }
+
+  .rail-search .form-input { width: 100%; padding-left: 1.9rem; }
+  .queue-filter-section .form-group { display: grid; gap: var(--space-1); margin: 0; }
+  .queue-filter-section .form-label { margin: 0; font-size: var(--font-xs); }
+  .queue-filter-section .form-select { width: 100%; }
+  .queue-filter-section .team-filter-row { padding-top: var(--space-1); }
+  .rail-clear-filters { justify-self: start; margin-top: var(--space-1); }
+
+  .queue-work-surface {
+    position: relative;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .queue-empty-state {
+    display: flex;
+    align-items: center;
+    min-height: 14rem;
+    padding: var(--space-5);
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .queue-results {
+    min-height: 12rem;
+    opacity: 1;
+    transition: opacity 160ms ease;
+  }
+
+  /* Let the workspace background show through the short transition instead
+     of leaving the previous white table visible behind the loader. */
+  .queue-results-updating { opacity: 0; }
 
   /* No hover effects on the manufacture tab (dense buttons + table rows).
      Use theme tokens so rows flip correctly in dark mode. Ruled hairlines
@@ -3535,57 +3856,6 @@
   .queue-tool-mode-header { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.35rem; }
   .queue-tool-mode-header .form-label { margin: 0; }
   .queue-tool-auto-note { margin-top: 0.4rem; }
-
-  .fusion-cam-running {
-    background: var(--purple-soft);
-    color: var(--purple-strong);
-    border-color: var(--purple-soft);
-    cursor: default;
-  }
-
-  .fusion-cam-completed {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    color: var(--green-strong, #237a41);
-    font-size: var(--font-xs, 0.75rem);
-    font-weight: 600;
-  }
-
-  .part-card-fusion-status {
-    flex-basis: 100%;
-  }
-
-  .fusion-cam-failed {
-    /* This is a <button>, and without a reset it kept the browser's native
-       button chrome (a light system control background/border) behind the
-       red text - barely visible in light theme but a jarring mismatched box
-       in dark theme, since that native background doesn't follow the app's
-       theme at all. */
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    background: none;
-    border: none;
-    padding: 0;
-    font: inherit;
-    color: var(--danger, #e05252);
-    font-size: var(--font-xs, 0.75rem);
-    font-weight: 600;
-    cursor: pointer;
-  }
-
-  .fusion-cam-spinner {
-    display: inline-block;
-    width: 12px;
-    height: 12px;
-    border: 2px solid color-mix(in srgb, var(--purple-strong) 30%, transparent);
-    border-top-color: var(--purple-strong);
-    border-radius: 50%;
-    animation: fusion-cam-spin 0.7s linear infinite;
-  }
-
-  @keyframes fusion-cam-spin { to { transform: rotate(360deg); } }
 
   .cad-action-grid {
     display: grid;
@@ -3651,7 +3921,10 @@
     width: 100vw;
     margin-left: calc(50% - 50vw);
     margin-right: calc(50% - 50vw);
-    padding: 0 var(--space-4);
+    /* The global page shell is intentionally escaped for the wide queue,
+       but a shop workspace still needs a calm inset from the browser edge. */
+    box-sizing: border-box;
+    padding: 0 clamp(var(--space-3), 2vw, var(--space-5));
   }
 
   .select-col {
@@ -3709,25 +3982,23 @@
   .table td.workflow-col {
     width: 10%;
   }
-  /* The WORKFLOW label sits over a chip, not over bare text. Both cells
-     share the same padding, so the header text lines up with the chip's
-     BORDER edge - but the chip's own label is pushed a further 1px border
-     + var(--space-3) padding inward, which is what read as misaligned.
-     Indenting the header by exactly that inset puts the two words on the
-     same left edge. */
-  /* Workflow chip, scaled up with the rest of the table. The global .tag
-     is 28px at --font-xs, which looked undersized next to the enlarged
-     part name beside it. */
+  /* A workflow is a category, not an action. Use a compact ruled label in
+     the table rather than the application's general-purpose tag treatment. */
   .table td.workflow-col .workflow-tag {
-    height: 34px;
-    padding: 0 var(--space-4);
-    font-size: 0.8rem;
+    height: auto;
+    min-height: 1.35rem;
+    padding: 0 0 0 var(--space-2);
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: inset 2px 0 0 var(--brand-gold-strong);
+    color: var(--text-secondary);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
   }
-  /* Kept in step with the chip's own left inset above (1px border +
-     --space-4 padding) so the WORKFLOW label stays on the same left edge
-     as the word inside the chip. */
   .table th.workflow-col {
-    padding-left: calc(var(--space-3) + var(--space-4) + 1px);
+    padding-left: var(--space-3);
   }
 
   /* Due input, same treatment. PartDueDate is shared with other pages, so
@@ -4016,6 +4287,16 @@
     white-space: nowrap;
     background: transparent;
     color: var(--secondary);
+    animation: route-status-fade 180ms ease-out both;
+  }
+
+  @keyframes route-status-fade {
+    from { opacity: 0.35; transform: translateY(2px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .status-badge.status-table { animation: none; }
   }
 
   /* No per-status colours here. This block used to restate the entire
@@ -4036,6 +4317,22 @@
     min-height: 4.5rem;
   }
 
+  .parts-row.part-completing,
+  .part-card.part-completing {
+    pointer-events: none;
+    animation: part-completion-exit 650ms ease-in forwards;
+  }
+
+  @keyframes part-completion-exit {
+    from { opacity: 1; }
+    to { opacity: 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .parts-row.part-completing,
+    .part-card.part-completing { animation-duration: 1ms; }
+  }
+
   .assigned-user-badge {
     display: inline-flex;
     margin-top: 0.3rem;
@@ -4051,6 +4348,7 @@
   .table thead th { background: var(--background); color: var(--text); font-weight: 600; border-bottom: none; }
 
   .content-layout { display: flex; gap: 1rem; align-items: flex-start; }
+  .content-layout > .table-container { flex: 1 1 auto; min-width: 0; }
   .assign-sidebar { width: 250px; background: var(--surface-1); border: 1px solid var(--border); border-radius: 4px; padding: 1rem; position: sticky; top: 1rem; max-height: calc(100vh - 2rem); display: flex; flex-direction: column; gap: 0.5rem; overflow: hidden; overscroll-behavior: contain; flex-shrink: 0; }
   .assign-sidebar h3 { margin-top: 0; margin-bottom: 1rem; font-size: 1.1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
   .roster-list { display: flex; flex-direction: column; gap: 0.5rem; flex: 1; min-height: 0; overflow-y: auto; max-height: calc(100vh - 6rem); overscroll-behavior: contain; padding-right: 0.25rem; }
@@ -4273,10 +4571,40 @@
     min-width: 0;
   }
 
+  @media (max-width: 1080px) {
+    .manufacture-workspace {
+      grid-template-columns: 12rem minmax(0, 1fr);
+      gap: var(--space-3);
+    }
+
+    .queue-rail { padding-right: var(--space-2); }
+  }
+
   @media (max-width: 900px) {
     .actions-col { min-width: auto; }
     .table th.name-col, .table td.name-col { min-width: 80px; max-width: 100px; }
     .cam-setup-grid { grid-template-columns: 1fr; }
+
+    .manufacture-command-bar {
+      align-items: flex-start;
+      flex-direction: column;
+    }
+
+    .manufacture-workspace {
+      grid-template-columns: 1fr;
+    }
+
+    .queue-rail {
+      position: static;
+      margin-top: 0;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+      padding: 0 0 var(--space-3);
+      border-right: 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .queue-navigation { border-bottom: 0; padding-bottom: 0; }
+    .queue-filter-section { padding-top: 0; border-top: 0; }
     
     .content-layout {
       flex-direction: column;
@@ -4321,9 +4649,23 @@
       padding: var(--space-3);
     }
 
-    .page-header h1 {
-      font-size: 1.25rem;
+    .manufacture-workspace-page {
+      gap: var(--space-2);
+      padding-top: 0;
     }
+
+    .manufacture-command-bar {
+      padding: var(--space-3);
+      margin: 0 calc(-1 * var(--space-3));
+    }
+
+    .manufacture-command-bar h1 { font-size: var(--font-xl); }
+    .queue-rail { display: block; padding: 0 var(--space-3) var(--space-3); }
+    .queue-navigation { display: flex; overflow-x: auto; gap: 0; margin: 0 calc(-1 * var(--space-3)) var(--space-3); padding: 0 var(--space-3) var(--space-2); border-bottom: 1px solid var(--border); }
+    .queue-navigation a { flex: 0 0 auto; }
+    .queue-rail-section { margin-bottom: var(--space-3); }
+    .queue-view-list { grid-template-columns: 1fr 1fr; }
+    .queue-work-surface { border-top: 0; }
 
     /* A 1-column stack of 6 buttons pushed every part below the fold on a
        phone. Two columns halves that, and the primary action (Create New
@@ -4335,6 +4677,11 @@
       grid-template-columns: 1fr 1fr;
       gap: var(--gap-2);
       width: 100%;
+    }
+
+    .manufacture-utility-actions,
+    .manufacture-primary-actions {
+      display: contents;
     }
 
     .page-actions .btn {
