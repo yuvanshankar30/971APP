@@ -1123,6 +1123,7 @@
     </div>
 
     {#if (orderMode ? displayedOrderItems : filteredParts).length > 0}
+      <div class="purchasing-table-wrap">
       <div class="table-container">
         <table class="table">
           <thead>
@@ -1381,6 +1382,7 @@
             {/each}
           </tbody>
         </table>
+      </div>
       </div>
     {:else}
       <div class="empty-state">
@@ -2309,8 +2311,33 @@
     .page-header { padding: 1.25rem; margin-bottom: 1rem; }
     .header-content h1 { font-size: var(--font-xl); }
     .header-content p { font-size: var(--font-base); }
+  }
 
+  /* Real bug this fixes: this table has 13 columns (Name, Vendor, Project
+     ID, Requester, Qty, Price, Total, Link, Approved, Status, Shipping,
+     Created, Kit) - .table-container's shared overflow-x:auto (app.css)
+     then gave it its own inner horizontal scrollbar on any window under
+     roughly 1600-1900px, which is most laptops even unzoomed, and only
+     got worse as a user zoomed in (zoom shrinks the effective CSS-pixel
+     width the table has to fit into). The card layout below used to only
+     kick in under a plain 760px *viewport* media query, which doesn't
+     track how much width the table itself actually has - the budget rail
+     beside it, page padding, and the sidebar nav all eat into that
+     independently of the raw viewport width.
+     A container query fixes this at the source: .purchasing-table-wrap
+     establishes an inline-size containment context around just the table,
+     so this reacts to the table's own real available width - after the
+     rail, padding, nav, and any browser zoom are already accounted for -
+     instead of guessing a viewport number that can't know about any of
+     that. Below this container width the table converts to one card per
+     part (each field stacked as its own label:value row via a
+     minmax(0,1fr) grid), which can never need horizontal scroll at any
+     width; .table-container's overflow-x:auto stays as a last-resort
+     safety net for the flat table above this threshold, not the normal
+     path any more. */
+  .purchasing-table-wrap { container-type: inline-size; }
 
+  @container (max-width: 1300px) {
     .table-container {
       margin: 0;
       width: 100%;
