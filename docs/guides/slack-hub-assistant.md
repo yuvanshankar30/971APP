@@ -57,7 +57,9 @@ Change Leads can use `@Spartans Hub /edit <change>` to draft an unmerged pull
 request. Gemini can search repository paths by keyword before reading files,
 which avoids repeated directory walks. The last model round disables tool
 calls and asks for a summary of files actually staged. If none were staged,
-the bot says that no change was made.
+the bot says that no change was made. After checking Change Lead access, the
+bot posts a working message in the request's Slack thread and replaces that
+message with the PR link, no-change result, or error when drafting finishes.
 
 Questions that name a Hub tab or ask where to find a page are resolved before
 Gemini from `src/lib/server/hub_feature_knowledge.js`. The local catalog covers

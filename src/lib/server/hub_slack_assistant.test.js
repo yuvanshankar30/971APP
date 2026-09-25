@@ -647,11 +647,17 @@ describe('Slack Hub assistant', () => {
       summary: 'I have updated the login screen (src/routes/+page.svelte) to remove the spartan helmet icon from the modern login view.'
     });
     const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
+    const update = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
     await handleHubAppMention({ channel: 'C1', user: 'U-ADMIN', ts: '1.0', text: '<@U971> /edit remove the spartan helmet from the login screen' }, {
       supa: supabaseForAssignments({ admin: true }),
-      slack: { chat: { postMessage } }
+      slack: { chat: { postMessage, update } }
     });
-    const text = postMessage.mock.calls[0][0].text;
+    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({
+      channel: 'C1', thread_ts: '1.0', text: expect.stringContaining('Working on your `/edit` request')
+    }));
+    expect(postMessage).toHaveBeenCalledTimes(1);
+    const text = update.mock.calls[0][0].text;
+    expect(update.mock.calls[0][0].ts).toBe('2.0');
     expect(text).toContain('I did not make any changes');
     expect(text).toContain('no pull request was opened');
     expect(text).not.toMatch(/\*Unmerged pull request:\*/);
@@ -664,13 +670,58 @@ describe('Slack Hub assistant', () => {
       summary: 'Removed the spartan helmet span from the login hero panel.'
     });
     const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
+    const update = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
     await handleHubAppMention({ channel: 'C1', user: 'U-ADMIN', ts: '1.0', text: '<@U971> /edit remove the spartan helmet from the login screen' }, {
       supa: supabaseForAssignments({ admin: true }),
-      slack: { chat: { postMessage } }
+      slack: { chat: { postMessage, update } }
     });
-    const text = postMessage.mock.calls[0][0].text;
+    const text = update.mock.calls[0][0].text;
     expect(text).toContain('<https://github.com/frc971/spartanshub/pull/1234|#1234>');
     expect(text).not.toContain('I did not make any changes');
+    expect(postMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows a working message while an authorized edit is still drafting', async () => {
+    let finishDraft;
+    draftCodeChangePr.mockImplementationOnce(() => new Promise((resolve) => { finishDraft = resolve; }));
+    const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
+    const update = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
+    const handling = handleHubAppMention({
+      channel: 'C1', user: 'U-ADMIN', ts: '1.5', thread_ts: '1.0',
+      text: '<@U971> /edit update the login screen'
+    }, { supa: supabaseForAssignments({ admin: true }), slack: { chat: { postMessage, update } } });
+    await vi.waitFor(() => expect(postMessage).toHaveBeenCalledTimes(1));
+    expect(postMessage.mock.calls[0][0].thread_ts).toBe('1.0');
+    expect(update).not.toHaveBeenCalled();
+    finishDraft({ prUrl: null, summary: 'Could not find the requested file.' });
+    await handling;
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({
+      channel: 'C1', ts: '2.0', text: expect.stringContaining('I did not make any changes')
+    }));
+  });
+
+  it('does not show a working message for an unauthorized edit request', async () => {
+    const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
+    const update = vi.fn();
+    await handleHubAppMention({
+      channel: 'C1', user: 'U-ADMIN', ts: '1.0', text: '<@U971> /edit update the login screen'
+    }, { supa: supabaseForAssignments({ admin: false }), slack: { chat: { postMessage, update } } });
+    expect(postMessage).toHaveBeenCalledTimes(1);
+    expect(postMessage.mock.calls[0][0].text).toBe('Only a Change Lead can ask me to draft a code change.');
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('posts the final edit result if Slack cannot update the working message', async () => {
+    draftCodeChangePr.mockRejectedValueOnce(new Error('Gemini unavailable'));
+    const postMessage = vi.fn().mockResolvedValueOnce({ ok: true, channel: 'C1', ts: '2.0' })
+      .mockResolvedValueOnce({ ok: true, channel: 'C1', ts: '3.0' });
+    const update = vi.fn().mockRejectedValue(new Error('temporary update failure'));
+    const result = await handleHubAppMention({
+      channel: 'C1', user: 'U-ADMIN', ts: '1.0', text: '<@U971> /edit update the login screen'
+    }, { supa: supabaseForAssignments({ admin: true }), slack: { chat: { postMessage, update } } });
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ ts: '2.0' }));
+    expect(postMessage.mock.calls[1][0].text).toContain("I couldn't draft that change: Gemini unavailable");
+    expect(result.ts).toBe('3.0');
   });
 
   it('reads all assignment types for admins and only the requester rows for members', async () => {

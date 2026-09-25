@@ -590,7 +590,8 @@ file: update its diagram alongside this section, not separately from it.
   Slack retry IDs in `slack_event_receipts`. Change Leads can use
   `@Spartans Hub /edit` to draft an unmerged GitHub PR; Gemini can search
   repository paths directly and its final round summarizes staged files
-  without asking for more tools),
+  without asking for more tools. Authorized `/edit` requests show a working
+  message in the Slack thread, which is updated with the result),
   Onshape API (CAD source of truth for parts - see the Onshape-key exposure
   note under **Known gaps** below), The Blue Alliance API (scouting), Sentry
   (error monitoring), Google Drive API (AutoCAM input/output watcher, hand-

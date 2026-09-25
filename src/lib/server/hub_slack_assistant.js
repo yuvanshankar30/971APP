@@ -950,6 +950,19 @@ function geminiFailureReply(error) {
   return 'I could not reach the Hub question-answering service. Try `@Spartans Hub /status`, or ask again shortly.';
 }
 
+async function postHubAssistantAnswer(slack, event, text, editStatusTs = null) {
+  if (editStatusTs) {
+    try {
+      const updated = await slack.chat.update({ channel: event.channel, ts: editStatusTs, text });
+      if (!updated?.ok) throw new Error(updated?.error || 'Slack rejected the message update');
+      return { ...updated, ts: updated.ts || editStatusTs };
+    } catch (error) {
+      console.error('Could not update Slack edit working message', error?.data?.error || error?.message || error);
+    }
+  }
+  return slack.chat.postMessage({ channel: event.channel, thread_ts: event.thread_ts || event.ts, text });
+}
+
 export async function handleHubAppMention(event, dependencies = {}) {
   if (!event?.channel || !event?.ts || event?.bot_id || event?.subtype === 'bot_message') {
     return { ok: false, reason: 'ignored-event' };
@@ -1001,6 +1014,7 @@ export async function handleHubAppMention(event, dependencies = {}) {
   const featureAnswer = answerHubFeatureQuestion(question)
     || (threadFeature ? answerHubFeatureQuestion(`${question} ${threadFeature.name}`) : null);
   let text;
+  let editStatusTs = null;
   if (!question) {
     text = 'Ask me about Spartans Hub, or use `@971hub /status` for live status and recent changes.';
   } else if (isCodeChangeRequest(question)) {
@@ -1008,6 +1022,19 @@ export async function handleHubAppMention(event, dependencies = {}) {
     if (!actorProfile || actorProfile.banned || !hasPermission(actorProfile, 'REQUEST_CODE_CHANGES')) {
       text = 'Only a Change Lead can ask me to draft a code change.';
     } else {
+      if (parseCodeChangeRequest(question)) {
+        try {
+          const status = await slack.chat.postMessage({
+            channel: event.channel,
+            thread_ts: event.thread_ts || event.ts,
+            text: 'Working on your `/edit` request. I’ll update this message with the result.'
+          });
+          if (!status?.ok || !status.ts) throw new Error(status?.error || 'Slack did not return a message timestamp');
+          editStatusTs = status.ts;
+        } catch (error) {
+          console.warn('Could not post Slack edit working message', error?.data?.error || error?.message || error);
+        }
+      }
       try {
         const result = await draftCodeChangePr(parseCodeChangeRequest(question), {
           ...dependencies,
@@ -1097,11 +1124,7 @@ export async function handleHubAppMention(event, dependencies = {}) {
       text = geminiFailureReply(error);
     }
   }
-  const response = await slack.chat.postMessage({
-    channel: event.channel,
-    thread_ts: event.thread_ts || event.ts,
-    text
-  });
+  const response = await postHubAssistantAnswer(slack, event, text, editStatusTs);
   await logBotRequest(supa, {
     slackUserId: event.user || null,
     channelId: event.channel,
