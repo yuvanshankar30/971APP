@@ -540,7 +540,7 @@ file: update its diagram alongside this section, not separately from it.
 - **3D/CAD**: `occt-import-js` (STEP file parsing, WASM) + `three.js`
   (client-side 3D viewing, `CadViewer.svelte`).
 - **Other integrations**: Slack (`@slack/web-api`, bot notifications/DMs,
-  ACE/Pit alerts, and signed `app_mention` handling: `@971hub /status` reports
+  ACE/Pit alerts, and signed `app_mention` handling: `@Spartans Hub /status` reports
   live Hub/database/scouting status plus recent releases, team-report questions
   use live report rows, and scouting-assignment questions are answered directly
   from Supabase without sending scout names or shifts to Gemini; authorized

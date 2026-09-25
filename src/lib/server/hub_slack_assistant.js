@@ -198,7 +198,7 @@ function hasHubQuestionContext(question, threadFeature) {
 }
 
 function outOfScopeReply() {
-  return 'I can only help with Spartans Hub: its pages, workflows, supported team data, and account-scoped Hub questions. Ask a Hub-specific question or use `@971hub /status`.';
+  return 'I can only help with Spartans Hub: its pages, workflows, supported team data, and account-scoped Hub questions. Ask a Hub-specific question or use `@Spartans Hub /status`.';
 }
 
 function recentConversation(messages) {
@@ -1024,7 +1024,7 @@ export async function handleHubAppMention(event, dependencies = {}) {
   let text;
   let editStatusTs = null;
   if (!question) {
-    text = 'Ask me about Spartans Hub, or use `@971hub /status` for live status and recent changes.';
+    text = 'Ask me about Spartans Hub, or use `@Spartans Hub /status` for live status and recent changes.';
   } else if (isCodeChangeRequest(question)) {
     const actorProfile = await resolveHubProfileForSlackUser(supa, event.user, slack);
     if (!actorProfile || actorProfile.banned || !hasPermission(actorProfile, 'REQUEST_CODE_CHANGES')) {
@@ -1114,7 +1114,7 @@ export async function handleHubAppMention(event, dependencies = {}) {
       } else if (person.members.length > 1) {
         text = `I found more than one possible Hub member: ${person.members.slice(0, 5).map((member) => member.name).join(', ')}. Which person do you mean?`;
       } else if (!actorProfile || actorProfile.banned) {
-        text = 'Link your Slack account to an active Spartans Hub profile before asking model-backed Hub questions. I can still help with documented page locations and `@971hub /status`.';
+        text = 'Link your Slack account to an active Spartans Hub profile before asking model-backed Hub questions. I can still help with documented page locations and `@Spartans Hub /status`.';
       } else {
         text = await askGeminiAboutHub(question, snapshot, {
           ...dependencies,

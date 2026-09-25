@@ -427,6 +427,7 @@ describe('Slack Hub assistant', () => {
     });
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(postMessage.mock.calls[0][0].text).toContain('only help with Spartans Hub');
+    expect(postMessage.mock.calls[0][0].text).toContain('@Spartans Hub /status');
   });
 
   it('rejects prompt-injection and credential requests before they reach Gemini', async () => {
