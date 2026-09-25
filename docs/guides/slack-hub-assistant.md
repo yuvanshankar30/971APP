@@ -53,6 +53,12 @@ Mentions using the old `@971app` or
 `@971hub` display names continue to work in existing messages because Slack
 identifies the app by ID rather than by its visible name.
 
+Change Leads can use `@Spartans Hub /edit <change>` to draft an unmerged pull
+request. Gemini can search repository paths by keyword before reading files,
+which avoids repeated directory walks. The last model round disables tool
+calls and asks for a summary of files actually staged. If none were staged,
+the bot says that no change was made.
+
 Questions that name a Hub tab or ask where to find a page are resolved before
 Gemini from `src/lib/server/hub_feature_knowledge.js`. The local catalog covers
 default navigation, important hidden/direct routes, feature subtabs, common

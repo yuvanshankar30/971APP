@@ -587,7 +587,10 @@ file: update its diagram alongside this section, not separately from it.
   each mention receipt by its own message timestamp while storing the thread
   parent separately, reports safe
   credential/model/quota/timeout failure categories, and durably deduplicates
-  Slack retry IDs in `slack_event_receipts`),
+  Slack retry IDs in `slack_event_receipts`. Change Leads can use
+  `@Spartans Hub /edit` to draft an unmerged GitHub PR; Gemini can search
+  repository paths directly and its final round summarizes staged files
+  without asking for more tools),
   Onshape API (CAD source of truth for parts - see the Onshape-key exposure
   note under **Known gaps** below), The Blue Alliance API (scouting), Sentry
   (error monitoring), Google Drive API (AutoCAM input/output watcher, hand-
