@@ -197,11 +197,19 @@
       if (status === 'machined') return { status: 'complete', label: 'Kit', icon: 'kit' };
       return null;
     }
+    // Real bug this fixes: this ladder must match WORKFLOW_STATUSES.router
+    // in statuses.js (cammed -> jprogged -> machined -> postprocessed ->
+    // complete), which is what the progress bar's own stage index
+    // (partRoute -> getWorkflowStatuses) already renders - this function
+    // had postprocessed and jprogged swapped relative to that canonical
+    // order, so after "Machined" (correctly shown as position 6/8 by the
+    // progress bar) the action button jumped straight to "Kit", skipping
+    // the "Postprocessed" stage the bar itself still expected next.
     if (status === 'in-progress') return { status: 'cammed', label: 'CAM Complete', icon: 'cam' };
-    if (status === 'cammed') return { status: 'postprocessed', label: 'Postprocess', icon: 'machine' };
-    if (status === 'postprocessed') return { status: 'jprogged', label: 'JProg', icon: 'jprog' };
+    if (status === 'cammed') return { status: 'jprogged', label: 'JProg', icon: 'jprog' };
     if (status === 'jprogged') return { status: 'machined', label: 'Machine', icon: 'machine' };
-    if (status === 'machined') return { status: 'complete', label: 'Kit', icon: 'kit' };
+    if (status === 'machined') return { status: 'postprocessed', label: 'Postprocess', icon: 'machine' };
+    if (status === 'postprocessed') return { status: 'complete', label: 'Kit', icon: 'kit' };
     return null;
   }
 
