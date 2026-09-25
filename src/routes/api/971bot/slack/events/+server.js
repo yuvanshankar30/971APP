@@ -9,7 +9,7 @@ import {
 } from '$lib/server/971bot';
 import { handlePlannerReaction } from '$lib/server/planner_notifications.js';
 import { handleP0BugAssignmentReaction } from '$lib/server/slack_notifications.js';
-import { handleHubAppMention, resolveHubMentionThreadTs } from '$lib/server/hub_slack_assistant.js';
+import { handleHubAppMention } from '$lib/server/hub_slack_assistant.js';
 import { claimSlackEvent, completeSlackEvent, failSlackEvent, recordSlackAssistantQuestion } from '$lib/server/slack_event_receipts.js';
 
 // Avoid approving the same purchase repeatedly when multiple reactions are added.
@@ -22,7 +22,8 @@ async function processHubAssistantEvent({ event, eventId, eventType, supa }) {
       eventId,
       eventType,
       channelId: event.channel || null,
-      eventTs: event.thread_ts || event.ts || null
+      // event_ts is the unique message identity, not the shared thread root.
+      eventTs: event.ts || null
     });
   } catch (error) {
     console.error('Failed to claim Slack assistant event', error?.message || error);
@@ -32,7 +33,9 @@ async function processHubAssistantEvent({ event, eventId, eventType, supa }) {
 
   let result;
   try {
-    await recordSlackAssistantQuestion(supa, eventId, { ts: event.ts, question: event.text || '' });
+    await recordSlackAssistantQuestion(supa, eventId, {
+      ts: event.ts, threadTs: event.thread_ts || event.ts, question: event.text || ''
+    });
     result = await handleHubAppMention(event, { supa });
     if (!result.ok) throw new Error(`Slack did not accept the assistant reply (${result.reason || 'unknown reason'})`);
     console.log('Slack assistant reply accepted', {
@@ -50,7 +53,10 @@ async function processHubAssistantEvent({ event, eventId, eventType, supa }) {
     return json({ ok: false, handled: false }, { status: 503 });
   }
   try {
-    await completeSlackEvent(supa, eventId, { ts: event.ts, question: event.text || '', answer: result.text || '' });
+    await completeSlackEvent(supa, eventId, {
+      ts: event.ts, threadTs: event.thread_ts || event.ts,
+      question: event.text || '', answer: result.text || ''
+    });
   } catch (error) {
     console.error('Failed to complete Slack event receipt', error?.message || error);
   }
@@ -87,13 +93,11 @@ export async function POST({ request }) {
       }
       const eventId = payload.event_id || `app_mention:${event.channel || ''}:${event.ts || ''}`;
       const supa = getSupabase();
-      const threadTs = await resolveHubMentionThreadTs(getSlackClient(), event);
-      const mention = threadTs && threadTs !== event.ts ? { ...event, thread_ts: threadTs } : event;
       console.log('Processing Slack mention', {
         event_id: eventId, channel: event.channel || null, ts: event.ts || null,
-        thread_ts: mention.thread_ts || null
+        thread_ts: event.thread_ts || null
       });
-      return processHubAssistantEvent({ event: mention, eventId, eventType: event_type, supa });
+      return processHubAssistantEvent({ event, eventId, eventType: event_type, supa });
     }
 
     if (event_type === 'reaction_added') {

@@ -1,8 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { handleHubAppMention, resolveHubMentionThreadTs, getSupabase, claimSlackEvent, completeSlackEvent, failSlackEvent, recordSlackAssistantQuestion } = vi.hoisted(() => ({
+const { handleHubAppMention, getSupabase, claimSlackEvent, completeSlackEvent, failSlackEvent, recordSlackAssistantQuestion } = vi.hoisted(() => ({
   handleHubAppMention: vi.fn(),
-  resolveHubMentionThreadTs: vi.fn(),
   getSupabase: vi.fn(() => ({ name: 'test-supabase' })),
   claimSlackEvent: vi.fn(),
   completeSlackEvent: vi.fn(),
@@ -13,14 +12,14 @@ const { handleHubAppMention, resolveHubMentionThreadTs, getSupabase, claimSlackE
 vi.mock('$lib/server/971bot', () => ({
   verifySlackSignature: () => true,
   approvePurchaseInDb: vi.fn(),
-  getSlackClient: vi.fn(() => ({ name: 'test-slack' })),
+  getSlackClient: vi.fn(),
   ensureApproverDmChannel: vi.fn(),
   messageToPurchaseMap: new Map(),
   getSupabase
 }));
 vi.mock('$lib/server/planner_notifications.js', () => ({ handlePlannerReaction: vi.fn() }));
 vi.mock('$lib/server/slack_notifications.js', () => ({ handleP0BugAssignmentReaction: vi.fn() }));
-vi.mock('$lib/server/hub_slack_assistant.js', () => ({ handleHubAppMention, resolveHubMentionThreadTs }));
+vi.mock('$lib/server/hub_slack_assistant.js', () => ({ handleHubAppMention }));
 vi.mock('$lib/server/slack_event_receipts.js', () => ({ claimSlackEvent, completeSlackEvent, failSlackEvent, recordSlackAssistantQuestion }));
 
 const { POST } = await import('./+server.js');
@@ -36,7 +35,6 @@ function slackRequest(payload) {
 describe('Slack app mention events', () => {
   beforeEach(() => {
     handleHubAppMention.mockReset().mockResolvedValue({ ok: true, text: 'Answer' });
-    resolveHubMentionThreadTs.mockReset().mockImplementation(async (_slack, event) => event.thread_ts || event.ts);
     claimSlackEvent.mockReset().mockResolvedValue({ claimed: true, retried: false });
     completeSlackEvent.mockReset().mockResolvedValue(undefined);
     failSlackEvent.mockReset().mockResolvedValue(undefined);
@@ -61,34 +59,30 @@ describe('Slack app mention events', () => {
     expect(response.status).toBe(200);
     expect(handleHubAppMention).toHaveBeenCalledWith(event, { supa: { name: 'test-supabase' } });
     expect(recordSlackAssistantQuestion).toHaveBeenCalledWith({ name: 'test-supabase' }, 'Ev-one', {
-      ts: '1.0', question: '<@U971> status'
+      ts: '1.0', threadTs: '1.0', question: '<@U971> status'
     });
     expect(completeSlackEvent).toHaveBeenCalledWith({ name: 'test-supabase' }, 'Ev-one', {
-      ts: '1.0', question: '<@U971> status', answer: 'Answer'
+      ts: '1.0', threadTs: '1.0', question: '<@U971> status', answer: 'Answer'
     });
     expect(await response.json()).toMatchObject({ ok: true, handled: true });
   });
 
-  it('records an in-thread mention against the thread root for later follow-ups', async () => {
+  it('deduplicates each in-thread mention by its own message timestamp', async () => {
     const event = { type: 'app_mention', channel: 'C1', ts: '1.5', thread_ts: '1.0', text: '<@U971> status' };
     await POST({ request: slackRequest({ type: 'event_callback', event_id: 'Ev-in-thread', event }) });
+    await POST({ request: slackRequest({ type: 'event_callback', event_id: 'Ev-next', event: { ...event, ts: '2.0' } }) });
     expect(claimSlackEvent).toHaveBeenCalledWith(
       { name: 'test-supabase' },
-      expect.objectContaining({ eventId: 'Ev-in-thread', eventTs: '1.0' })
+      expect.objectContaining({ eventId: 'Ev-in-thread', eventTs: '1.5' })
     );
-  });
-
-  it('uses a resolved parent when Slack omits thread_ts from a reply mention', async () => {
-    const event = { type: 'app_mention', channel: 'C1', ts: '2.0', text: '<@U971> follow up' };
-    resolveHubMentionThreadTs.mockResolvedValueOnce('1.0');
-    await POST({ request: slackRequest({ type: 'event_callback', event_id: 'Ev-parent', event }) });
     expect(claimSlackEvent).toHaveBeenCalledWith(
       { name: 'test-supabase' },
-      expect.objectContaining({ eventId: 'Ev-parent', eventTs: '1.0' })
+      expect.objectContaining({ eventId: 'Ev-next', eventTs: '2.0' })
     );
-    expect(handleHubAppMention).toHaveBeenCalledWith(
-      { ...event, thread_ts: '1.0' }, { supa: { name: 'test-supabase' } }
-    );
+    expect(handleHubAppMention).toHaveBeenCalledTimes(2);
+    expect(recordSlackAssistantQuestion).toHaveBeenCalledWith({ name: 'test-supabase' }, 'Ev-next', {
+      ts: '2.0', threadTs: '1.0', question: '<@U971> status'
+    });
   });
 
   it('deduplicates Slack retries by event_id', async () => {
