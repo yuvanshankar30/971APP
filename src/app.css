@@ -385,6 +385,13 @@ body { transition: background-color 0.2s ease, color 0.2s ease; }
 /* Stat card - consolidated from 2 duplicate definitions */
 .stat-card { padding: var(--space-3) var(--space-4); display: flex; align-items: center; gap: var(--gap-3); }
 
+/* `html`, not `body`, is the scrolling element in the browsers the Hub
+   supports. Reserve its scrollbar track so a short filtered queue cannot
+   change the viewport width and make the manufacturing rail jump sideways. */
+html {
+  scrollbar-gutter: stable;
+}
+
 body {
   margin: 0;
   padding: 0;

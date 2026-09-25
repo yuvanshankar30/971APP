@@ -5,13 +5,14 @@
   import { page } from '$app/stores';
   import { requestConfirmation } from '$lib/confirmation.js';
   import { buildDuplicatePartPayload } from '$lib/parts_helpers.js';
-  import { Download, Upload, Box, Copy, X } from 'lucide-svelte';
+  import { ArrowLeft, Search, Download, Upload, Box, Copy, X, Folder, Scissors } from 'lucide-svelte';
   import { formatPacificDate } from '$lib/timezone.js';
   import { passesTeamFilter } from '$lib/frcTeams.js';
   import TeamFilter from '$lib/components/TeamFilter.svelte';
   import CadViewer from '$lib/components/CadViewer.svelte';
   import { getSeasonBucket, getCurrentSeasonBucket, getAllSeasonBuckets, passesSeasonFilter } from '$lib/frcSeason.js';
   import SeasonFilter from '$lib/components/SeasonFilter.svelte';
+  import ManufactureLoadingOverlay from '../ManufactureLoadingOverlay.svelte';
 
   let parts = [];
   let filteredParts = [];
@@ -132,30 +133,47 @@
 
 <svelte:head><title>Completed Parts</title></svelte:head>
 
-<div class="page-header">
-  <h1>Completed Parts</h1>
+<div class="completed-page-container">
+<header class="completed-command-bar">
+  <div class="completed-command-title">
+    <div class="completed-heading-row">
+      <h1>Manufacturing</h1>
+      <span class="completed-total">{parts.length} completed parts</span>
+    </div>
+  </div>
   <div class="page-actions">
+    <a href="/manufacture" class="btn btn-secondary">
+      <ArrowLeft size={16} />
+      Work Queue
+    </a>
+    <a href="/jprog" class="btn btn-secondary">
+      <Scissors size={16} />
+      JProg
+    </a>
+    <a href="/manufacture/files" class="btn btn-secondary">
+      <Folder size={16} />
+      Files
+    </a>
     <a href="/manufacture/create" class="btn btn-primary" style="text-decoration:none;display:inline-flex;align-items:center;gap:8px;">
       <Upload size={16} />
       Create New Part
     </a>
   </div>
-  
-</div>
-<div class="card">
-  <div class="subtabs subtabs-in-card">
-    <a href="/manufacture" class:active={$page.url.pathname === '/manufacture'}>ToDo</a>
-    <a href="/manufacture/completed" class:active={$page.url.pathname === '/manufacture/completed'}>Completed</a>
-    <a href="/manufacture/router" class:active={$page.url.pathname === '/manufacture/router'}>Router</a>
-    <a href="/manufacture/post-processing" class:active={$page.url.pathname === '/manufacture/post-processing'}>Post Processing</a>
-    <a href="/manufacture/files" class:active={$page.url.pathname === '/manufacture/files'}>Files</a>
-  </div>
+</header>
 
-  <div class="filters" style="--filters-columns: 2fr 1fr 1fr;">
-    <div class="form-group">
-      <label class="form-label" for="completed-search">Search</label>
-      <input id="completed-search" class="form-input" placeholder="Search by name, material, requester, or project ID..." bind:value={searchTerm} />
-    </div>
+<div class="completed-workspace">
+  <aside class="completed-rail" aria-label="Completed parts controls">
+    <nav class="completed-navigation" aria-label="Manufacturing sections">
+      <a href="/manufacture" class:active={$page.url.pathname === '/manufacture'}>Work Queue</a>
+      <a href="/manufacture/completed" class:active={$page.url.pathname === '/manufacture/completed'}>Completed</a>
+    </nav>
+
+    <section class="completed-filter-section" aria-labelledby="completed-filter-heading">
+      <span id="completed-filter-heading" class="completed-section-label">Filter Parts</span>
+      <div class="completed-search">
+        <Search size={15} aria-hidden="true" />
+        <input id="completed-search" class="form-input" placeholder="Search parts" aria-label="Search completed parts" bind:value={searchTerm} />
+      </div>
     <div class="form-group">
       <label class="form-label" for="completed-workflow">Workflow</label>
       <select id="completed-workflow" class="form-select" bind:value={filterWorkflow}>
@@ -166,19 +184,32 @@
       </select>
     </div>
     <SeasonFilter options={seasonOptions} bind:value={filterSeason} />
-  </div>
-  <div style="margin-top:0.75rem;padding-top:0.75rem;border-top:1px solid var(--border);">
-    <TeamFilter bind:show971 bind:show9584 />
-  </div>
-</div>
+      <div class="completed-team-filter">
+        <TeamFilter bind:show971 bind:show9584 />
+      </div>
+    </section>
+  </aside>
+
+  <section class="completed-work-surface" aria-label="Completed parts">
+    <div class="completed-surface-header">
+      <div>
+        <span class="completed-section-label">Completed</span>
+        <h2>{filteredParts.length} parts</h2>
+      </div>
+      {#if filterWorkflow || searchTerm}
+        <button class="btn btn-secondary btn-sm" on:click={() => { searchTerm = ''; filterWorkflow = ''; }}>
+          <X size={14} /> Clear filters
+        </button>
+      {/if}
+    </div>
 
 {#if loading}
-  <div class="card"><p>Loading...</p></div>
+  <div class="completed-empty-state"><ManufactureLoadingOverlay compact inline label="Loading completed parts" /></div>
 {:else if filteredParts.length === 0}
-  <div class="card"><p>No completed parts found.</p></div>
+  <div class="completed-empty-state"><p>No completed parts found.</p></div>
 {:else}
-  <div class="table-container">
-    <table class="table">
+  <div class="table-container completed-table-container">
+    <table class="table completed-table">
       <thead>
         <tr>
           <th>Name</th>
@@ -268,6 +299,9 @@
     {/each}
   </div>
 {/if}
+</section>
+</div>
+</div>
 
 <!-- CAD 3D Viewer Modal -->
 {#if showCadModal && cadViewerPart}
@@ -299,13 +333,163 @@
 {/if}
 
 <style>
-  /* Same fix as /manufacture's own ToDo page: the sub-tabs used to sit in
-     their own separately-margined block above the filters card, reading as
-     a dead gap between two stacked containers. Now inside the same card. */
-  .subtabs-in-card {
-    margin: 0 0 var(--space-3);
+  .completed-page-container {
+    box-sizing: border-box;
+    width: 100vw;
+    margin-left: calc(50% - 50vw);
+    margin-right: calc(50% - 50vw);
+    padding: 0 clamp(var(--space-3), 2vw, var(--space-5)) var(--space-5);
+  }
+
+  .completed-command-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
+    padding: var(--space-3) 0;
+    border-bottom: 2px solid var(--text);
+  }
+
+  .completed-heading-row {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+  }
+
+  .completed-command-bar h1,
+  .completed-surface-header h2 {
+    margin: 0;
+    color: var(--text);
+    font-size: var(--font-xl);
+    line-height: 1.1;
+  }
+
+  .completed-total {
+    color: var(--text-muted);
+    font-size: var(--font-sm);
+  }
+
+  .completed-workspace {
+    display: grid;
+    grid-template-columns: 13.5rem minmax(0, 1fr);
+    align-items: start;
+    gap: var(--space-4);
+    width: 100%;
+  }
+
+  .completed-rail {
+    position: sticky;
+    top: var(--space-3);
+    margin-top: 3.6rem;
+    display: grid;
+    gap: var(--space-4);
+    padding-right: var(--space-4);
+    border-right: 1px solid var(--border);
+  }
+
+  .completed-navigation,
+  .completed-filter-section {
+    display: grid;
+    gap: var(--gap-1);
+  }
+
+  .completed-navigation {
     padding-bottom: var(--space-3);
     border-bottom: 1px solid var(--border);
+  }
+
+  .completed-navigation a {
+    display: flex;
+    align-items: center;
+    min-height: var(--control-height);
+    padding: 0 var(--space-2);
+    color: var(--text-secondary);
+    font-size: var(--font-sm);
+    text-decoration: none;
+  }
+
+  .completed-navigation a:hover { color: var(--text); background: var(--surface-2); }
+  .completed-navigation a.active { color: var(--text); font-weight: 650; box-shadow: inset 3px 0 0 var(--brand-gold-strong); background: var(--accent-subtle); }
+
+  .completed-filter-section {
+    padding-top: var(--space-3);
+    border-top: 1px solid var(--border);
+  }
+
+  .completed-section-label {
+    color: var(--text-muted);
+    font-size: var(--font-xs);
+    font-weight: 650;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .completed-search {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+
+  .completed-search :global(svg) {
+    position: absolute;
+    left: var(--space-2);
+    color: var(--text-muted);
+    pointer-events: none;
+  }
+
+  .completed-search .form-input { width: 100%; padding-left: 1.9rem; }
+  .completed-filter-section .form-group { display: grid; gap: var(--space-1); margin: 0; }
+  .completed-filter-section .form-label { margin: 0; font-size: var(--font-xs); }
+  .completed-filter-section .form-select { width: 100%; }
+  .completed-team-filter { margin-top: var(--space-2); padding-top: var(--space-3); border-top: 1px solid var(--border); }
+
+  .completed-work-surface {
+    width: 100%;
+    min-width: 0;
+    border-top: 1px solid var(--border);
+  }
+
+  .completed-surface-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    min-height: 3.6rem;
+    padding: var(--space-2) 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .completed-surface-header h2 { margin-top: 0.1rem; font-size: var(--font-lg); }
+  .completed-empty-state { display: flex; align-items: center; min-height: 14rem; padding: var(--space-5); color: var(--text-muted); border-bottom: 1px solid var(--border); }
+
+  .completed-table-container { width: 100%; }
+  .completed-table { width: 100%; font-size: var(--font-sm); }
+  .completed-table thead th { background: var(--background); color: var(--text); }
+  .completed-table tbody tr { background: var(--surface-1); }
+  .completed-table tbody tr:hover { background: var(--surface-1); }
+
+  @media (max-width: 1080px) {
+    .completed-workspace { grid-template-columns: 12rem minmax(0, 1fr); gap: var(--space-3); }
+    .completed-rail { padding-right: var(--space-3); }
+  }
+
+  @media (max-width: 900px) {
+    .completed-command-bar { align-items: flex-start; flex-direction: column; }
+    .completed-workspace { grid-template-columns: 1fr; }
+    .completed-rail { position: static; margin-top: 0; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); padding: 0 0 var(--space-3); border-right: 0; border-bottom: 1px solid var(--border); }
+    .completed-navigation { border-bottom: 0; padding-bottom: 0; }
+    .completed-filter-section { padding-top: 0; border-top: 0; }
+  }
+
+  @media (max-width: 768px) {
+    .completed-page-container { width: auto; margin: 0; padding: 0; }
+    .completed-command-bar { padding: var(--space-3); }
+    .completed-rail { display: block; padding: 0 var(--space-3) var(--space-3); }
+    .completed-navigation { display: flex; margin: 0 calc(-1 * var(--space-3)) var(--space-3); padding: 0 var(--space-3) var(--space-2); overflow-x: auto; border-bottom: 1px solid var(--border); }
+    .completed-navigation a { flex: 0 0 auto; }
+    .completed-work-surface { border-top: 0; }
+    .completed-surface-header { padding: var(--space-2) var(--space-3); }
   }
 
   .view-cad-link {

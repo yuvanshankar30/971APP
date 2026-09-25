@@ -19,6 +19,7 @@
   let newStockDescription = '';
   let isAddingStock = false;
   let stockOptionError = '';
+  let stockError = '';
   let uploadedFile = null;
   let uploadedStepFile = null;
   let camJobName = ''; // optional AutoCAM job name for router/lathe
@@ -214,6 +215,7 @@
     }
     savedStockOptions = [...savedStockOptions, data];
     stockAssignment = data.description;
+    stockError = '';
     newStockDescription = '';
   }
 
@@ -320,8 +322,12 @@
 
   async function handleSubmitGeneric() {
     const effectiveStock = stockAssignment === '__other__' ? customStock.trim() : (stockAssignment === '__add__' ? '' : stockAssignment);
-    if (!partName || !requesterName || !workflow || !uploadedFile || !quantity || quantity < 1 || !effectiveStock) {
-      alert('Please fill in all fields, select a stock, upload a file, and specify a valid quantity.');
+    if (!effectiveStock) {
+      stockError = 'Select a stock before submitting this request.';
+      return;
+    }
+    if (!partName || !requesterName || !workflow || !uploadedFile || !quantity || quantity < 1) {
+      alert('Please fill in all fields, upload a file, and specify a valid quantity.');
       return;
     }
 
@@ -381,7 +387,11 @@
 
   async function handleSubmitRouter() {
     const effectiveStock = stockAssignment === '__other__' ? customStock.trim() : (stockAssignment === '__add__' ? '' : stockAssignment);
-    if (!partName || !requesterName || !workflow || !quantity || quantity < 1 || !effectiveStock) {
+    if (!effectiveStock) {
+      stockError = 'Select a stock before submitting this request.';
+      return;
+    }
+    if (!partName || !requesterName || !workflow || !quantity || quantity < 1) {
       alert('Please fill in all fields and specify a valid quantity.');
       return;
     }
@@ -457,7 +467,11 @@
 
   async function handleSubmitLathe() {
     const effectiveStock = stockAssignment === '__other__' ? customStock.trim() : (stockAssignment === '__add__' ? '' : stockAssignment);
-    if (!partName || !requesterName || !workflow || !quantity || quantity < 1 || !effectiveStock) {
+    if (!effectiveStock) {
+      stockError = 'Select a stock before submitting this request.';
+      return;
+    }
+    if (!partName || !requesterName || !workflow || !quantity || quantity < 1) {
       alert('Please fill in all fields and specify a valid quantity.');
       return;
     }
@@ -626,7 +640,7 @@
                 type="radio" 
                 bind:group={workflow} 
                 value={workflowOption.id}
-                on:change={() => { stockAssignment = ''; customStock = ''; newStockDescription = ''; stockOptionError = ''; uploadedFile = null; uploadedStepFile = null; camJobName = ''; camFolderPath = ''; }}
+                on:change={() => { stockAssignment = ''; customStock = ''; newStockDescription = ''; stockOptionError = ''; stockError = ''; uploadedFile = null; uploadedStepFile = null; camJobName = ''; camFolderPath = ''; }}
               />
               <div class="workflow-content">
                 <svelte:component this={workflowOption.icon} size={24} />
@@ -644,7 +658,14 @@
           <h2>Stock Selection</h2>
           <div class="form-group">
             <label for="stock">Stock</label>
-            <select id="stock" bind:value={stockAssignment} required>
+            <select
+              id="stock"
+              class:field-error={Boolean(stockError)}
+              bind:value={stockAssignment}
+              aria-invalid={stockError ? 'true' : undefined}
+              aria-describedby={stockError ? 'stock-error' : undefined}
+              on:change={() => (stockError = '')}
+            >
               <option value="">Select stock</option>
               {#each stockOptions as s}
                 <option value={s.description}>{s.description}</option>
@@ -652,6 +673,7 @@
               <option value="__add__">Add stock option...</option>
               <option value="__other__">Other...</option>
             </select>
+            {#if stockError}<p id="stock-error" class="form-error" role="alert">{stockError}</p>{/if}
           </div>
           {#if stockAssignment === '__add__'}
             <div class="form-group">
@@ -667,7 +689,7 @@
           {#if stockAssignment === '__other__'}
             <div class="form-group">
               <label for="customStock">Custom Stock</label>
-              <input id="customStock" type="text" bind:value={customStock} placeholder="Type custom stock" required />
+              <input id="customStock" type="text" bind:value={customStock} placeholder="Type custom stock" required on:input={() => (stockError = '')} />
             </div>
           {/if}
         </div>
@@ -930,6 +952,7 @@
   .stock-option-add-row button { white-space: nowrap; }
   .form-hint { margin: 0.45rem 0 0; color: var(--text-muted); font-size: 0.85rem; }
   .form-error { margin: 0.45rem 0 0; color: var(--danger, #b42318); font-size: 0.85rem; }
+  .form-group select.field-error { border-color: var(--danger, #b42318); }
   .workflow-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0.85rem; }
   .workflow-card {
     display: block;
@@ -960,7 +983,7 @@
   .form-actions { margin-top: 2rem; text-align: center; }
   .submit-btn {
     background: var(--accent);
-    color: var(--secondary);
+    color: var(--on-primary);
     border: none;
     border-radius: 10px;
     font-weight: 600;
