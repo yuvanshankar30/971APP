@@ -1951,17 +1951,21 @@
 
   .view-tabs button.active {
     border-color: var(--brand-gold-strong);
-    background: var(--brand-gold-soft);
+    background: var(--surface-2);
     color: var(--text);
     font-weight: 700;
   }
 
+  /* Was a solid-filled red circle - the loudest thing on the page for a
+     plain unresolved-count. A quiet outlined pill still reads as "this
+     needs attention" without competing with genuinely urgent flags. */
   .view-tabs button span {
     min-width: 1.35rem;
     padding: 0.1rem 0.35rem;
     border-radius: 999px;
-    background: var(--danger);
-    color: white;
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    color: var(--status-risk-text);
     font-size: 0.72rem;
     text-align: center;
   }
@@ -2113,15 +2117,20 @@
     color: var(--text-muted);
   }
 
+  /* Neutral surface + a colored label, matching .status-pending's own
+     plain treatment above - was a filled gold/green tint with a matching
+     saturated border, which on the dark theme's near-black cards read as
+     a loud, gradient-ish chip rather than a quiet status label. Only the
+     text now carries the color cue. */
   .status-needs-photo {
-    background: var(--brand-gold-soft);
-    border-color: var(--orange-soft);
+    background: var(--surface-2);
+    border-color: var(--border);
     color: var(--brand-gold-strong);
   }
 
   .status-complete {
-    background: var(--green-soft);
-    border-color: var(--green-base);
+    background: var(--surface-2);
+    border-color: var(--border);
     color: var(--green-strong);
   }
 
@@ -2139,18 +2148,27 @@
     font-size: 0.9rem;
   }
 
-  /* A flagged problem is time-critical - "inspect before the next match" - so
-     it gets colour where the rest of the row does not. Urgent (the robot died
-     or was disabled) is the only thing that escalates past the warning tone. */
+  /* A flagged problem is worth a second look, but every team having the
+     same bright-red pill (the old --status-risk-bg/-text pairing) made the
+     whole list read as one flat wall of alarm, not a hierarchy - urgent
+     and routine looked identical except for font-weight. Routine counts
+     now sit on the same neutral surface every other status pill uses;
+     colour is saved for urgent (the robot died or was disabled), which is
+     the one case actually worth standing out. */
   .problem-flag {
     padding: 1px var(--space-2);
     border-radius: var(--radius-sm);
     font-size: 0.72rem;
     white-space: nowrap;
-    background: var(--status-risk-bg);
-    color: var(--status-risk-text);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
   }
-  .problem-flag.urgent { font-weight: 700; }
+  .problem-flag.urgent {
+    font-weight: 700;
+    color: var(--status-risk-text);
+    border-color: color-mix(in srgb, var(--red-base) 40%, var(--border));
+  }
 
   .team-problem-queue {
     display: grid;

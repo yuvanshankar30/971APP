@@ -2154,30 +2154,35 @@
     border-color: color-mix(in srgb, var(--brand-gold-strong) 35%, transparent);
   }
   /* Approved: emerald-teal — a "verified/authorized" signal, distinct from
-     the received-goods green used for delivered/kitted below */
+     the received-goods green used for delivered/kitted below.
+     Explicit color-mix here, not the shared --status-approved-bg token -
+     that token now feeds the plain (non-"colorful") status badges
+     elsewhere in the app, which moved to a neutral surface; this select is
+     deliberately named/designed to stay colorful, so it keeps its own
+     original fill rather than inheriting that neutral change. */
   .status-select.colorful[data-status="approved"] {
-    background: var(--status-approved-bg);
+    background: color-mix(in srgb, var(--green-base) 15%, transparent);
     color: var(--status-approved-text);
     border-color: color-mix(in srgb, var(--status-approved-text) 32%, transparent);
   }
   /* Ordered: berry-plum — in-transit, still a cool accent for variety but
      wine-toned rather than a bright stock violet */
   .status-select.colorful[data-status="ordered"] {
-    background: var(--status-ordered-bg);
+    background: color-mix(in srgb, var(--blue-base) 14%, transparent);
     color: var(--status-ordered-text);
     border-color: color-mix(in srgb, var(--status-ordered-text) 32%, transparent);
   }
   /* Pickup: terracotta — a distinct "ready, take action" state, previously
      shared Ordered's exact color with no differentiation */
   .status-select.colorful[data-status="pickup"] {
-    background: var(--status-pickup-bg);
+    background: color-mix(in srgb, var(--orange-base) 16%, transparent);
     color: var(--status-pickup-text);
     border-color: color-mix(in srgb, var(--status-pickup-text) 32%, transparent);
   }
   /* Delivered / Picked Up / Kitted: forest green — the "received" family */
   .status-select.colorful[data-status="delivered"],
   .status-select.colorful[data-status="picked_up"] {
-    background: var(--status-delivered-bg);
+    background: color-mix(in srgb, var(--green-base) 15%, transparent);
     color: var(--status-delivered-text);
     border-color: color-mix(in srgb, var(--status-delivered-text) 32%, transparent);
   }
@@ -2247,11 +2252,11 @@
 
   .status-select.colorful option[value="pending"] { background: var(--brand-gold-soft); }
   .status-select.colorful option[value="rejected"] { background: var(--red-soft); }
-  .status-select.colorful option[value="approved"] { background: var(--status-approved-bg); }
-  .status-select.colorful option[value="ordered"] { background: var(--status-ordered-bg); }
-  .status-select.colorful option[value="pickup"] { background: var(--status-pickup-bg); }
-  .status-select.colorful option[value="delivered"] { background: var(--status-delivered-bg); }
-  .status-select.colorful option[value="picked_up"] { background: var(--status-delivered-bg); }
+  .status-select.colorful option[value="approved"] { background: color-mix(in srgb, var(--green-base) 15%, transparent); }
+  .status-select.colorful option[value="ordered"] { background: color-mix(in srgb, var(--blue-base) 14%, transparent); }
+  .status-select.colorful option[value="pickup"] { background: color-mix(in srgb, var(--orange-base) 16%, transparent); }
+  .status-select.colorful option[value="delivered"] { background: color-mix(in srgb, var(--green-base) 15%, transparent); }
+  .status-select.colorful option[value="picked_up"] { background: color-mix(in srgb, var(--green-base) 15%, transparent); }
   .status-select.colorful option[value="kitted"] { background: var(--status-kitted-bg); }
 
   .kit-inline { display: flex; align-items: center; gap: 0.5rem; }

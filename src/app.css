@@ -71,20 +71,22 @@
   --warning: var(--brand-gold-base);
   --info: var(--blue-base);
 
-  /* Same tint recipe as the .status-* chips, so a component driven by these
-     tokens and one driven by the classes render identically rather than two
-     slightly different greens sitting next to each other. */
-  --status-pending-bg: color-mix(in srgb, var(--brand-gold-base) 16%, transparent);
-  --status-pending-border: color-mix(in srgb, var(--brand-gold-base) 38%, transparent);
+  /* Same neutral-surface recipe as the .status-* chips, so a component
+     driven by these tokens and one driven by the classes render
+     identically. Was a colour-tinted bg+border per status (a matching
+     "filled" recipe to the old .status-* classes) - same second pass as
+     those classes: neutral surface/border, colour left on -text only. */
+  --status-pending-bg: var(--surface-2);
+  --status-pending-border: var(--border);
   --status-pending-text: var(--brand-gold-strong);
-  --status-progress-bg: color-mix(in srgb, var(--blue-base) 14%, transparent);
-  --status-progress-border: color-mix(in srgb, var(--blue-base) 34%, transparent);
+  --status-progress-bg: var(--surface-2);
+  --status-progress-border: var(--border);
   --status-progress-text: var(--blue-strong);
-  --status-ready-bg: color-mix(in srgb, var(--green-base) 15%, transparent);
-  --status-ready-border: color-mix(in srgb, var(--green-base) 36%, transparent);
+  --status-ready-bg: var(--surface-2);
+  --status-ready-border: var(--border);
   --status-ready-text: var(--green-strong);
-  --status-risk-bg: color-mix(in srgb, var(--red-base) 14%, transparent);
-  --status-risk-border: color-mix(in srgb, var(--red-base) 34%, transparent);
+  --status-risk-bg: var(--surface-2);
+  --status-risk-border: var(--border);
   --status-risk-text: var(--red-strong);
 
   /* Purchasing-specific statuses (cad/purchasing) - deliberately distinct
@@ -103,13 +105,13 @@
      rest of the app never uses. Ordered by workflow rather than by hue:
      waiting -> in flight -> act now -> done. */
   /* Approved is a green light, so it reads as one. */
-  --status-approved-bg: color-mix(in srgb, var(--green-base) 15%, transparent);
+  --status-approved-bg: var(--surface-2);
   --status-approved-text: var(--green-strong);
-  --status-ordered-bg: color-mix(in srgb, var(--blue-base) 14%, transparent);
+  --status-ordered-bg: var(--surface-2);
   --status-ordered-text: var(--blue-strong);
-  --status-pickup-bg: color-mix(in srgb, var(--orange-base) 16%, transparent);
+  --status-pickup-bg: var(--surface-2);
   --status-pickup-text: var(--orange-strong);
-  --status-delivered-bg: color-mix(in srgb, var(--green-base) 15%, transparent);
+  --status-delivered-bg: var(--surface-2);
   --status-delivered-text: var(--green-strong);
   /* Kitted is the end of the line - packed away, nothing left to act on.
      It used to share Delivered's green, which made the last two stages of
@@ -890,8 +892,13 @@ textarea:focus,
 
    Grouped onto the app's own themed colour scales (so every theme follows
    automatically, and no chip invents a colour the rest of the app never
-   uses), and tinted rather than filled - a passive label reads better as a
-   wash than as a saturated block.
+   uses). A second pass on top of that first consolidation: these were
+   still a colour-tinted background AND a colour-tinted border on every
+   single chip - five colour washes competing across one page still read
+   as loud/gradient-y, especially stacked with badges elsewhere that use
+   the same tokens. Every chip now sits on the same neutral surface/border
+   every other quiet label in the app uses; only the text carries the hue,
+   which is the minimum colour needed to answer the same question.
 
      gold   waiting, nothing to do yet
      blue   in flight, somewhere in the pipeline
@@ -902,9 +909,9 @@ textarea:focus,
 .status-pending,
 .status-autocammed,
 .status-jprogged {
-  background: color-mix(in srgb, var(--brand-gold-base) 16%, transparent);
+  background: var(--surface-2);
   color: var(--brand-gold-strong);
-  border: 1px solid color-mix(in srgb, var(--brand-gold-base) 38%, transparent);
+  border: 1px solid var(--border);
 }
 
 .status-in-progress, /* alias */
@@ -912,18 +919,18 @@ textarea:focus,
 .status-cammed,
 .status-postprocessed,
 .status-ordered {
-  background: color-mix(in srgb, var(--blue-base) 14%, transparent);
+  background: var(--surface-2);
   color: var(--blue-strong);
-  border: 1px solid color-mix(in srgb, var(--blue-base) 34%, transparent);
+  border: 1px solid var(--border);
 }
 
 /* The one group that means "a human must do something now" - kept visually
    distinct from plain waiting, which is the whole point of separating it. */
 .status-cam-review,
 .status-pickup {
-  background: color-mix(in srgb, var(--orange-base) 16%, transparent);
+  background: var(--surface-2);
   color: var(--orange-strong);
-  border: 1px solid color-mix(in srgb, var(--orange-base) 38%, transparent);
+  border: 1px solid var(--border);
 }
 
 .status-complete,
@@ -932,17 +939,17 @@ textarea:focus,
 .status-delivered,
 .status-ready,
 .status-approved {
-  background: color-mix(in srgb, var(--green-base) 15%, transparent);
+  background: var(--surface-2);
   color: var(--green-strong);
-  border: 1px solid color-mix(in srgb, var(--green-base) 36%, transparent);
+  border: 1px solid var(--border);
 }
 
 .status-error,
 .status-rejected,
 .status-risk {
-  background: color-mix(in srgb, var(--red-base) 14%, transparent);
+  background: var(--surface-2);
   color: var(--red-strong);
-  border: 1px solid color-mix(in srgb, var(--red-base) 34%, transparent);
+  border: 1px solid var(--border);
 }
 
 /* Icon bubbles */
@@ -2265,17 +2272,17 @@ textarea:focus,
   --danger: var(--red-base);
   --warning: var(--yellow-base);
   --info: var(--blue-base);
-  --status-pending-bg: var(--yellow-soft);
-  --status-pending-border: var(--yellow-base);
+  --status-pending-bg: var(--surface-2);
+  --status-pending-border: var(--border);
   --status-pending-text: var(--yellow-strong);
-  --status-progress-bg: var(--blue-soft);
-  --status-progress-border: var(--blue-base);
+  --status-progress-bg: var(--surface-2);
+  --status-progress-border: var(--border);
   --status-progress-text: var(--blue-strong);
-  --status-ready-bg: var(--green-soft);
-  --status-ready-border: var(--green-base);
+  --status-ready-bg: var(--surface-2);
+  --status-ready-border: var(--border);
   --status-ready-text: var(--green-strong);
-  --status-risk-bg: var(--red-soft);
-  --status-risk-border: var(--red-base);
+  --status-risk-bg: var(--surface-2);
+  --status-risk-border: var(--border);
   --status-risk-text: var(--red-strong);
   --shadow-lg: 0 8px 24px rgba(0,0,0,.5);
 }
@@ -2382,17 +2389,11 @@ textarea:focus,
   border-color: color-mix(in srgb, var(--brand-gold-base) 45%, transparent);
 }
 
-/* Solid-fill helpers become tints too (ordered / delivered / ready) */
-[data-theme="modern-dark"] .status-ordered {
-  background: rgba(96, 165, 250, 0.16);
-  color: #93c5fd;
-}
-
-[data-theme="modern-dark"] .status-delivered,
-[data-theme="modern-dark"] .status-ready {
-  background: rgba(74, 222, 128, 0.16);
-  color: #86efac;
-}
+/* .status-ordered/-delivered/-ready now inherit the same neutral-surface
+   treatment as every other status chip above - nothing left to override
+   here, kept only as a marker so a future colour-tint attempt on these
+   three specifically gets caught by this comment instead of silently
+   reintroducing the loud fill this whole system moved away from. */
 
 /* Admin > Activity Log's active tab was a solid saturated gold fill with
    --secondary (near-white in this theme) text - too jarring, and low

@@ -1648,21 +1648,22 @@
   .subsystem-badges { display: flex; align-items: center; gap: var(--gap-1); flex-wrap: wrap; }
   .badge { display: inline-flex; align-items: center; justify-content: center; height: var(--control-height) !important; padding: 0 var(--space-2) !important; border-radius: var(--radius-sm); font-size: var(--font-xs); font-weight: 600; text-transform: uppercase; line-height: 1; box-sizing: border-box; white-space: nowrap; }
   .subsystem-header .btn-outline.btn-small { display: inline-flex; align-items: center; justify-content: center; height: var(--control-height) !important; width: var(--control-height) !important; padding: 0 !important; font-size: var(--font-xs); border-radius: var(--radius-sm); box-sizing: border-box; }
-  /* Soft tint + colored text + a faint border, the same treatment the
-     status chips use (see --status-ready-* in app.css). These were solid
-     fills of saturated gold and green, which on the dark theme's near-black
-     cards read as glaring blocks - and made a role label shout louder than
-     the actual buttons beside it. The soft tokens are themed, so this stays
-     readable in both light and dark without a per-theme override. */
+  /* Neutral surface + a colored label, no filled tint or colored border.
+     The prior soft-tint pill (gold/green background with a matching
+     border) still read as a bright, filled chip on the dark theme's
+     near-black cards - a role label shouting louder than the actual
+     buttons beside it. Matching the app's own plain status-pending
+     pattern instead: only the text carries the color cue, so it reads as
+     a quiet label, not a gradient-ish badge. */
   .badge-lead {
-    background: var(--brand-gold-soft);
+    background: var(--surface-2);
     color: var(--brand-gold-strong);
-    border: 1px solid color-mix(in srgb, var(--brand-gold-base) 35%, transparent);
+    border: 1px solid var(--border);
   }
   .badge-member {
-    background: var(--green-soft);
+    background: var(--surface-2);
     color: var(--green-strong);
-    border: 1px solid color-mix(in srgb, var(--green-base) 35%, transparent);
+    border: 1px solid var(--border);
   }
   .subsystem-description { color: var(--neutral-500); margin-bottom: var(--space-4); line-height: 1.5; }
   .subsystem-info { display: flex; flex-direction: column; gap: var(--gap-2); margin-bottom: var(--space-4); }
