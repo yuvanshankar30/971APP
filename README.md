@@ -178,7 +178,8 @@ browser confirmation or prompt popups.
   assignment drafting and explicit publishing, plus form/config editing -
   integrates with The Blue Alliance API for competition data.
   The signed-in home dashboard balances direct links to Manufacturing,
-  Purchasing, and Scouting, while keeping each scout's personal assignment
+  Purchasing, and Scouting with consistently sized workspace-card icons, while
+  keeping each scout's personal assignment
   queue available without filling the page with duplicate scouting tools.
   **My Scout** also puts up to 20 incomplete match, note, and quick-scout
   assignments in a fixed two-row worklist above that scout's submitted reports,

@@ -2166,9 +2166,9 @@
   .workspace-card :global(svg),
   .action-card :global(svg) {
     grid-row: 1 / span 2;
-    width: 28px;
-    height: 28px;
-    padding: 11px;
+    width: 36px;
+    height: 36px;
+    padding: 10px;
     background: var(--brand-gold-soft);
     color: var(--brand-gold-strong);
   }
