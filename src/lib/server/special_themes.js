@@ -2,7 +2,7 @@ export function canAccessSpecialThemes(user) {
   return !!user;
 }
 
-export const SPECIAL_THEME_GROUPS = [
+const ALL_SPECIAL_THEME_GROUPS = [
   { label: 'Atmosphere', themes: [
     { id: 'theme-kind-of-blue', label: 'Kind of Blue', preview: ['#18314a', '#277da1'], palette: ['#071827', '#102a40', '#4aa8d8', '#e7f4fb'] },
     { id: 'theme-funky-fresh', label: 'Funky Fresh', preview: ['#6d5b97', '#52b788'], palette: ['#17152a', '#282342', '#5ecf9a', '#f0ecff'] },
@@ -24,3 +24,12 @@ export const SPECIAL_THEME_GROUPS = [
     { id: 'theme-chill-vibes', label: 'Chill Vibes', preview: ['#003d36', '#006d77'], palette: ['#041719', '#082a2e', '#27a9b7', '#e2fbfd'] }
   ] }
 ];
+
+const allThemes = ALL_SPECIAL_THEME_GROUPS.flatMap((group) => group.themes);
+const excludedIndex = Math.floor(Math.random() * allThemes.length);
+const excludedThemeId = allThemes[excludedIndex]?.id;
+
+export const SPECIAL_THEME_GROUPS = ALL_SPECIAL_THEME_GROUPS.map((group) => ({
+  ...group,
+  themes: group.themes.filter((theme) => theme.id !== excludedThemeId)
+}));
