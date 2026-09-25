@@ -63,6 +63,13 @@ export async function listDirectory(fetchImpl, token, path, ref = 'main') {
   return data.map((e) => ({ name: e.name, path: e.path, type: e.type }));
 }
 
+export async function listRepositoryPaths(fetchImpl, token, ref = 'main') {
+  const data = await githubRequest(fetchImpl, token,
+    `/repos/${OWNER}/${REPO}/git/trees/${encodeURIComponent(ref)}?recursive=1`);
+  if (data?.truncated) throw new Error('GitHub returned a truncated repository tree');
+  return (data?.tree || []).filter((entry) => entry.type === 'blob').map((entry) => entry.path);
+}
+
 export async function createBranch(fetchImpl, token, branchName, fromRef = 'main') {
   const base = await githubRequest(fetchImpl, token, `/repos/${OWNER}/${REPO}/git/ref/heads/${encodeURIComponent(fromRef)}`);
   await githubRequest(fetchImpl, token, `/repos/${OWNER}/${REPO}/git/refs`, {

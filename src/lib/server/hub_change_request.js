@@ -1,5 +1,5 @@
 import { env } from '$env/dynamic/private';
-import { getFileContent, listDirectory, createBranch, putFile, createPullRequest } from '$lib/server/github_repo.js';
+import { getFileContent, listDirectory, listRepositoryPaths, createBranch, putFile, createPullRequest } from '$lib/server/github_repo.js';
 import { queryHubDataToolDeclaration, executeHubDataQuery } from '$lib/server/hub_data_query.js';
 import { queueEditPreview } from '$lib/server/edit_preview.js';
 
@@ -74,6 +74,18 @@ function listDirectoryToolDeclaration() {
   };
 }
 
+function searchPathsToolDeclaration() {
+  return {
+    name: 'search_paths',
+    description: 'Find repository file paths by filename or feature keywords without walking directories. Use this before list_directory when the location is unknown. Returns matching paths, not file contents.',
+    parameters: {
+      type: 'OBJECT',
+      properties: { query: { type: 'STRING', description: 'Short filename or feature keywords, e.g. "theme" or "login".' } },
+      required: ['query']
+    }
+  };
+}
+
 function writeFileToolDeclaration() {
   return {
     name: 'write_file',
@@ -92,7 +104,7 @@ function writeFileToolDeclaration() {
 function buildSystemPrompt() {
   return [
     'You are Spartans Hub\'s code-change assistant, invoked by a Change Lead (a trusted, authorized team member) via "@Spartans Hub /edit <description>" in Slack.',
-    'You have read access to every file in the frc971/spartanshub repository via read_file and list_directory, and read-only access to a small allowlisted set of database tables via query_hub_data (use it only to understand real data shapes, e.g. before writing a migration - never to justify skipping a real file read).',
+    'You have read access to every file in the frc971/spartanshub repository via search_paths, read_file and list_directory. Search paths first when you do not know the file location. You also have read-only access to a small allowlisted set of database tables via query_hub_data (use it only to understand real data shapes, e.g. before writing a migration - never to justify skipping a real file read).',
     'Use write_file to stage the files your change needs, given the requester\'s description. Always read a file with read_file before writing a changed version of it, so your version is a real edit of the current content, not a guess. Match the existing code style, naming, and patterns you find in nearby files - do not introduce a new framework, library, or pattern the codebase does not already use.',
     'You may create or edit a SQL migration file under migrations/ exactly like any other file write - that is allowed and often correct for a schema change. But you must NEVER attempt to execute, run, or apply a migration, and you have no tool that could mutate the live database even if you tried - query_hub_data is strictly read-only. Writing a migration FILE is the entire extent of what you may do about the database; actually applying it is a deliberate separate step a human takes later.',
     'Every change you make is submitted as a new, UNMERGED pull request for a human to review before anything reaches production - never claim in your final summary that the change is live, deployed, applied, or merged. It is not, and must not be.',
@@ -102,7 +114,7 @@ function buildSystemPrompt() {
   ].join('\n\n');
 }
 
-async function callGemini(fetchImpl, apiKey, model, systemPrompt, contents, tools, timeoutMs) {
+async function callGemini(fetchImpl, apiKey, model, systemPrompt, contents, tools, timeoutMs, finalRound = false) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -113,6 +125,7 @@ async function callGemini(fetchImpl, apiKey, model, systemPrompt, contents, tool
         system_instruction: { parts: [{ text: systemPrompt }] },
         contents,
         tools: [{ function_declarations: tools }],
+        ...(finalRound ? { toolConfig: { functionCallingConfig: { mode: 'NONE' } } } : {}),
         // Real bug this fixes: the system prompt requires write_file to
         // carry a FILE'S COMPLETE new content, not a diff - 2000 tokens
         // (borrowed from the much shorter Slack-reply-sized Q&A fallback)
@@ -137,7 +150,7 @@ async function callGemini(fetchImpl, apiKey, model, systemPrompt, contents, tool
   }
 }
 
-async function executeChangeTool(fetchImpl, githubToken, supa, staged, call) {
+async function executeChangeTool(fetchImpl, githubToken, supa, staged, repository, call) {
   const args = call?.args || {};
   switch (call?.name) {
     case 'read_file': {
@@ -152,6 +165,25 @@ async function executeChangeTool(fetchImpl, githubToken, supa, staged, call) {
         return { path: args.path || '', entries };
       } catch (error) {
         return { error: error.message || 'Could not list that directory' };
+      }
+    }
+    case 'search_paths': {
+      const query = String(args.query || '').trim().toLowerCase();
+      const words = query.split(/[^a-z0-9]+/).filter((word) => word.length > 1);
+      if (!words.length) return { error: 'Use a filename or feature keyword of at least two characters.' };
+      try {
+        repository.paths ||= await listRepositoryPaths(fetchImpl, githubToken, 'main');
+        const matches = repository.paths.map((path) => {
+          const lower = path.toLowerCase();
+          const name = lower.split('/').at(-1);
+          const score = words.reduce((sum, word) => sum + (name.includes(word) ? 3 : lower.includes(word) ? 1 : 0), 0);
+          return { path, score };
+        }).filter(({ score }) => score > 0)
+          .sort((a, b) => b.score - a.score || a.path.length - b.path.length)
+          .slice(0, 60).map(({ path }) => path);
+        return { query, matches };
+      } catch (error) {
+        return { error: error.message || 'Could not search repository paths' };
       }
     }
     case 'write_file': {
@@ -214,24 +246,30 @@ export async function draftCodeChangePr(description, options = {}) {
     return { prUrl: null, summary: 'Tell me what to change - e.g. `/edit change the Sign In button on the login screen to say "Log In" instead`.' };
   }
 
-  const tools = [readFileToolDeclaration(), listDirectoryToolDeclaration(), writeFileToolDeclaration()];
+  const tools = [searchPathsToolDeclaration(), readFileToolDeclaration(), listDirectoryToolDeclaration(), writeFileToolDeclaration()];
   if (supa) tools.push(queryHubDataToolDeclaration());
   const systemPrompt = buildSystemPrompt();
   const contents = [{ role: 'user', parts: [{ text: trimmedDescription.slice(0, 2000) }] }];
   const staged = new Map();
+  const repository = { paths: null };
 
   for (let round = 0; round < MAX_CHANGE_ROUNDS; round += 1) {
+    const finalRound = round === MAX_CHANGE_ROUNDS - 1;
+    if (finalRound) contents.push({ role: 'user', parts: [{ text:
+      'No tool calls remain. Summarize only files already staged with write_file. If none were staged, say no changes were made and explain what blocked you.'
+    }] });
     // eslint-disable-next-line no-await-in-loop
-    const payload = await callGemini(fetchImpl, apiKey, model, systemPrompt, contents, tools, timeoutMs);
+    const payload = await callGemini(fetchImpl, apiKey, model, systemPrompt, contents, tools, timeoutMs, finalRound);
     const parts = payload?.candidates?.[0]?.content?.parts || [];
     const functionCalls = parts.filter((part) => part?.functionCall).map((part) => part.functionCall);
 
     if (functionCalls.length) {
+      if (finalRound) throw new Error('Gemini called a tool during the final summary round');
       contents.push({ role: 'model', parts: parts.filter((part) => part?.functionCall) });
       const functionResponseParts = [];
       for (const call of functionCalls) {
         // eslint-disable-next-line no-await-in-loop
-        const result = await executeChangeTool(fetchImpl, githubToken, supa, staged, call);
+        const result = await executeChangeTool(fetchImpl, githubToken, supa, staged, repository, call);
         functionResponseParts.push({ functionResponse: { name: call.name, response: result } });
       }
       contents.push({ role: 'user', parts: functionResponseParts });

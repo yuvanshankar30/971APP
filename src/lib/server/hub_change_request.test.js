@@ -71,3 +71,66 @@ describe('draftCodeChangePr Gemini model selection', () => {
     );
   });
 });
+
+describe('draftCodeChangePr round budget', () => {
+  it('searches paths once and forces a final answer after repeated tool calls', async () => {
+    let geminiCalls = 0;
+    const fetchImpl = vi.fn(async (url, options) => {
+      if (url.includes('generativelanguage.googleapis.com')) {
+        geminiCalls += 1;
+        const part = geminiCalls < 40
+          ? { functionCall: { name: 'search_paths', args: { query: 'theme' } } }
+          : { text: 'No files were staged; I could not finish this edit.' };
+        return { ok: true, json: async () => ({ candidates: [{ content: { parts: [part] } }] }) };
+      }
+      if (url.includes('/git/trees/main?recursive=1')) {
+        return { ok: true, json: async () => ({ truncated: false, tree: [
+          { type: 'blob', path: 'src/lib/themes.js' }, { type: 'blob', path: 'README.md' }
+        ] }) };
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    const result = await draftCodeChangePr('remove a theme', {
+      apiKey: 'test-key', githubToken: 'test-token', fetchImpl
+    });
+    expect(result).toEqual({ prUrl: null, summary: 'No files were staged; I could not finish this edit.' });
+    expect(fetchImpl.mock.calls.filter(([url]) => url.includes('/git/trees/'))).toHaveLength(1);
+    const geminiRequests = fetchImpl.mock.calls.filter(([url]) => url.includes('generativelanguage.googleapis.com'));
+    expect(geminiRequests).toHaveLength(40);
+    const secondRequest = JSON.parse(geminiRequests[1][1].body);
+    expect(secondRequest.contents.at(-1).parts[0].functionResponse.response.matches).toContain('src/lib/themes.js');
+    expect(JSON.parse(geminiRequests.at(-1)[1].body).toolConfig.functionCallingConfig.mode).toBe('NONE');
+  });
+
+  it('opens a PR for staged files when the final summary round ends tool use', async () => {
+    let geminiCalls = 0;
+    const fetchImpl = vi.fn(async (url, options) => {
+      if (url.includes('generativelanguage.googleapis.com')) {
+        geminiCalls += 1;
+        const part = geminiCalls === 1
+          ? { functionCall: { name: 'write_file', args: { path: 'example.txt', content: 'new text' } } }
+          : geminiCalls < 40
+            ? { functionCall: { name: 'search_paths', args: { query: 'example' } } }
+            : { text: 'Staged example.txt for review.' };
+        return { ok: true, json: async () => ({ candidates: [{ content: { parts: [part] } }] }) };
+      }
+      if (url.includes('/git/trees/main?recursive=1')) {
+        return { ok: true, json: async () => ({ truncated: false, tree: [] }) };
+      }
+      if (url.endsWith('/git/ref/heads/main')) {
+        return { ok: true, json: async () => ({ object: { sha: 'base-sha' } }) };
+      }
+      if (url.endsWith('/git/refs')) return { ok: true, json: async () => ({}) };
+      if (url.includes('/contents/example.txt?ref=')) return { ok: false, status: 404, json: async () => ({ message: 'Not Found' }) };
+      if (url.endsWith('/contents/example.txt')) return { ok: true, json: async () => ({}) };
+      if (url.endsWith('/pulls')) return { ok: true, json: async () => ({ html_url: 'https://github.com/frc971/spartanshub/pull/42', number: 42 }) };
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    const result = await draftCodeChangePr('create example', {
+      apiKey: 'test-key', githubToken: 'test-token', fetchImpl
+    });
+    expect(result.prUrl).toBe('https://github.com/frc971/spartanshub/pull/42');
+    expect(result.summary).toBe('Staged example.txt for review.');
+    expect(fetchImpl.mock.calls.filter(([url]) => url.endsWith('/pulls'))).toHaveLength(1);
+  });
+});
