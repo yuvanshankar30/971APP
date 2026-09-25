@@ -201,10 +201,20 @@
   function showQueueTransition(afterTransition) {
     queueTransitioning = true;
     if (queueTransitionTimer) clearTimeout(queueTransitionTimer);
+    // DOM input/change handlers pass their event as the first argument. Only
+    // an explicit callback is allowed to run after the transition; treating
+    // an Event as a callback used to leave the loader on forever after a
+    // workflow filter changed.
+    const completeTransition = typeof afterTransition === 'function' ? afterTransition : null;
     queueTransitionTimer = setTimeout(() => {
-      afterTransition?.();
-      queueTransitioning = false;
-      queueTransitionTimer = null;
+      try {
+        completeTransition?.();
+      } finally {
+        // A display transition must always settle, even if a future callback
+        // changes state in an unexpected way.
+        queueTransitioning = false;
+        queueTransitionTimer = null;
+      }
     }, 220);
   }
 
@@ -2420,12 +2430,12 @@
           placeholder="Search parts"
           aria-label="Search manufacturing parts"
           bind:value={searchTerm}
-          on:input={showQueueTransition}
+          on:input={() => showQueueTransition()}
         />
       </div>
     <div class="form-group">
       <label class="form-label" for="manufacture-workflow-filter">Workflow</label>
-      <select id="manufacture-workflow-filter" class="form-select" bind:value={filterWorkflow} on:change={showQueueTransition}>
+      <select id="manufacture-workflow-filter" class="form-select" bind:value={filterWorkflow} on:change={() => showQueueTransition()}>
         <option value="">All Workflows</option>
         {#each workflows as workflow}
           <option value={workflow.value}>{workflow.label}</option>
@@ -2445,7 +2455,7 @@
 
     <div class="form-group">
       <label class="form-label" for="manufacture-project-filter">Project</label>
-      <select id="manufacture-project-filter" class="form-select" bind:value={filterProject} on:change={showQueueTransition}>
+      <select id="manufacture-project-filter" class="form-select" bind:value={filterProject} on:change={() => showQueueTransition()}>
         <option value="">All Projects</option>
         {#each projectIds as pid}
           <option value={pid}>{pid}</option>
@@ -2453,10 +2463,10 @@
       </select>
     </div>
 
-    <div on:change={showQueueTransition}>
+    <div on:change={() => showQueueTransition()}>
       <SeasonFilter options={seasonOptions} bind:value={filterSeason} />
     </div>
-      <div class="team-filter-row" on:change={showQueueTransition}>
+      <div class="team-filter-row" on:change={() => showQueueTransition()}>
         <TeamFilter bind:show971 bind:show9584 />
       </div>
       {#if filterWorkflow || filterStatus || filterProject || searchTerm}
