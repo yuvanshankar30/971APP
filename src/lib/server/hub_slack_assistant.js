@@ -7,6 +7,7 @@ import { identifyRosterQuestion, loadHubRoster } from '$lib/server/hub_slack_ros
 import { readSlackAssistantThread } from '$lib/server/slack_event_receipts.js';
 import { ROUTES } from '$lib/siteSearch.js';
 import { isCodeChangeRequest, parseCodeChangeRequest, draftCodeChangePr } from '$lib/server/hub_change_request.js';
+import { logBotRequest, classifyBotRequestType } from '$lib/server/hub_bot_request_log.js';
 
 export const HUB_RECENT_CHANGES = [
   'Drive Team now shows every completed 971 match with Win/Loss/Tie and the final score.',
@@ -974,6 +975,14 @@ export async function handleHubAppMention(event, dependencies = {}) {
   const question = stripAppMention(event.text);
   const supa = dependencies.supa || getSupabase();
   const slack = dependencies.slack || getSlackClient();
+  // Logging system for bot requests (see hub_bot_request_log.js /
+  // migrations/20260925_hub_bot_requests.sql) - requestError is set in
+  // either of this function's two try/catch blocks below without changing
+  // their existing control flow, so the eventual log row's outcome reflects
+  // what actually happened even though both blocks already convert their
+  // error into an apologetic `text` reply rather than letting it propagate.
+  const requestStartedAt = Date.now();
+  let requestError = null;
   let threadMessages = dependencies.threadMessages;
   if (threadMessages === undefined && event.thread_ts) {
     try {
@@ -1038,6 +1047,7 @@ export async function handleHubAppMention(event, dependencies = {}) {
           : `I did not make any changes - no pull request was opened.\n${safeSlackText(result.summary)}`;
       } catch (error) {
         console.error('Code-change request failed', error?.message || error);
+        requestError = error?.message || String(error);
         text = `I couldn't draft that change: ${safeSlackText(error?.message || 'unknown error')}`;
       }
     }
@@ -1101,6 +1111,7 @@ export async function handleHubAppMention(event, dependencies = {}) {
       }
     } catch (error) {
       console.error('Gemini Hub assistant failed', error?.message || error);
+      requestError = error?.message || String(error);
       text = geminiFailureReply(error);
     }
   }
@@ -1108,6 +1119,26 @@ export async function handleHubAppMention(event, dependencies = {}) {
     channel: event.channel,
     thread_ts: event.thread_ts || event.ts,
     text
+  });
+  await logBotRequest(supa, {
+    slackUserId: event.user || null,
+    channelId: event.channel,
+    threadTs: event.thread_ts || null,
+    eventTs: event.ts,
+    requestType: classifyBotRequestType(question, {
+      isCodeChangeRequest,
+      isHubStatusRequest,
+      isTeamReportStatusRequest,
+      isScoutingAssignmentQuestion,
+      isAdminProfileQuestion,
+      isNamedPurchasingQuestion,
+      isFusionRunnerSetupQuestion
+    }),
+    question,
+    outcome: requestError ? 'error' : 'ok',
+    errorMessage: requestError,
+    durationMs: Date.now() - requestStartedAt,
+    responseTs: response?.ts || null
   });
   return { ok: !!response?.ok, channel: response?.channel || event.channel, ts: response?.ts || null, text };
 }

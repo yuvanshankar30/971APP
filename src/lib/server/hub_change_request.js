@@ -173,7 +173,23 @@ function slugifyBranchSuffix(description) {
 export async function draftCodeChangePr(description, options = {}) {
   const apiKey = options.apiKey ?? env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('GEMINI_API_KEY is not configured');
-  const model = options.model ?? env.GEMINI_MODEL ?? 'gemini-3.5-flash-lite';
+  // Real bug this fixes: this fell straight back to Flash-Lite whenever
+  // GEMINI_MODEL wasn't set (the case in production - confirmed via
+  // `gcloud run services describe`, no GEMINI_MODEL env var configured).
+  // askGeminiAboutHub in hub_slack_assistant.js already worked this out for
+  // the plain Q&A path ("Flash has stronger reasoning than Flash-Lite") and
+  // guards against it there; /edit is a harder, multi-round agentic
+  // read/write task than a single Q&A answer and needs that same reasoning
+  // strength even more, but never got the same guard - Flash-Lite would
+  // reliably run out its MAX_CHANGE_ROUNDS budget without ever calling
+  // write_file on anything beyond the most trivial single-file request,
+  // surfacing to the requester as "Gemini did not finish drafting this
+  // change within the tool-call round limit" (confirmed against a real
+  // Slack transcript). Same override-respecting logic as that guard: only
+  // ever falls back to Flash-Lite if a deployment explicitly configures it.
+  const configuredModel = env.GEMINI_MODEL;
+  const model = options.model ?? (configuredModel && configuredModel !== 'gemini-3.5-flash-lite'
+    ? configuredModel : 'gemini-3.5-flash');
   const fetchImpl = options.fetchImpl || fetch;
   const supa = options.supa || null;
   // Generous room for a large full-file rewrite (see maxOutputTokens above)
