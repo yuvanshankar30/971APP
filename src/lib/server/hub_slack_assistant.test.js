@@ -716,11 +716,13 @@ describe('Slack Hub assistant', () => {
     const postMessage = vi.fn().mockResolvedValueOnce({ ok: true, channel: 'C1', ts: '2.0' })
       .mockResolvedValueOnce({ ok: true, channel: 'C1', ts: '3.0' });
     const update = vi.fn().mockRejectedValue(new Error('temporary update failure'));
+    const deleteMessage = vi.fn().mockResolvedValue({ ok: true });
     const result = await handleHubAppMention({
       channel: 'C1', user: 'U-ADMIN', ts: '1.0', text: '<@U971> /edit update the login screen'
-    }, { supa: supabaseForAssignments({ admin: true }), slack: { chat: { postMessage, update } } });
+    }, { supa: supabaseForAssignments({ admin: true }), slack: { chat: { postMessage, update, delete: deleteMessage } } });
     expect(update).toHaveBeenCalledWith(expect.objectContaining({ ts: '2.0' }));
     expect(postMessage.mock.calls[1][0].text).toContain("I couldn't draft that change: Gemini unavailable");
+    expect(deleteMessage).toHaveBeenCalledWith({ channel: 'C1', ts: '2.0' });
     expect(result.ts).toBe('3.0');
   });
 

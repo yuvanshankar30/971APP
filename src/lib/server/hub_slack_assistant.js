@@ -960,7 +960,15 @@ async function postHubAssistantAnswer(slack, event, text, editStatusTs = null) {
       console.error('Could not update Slack edit working message', error?.data?.error || error?.message || error);
     }
   }
-  return slack.chat.postMessage({ channel: event.channel, thread_ts: event.thread_ts || event.ts, text });
+  const posted = await slack.chat.postMessage({ channel: event.channel, thread_ts: event.thread_ts || event.ts, text });
+  if (editStatusTs && posted?.ok && slack.chat.delete) {
+    try {
+      await slack.chat.delete({ channel: event.channel, ts: editStatusTs });
+    } catch (error) {
+      console.warn('Could not remove Slack edit working message', error?.data?.error || error?.message || error);
+    }
+  }
+  return posted;
 }
 
 export async function handleHubAppMention(event, dependencies = {}) {
