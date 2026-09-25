@@ -28,19 +28,19 @@ describe('draftCodeChangePr Gemini model selection', () => {
     env.GEMINI_MODEL = undefined;
   });
 
-  it('defaults to gemini-3.5-flash, never the unreliable Flash-Lite default', async () => {
-    // Real bug this guards against: this used to fall straight back to
-    // "gemini-3.5-flash-lite" whenever GEMINI_MODEL wasn't configured (the
-    // case in production) - confirmed against a real Slack transcript and
-    // a matching Cloud Run log line, Flash-Lite reliably burned through
-    // the whole MAX_CHANGE_ROUNDS budget without finishing even simple
-    // requests. askGeminiAboutHub already worked this out for the plain
-    // Q&A path; /edit needs the same guard even more since it's a harder,
-    // multi-round agentic task.
+  it('defaults to gemini-3.1-pro-preview, never the unreliable Flash-Lite default', async () => {
+    // Direct instruction: /edit now defaults to Gemini 3.1 Pro (its real
+    // model id, "gemini-3.1-pro-preview" - "gemini-3.1-pro" alone 404s) for
+    // stronger reasoning on this harder, multi-round agentic read/write
+    // task than the plain Q&A path. Still must never silently fall back to
+    // Flash-Lite (an earlier real bug, confirmed against a real Slack
+    // transcript and Cloud Run log line - Flash-Lite reliably burned
+    // through the whole MAX_CHANGE_ROUNDS budget without finishing even
+    // simple requests).
     const fetchImpl = vi.fn().mockResolvedValue(noOpGeminiResponse());
     await draftCodeChangePr('rename the app', { apiKey: 'test-key', fetchImpl, githubToken: 'test-token' });
     expect(fetchImpl.mock.calls[0][0]).toBe(
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent'
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent'
     );
   });
 
@@ -53,12 +53,12 @@ describe('draftCodeChangePr Gemini model selection', () => {
     );
   });
 
-  it('still falls back to Flash instead of Flash-Lite even if GEMINI_MODEL is explicitly set to Flash-Lite', async () => {
+  it('still falls back to Pro instead of Flash-Lite even if GEMINI_MODEL is explicitly set to Flash-Lite', async () => {
     env.GEMINI_MODEL = 'gemini-3.5-flash-lite';
     const fetchImpl = vi.fn().mockResolvedValue(noOpGeminiResponse());
     await draftCodeChangePr('rename the app', { apiKey: 'test-key', fetchImpl, githubToken: 'test-token' });
     expect(fetchImpl.mock.calls[0][0]).toBe(
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent'
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent'
     );
   });
 
