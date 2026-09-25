@@ -201,6 +201,14 @@ function outOfScopeReply() {
   return 'I can only help with Spartans Hub: its pages, workflows, supported team data, and account-scoped Hub questions. Ask a Hub-specific question or use `@Spartans Hub /status`.';
 }
 
+function isHubGreeting(question) {
+  return /^(?:hi|hello|hey|yo|good\s+(?:morning|afternoon|evening))(?:\s+(?:there|spartans\s*hub))?[!.?]*$/i.test(String(question || '').trim());
+}
+
+function hubGreetingReply() {
+  return 'Hi! I can help with Spartans Hub pages and workflows, live Hub status, team reports, scouting assignments, Hub roles, and authorized `/edit` requests that draft an unmerged PR. Try `@Spartans Hub /status` or ask about a Hub feature.';
+}
+
 function recentConversation(messages) {
   const all = messages || [];
   // Preserve the original exchange as well as recent turns in a long thread.
@@ -1096,6 +1104,8 @@ export async function handleHubAppMention(event, dependencies = {}) {
     text = featureAnswer;
   } else if (featureAnswer && !person.aboutPerson) {
     text = featureAnswer;
+  } else if (isHubGreeting(question)) {
+    text = hubGreetingReply();
   } else if (!person.aboutPerson && !person.requestedRole && !hasHubQuestionContext(question, threadFeature)) {
     text = outOfScopeReply();
   } else {
