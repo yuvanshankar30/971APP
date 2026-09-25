@@ -4,7 +4,7 @@
   import { cubicOut } from 'svelte/easing';
   import { supabase, getAuthHeader } from '$lib/supabase.js';
   import { initAuth, userStore, signOut, authReady as authReadyStore, user as authUserStore } from '$lib/stores/auth.js';
-  import { LogIn, UserPlus, Mail, Lock, User, Shield, CheckCircle, AlertCircle, LogOut, Users, GripVertical, X, Plus, LayoutGrid, ClipboardCheck, Factory, ShoppingCart, ListChecks, ListOrdered, Target, Box, Trophy } from 'lucide-svelte';
+  import { LogIn, UserPlus, Mail, Lock, User, Shield, CheckCircle, AlertCircle, LogOut, Users, ClipboardCheck, Factory, ShoppingCart, ListChecks, ListOrdered, Target, Box, Trophy } from 'lucide-svelte';
   import { goto } from '$app/navigation';
   import { FRC_TEAMS, hasPermission } from '$lib/permissions.js';
   import { theme, setTheme } from '$lib/stores/theme.js';
@@ -27,53 +27,20 @@
   let scoutingLoaded = false;
 
   // --- Home dashboard section customization (drag to reorder, delete, restore) ---
-  // Mirrors the header_tabs pattern in +layout.svelte: a nullable JSONB column
-  // (dashboard_sections) stores an ordered array of section keys. Null/empty
-  // means "no customization yet" — fall back to every section in its default
-  // order. Admin is opt-in per user (defaults to visible for admins, but can
-  // be dragged/removed like anything else) rather than pinned like the top
-  // nav's Admin tab, since admins always retain nav access regardless.
+  // Dashboard sections are fixed - no per-user customization (drag reorder/
+  // hide) any more. Admin is opt-in by permission (shown whenever the user
+  // can view it) rather than pinned like the top nav's Admin tab, since
+  // admins always retain nav access regardless.
   const ALL_DASHBOARD_SECTIONS = [
     { key: 'workspace', label: 'Team Workspace' },
     { key: 'assignment-queue', label: 'Your Scouting Assignments' }
   ];
-  const LEGACY_SECTION_MIGRATIONS = Object.freeze({
-    stats: 'workspace',
-    'quick-actions': 'workspace',
-    analysis: 'workspace',
-    subsystems: 'workspace',
-    builds: 'workspace',
-    purchases: 'workspace'
-  });
-
-  function sectionLabel(key) {
-    if (key === 'admin') return 'Admin Panel';
-    return ALL_DASHBOARD_SECTIONS.find(d => d.key === key)?.label || key;
-  }
-
-  function sanitizeSectionKeys(raw) {
-    if (!Array.isArray(raw)) return null;
-    const seen = new Set();
-    const out = [];
-    for (const entry of raw) {
-      const rawKey = typeof entry === 'string' ? entry : entry?.key;
-      const key = LEGACY_SECTION_MIGRATIONS[rawKey] || rawKey;
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      out.push(key);
-    }
-    return out;
-  }
 
   function defaultSectionKeyList(canViewAdminPanel) {
     const keys = ALL_DASHBOARD_SECTIONS.map(d => d.key);
     if (canViewAdminPanel) keys.push('admin');
     return keys;
   }
-
-  let editMode = false;
-  let draggedSectionKey = null;
-  let dragOverSectionKey = null;
 
   // Quick-nav sidebar: clicking a tab surfaces a preview right here on the
   // home page instead of immediately navigating away from it - navigating
@@ -189,71 +156,9 @@
   }
 
   $: canViewAdmin = can('VIEW_ADMIN_PANEL');
-  $: customSectionKeys = sanitizeSectionKeys(user?.dashboard_sections);
-  $: rawVisibleKeys = (customSectionKeys && customSectionKeys.length ? customSectionKeys : defaultSectionKeyList(canViewAdmin))
-    .filter(k => k !== 'admin' || canViewAdmin)
-    .filter(k => k === 'admin' || ALL_DASHBOARD_SECTIONS.some(d => d.key === k))
-    .filter(k => k !== 'assignment-queue' || competitionMode);
-  $: visibleSections = rawVisibleKeys.map(k => ({ key: k, label: sectionLabel(k) }));
-  $: hiddenSections = [...ALL_DASHBOARD_SECTIONS.map(d => d.key), ...(canViewAdmin ? ['admin'] : [])]
-    .filter(k => !rawVisibleKeys.includes(k))
+  $: visibleSections = defaultSectionKeyList(canViewAdmin)
     .filter(k => k !== 'assignment-queue' || competitionMode)
-    .map(k => ({ key: k, label: sectionLabel(k) }));
-
-  async function persistDashboardSections(keys) {
-    user = { ...user, dashboard_sections: keys };
-    try {
-      const { error } = await supabase.from('user_profiles').update({ dashboard_sections: keys }).eq('id', user.id);
-      if (error) throw error;
-    } catch (e) {
-      console.error('Failed to save dashboard layout:', e);
-    }
-  }
-
-  function handleSectionDragStart(event, key) {
-    draggedSectionKey = key;
-    event.dataTransfer.effectAllowed = 'move';
-    event.dataTransfer.setData('text/plain', key);
-  }
-
-  function handleSectionDragOver(event, key) {
-    if (!draggedSectionKey) return;
-    event.preventDefault();
-    event.dataTransfer.dropEffect = 'move';
-    dragOverSectionKey = key;
-  }
-
-  function handleSectionDragLeave() {
-    dragOverSectionKey = null;
-  }
-
-  function handleSectionDragEnd() {
-    draggedSectionKey = null;
-    dragOverSectionKey = null;
-  }
-
-  async function handleSectionDrop(event, key) {
-    event.preventDefault();
-    dragOverSectionKey = null;
-    const fromKey = draggedSectionKey;
-    draggedSectionKey = null;
-    if (!fromKey || fromKey === key) return;
-    const keys = [...rawVisibleKeys];
-    const fromIdx = keys.indexOf(fromKey);
-    const toIdx = keys.indexOf(key);
-    if (fromIdx === -1 || toIdx === -1) return;
-    keys.splice(fromIdx, 1);
-    keys.splice(toIdx, 0, fromKey);
-    await persistDashboardSections(keys);
-  }
-
-  async function removeSection(key) {
-    await persistDashboardSections(rawVisibleKeys.filter(k => k !== key));
-  }
-
-  async function restoreSection(key) {
-    await persistDashboardSections([...rawVisibleKeys, key]);
-  }
+    .map(k => ({ key: k }));
   let authMode = 'login'; // 'login', 'register', or 'forgot'
 
   // Sliding underline indicator for the modern login screen's Sign In /
@@ -693,21 +598,6 @@
         <!-- Simplified header: we no longer show individual info boxes here -->
         <p class="muted">Your workspace for manufacturing, purchasing, and competition scouting.</p>
       </div>
-      <!-- Sits with the greeting rather than in a full-width bar of its own
-           below it - it is a single occasional control, and a whole toolbar
-           row for one button read as an empty strip across the page. Same
-           permission guard it had there. -->
-      {#if can('CAN_SEE_ROUTES')}
-        <button type="button" class="btn btn-outline btn-sm layout-toggle" on:click={() => editMode = !editMode}>
-          {#if editMode}
-            <CheckCircle size={14} />
-            Done
-          {:else}
-            <LayoutGrid size={14} />
-            Customize Layout
-          {/if}
-        </button>
-      {/if}
     </div>
 
     {#if !can('CAN_SEE_ROUTES')}
@@ -721,44 +611,13 @@
     {:else if !dashboardDataReady}
       <div class="empty-state">Loading your dashboard...</div>
     {:else}
-      {#if editMode && hiddenSections.length > 0}
-        <div class="hidden-sections-tray">
-          <span class="tray-label">Hidden:</span>
-          {#each hiddenSections as s (s.key)}
-            <button type="button" class="chip-btn" on:click={() => restoreSection(s.key)}>
-              <Plus size={12} />
-              {s.label}
-            </button>
-          {/each}
-        </div>
-      {/if}
-
       <div class="dashboard-sections">
         {#each visibleSections as section (section.key)}
           <div
             id={section.key === 'assignment-queue' ? 'assignment-queue' : undefined}
             class="dashboard-section"
-            class:editing={editMode}
-            class:dragging={draggedSectionKey === section.key}
-            class:drag-over={dragOverSectionKey === section.key}
             role="group"
-            draggable={editMode}
-            on:dragstart={(e) => handleSectionDragStart(e, section.key)}
-            on:dragover={(e) => handleSectionDragOver(e, section.key)}
-            on:dragleave={handleSectionDragLeave}
-            on:drop={(e) => handleSectionDrop(e, section.key)}
-            on:dragend={handleSectionDragEnd}
           >
-            {#if editMode}
-              <div class="section-editbar">
-                <span class="drag-handle" aria-hidden="true"><GripVertical size={16} /></span>
-                <span class="section-editbar-label">{section.label}</span>
-                <button type="button" class="section-remove" on:click={() => removeSection(section.key)} aria-label={`Remove ${section.label}`}>
-                  <X size={14} />
-                </button>
-              </div>
-            {/if}
-
             {#if section.key === 'workspace'}
               <div class="dashboard-actions">
                 <h3>Team Workspace</h3>
@@ -879,12 +738,6 @@
             {/if}
           </div>
         {/each}
-
-        {#if visibleSections.length === 0}
-          <div class="dashboard-section-empty">
-            <p class="muted">All dashboard sections are hidden. Use "Customize Layout" at the top to bring them back.</p>
-          </div>
-        {/if}
       </div>
 
       <!-- Sidebar sits below Your Scouting Assignments now, not competing
@@ -2545,54 +2398,6 @@
     flex-shrink: 0;
   }
 
-  /* ===== Home dashboard customization: toolbar, hidden tray, sections ===== */
-  .layout-toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--gap-2);
-  }
-
-  .hidden-sections-tray {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: var(--gap-2);
-    background: var(--surface-1);
-    border: 1px dashed var(--border);
-    border-radius: var(--home-radius, var(--radius-lg));
-    padding: var(--space-3) var(--space-4);
-    margin-bottom: var(--space-5);
-  }
-
-  .tray-label {
-    font-family: var(--font-mono-stack);
-    font-size: 0.68rem;
-    font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--text-muted);
-  }
-
-  .chip-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--gap-1);
-    background: var(--primary);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: var(--space-1) var(--space-3);
-    font-size: var(--font-xs);
-    font-weight: 500;
-    color: var(--secondary);
-    cursor: pointer;
-    transition: border-color 0.1s ease, background-color 0.1s ease;
-  }
-
-  .chip-btn:hover {
-    background: var(--surface-2);
-    border-color: var(--accent-strong);
-  }
-
   /* Putting Workspace/Admin next to the assignment queue squeezed both into
      a narrow outer column - Workspace's own 3-card row had nowhere near
      enough width and its card text was clipping. Each section spans the
@@ -2603,78 +2408,6 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-3);
-  }
-
-  .dashboard-section.editing {
-    border: 1px dashed var(--border);
-    border-radius: var(--home-radius, var(--radius-lg));
-    padding: var(--space-3);
-  }
-
-  .dashboard-section.editing[draggable="true"] {
-    cursor: grab;
-  }
-
-  .dashboard-section.dragging {
-    opacity: 0.4;
-  }
-
-  .dashboard-section.drag-over {
-    border-color: var(--accent);
-    background: var(--accent-subtle);
-  }
-
-  .section-editbar {
-    display: flex;
-    align-items: center;
-    gap: var(--gap-2);
-    margin-bottom: var(--space-3);
-  }
-
-  .drag-handle {
-    display: flex;
-    align-items: center;
-    color: var(--text-muted);
-  }
-
-  .section-editbar-label {
-    flex: 1;
-    font-family: var(--font-mono-stack);
-    font-size: 0.68rem;
-    font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--text-muted);
-  }
-
-  .section-remove {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 24px;
-    height: 24px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--primary);
-    color: var(--danger);
-    cursor: pointer;
-    transition: border-color 0.1s ease, background-color 0.1s ease;
-  }
-
-  .section-remove:hover {
-    background: rgba(220, 53, 69, 0.1);
-    border-color: var(--danger);
-  }
-
-  .dashboard-section-empty {
-    border: 1px dashed var(--border);
-    border-radius: var(--home-radius, var(--radius-lg));
-    background: var(--surface-1);
-    padding: var(--space-5);
-  }
-
-  .dashboard-section-empty p {
-    margin: 0;
   }
 
   /* Empty states read as intentional placeholders, not stray text */
