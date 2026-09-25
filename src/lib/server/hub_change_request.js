@@ -31,7 +31,19 @@ export function parseCodeChangeRequest(question) {
   return String(question || '').trim().replace(/^\/edit\b/i, '').trim();
 }
 
-const MAX_CHANGE_ROUNDS = 14;
+// Real bug this fixes: the Sept 25 03:28 and 04:00 failures (both AFTER the
+// Flash-vs-Flash-Lite model fix above was live - confirmed against Cloud Run
+// revision deploy times) show the round limit itself, not the model, is now
+// the bottleneck. hub_bot_requests logs the second failure ("/edit make it
+// so that 3 random themes disappear") at 21.9s total for all 14 rounds -
+// under 1.6s/round - so Gemini was efficiently exploring (list_directory/
+// read_file), just needed more than 14 short round-trips to find the theme
+// definitions, read them, and write a change; it was not stuck in a slow
+// retry loop. Cloud Run's request timeout is 300s and each round with no
+// large write_file text generation is well under 2s, so there is enormous
+// unused headroom - raised generously rather than guessing at the minimum
+// that would have covered this one request.
+const MAX_CHANGE_ROUNDS = 40;
 // Hard ceiling on files touched by one request - not a technical limit, a
 // blast-radius one: this bot has no test-running step, so a request that
 // would sprawl across dozens of files is exactly the kind of change that
@@ -223,6 +235,14 @@ export async function draftCodeChangePr(description, options = {}) {
         functionResponseParts.push({ functionResponse: { name: call.name, response: result } });
       }
       contents.push({ role: 'user', parts: functionResponseParts });
+      // Real gap this fixes: a round-limit failure previously surfaced with
+      // zero visibility into what Gemini actually did across those rounds -
+      // debugging the Sept 25 04:00 failure required inferring behavior
+      // entirely from total duration, with no record of which tools were
+      // called or on what paths. One line per round is cheap and turns the
+      // next round-limit failure into something diagnosable directly from
+      // Cloud Run logs instead of a guess.
+      console.log('Code-change round', round + 1, functionCalls.map((call) => `${call.name}(${call.args?.path || ''})`).join(', '), '- staged:', staged.size);
       continue;
     }
 
