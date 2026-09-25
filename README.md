@@ -540,7 +540,7 @@ file: update its diagram alongside this section, not separately from it.
 - **3D/CAD**: `occt-import-js` (STEP file parsing, WASM) + `three.js`
   (client-side 3D viewing, `CadViewer.svelte`).
 - **Other integrations**: Slack (`@slack/web-api`, bot notifications/DMs,
-  ACE/Pit alerts, and signed `app_mention` handling: `@971hub /status` reports
+  ACE/Pit alerts, and signed `app_mention` handling: `@Spartans Hub /status` reports
   live Hub/database/scouting status plus recent releases, team-report questions
   use live report rows, and scouting-assignment questions are answered directly
   from Supabase without sending scout names or shifts to Gemini; authorized
@@ -591,7 +591,8 @@ file: update its diagram alongside this section, not separately from it.
   `@Spartans Hub /edit` to draft an unmerged GitHub PR; Gemini can search
   repository paths directly and its final round summarizes staged files
   without asking for more tools. Authorized `/edit` requests show a working
-  message in the Slack thread, which is updated with the result),
+  message in the Slack thread, which is updated with the result. Simple
+  greetings receive a compact list of the assistant's supported Hub tasks),
   Onshape API (CAD source of truth for parts - see the Onshape-key exposure
   note under **Known gaps** below), The Blue Alliance API (scouting), Sentry
   (error monitoring), Google Drive API (AutoCAM input/output watcher, hand-
