@@ -103,6 +103,9 @@ export function isScoutingAssignmentQuestion(question) {
 // remains available separately for public competition facts.
 export function shouldUseGoogleSearch(question) {
   if (isScoutingAssignmentQuestion(question)) return false;
+  // Direct FRC/TBA identifiers are better served by the authenticated TBA
+  // function than a broad web query.
+  if (/\b(?:tba|the blue alliance|frc|frc\s*#?\d+|team\s*#?\d+|\d{4}[a-z0-9]+_(?:qm|qf|sf|f)\d+)\b/i.test(String(question || ''))) return false;
   if (/\b(spartans\s*hub|971hub|scouting admin|match scouting|pit scouting|planner|manufacturing|autocam|prediction market)\b/i.test(String(question || ''))) return false;
   const possibleArithmetic = String(question || '').trim()
     .replace(/^(?:what\s+is|calculate|compute)\s+/i, '')
@@ -906,6 +909,11 @@ export async function askGeminiAboutHub(question, snapshot, options = {}) {
   try {
     for (let round = 0; round <= MAX_TOOL_ROUNDS; round += 1) {
       const offerTools = round < MAX_TOOL_ROUNDS;
+      // The deployed generateContent model rejects a payload that combines
+      // Google Search with custom functions. Select one compatible tool mode:
+      // Search for public-current questions; TBA/Hub functions otherwise.
+      const useGoogleSearch = offerTools && options.useGoogleSearch;
+      const offerCustomTools = offerTools && !useGoogleSearch;
       const response = await fetchGeminiWithRetry(fetchImpl, `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
         method: 'POST',
         headers: {
@@ -915,10 +923,10 @@ export async function askGeminiAboutHub(question, snapshot, options = {}) {
         body: JSON.stringify({
           system_instruction: { parts: [{ text: `${threadInstruction}${systemPrompt}${options.correction ? `\n\nCORRECTION REQUIRED: ${options.correction}` : ''}` }] },
           contents,
-          ...(offerTools ? { tools: [
-            ...(options.useGoogleSearch ? [{ google_search: {} }] : []),
-            { function_declarations: [queryTbaToolDeclaration(), ...(canQueryHubData ? [queryHubDataToolDeclaration()] : [])] }
-          ] } : {}),
+          ...(useGoogleSearch ? { tools: [{ google_search: {} }] } : {}),
+          ...(offerCustomTools ? { tools: [{
+            function_declarations: [queryTbaToolDeclaration(), ...(canQueryHubData ? [queryHubDataToolDeclaration()] : [])]
+          }] } : {}),
           generationConfig: {
             maxOutputTokens: 8192,
             ...(/^gemini-3\./.test(model) ? { thinkingConfig: { thinkingLevel: 'HIGH' } } : {})
@@ -952,10 +960,9 @@ export async function askGeminiAboutHub(question, snapshot, options = {}) {
       }
       const parts = payload?.candidates?.[0]?.content?.parts || [];
       const functionCalls = parts.filter((part) => part?.functionCall).map((part) => part.functionCall);
-      if (functionCalls.length && offerTools) {
-        // Gemini 3 tool combinations attach encrypted thought signatures and
-        // Google Search context to the full model turn. Returning the full turn
-        // preserves that context for the subsequent custom-tool response.
+      if (functionCalls.length && offerCustomTools) {
+        // Preserve the whole model turn, including its thought signatures,
+        // when returning the custom-tool response.
         contents.push({ role: 'model', parts });
         const functionResponseParts = [];
         for (const call of functionCalls) {

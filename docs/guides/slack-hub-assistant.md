@@ -29,10 +29,12 @@ in these paths are never sent to Gemini. Other directed questions are first draf
 Hub summary, the same route/keyword list the in-app search box uses (so an
 answer about any real page, e.g. "what's the EPA tab", stays in sync with the
 app automatically instead of drifting from hand-written prose), and the status
-snapshot. The draft pass can use Google Search grounding for current public
-information and appends up to three grounded source links to the Slack reply. It
-also has a read-only `query_tba` function for public The Blue Alliance
-event, team, match, rankings, and schedule data. It can use `query_hub_data`
+snapshot. The draft pass selects one compatible tool mode: Google Search
+for current public information, appending up to three grounded source links to
+the Slack reply; or a read-only `query_tba` function for public The Blue
+Alliance event, team, match, rankings, and schedule data. The deployed Gemini
+`generateContent` endpoint rejects a payload that combines Google Search with
+custom functions, so the two modes stay separate. It can use `query_hub_data`
 for a fixed, read-only allowlist of Hub tables and columns only when the Slack
 account is linked to an active Hub profile; it never runs arbitrary SQL and
 excludes emails, Slack IDs, auth identifiers, and assignment identity data.

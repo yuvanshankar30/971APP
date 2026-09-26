@@ -179,6 +179,7 @@ describe('Slack Hub assistant', () => {
     expect(isScoutingAssignmentQuestion('What tasks were scouts assigned for Chezy?')).toBe(true);
     expect(shouldUseGoogleSearch('When does Madtown start?')).toBe(true);
     expect(shouldUseGoogleSearch('What does Scouting Admin do?')).toBe(false);
+    expect(shouldUseGoogleSearch("What is FRC team 971's next match?")).toBe(false);
     expect(isAdminProfileQuestion('What role am I?')).toBe(true);
     expect(isAdminProfileQuestion('What role does Casey Scout have?')).toBe(false);
     expect(isAdminProfileQuestion('What permissions does Casey Scout have?')).toBe(true);
@@ -219,7 +220,7 @@ describe('Slack Hub assistant', () => {
     expect(JSON.parse(request.body).generationConfig.thinkingConfig.thinkingLevel).toBe('HIGH');
   });
 
-  it('offers Google Search alongside the public TBA tool for a drafted answer', async () => {
+  it('uses a Google Search-only payload for a web-grounded drafted answer', async () => {
     const fetchImpl = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -236,12 +237,7 @@ describe('Slack Hub assistant', () => {
       hubScopeConfirmed: true
     });
     const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
-    expect(body.tools).toEqual(expect.arrayContaining([
-      expect.objectContaining({ google_search: {} }),
-      expect.objectContaining({ function_declarations: expect.arrayContaining([
-        expect.objectContaining({ name: 'query_tba' })
-      ]) })
-    ]));
+    expect(body.tools).toEqual([{ google_search: {} }]);
     expect(answer).toContain('Madtown starts November 13.');
     expect(answer).toContain('<https://example.test/madtown|Madtown event>');
   });
@@ -529,7 +525,7 @@ describe('Slack Hub assistant', () => {
     expect(postMessage.mock.calls[0][0].text).toContain('require Purchasing Admin access');
   });
 
-  it('offers Google Search alongside Hub data', async () => {
+  it('uses Google Search instead of Hub data functions for a web request', async () => {
     const fetchImpl = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ candidates: [{ content: { parts: [{ text: 'Madtown starts November 13.' }] } }] })
@@ -542,10 +538,7 @@ describe('Slack Hub assistant', () => {
       hubScopeConfirmed: true
     });
     const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
-    expect(body.tools).toEqual(expect.arrayContaining([
-      expect.objectContaining({ google_search: {} }),
-      expect.objectContaining({ function_declarations: expect.arrayContaining([expect.objectContaining({ name: 'query_hub_data' })]) })
-    ]));
+    expect(body.tools).toEqual([{ google_search: {} }]);
   });
 
   it('queries the public TBA API without exposing its key', async () => {
