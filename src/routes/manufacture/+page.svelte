@@ -58,6 +58,11 @@
   // actual table query so a newly selected tab never flashes before loading.
   let appliedQueueView = 'all';
   let filterProject = '';
+  // Direct instruction: let the user sort the queue by stock. '' keeps the
+  // natural (query) order; 'stock' groups parts by their assigned stock,
+  // alphabetically, with unassigned parts last rather than first - an
+  // empty stock isn't "before A", it's "nothing to group by yet."
+  let sortBy = '';
   let filterSeason = getCurrentSeasonBucket()?.value || '';
   let show971 = true;
   let show9584 = true;
@@ -2240,6 +2245,14 @@
     const matchesSeason = passesSeasonFilter(part.created_at, filterSeason);
 
     return matchesSearch && matchesWorkflow && matchesStatus && matchesQueueStatus && matchesProject && notCompleted && matchesTeam && matchesSeason;
+  }).sort((a, b) => {
+    if (sortBy !== 'stock') return 0;
+    const stockA = (a.stock_assignment || '').trim();
+    const stockB = (b.stock_assignment || '').trim();
+    if (!stockA && !stockB) return 0;
+    if (!stockA) return 1;
+    if (!stockB) return -1;
+    return stockA.localeCompare(stockB);
   });
 
   $: filteredPartKeys = filteredParts.map(getPartKey);
@@ -2463,14 +2476,22 @@
       </select>
     </div>
 
+    <div class="form-group">
+      <label class="form-label" for="manufacture-sort">Sort</label>
+      <select id="manufacture-sort" class="form-select" bind:value={sortBy} on:change={() => showQueueTransition()}>
+        <option value="">Default order</option>
+        <option value="stock">Stock</option>
+      </select>
+    </div>
+
     <div on:change={() => showQueueTransition()}>
       <SeasonFilter options={seasonOptions} bind:value={filterSeason} />
     </div>
       <div class="team-filter-row" on:change={() => showQueueTransition()}>
         <TeamFilter bind:show971 bind:show9584 />
       </div>
-      {#if filterWorkflow || filterStatus || filterProject || searchTerm}
-        <button class="btn btn-secondary btn-sm rail-clear-filters" on:click={() => { searchTerm = ''; filterWorkflow = ''; filterStatus = ''; filterProject = ''; queueView = 'all'; appliedQueueView = 'all'; showQueueTransition(); }}>
+      {#if filterWorkflow || filterStatus || filterProject || sortBy || searchTerm}
+        <button class="btn btn-secondary btn-sm rail-clear-filters" on:click={() => { searchTerm = ''; filterWorkflow = ''; filterStatus = ''; filterProject = ''; sortBy = ''; queueView = 'all'; appliedQueueView = 'all'; showQueueTransition(); }}>
           <X size={14} /> Clear filters
         </button>
       {/if}
