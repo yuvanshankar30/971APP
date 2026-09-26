@@ -1,6 +1,6 @@
 <script>
   import { requestConfirmation } from '$lib/confirmation.js';
-  import { onMount } from 'svelte';
+  import { createEventDispatcher, onMount } from 'svelte';
   import { supabase } from '$lib/supabase.js';
   import { toastActions } from '$lib/toast.js';
   import {
@@ -17,6 +17,7 @@
 
   export let user;
   export let canManage;
+  const dispatch = createEventDispatcher();
 
   let turningParts = [];
   // fusion_turning_parts.id set with a completed CAM output job - see
@@ -136,6 +137,7 @@
       toastActions.show(e.message || 'Failed to load turning stock');
     } finally {
       loading = false;
+      if (showLoading) dispatch('ready');
     }
   }
 

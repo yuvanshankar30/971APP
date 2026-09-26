@@ -13,6 +13,7 @@
   import TurningTab from './TurningTab.svelte';
   import AtcSlotConfig from '$autocam/components/AtcSlotConfig.svelte';
   import SeasonFilter from '$lib/components/SeasonFilter.svelte';
+  import ManufactureLoadingOverlay from '../../manufacture/ManufactureLoadingOverlay.svelte';
 
   // Deep link from Manufacturing's "Open Fusion CAM" button
   // (/manufacture's fusionCamHref) - ?tab=parts&manufacturingPart=<id>
@@ -41,6 +42,18 @@
 
   let user = null;
   let activeTab = VALID_TABS.includes(forcedTab) ? forcedTab : (VALID_TABS.includes(normalizedRequestedTab) ? normalizedRequestedTab : 'parts');
+  // Start covered until the mounted tab finishes its first request. The same
+  // flag is set before navigation so every subtab change keeps the current
+  // workspace context visible rather than flashing a blank page.
+  let tabLoading = true;
+  const TAB_LOADING_LABELS = {
+    parts: 'Loading parts',
+    'box-tubes': 'Loading tube stock',
+    turning: 'Loading turning stock',
+    queue: 'Loading jobs',
+    'stock-categories': 'Loading stock categories'
+  };
+  $: tabLoadingLabel = TAB_LOADING_LABELS[activeTab] || 'Loading AutoCAM';
   // Reference to the mounted PartsTab instance, so the page-level "Send to
   // Fusion CAM" button (see openSendToFusionCam below) can open its queue
   // picker popup from outside the Parts tab - direct instruction: this
@@ -121,14 +134,20 @@
   }
 
   function setActiveTab(tab) {
+    if (tab === activeTab) return;
     // Each tab's own list/filters are independent - starting fresh on
     // every switch matches what already happened before this moved up
     // here, since {#if activeTab === ...} below destroys and remounts the
     // previous tab's component (and its now-lifted state) either way.
+    tabLoading = true;
     search = '';
     filterProject = '';
     filterSeason = '';
     goto(TAB_PATHS[tab]);
+  }
+
+  function markTabReady() {
+    tabLoading = false;
   }
 
   // Switches to the Parts tab first if it isn't already active - PartsTab
@@ -271,30 +290,41 @@
   {/if}
 </div>
 
-{#if activeTab === 'parts'}
-  <PartsTab
-    bind:this={partsTabRef} {user} {canManage} {initialManufacturingPartId}
-    bind:partsListSearch={search} bind:filterProject bind:filterSeason bind:projectIds bind:seasonOptions
-  />
-{:else if activeTab === 'stock-categories'}
-  <StockCategoriesTab {canManage} />
-{:else if activeTab === 'box-tubes'}
-  <BoxTubesTab
-    bind:this={boxTubesTabRef} {user} {canManage}
-    bind:boxTubesListSearch={search} bind:filterProject bind:filterSeason bind:projectIds bind:seasonOptions
-  />
-{:else if activeTab === 'turning'}
-  <TurningTab
-    bind:this={turningTabRef} {user} {canManage}
-    bind:turningListSearch={search} bind:filterProject bind:filterSeason bind:projectIds bind:seasonOptions
-  />
-{:else if activeTab === 'queue'}
-  <JobQueueTab
-    bind:this={jobQueueTabRef}
-    bind:jobsSearch={search} bind:jobsFilterProject={filterProject} bind:jobsFilterSeason={filterSeason}
-    bind:jobsProjectIds={projectIds} bind:jobsSeasonOptions={seasonOptions} bind:deletingFailed={deletingFailedJobs}
-  />
-{/if}
+<section class="fusion-tab-panel" class:fusion-tab-panel--loading={tabLoading} aria-busy={tabLoading}>
+  <div class="fusion-tab-panel__content">
+    {#if activeTab === 'parts'}
+      <PartsTab
+        bind:this={partsTabRef} {user} {canManage} {initialManufacturingPartId}
+        bind:partsListSearch={search} bind:filterProject bind:filterSeason bind:projectIds bind:seasonOptions
+        on:ready={markTabReady}
+      />
+    {:else if activeTab === 'stock-categories'}
+      <StockCategoriesTab {canManage} on:ready={markTabReady} />
+    {:else if activeTab === 'box-tubes'}
+      <BoxTubesTab
+        bind:this={boxTubesTabRef} {user} {canManage}
+        bind:boxTubesListSearch={search} bind:filterProject bind:filterSeason bind:projectIds bind:seasonOptions
+        on:ready={markTabReady}
+      />
+    {:else if activeTab === 'turning'}
+      <TurningTab
+        bind:this={turningTabRef} {user} {canManage}
+        bind:turningListSearch={search} bind:filterProject bind:filterSeason bind:projectIds bind:seasonOptions
+        on:ready={markTabReady}
+      />
+    {:else if activeTab === 'queue'}
+      <JobQueueTab
+        bind:this={jobQueueTabRef}
+        bind:jobsSearch={search} bind:jobsFilterProject={filterProject} bind:jobsFilterSeason={filterSeason}
+        bind:jobsProjectIds={projectIds} bind:jobsSeasonOptions={seasonOptions} bind:deletingFailed={deletingFailedJobs}
+        on:ready={markTabReady}
+      />
+    {/if}
+  </div>
+  {#if tabLoading}
+    <ManufactureLoadingOverlay compact label={tabLoadingLabel} />
+  {/if}
+</section>
 
 {#if quickQueueChoiceOpen}
   <div class="modal-overlay" role="presentation" on:click={() => (quickQueueChoiceOpen = false)}>
@@ -361,6 +391,17 @@
     display: flex;
     align-items: center;
     gap: var(--space-2);
+  }
+  .fusion-tab-panel {
+    position: relative;
+    min-height: 12rem;
+  }
+  .fusion-tab-panel__content {
+    transition: opacity 160ms ease;
+  }
+  .fusion-tab-panel--loading .fusion-tab-panel__content {
+    opacity: 0;
+    pointer-events: none;
   }
   /* One horizontal row - tabs, Add button, and filters all inline, instead
      of the tabs stacked above a second Add-button/filters row. .tab-nav
