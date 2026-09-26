@@ -13,6 +13,7 @@ vi.mock('$lib/server/hub_change_request.js', async (importOriginal) => {
 import {
   askGeminiAboutHub,
   assignmentEventKey,
+  executeTbaQuery,
   fetchAdminProfileForSlackUser,
   fetchSlackThreadMessages,
   fetchScoutingAssignmentsForSlackUser,
@@ -26,6 +27,7 @@ import {
   isAdminProfileQuestion,
   isFusionRunnerSetupQuestion,
   isScoutingAssignmentQuestion,
+  shouldUseGoogleSearch,
   isHubStatusRequest,
   isTeamReportStatusRequest,
   stripAppMention
@@ -175,6 +177,8 @@ describe('Slack Hub assistant', () => {
     expect(isHubStatusRequest('Where is Match Scouting?')).toBe(false);
     expect(isTeamReportStatusRequest('Have all reports for team 971 been finished?')).toBe(true);
     expect(isScoutingAssignmentQuestion('What tasks were scouts assigned for Chezy?')).toBe(true);
+    expect(shouldUseGoogleSearch('When does Madtown start?')).toBe(true);
+    expect(shouldUseGoogleSearch('What does Scouting Admin do?')).toBe(false);
     expect(isAdminProfileQuestion('What role am I?')).toBe(true);
     expect(isAdminProfileQuestion('What role does Casey Scout have?')).toBe(false);
     expect(isAdminProfileQuestion('What permissions does Casey Scout have?')).toBe(true);
@@ -215,7 +219,7 @@ describe('Slack Hub assistant', () => {
     expect(JSON.parse(request.body).generationConfig.thinkingConfig.thinkingLevel).toBe('HIGH');
   });
 
-  it('does not expose Google Search even when a caller asks for it', async () => {
+  it('offers Google Search alongside the public TBA tool for a drafted answer', async () => {
     const fetchImpl = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -232,8 +236,14 @@ describe('Slack Hub assistant', () => {
       hubScopeConfirmed: true
     });
     const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
-    expect(body.tools).toBeUndefined();
-    expect(answer).toBe('Madtown starts November 13.');
+    expect(body.tools).toEqual(expect.arrayContaining([
+      expect.objectContaining({ google_search: {} }),
+      expect.objectContaining({ function_declarations: expect.arrayContaining([
+        expect.objectContaining({ name: 'query_tba' })
+      ]) })
+    ]));
+    expect(answer).toContain('Madtown starts November 13.');
+    expect(answer).toContain('<https://example.test/madtown|Madtown event>');
   });
 
   it('sends bounded earlier thread turns to Gemini in chronological order', async () => {
@@ -327,7 +337,7 @@ describe('Slack Hub assistant', () => {
     const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
     expect(body.system_instruction.parts[0].text).toContain('Casey Scout');
     expect(body.system_instruction.parts[0].text).toContain('Competition Lead');
-    expect(body.tools?.[0]?.google_search).toBeUndefined();
+    expect(body.tools?.[0]?.google_search).toEqual({});
     expect(postMessage.mock.calls[0][0].text).toContain('Competition Lead');
   });
 
@@ -360,7 +370,7 @@ describe('Slack Hub assistant', () => {
     const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
     expect(body.contents.map((item) => item.role)).toEqual(['user', 'model', 'user']);
     expect(body.system_instruction.parts[0].text).toContain('Arnav Gathani');
-    expect(body.tools?.[0]?.google_search).toBeUndefined();
+    expect(body.tools?.[0]?.google_search).toEqual({});
     expect(postMessage.mock.calls[0][0].text).toContain('Manufacturing Lead');
   });
 
@@ -412,20 +422,16 @@ describe('Slack Hub assistant', () => {
     expect(postMessage.mock.calls[0][0].text).toContain('grounded in a Spartans Hub roster record');
   });
 
-  it('rejects unrelated questions before they can consume the model', async () => {
+  it('drafts an unrelated answer before routing it to the standard pre-response', async () => {
     const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
-    const fetchImpl = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ candidates: [{ content: { parts: [{ text: '2' }] } }] })
-    });
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: '2' }] } }] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify({ related: false, relevant: true, problem: 'general math' }) }] } }] }) });
     await handleHubAppMention({ channel: 'C1', user: 'U1', ts: '1.0', text: '<@U971> what is 1+1?' }, {
-      supa: supabaseForStatus(),
-      slack: { chat: { postMessage } },
-      apiKey: 'test-secret',
-      fetchImpl,
-      verifyRelevance: false
+      supa: supabaseForStatus(), slack: { chat: { postMessage } }, apiKey: 'test-secret', fetchImpl
     });
-    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(fetchImpl.mock.calls[0][1].body).tools).not.toEqual(expect.arrayContaining([expect.objectContaining({ google_search: {} })]));
     expect(postMessage.mock.calls[0][0].text).toContain('only help with Spartans Hub');
     expect(postMessage.mock.calls[0][0].text).toContain('@Spartans Hub /status');
   });
@@ -471,7 +477,10 @@ describe('Slack Hub assistant', () => {
       verifyRelevance: false
     });
     const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
-    expect(body.tools[0].function_declarations[0].name).toBe('query_hub_data');
+    expect(body.tools).not.toEqual(expect.arrayContaining([expect.objectContaining({ google_search: {} })]));
+    expect(body.tools).toEqual(expect.arrayContaining([
+      expect.objectContaining({ function_declarations: expect.arrayContaining([expect.objectContaining({ name: 'query_hub_data' })]) })
+    ]));
     expect(postMessage.mock.calls[0][0].text).toBe('2');
   });
 
@@ -520,7 +529,7 @@ describe('Slack Hub assistant', () => {
     expect(postMessage.mock.calls[0][0].text).toContain('require Purchasing Admin access');
   });
 
-  it('never exposes Google Search alongside Hub data', async () => {
+  it('offers Google Search alongside Hub data', async () => {
     const fetchImpl = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ candidates: [{ content: { parts: [{ text: 'Madtown starts November 13.' }] } }] })
@@ -533,7 +542,17 @@ describe('Slack Hub assistant', () => {
       hubScopeConfirmed: true
     });
     const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
-    expect(body.tools[0].function_declarations[0].name).toBe('query_hub_data');
+    expect(body.tools).toEqual(expect.arrayContaining([
+      expect.objectContaining({ google_search: {} }),
+      expect.objectContaining({ function_declarations: expect.arrayContaining([expect.objectContaining({ name: 'query_hub_data' })]) })
+    ]));
+  });
+
+  it('queries the public TBA API without exposing its key', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ key: '2026cc', name: 'Chezy Champs' }) });
+    const result = await executeTbaQuery({ resource: 'event', key: '2026cc' }, { apiKey: 'tba-secret', fetchImpl });
+    expect(fetchImpl).toHaveBeenCalledWith('https://www.thebluealliance.com/api/v3/event/2026cc', expect.objectContaining({ headers: { 'X-TBA-Auth-Key': 'tba-secret' } }));
+    expect(result).toEqual(expect.objectContaining({ resource: 'event', key: '2026cc', data: expect.objectContaining({ name: 'Chezy Champs' }) }));
   });
 
   it('runs a query_hub_data round trip against an allowlisted table and answers from the result', async () => {
@@ -860,7 +879,7 @@ describe('Slack Hub assistant', () => {
     expect(postMessage.mock.calls[0][0].text).toContain('model is unavailable');
   });
 
-  it('returns a completed answer when only the relevance review fails', async () => {
+  it('uses the scope pre-response when the relatedness review fails', async () => {
     const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: 'Use the Match Scouting tab.' }] } }] }) })
@@ -868,7 +887,7 @@ describe('Slack Hub assistant', () => {
     await handleHubAppMention({ channel: 'C1', user: 'U-ADMIN', ts: '1.0', text: '<@U971> how many active Hub parts are there?' }, {
       supa: supabaseForAssignments({ admin: true }), slack: { chat: { postMessage } }, apiKey: 'test-secret', fetchImpl
     });
-    expect(postMessage.mock.calls[0][0].text).toBe('Use the Match Scouting tab.');
+    expect(postMessage.mock.calls[0][0].text).toContain('only help with Spartans Hub');
   });
 
   it('reports a rejected request format separately from an unreachable service', async () => {

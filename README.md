@@ -574,16 +574,17 @@ file: update its diagram alongside this section, not separately from it.
   while another person's history requires `VIEW_PURCHASING_ADMIN`, and rejected
   rows retain the same requester/rejector visibility as the Purchasing page.
   Live-data tools are offered only to Slack accounts linked to an active Hub
-  profile. Other Hub questions receive
-  read-only, context-bounded answers from Gemini using the server-side `GEMINI_API_KEY`
-  and the current `gemini-3.5-flash` default, with higher reasoning effort,
-  a longer response window, and a relevance check that retries an off-topic
-  draft. Gemini function calls carry matching reply IDs, and a failed review
-  no longer discards an otherwise completed answer. Transient Gemini server or
-  connection errors are retried before a specific safe failure reply. The
-  assistant rejects unrelated/general prompts before any model call, never
-  uses external web search, and requires a linked active Hub profile for
-  model-backed answers. The assistant responds to direct mentions in every conversation where the bot is
+  profile. For other directed questions, Gemini first drafts an answer with
+  Google Search grounding, including concise source links, and a read-only
+  `query_tba` tool for public The Blue Alliance event, team, match, rankings,
+  and schedule data. A second Gemini
+  pass then decides whether that completed draft is related to Spartans Hub,
+  teams 971/9584, or their FRC work: related drafts are posted and unrelated
+  drafts receive the standard Hub scope response. If that relatedness check
+  fails, the bot also uses the scope response rather than post an unreviewed
+  draft. Internal Hub data stays behind the linked-account `query_hub_data`
+  tool. Gemini function calls carry matching reply IDs, and transient Gemini
+  server or connection errors are retried before a specific safe failure reply. The assistant responds to direct mentions in every conversation where the bot is
   a member, requires a direct mention for every thread follow-up, identifies
   each mention receipt by its own message timestamp while storing the thread
   parent separately, reports safe
