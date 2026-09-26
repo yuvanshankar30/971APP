@@ -39,9 +39,10 @@ for a fixed, read-only allowlist of Hub tables and columns only when the Slack
 account is linked to an active Hub profile; it never runs arbitrary SQL and
 excludes emails, Slack IDs, auth identifiers, and assignment identity data.
 After the draft is complete, Gemini performs a structured relatedness review.
-Only questions about Spartans Hub, FRC teams 971/9584, their competition or
-scouting work, or useful FRC/TBA information receive the draft; every other
-question receives the standard Hub scope pre-response. A failed relatedness
+Questions about robotics receive the draft, including Spartans Hub, FRC teams
+971/9584, competition or scouting, mechanical design, CAD/CAM, fabrication,
+controls, electronics, and robotics programming; every other question receives
+the standard robotics scope pre-response. A failed relatedness
 review also uses that pre-response, so an unreviewed draft is never posted.
 The assistant never reveals API keys, tokens, secrets, or setup/install
 commands, regardless of how the request is phrased. Mentions using the old

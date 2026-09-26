@@ -214,7 +214,7 @@ function hasHubQuestionContext(question, threadFeature) {
 }
 
 function outOfScopeReply() {
-  return 'I can only help with Spartans Hub: its pages, workflows, supported team data, and account-scoped Hub questions. Ask a Hub-specific question or use `@Spartans Hub /status`.';
+  return 'I can help with robotics, FRC, Spartans Hub, and team competition work. Ask a robotics question or use `@Spartans Hub /status` for live Hub status.';
 }
 
 function isUnsafeAssistantRequest(question) {
@@ -226,7 +226,7 @@ function isHubGreeting(question) {
 }
 
 function hubGreetingReply() {
-  return 'Hi! I can help with Spartans Hub pages and workflows, live Hub status, team reports, scouting assignments, Hub roles, and authorized `/edit` requests that draft an unmerged PR. Try `@Spartans Hub /status` or ask about a Hub feature.';
+  return 'Hi! I can help with robotics, FRC competition, design and fabrication, programming, electronics, and Spartans Hub pages, status, reports, assignments, and authorized `/edit` requests. Try `@Spartans Hub /status` or ask a robotics question.';
 }
 
 function recentConversation(messages) {
@@ -836,7 +836,7 @@ async function reviewAnswer(question, answer, { apiKey, model, fetchImpl, roster
     method: 'POST',
     headers: { 'x-goog-api-key': apiKey, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      system_instruction: { parts: [{ text: 'Review the completed draft after it has answered the question. Set related=false unless the question is substantively about Spartans Hub, FRC teams 971 or 9584, their competition/scouting work, or an FRC/TBA fact that would help those teams. A generic FRC question is related; unrelated general knowledge is not. Also set relevant=false when the draft fails to directly answer the exact question. Reject a reply about another person or topic, a generic profile dump when an opinion was requested, or a claim about roster roles missing from the supplied roster record. Return JSON only.' }] },
+      system_instruction: { parts: [{ text: 'Review the completed draft after it has answered the question. Set related=false unless the question is substantively about robotics: FRC, teams 971 or 9584, competition/scouting, mechanical design, CAD/CAM, fabrication, controls, electronics, or robotics programming are all related. A generic robotics or FRC question is related; unrelated general knowledge is not. Also set relevant=false when the draft fails to directly answer the exact question. Reject a reply about another person or topic, a generic profile dump when an opinion was requested, or a claim about roster roles missing from the supplied roster record. Return JSON only.' }] },
       contents: [{ role: 'user', parts: [{ text: JSON.stringify({
         question, answer, rosterMember: rosterMember || null,
         recentConversation: recentConversation(threadMessages).map((turn) => ({
@@ -999,7 +999,7 @@ export async function askGeminiAboutHub(question, snapshot, options = {}) {
           return outOfScopeReply();
         }
         if (review.related === false) {
-          const error = new Error('Question is outside the Spartans Hub scope');
+          const error = new Error('Question is outside the robotics scope');
           error.geminiReason = 'out_of_scope';
           throw error;
         }

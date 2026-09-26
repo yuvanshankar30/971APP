@@ -428,8 +428,20 @@ describe('Slack Hub assistant', () => {
     });
     expect(fetchImpl).toHaveBeenCalledTimes(2);
     expect(JSON.parse(fetchImpl.mock.calls[0][1].body).tools).not.toEqual(expect.arrayContaining([expect.objectContaining({ google_search: {} })]));
-    expect(postMessage.mock.calls[0][0].text).toContain('only help with Spartans Hub');
+    expect(postMessage.mock.calls[0][0].text).toContain('help with robotics');
     expect(postMessage.mock.calls[0][0].text).toContain('@Spartans Hub /status');
+  });
+
+  it('posts a reviewed general robotics answer', async () => {
+    const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: 'Start with a low proportional gain and add damping with derivative gain.' }] } }] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify({ related: true, relevant: true, problem: '' }) }] } }] }) });
+    await handleHubAppMention({ channel: 'C1', user: 'U1', ts: '1.0', text: '<@U971> How should I tune a PID loop on a robot?' }, {
+      supa: supabaseForStatus(), slack: { chat: { postMessage } }, apiKey: 'test-secret', fetchImpl
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(postMessage.mock.calls[0][0].text).toContain('low proportional gain');
   });
 
   it('answers a greeting with the assistant capabilities without calling Gemini', async () => {
@@ -439,7 +451,7 @@ describe('Slack Hub assistant', () => {
       supa: supabaseForStatus(), slack: { chat: { postMessage } }, apiKey: 'test-secret', fetchImpl
     });
     expect(fetchImpl).not.toHaveBeenCalled();
-    expect(postMessage.mock.calls[0][0].text).toContain('I can help with Spartans Hub pages and workflows');
+    expect(postMessage.mock.calls[0][0].text).toContain('I can help with robotics');
     expect(postMessage.mock.calls[0][0].text).toContain('@Spartans Hub /status');
   });
 
@@ -456,7 +468,7 @@ describe('Slack Hub assistant', () => {
       fetchImpl
     });
     expect(fetchImpl).not.toHaveBeenCalled();
-    expect(postMessage.mock.calls[0][0].text).toContain('only help with Spartans Hub');
+    expect(postMessage.mock.calls[0][0].text).toContain('help with robotics');
   });
 
   it('offers the allowlisted live-data tool only for an in-scope Hub question from a linked user', async () => {
@@ -880,7 +892,7 @@ describe('Slack Hub assistant', () => {
     await handleHubAppMention({ channel: 'C1', user: 'U-ADMIN', ts: '1.0', text: '<@U971> how many active Hub parts are there?' }, {
       supa: supabaseForAssignments({ admin: true }), slack: { chat: { postMessage } }, apiKey: 'test-secret', fetchImpl
     });
-    expect(postMessage.mock.calls[0][0].text).toContain('only help with Spartans Hub');
+    expect(postMessage.mock.calls[0][0].text).toContain('help with robotics');
   });
 
   it('reports a rejected request format separately from an unreachable service', async () => {

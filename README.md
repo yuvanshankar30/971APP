@@ -578,9 +578,10 @@ file: update its diagram alongside this section, not separately from it.
   Google Search grounding, including concise source links, and a read-only
   `query_tba` tool for public The Blue Alliance event, team, match, rankings,
   and schedule data. A second Gemini
-  pass then decides whether that completed draft is related to Spartans Hub,
-  teams 971/9584, or their FRC work: related drafts are posted and unrelated
-  drafts receive the standard Hub scope response. If that relatedness check
+  pass then decides whether that completed draft is related to robotics, including
+  Spartans Hub, teams 971/9584, FRC competition, design, fabrication, controls,
+  electronics, or programming: related drafts are posted and unrelated drafts
+  receive the standard robotics scope response. If that relatedness check
   fails, the bot also uses the scope response rather than post an unreviewed
   draft. Internal Hub data stays behind the linked-account `query_hub_data`
   tool. Gemini function calls carry matching reply IDs, and transient Gemini
