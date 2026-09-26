@@ -573,6 +573,9 @@ file: update its diagram alongside this section, not separately from it.
   questions are also answered locally: users may read their own latest request,
   while another person's history requires `VIEW_PURCHASING_ADMIN`, and rejected
   rows retain the same requester/rejector visibility as the Purchasing page.
+  Manufacturing queue questions (for example, remaining Ground Intake router,
+  kitting, or post-processing work) are answered directly from active parts in
+  the asking linked user's own team; complete and kitted parts are excluded.
   Live-data tools are offered only to Slack accounts linked to an active Hub
   profile. For other directed questions, Gemini first drafts an answer with
   Google Search grounding, including concise Slack-native source links and
@@ -900,7 +903,7 @@ AutoCAM's own code (engine, Drive watcher, `camJobs.js`, its components) is
 **not** here - see the dedicated **AutoCAM** section above for why.
 
 - **`server/`** - server-only modules (`$lib/server/...`, never bundled to
-  the client): `971bot.js` (Slack), `cron_auth.js` (shared auth check for
+  the client): `971bot.js` and `hub_slack_assistant.js` (Slack), `cron_auth.js` (shared auth check for
   cron-triggered endpoints - see **Known gaps**), `planner_notifications.js`,
   and `fusion_runner_setup.js` (expiring browser enrollment sessions and
   one-time delivery of per-install Runner credentials).

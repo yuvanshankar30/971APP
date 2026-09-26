@@ -156,6 +156,86 @@ export function isFusionRunnerSetupQuestion(question) {
     .test(String(question || ''));
 }
 
+const FINISHED_MANUFACTURING_STATUSES = new Set(['complete', 'completed', 'kitted']);
+
+// This deliberately requires both a manufacturing term and a queue/status
+// term. A question such as “who is the manufacturing lead?” must continue to
+// use the roster handler instead of dumping work orders into Slack.
+export function isManufacturingQueueQuestion(question) {
+  const value = String(question || '');
+  return /\b(?:manufactur(?:e|ed|ing)|parts?|queue|router|mill|lathe|laser(?:-cut)?|3d[ -]?print(?:ing)?|kitt?(?:ed|ing)|post[ -]?process(?:ed|ing)?|cam(?:med|ming)?)\b/i.test(value)
+    && /\b(?:what|which|show|list|need|needs|needed|remaining|left|status|queue|ready|pending|still|done|complete|kitted)\b/i.test(value);
+}
+
+function normalizedQueueText(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function requestedManufacturingWorkflows(question) {
+  const value = String(question || '').toLowerCase();
+  const workflows = [];
+  if (/\brouter\b/.test(value)) workflows.push('router');
+  if (/\bmill(?:ing)?\b/.test(value)) workflows.push('mill');
+  if (/\blathe\b|\bturn(?:ing)?\b/.test(value)) workflows.push('lathe');
+  if (/\b(?:3d|three[ -]?d)[ -]?print(?:ing)?\b/.test(value)) workflows.push('3d-print');
+  if (/\blaser(?:[ -]?cut(?:ting)?)?\b/.test(value)) workflows.push('laser-cut');
+  return workflows;
+}
+
+// Read only the fields needed for a concise queue answer. This is a direct
+// handler rather than a model-driven database tool: the question can safely
+// name an arbitrary subsystem, but no Slack user can broaden the query beyond
+// their own Hub team or retrieve finished work.
+export async function fetchManufacturingQueue(supa, frcTeam) {
+  if (!frcTeam) return { available: false, reason: 'Your Hub profile has no team.', parts: [] };
+  const { data, error } = await supa
+    .from('parts')
+    .select('name, project_id, workflow, status, quantity, material, updated_at')
+    .eq('frc_team', frcTeam)
+    .order('updated_at', { ascending: false })
+    .limit(250);
+  if (error) throw error;
+  return {
+    available: true,
+    parts: (data || []).filter((part) => !FINISHED_MANUFACTURING_STATUSES.has(String(part.status || '').toLowerCase()))
+  };
+}
+
+export function formatManufacturingQueue(queue, question) {
+  if (!queue?.available) return `I could not load your manufacturing queue: ${queue?.reason || 'your Hub team is unavailable.'}`;
+  const parts = queue.parts || [];
+  const projects = [...new Set(parts.map((part) => part.project_id).filter(Boolean))];
+  const normalizedQuestion = normalizedQueueText(question);
+  // Prefer the longest matching project, so “Ground Intake” wins over a
+  // generic project name such as “Intake”.
+  const project = projects
+    .filter((candidate) => normalizedQueueText(candidate).length >= 3 && normalizedQuestion.includes(normalizedQueueText(candidate)))
+    .sort((left, right) => normalizedQueueText(right).length - normalizedQueueText(left).length)[0] || null;
+  const workflows = requestedManufacturingWorkflows(question);
+  const matching = parts.filter((part) => (!project || part.project_id === project)
+    && (!workflows.length || workflows.includes(part.workflow)));
+  const scope = [project, workflows.length ? workflows.map((workflow) => workflow === '3d-print' ? '3D print' : workflow).join(', ') : null]
+    .filter(Boolean).join(' — ');
+  if (!matching.length) return `*Active manufacturing work${scope ? ` — ${scope}` : ''}:* none found.`;
+
+  const byWorkflow = new Map();
+  for (const part of matching) {
+    const workflow = part.workflow || 'unspecified workflow';
+    if (!byWorkflow.has(workflow)) byWorkflow.set(workflow, []);
+    byWorkflow.get(workflow).push(part);
+  }
+  const lines = [`*Active manufacturing work${scope ? ` — ${scope}` : ''}:*`];
+  for (const [workflow, workflowParts] of [...byWorkflow.entries()].sort(([left], [right]) => left.localeCompare(right))) {
+    lines.push(`*${workflow}:*`);
+    for (const part of workflowParts.slice(0, 25)) {
+      const quantity = Number(part.quantity) > 0 ? ` ×${Number(part.quantity)}` : '';
+      lines.push(`• ${part.name || 'Unnamed part'}${quantity} — ${part.status || 'pending'}${part.material ? ` (${part.material})` : ''}`);
+    }
+    if (workflowParts.length > 25) lines.push(`• …and ${workflowParts.length - 25} more`);
+  }
+  return lines.join('\n');
+}
+
 function normalizedWords(value) {
   return ` ${String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()} `;
 }
@@ -1196,6 +1276,19 @@ export async function handleHubAppMention(event, dependencies = {}) {
   } else if (isNamedPurchasingQuestion(question)) {
     const purchaseContext = await fetchNamedPurchasingRequest(supa, event.user, question, { slack });
     text = formatNamedPurchasingRequest(purchaseContext);
+  } else if (isManufacturingQueueQuestion(question)) {
+    const actorProfile = await resolveHubProfileForSlackUser(supa, event.user, slack);
+    if (!actorProfile || actorProfile.banned) {
+      text = 'Link your Slack account to an active Spartans Hub profile before asking about the manufacturing queue.';
+    } else {
+      try {
+        text = formatManufacturingQueue(await fetchManufacturingQueue(supa, actorProfile.frc_team), question);
+      } catch (error) {
+        console.error('Manufacturing queue lookup failed', error?.message || error);
+        requestError = error?.message || String(error);
+        text = 'I could not load the manufacturing queue right now. Please try again shortly.';
+      }
+    }
   } else if (isFusionRunnerSetupQuestion(question)) {
     text = await formatFusionRunnerSetupHelp(supa);
   } else if (isFeatureFollowUp(question) && !person.members.length && !person.searchName && /\b(?:role|roles|permission|permissions|profile|account)\b/i.test(question)) {

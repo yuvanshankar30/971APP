@@ -21,11 +21,14 @@ import {
   formatAdminProfile,
   formatHubStatus,
   formatFusionRunnerSetupHelp,
+  fetchManufacturingQueue,
+  formatManufacturingQueue,
   formatScoutingAssignments,
   formatTeamReportStatus,
   handleHubAppMention,
   isAdminProfileQuestion,
   isFusionRunnerSetupQuestion,
+  isManufacturingQueueQuestion,
   isScoutingAssignmentQuestion,
   shouldUseGoogleSearch,
   isHubStatusRequest,
@@ -192,8 +195,34 @@ describe('Slack Hub assistant', () => {
     expect(isAdminProfileQuestion('give me as much info on haas tl-1 and is it worth it')).toBe(false);
     expect(isAdminProfileQuestion('is the router free right now?')).toBe(false);
     expect(isAdminProfileQuestion('does the tube stock have enough 1x1 left for this part?')).toBe(false);
+    expect(isManufacturingQueueQuestion('What parts from Ground Intake still need to be manufactured or kitted on the router?')).toBe(true);
+    expect(isManufacturingQueueQuestion('Who is the manufacturing lead?')).toBe(false);
     expect(assignmentEventKey('What was assigned for Chezy?', '2026mrcmp')).toBe('2026cc');
     expect(assignmentEventKey('What was assigned for 2025 Chezy?', '2026mrcmp')).toBe('2025cc');
+  });
+
+  it('returns only active subsystem work from the asking team’s manufacturing queue', async () => {
+    const rows = [
+      { name: 'Intake Plate', project_id: 'Ground Intake', workflow: 'router', status: 'postprocessed', quantity: 2, material: '1/8 Aluminum' },
+      { name: 'Intake Spacer', project_id: 'Ground Intake', workflow: 'lathe', status: 'pending', quantity: 1 },
+      { name: 'Finished Intake Plate', project_id: 'Ground Intake', workflow: 'router', status: 'kitted', quantity: 1 },
+      { name: 'Other Team Part', project_id: 'Ground Intake', workflow: 'router', status: 'pending', quantity: 1 }
+    ];
+    const supa = { from: vi.fn(() => {
+      const query = {
+        select: () => query,
+        eq: (_column, team) => { query.team = team; return query; },
+        order: () => query,
+        limit: async () => ({ data: query.team === '971' ? rows.slice(0, 3) : [rows[3]], error: null })
+      };
+      return query;
+    }) };
+    const queue = await fetchManufacturingQueue(supa, '971');
+    const text = formatManufacturingQueue(queue, 'What parts from Ground Intake still need to be manufactured or kitted on the router?');
+    expect(text).toContain('Intake Plate ×2 — postprocessed');
+    expect(text).not.toContain('Intake Spacer');
+    expect(text).not.toContain('Finished Intake Plate');
+    expect(text).not.toContain('Other Team Part');
   });
 
   it('formats live status and recent changes', () => {
