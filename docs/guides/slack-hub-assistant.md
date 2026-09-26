@@ -30,7 +30,7 @@ Hub summary, the same route/keyword list the in-app search box uses (so an
 answer about any real page, e.g. "what's the EPA tab", stays in sync with the
 app automatically instead of drifting from hand-written prose), and the status
 snapshot. The draft pass selects one compatible tool mode: Google Search
-for current public information, appending up to three grounded source links to
+for current public information, appending up to three grounded source links in Slack mrkdwn to
 the Slack reply; or a read-only `query_tba` function for public The Blue
 Alliance event, team, match, rankings, and schedule data. The deployed Gemini
 `generateContent` endpoint rejects a payload that combines Google Search with

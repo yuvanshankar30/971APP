@@ -207,14 +207,14 @@ describe('Slack Hub assistant', () => {
   it('calls Gemini without exposing its key in the request body and sanitizes mass mentions', async () => {
     const fetchImpl = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ candidates: [{ content: { parts: [{ text: '<!channel> Open ' }, { text: 'Match Scouting.' }] } }] })
+      json: async () => ({ candidates: [{ content: { parts: [{ text: '<!channel> **Open** ' }, { text: '[Match Scouting](https://hub.test/matchscout).' }] } }] })
     });
     const answer = await askGeminiAboutHub('Where do I scout?', snapshot, { apiKey: 'test-secret', fetchImpl, hubScopeConfirmed: true });
     const request = fetchImpl.mock.calls[0][1];
     expect(fetchImpl.mock.calls[0][0]).toBe('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent');
     expect(request.headers['x-goog-api-key']).toBe('test-secret');
     expect(request.body).not.toContain('test-secret');
-    expect(answer).toBe('@channel (mention suppressed) Open Match Scouting.');
+    expect(answer).toBe('@channel (mention suppressed) *Open* <https://hub.test/matchscout|Match Scouting>.');
     expect(request.body).toContain('dead, disabled');
     expect(JSON.parse(request.body).contents[0].parts[0].text).toBe('Where do I scout?');
     expect(JSON.parse(request.body).generationConfig.thinkingConfig.thinkingLevel).toBe('HIGH');

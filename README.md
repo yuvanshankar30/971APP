@@ -575,8 +575,8 @@ file: update its diagram alongside this section, not separately from it.
   rows retain the same requester/rejector visibility as the Purchasing page.
   Live-data tools are offered only to Slack accounts linked to an active Hub
   profile. For other directed questions, Gemini first drafts an answer with
-  Google Search grounding, including concise source links, and a read-only
-  `query_tba` tool for public The Blue Alliance event, team, match, rankings,
+  Google Search grounding, including concise Slack-native source links and
+  normalized Slack-native bold formatting, and a read-only `query_tba` tool for public The Blue Alliance event, team, match, rankings,
   and schedule data. A second Gemini
   pass then decides whether that completed draft is related to robotics, including
   Spartans Hub, teams 971/9584, FRC competition, design, fabrication, controls,
