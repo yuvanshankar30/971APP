@@ -4590,7 +4590,13 @@
     .queue-rail { padding-right: var(--space-2); }
   }
 
-  @media (max-width: 900px) {
+  /* A 100%-zoom Chrome window on a laptop is commonly 1024–1280 CSS px
+     wide. Keeping the desktop rail beside the six-column queue through that
+     range left the table's Progress and Actions cells fighting for the same
+     narrow strip, despite there being ample vertical room. Treat that range
+     as an intermediate workspace: keep the desktop table, but move the
+     controls above it so the table gets the full line. */
+  @media (max-width: 1280px) {
     .actions-col { min-width: auto; }
     .table th.name-col, .table td.name-col { min-width: 80px; max-width: 100px; }
     .cam-setup-grid { grid-template-columns: 1fr; }
