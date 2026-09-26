@@ -1,6 +1,6 @@
 <script>
   import { requestConfirmation } from '$lib/confirmation.js';
-  import { onMount, tick } from 'svelte';
+  import { createEventDispatcher, onMount, tick } from 'svelte';
   import { supabase } from '$lib/supabase.js';
   import { toastActions } from '$lib/toast.js';
   import {
@@ -16,6 +16,7 @@
 
   export let user;
   export let canManage;
+  const dispatch = createEventDispatcher();
 
   let boxTubes = [];
   // fusion_box_tubes.id set with a completed CAM output job -
@@ -189,6 +190,7 @@
       toastActions.show(e.message || 'Failed to load box tubes');
     } finally {
       loading = false;
+      if (showLoading) dispatch('ready');
     }
   }
 

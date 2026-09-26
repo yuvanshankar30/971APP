@@ -1,6 +1,6 @@
 <script>
   import { requestConfirmation } from '$lib/confirmation.js';
-  import { onMount } from 'svelte';
+  import { createEventDispatcher, onMount } from 'svelte';
   import { supabase } from '$lib/supabase.js';
   import { toastActions } from '$lib/toast.js';
   import { fetchFusionJobs, fetchFusionJobUpdates, fetchFusionJobNcFiles, fetchFusionPartStepFiles, fetchFusionPartProjectIds, installFusionPartCad, cancelFusionJob, deleteFusionJob, deleteAllFailedFusionJobs, updateFusionJobMaterial, fusionNcDestinationName } from '$lib/fusionCam.js';
@@ -11,6 +11,7 @@
   import { convertGcodeToInches } from '$autocam/fusion/gcodeUnitConvert.js';
 
   let jobs = [];
+  const dispatch = createEventDispatcher();
   let loading = true;
   let hasMore = false;
   let loadingMore = false;
@@ -277,6 +278,7 @@
       toastActions.show(e.message || 'Failed to load jobs');
     } finally {
       loading = false;
+      if (showLoading) dispatch('ready');
     }
   }
 

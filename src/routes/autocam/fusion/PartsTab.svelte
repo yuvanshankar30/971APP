@@ -1,6 +1,6 @@
 <script>
   import { requestConfirmation } from '$lib/confirmation.js';
-  import { onMount, tick } from 'svelte';
+  import { createEventDispatcher, onMount, tick } from 'svelte';
   import { toastActions } from '$lib/toast.js';
   import { supabase } from '$lib/supabase.js';
   import {
@@ -21,6 +21,7 @@
 
   export let user;
   export let canManage;
+  const dispatch = createEventDispatcher();
   // Deep link from Manufacturing's "Open Fusion CAM" button (see
   // /autocam/fusion/+page.svelte) - the id of a public.parts row to
   // pre-fill the Add Part form from: name, STEP file (carried over, not
@@ -557,6 +558,7 @@
       toastActions.show(e.message || 'Failed to load parts');
     } finally {
       loading = false;
+      if (showLoading) dispatch('ready');
     }
   }
 

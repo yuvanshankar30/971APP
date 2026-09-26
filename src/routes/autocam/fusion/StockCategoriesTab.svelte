@@ -1,5 +1,5 @@
 <script>
-  import { onMount } from 'svelte';
+  import { createEventDispatcher, onMount } from 'svelte';
   import { toastActions } from '$lib/toast.js';
   import { supabase } from '$lib/supabase.js';
   import { requestConfirmation } from '$lib/confirmation.js';
@@ -7,6 +7,7 @@
   import { Plus, SlidersHorizontal, Trash2, AlertTriangle } from 'lucide-svelte';
 
   export let canManage;
+  const dispatch = createEventDispatcher();
 
   let categories = [];
   let materials = [];
@@ -62,6 +63,7 @@
       toastActions.show(error.message || 'Failed to load stock categories');
     } finally {
       loading = false;
+      if (showLoading) dispatch('ready');
     }
   }
 
