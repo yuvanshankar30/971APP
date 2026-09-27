@@ -13,7 +13,7 @@ import {
 } from './stepProfile.js';
 import { generateTurningGcode } from './inprocess/turning.js';
 import { generateRoutingGcode } from './inprocess/routing.js';
-import { generateTubestockGcode } from './inprocess/tubestock.js';
+import { generateTubestockGcode, tubestockFaceClock } from './inprocess/tubestock.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const HEX_SHAFT = path.join(__dirname, '__fixtures__', 'hex-shaft.step');
@@ -471,6 +471,23 @@ describe('extractTubeFeaturesFromMeshes (real STEP file: tube-2x1-wide-face.step
     expect(result.gcode).toContain('M30');
     expect(result.stats.totalHoles).toBeGreaterThan(700);
   });
+
+  it('calls this real tube\'s 2" faces sides 12 and 6, and its 1" faces sides 3 and 9', async () => {
+    // The shop writes 3/6/9/12 on the tube and expects the big faces to be
+    // 12 and 6. On a real 2"x1" tube that is a question the geometry can
+    // answer, so it should never come down to which axis the part happened
+    // to be modeled along.
+    const meshes = await readStepMeshes(fs.readFileSync(TUBE_2X1_WIDE_FACE));
+    const features = extractTubeFeaturesFromMeshes(meshes);
+
+    const wideWalls = features.walls.filter((w) => w.holes.length > 100);
+    const narrowWalls = features.walls.filter((w) => w.holes.length > 0 && w.holes.length <= 100);
+    expect(wideWalls.length).toBe(2);
+    expect(narrowWalls.length).toBe(2);
+
+    expect(wideWalls.map((w) => tubestockFaceClock(w.angleDeg)).sort((a, b) => a - b)).toEqual([6, 12]);
+    expect(narrowWalls.map((w) => tubestockFaceClock(w.angleDeg)).sort((a, b) => a - b)).toEqual([3, 9]);
+  });
 });
 
 describe('extractTubeFeaturesFromMeshes (real STEP file: tube-2x1-two-walls.step - am-5644, a real AndyMark 2"x1" tube with only 2 of 4 walls drilled)', () => {
@@ -651,9 +668,29 @@ describe('extractTubeFeaturesFromMeshes (synthetic rectangular tube: 6"x1.5"x1.0
     const result = extractTubeFeaturesFromMeshes([buildTestTube()]);
     expect(result.lengthAxis).toBe('x');
     expect(result.tubeLength).toBeCloseTo(6, 3);
-    expect(result.crossSection.a).toBeCloseTo(1.5, 3);
-    expect(result.crossSection.b).toBeCloseTo(1.0, 3);
+    // Ordered smaller-span-first, so the walls at 0/180 (sides 12 and 6)
+    // are the wide ones - see the wide-wall test below.
+    expect(result.crossSection.a).toBeCloseTo(1.0, 3);
+    expect(result.crossSection.b).toBeCloseTo(1.5, 3);
     expect(result.walls.map((w) => w.angleDeg)).toEqual([0, 90, 180, 270]);
+  });
+
+  it('puts the tube\'s WIDE walls on sides 12 and 6, and the narrow ones on 3 and 9', () => {
+    // Direct instruction: the operator writes 3/6/9/12 on the tube, and the
+    // larger-area faces are the ones they call 12 and 6. This used to fall
+    // out of plain x/y/z axis order instead, so on this 1.5" x 1.0" tube the
+    // 1.0" walls were labelled 12/6 purely because Y sorts before Z.
+    const result = extractTubeFeaturesFromMeshes([buildTestTube()]);
+    const wide = Math.max(result.crossSection.a, result.crossSection.b);
+
+    // A wall at 0/180 takes its width from crossSection.b (see
+    // stepProfile's own isAWall convention, mirrored in tubestock.js), and
+    // 0/180 are exactly the clock numbers 12 and 6.
+    expect(result.crossSection.b).toBeCloseTo(wide, 3);
+    expect(tubestockFaceClock(0)).toBe(12);
+    expect(tubestockFaceClock(180)).toBe(6);
+    expect(tubestockFaceClock(90)).toBe(3);
+    expect(tubestockFaceClock(270)).toBe(9);
   });
 
   it('excludes the end caps entirely - only 4 side walls, never 6 faces', () => {
@@ -661,22 +698,26 @@ describe('extractTubeFeaturesFromMeshes (synthetic rectangular tube: 6"x1.5"x1.0
     expect(result.walls.length).toBe(4);
   });
 
+  // The two-hole wall is this fixture's NARROW (1.0") face, so it is side 3
+  // (90 degrees), and the single-hole wall is the wide (1.5") face on side
+  // 12 (0 degrees). Both were one clock position round from here before the
+  // wide walls were pinned to 12/6.
   it('finds both holes on the same wall, sorted by position along the tube, with correct diameters', () => {
     const result = extractTubeFeaturesFromMeshes([buildTestTube()]);
-    const wall0 = result.walls.find((w) => w.angleDeg === 0);
-    expect(wall0.holes.length).toBe(2);
-    expect(wall0.holes[0].position).toBeCloseTo(1.5, 1);
-    expect(wall0.holes[0].diameter).toBeCloseTo(0.3, 1);
-    expect(wall0.holes[1].position).toBeCloseTo(4.5, 1);
-    expect(wall0.holes[1].diameter).toBeCloseTo(0.3, 1);
+    const wall90 = result.walls.find((w) => w.angleDeg === 90);
+    expect(wall90.holes.length).toBe(2);
+    expect(wall90.holes[0].position).toBeCloseTo(1.5, 1);
+    expect(wall90.holes[0].diameter).toBeCloseTo(0.3, 1);
+    expect(wall90.holes[1].position).toBeCloseTo(4.5, 1);
+    expect(wall90.holes[1].diameter).toBeCloseTo(0.3, 1);
   });
 
   it('finds the single hole on the second wall and leaves the two blank walls empty', () => {
     const result = extractTubeFeaturesFromMeshes([buildTestTube()]);
-    const wall90 = result.walls.find((w) => w.angleDeg === 90);
-    expect(wall90.holes.length).toBe(1);
-    expect(wall90.holes[0].position).toBeCloseTo(3, 1);
-    expect(wall90.holes[0].diameter).toBeCloseTo(0.25, 1);
+    const wall0 = result.walls.find((w) => w.angleDeg === 0);
+    expect(wall0.holes.length).toBe(1);
+    expect(wall0.holes[0].position).toBeCloseTo(3, 1);
+    expect(wall0.holes[0].diameter).toBeCloseTo(0.25, 1);
     expect(result.walls.find((w) => w.angleDeg === 180).holes).toEqual([]);
     expect(result.walls.find((w) => w.angleDeg === 270).holes).toEqual([]);
   });
@@ -687,14 +728,14 @@ describe('extractTubeFeaturesFromMeshes (synthetic rectangular tube: 6"x1.5"x1.0
     // marks the CAD modeler drew, not holes) that this extractor has no way
     // to represent as a single center+diameter.
     const result = extractTubeFeaturesFromMeshes([buildTestTube({ slotInsteadOfSecondHole: true })]);
-    const wall0 = result.walls.find((w) => w.angleDeg === 0);
+    const wall90 = result.walls.find((w) => w.angleDeg === 90);
     // The first (round) hole on this wall still comes through untouched.
-    expect(wall0.holes.length).toBe(1);
-    expect(wall0.holes[0].position).toBeCloseTo(1.5, 1);
+    expect(wall90.holes.length).toBe(1);
+    expect(wall90.holes[0].position).toBeCloseTo(1.5, 1);
     // The slot is described, not silently dropped, so tubestock.js can mill it.
-    expect(wall0.profiles.length).toBe(1);
-    expect(wall0.profiles[0].position).toBeCloseTo(4.5, 1);
-    expect(wall0.profiles[0].lateralOffset).toBeCloseTo(0, 1);
+    expect(wall90.profiles.length).toBe(1);
+    expect(wall90.profiles[0].position).toBeCloseTo(4.5, 1);
+    expect(wall90.profiles[0].lateralOffset).toBeCloseTo(0, 1);
   });
 
   it('gives a profile its full boundary, in the same (position, lateralOffset) coordinates as a hole - not just a centroid', () => {
@@ -704,7 +745,7 @@ describe('extractTubeFeaturesFromMeshes (synthetic rectangular tube: 6"x1.5"x1.0
     // u - lengthMin, lateralOffset = v - wallWidth/2), its boundary should
     // span roughly x in [3.9, 5.1] and y in [-0.12, 0.12].
     const result = extractTubeFeaturesFromMeshes([buildTestTube({ slotInsteadOfSecondHole: true })]);
-    const profile = result.walls.find((w) => w.angleDeg === 0).profiles[0];
+    const profile = result.walls.find((w) => w.angleDeg === 90).profiles[0];
     expect(profile.points.length).toBeGreaterThan(3);
     const xs = profile.points.map((p) => p.x);
     const ys = profile.points.map((p) => p.y);
@@ -739,10 +780,11 @@ describe('extractTubeFeaturesFromMeshes (synthetic rectangular tube: 6"x1.5"x1.0
     const mesh = assembleTubeMesh([wallAplus, wallBplus, wallAminus, wallBminus, capStart, capEnd]);
 
     const result = extractTubeFeaturesFromMeshes([mesh]);
-    const wall0 = result.walls.find((w) => w.angleDeg === 0);
-    expect(wall0.holes.length).toBe(2);
+    // The +Y wall is this tube's narrow (1.0") face, so it is side 3.
+    const wall90 = result.walls.find((w) => w.angleDeg === 90);
+    expect(wall90.holes.length).toBe(2);
     // Wall center is at v=0.5 (HZ/2); holes at v=0.2 and v=0.8 -> offsets -0.3 and +0.3.
-    const offsets = wall0.holes.map((h) => h.lateralOffset).sort((a, b) => a - b);
+    const offsets = wall90.holes.map((h) => h.lateralOffset).sort((a, b) => a - b);
     expect(offsets[0]).toBeCloseTo(-0.3, 1);
     expect(offsets[1]).toBeCloseTo(0.3, 1);
   });
