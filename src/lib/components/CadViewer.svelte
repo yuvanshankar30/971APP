@@ -7,6 +7,10 @@
   //  - Uploaded STEP files: download from storage and parse client-side (occt).
   export let part;                 // needs onshape_* ids for the Onshape path
   export let stepFileName = null;  // storage path in 'manufacturing-files' for uploaded STEP
+  // A non-interactive, low-cost render used as a part-list thumbnail. It
+  // still parses the real STEP model, so it never drifts from the uploaded
+  // geometry like a hand-maintained image would.
+  export let thumbnail = false;
 
   let container;
   let loading = true;
@@ -79,7 +83,7 @@
 
         renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(width, height);
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.setPixelRatio(thumbnail ? 1 : Math.min(window.devicePixelRatio, 2));
         container.appendChild(renderer.domElement);
 
         // Gray, not the brand-gold accent color - this is the actual stock
@@ -114,9 +118,11 @@
         fill.position.set(-1, -0.5, -1);
         scene.add(fill);
 
-        controls = new OrbitControls(camera, renderer.domElement);
-        controls.enableDamping = true;
-        controls.dampingFactor = 0.1;
+        if (!thumbnail) {
+          controls = new OrbitControls(camera, renderer.domElement);
+          controls.enableDamping = true;
+          controls.dampingFactor = 0.1;
+        }
 
         const animate = () => {
           if (disposed) return;
@@ -124,7 +130,8 @@
           controls.update();
           renderer.render(scene, camera);
         };
-        animate();
+        if (thumbnail) renderer.render(scene, camera);
+        else animate();
 
         resizeObserver = new ResizeObserver(() => {
           if (!renderer || !camera || !container) return;
@@ -134,6 +141,7 @@
           camera.aspect = w / h;
           camera.updateProjectionMatrix();
           renderer.setSize(w, h);
+          if (thumbnail) renderer.render(scene, camera);
         });
         resizeObserver.observe(container);
 
@@ -158,7 +166,7 @@
   });
 </script>
 
-<div class="cad-viewer" bind:this={container}>
+<div class="cad-viewer" class:cad-viewer-thumbnail={thumbnail} bind:this={container}>
   {#if loading}
     <div class="cad-viewer-overlay">
       <div class="spinner"></div>
@@ -180,6 +188,24 @@
     border-radius: var(--radius-sm, 4px);
     overflow: hidden;
     background: var(--surface-2, #f3f4f6);
+  }
+
+  .cad-viewer-thumbnail {
+    height: 4.25rem;
+    min-height: 4.25rem;
+    border-radius: var(--radius-sm, 4px);
+  }
+
+  .cad-viewer-thumbnail .cad-viewer-overlay {
+    gap: 0.25rem;
+    padding: 0.25rem;
+    font-size: 0.65rem;
+  }
+
+  .cad-viewer-thumbnail .spinner {
+    width: 16px;
+    height: 16px;
+    border-width: 2px;
   }
 
   .cad-viewer-overlay {

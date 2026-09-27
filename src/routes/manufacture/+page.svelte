@@ -1886,8 +1886,15 @@
     parts = parts.map((p) => (p.id === partId ? { ...p, status } : p));
   }
 
-  // Row click handler: for Onshape parts, show preview; otherwise open edit modal
-  // but ignore clicks that originated on interactive elements (buttons, inputs, links)
+  function canOpenPartPreview(part) {
+    return Boolean(
+      (part?.source_type === 'onshape_api' && part.onshape_document_id && part.onshape_element_id && part.onshape_part_id)
+      || (part?.workflow === '3d-print' && getStepFileName(part))
+    );
+  }
+
+  // Row click handler: show an actual model preview when one is available;
+  // otherwise open the editable request details.
   function onRowClick(e, part) {
     try {
       if (e.target.closest('button') || e.target.closest('input') || e.target.closest('a')) return;
@@ -1895,8 +1902,7 @@
       // defensive: if DOM not available, just return
       return;
     }
-    // Show preview modal for Onshape parts that have all required IDs
-    if (part.source_type === 'onshape_api' && part.onshape_document_id && part.onshape_element_id && part.onshape_part_id) {
+    if (canOpenPartPreview(part)) {
       openPreviewModal(part);
     } else {
       openEditModal(part);
@@ -1913,8 +1919,7 @@
     }
     // Prevent page from scrolling on Space
     e.preventDefault();
-    // Show preview modal for Onshape parts that have all required IDs
-    if (part.source_type === 'onshape_api' && part.onshape_document_id && part.onshape_element_id && part.onshape_part_id) {
+    if (canOpenPartPreview(part)) {
       openPreviewModal(part);
     } else {
       openEditModal(part);
@@ -1938,6 +1943,13 @@
     previewQuantity = part.quantity || 1;
     previewNotes = part.notes || '';
     previewDueDate = (part.due_date || '').slice(0, 10);
+
+    // Uploaded 3D-print STEP files do not have an Onshape shaded-image API.
+    // The modal renders their real CAD directly with CadViewer instead.
+    if (part.workflow === '3d-print' && getStepFileName(part)) {
+      previewLoading = false;
+      return;
+    }
 
     // Check if we have a cached preview image URL first
     if (part.preview_image_url) {
@@ -2803,6 +2815,17 @@
             {/if}
             <td class="name-col">
               <div class="name-line">
+                {#if part.workflow === '3d-print' && getStepFileName(part)}
+                  <button
+                    type="button"
+                    class="part-print-thumbnail"
+                    title={`Open 3D model for ${part.name}`}
+                    aria-label={`Open 3D model for ${part.name}`}
+                    on:click|stopPropagation={() => openCadViewer(part)}
+                  >
+                    <CadViewer part={part} stepFileName={getStepFileName(part)} thumbnail />
+                  </button>
+                {/if}
                 <strong>{part.name}</strong>
                 <!-- Every part shows its team, not just 9584 - a tag that
                      only appears for one team means the other team's parts
@@ -3185,6 +3208,8 @@
             <div class="preview-error">
               <span>⚠️ {previewError}</span>
             </div>
+          {:else if previewPart?.workflow === '3d-print' && getStepFileName(previewPart)}
+            <CadViewer part={previewPart} stepFileName={getStepFileName(previewPart)} />
           {:else if previewImage}
             <img src={previewImage} alt="Isometric view of {previewPart?.name}" class="preview-image" />
           {/if}
@@ -4222,6 +4247,27 @@
     align-items: center;
     gap: 0.3rem 0.4rem;
   }
+
+  .part-print-thumbnail {
+    flex: 0 0 4.25rem;
+    width: 4.25rem;
+    height: 4.25rem;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    cursor: zoom-in;
+  }
+
+  .part-print-thumbnail:hover {
+    border-color: var(--brand-gold-strong);
+  }
+
+  .part-print-thumbnail :global(.cad-viewer) {
+    pointer-events: none;
+  }
   /* The anchor needs to actually out-weigh the muted spec line under it.
      At the table's base size everything sat at the same visual weight,
      which is most of why the row read as flat. */
@@ -4780,6 +4826,12 @@
     border-radius: var(--radius-md);
     border: 1px solid var(--border);
     overflow: hidden;
+  }
+
+  .preview-image-container :global(.cad-viewer) {
+    height: 100%;
+    min-height: 0;
+    border-radius: 0;
   }
 
   .preview-image {
