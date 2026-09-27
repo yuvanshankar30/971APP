@@ -7,7 +7,7 @@
 
   <iconID id="0"/>
 
-  <template description="&lt;.3 Circluar Through Hole" isFallback="0" strategy="bore" toolPresetId="{8aca8271-189f-4c39-beec-e1683a96d7bf}" unit="inches" version="178">
+  <template description="&lt;.3 Circluar Through Hole" isFallback="0" strategy="bore" toolPresetId="{0f1c2951-7ee0-4ff8-9538-babcfa8a876e}" unit="inches" version="178">
     <tool guid="c1f2bb0a-e3fb-4ac1-9423-e379eda3f72f" tool-library-version="36" type="flat end mill" unit="inches" version="1.5">
       <description>971 Main Bit</description>
       <nc break-control="0" diameter-offset="1" length-offset="1" live-tool="1" manual-tool-change="0" number="1" turret="0"/>
@@ -16,7 +16,7 @@
       <body assembly-gauge-length="1.9685" body-length="1.9685" coolant-support="no" diameter="0.1575" flute-length="0.787402" number-of-flutes="1" overall-length="1.9685" shaft-diameter="0.1575" shoulder-diameter="0.1575" shoulder-length="1.1811" thread-pitch="0" thread-profile-angle="60"/>
       <motion clockwise="yes" cutting-feedrate="60" entry-feedrate="60" exit-feedrate="60" feed-mode="per-minute" plunge-feedrate="13.333" ramp-angle="2" ramp-feedrate="13.333" ramp-spindle-rpm="22000" retract-feedrate="0" spindle-rpm="22000" transition-feedrate="60"/>
       <presets>
-        <preset description="" id="{8aca8271-189f-4c39-beec-e1683a96d7bf}" name="Default preset">
+        <preset description="" id="{0f1c2951-7ee0-4ff8-9538-babcfa8a876e}" name="Default preset">
           <parameter key="tool_coolant" value="mist"/>
           <parameter key="tool_spindleSpeed" value="22000"/>
           <parameter key="tool_rampSpindleSpeed" value="22000"/>
@@ -278,7 +278,7 @@
     <parameter expression="false" name="associatedView"/>
   </template>
 
-  <template description=">.3 Circular Through Hole (sized)" isFallback="0" strategy="pocket2d" toolPresetId="{8aca8271-189f-4c39-beec-e1683a96d7bf}" unit="inches" version="178">
+  <template description=">.3 Circular Through Hole (sized)" isFallback="0" strategy="pocket2d" toolPresetId="{b9d63df1-2a86-4b31-bf86-84bcffaabfe0}" unit="inches" version="178">
     <tool guid="e7813c26-af06-4d6c-9aba-324fa1b402c1" tool-library-version="36" type="flat end mill" unit="inches" version="1.5">
       <description>4mm sized for toolchager</description>
       <expressions>
@@ -293,7 +293,7 @@
       <body assembly-gauge-length="0.5" body-length="0.5" coolant-support="no" diameter="0.15748" flute-length="0.5" number-of-flutes="1" overall-length="1" shaft-diameter="0.15748" shoulder-diameter="0.15748" shoulder-length="0.5" thread-pitch="0" thread-profile-angle="60"/>
       <motion clockwise="yes" cutting-feedrate="60" entry-feedrate="60" exit-feedrate="60" feed-mode="per-minute" plunge-feedrate="13.333" ramp-angle="2" ramp-feedrate="13.333" ramp-spindle-rpm="21829.735653956" retract-feedrate="0" spindle-rpm="21829.735653956" transition-feedrate="60"/>
       <presets>
-        <preset description="" id="{8aca8271-189f-4c39-beec-e1683a96d7bf}" name="Default preset">
+        <preset description="" id="{b9d63df1-2a86-4b31-bf86-84bcffaabfe0}" name="Default preset">
           <parameter key="tool_coolant" value="mist"/>
           <parameter key="tool_spindleSpeed" value="21829.735653955675"/>
           <parameter expression="900 ft/min" key="tool_surfaceSpeed"/>
@@ -623,7 +623,7 @@
     <parameter expression="false" name="associatedView"/>
   </template>
 
-  <template description="Shape Through Hole big endmill" isFallback="0" strategy="adaptive2d" toolPresetId="{8aca8271-189f-4c39-beec-e1683a96d7bf}" unit="inches" version="178">
+  <template description="Shape Through Hole big endmill" isFallback="0" strategy="adaptive2d" toolPresetId="{f597ad0c-d71d-4343-8690-f7bdeb628ae9}" unit="inches" version="178">
     <tool guid="29331875-1efc-47c5-9742-f39efcb697ed" tool-library-version="36" type="flat end mill" unit="inches" version="1.5">
       <description>6mm for toolchanger</description>
       <manufacturer>wcp</manufacturer>
@@ -639,7 +639,7 @@
       <body assembly-gauge-length="1.625" body-length="1.625" coolant-support="no" diameter="0.2362205" flute-length="1.625" number-of-flutes="1" overall-length="2.5" shaft-diameter="0.2362205" shoulder-diameter="0.2362205" shoulder-length="1.625" thread-pitch="0" thread-profile-angle="60"/>
       <motion clockwise="yes" cutting-feedrate="100" entry-feedrate="100" exit-feedrate="100" feed-mode="per-minute" plunge-feedrate="10" ramp-angle="2" ramp-feedrate="30" ramp-spindle-rpm="14553.126298458" retract-feedrate="0" spindle-rpm="14553.126298458" transition-feedrate="100"/>
       <presets>
-        <preset description="" id="{8aca8271-189f-4c39-beec-e1683a96d7bf}" name="Default preset">
+        <preset description="" id="{f597ad0c-d71d-4343-8690-f7bdeb628ae9}" name="Default preset">
           <parameter key="tool_coolant" value="mist"/>
           <parameter key="tool_spindleSpeed" value="22000"/>
           <parameter key="tool_rampSpindleSpeed" value="22000"/>
@@ -942,7 +942,7 @@
     <parameter expression="false" name="associatedView"/>
   </template>
 
-  <template description="Shape Through Hole" isFallback="0" strategy="adaptive2d" toolPresetId="{8aca8271-189f-4c39-beec-e1683a96d7bf}" unit="inches" version="178">
+  <template description="Shape Through Hole" isFallback="0" strategy="adaptive2d" toolPresetId="{27ca5855-117c-4923-9cab-5c0249ae0a01}" unit="inches" version="178">
     <tool guid="c1f2bb0a-e3fb-4ac1-9423-e379eda3f72f" tool-library-version="36" type="flat end mill" unit="inches" version="1.5">
       <description>971 Main Bit</description>
       <nc break-control="0" diameter-offset="1" length-offset="1" live-tool="1" manual-tool-change="0" number="1" turret="0"/>
@@ -951,7 +951,7 @@
       <body assembly-gauge-length="1.9685" body-length="1.9685" coolant-support="no" diameter="0.1546" flute-length="0.787402" number-of-flutes="1" overall-length="1.9685" shaft-diameter="0.1546" shoulder-diameter="0.1546" shoulder-length="1.1811" thread-pitch="0" thread-profile-angle="60"/>
       <motion clockwise="yes" cutting-feedrate="80" entry-feedrate="50" exit-feedrate="80" feed-mode="per-minute" plunge-feedrate="13.333" ramp-angle="2" ramp-feedrate="20" ramp-spindle-rpm="22000" retract-feedrate="0" spindle-rpm="22000" transition-feedrate="80"/>
       <presets>
-        <preset description="" id="{8aca8271-189f-4c39-beec-e1683a96d7bf}" name="Default preset">
+        <preset description="" id="{27ca5855-117c-4923-9cab-5c0249ae0a01}" name="Default preset">
           <parameter key="tool_coolant" value="mist"/>
           <parameter key="tool_spindleSpeed" value="22000"/>
           <parameter key="tool_rampSpindleSpeed" value="22000"/>
@@ -1254,7 +1254,7 @@
     <parameter expression="false" name="associatedView"/>
   </template>
 
-  <template description="Small Shape Through Hole" isFallback="0" strategy="adaptive2d" toolPresetId="{8aca8271-189f-4c39-beec-e1683a96d7bf}" unit="inches" version="178">
+  <template description="Small Shape Through Hole" isFallback="0" strategy="adaptive2d" toolPresetId="{5ef7d9cb-3072-45cf-8d24-53c722ea90fb}" unit="inches" version="178">
     <tool guid="c1f2bb0a-e3fb-4ac1-9423-e379eda3f72f" tool-library-version="36" type="flat end mill" unit="inches" version="1.5">
       <description>971 Main Bit</description>
       <nc break-control="0" diameter-offset="1" length-offset="1" live-tool="1" manual-tool-change="0" number="1" turret="0"/>
@@ -1263,7 +1263,7 @@
       <body assembly-gauge-length="1.9685" body-length="1.9685" coolant-support="no" diameter="0.1575" flute-length="0.787402" number-of-flutes="1" overall-length="1.9685" shaft-diameter="0.1575" shoulder-diameter="0.1575" shoulder-length="1.1811" thread-pitch="0" thread-profile-angle="60"/>
       <motion clockwise="yes" cutting-feedrate="60" entry-feedrate="60" exit-feedrate="60" feed-mode="per-minute" plunge-feedrate="13.333" ramp-angle="2" ramp-feedrate="13.333" ramp-spindle-rpm="21826.963624031" retract-feedrate="0" spindle-rpm="21826.963624031" transition-feedrate="60"/>
       <presets>
-        <preset description="" id="{8aca8271-189f-4c39-beec-e1683a96d7bf}" name="Default preset">
+        <preset description="" id="{5ef7d9cb-3072-45cf-8d24-53c722ea90fb}" name="Default preset">
           <parameter key="tool_coolant" value="mist"/>
           <parameter key="tool_spindleSpeed" value="21826.963624031363"/>
           <parameter expression="900 ft/min" key="tool_surfaceSpeed"/>
@@ -1567,7 +1567,7 @@
     <parameter expression="false" name="associatedView"/>
   </template>
 
-  <template description="Shape Through Finishing Pass" isFallback="0" strategy="contour2d" toolPresetId="{8aca8271-189f-4c39-beec-e1683a96d7bf}" unit="inches" version="178">
+  <template description="Shape Through Finishing Pass" isFallback="0" strategy="contour2d" toolPresetId="{5e83729b-1a1b-4584-92fa-b358cba62522}" unit="inches" version="178">
     <tool guid="c1f2bb0a-e3fb-4ac1-9423-e379eda3f72f" tool-library-version="36" type="flat end mill" unit="inches" version="1.5">
       <description>971 Main Bit</description>
       <nc break-control="0" diameter-offset="1" length-offset="1" live-tool="1" manual-tool-change="0" number="1" turret="0"/>
@@ -1576,7 +1576,7 @@
       <body assembly-gauge-length="1.9685" body-length="1.9685" coolant-support="no" diameter="0.1575" flute-length="0.787402" number-of-flutes="1" overall-length="1.9685" shaft-diameter="0.1575" shoulder-diameter="0.1575" shoulder-length="1.1811" thread-pitch="0" thread-profile-angle="60"/>
       <motion clockwise="yes" cutting-feedrate="60" entry-feedrate="40" exit-feedrate="60" feed-mode="per-minute" plunge-feedrate="13.333" ramp-angle="2" ramp-feedrate="20" ramp-spindle-rpm="22000" retract-feedrate="0" spindle-rpm="22000" transition-feedrate="60"/>
       <presets>
-        <preset description="" id="{8aca8271-189f-4c39-beec-e1683a96d7bf}" name="Default preset">
+        <preset description="" id="{5e83729b-1a1b-4584-92fa-b358cba62522}" name="Default preset">
           <parameter key="tool_coolant" value="mist"/>
           <parameter key="tool_spindleSpeed" value="22000"/>
           <parameter key="tool_rampSpindleSpeed" value="22000"/>
@@ -1926,7 +1926,7 @@
     <parameter expression="false" name="associatedView"/>
   </template>
 
-  <template description="Shape Pocket" isFallback="0" strategy="adaptive2d" toolPresetId="{8aca8271-189f-4c39-beec-e1683a96d7bf}" unit="inches" version="178">
+  <template description="Shape Pocket" isFallback="0" strategy="adaptive2d" toolPresetId="{42baba61-1524-4f0a-9202-58426cff651f}" unit="inches" version="178">
     <tool guid="c1f2bb0a-e3fb-4ac1-9423-e379eda3f72f" tool-library-version="36" type="flat end mill" unit="inches" version="1.5">
       <description>971 Main Bit</description>
       <nc break-control="0" diameter-offset="1" length-offset="1" live-tool="1" manual-tool-change="0" number="1" turret="0"/>
@@ -1935,7 +1935,7 @@
       <body assembly-gauge-length="1.9685" body-length="1.9685" coolant-support="no" diameter="0.1575" flute-length="0.787402" number-of-flutes="1" overall-length="1.9685" shaft-diameter="0.1575" shoulder-diameter="0.1575" shoulder-length="1.1811" thread-pitch="0" thread-profile-angle="60"/>
       <motion clockwise="yes" cutting-feedrate="80" entry-feedrate="80" exit-feedrate="80" feed-mode="per-minute" plunge-feedrate="13.333" ramp-angle="2" ramp-feedrate="13.333" ramp-spindle-rpm="22000" retract-feedrate="0" spindle-rpm="22000" transition-feedrate="80"/>
       <presets>
-        <preset description="" id="{8aca8271-189f-4c39-beec-e1683a96d7bf}" name="Default preset">
+        <preset description="" id="{42baba61-1524-4f0a-9202-58426cff651f}" name="Default preset">
           <parameter key="tool_coolant" value="mist"/>
           <parameter key="tool_spindleSpeed" value="22000"/>
           <parameter key="tool_rampSpindleSpeed" value="22000"/>
@@ -2238,7 +2238,7 @@
     <parameter expression="false" name="associatedView"/>
   </template>
 
-  <template description="Shape Pocket Finishing Pass" isFallback="0" strategy="contour2d" toolPresetId="{8aca8271-189f-4c39-beec-e1683a96d7bf}" unit="inches" version="178">
+  <template description="Shape Pocket Finishing Pass" isFallback="0" strategy="contour2d" toolPresetId="{f7e1e6e6-9ff0-4786-b65e-cf91f981e135}" unit="inches" version="178">
     <tool guid="c1f2bb0a-e3fb-4ac1-9423-e379eda3f72f" tool-library-version="36" type="flat end mill" unit="inches" version="1.5">
       <description>971 Main Bit</description>
       <nc break-control="0" diameter-offset="1" length-offset="1" live-tool="1" manual-tool-change="0" number="1" turret="0"/>
@@ -2247,7 +2247,7 @@
       <body assembly-gauge-length="1.9685" body-length="1.9685" coolant-support="no" diameter="0.1575" flute-length="0.787402" number-of-flutes="1" overall-length="1.9685" shaft-diameter="0.1575" shoulder-diameter="0.1575" shoulder-length="1.1811" thread-pitch="0" thread-profile-angle="60"/>
       <motion clockwise="yes" cutting-feedrate="60" entry-feedrate="40" exit-feedrate="60" feed-mode="per-minute" plunge-feedrate="13.333" ramp-angle="2" ramp-feedrate="20" ramp-spindle-rpm="22000" retract-feedrate="0" spindle-rpm="22000" transition-feedrate="60"/>
       <presets>
-        <preset description="" id="{8aca8271-189f-4c39-beec-e1683a96d7bf}" name="Default preset">
+        <preset description="" id="{f7e1e6e6-9ff0-4786-b65e-cf91f981e135}" name="Default preset">
           <parameter key="tool_coolant" value="mist"/>
           <parameter key="tool_spindleSpeed" value="22000"/>
           <parameter key="tool_rampSpindleSpeed" value="22000"/>
@@ -2612,7 +2612,7 @@
     <parameter expression="false" name="associatedView"/>
   </template>
 
-  <template description=">.3 Circular Pocket" isFallback="0" strategy="pocket2d" toolPresetId="{8aca8271-189f-4c39-beec-e1683a96d7bf}" unit="inches" version="178">
+  <template description=">.3 Circular Pocket" isFallback="0" strategy="pocket2d" toolPresetId="{645f6a43-9ad4-417c-a877-2dd91fc132b2}" unit="inches" version="178">
     <tool guid="c1f2bb0a-e3fb-4ac1-9423-e379eda3f72f" tool-library-version="36" type="flat end mill" unit="inches" version="1.5">
       <description>971 Main Bit</description>
       <nc break-control="0" diameter-offset="1" length-offset="1" live-tool="1" manual-tool-change="0" number="1" turret="0"/>
@@ -2621,7 +2621,7 @@
       <body assembly-gauge-length="1.9685" body-length="1.9685" coolant-support="no" diameter="0.1575" flute-length="0.787402" number-of-flutes="1" overall-length="1.9685" shaft-diameter="0.1575" shoulder-diameter="0.1575" shoulder-length="1.1811" thread-pitch="0" thread-profile-angle="60"/>
       <motion clockwise="yes" cutting-feedrate="60" entry-feedrate="40" exit-feedrate="60" feed-mode="per-minute" plunge-feedrate="13.333" ramp-angle="2" ramp-feedrate="20" ramp-spindle-rpm="22000" retract-feedrate="0" spindle-rpm="22000" transition-feedrate="60"/>
       <presets>
-        <preset description="" id="{8aca8271-189f-4c39-beec-e1683a96d7bf}" name="Default preset">
+        <preset description="" id="{645f6a43-9ad4-417c-a877-2dd91fc132b2}" name="Default preset">
           <parameter key="tool_coolant" value="mist"/>
           <parameter key="tool_spindleSpeed" value="22000"/>
           <parameter key="tool_rampSpindleSpeed" value="22000"/>
@@ -2950,7 +2950,7 @@
     <parameter expression="false" name="associatedView"/>
   </template>
 
-  <template description="Slot Cut for Features" isFallback="0" strategy="contour2d" toolPresetId="{8aca8271-189f-4c39-beec-e1683a96d7bf}" unit="inches" version="178">
+  <template description="Slot Cut for Features" isFallback="0" strategy="contour2d" toolPresetId="{a43c9470-65b1-4224-bfa0-7e9e668311f0}" unit="inches" version="178">
     <tool guid="c1f2bb0a-e3fb-4ac1-9423-e379eda3f72f" tool-library-version="36" type="flat end mill" unit="inches" version="1.5">
       <description>971 Main Bit</description>
       <nc break-control="0" diameter-offset="1" length-offset="1" live-tool="1" manual-tool-change="0" number="1" turret="0"/>
@@ -2959,7 +2959,7 @@
       <body assembly-gauge-length="1.9685" body-length="1.9685" coolant-support="no" diameter="0.1575" flute-length="0.787402" number-of-flutes="1" overall-length="1.9685" shaft-diameter="0.1575" shoulder-diameter="0.1575" shoulder-length="1.1811" thread-pitch="0" thread-profile-angle="60"/>
       <motion clockwise="yes" cutting-feedrate="70" entry-feedrate="40" exit-feedrate="70" feed-mode="per-minute" plunge-feedrate="13.333" ramp-angle="2" ramp-feedrate="20" ramp-spindle-rpm="22000" retract-feedrate="0" spindle-rpm="22000" transition-feedrate="70"/>
       <presets>
-        <preset description="" id="{8aca8271-189f-4c39-beec-e1683a96d7bf}" name="Default preset">
+        <preset description="" id="{a43c9470-65b1-4224-bfa0-7e9e668311f0}" name="Default preset">
           <parameter key="tool_coolant" value="mist"/>
           <parameter key="tool_spindleSpeed" value="22000"/>
           <parameter key="tool_rampSpindleSpeed" value="22000"/>
@@ -3309,7 +3309,7 @@
     <parameter expression="false" name="associatedView"/>
   </template>
 
-  <template description="Slot Cut for Edges" isFallback="0" strategy="contour2d" toolPresetId="{8aca8271-189f-4c39-beec-e1683a96d7bf}" unit="inches" version="178">
+  <template description="Slot Cut for Edges" isFallback="0" strategy="contour2d" toolPresetId="{e4fe0cc6-b355-40a6-9b94-4b8ddcf31a86}" unit="inches" version="178">
     <tool guid="c1f2bb0a-e3fb-4ac1-9423-e379eda3f72f" tool-library-version="36" type="flat end mill" unit="inches" version="1.5">
       <description>971 Main Bit</description>
       <nc break-control="0" diameter-offset="1" length-offset="1" live-tool="1" manual-tool-change="0" number="1" turret="0"/>
@@ -3318,7 +3318,7 @@
       <body assembly-gauge-length="1.9685" body-length="1.9685" coolant-support="no" diameter="0.1575" flute-length="0.787402" number-of-flutes="1" overall-length="1.9685" shaft-diameter="0.1575" shoulder-diameter="0.1575" shoulder-length="1.1811" thread-pitch="0" thread-profile-angle="60"/>
       <motion clockwise="yes" cutting-feedrate="70" entry-feedrate="40" exit-feedrate="70" feed-mode="per-minute" plunge-feedrate="13.333" ramp-angle="2" ramp-feedrate="20" ramp-spindle-rpm="22000" retract-feedrate="0" spindle-rpm="22000" transition-feedrate="70"/>
       <presets>
-        <preset description="" id="{8aca8271-189f-4c39-beec-e1683a96d7bf}" name="Default preset">
+        <preset description="" id="{e4fe0cc6-b355-40a6-9b94-4b8ddcf31a86}" name="Default preset">
           <parameter key="tool_coolant" value="mist"/>
           <parameter key="tool_spindleSpeed" value="22000"/>
           <parameter key="tool_rampSpindleSpeed" value="22000"/>
