@@ -35,16 +35,22 @@ def _safe_program_name(name, fallback="Program"):
 
 
 def autocam_program_name(file_name, fallback="Program"):
-    """`<Fusion file name>AUTOCAM`, the posted G-code filename operators see.
+    """`<Fusion file name>_cut`, the posted plate G-code filename operators see.
 
-    Direct instruction: posted files are named after the Fusion file name
-    chosen when the job was queued plus the word AUTOCAM, never an internal
-    id. Not doubled when the name already ends in AUTOCAM, and the base is
-    trimmed (not the suffix) so a long name still keeps it under the cap.
+    Direct instruction: a plate program is named after the Fusion file name
+    chosen when the job was queued, suffixed "_cut" with no separator before
+    it, never an internal id. This replaces the older AUTOCAM suffix, and a
+    name that still carries that one is converted rather than left with both
+    spellings. Not doubled, and the base is trimmed (not the suffix) so a
+    long name still keeps it under the cap.
+
+    Tube programs are named separately (see tube_face_program_name) and are
+    not affected.
     """
-    suffix = "AUTOCAM"
+    suffix = "_cut"
     base = _safe_program_name(file_name, fallback)
-    if base.upper().endswith(suffix):
+    base = re.sub(r"AUTOCAM$", "", base, flags=re.IGNORECASE) or fallback
+    if base.lower().endswith(suffix):
         return base
     return f"{base[:60 - len(suffix)]}{suffix}"
 

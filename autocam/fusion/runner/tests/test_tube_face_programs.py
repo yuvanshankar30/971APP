@@ -89,6 +89,36 @@ class TubeFaceProgramTests(unittest.TestCase):
         self.assertLess(bind_index, configure_index)
         self.assertIn("adsk.doEvents()", handler[template_index:configure_index])
 
+    def test_tube_shapes_are_cut_by_the_slot_cut_not_the_shape_through_pair(self):
+        # Direct instruction: 2D Slot Cut cuts a tube's shapes. Clearing
+        # dominates a tube program's cycle time and buys nothing here - the
+        # slug it grinds away just falls into the hollow tube once the
+        # profile is cut through. The slot cut has to bind the shapes, or
+        # they stop being cut at all.
+        handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
+        shape_branch = handler.index(
+            'elif "shape" in name and operation.strategy in ("adaptive2d", "pocket2d", "contour2d"):'
+        )
+        slot_branch = handler.index('elif "slot" in name and operation.strategy == "contour2d":')
+        self.assertLess(shape_branch, slot_branch)
+        # Every Shape Through operation is dropped, roughing and finishing.
+        self.assertIn("keep = False", handler[shape_branch:slot_branch])
+        self.assertNotIn('_apply_chains(operation, "pockets", shapes)', handler)
+        # ...and the slot cut is what actually gets the geometry.
+        self.assertIn('keep = _apply_chains(operation, "contours", shapes)', handler[slot_branch:])
+
+    def test_tube_shape_chains_come_from_the_material_bottom_face(self):
+        # Fusion traces the real breakout contour on the wall's inner face;
+        # selecting the exterior loop cuts from the wrong side. The shapes
+        # the slot cut binds are derived from that same selection_face.
+        handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
+        self.assertIn("loops = _loop_specs(selection_face)", handler)
+        self.assertIn("shapes = [loop for loop in loops if not loop[\"circular\"]]", handler)
+        # selection_face is the paired INNER wall, not the exterior one.
+        self.assertIn("selection_face_by_exterior[_face_id(exterior_near)] = inner_near", handler)
+        self.assertIn("selection_face_by_exterior[_face_id(exterior_far)] = inner_far", handler)
+        self.assertIn("selection_face_by_exterior.get(_face_id(face), face)", handler)
+
     def test_tube_routes_all_circular_holes_through_bore_faces(self):
         handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
         self.assertIn('"holeDiameterMaximum", "100 in"', handler)
@@ -150,10 +180,14 @@ class TubeFaceProgramTests(unittest.TestCase):
             self.assertEqual(parameters["bothWays"], "false")
             self.assertEqual(parameters["otherWayFeedrate"], "tool_feedCutting")
 
-    def test_tube_closed_non_circular_features_use_shape_through_not_slot_cut(self):
+    def test_tube_closed_non_circular_features_go_to_one_operation_not_a_width_rule(self):
+        # Every non-circular loop is one closed through feature and they all
+        # go to the same operation - now 2D Slot Cut (see
+        # test_tube_shapes_are_cut_by_the_slot_cut_not_the_shape_through_pair),
+        # previously the Shape Through pair. What must not come back is
+        # splitting them by aspect ratio into "slot-like" and "shape-like".
         handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
         self.assertIn('shapes = [loop for loop in loops if not loop["circular"]]', handler)
-        self.assertIn('elif "slot" in name and operation.strategy == "contour2d":\n            keep = False', handler)
         self.assertNotIn("_SLOT_ASPECT_RATIO", handler)
 
     def test_tube_operations_reference_stock_under_the_active_face(self):

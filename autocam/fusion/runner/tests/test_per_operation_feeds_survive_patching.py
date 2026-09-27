@@ -16,7 +16,6 @@ material-specific named preset still does, since it encodes something the
 template cannot know.
 """
 
-import copy
 import importlib.util
 import json
 import tempfile
@@ -133,28 +132,23 @@ class PerOperationFeedsSurvivePatchingTests(unittest.TestCase):
         self.assertEqual(finishing["tool_feedCutting"], "20.in/min")
         self.assertEqual(finishing["tool_spindleSpeed"], "13000.")
 
-    def test_a_material_specific_preset_still_overrides_the_template(self):
-        # The documented reason this overwrite existed at all: a real Lexan
-        # job posted the template's hardcoded speeds instead of the reviewed
-        # Lexan preset. A named material preset must still win.
-        library = copy.deepcopy(_load_library_tools())
-        patched_any = False
-        for tool in library.get("data", []):
-            presets = tool.get("start-values", {}).get("presets", [])
-            if not presets:
-                continue
-            lexan = copy.deepcopy(presets[0])
-            lexan["name"] = "Polycarbonate (Lexan)"
-            lexan.update({"n": 12000, "n_ramp": 12000, "v_f": 30, "v_f_ramp": 10})
-            presets.append(lexan)
-            patched_any = True
-        self.assertTrue(patched_any)
+    def test_no_material_preset_overrides_a_template_that_has_its_own_feeds(self):
+        # Direct instruction: the shop cuts Lexan plate on the aluminum
+        # numbers the 971-real templates are already authored in, so no
+        # material gets to collapse their per-operation feeds. The Lexan
+        # preset in this library is a genuinely different 12000 rpm / 96
+        # in/min and still must not reach these operations.
+        root = _patch(
+            _load_library_tools(_TUBE_LIBRARY_PATH),
+            material_name="Polycarbonate (Lexan)",
+        )
 
-        root = _patch(library, material_name="Polycarbonate (Lexan)")
         bore = _feeds(_operation(root, "<.3 Circluar Through Hole"))
+        finishing = _feeds(_operation(root, "Shape Through Finishing Pass"))
 
-        self.assertEqual(bore["tool_feedCutting"], "30in/min")
-        self.assertEqual(bore["tool_spindleSpeed"], "12000")
+        self.assertEqual(bore["tool_feedCutting"], "40.in/min")
+        self.assertEqual(bore["tool_spindleSpeed"], "22000.")
+        self.assertEqual(finishing["tool_feedCutting"], "20.in/min")
 
     def test_a_template_without_its_own_feeds_still_takes_them_from_the_preset(self):
         # The minimal generic templates (Plates, Bore) carry no feed

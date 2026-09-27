@@ -47,20 +47,29 @@ class SafeProgramNameTests(unittest.TestCase):
 
 
 class AutocamProgramNameTests(unittest.TestCase):
-    def test_is_the_fusion_file_name_plus_autocam(self):
-        self.assertEqual(autocam_program_name("pivot gearbox plate 2"), "pivotgearboxplate2AUTOCAM")
+    def test_is_the_fusion_file_name_plus_cut(self):
+        self.assertEqual(autocam_program_name("pivot gearbox plate 2"), "pivotgearboxplate2_cut")
+
+    def test_the_suffix_has_no_separator_before_it(self):
+        self.assertTrue(autocam_program_name("main plate").endswith("e_cut"))
+
+    def test_converts_the_old_autocam_suffix_rather_than_keeping_both(self):
+        self.assertEqual(autocam_program_name("pivotgearboxplate2AUTOCAM"), "pivotgearboxplate2_cut")
+        self.assertEqual(autocam_program_name("MainPlate2autocam"), "MainPlate2_cut")
 
     def test_does_not_double_the_suffix(self):
-        self.assertEqual(autocam_program_name("pivotgearboxplate2AUTOCAM"), "pivotgearboxplate2AUTOCAM")
-        self.assertEqual(autocam_program_name("MainPlate2autocam"), "MainPlate2autocam")
+        self.assertEqual(autocam_program_name("pivotgearboxplate2_cut"), "pivotgearboxplate2_cut")
 
     def test_long_names_keep_the_suffix(self):
         result = autocam_program_name("x" * 200)
         self.assertEqual(len(result), 60)
-        self.assertTrue(result.endswith("AUTOCAM"))
+        self.assertTrue(result.endswith("_cut"))
 
     def test_never_returns_an_internal_id_shape(self):
-        self.assertEqual(autocam_program_name(""), "ProgramAUTOCAM")
+        self.assertEqual(autocam_program_name(""), "Program_cut")
+
+    def test_a_name_that_was_only_the_old_suffix_still_gets_a_readable_base(self):
+        self.assertEqual(autocam_program_name("AUTOCAM"), "Program_cut")
 
 
 class PlateExportUsesTheFusionFileName(unittest.TestCase):

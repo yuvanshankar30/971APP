@@ -448,12 +448,22 @@ def _apply_open_chain(operation, parameter_name, edge, is_reverted):
 def _configure_face_operations(setup, selection_face, wall_thickness_in, cutoff_chain):
     """Rebind operations to the active wall's material-bottom loops only."""
     loops = _loop_specs(selection_face)
-    # Every non-circular tube loop is a closed through feature. Even a long,
-    # narrow cutout needs the Shape Through clearing strategy; 2D Slot Cut
-    # follows a centerline-style path and machines those closed profiles
-    # incorrectly on tube walls.
+    # Every non-circular tube loop is a closed through feature, cut as a
+    # profile by 2D Slot Cut below - the slug drops into the hollow tube.
+    #
+    # Direct instruction: tubes do NOT get the Shape Through pair (the
+    # adaptive clearing pass or its contour finishing pass). Clearing grinds
+    # away the entire inside of the shape, which dominates a tube program's
+    # cycle time, and on a tube it buys nothing - the material it removes is
+    # a slug with nowhere to go but inside the tube, which is where it falls
+    # anyway once the profile is cut through. Plates still rough, since
+    # there the slug sits on the bed.
+    #
+    # These loops come from selection_face, which _ordered_wall_faces has
+    # already resolved to the wall's INNER face - the material bottom, where
+    # Fusion traces the real breakout contour (see _wall_face_families).
+    # Selecting the exterior loop instead cuts from the wrong side.
     shapes = [loop for loop in loops if not loop["circular"]]
-    have_shape_roughing = False
     circular_loops = [loop for loop in loops if loop["circular"] and loop["circular_faces"]]
     # Bore's face selector defines a hole feature, not every repeated hole
     # instance. Passing all 141 tube holes made Fusion create an enormous
@@ -503,15 +513,16 @@ def _configure_face_operations(setup, selection_face, wall_thickness_in, cutoff_
             # which selects cylindrical walls directly and produces the
             # correct face-scoped result.
             keep = False
-        elif "shape" in name and "through" in name and operation.strategy in ("adaptive2d", "pocket2d"):
-            # The current template has regular and Small roughing siblings.
-            # Do not cut every profile twice: use the first applicable one.
-            keep = bool(shapes) and not have_shape_roughing and _apply_chains(operation, "pockets", shapes)
-            have_shape_roughing = have_shape_roughing or keep
-        elif "shape" in name and operation.strategy == "contour2d":
-            keep = _apply_chains(operation, "contours", shapes)
-        elif "slot" in name and operation.strategy == "contour2d":
+        elif "shape" in name and operation.strategy in ("adaptive2d", "pocket2d", "contour2d"):
+            # The whole Shape Through pair is dropped on tubes - clearing
+            # pass and finishing pass alike. 2D Slot Cut below cuts these
+            # same profiles instead. See the shapes list above.
             keep = False
+        elif "slot" in name and operation.strategy == "contour2d":
+            # Direct instruction: 2D Slot Cut is the tube's shape-cutting
+            # operation. Its chains are the material-bottom loops, same as
+            # every other operation on this face.
+            keep = _apply_chains(operation, "contours", shapes)
         if keep:
             _set_face_stock_heights(operation, wall_thickness_in, clearance_in)
         else:

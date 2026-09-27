@@ -813,7 +813,19 @@ export function extractTubeFeaturesFromMeshes(meshes) {
   };
   const axes = ['x', 'y', 'z'];
   const lengthAxis = axes.reduce((a, b) => (spans[b] > spans[a] ? b : a));
-  const [axisA, axisB] = axes.filter((a) => a !== lengthAxis);
+  // Ordered by span, smaller first, so the tube's WIDE walls always come out
+  // as sides 12 and 6 and the narrow ones as 3 and 9 - the numbers the
+  // operator writes on the tube (direct instruction; see tubestock.js's
+  // tubestockFaceClock). The "A" walls below become angleDeg 0/180, which is
+  // clocks 12/6, and they take their width from spans[axisB] - so putting the
+  // LARGER span on axisB is what lands the wide faces there. Ordering this
+  // pair as plain x/y/z instead made the assignment depend on nothing but how
+  // the part happened to be modeled, which is how a 2x1 tube ended up
+  // labelling its 1" walls as the 12/6 faces. A square tube is unaffected
+  // (equal spans keep their existing x/y/z order - sort is stable).
+  const [axisA, axisB] = axes
+    .filter((a) => a !== lengthAxis)
+    .sort((first, second) => spans[first] - spans[second]);
   const li = AXIS_INDEX[lengthAxis], ai = AXIS_INDEX[axisA], bi = AXIS_INDEX[axisB];
   const lengthMinByAxis = { x: bbox.minX, y: bbox.minY, z: bbox.minZ };
   const tubeLength = spans[lengthAxis];
