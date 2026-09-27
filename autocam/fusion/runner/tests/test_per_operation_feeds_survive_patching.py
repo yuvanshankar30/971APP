@@ -33,6 +33,11 @@ spec.loader.exec_module(template_tools)
 
 _TEMPLATE_PATH = ROOT / "templates/971-real/Tubestock(with Cutter Comp).f3dhsm-template"
 _LIBRARY_PATH = ROOT / "tools/Normal router tools (use this).tools"
+# The library the plain "971 Main Bit" (the tube jobs' cutter) actually
+# resolves to - it names its presets after materials instead of shipping a
+# generic "Default preset", which is why tube jobs stayed broken after
+# plate jobs were fixed.
+_TUBE_LIBRARY_PATH = ROOT / "tools/971-outside-plate.tools"
 _NS = {"x": "http://www.hsmworks.com/namespace/hsmworks/document/template"}
 
 # The single preset the 971 Main Bit actually ships with, and the exact
@@ -41,8 +46,8 @@ _TOOL_WIDE_CUTTING_FEED = "80in/min"
 _TOOL_WIDE_RAMP_FEED = "20in/min"
 
 
-def _load_library_tools():
-    with zipfile.ZipFile(_LIBRARY_PATH) as archive:
+def _load_library_tools(path=_LIBRARY_PATH):
+    with zipfile.ZipFile(path) as archive:
         return json.loads(archive.read("tools.json"))
 
 
@@ -112,6 +117,21 @@ class PerOperationFeedsSurvivePatchingTests(unittest.TestCase):
 
         self.assertEqual(motion.get("cutting-feedrate"), "40")
         self.assertEqual(motion.get("ramp-feedrate"), "40")
+
+    def test_an_aluminum_preset_does_not_override_the_template_either(self):
+        # Real, confirmed: plate jobs came right while tube jobs kept
+        # posting 80 in/min everywhere, because the tube cutter's library
+        # names its presets after materials - "Aluminum 6061" at exactly
+        # the same tool-wide 22000 rpm / 80 in/min the other library calls
+        # "Default preset". Tube jobs only ever run aluminum.
+        root = _patch(_load_library_tools(_TUBE_LIBRARY_PATH))
+
+        bore = _feeds(_operation(root, "<.3 Circluar Through Hole"))
+        finishing = _feeds(_operation(root, "Shape Through Finishing Pass"))
+
+        self.assertEqual(bore["tool_feedCutting"], "40.in/min")
+        self.assertEqual(finishing["tool_feedCutting"], "20.in/min")
+        self.assertEqual(finishing["tool_spindleSpeed"], "13000.")
 
     def test_a_material_specific_preset_still_overrides_the_template(self):
         # The documented reason this overwrite existed at all: a real Lexan

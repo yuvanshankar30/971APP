@@ -305,9 +305,25 @@ def _choose_preset(tool: dict, material_name: Optional[str]) -> Optional[dict]:
     )
 
 
-def _is_generic_default_preset(preset: dict) -> bool:
-    """Whether this is a tool's material-agnostic fallback preset."""
-    return _normalize_desc(str(preset.get("name") or "")) == "default preset"
+def _is_tool_wide_baseline_preset(preset: dict) -> bool:
+    """Whether this preset holds nothing a 971-real template doesn't already have.
+
+    A tool's generic "Default preset" qualifies - it is a tool-wide
+    fallback with no material of its own. So does an aluminum preset: tube
+    jobs only ever run aluminum, the 971-real templates are authored for
+    it, and the two libraries already agree on the numbers - the 971 Main
+    Bit's "Default preset" and its "Aluminum 6061" preset are both 22000
+    rpm / 80 in/min. Naming that same tool-wide value after a material
+    doesn't make it a per-operation decision, and letting it win is what
+    left tube jobs posting one feed for every operation after plate jobs
+    were already fixed.
+    """
+    name = _normalize_desc(str(preset.get("name") or ""))
+    if name == "default preset":
+        return True
+    # Same token set _material_aliases uses, and deliberately not a bare
+    # "al" substring - that false-matches "Delrin (Acetal)".
+    return any(token in name for token in ("aluminum", "aluminium", "6061"))
 
 
 def _has_reviewed_preset(tool: dict, material_name: Optional[str]) -> bool:
@@ -789,12 +805,13 @@ def _apply_tool_to_elem(
     # them - posted the 971 Main Bit's single "Default preset" (22000 rpm,
     # 80 in/min cutting) instead of each operation's own shop-set feed, even
     # though the template on disk held the right per-operation values.
-    # A generic "Default preset" is a tool-wide fallback, not a per-operation
-    # decision, so it no longer outranks a template exported with its own
-    # reviewed feeds. A material-specific named preset still wins: it encodes
-    # what the template cannot know (see _choose_preset), and a real Lexan
-    # job was already mis-posted once by a preset that never reached G-code.
-    preserve_template_feeds = _is_generic_default_preset(
+    # A tool-wide preset is not a per-operation decision, so it no longer
+    # outranks a template exported with its own reviewed feeds (see
+    # _is_tool_wide_baseline_preset). A preset for a material the templates
+    # were NOT authored for still wins: it encodes what the template cannot
+    # know (see _choose_preset), and a real Lexan job was already mis-posted
+    # once by a preset that never reached G-code.
+    preserve_template_feeds = _is_tool_wide_baseline_preset(
         preset
     ) and _template_carries_own_feeds(template_elem)
 
