@@ -2938,18 +2938,18 @@
       <coolant mode="mist"/>
       <material name="hss"/>
       <body assembly-gauge-length="1.9685" body-length="1.9685" coolant-support="no" diameter="0.1555" flute-length="0.787402" number-of-flutes="1" overall-length="1.9685" shaft-diameter="0.1555" shoulder-diameter="0.1555" shoulder-length="1.1811" thread-pitch="0" thread-profile-angle="60"/>
-      <motion clockwise="yes" cutting-feedrate="20" entry-feedrate="20" exit-feedrate="20" feed-mode="per-minute" plunge-feedrate="13.333" ramp-angle="2" ramp-feedrate="13.333" ramp-spindle-rpm="13000" retract-feedrate="0" spindle-rpm="13000" transition-feedrate="20"/>
+      <motion clockwise="yes" cutting-feedrate="80" entry-feedrate="80" exit-feedrate="80" feed-mode="per-minute" plunge-feedrate="13.333" ramp-angle="2" ramp-feedrate="20" ramp-spindle-rpm="22000" retract-feedrate="0" spindle-rpm="22000" transition-feedrate="80"/>
       <presets>
         <preset description="" id="{8aca8271-189f-4c39-beec-e1683a96d7bf}" name="Default preset">
           <parameter key="tool_coolant" value="mist"/>
-          <parameter key="tool_spindleSpeed" value="13000"/>
-          <parameter key="tool_rampSpindleSpeed" value="13000"/>
-          <parameter key="tool_feedCutting" value="508"/>
-          <parameter key="tool_feedEntry" value="508"/>
-          <parameter key="tool_feedExit" value="508"/>
+          <parameter key="tool_spindleSpeed" value="22000"/>
+          <parameter key="tool_rampSpindleSpeed" value="22000"/>
+          <parameter key="tool_feedCutting" value="2032"/>
+          <parameter key="tool_feedEntry" value="2032"/>
+          <parameter key="tool_feedExit" value="2032"/>
           <parameter key="tool_feedPlunge" value="338.65819999999923"/>
-          <parameter key="tool_feedTransition" value="508"/>
-          <parameter key="tool_feedRamp" value="338.65819999999923"/>
+          <parameter key="tool_feedTransition" value="2032"/>
+          <parameter key="tool_feedRamp" value="508"/>
           <parameter key="tool_presetMaterialCategory" value="all"/>
           <parameter key="tool_presetMaterialQuery" value=""/>
           <parameter key="tool_rampAngle" value="2"/>
@@ -3037,16 +3037,16 @@
     <parameter expression="true" name="group_feedspeed"/>
     <parameter expression="false" name="sandvik_get_cutting_data"/>
     <parameter expression="false" name="preset_select"/>
-    <parameter expression="13000." name="tool_spindleSpeed"/>
+    <parameter expression="22000." name="tool_spindleSpeed"/>
     <parameter expression="tool_isTurning ? (tool_unit == 'millimeters' ? 25mm : 1.0in) : tool_diameter" name="tool_stockDiameter"/>
     <parameter expression="tool_diameter * Math.PI * tool_spindleSpeed" name="tool_surfaceSpeed"/>
     <parameter expression="tool_spindleSpeed" name="tool_rampSpindleSpeed"/>
-    <parameter expression="20.in/min" name="tool_feedCutting"/>
+    <parameter expression="80.in/min" name="tool_feedCutting"/>
     <parameter expression="tool_spindleSpeed > 0 ? tool_feedCutting/(tool_spindleSpeed * tool_numberOfFlutes) : 0.0" name="tool_feedPerTooth"/>
     <parameter expression="tool_type == 'probe' || tool_isDepositing ? 40inpm:tool_feedCutting" name="tool_feedEntry"/>
     <parameter expression="tool_isDepositing ? 40inpm : tool_feedCutting" name="tool_feedExit"/>
     <parameter expression="tool_feedCutting" name="tool_feedTransition"/>
-    <parameter expression="tool_feedPlunge" name="tool_feedRamp"/>
+    <parameter expression="20.in/min" name="tool_feedRamp"/>
     <parameter expression="13.33299999999997in/min" name="tool_feedPlunge"/>
     <parameter expression="tool_spindleSpeed > 0 ? tool_feedPlunge/tool_spindleSpeed : 0.0" name="tool_feedPerRevolution"/>
     <parameter expression="tool_feedPlunge" name="tool_feedRetract"/>
