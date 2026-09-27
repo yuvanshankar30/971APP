@@ -641,9 +641,8 @@
       <presets>
         <preset description="" id="{8aca8271-189f-4c39-beec-e1683a96d7bf}" name="Default preset">
           <parameter key="tool_coolant" value="mist"/>
-          <parameter key="tool_spindleSpeed" value="14553.126298458175"/>
-          <parameter expression="900 ft/min" key="tool_surfaceSpeed"/>
-          <parameter key="tool_rampSpindleSpeed" value="14553.126298458175"/>
+          <parameter key="tool_spindleSpeed" value="22000"/>
+          <parameter key="tool_rampSpindleSpeed" value="22000"/>
           <parameter expression="100 in/min" key="tool_feedCutting" value="2540"/>
           <parameter key="tool_feedEntry" value="2540"/>
           <parameter key="tool_feedExit" value="2540"/>
@@ -722,7 +721,7 @@
     <parameter expression="''" name="holder_libraryName"/>
     <parameter expression="0.0in" name="tool_holderGaugeLength"/>
     <parameter expression="1.625in" name="tool_assemblyGaugeLength"/>
-    <parameter expression="14553.12629845817537" name="tool_spindleSpeed"/>
+    <parameter expression="22000." name="tool_spindleSpeed"/>
     <parameter expression="tool_isTurning ? (tool_unit == 'millimeters' ? 25mm : 1.0in) : tool_diameter" name="tool_stockDiameter"/>
     <parameter expression="tool_diameter * Math.PI * tool_spindleSpeed" name="tool_surfaceSpeed"/>
     <parameter expression="tool_spindleSpeed" name="tool_rampSpindleSpeed"/>
