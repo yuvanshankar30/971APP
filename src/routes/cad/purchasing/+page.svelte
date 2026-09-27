@@ -2441,4 +2441,75 @@
     }
   }
 
+  /* Keep the actual table on laptop-sized screens.  It is more useful there
+     than a tall card list; compact type, padding, and form controls let all
+     columns fit.  Cards remain the fallback below 700px. */
+  @container purchasing-table (min-width: 700px) and (max-width: 1300px) {
+    .table-container {
+      overflow: visible;
+      background: var(--surface-1);
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow-sm);
+    }
+    .table-container .table {
+      display: table;
+      table-layout: fixed;
+      font-size: 0.64rem;
+      border-collapse: collapse;
+    }
+    .table-container .table thead { display: table-header-group; }
+    .table-container .table tbody { display: table-row-group; }
+    .table-container .table tr {
+      display: table-row;
+      padding: 0;
+      border: 0;
+      border-radius: 0;
+      box-shadow: none;
+    }
+    .table-container .table th,
+    .table-container .table td {
+      display: table-cell;
+      width: auto;
+      min-height: 0;
+      padding: 0.3rem 0.25rem;
+      font-size: inherit;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      border-bottom: 1px solid var(--border);
+    }
+    .table-container .table td::before { display: none; }
+    .table-container .table td.part-name {
+      display: table-cell;
+      max-width: 7.5rem;
+      padding: 0.3rem 0.25rem;
+      font-size: inherit;
+      font-weight: 600;
+      border-bottom: 1px solid var(--border);
+    }
+    .table-container .table td.part-name .name-cell { max-width: 100%; }
+    .table-container .table .status-select {
+      min-width: 0;
+      width: 4.75rem;
+      font-size: inherit;
+      padding: 0.25rem 1.25rem 0.25rem 0.3rem !important;
+    }
+    .table-container .table .kit-input {
+      min-width: 0;
+      width: 4.75rem;
+      font-size: inherit;
+      padding: 0.25rem;
+    }
+    .table-container .table .price-input { width: 3.6rem; font-size: inherit; }
+    .table-container .table .btn { min-height: 1.75rem; padding: 0.2rem 0.35rem; font-size: inherit; }
+    .table-container .table .date-value,
+    .table-container .table .approver-name { font-size: inherit; }
+    .table-container .table td.selection-cell {
+      position: static;
+      display: table-cell;
+      width: 1.5rem;
+      padding: 0.3rem 0.25rem;
+    }
+  }
+
 </style>
