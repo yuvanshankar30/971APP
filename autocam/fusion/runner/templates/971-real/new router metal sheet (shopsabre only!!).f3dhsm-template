@@ -18,8 +18,8 @@
       <presets>
         <preset description="" id="{8aca8271-189f-4c39-beec-e1683a96d7bf}" name="Default preset">
           <parameter key="tool_coolant" value="mist"/>
-          <parameter key="tool_spindleSpeed" value="13000"/>
-          <parameter key="tool_rampSpindleSpeed" value="13000"/>
+          <parameter key="tool_spindleSpeed" value="22000"/>
+          <parameter key="tool_rampSpindleSpeed" value="22000"/>
           <parameter expression="60 in/min" key="tool_feedCutting" value="1524"/>
           <parameter key="tool_feedEntry" value="1524"/>
           <parameter key="tool_feedExit" value="1524"/>
@@ -641,9 +641,8 @@
       <presets>
         <preset description="" id="{8aca8271-189f-4c39-beec-e1683a96d7bf}" name="Default preset">
           <parameter key="tool_coolant" value="mist"/>
-          <parameter key="tool_spindleSpeed" value="14553.126298458175"/>
-          <parameter expression="900 ft/min" key="tool_surfaceSpeed"/>
-          <parameter key="tool_rampSpindleSpeed" value="14553.126298458175"/>
+          <parameter key="tool_spindleSpeed" value="22000"/>
+          <parameter key="tool_rampSpindleSpeed" value="22000"/>
           <parameter expression="100 in/min" key="tool_feedCutting" value="2540"/>
           <parameter key="tool_feedEntry" value="2540"/>
           <parameter key="tool_feedExit" value="2540"/>
@@ -722,7 +721,7 @@
     <parameter expression="''" name="holder_libraryName"/>
     <parameter expression="0.0in" name="tool_holderGaugeLength"/>
     <parameter expression="1.625in" name="tool_assemblyGaugeLength"/>
-    <parameter expression="14553.12629845817537" name="tool_spindleSpeed"/>
+    <parameter expression="22000." name="tool_spindleSpeed"/>
     <parameter expression="tool_isTurning ? (tool_unit == 'millimeters' ? 25mm : 1.0in) : tool_diameter" name="tool_stockDiameter"/>
     <parameter expression="tool_diameter * Math.PI * tool_spindleSpeed" name="tool_surfaceSpeed"/>
     <parameter expression="tool_spindleSpeed" name="tool_rampSpindleSpeed"/>
@@ -954,14 +953,14 @@
       <presets>
         <preset description="" id="{8aca8271-189f-4c39-beec-e1683a96d7bf}" name="Default preset">
           <parameter key="tool_coolant" value="mist"/>
-          <parameter key="tool_spindleSpeed" value="13000"/>
-          <parameter key="tool_rampSpindleSpeed" value="13000"/>
-          <parameter key="tool_feedCutting" value="508"/>
-          <parameter key="tool_feedEntry" value="508"/>
-          <parameter key="tool_feedExit" value="508"/>
+          <parameter key="tool_spindleSpeed" value="22000"/>
+          <parameter key="tool_rampSpindleSpeed" value="22000"/>
+          <parameter key="tool_feedCutting" value="2032"/>
+          <parameter key="tool_feedEntry" value="1270"/>
+          <parameter key="tool_feedExit" value="2032"/>
           <parameter key="tool_feedPlunge" value="338.65819999999923"/>
-          <parameter key="tool_feedTransition" value="508"/>
-          <parameter key="tool_feedRamp" value="338.65819999999923"/>
+          <parameter key="tool_feedTransition" value="2032"/>
+          <parameter key="tool_feedRamp" value="508"/>
           <parameter key="tool_presetMaterialCategory" value="all"/>
           <parameter key="tool_presetMaterialQuery" value=""/>
           <parameter key="tool_rampAngle" value="2"/>
@@ -1266,8 +1265,9 @@
       <presets>
         <preset description="" id="{8aca8271-189f-4c39-beec-e1683a96d7bf}" name="Default preset">
           <parameter key="tool_coolant" value="mist"/>
-          <parameter key="tool_spindleSpeed" value="13000"/>
-          <parameter key="tool_rampSpindleSpeed" value="13000"/>
+          <parameter key="tool_spindleSpeed" value="21826.963624031363"/>
+          <parameter expression="900 ft/min" key="tool_surfaceSpeed"/>
+          <parameter key="tool_rampSpindleSpeed" value="21826.963624031363"/>
           <parameter expression="60 in/min" key="tool_feedCutting" value="1524"/>
           <parameter key="tool_feedEntry" value="1524"/>
           <parameter key="tool_feedExit" value="1524"/>
@@ -1578,14 +1578,14 @@
       <presets>
         <preset description="" id="{8aca8271-189f-4c39-beec-e1683a96d7bf}" name="Default preset">
           <parameter key="tool_coolant" value="mist"/>
-          <parameter key="tool_spindleSpeed" value="13000"/>
-          <parameter key="tool_rampSpindleSpeed" value="13000"/>
+          <parameter key="tool_spindleSpeed" value="22000"/>
+          <parameter key="tool_rampSpindleSpeed" value="22000"/>
           <parameter expression="60 in/min" key="tool_feedCutting" value="1524"/>
-          <parameter key="tool_feedEntry" value="1524"/>
+          <parameter key="tool_feedEntry" value="1016"/>
           <parameter key="tool_feedExit" value="1524"/>
           <parameter key="tool_feedPlunge" value="338.65819999999928"/>
           <parameter key="tool_feedTransition" value="1524"/>
-          <parameter key="tool_feedRamp" value="338.65819999999928"/>
+          <parameter key="tool_feedRamp" value="508"/>
           <parameter key="tool_presetMaterialCategory" value="all"/>
           <parameter key="tool_presetMaterialQuery" value=""/>
           <parameter key="tool_rampAngle" value="2"/>
@@ -1937,13 +1937,13 @@
       <presets>
         <preset description="" id="{8aca8271-189f-4c39-beec-e1683a96d7bf}" name="Default preset">
           <parameter key="tool_coolant" value="mist"/>
-          <parameter key="tool_spindleSpeed" value="13000"/>
-          <parameter key="tool_rampSpindleSpeed" value="13000"/>
-          <parameter expression="60 in/min" key="tool_feedCutting" value="1524"/>
-          <parameter key="tool_feedEntry" value="1524"/>
-          <parameter key="tool_feedExit" value="1524"/>
+          <parameter key="tool_spindleSpeed" value="22000"/>
+          <parameter key="tool_rampSpindleSpeed" value="22000"/>
+          <parameter expression="80 in/min" key="tool_feedCutting" value="2032"/>
+          <parameter key="tool_feedEntry" value="2032"/>
+          <parameter key="tool_feedExit" value="2032"/>
           <parameter key="tool_feedPlunge" value="338.65819999999928"/>
-          <parameter key="tool_feedTransition" value="1524"/>
+          <parameter key="tool_feedTransition" value="2032"/>
           <parameter key="tool_feedRamp" value="338.65819999999928"/>
           <parameter key="tool_presetMaterialCategory" value="all"/>
           <parameter key="tool_presetMaterialQuery" value=""/>
@@ -2249,14 +2249,14 @@
       <presets>
         <preset description="" id="{8aca8271-189f-4c39-beec-e1683a96d7bf}" name="Default preset">
           <parameter key="tool_coolant" value="mist"/>
-          <parameter key="tool_spindleSpeed" value="13000"/>
-          <parameter key="tool_rampSpindleSpeed" value="13000"/>
+          <parameter key="tool_spindleSpeed" value="22000"/>
+          <parameter key="tool_rampSpindleSpeed" value="22000"/>
           <parameter expression="60 in/min" key="tool_feedCutting" value="1524"/>
-          <parameter key="tool_feedEntry" value="1524"/>
+          <parameter key="tool_feedEntry" value="1016"/>
           <parameter key="tool_feedExit" value="1524"/>
           <parameter key="tool_feedPlunge" value="338.65819999999928"/>
           <parameter key="tool_feedTransition" value="1524"/>
-          <parameter key="tool_feedRamp" value="338.65819999999928"/>
+          <parameter key="tool_feedRamp" value="508"/>
           <parameter key="tool_presetMaterialCategory" value="all"/>
           <parameter key="tool_presetMaterialQuery" value=""/>
           <parameter key="tool_rampAngle" value="2"/>
@@ -2623,14 +2623,14 @@
       <presets>
         <preset description="" id="{8aca8271-189f-4c39-beec-e1683a96d7bf}" name="Default preset">
           <parameter key="tool_coolant" value="mist"/>
-          <parameter key="tool_spindleSpeed" value="13000"/>
-          <parameter key="tool_rampSpindleSpeed" value="13000"/>
+          <parameter key="tool_spindleSpeed" value="22000"/>
+          <parameter key="tool_rampSpindleSpeed" value="22000"/>
           <parameter expression="60 in/min" key="tool_feedCutting" value="1524"/>
-          <parameter key="tool_feedEntry" value="1524"/>
+          <parameter key="tool_feedEntry" value="1016"/>
           <parameter key="tool_feedExit" value="1524"/>
           <parameter key="tool_feedPlunge" value="338.65819999999928"/>
           <parameter key="tool_feedTransition" value="1524"/>
-          <parameter key="tool_feedRamp" value="338.65819999999928"/>
+          <parameter key="tool_feedRamp" value="508"/>
           <parameter key="tool_presetMaterialCategory" value="all"/>
           <parameter key="tool_presetMaterialQuery" value=""/>
           <parameter key="tool_rampAngle" value="2"/>
@@ -2961,14 +2961,14 @@
       <presets>
         <preset description="" id="{8aca8271-189f-4c39-beec-e1683a96d7bf}" name="Default preset">
           <parameter key="tool_coolant" value="mist"/>
-          <parameter key="tool_spindleSpeed" value="13000"/>
-          <parameter key="tool_rampSpindleSpeed" value="13000"/>
-          <parameter expression="60 in/min" key="tool_feedCutting" value="1524"/>
-          <parameter key="tool_feedEntry" value="1524"/>
-          <parameter key="tool_feedExit" value="1524"/>
+          <parameter key="tool_spindleSpeed" value="22000"/>
+          <parameter key="tool_rampSpindleSpeed" value="22000"/>
+          <parameter expression="70 in/min" key="tool_feedCutting" value="1778"/>
+          <parameter key="tool_feedEntry" value="1016"/>
+          <parameter key="tool_feedExit" value="1778"/>
           <parameter key="tool_feedPlunge" value="338.65819999999928"/>
-          <parameter key="tool_feedTransition" value="1524"/>
-          <parameter key="tool_feedRamp" value="338.65819999999928"/>
+          <parameter key="tool_feedTransition" value="1778"/>
+          <parameter key="tool_feedRamp" value="508"/>
           <parameter key="tool_presetMaterialCategory" value="all"/>
           <parameter key="tool_presetMaterialQuery" value=""/>
           <parameter key="tool_rampAngle" value="2"/>
@@ -3320,14 +3320,14 @@
       <presets>
         <preset description="" id="{8aca8271-189f-4c39-beec-e1683a96d7bf}" name="Default preset">
           <parameter key="tool_coolant" value="mist"/>
-          <parameter key="tool_spindleSpeed" value="13000"/>
-          <parameter key="tool_rampSpindleSpeed" value="13000"/>
-          <parameter expression="60 in/min" key="tool_feedCutting" value="1524"/>
-          <parameter key="tool_feedEntry" value="1524"/>
-          <parameter key="tool_feedExit" value="1524"/>
+          <parameter key="tool_spindleSpeed" value="22000"/>
+          <parameter key="tool_rampSpindleSpeed" value="22000"/>
+          <parameter expression="70 in/min" key="tool_feedCutting" value="1778"/>
+          <parameter key="tool_feedEntry" value="1016"/>
+          <parameter key="tool_feedExit" value="1778"/>
           <parameter key="tool_feedPlunge" value="338.65819999999928"/>
-          <parameter key="tool_feedTransition" value="1524"/>
-          <parameter key="tool_feedRamp" value="338.65819999999928"/>
+          <parameter key="tool_feedTransition" value="1778"/>
+          <parameter key="tool_feedRamp" value="508"/>
           <parameter key="tool_presetMaterialCategory" value="all"/>
           <parameter key="tool_presetMaterialQuery" value=""/>
           <parameter key="tool_rampAngle" value="2"/>
