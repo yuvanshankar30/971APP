@@ -305,6 +305,11 @@ def _choose_preset(tool: dict, material_name: Optional[str]) -> Optional[dict]:
     )
 
 
+def _is_generic_default_preset(preset: dict) -> bool:
+    """Whether this is a tool's material-agnostic fallback preset."""
+    return _normalize_desc(str(preset.get("name") or "")) == "default preset"
+
+
 def _has_reviewed_preset(tool: dict, material_name: Optional[str]) -> bool:
     """Whether a loaded tool can safely be used for this material."""
     try:
@@ -778,6 +783,20 @@ def _apply_tool_to_elem(
     material_name: Optional[str],
 ) -> None:
     preset = _conservative_router_preset(_choose_preset(tool, material_name))
+    # A tool library holds ONE preset per tool, so copying it onto every
+    # operation collapses them all onto identical feeds. Real, confirmed
+    # case: every operation of a real job - Bore, Slot Cut for Edges, all of
+    # them - posted the 971 Main Bit's single "Default preset" (22000 rpm,
+    # 80 in/min cutting) instead of each operation's own shop-set feed, even
+    # though the template on disk held the right per-operation values.
+    # A generic "Default preset" is a tool-wide fallback, not a per-operation
+    # decision, so it no longer outranks a template exported with its own
+    # reviewed feeds. A material-specific named preset still wins: it encodes
+    # what the template cannot know (see _choose_preset), and a real Lexan
+    # job was already mis-posted once by a preset that never reached G-code.
+    preserve_template_feeds = _is_generic_default_preset(
+        preset
+    ) and _template_carries_own_feeds(template_elem)
 
     tool_guid = tool.get("guid")
     if tool_guid:
@@ -856,7 +875,7 @@ def _apply_tool_to_elem(
 
     # Best-effort motion + presets (Fusion will still load even if some values differ).
     motion_node = _ensure_child(tool_elem, "motion")
-    if preset:
+    if preset and not preserve_template_feeds:
         n = _parse_number(preset.get("n")) or _parse_number(preset.get("n_ramp")) or 0
         n_ramp = _parse_number(preset.get("n_ramp")) or n
         v_f = _parse_number(preset.get("v_f")) or 0
@@ -889,9 +908,9 @@ def _apply_tool_to_elem(
         if ramp_angle_internal is not None:
             motion_node.set("ramp-angle", _fmt_num(ramp_angle_internal))
 
-    presets_node = _ensure_child(tool_elem, "presets")
-    _reset_children(presets_node)
-    if preset and preset.get("guid"):
+    if preset and preset.get("guid") and not preserve_template_feeds:
+        presets_node = _ensure_child(tool_elem, "presets")
+        _reset_children(presets_node)
         preset_id = str(preset.get("guid"))
         template_elem.set("toolPresetId", f"{{{preset_id}}}")
 
@@ -1007,7 +1026,7 @@ def _apply_tool_to_elem(
         if diameter is not None:
             _set_drill_diameter_range(template_elem, diameter)
 
-    if preset:
+    if preset and not preserve_template_feeds:
         _set_template_level_feed_params(template_elem, preset)
 
 
@@ -1043,6 +1062,20 @@ _TEMPLATE_LEVEL_FEED_PARAMS = {
 # every feed rate is "<number>in/min" - confirmed by direct inspection of
 # templates/971-real/*.f3dhsm-template and templates/Plates.f3dhsm-template).
 _TEMPLATE_LEVEL_FEED_PARAMS_NO_UNIT = {"tool_spindleSpeed", "tool_rampSpindleSpeed"}
+
+
+def _template_carries_own_feeds(template_elem: ET.Element) -> bool:
+    """Whether this operation was exported carrying its own feed/speed data.
+
+    True for the rich templates/971-real/*.f3dhsm-template operations, whose
+    per-operation values the shop sets directly; false for the minimal
+    generic templates (Plates, Bore), which have no such parameters and so
+    can only get feeds from the tool library preset.
+    """
+    return any(
+        parameter.get("name") in _TEMPLATE_LEVEL_FEED_PARAMS
+        for parameter in template_elem.findall(_q("parameter"))
+    )
 
 
 def _set_template_level_feed_params(template_elem: ET.Element, preset: dict) -> None:
