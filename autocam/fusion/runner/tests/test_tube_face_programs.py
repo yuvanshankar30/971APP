@@ -89,6 +89,20 @@ class TubeFaceProgramTests(unittest.TestCase):
         self.assertLess(bind_index, configure_index)
         self.assertIn("adsk.doEvents()", handler[template_index:configure_index])
 
+    def test_tube_shapes_are_profiled_not_area_cleared(self):
+        # Direct instruction: adaptive clearing dominates a tube program's
+        # cycle time and buys nothing here - the slug it grinds away just
+        # falls into the hollow tube once the profile is cut through. The
+        # contour pass has to survive, or the shapes stop being cut at all.
+        handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
+        roughing = handler.index(
+            'elif "shape" in name and "through" in name and operation.strategy in ("adaptive2d", "pocket2d"):'
+        )
+        contour = handler.index('elif "shape" in name and operation.strategy == "contour2d":')
+        self.assertIn("keep = False", handler[roughing:contour])
+        self.assertNotIn('_apply_chains(operation, "pockets", shapes)', handler)
+        self.assertIn('keep = _apply_chains(operation, "contours", shapes)', handler)
+
     def test_tube_routes_all_circular_holes_through_bore_faces(self):
         handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
         self.assertIn('"holeDiameterMaximum", "100 in"', handler)
