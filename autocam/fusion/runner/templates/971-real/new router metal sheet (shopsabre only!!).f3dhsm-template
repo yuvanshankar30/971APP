@@ -1265,8 +1265,9 @@
       <presets>
         <preset description="" id="{8aca8271-189f-4c39-beec-e1683a96d7bf}" name="Default preset">
           <parameter key="tool_coolant" value="mist"/>
-          <parameter key="tool_spindleSpeed" value="13000"/>
-          <parameter key="tool_rampSpindleSpeed" value="13000"/>
+          <parameter key="tool_spindleSpeed" value="21826.963624031363"/>
+          <parameter expression="900 ft/min" key="tool_surfaceSpeed"/>
+          <parameter key="tool_rampSpindleSpeed" value="21826.963624031363"/>
           <parameter expression="60 in/min" key="tool_feedCutting" value="1524"/>
           <parameter key="tool_feedEntry" value="1524"/>
           <parameter key="tool_feedExit" value="1524"/>
