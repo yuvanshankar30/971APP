@@ -1797,7 +1797,13 @@
   }
   .toolbar-clear:hover { border-color: var(--brand-gold-strong); color: var(--text); }
 
-  @media (max-width: 760px) {
+  /* The toolbar lives in the main column, whose width changes independently
+     of the browser viewport when the budget rail is visible.  Query that
+     column directly so Chrome zoom cannot leave one control stranded on a
+     clipped line between the desktop and phone breakpoints. */
+  .purchasing-main { container: purchasing-main / inline-size; }
+
+  @container purchasing-main (max-width: 760px) {
     .toolbar-search { flex-basis: 100%; }
     .toolbar-select { flex: 1 1 45%; }
   }
@@ -1860,9 +1866,15 @@
   .progress-fill.over { background: var(--red-base); }
   .text-danger { color: var(--red-base); font-weight: 700; }
 
+  /* The full-bleed page is the outer sizing context.  Using it instead of
+     the viewport means the rail drops above the list when the page itself
+     loses room (including at 90%, 100%, 110%, and 125% Chrome zoom), rather
+     than at an arbitrary browser-window width. */
+  .parts-container { container: purchasing-page / inline-size; }
+
   /* Below the breakout width the rail stops being a rail: budgets go back
      above the list rather than squeezing the table into a narrow column. */
-  @media (max-width: 1200px) {
+  @container purchasing-page (max-width: 1280px) {
     .purchasing-layout { grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
   }
 
@@ -2335,9 +2347,9 @@
      width; .table-container's overflow-x:auto stays as a last-resort
      safety net for the flat table above this threshold, not the normal
      path any more. */
-  .purchasing-table-wrap { container-type: inline-size; }
+  .purchasing-table-wrap { container: purchasing-table / inline-size; }
 
-  @container (max-width: 1300px) {
+  @container purchasing-table (max-width: 1300px) {
     .table-container {
       margin: 0;
       width: 100%;
@@ -2367,7 +2379,12 @@
     }
     .table-container .table td {
       display: grid;
-      grid-template-columns: minmax(6.75rem, 42%) minmax(0, 1fr);
+      /* A percentage here makes the label track grow with a wide card: at
+         Chrome's 100% desktop zoom that was 300px+ for labels such as
+         "Vendor", putting the actual value in a distant second column.
+         Keep labels readable without letting them consume nearly half of a
+         desktop-width card. */
+      grid-template-columns: minmax(6.75rem, 13rem) minmax(0, 1fr);
       align-items: center;
       gap: 0.65rem;
       min-height: 2.25rem;
@@ -2413,6 +2430,15 @@
     .table-container .table td.download .btn { justify-self: start; }
     .table-container .table td.delivery { align-items: start; }
     .table-container .table td.delivery .season-tag { justify-self: start; }
+  }
+
+  /* On a genuinely narrow card the capped label track would leave too
+     little room for long values, so return to a proportional split only
+     there.  This is based on the card's available width, not the viewport. */
+  @container purchasing-table (max-width: 560px) {
+    .table-container .table td {
+      grid-template-columns: minmax(6.75rem, 42%) minmax(0, 1fr);
+    }
   }
 
 </style>
