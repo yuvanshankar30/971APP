@@ -26,11 +26,13 @@ import {
   formatManufacturingQueue,
   formatPurchasingList,
   formatPurchasingCompletion,
+  formatBudgetReport,
   formatScoutingAssignments,
   formatTeamReportStatus,
   handleHubAppMention,
   isAdminProfileQuestion,
   isFusionRunnerSetupQuestion,
+  isBudgetQuestion,
   isManufacturingQueueQuestion,
   isMultiPartQuestion,
   isPurchasingCompletionQuestion,
@@ -212,6 +214,7 @@ describe('Slack Hub assistant', () => {
     expect(isPurchasingListQuestion('Who requested the last order?')).toBe(false);
     expect(isPurchasingListQuestion('Explain the purchasing workflow from request through delivery')).toBe(false);
     expect(isPurchasingCompletionQuestion('Are all parts for Electrical purchased/approved for Third Robot?')).toBe(true);
+    expect(isBudgetQuestion('Which budgets are over, and which purchases caused it?')).toBe(true);
     expect(assignmentEventKey('What was assigned for Chezy?', '2026mrcmp')).toBe('2026cc');
     expect(assignmentEventKey('What was assigned for 2025 Chezy?', '2026mrcmp')).toBe('2025cc');
   });
@@ -260,6 +263,19 @@ describe('Slack Hub assistant', () => {
     expect(text).toContain('971 Bracket ×2 — pending (McMaster) — $4.50');
     expect(text).not.toContain('Rejected item');
     expect(text).not.toContain('9584 Item');
+  });
+
+  it('connects an over-budget line to the purchases and requesters that count toward it', () => {
+    const text = formatBudgetReport({ available: true, budgets: [{
+      name: 'Shooter', amount: 100, spent: 140, overBy: 40,
+      connectedPurchases: [
+        { name: 'Falcon motor', amount: 100, requester: 'Casey Scout' },
+        { name: 'Belt', amount: 40, requester: 'Arin Rao' }
+      ]
+    }] }, 'Which budget is over, who is contributing, and which purchases are connected?');
+    expect(text).toContain('*Shooter:* $140.00 / $100.00 — *$40.00 over*');
+    expect(text).toContain('Falcon motor — $100.00 — requested by Casey Scout');
+    expect(text).toContain('Belt — $40.00 — requested by Arin Rao');
   });
 
   it('filters a purchasing list by project, category, and approval status', () => {
