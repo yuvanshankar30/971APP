@@ -174,6 +174,7 @@ export function isPurchasingListQuestion(question) {
     && /\b(?:list|queue|show|what|which|open|pending|approved|ordered|delivered|status)\b/i.test(value);
 }
 
+
 export async function fetchPurchasingList(supa, frcTeam) {
   if (!frcTeam) return { available: false, reason: 'Your Hub profile has no team.', items: [] };
   const { data, error } = await supa
@@ -1260,13 +1261,14 @@ export async function handleHubAppMention(event, dependencies = {}) {
     || (threadFeature ? answerHubFeatureQuestion(`${question} ${threadFeature.name}`) : null);
   let text;
   let editStatusTs = null;
-  // "parts" alone is shared vocabulary. Ask Gemini to choose the data domain
-  // before a live query rather than letting the manufacturing regex win.
+  // Gemini is the intent router for every mention. It chooses the live-data
+  // domain before any keyword handler can select a nearby-but-wrong list.
   let partsIntent = null;
-  if (isManufacturingQueueQuestion(question) && /\b(?:approved|ordered|delivered|vendor|electrical|price|cost)\b/i.test(question)) {
+  if (/\bcomponents?\b/i.test(question)
+    && /\b(?:approved|approve|ordered|delivered|pending|status)\b/i.test(question)) {
     try {
       const decision = await askGeminiAboutHub(
-        `Reply with exactly PURCHASING or MANUFACTURING. Which Spartans Hub list answers this request?\n${question}`,
+        `Classify this Spartans Hub request. Reply with exactly one word: PURCHASING for vendor items, orders, approvals, receiving, or costs; MANUFACTURING for fabricated parts, machine work, CAM, or kitting; OTHER for everything else.\n\n${question}`,
         snapshot,
         { ...dependencies, supa, hubScopeConfirmed: true, allowHubData: false, useGoogleSearch: false }
       );
@@ -1337,7 +1339,7 @@ export async function handleHubAppMention(event, dependencies = {}) {
   } else if (isAdminProfileQuestion(question)) {
     const profileContext = await fetchAdminProfileForSlackUser(supa, event.user, question, { slack });
     text = formatAdminProfile(profileContext);
-  } else if (isPurchasingListQuestion(question) || partsIntent === 'purchasing') {
+  } else if (partsIntent === 'purchasing' || isPurchasingListQuestion(question)) {
     const actorProfile = await resolveHubProfileForSlackUser(supa, event.user, slack);
     if (!actorProfile || actorProfile.banned) {
       text = 'Link your Slack account to an active Spartans Hub profile before asking about the purchasing list.';
@@ -1353,7 +1355,7 @@ export async function handleHubAppMention(event, dependencies = {}) {
   } else if (isNamedPurchasingQuestion(question)) {
     const purchaseContext = await fetchNamedPurchasingRequest(supa, event.user, question, { slack });
     text = formatNamedPurchasingRequest(purchaseContext);
-  } else if (isManufacturingQueueQuestion(question)) {
+  } else if (partsIntent === 'manufacturing' || isManufacturingQueueQuestion(question)) {
     const actorProfile = await resolveHubProfileForSlackUser(supa, event.user, slack);
     if (!actorProfile || actorProfile.banned) {
       text = 'Link your Slack account to an active Spartans Hub profile before asking about the manufacturing queue.';
