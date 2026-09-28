@@ -32,12 +32,14 @@ import {
   isAdminProfileQuestion,
   isFusionRunnerSetupQuestion,
   isManufacturingQueueQuestion,
+  isMultiPartQuestion,
   isPurchasingCompletionQuestion,
   isPurchasingListQuestion,
   isScoutingAssignmentQuestion,
   shouldUseGoogleSearch,
   isHubStatusRequest,
   isTeamReportStatusRequest,
+  shouldUseReviewedCompoundPath,
   stripAppMention
 } from './hub_slack_assistant.js';
 
@@ -203,6 +205,9 @@ describe('Slack Hub assistant', () => {
     expect(isManufacturingQueueQuestion('What parts from Ground Intake still need to be manufactured or kitted on the router?')).toBe(true);
     expect(isManufacturingQueueQuestion('Who is the manufacturing lead?')).toBe(false);
     expect(isManufacturingQueueQuestion('What does AutoCAM do, who can use it, and where is the job queue?')).toBe(false);
+    expect(isMultiPartQuestion('What does AutoCAM do, who can use it, and where is the job queue?')).toBe(true);
+    expect(shouldUseReviewedCompoundPath('Show the manufacturing queue and tell me who is the manufacturing lead.')).toBe(true);
+    expect(shouldUseReviewedCompoundPath('What are my scouting assignments, which ones are incomplete, and what should I do when I finish one?')).toBe(false);
     expect(isPurchasingListQuestion('Show the purchasing list')).toBe(true);
     expect(isPurchasingListQuestion('Who requested the last order?')).toBe(false);
     expect(isPurchasingListQuestion('Explain the purchasing workflow from request through delivery')).toBe(false);
@@ -642,6 +647,21 @@ describe('Slack Hub assistant', () => {
     expect(prompt).toContain('every atomic answer requirement');
     expect(postMessage.mock.calls[0][0].text).toContain('/cad/purchasing');
     expect(postMessage.mock.calls[0][0].text).toContain('/manufacture');
+  });
+
+  it('does not let a queue keyword consume the other clause of a compound question', async () => {
+    const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: 'The manufacturing queue is on /manufacture. The manufacturing lead is not available from the supplied evidence.' }] } }] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify({ related: true, relevant: true, problem: '', requirements: ['manufacturing queue', 'manufacturing lead'], missingRequirements: [] }) }] } }] }) });
+    await handleHubAppMention({
+      channel: 'C1', user: 'U1', ts: '1.0',
+      text: '<@U971> Show the manufacturing queue and tell me who is the manufacturing lead.'
+    }, {
+      supa: supabaseForStatus(), slack: { chat: { postMessage } }, apiKey: 'test-secret', fetchImpl
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(postMessage.mock.calls[0][0].text).toContain('manufacturing lead');
   });
 
   it('answers an authorized named-person purchasing-history question locally', async () => {
