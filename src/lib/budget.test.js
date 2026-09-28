@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { calculateBudgetSpent, BUDGET_CATEGORY_GROUPS, PURCHASING_CATEGORIES } from './budget.js';
+import { calculateBudgetSpent } from './budget.js';
 
 const overall = (extra = {}) => ({ scope_type: 'overall', ...extra });
 
@@ -171,23 +171,4 @@ describe('calculateBudgetSpent', () => {
     });
   });
 
-  describe('BUDGET_CATEGORY_GROUPS', () => {
-    it('files every selectable category under exactly one budget', () => {
-      const seen = new Set();
-      for (const group of BUDGET_CATEGORY_GROUPS) {
-        for (const category of group.categories) {
-          expect(seen.has(category)).toBe(false);
-          seen.add(category);
-        }
-      }
-      expect(PURCHASING_CATEGORIES).toHaveLength(seen.size);
-    });
-
-    it('keeps Budget Exempt out of the real budget lines', () => {
-      const realLines = BUDGET_CATEGORY_GROUPS.filter(
-        (group) => group.budget !== 'Not tracked against a budget'
-      );
-      expect(realLines.flatMap((group) => group.categories)).not.toContain('Budget Exempt');
-    });
-  });
 });

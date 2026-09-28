@@ -4,7 +4,8 @@
   import { supabase } from '$lib/supabase.js';
   import { userStore, loadUserFromUUID, upsertProfileIfMissing, setUserUUID } from '$lib/stores/user.js';
   import { hasPermission, canManagePurchasing, canCreateOrders, canApprovePurchases } from '$lib/permissions.js';
-  import { calculateBudgetSpent, BUDGET_CATEGORY_GROUPS } from '$lib/budget.js';
+  import { calculateBudgetSpent, BUDGET_EXEMPT_PROJECT } from '$lib/budget.js';
+  import { loadPurchasingCategories, addPurchasingCategory } from '$lib/purchasingCategories.js';
   import { isTeam9584, passesTeamFilter } from '$lib/frcTeams.js';
   import TeamFilter from '$lib/components/TeamFilter.svelte';
   import { getSeasonBucket, getCurrentSeasonBucket, getAllSeasonBuckets, passesSeasonFilter } from '$lib/frcSeason.js';
@@ -135,6 +136,7 @@
   let miscProjectText = '';
   // Project selection/linking to a build
   let buildOptions = []; // { id, label }
+  let categoryOptions = []; // { id, name, sort_order } from purchasing_categories
   let miscProject = ''; // typed or selected project label/id to store in project_id
   let miscNotes = '';
   // Edit modal state
@@ -304,7 +306,7 @@
     loading = false;
     
     // Load these in parallel but don't block the page
-    Promise.all([loadBuildOptions(), loadVendors(), loadPinnedBudgets()]).catch(err => {
+    Promise.all([loadBuildOptions(), loadCategories(), loadVendors(), loadPinnedBudgets()]).catch(err => {
       console.error('Error loading supplemental data:', err);
     });
   });
@@ -527,6 +529,40 @@
     } catch (e) {
       console.warn('Failed to load builds for project options', e?.message || e);
       buildOptions = [];
+    }
+  }
+
+  // Budget categories come from the database so everyone sees the same list
+  // and a category somebody adds shows up for the rest of the team - see
+  // $lib/purchasingCategories.js. A failure here leaves the dropdown with
+  // builds only rather than silently offering a stale hardcoded list.
+  async function loadCategories() {
+    try {
+      categoryOptions = await loadPurchasingCategories(supabase);
+    } catch (e) {
+      console.warn('Failed to load budget categories', e?.message || e);
+      categoryOptions = [];
+    }
+  }
+
+  // Sentinel value for the dropdown's own "add a category" row. Not a
+  // project id - it is swapped back out for the real name once created.
+  const ADD_CATEGORY_OPTION = '__add_category__';
+
+  async function handleCategorySelection(value, apply) {
+    if (value !== ADD_CATEGORY_OPTION) return;
+    const name = (typeof window !== 'undefined' ? window.prompt('New budget category name') : '') || '';
+    if (!name.trim()) {
+      apply('');
+      return;
+    }
+    try {
+      const created = await addPurchasingCategory(supabase, name, user?.id ?? null);
+      await loadCategories();
+      apply(created.name);
+    } catch (e) {
+      alert(e?.message || 'Could not add that budget category');
+      apply('');
     }
   }
 
@@ -1450,22 +1486,30 @@
         </div>
         <div class="form-row">
           <label for="edit-project">Project ID</label>
-          <select id="edit-project" bind:value={editProjectId}>
+          <select
+            id="edit-project"
+            bind:value={editProjectId}
+            on:change={() => handleCategorySelection(editProjectId, (v) => (editProjectId = v))}
+          >
             <option value="">Select project…</option>
+            {#if categoryOptions.length}
+              <optgroup label="Budget category">
+                {#each categoryOptions as category (category.id)}
+                  <option value={category.name}>{category.name}</option>
+                {/each}
+              </optgroup>
+            {/if}
             {#if buildOptions.length}
-              <optgroup label="Robot — builds">
+              <optgroup label="Build">
                 {#each buildOptions as b}
                   <option value={b.label}>{b.label}</option>
                 {/each}
               </optgroup>
             {/if}
-            {#each BUDGET_CATEGORY_GROUPS as group}
-              <optgroup label={group.budget}>
-                {#each group.categories as category}
-                  <option value={category}>{category}</option>
-                {/each}
-              </optgroup>
-            {/each}
+            <optgroup label="Other">
+              <option value={BUDGET_EXEMPT_PROJECT}>{BUDGET_EXEMPT_PROJECT}</option>
+              <option value={ADD_CATEGORY_OPTION}>+ Add a budget category…</option>
+            </optgroup>
           </select>
           <small style="color: var(--text-secondary); margin-top: 0.25rem;">Selecting "Budget Exempt" excludes this item from budget totals</small>
         </div>
@@ -1510,22 +1554,31 @@
         </div>
         <div class="form-row">
           <label for="misc-build">Project ID</label>
-          <select id="misc-build" bind:value={miscProject} class="combo-input">
+          <select
+            id="misc-build"
+            bind:value={miscProject}
+            class="combo-input"
+            on:change={() => handleCategorySelection(miscProject, (v) => (miscProject = v))}
+          >
             <option value="">Select project…</option>
+            {#if categoryOptions.length}
+              <optgroup label="Budget category">
+                {#each categoryOptions as category (category.id)}
+                  <option value={category.name}>{category.name}</option>
+                {/each}
+              </optgroup>
+            {/if}
             {#if buildOptions.length}
-              <optgroup label="Robot — builds">
+              <optgroup label="Build">
                 {#each buildOptions as b}
                   <option value={b.label}>{b.label}</option>
                 {/each}
               </optgroup>
             {/if}
-            {#each BUDGET_CATEGORY_GROUPS as group}
-              <optgroup label={group.budget}>
-                {#each group.categories as category}
-                  <option value={category}>{category}</option>
-                {/each}
-              </optgroup>
-            {/each}
+            <optgroup label="Other">
+              <option value={BUDGET_EXEMPT_PROJECT}>{BUDGET_EXEMPT_PROJECT}</option>
+              <option value={ADD_CATEGORY_OPTION}>+ Add a budget category…</option>
+            </optgroup>
           </select>
           <small style="color: var(--text-secondary); margin-top: 0.25rem;">Selecting "Budget Exempt" excludes this item from budget totals</small>
         </div>
@@ -2021,13 +2074,18 @@
   .header-content h1 { font-size: 2rem; }
   .header-content p { margin: 0.5rem 0 0 0; font-size: 1.1rem; }
 
+  /* Item names wrap onto another line rather than being cut off with an
+     ellipsis. A truncated purchasing name hides exactly the part that
+     tells two similar orders apart - "IMPORTANT - 12..." says nothing
+     about which of them this row is. */
   .part-name {
     font-weight: 500;
-    max-width: 180px;
+    min-width: 11rem;
     text-align: left;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    white-space: normal;
+    /* anywhere, not break-word: part numbers are often one long token with
+       no space to break at. */
+    overflow-wrap: anywhere;
   }
 
   .part-name .name-cell {
@@ -2038,7 +2096,12 @@
     flex-wrap: nowrap;
     vertical-align: middle;
     max-width: 100%;
-    overflow: hidden;
+    /* min-width:0 lets the text inside actually wrap - a flex item's
+       default min-width:auto refuses to shrink below its content, which
+       is what pushed the name past the cell and back into a clip. */
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 
   .part-name .name-cell .notes-badge {
@@ -2475,11 +2538,17 @@
     .table-container .table td::before { display: none; }
     .table-container .table td.part-name {
       display: table-cell;
-      max-width: 7.5rem;
+      min-width: 7.5rem;
       padding: 0.3rem 0.25rem;
       font-size: inherit;
       font-weight: 600;
       border-bottom: 1px solid var(--border);
+      /* Wraps here too - this breakpoint inherits the table's own
+         nowrap/ellipsis, which would put the truncation straight back. */
+      white-space: normal;
+      overflow: visible;
+      text-overflow: clip;
+      overflow-wrap: anywhere;
     }
     .table-container .table td.part-name .name-cell { max-width: 100%; }
     .table-container .table .status-select {

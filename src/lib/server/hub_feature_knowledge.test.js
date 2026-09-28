@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { answerHubFeatureQuestion, classifyHubFeatureQuestion, HUB_FEATURES } from './hub_feature_knowledge.js';
+import { answerHubFeatureComparison, answerHubFeatureQuestion, classifyHubFeatureQuestion, HUB_FEATURES } from './hub_feature_knowledge.js';
 
 describe('Slack Hub feature knowledge', () => {
+  it('answers both sides of a named feature comparison', () => {
+    const answer = answerHubFeatureComparison('What is the difference between Power Rankings and Robot Ratings?');
+    expect(answer).toContain('*Power Rankings vs Robot Ratings*');
+    expect(answer).toContain('*Power Rankings:*');
+    expect(answer).toContain('*Robot Ratings:*');
+    expect(answer).toContain('never changes Scout Power');
+  });
   it('documents every default navigation feature with routes and sections', () => {
     const names = new Set(HUB_FEATURES.map((feature) => feature.name));
     for (const required of ['Manufacturing', 'Fusion AutoCAM', 'JProg', 'Strategy', 'Drive Team', 'Match Scouting', 'Pit Scouting', 'My Scout', 'Picklist', 'Match Rankings', 'Power Rankings', 'Robot Ratings', 'EPA', 'Vision Scouting', 'Prediction Market', 'Blue Alliance', 'Scouting Admin', 'CAD', 'Build', 'Files', 'Purchasing']) {
