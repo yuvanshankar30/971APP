@@ -962,7 +962,9 @@ AutoCAM's own code (engine, Drive watcher, `camJobs.js`, its components) is
   setup/secrets checklist. The 971hub Slack assistant reads `GEMINI_API_KEY`
   from a Cloud Run runtime-only Secret Manager mapping; the secret must exist
   in the `spartanshub` project with an enabled version and runtime access
-  before that mapping is deployed.
+  before that mapping is deployed. Linked Slack users can also ask the Hub
+  assistant for their own team's purchasing list, including filters such as
+  project, electrical items, and approval status.
 - **Vercel edit previews**: the disposable
   [`yuvanshankar30/971APP`](https://github.com/yuvanshankar30/971APP) mirror
   deploys its `main` branch through Vercel. Run the manual-only

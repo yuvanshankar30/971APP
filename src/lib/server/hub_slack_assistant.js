@@ -190,9 +190,22 @@ export function formatPurchasingList(list, question) {
   if (!list?.available) return `I could not load your purchasing list: ${list?.reason || 'your Hub team is unavailable.'}`;
   const questionText = String(question || '').toLowerCase();
   const status = ['pending', 'approved', 'ordered', 'delivered', 'kitted'].find((candidate) => new RegExp(`\\b${candidate}\\b`, 'i').test(questionText));
-  const items = (list.items || []).filter((item) => !status || String(item.status || (item.approved ? 'approved' : 'pending')).toLowerCase() === status);
-  if (!items.length) return `*Purchasing list${status ? ` — ${status}` : ''}:* no matching items found.`;
-  const lines = [`*Purchasing list${status ? ` — ${status}` : ''}:*`];
+  const projects = [...new Set((list.items || []).map((item) => item.project_id).filter(Boolean))];
+  const normalizedQuestion = normalizedQueueText(question);
+  const project = projects
+    .filter((candidate) => {
+      const normalized = normalizedQueueText(candidate);
+      return normalized.length >= 3 && (normalizedQuestion.includes(normalized)
+        || normalized.split(' ').filter((word) => word.length >= 3).some((word) => normalizedQuestion.includes(word)));
+    })
+    .sort((left, right) => normalizedQueueText(right).length - normalizedQueueText(left).length)[0] || null;
+  const category = /\belectrical\b/i.test(questionText) ? 'electrical' : null;
+  const items = (list.items || []).filter((item) => (!status || String(item.status || (item.approved ? 'approved' : 'pending')).toLowerCase() === status)
+    && (!project || item.project_id === project)
+    && (!category || normalizedQueueText(`${item.name} ${item.project_id} ${item.vendor}`).includes(category)));
+  const scope = [project, category, status].filter(Boolean).join(' — ');
+  if (!items.length) return `*Purchasing list${scope ? ` — ${scope}` : ''}:* no matching items found.`;
+  const lines = [`*Purchasing list${scope ? ` — ${scope}` : ''}:*`];
   for (const item of items.slice(0, 25)) {
     const quantity = Number(item.quantity) > 0 ? ` ×${Number(item.quantity)}` : '';
     const price = Number.isFinite(Number(item.price)) ? ` — $${Number(item.price).toFixed(2)}` : '';
@@ -1247,6 +1260,21 @@ export async function handleHubAppMention(event, dependencies = {}) {
     || (threadFeature ? answerHubFeatureQuestion(`${question} ${threadFeature.name}`) : null);
   let text;
   let editStatusTs = null;
+  // "parts" alone is shared vocabulary. Ask Gemini to choose the data domain
+  // before a live query rather than letting the manufacturing regex win.
+  let partsIntent = null;
+  if (isManufacturingQueueQuestion(question) && /\b(?:approved|ordered|delivered|vendor|electrical|price|cost)\b/i.test(question)) {
+    try {
+      const decision = await askGeminiAboutHub(
+        `Reply with exactly PURCHASING or MANUFACTURING. Which Spartans Hub list answers this request?\n${question}`,
+        snapshot,
+        { ...dependencies, supa, hubScopeConfirmed: true, allowHubData: false, useGoogleSearch: false }
+      );
+      partsIntent = /PURCHASING/i.test(decision) ? 'purchasing' : /MANUFACTURING/i.test(decision) ? 'manufacturing' : null;
+    } catch (error) {
+      console.warn('Gemini parts-intent classification failed', error?.message || error);
+    }
+  }
   if (!question) {
     text = 'Ask me about Spartans Hub, or use `@Spartans Hub /status` for live status and recent changes.';
   } else if (isCodeChangeRequest(question)) {
@@ -1309,7 +1337,7 @@ export async function handleHubAppMention(event, dependencies = {}) {
   } else if (isAdminProfileQuestion(question)) {
     const profileContext = await fetchAdminProfileForSlackUser(supa, event.user, question, { slack });
     text = formatAdminProfile(profileContext);
-  } else if (isPurchasingListQuestion(question)) {
+  } else if (isPurchasingListQuestion(question) || partsIntent === 'purchasing') {
     const actorProfile = await resolveHubProfileForSlackUser(supa, event.user, slack);
     if (!actorProfile || actorProfile.banned) {
       text = 'Link your Slack account to an active Spartans Hub profile before asking about the purchasing list.';
