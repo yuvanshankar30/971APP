@@ -2074,13 +2074,18 @@
   .header-content h1 { font-size: 2rem; }
   .header-content p { margin: 0.5rem 0 0 0; font-size: 1.1rem; }
 
+  /* Item names wrap onto another line rather than being cut off with an
+     ellipsis. A truncated purchasing name hides exactly the part that
+     tells two similar orders apart - "IMPORTANT - 12..." says nothing
+     about which of them this row is. */
   .part-name {
     font-weight: 500;
-    max-width: 180px;
+    min-width: 11rem;
     text-align: left;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    white-space: normal;
+    /* anywhere, not break-word: part numbers are often one long token with
+       no space to break at. */
+    overflow-wrap: anywhere;
   }
 
   .part-name .name-cell {
@@ -2091,7 +2096,12 @@
     flex-wrap: nowrap;
     vertical-align: middle;
     max-width: 100%;
-    overflow: hidden;
+    /* min-width:0 lets the text inside actually wrap - a flex item's
+       default min-width:auto refuses to shrink below its content, which
+       is what pushed the name past the cell and back into a clip. */
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 
   .part-name .name-cell .notes-badge {
@@ -2528,11 +2538,17 @@
     .table-container .table td::before { display: none; }
     .table-container .table td.part-name {
       display: table-cell;
-      max-width: 7.5rem;
+      min-width: 7.5rem;
       padding: 0.3rem 0.25rem;
       font-size: inherit;
       font-weight: 600;
       border-bottom: 1px solid var(--border);
+      /* Wraps here too - this breakpoint inherits the table's own
+         nowrap/ellipsis, which would put the truncation straight back. */
+      white-space: normal;
+      overflow: visible;
+      text-overflow: clip;
+      overflow-wrap: anywhere;
     }
     .table-container .table td.part-name .name-cell { max-width: 100%; }
     .table-container .table .status-select {
