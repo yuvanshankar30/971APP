@@ -22,13 +22,16 @@ import {
   formatHubStatus,
   formatFusionRunnerSetupHelp,
   fetchManufacturingQueue,
+  fetchPurchasingList,
   formatManufacturingQueue,
+  formatPurchasingList,
   formatScoutingAssignments,
   formatTeamReportStatus,
   handleHubAppMention,
   isAdminProfileQuestion,
   isFusionRunnerSetupQuestion,
   isManufacturingQueueQuestion,
+  isPurchasingListQuestion,
   isScoutingAssignmentQuestion,
   shouldUseGoogleSearch,
   isHubStatusRequest,
@@ -197,6 +200,8 @@ describe('Slack Hub assistant', () => {
     expect(isAdminProfileQuestion('does the tube stock have enough 1x1 left for this part?')).toBe(false);
     expect(isManufacturingQueueQuestion('What parts from Ground Intake still need to be manufactured or kitted on the router?')).toBe(true);
     expect(isManufacturingQueueQuestion('Who is the manufacturing lead?')).toBe(false);
+    expect(isPurchasingListQuestion('Show the purchasing list')).toBe(true);
+    expect(isPurchasingListQuestion('Who requested the last order?')).toBe(false);
     expect(assignmentEventKey('What was assigned for Chezy?', '2026mrcmp')).toBe('2026cc');
     expect(assignmentEventKey('What was assigned for 2025 Chezy?', '2026mrcmp')).toBe('2025cc');
   });
@@ -223,6 +228,28 @@ describe('Slack Hub assistant', () => {
     expect(text).not.toContain('Intake Spacer');
     expect(text).not.toContain('Finished Intake Plate');
     expect(text).not.toContain('Other Team Part');
+  });
+
+  it('returns only the linked team’s non-rejected purchasing list', async () => {
+    const rows = [
+      { name: '971 Bracket', vendor: 'McMaster', quantity: 2, price: 4.5, status: 'pending' },
+      { name: 'Rejected item', vendor: 'REV', quantity: 1, price: 9, status: 'rejected' },
+      { name: '9584 Item', vendor: 'AndyMark', quantity: 1, price: 12, status: 'ordered' }
+    ];
+    const supa = { from: vi.fn(() => {
+      const query = {
+        select: () => query,
+        eq: (_column, team) => { query.team = team; return query; },
+        order: () => query,
+        limit: async () => ({ data: query.team === '971' ? rows.slice(0, 2) : [rows[2]], error: null })
+      };
+      return query;
+    }) };
+    const list = await fetchPurchasingList(supa, '971');
+    const text = formatPurchasingList(list, 'Show the pending purchasing list');
+    expect(text).toContain('971 Bracket ×2 — pending (McMaster) — $4.50');
+    expect(text).not.toContain('Rejected item');
+    expect(text).not.toContain('9584 Item');
   });
 
   it('formats live status and recent changes', () => {

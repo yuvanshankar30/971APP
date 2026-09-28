@@ -167,6 +167,42 @@ export function isManufacturingQueueQuestion(question) {
     && /\b(?:what|which|show|list|need|needs|needed|remaining|left|status|queue|ready|pending|still|done|complete|kitted)\b/i.test(value);
 }
 
+export function isPurchasingListQuestion(question) {
+  const value = String(question || '');
+  return !/\b(?:last|latest|recent|history)\b/i.test(value)
+    && /\b(?:purchasing|purchases?|orders?|buying)\b/i.test(value)
+    && /\b(?:list|queue|show|what|which|open|pending|approved|ordered|delivered|status)\b/i.test(value);
+}
+
+export async function fetchPurchasingList(supa, frcTeam) {
+  if (!frcTeam) return { available: false, reason: 'Your Hub profile has no team.', items: [] };
+  const { data, error } = await supa
+    .from('purchasing')
+    .select('name, project_id, vendor, quantity, price, status, approved, created_at')
+    .eq('frc_team', frcTeam)
+    .order('created_at', { ascending: false })
+    .limit(100);
+  if (error) throw error;
+  return { available: true, items: (data || []).filter((item) => String(item.status || '').toLowerCase() !== 'rejected') };
+}
+
+export function formatPurchasingList(list, question) {
+  if (!list?.available) return `I could not load your purchasing list: ${list?.reason || 'your Hub team is unavailable.'}`;
+  const questionText = String(question || '').toLowerCase();
+  const status = ['pending', 'approved', 'ordered', 'delivered', 'kitted'].find((candidate) => new RegExp(`\\b${candidate}\\b`, 'i').test(questionText));
+  const items = (list.items || []).filter((item) => !status || String(item.status || (item.approved ? 'approved' : 'pending')).toLowerCase() === status);
+  if (!items.length) return `*Purchasing list${status ? ` — ${status}` : ''}:* no matching items found.`;
+  const lines = [`*Purchasing list${status ? ` — ${status}` : ''}:*`];
+  for (const item of items.slice(0, 25)) {
+    const quantity = Number(item.quantity) > 0 ? ` ×${Number(item.quantity)}` : '';
+    const price = Number.isFinite(Number(item.price)) ? ` — $${Number(item.price).toFixed(2)}` : '';
+    lines.push(`• ${item.name || 'Unnamed item'}${quantity} — ${item.status || (item.approved ? 'approved' : 'pending')}${item.vendor ? ` (${item.vendor})` : ''}${price}`);
+  }
+  if (items.length > 25) lines.push(`• …and ${items.length - 25} more`);
+  lines.push('*Open:* /cad/purchasing');
+  return safeSlackText(lines.join('\n'));
+}
+
 function normalizedQueueText(value) {
   return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
@@ -1273,6 +1309,19 @@ export async function handleHubAppMention(event, dependencies = {}) {
   } else if (isAdminProfileQuestion(question)) {
     const profileContext = await fetchAdminProfileForSlackUser(supa, event.user, question, { slack });
     text = formatAdminProfile(profileContext);
+  } else if (isPurchasingListQuestion(question)) {
+    const actorProfile = await resolveHubProfileForSlackUser(supa, event.user, slack);
+    if (!actorProfile || actorProfile.banned) {
+      text = 'Link your Slack account to an active Spartans Hub profile before asking about the purchasing list.';
+    } else {
+      try {
+        text = formatPurchasingList(await fetchPurchasingList(supa, actorProfile.frc_team), question);
+      } catch (error) {
+        console.error('Purchasing list lookup failed', error?.message || error);
+        requestError = error?.message || String(error);
+        text = 'I could not load the purchasing list right now. Please try again shortly.';
+      }
+    }
   } else if (isNamedPurchasingQuestion(question)) {
     const purchaseContext = await fetchNamedPurchasingRequest(supa, event.user, question, { slack });
     text = formatNamedPurchasingRequest(purchaseContext);
