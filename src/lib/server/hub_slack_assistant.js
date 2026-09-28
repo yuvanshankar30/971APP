@@ -2,6 +2,7 @@ import { env } from '$env/dynamic/private';
 import { env as publicEnv } from '$env/dynamic/public';
 import { getSlackClient, getSupabase } from '$lib/server/971bot.js';
 import { hasPermission } from '$lib/permissions.js';
+import { calculateBudgetSpent } from '$lib/budget.js';
 import { answerHubFeatureComparison, answerHubFeatureQuestion, classifyHubFeatureQuestion, HUB_FEATURES } from '$lib/server/hub_feature_knowledge.js';
 import { identifyRosterQuestion, loadHubRoster } from '$lib/server/hub_slack_roster.js';
 import { readSlackAssistantThread } from '$lib/server/slack_event_receipts.js';
@@ -206,6 +207,72 @@ export function isPurchasingCompletionQuestion(question) {
   return /\b(?:all|every)\b/i.test(value)
     && /\b(?:part|parts|component|components|item|items)\b/i.test(value)
     && /\b(?:approv(?:e|ed|al)|purchas(?:e|ed|ing)|order(?:ed|ing)?|bought)\b/i.test(value);
+}
+
+export function isBudgetQuestion(question) {
+  return /\b(?:budget|budgets|over[ -]?budget|spend(?:ing)?|overspend(?:ing)?)\b/i.test(String(question || ''));
+}
+
+function budgetPurchaseAmount(purchase) {
+  return (Number(purchase.final_price) || Number(purchase.price) || 0) * (Number(purchase.quantity) || 1);
+}
+
+// Budget spending and requester attribution are financial data. They are
+// available only to the same Purchasing Admin/Budgeting roles that can manage
+// budgets in the app; the Slack bot never broadens that access.
+export async function fetchBudgetReport(supa, slackUserId, options = {}) {
+  const caller = await resolveHubProfileForSlackUser(supa, slackUserId, options.slack);
+  if (!caller?.id) return { available: false, reason: 'slack-profile-not-linked' };
+  if (caller.banned) return { available: false, reason: 'account-disabled' };
+  if (!hasPermission(caller, 'VIEW_PURCHASING_ADMIN') && !hasPermission(caller, 'EDIT_BUDGETS')) {
+    return { available: false, reason: 'permission-denied' };
+  }
+  const [budgetResult, purchaseResult] = await Promise.all([
+    supa.from('purchasing_budgets').select('id, name, scope_type, scope_value, amount, start_date, end_date, metadata'),
+    supa.from('purchasing')
+      .select('name, project_id, requester, quantity, price, final_price, status, created_at, frc_team')
+      .eq('frc_team', caller.frc_team)
+      .order('created_at', { ascending: false })
+      .limit(1000)
+  ]);
+  if (budgetResult.error || purchaseResult.error) return { available: false, reason: 'budget-query-failed' };
+  const purchases = purchaseResult.data || [];
+  const budgets = (budgetResult.data || []).map((budget) => {
+    const spent = calculateBudgetSpent(budget, purchases);
+    const connectedPurchases = purchases
+      .filter((purchase) => calculateBudgetSpent(budget, [purchase]) > 0)
+      .map((purchase) => ({ ...purchase, amount: budgetPurchaseAmount(purchase) }))
+      .sort((left, right) => right.amount - left.amount);
+    return { ...budget, spent, overBy: Math.max(0, spent - Number(budget.amount || 0)), connectedPurchases };
+  });
+  return { available: true, budgets };
+}
+
+export function formatBudgetReport(report, question = '') {
+  if (!report?.available) {
+    if (report?.reason === 'slack-profile-not-linked') return 'Link your Slack account to an active Hub profile before asking about budgets.';
+    if (report?.reason === 'account-disabled') return 'This Spartans Hub account is disabled.';
+    if (report?.reason === 'permission-denied') return 'Budget and requester spending details require Purchasing Admin or Budgeting access.';
+    return 'I could not load budget and purchase data right now.';
+  }
+  const query = String(question || '').toLowerCase();
+  const named = report.budgets.filter((budget) => String(budget.name || '').toLowerCase().length >= 3
+    && query.includes(String(budget.name).toLowerCase()));
+  const budgets = named.length ? named : report.budgets.filter((budget) => budget.overBy > 0);
+  if (!budgets.length) return named.length
+    ? `*Budget status:* the named budget is not over its limit. *Open:* /cad/purchasing`
+    : `*Budget status:* no configured budgets are currently over their limits. *Open:* /cad/purchasing`;
+  const lines = ['*Budget status — over limit:*'];
+  for (const budget of budgets.slice(0, 10)) {
+    lines.push(`*${budget.name || 'Unnamed budget'}:* $${budget.spent.toFixed(2)} / $${Number(budget.amount || 0).toFixed(2)} — *$${budget.overBy.toFixed(2)} over*`);
+    const contributors = budget.connectedPurchases.slice(0, 5);
+    if (contributors.length) {
+      lines.push('*Connected purchases:*');
+      contributors.forEach((purchase) => lines.push(`• ${purchase.name || 'Unnamed item'} — $${purchase.amount.toFixed(2)}${purchase.requester ? ` — requested by ${purchase.requester}` : ''}`));
+    }
+  }
+  lines.push('*Open:* /cad/purchasing');
+  return safeSlackText(lines.join('\n'));
 }
 
 
@@ -1461,6 +1528,14 @@ export async function handleHubAppMention(event, dependencies = {}) {
     }
   } else if (isHubStatusRequest(question)) {
     text = formatHubStatus(snapshot);
+  } else if (isBudgetQuestion(question)) {
+    try {
+      text = formatBudgetReport(await fetchBudgetReport(supa, event.user, { slack }), question);
+    } catch (error) {
+      console.error('Budget report lookup failed', error?.message || error);
+      requestError = error?.message || String(error);
+      text = 'I could not load budget and purchase data right now.';
+    }
   } else if (isTeamReportStatusRequest(question) && !useReviewedCompoundPath) {
     const teamSnapshot = await fetchTeamReportSnapshot(supa, teamNumberFromQuestion(question), snapshot.eventKey);
     text = formatTeamReportStatus(teamSnapshot);
