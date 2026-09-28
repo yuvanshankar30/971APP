@@ -166,7 +166,14 @@ def _wall_face_families(body, axis):
         # WCS detection and loop selection that follow.
         exterior_near = max(planes[0]["faces"], key=lambda face: face.area)
         exterior_far = max(planes[-1]["faces"], key=lambda face: face.area)
-        exterior_pairs.append((exterior_near, exterior_far))
+        # How far apart this family's two exterior walls sit. That is the
+        # tube dimension ALONG this family's normal, which means it is the
+        # width of the OTHER family's walls - so the family with the smaller
+        # separation is the one whose own walls are the wide ones. On a 2x1
+        # tube the 2in-wide walls are the pair standing 1in apart.
+        # _ordered_wall_faces sorts on this; see the note there.
+        separation = abs(planes[-1]["projection"] - planes[0]["projection"])
+        exterior_pairs.append((separation, exterior_near, exterior_far))
         # Inner walls live between the two exterior-wall planes. A wall
         # thickness is only known when a third, distinct plane exists
         # inward of an exterior extremum - genuinely solid stock (only the
@@ -185,7 +192,19 @@ def _wall_face_families(body, axis):
             # from the wrong side and produced the wall-spanning zig-zags.
             selection_face_by_exterior[_face_id(exterior_near)] = inner_near
             selection_face_by_exterior[_face_id(exterior_far)] = inner_far
-    return exterior_pairs, wall_thickness_by_face, selection_face_by_exterior
+
+    # Smaller separation first, so the wide walls come back as the first
+    # pair. Sorted here rather than left in body.faces discovery order:
+    # which family was found first is a property of how the part happened to
+    # be modelled, not of the tube, and it decided which pair got called
+    # 12/6 - the same tube could come out labelled either way. A square tube
+    # keeps its existing order, since the sort is stable.
+    exterior_pairs.sort(key=lambda entry: entry[0])
+    return (
+        [(near, far) for _, near, far in exterior_pairs],
+        wall_thickness_by_face,
+        selection_face_by_exterior
+    )
 
 
 def _ordered_wall_faces(body):
@@ -194,6 +213,12 @@ def _ordered_wall_faces(body):
     # These are fixture order labels, not claims about a STEP model's
     # arbitrary global orientation. The operator labels the real tube 12/3/6/9
     # to match the four emitted files before machining it.
+    #
+    # pair_a is the wide pair (see _wall_face_families' sort), so the wide
+    # walls are 12 and 6 and the narrow ones 3 and 9 - the same rule
+    # stepProfile.js applies for the in-process tubestock path, which orders
+    # its cross-section axes by span for exactly this. Opposite walls stay
+    # opposite: 12 faces 6, 3 faces 9.
     faces = (pair_a[1], pair_b[1], pair_a[0], pair_b[0])
     return [
         (
