@@ -202,8 +202,10 @@ describe('Slack Hub assistant', () => {
     expect(isAdminProfileQuestion('does the tube stock have enough 1x1 left for this part?')).toBe(false);
     expect(isManufacturingQueueQuestion('What parts from Ground Intake still need to be manufactured or kitted on the router?')).toBe(true);
     expect(isManufacturingQueueQuestion('Who is the manufacturing lead?')).toBe(false);
+    expect(isManufacturingQueueQuestion('What does AutoCAM do, who can use it, and where is the job queue?')).toBe(false);
     expect(isPurchasingListQuestion('Show the purchasing list')).toBe(true);
     expect(isPurchasingListQuestion('Who requested the last order?')).toBe(false);
+    expect(isPurchasingListQuestion('Explain the purchasing workflow from request through delivery')).toBe(false);
     expect(isPurchasingCompletionQuestion('Are all parts for Electrical purchased/approved for Third Robot?')).toBe(true);
     expect(assignmentEventKey('What was assigned for Chezy?', '2026mrcmp')).toBe('2026cc');
     expect(assignmentEventKey('What was assigned for 2025 Chezy?', '2026mrcmp')).toBe('2025cc');
@@ -896,6 +898,15 @@ describe('Slack Hub assistant', () => {
     expect(memberContext.visibility).toBe('requester-only');
     expect(memberContext.assignments).toHaveLength(1);
     expect(formatScoutingAssignments(memberContext, 'What are my scouting assignments?')).not.toContain('Casey Scout');
+  });
+
+  it('states assignment completion and the next action alongside the assignment list', () => {
+    const text = formatScoutingAssignments({
+      available: true, eventKey: '2026cc', visibility: 'requester-only', requester: 'Arin Rao',
+      assignments: [{ scout: 'Arin Rao', kind: 'data', match: '2026cc_qm1', team: '971', completed: true }]
+    }, 'What are my scouting assignments, which ones are incomplete, and what should I do when I finish one?');
+    expect(text).toContain('*Completion:* 1/1 complete. No assignments are incomplete.');
+    expect(text).toContain('You have no remaining assignments');
   });
 
   it('answers assignment questions locally without sending scout data to Gemini', async () => {

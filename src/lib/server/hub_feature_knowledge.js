@@ -280,6 +280,11 @@ function hasExplicitHubContext(value) {
 export function classifyHubFeatureQuestion(question) {
   const value = normalized(question);
   if (!value) return { kind: 'none', feature: null };
+  // “AutoCAM” alone is ambiguous, but a question about jobs/the runner is
+  // specifically about the Fusion queue, not the legacy in-process engine.
+  if (hasAlias(value, 'autocam') && /\b(?:job|jobs|queue|runner)\b/.test(value)) {
+    return { kind: 'answer', feature: HUB_FEATURES.find((feature) => feature.name === 'Fusion AutoCAM') };
+  }
   const matches = HUB_FEATURES.flatMap((feature) => feature.aliases
     .filter((alias) => hasAlias(value, alias))
     .map((alias) => ({ feature, alias })));
@@ -288,7 +293,11 @@ export function classifyHubFeatureQuestion(question) {
   const best = [...matches].sort((left, right) => normalized(right.alias).length - normalized(left.alias).length)[0];
   const aliasesAreAmbiguous = matches.every(({ alias }) => AMBIGUOUS_FEATURE_ALIASES.has(normalized(alias)));
   const exactTopic = matches.some(({ alias }) => value === normalized(alias));
-  if (exactTopic || (aliasesAreAmbiguous && !hasExplicitHubContext(value))) {
+  // A named workflow question supplies enough Hub context even when it does
+  // not literally say “Spartans Hub.” Without this, “Explain the purchasing
+  // approval workflow” becomes an unhelpful clarification or a raw list.
+  const detailedWorkflowRequest = /\b(?:workflow|approval|approve|delivery|receiv|order|job|queue|runner)\b/.test(value);
+  if (exactTopic || (aliasesAreAmbiguous && !hasExplicitHubContext(value) && !detailedWorkflowRequest)) {
     return { kind: 'clarify', feature: best.feature };
   }
   if (!asksForFeatureInformation(value) && !hasExplicitHubContext(value)) {
@@ -354,7 +363,7 @@ export function answerHubFeatureQuestion(question) {
     const metadata = sectionMetadata(section);
     return { feature, section, metadata, matches: metadata.label.length >= 4 && hasAlias(value, metadata.label) };
   })).filter((candidate) => candidate.matches);
-  const parentFeature = candidates[0]?.feature || null;
+  const parentFeature = featureIntent.kind === 'answer' ? featureIntent.feature : candidates[0]?.feature || null;
   const withinParent = parentFeature ? subtabCandidates.filter((candidate) => candidate.feature === parentFeature) : [];
   if (withinParent.length === 1) return formatSubtabAnswer(withinParent[0].feature, withinParent[0].section);
   const asksAboutSubtab = /\b(subtab|tab|section|screen|page|inside|within|find|where)\b/.test(value);
@@ -367,7 +376,7 @@ export function answerHubFeatureQuestion(question) {
   }
   if (featureIntent.kind !== 'answer') return null;
   if (!candidates.length) return null;
-  const feature = candidates[0].feature;
+  const feature = featureIntent.feature || candidates[0].feature;
   return [
     `*${feature.name}* — ${feature.location}`,
     feature.summary,
