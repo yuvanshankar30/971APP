@@ -1012,6 +1012,25 @@ async function fetchGeminiWithRetry(fetchImpl, url, request, retryDelayMs = 400)
   }
 }
 
+async function classifyPartsIntent(question, options = {}) {
+  const apiKey = options.apiKey ?? env.GEMINI_API_KEY;
+  if (!apiKey) return 'unknown';
+  const model = options.model ?? env.GEMINI_MODEL ?? 'gemini-3.5-flash';
+  const response = await fetchGeminiWithRetry(options.fetchImpl || fetch,
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+      method: 'POST', headers: { 'x-goog-api-key': apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: 'Classify the request as purchasing (vendor items, order approvals, receiving, costs), manufacturing (fabricated parts, machines, CAM, kitting), or unknown. Return JSON only.' }] },
+        contents: [{ role: 'user', parts: [{ text: question }] }],
+        generationConfig: { responseMimeType: 'application/json', responseSchema: { type: 'OBJECT', properties: { intent: { type: 'STRING', enum: ['purchasing', 'manufacturing', 'unknown'] } }, required: ['intent'] }, maxOutputTokens: 32 }
+      })
+    });
+  if (!response.ok) return 'unknown';
+  const raw = (await response.json())?.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('') || '';
+  try { return ['purchasing', 'manufacturing'].includes(JSON.parse(raw).intent) ? JSON.parse(raw).intent : 'unknown'; }
+  catch { return 'unknown'; }
+}
+
 export async function askGeminiAboutHub(question, snapshot, options = {}) {
   if (!options.hubScopeConfirmed) {
     const error = new Error('Hub scope must be confirmed before asking Gemini');
@@ -1264,15 +1283,11 @@ export async function handleHubAppMention(event, dependencies = {}) {
   // Gemini is the intent router for every mention. It chooses the live-data
   // domain before any keyword handler can select a nearby-but-wrong list.
   let partsIntent = null;
-  if (/\bcomponents?\b/i.test(question)
-    && /\b(?:approved|approve|ordered|delivered|pending|status)\b/i.test(question)) {
+  const componentApprovalQuestion = /\bcomponents?\b/i.test(question)
+    && /\b(?:approved|approve|ordered|delivered|pending|status)\b/i.test(question);
+  if (componentApprovalQuestion) {
     try {
-      const decision = await askGeminiAboutHub(
-        `Classify this Spartans Hub request. Reply with exactly one word: PURCHASING for vendor items, orders, approvals, receiving, or costs; MANUFACTURING for fabricated parts, machine work, CAM, or kitting; OTHER for everything else.\n\n${question}`,
-        snapshot,
-        { ...dependencies, supa, hubScopeConfirmed: true, allowHubData: false, useGoogleSearch: false }
-      );
-      partsIntent = /PURCHASING/i.test(decision) ? 'purchasing' : /MANUFACTURING/i.test(decision) ? 'manufacturing' : null;
+      partsIntent = await classifyPartsIntent(question, dependencies);
     } catch (error) {
       console.warn('Gemini parts-intent classification failed', error?.message || error);
     }
@@ -1368,6 +1383,10 @@ export async function handleHubAppMention(event, dependencies = {}) {
         text = 'I could not load the manufacturing queue right now. Please try again shortly.';
       }
     }
+  } else if (componentApprovalQuestion) {
+    text = 'I could not determine whether this is a Purchasing or Manufacturing question. Please try again shortly.';
+  } else if (componentApprovalQuestion) {
+    text = 'I could not classify this as Purchasing or Manufacturing. Please try again shortly.';
   } else if (isFusionRunnerSetupQuestion(question)) {
     text = await formatFusionRunnerSetupHelp(supa);
   } else if (isFeatureFollowUp(question) && !person.members.length && !person.searchName && /\b(?:role|roles|permission|permissions|profile|account)\b/i.test(question)) {
