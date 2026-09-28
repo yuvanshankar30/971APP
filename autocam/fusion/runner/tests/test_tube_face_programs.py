@@ -161,6 +161,31 @@ class TubeFaceProgramTests(unittest.TestCase):
         self.assertIn('both_ways.expression = "false"', handler)
         self.assertIn("_cap_other_way_feedrate(setup)", handler)
 
+    def test_the_tube_slot_cut_enters_solid_material_by_ramping_not_by_a_lead(self):
+        # These profiles are cut from solid now that the clearing pass is
+        # gone (#1060), so the tool has to ramp in. The Shape Through
+        # Finishing Pass this replaced used lead-in/lead-out, but only
+        # because roughing had already opened the pocket for the lead to
+        # swing through - copying those settings back here would put a lead
+        # arc in material that is still solid.
+        template = ET.parse(
+            RUNNER_DIR / "templates" / "971-real" / "Tubestock(with Cutter Comp).f3dhsm-template"
+        )
+        slot_cut = next(
+            item for item in template.iter()
+            if item.tag.endswith("template") and item.get("description") == "2D Slot Cut"
+        )
+        parameters = {
+            item.get("name"): item.get("expression")
+            for item in slot_cut.findall("{*}parameter")
+        }
+
+        self.assertEqual(parameters["doRamp"], "true")
+        self.assertEqual(parameters["doLeadIn"], "false")
+        self.assertEqual(parameters["doLeadOut"], "false")
+        # Computer compensation, so no lead is needed to engage G41/G42.
+        self.assertEqual(parameters["compensationType"], "'computer'")
+
     def test_every_tube_operation_runs_at_22000_rpm(self):
         # Direct instruction: tubes run 22000 across the board. 2D Slot Cut
         # matters most - it is the operation that cuts a tube's shapes - but
