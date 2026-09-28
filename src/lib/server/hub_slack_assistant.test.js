@@ -1014,6 +1014,18 @@ describe('Slack Hub assistant', () => {
     })).rejects.toThrow('Gemini returned an empty answer');
   });
 
+  it('retries once when Gemini returns no displayable text', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ thought: true, text: 'hidden reasoning' }] } }] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: 'The active queue is available on the Manufacturing page.' }] } }] }) });
+    await expect(askGeminiAboutHub('Where is the manufacturing queue?', snapshot, {
+      apiKey: 'test-secret', fetchImpl, hubScopeConfirmed: true
+    })).resolves.toContain('Manufacturing page');
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    const retry = JSON.parse(fetchImpl.mock.calls[1][1].body);
+    expect(retry.contents.at(-1).parts[0].text).toContain('no visible answer');
+  });
+
   it('requires server code to explicitly confirm Hub scope before calling Gemini', async () => {
     await expect(askGeminiAboutHub('What is 1+1?', snapshot, { apiKey: 'test-secret' }))
       .rejects.toThrow('Hub scope must be confirmed');
