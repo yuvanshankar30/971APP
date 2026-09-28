@@ -7,7 +7,13 @@
   import { Plus, Edit, Trash2, DollarSign, Calendar, Target, Folder } from 'lucide-svelte';
   import { userStore } from '$lib/stores/user.js';
   import { formatPacificDate } from '$lib/timezone.js';
-  import { calculateBudgetSpent, PURCHASING_CATEGORIES } from '$lib/budget.js';
+  import { calculateBudgetSpent } from '$lib/budget.js';
+  import {
+    loadPurchasingCategories,
+    addPurchasingCategory,
+    renamePurchasingCategory,
+    deletePurchasingCategory
+  } from '$lib/purchasingCategories.js';
 
   export let subsystems = []; // Passed from parent or loaded here if needed
 
@@ -66,11 +72,82 @@
     }
   ];
 
-  // Common project IDs a budget can be scoped to. Shared with the purchasing
-  // page's own dropdowns, so a budget can only ever be pointed at a category
-  // somebody can actually file a purchase under - these two lists were
-  // separate copies and had already drifted apart.
-  const COMMON_PROJECT_IDS = PURCHASING_CATEGORIES;
+  // A budget can only be scoped to a category somebody can actually file a
+  // purchase under, so this is the same database-backed list the purchasing
+  // page offers rather than a second copy that drifts away from it.
+  let categories = [];
+  let categoriesLoading = true;
+  let newCategoryName = '';
+  let categoryBusy = false;
+  $: COMMON_PROJECT_IDS = categories.map((category) => category.name);
+
+  async function loadCategories() {
+    categoriesLoading = true;
+    try {
+      categories = await loadPurchasingCategories(supabase);
+    } catch (e) {
+      console.warn('Failed to load budget categories', e?.message || e);
+      categories = [];
+    } finally {
+      categoriesLoading = false;
+    }
+  }
+
+  async function createCategory() {
+    if (!newCategoryName.trim() || categoryBusy) return;
+    categoryBusy = true;
+    try {
+      await addPurchasingCategory(supabase, newCategoryName, $userStore?.id ?? null);
+      newCategoryName = '';
+      await loadCategories();
+      toastActions.show('Budget category added');
+    } catch (e) {
+      toastActions.show(e?.message || 'Could not add that budget category');
+    } finally {
+      categoryBusy = false;
+    }
+  }
+
+  // Renaming and deleting both leave already-filed purchases behind: their
+  // project_id is the old text, and nothing rewrites it. Both prompts say so
+  // rather than letting somebody split a budget line in two by accident.
+  async function renameCategory(category) {
+    const next = window.prompt(
+      `Rename "${category.name}" to what?\n\nPurchases already filed under the old name keep it, so they stop counting toward this category until they are moved.`,
+      category.name
+    );
+    if (next === null || !next.trim() || next.trim() === category.name) return;
+    categoryBusy = true;
+    try {
+      await renamePurchasingCategory(supabase, category.id, next);
+      await loadCategories();
+      toastActions.show('Budget category renamed');
+    } catch (e) {
+      toastActions.show(e?.message || 'Could not rename that budget category');
+    } finally {
+      categoryBusy = false;
+    }
+  }
+
+  async function removeCategory(category) {
+    const confirmed = await requestConfirmation({
+      title: 'Delete budget category',
+      message: `Delete "${category.name}"? Purchases already filed under it keep the name and still count toward it - this only takes it out of the dropdown.`,
+      confirmLabel: 'Delete',
+      danger: true
+    });
+    if (!confirmed) return;
+    categoryBusy = true;
+    try {
+      await deletePurchasingCategory(supabase, category.id);
+      await loadCategories();
+      toastActions.show('Budget category deleted');
+    } catch (e) {
+      toastActions.show(e?.message || 'Could not delete that budget category');
+    } finally {
+      categoryBusy = false;
+    }
+  }
 
   // Build options for build/build_group scope types
   let buildOptions = [];
@@ -110,7 +187,7 @@
     if (!subsystems || subsystems.length === 0) {
       await loadSubsystems();
     }
-    await Promise.all([loadBudgets(), loadBuildOptionsForBudget()]);
+    await Promise.all([loadBudgets(), loadBuildOptionsForBudget(), loadCategories()]);
   });
 
   async function loadSubsystems() {
@@ -269,6 +346,62 @@
       <Plus size={16} /> New Budget
     </button>
   </div>
+
+  <!-- The categories the purchasing page files items under. Editable here
+       because a budget is only as useful as the categories people can
+       actually pick, and those used to be hardcoded in the bundle. -->
+  <section class="category-manager">
+    <div class="category-manager-header">
+      <h4><Folder size={15} /> Budget categories</h4>
+      <p class="category-hint">
+        What the purchasing page offers when someone files an item. Anyone can add
+        one there too, and it shows up here for everyone.
+      </p>
+    </div>
+
+    {#if categoriesLoading}
+      <div class="loading">Loading categories…</div>
+    {:else}
+      <ul class="category-list">
+        {#each categories as category (category.id)}
+          <li class="category-chip">
+            <span class="category-name">{category.name}</span>
+            <button
+              class="btn-icon"
+              title={`Rename ${category.name}`}
+              disabled={categoryBusy}
+              on:click={() => renameCategory(category)}
+            >
+              <Edit size={13} />
+            </button>
+            <button
+              class="btn-icon danger"
+              title={`Delete ${category.name}`}
+              disabled={categoryBusy}
+              on:click={() => removeCategory(category)}
+            >
+              <Trash2 size={13} />
+            </button>
+          </li>
+        {:else}
+          <li class="category-empty">No categories yet - add the first one below.</li>
+        {/each}
+      </ul>
+
+      <form class="category-add" on:submit|preventDefault={createCategory}>
+        <input
+          type="text"
+          class="form-control"
+          placeholder="New category name"
+          bind:value={newCategoryName}
+          disabled={categoryBusy}
+        />
+        <button class="btn btn-secondary" type="submit" disabled={categoryBusy || !newCategoryName.trim()}>
+          <Plus size={14} /> Add
+        </button>
+      </form>
+    {/if}
+  </section>
 
   {#if loading}
     <div class="loading">Loading budgets...</div>
@@ -501,6 +634,55 @@
 {/if}
 
 <style>
+  .category-manager {
+    margin-bottom: 1.25rem;
+    padding: 0.9rem 1rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 6px);
+    background: var(--surface-2);
+  }
+  .category-manager-header h4 {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin: 0;
+    font-size: 0.95rem;
+  }
+  .category-hint {
+    margin: 0.3rem 0 0.75rem;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+  }
+  .category-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin: 0 0 0.75rem;
+    padding: 0;
+    list-style: none;
+  }
+  .category-chip {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.25rem 0.35rem 0.25rem 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+  }
+  .category-name { font-size: 0.85rem; }
+  .category-empty {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+  }
+  .category-add {
+    display: flex;
+    gap: 0.5rem;
+    /* Stops the input stretching the full width of a wide admin panel,
+       where a name field several inches long reads as a search box. */
+    max-width: 22rem;
+  }
+
   .header-actions {
     display: flex;
     justify-content: space-between;
