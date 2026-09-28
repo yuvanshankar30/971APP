@@ -25,12 +25,14 @@ import {
   fetchPurchasingList,
   formatManufacturingQueue,
   formatPurchasingList,
+  formatPurchasingCompletion,
   formatScoutingAssignments,
   formatTeamReportStatus,
   handleHubAppMention,
   isAdminProfileQuestion,
   isFusionRunnerSetupQuestion,
   isManufacturingQueueQuestion,
+  isPurchasingCompletionQuestion,
   isPurchasingListQuestion,
   isScoutingAssignmentQuestion,
   shouldUseGoogleSearch,
@@ -202,6 +204,7 @@ describe('Slack Hub assistant', () => {
     expect(isManufacturingQueueQuestion('Who is the manufacturing lead?')).toBe(false);
     expect(isPurchasingListQuestion('Show the purchasing list')).toBe(true);
     expect(isPurchasingListQuestion('Who requested the last order?')).toBe(false);
+    expect(isPurchasingCompletionQuestion('Are all parts for Electrical purchased/approved for Third Robot?')).toBe(true);
     expect(assignmentEventKey('What was assigned for Chezy?', '2026mrcmp')).toBe('2026cc');
     expect(assignmentEventKey('What was assigned for 2025 Chezy?', '2026mrcmp')).toBe('2025cc');
   });
@@ -261,6 +264,27 @@ describe('Slack Hub assistant', () => {
     expect(text).toContain('Electrical breaker');
     expect(text).not.toContain('Mechanical bracket');
     expect(text).not.toContain('Electrical wire');
+  });
+
+  it('answers purchasing completion explicitly and names every exception', () => {
+    const text = formatPurchasingCompletion({ available: true, items: [
+      { name: 'Bracket', project_id: '2026 Third Robot Mechanical', quantity: 1, status: 'pending', approved: false },
+      { name: 'Breaker', project_id: '2026 Third Robot Electrical', quantity: 1, status: 'approved', approved: true },
+      { name: 'Wire', project_id: '2026 Third Robot Electrical', quantity: 2, status: 'pending', approved: false }
+    ] }, 'Are all parts for Electrical purchased/approved for Third Robot?');
+    expect(text).toContain('*Approval:* No');
+    expect(text).toContain('*Purchased:* No');
+    expect(text).toContain('Wire ×2 — pending');
+    expect(text).not.toContain('Bracket');
+  });
+
+  it('confirms completion only when every matching item meets the requested state', () => {
+    const text = formatPurchasingCompletion({ available: true, items: [
+      { name: 'Breaker', project_id: '2026 Third Robot Electrical', quantity: 1, status: 'ordered', approved: true },
+      { name: 'Wire', project_id: '2026 Third Robot Electrical', quantity: 2, status: 'delivered', approved: true }
+    ] }, 'Are all parts for Electrical purchased/approved for Third Robot?');
+    expect(text).toContain('*Approval:* Yes');
+    expect(text).toContain('*Purchased:* Yes');
   });
 
   it('formats live status and recent changes', () => {

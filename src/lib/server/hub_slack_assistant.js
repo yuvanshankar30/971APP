@@ -2,7 +2,7 @@ import { env } from '$env/dynamic/private';
 import { env as publicEnv } from '$env/dynamic/public';
 import { getSlackClient, getSupabase } from '$lib/server/971bot.js';
 import { hasPermission } from '$lib/permissions.js';
-import { answerHubFeatureQuestion, classifyHubFeatureQuestion, HUB_FEATURES } from '$lib/server/hub_feature_knowledge.js';
+import { answerHubFeatureComparison, answerHubFeatureQuestion, classifyHubFeatureQuestion, HUB_FEATURES } from '$lib/server/hub_feature_knowledge.js';
 import { identifyRosterQuestion, loadHubRoster } from '$lib/server/hub_slack_roster.js';
 import { readSlackAssistantThread } from '$lib/server/slack_event_receipts.js';
 import { ROUTES } from '$lib/siteSearch.js';
@@ -174,15 +174,22 @@ export function isPurchasingListQuestion(question) {
     && /\b(?:list|queue|show|what|which|open|pending|approved|ordered|delivered|status)\b/i.test(value);
 }
 
+export function isPurchasingCompletionQuestion(question) {
+  const value = String(question || '');
+  return /\b(?:all|every)\b/i.test(value)
+    && /\b(?:part|parts|component|components|item|items)\b/i.test(value)
+    && /\b(?:approv(?:e|ed|al)|purchas(?:e|ed|ing)|order(?:ed|ing)?|bought)\b/i.test(value);
+}
 
-export async function fetchPurchasingList(supa, frcTeam) {
+
+export async function fetchPurchasingList(supa, frcTeam, limit = 100) {
   if (!frcTeam) return { available: false, reason: 'Your Hub profile has no team.', items: [] };
   const { data, error } = await supa
     .from('purchasing')
     .select('name, project_id, vendor, quantity, price, status, approved, created_at')
     .eq('frc_team', frcTeam)
     .order('created_at', { ascending: false })
-    .limit(100);
+    .limit(limit);
   if (error) throw error;
   return { available: true, items: (data || []).filter((item) => String(item.status || '').toLowerCase() !== 'rejected') };
 }
@@ -219,6 +226,70 @@ export function formatPurchasingList(list, question) {
 
 function normalizedQueueText(value) {
   return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function purchasingScope(list, question) {
+  const questionText = String(question || '').toLowerCase();
+  const projects = [...new Set((list.items || []).map((item) => item.project_id).filter(Boolean))];
+  const normalizedQuestion = normalizedQueueText(question);
+  const category = /\belectrical\b/i.test(questionText) ? 'electrical' : null;
+  // “Third Robot” can match several project names. Apply an explicitly named
+  // category before choosing the project so a newer Mechanical record cannot
+  // make an Electrical completion check appear empty.
+  const candidateProjects = category
+    ? projects.filter((candidate) => normalizedQueueText(candidate).includes(category))
+    : projects;
+  const project = candidateProjects
+    .filter((candidate) => {
+      const normalized = normalizedQueueText(candidate);
+      return normalized.length >= 3 && (normalizedQuestion.includes(normalized)
+        || normalized.split(' ').filter((word) => word.length >= 3).some((word) => normalizedQuestion.includes(word)));
+    })
+    .sort((left, right) => normalizedQueueText(right).length - normalizedQueueText(left).length)[0] || null;
+  const items = (list.items || []).filter((item) => (!project || item.project_id === project)
+    && (!category || normalizedQueueText(`${item.name} ${item.project_id} ${item.vendor}`).includes(category)));
+  return { items, project, category };
+}
+
+function isPurchaseApproved(item) {
+  return Boolean(item.approved) || ['approved', 'ordered', 'delivered', 'received', 'kitted'].includes(String(item.status || '').toLowerCase());
+}
+
+function isPurchased(item) {
+  return ['ordered', 'delivered', 'received', 'kitted'].includes(String(item.status || '').toLowerCase());
+}
+
+function purchasingItemLabel(item) {
+  const quantity = Number(item.quantity) > 0 ? ` ×${Number(item.quantity)}` : '';
+  return `${item.name || 'Unnamed item'}${quantity} — ${item.status || (item.approved ? 'approved' : 'pending')}`;
+}
+
+// Completion questions need an explicit conclusion and every exception, not
+// a raw list that asks the user to infer whether all items passed.
+export function formatPurchasingCompletion(list, question) {
+  if (!list?.available) return `I could not verify purchasing completion: ${list?.reason || 'your Hub team is unavailable.'}`;
+  const { items, project, category } = purchasingScope(list, question);
+  const scope = [project, category].filter(Boolean).join(' — ') || 'requested scope';
+  if (!items.length) return `I cannot verify completion for *${scope}*: no matching purchasing records were found.`;
+  const wantsApproval = /\bapprov(?:e|ed|al)\b/i.test(question);
+  const wantsPurchase = /\bpurchas(?:e|ed|ing)|order(?:ed|ing)?|bought\b/i.test(question);
+  const checks = [
+    ...(wantsApproval ? [{ label: 'Approval', complete: isPurchaseApproved }] : []),
+    ...(wantsPurchase ? [{ label: 'Purchased', complete: isPurchased }] : [])
+  ];
+  const lines = [`*Purchasing completion — ${scope}:* ${items.length} matching item${items.length === 1 ? '' : 's'}.`];
+  for (const check of checks) {
+    const incomplete = items.filter((item) => !check.complete(item));
+    if (!incomplete.length) {
+      lines.push(`*${check.label}:* Yes — all ${items.length} matching items are ${check.label === 'Approval' ? 'approved' : 'ordered or received'}.`);
+    } else {
+      lines.push(`*${check.label}:* No — ${incomplete.length} item${incomplete.length === 1 ? '' : 's'} still need${incomplete.length === 1 ? 's' : ''} attention:`);
+      incomplete.slice(0, 25).forEach((item) => lines.push(`• ${purchasingItemLabel(item)}`));
+      if (incomplete.length > 25) lines.push(`• …and ${incomplete.length - 25} more`);
+    }
+  }
+  lines.push('*Open:* /cad/purchasing');
+  return safeSlackText(lines.join('\n'));
 }
 
 function requestedManufacturingWorkflows(question) {
@@ -1276,7 +1347,8 @@ export async function handleHubAppMention(event, dependencies = {}) {
   }
   const snapshot = await fetchHubStatusSnapshot(supa);
   const featureIntent = classifyHubFeatureQuestion(question);
-  const featureAnswer = answerHubFeatureQuestion(question)
+  const featureAnswer = answerHubFeatureComparison(question)
+    || answerHubFeatureQuestion(question)
     || (threadFeature ? answerHubFeatureQuestion(`${question} ${threadFeature.name}`) : null);
   let text;
   let editStatusTs = null;
@@ -1354,13 +1426,19 @@ export async function handleHubAppMention(event, dependencies = {}) {
   } else if (isAdminProfileQuestion(question)) {
     const profileContext = await fetchAdminProfileForSlackUser(supa, event.user, question, { slack });
     text = formatAdminProfile(profileContext);
-  } else if (partsIntent === 'purchasing' || isPurchasingListQuestion(question)) {
+  } else if (partsIntent === 'purchasing' || isPurchasingCompletionQuestion(question) || isPurchasingListQuestion(question)) {
     const actorProfile = await resolveHubProfileForSlackUser(supa, event.user, slack);
     if (!actorProfile || actorProfile.banned) {
       text = 'Link your Slack account to an active Spartans Hub profile before asking about the purchasing list.';
     } else {
       try {
-        text = formatPurchasingList(await fetchPurchasingList(supa, actorProfile.frc_team), question);
+        // A completion claim cannot be based on the first page alone.
+        const purchasingList = await fetchPurchasingList(
+          supa, actorProfile.frc_team, isPurchasingCompletionQuestion(question) ? 1000 : 100
+        );
+        text = isPurchasingCompletionQuestion(question)
+          ? formatPurchasingCompletion(purchasingList, question)
+          : formatPurchasingList(purchasingList, question);
       } catch (error) {
         console.error('Purchasing list lookup failed', error?.message || error);
         requestError = error?.message || String(error);

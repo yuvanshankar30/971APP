@@ -128,13 +128,15 @@ export const HUB_FEATURES = [
     name: 'Power Rankings', aliases: ['power rankings', 'scout power', 'human consensus'], route: '/powerrankings', location: 'Competition → Power Rankings',
     summary: "971's event-relative scouting ranking and head-to-head comparison page. It is not an official FRC ranking.",
     sections: ['971 Scout Power: calculated local scouting score', 'Human Consensus: Match Rankings plus authenticated comparisons', 'Team Rating: display-only average from Robot Ratings', 'Official Event Rank: FIRST qualification standing from TBA', 'TBA OPR: least-squares contribution estimate', 'Head-to-head table, star plot, evidence and review flags'],
-    details: 'Scout Power currently blends observed performance, explicit note impact, pit reliability and TBA OPR while rebalancing around missing inputs. Human Consensus and Robot Ratings do not change it.'
+    details: 'Scout Power currently blends observed performance, explicit note impact, pit reliability and TBA OPR while rebalancing around missing inputs. Human Consensus and Robot Ratings do not change it.',
+    comparison: 'Power Rankings compares teams using calculated Scout Power and a separate Human Consensus rank. Its Team Rating column is only a display of Robot Ratings; Robot Ratings never changes Scout Power or Human Consensus.'
   },
   {
     name: 'Robot Ratings', aliases: ['robot ratings', 'team rating'], route: '/robotratings', location: 'Competition → Robot Ratings',
     summary: "Scouts' subjective 1–10 impressions, shared with the team.",
     sections: ['Overall, auto, offense, shuttling and driving', 'Defense or N/A', 'General notes', 'Practice-match strategy notes', 'Individual entries and team averages'],
-    details: 'The average appears in Power Rankings for context but never changes Scout Power.'
+    details: 'The average appears in Power Rankings for context but never changes Scout Power.',
+    comparison: 'Robot Ratings records individual scouts’ subjective 1–10 impressions and notes. The resulting average is context on Power Rankings, not an input to the calculated ranking.'
   },
   {
     name: 'Vision Scouting', aliases: ['vision scouting', 'vision review'], route: '/scouting/vision', location: 'Competition → Vision Scouting',
@@ -375,5 +377,29 @@ export function answerHubFeatureQuestion(question) {
     '',
     feature.details,
     `*Open:* <${absoluteHubUrl(feature.route)}|${feature.name}>`
+  ].join('\n');
+}
+
+// A single-feature answer drops one side of a comparison question. Keep this
+// local and deterministic so named Hub concepts are both addressed.
+export function answerHubFeatureComparison(question) {
+  const value = normalized(question);
+  if (!/\b(?:difference|different|compare|comparison|versus|vs|distinguish)\b/.test(value)) return null;
+  const matches = HUB_FEATURES.flatMap((feature) => feature.aliases
+    .filter((alias) => hasAlias(value, alias))
+    .map((alias) => ({ feature, score: normalized(alias).length })));
+  const features = [...new Map(matches.sort((left, right) => right.score - left.score)
+    .map(({ feature }) => [feature.name, feature])).values()].slice(0, 2);
+  if (features.length < 2) return null;
+  const [left, right] = features;
+  return [
+    `*${left.name} vs ${right.name}*`,
+    `*${left.name}:* ${left.summary}`,
+    `*${right.name}:* ${right.summary}`,
+    '',
+    '*Key difference:*',
+    left.comparison || left.details,
+    right.comparison || right.details,
+    `*Open:* <${absoluteHubUrl(left.route)}|${left.name}> · <${absoluteHubUrl(right.route)}|${right.name}>`
   ].join('\n');
 }
