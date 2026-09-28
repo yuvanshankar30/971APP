@@ -33,6 +33,15 @@ describe('Slack Hub feature knowledge', () => {
     expect(answer).toContain('*Settings — JProg*');
   });
 
+  it('recognizes detailed workflow questions without requiring the words Spartans Hub', () => {
+    expect(classifyHubFeatureQuestion('Explain the purchasing workflow from request through delivery')).toMatchObject({ kind: 'answer', feature: { name: 'Purchasing' } });
+    expect(classifyHubFeatureQuestion('What does AutoCAM do, who can use it, and where is the job queue?')).toMatchObject({ kind: 'answer', feature: { name: 'Fusion AutoCAM' } });
+    const answer = answerHubFeatureQuestion('What does AutoCAM do, who can use it, and where is the job queue?');
+    expect(answer).toContain('Fusion 360 CAM');
+    expect(answer).toContain('Authorized users');
+    expect(answer).toContain('/autocam/fusion/jobs');
+  });
+
   it('answers a uniquely named subtab even when the parent tab is omitted', () => {
     const answer = answerHubFeatureQuestion('What does the Accuracy subtab show?');
     expect(answer).toContain('*Accuracy — EPA*');

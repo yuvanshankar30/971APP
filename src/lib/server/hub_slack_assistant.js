@@ -163,15 +163,19 @@ const FINISHED_MANUFACTURING_STATUSES = new Set(['complete', 'completed', 'kitte
 // use the roster handler instead of dumping work orders into Slack.
 export function isManufacturingQueueQuestion(question) {
   const value = String(question || '');
+  // A question about what AutoCAM does or where its job queue lives is a
+  // product/help question. Do not turn “job queue” into a request to dump the
+  // active manufacturing queue just because both contain the word “queue.”
+  if (/\bautocam\b/i.test(value) && /\b(?:what\s+does|how\s+does|who\s+can|where\s+(?:do|can|is)|explain|help)\b/i.test(value)) return false;
   return /\b(?:manufactur(?:e|ed|ing)|parts?|queue|router|mill|lathe|laser(?:-cut)?|3d[ -]?print(?:ing)?|kitt?(?:ed|ing)|post[ -]?process(?:ed|ing)?|cam(?:med|ming)?)\b/i.test(value)
-    && /\b(?:what|which|show|list|need|needs|needed|remaining|left|status|queue|ready|pending|still|done|complete|kitted)\b/i.test(value);
+    && /\b(?:what\s+(?:parts?|items?)|which\s+(?:parts?|items?)|show\s+(?:me\s+)?(?:the\s+)?(?:active\s+)?(?:manufacturing\s+)?queue|(?:parts?|items?)\s+(?:need|needs|needed|remaining|left|pending)|(?:manufacturing|router|mill|lathe|laser|3d[ -]?print)\s+(?:queue|status)|(?:active\s+)?queue\s+(?:status|work))\b/i.test(value);
 }
 
 export function isPurchasingListQuestion(question) {
   const value = String(question || '');
-  return !/\b(?:last|latest|recent|history)\b/i.test(value)
+  return !/\b(?:last|latest|recent|history|workflow|process|how|who\s+can|where)\b/i.test(value)
     && /\b(?:purchasing|purchases?|orders?|buying)\b/i.test(value)
-    && /\b(?:list|queue|show|what|which|open|pending|approved|ordered|delivered|status)\b/i.test(value);
+    && /\b(?:list|queue|show|which\s+(?:items?|orders?|purchases?)|what\s+(?:items?|orders?|purchases?)|open\s+(?:items?|orders?|purchases?))\b/i.test(value);
 }
 
 export function isPurchasingCompletionQuestion(question) {
@@ -640,9 +644,16 @@ export function formatScoutingAssignments(context, question = '') {
     byScout.get(row.scout).push(`${row.kind}: ${target}${row.completed ? ' ✓' : ''}`);
   }
   const heading = `*${selectedScout}'s scouting assignments — ${context.eventKey}:*`;
-  const lines = [heading];
+  const complete = rows.filter((row) => row.completed);
+  const incomplete = rows.filter((row) => !row.completed);
+  const lines = [heading, `*Completion:* ${complete.length}/${rows.length} complete.${incomplete.length ? ` ${incomplete.length} still incomplete.` : ' No assignments are incomplete.'}`];
   for (const [scout, assignments] of [...byScout.entries()].sort(([a], [b]) => a.localeCompare(b))) {
     lines.push(`• *${scout}:* ${assignments.join(', ')}`);
+  }
+  if (/\b(?:what\s+(?:should|do)\s+i\s+do|what\s+next|after\s+(?:i\s+)?finish|when\s+(?:i\s+)?finish|next\s+step)\b/i.test(question)) {
+    lines.push(incomplete.length
+      ? '*Next step:* Complete the unmarked assignment(s) in the matching scouting page; the assignment will show Done after submission.'
+      : '*Next step:* You have no remaining assignments. Use My Scout or Match Scouting to review/correct your submitted reports, or wait for a new assignment.');
   }
   return safeSlackText(lines.join('\n'));
 }
@@ -1418,6 +1429,11 @@ export async function handleHubAppMention(event, dependencies = {}) {
   } else if (isTeamReportStatusRequest(question)) {
     const teamSnapshot = await fetchTeamReportSnapshot(supa, teamNumberFromQuestion(question), snapshot.eventKey);
     text = formatTeamReportStatus(teamSnapshot);
+  } else if (featureIntent.kind === 'answer' && featureAnswer && !person.aboutPerson) {
+    // Help/workflow questions may contain words like “queue,” “status,” or
+    // “purchasing.” Prefer the documented feature answer over a narrow live
+    // list, so one keyword cannot consume the rest of a multi-part question.
+    text = featureAnswer;
   } else if (isScoutingAssignmentQuestion(question)) {
     const requestedEventKey = assignmentEventKey(question, snapshot.eventKey);
     const assignmentContext = await fetchScoutingAssignmentsForSlackUser(
