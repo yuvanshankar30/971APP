@@ -11,7 +11,7 @@ import adsk.fusion
 import adsk.cam
 import time
 
-from .ContourChains import is_reverted_for_loop_seed
+from .ContourChains import is_reverted_for_loop_seed, is_reverted_for_seed_edge
 from .TubeFacePrograms import TUBE_FACE_CLOCKS, tube_face_program_name, tube_face_setup_name
 from .TubeHeightMath import (
     BREAKTHROUGH_CLEARANCE_IN,
@@ -251,9 +251,21 @@ def _loop_specs(face):
                         continue
                     if adjacent_face not in circular_faces:
                         circular_faces.append(adjacent_face)
+        # The winding has to come from the co-edge of the edge that actually
+        # seeds the chain (edges[0] in _apply_chains), not from whichever
+        # co-edge happens to be first: loop.coEdges and loop.edges are two
+        # separate collections with no guaranteed common order. Getting this
+        # from the wrong co-edge is silent - Fusion accepts either winding on
+        # a closed loop and just traces a differently-sized chain - and was
+        # confirmed live on a tube wall whose two identical slots came out
+        # with one correct selection and one tracing a larger loop around the
+        # feature. Matched by tempId, never by object identity.
         specs.append({
             "edges": edges,
-            "is_reverted": is_reverted_for_loop_seed(coedges[0].isOpposedToEdge),
+            "is_reverted": is_reverted_for_seed_edge(
+                ((coedge.edge.tempId, coedge.isOpposedToEdge) for coedge in coedges),
+                edges[0].tempId
+            ),
             "circular": circular,
             "circular_faces": circular_faces,
             "diameter": adsk.core.Circle3D.cast(edges[0].geometry).radius * 2 if circular else None,
