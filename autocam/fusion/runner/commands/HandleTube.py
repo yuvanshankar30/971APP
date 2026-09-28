@@ -522,6 +522,14 @@ def _configure_face_operations(setup, selection_face, wall_thickness_in, cutoff_
             # Direct instruction: 2D Slot Cut is the tube's shape-cutting
             # operation. Its chains are the material-bottom loops, same as
             # every other operation on this face.
+            #
+            # Its entry settings are the ones this job needs and should not
+            # be "restored" to the Shape Through Finishing Pass's: that pass
+            # used lead-in/lead-out, which only had somewhere to go because
+            # adaptive clearing had already opened the pocket ahead of it.
+            # With the clearing pass gone these profiles are cut from solid,
+            # so 2D Slot Cut's ramped entry with no lead is correct and a
+            # lead-in arc would have no open material to swing through.
             keep = _apply_chains(operation, "contours", shapes)
         if keep:
             _set_face_stock_heights(operation, wall_thickness_in, clearance_in)
