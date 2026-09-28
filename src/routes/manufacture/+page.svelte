@@ -1353,6 +1353,18 @@
     return !!getStepFileName(part);
   }
 
+  // Workflows whose rows carry a CAD thumbnail. Router and lathe parts ship
+  // the same uploaded STEP a 3D print does, so the operator gets the same
+  // at-a-glance picture of what they are about to make instead of reading it
+  // off the part name. CadViewer holds a thumbnail's own STEP parse until the
+  // row scrolls into view, which is what makes this affordable across the
+  // hundreds of router and lathe parts in this list.
+  const THUMBNAIL_WORKFLOWS = ['3d-print', 'router', 'lathe'];
+
+  function showsRowThumbnail(part) {
+    return THUMBNAIL_WORKFLOWS.includes(part?.workflow) && !!getStepFileName(part);
+  }
+
   // Lathe parts can be documented with a drawing PDF instead of (or in
   // addition to) a STEP file - CadViewer can't render a PDF, so it gets its
   // own lightweight in-app viewer rather than forcing a download.
@@ -2815,7 +2827,7 @@
             {/if}
             <td class="name-col">
               <div class="name-line">
-                {#if part.workflow === '3d-print' && getStepFileName(part)}
+                {#if showsRowThumbnail(part)}
                   <button
                     type="button"
                     class="part-print-thumbnail"

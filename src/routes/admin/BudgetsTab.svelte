@@ -7,7 +7,7 @@
   import { Plus, Edit, Trash2, DollarSign, Calendar, Target, Folder } from 'lucide-svelte';
   import { userStore } from '$lib/stores/user.js';
   import { formatPacificDate } from '$lib/timezone.js';
-  import { calculateBudgetSpent } from '$lib/budget.js';
+  import { calculateBudgetSpent, PURCHASING_CATEGORIES } from '$lib/budget.js';
 
   export let subsystems = []; // Passed from parent or loaded here if needed
 
@@ -66,22 +66,11 @@
     }
   ];
 
-  // Common project IDs that users can select from
-  const COMMON_PROJECT_IDS = [
-    '9584 misc',
-    'Competition',
-    'Outreach + Fundraising',
-    'Mechanical Supply',
-    'Mechanical Consumable',
-    'Electrical Supply',
-    'Electrical Consumable',
-    'Lab Supply',
-    'Lab Consumable',
-    'Software Supply',
-    'Software Consumable',
-    'Manufacturing Stock',
-    'Other'
-  ];
+  // Common project IDs a budget can be scoped to. Shared with the purchasing
+  // page's own dropdowns, so a budget can only ever be pointed at a category
+  // somebody can actually file a purchase under - these two lists were
+  // separate copies and had already drifted apart.
+  const COMMON_PROJECT_IDS = PURCHASING_CATEGORIES;
 
   // Build options for build/build_group scope types
   let buildOptions = [];

@@ -17,7 +17,7 @@
   let loadingMsg = 'Loading 3D model…';
   let error = null;
 
-  let renderer, scene, camera, controls, frameId, resizeObserver;
+  let renderer, scene, camera, controls, frameId, resizeObserver, visibilityObserver;
   let disposed = false;
 
   const isOnshape = part?.source_type === 'onshape_api';
@@ -55,10 +55,33 @@
     return occtMeshesToBufferGeometries(THREE, meshes);
   }
 
+  // A thumbnail parses its own STEP file client-side through occt-import-js,
+  // which is far too much work to do for a whole list at once: the
+  // manufacture page carries hundreds of router and lathe parts alongside
+  // the 3D prints, and mounting every row's viewer would download and parse
+  // all of them before the operator has scrolled to any. Wait until the row
+  // is actually on screen. The full-size viewer opens one model deliberately,
+  // so it still loads immediately.
+  function whenVisible(element) {
+    if (!thumbnail || typeof IntersectionObserver === 'undefined') return Promise.resolve();
+    return new Promise((resolve) => {
+      const observer = new IntersectionObserver((entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          observer.disconnect();
+          resolve();
+        }
+      }, { rootMargin: '200px' });
+      observer.observe(element);
+      visibilityObserver = observer;
+    });
+  }
+
   onMount(() => {
     let cancelled = false;
     (async () => {
       try {
+        await whenVisible(container);
+        if (cancelled || disposed) return;
         const THREE = await import('three');
         const { OrbitControls } = await import('three/examples/jsm/controls/OrbitControls.js');
 
@@ -160,6 +183,7 @@
     disposed = true;
     if (frameId) cancelAnimationFrame(frameId);
     resizeObserver?.disconnect();
+    visibilityObserver?.disconnect();
     controls?.dispose?.();
     renderer?.dispose?.();
     if (renderer?.domElement?.parentNode) renderer.domElement.parentNode.removeChild(renderer.domElement);

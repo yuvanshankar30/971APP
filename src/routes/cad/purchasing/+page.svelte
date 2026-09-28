@@ -4,7 +4,7 @@
   import { supabase } from '$lib/supabase.js';
   import { userStore, loadUserFromUUID, upsertProfileIfMissing, setUserUUID } from '$lib/stores/user.js';
   import { hasPermission, canManagePurchasing, canCreateOrders, canApprovePurchases } from '$lib/permissions.js';
-  import { calculateBudgetSpent } from '$lib/budget.js';
+  import { calculateBudgetSpent, BUDGET_CATEGORY_GROUPS } from '$lib/budget.js';
   import { isTeam9584, passesTeamFilter } from '$lib/frcTeams.js';
   import TeamFilter from '$lib/components/TeamFilter.svelte';
   import { getSeasonBucket, getCurrentSeasonBucket, getAllSeasonBuckets, passesSeasonFilter } from '$lib/frcSeason.js';
@@ -1452,23 +1452,20 @@
           <label for="edit-project">Project ID</label>
           <select id="edit-project" bind:value={editProjectId}>
             <option value="">Select project…</option>
-            {#each buildOptions as b}
-              <option value={b.label}>{b.label}</option>
+            {#if buildOptions.length}
+              <optgroup label="Robot — builds">
+                {#each buildOptions as b}
+                  <option value={b.label}>{b.label}</option>
+                {/each}
+              </optgroup>
+            {/if}
+            {#each BUDGET_CATEGORY_GROUPS as group}
+              <optgroup label={group.budget}>
+                {#each group.categories as category}
+                  <option value={category}>{category}</option>
+                {/each}
+              </optgroup>
             {/each}
-            <option value="Mechanical Supply">Mechanical Supply</option>
-            <option value="Mechanical Consumable">Mechanical Consumable</option>
-            <option value="Electrical Supply">Electrical Supply</option>
-            <option value="Electrical Consumable">Electrical Consumable</option>
-            <option value="Lab Consumable">Lab Consumable</option>
-            <option value="Lab Supply">Lab Supply</option>
-            <option value="Software Consumable">Software Consumable</option>
-            <option value="Software Supply">Software Supply</option>
-            <option value="Manufacturing Stock">Manufacturing Stock</option>
-            <option value="9584 misc">9584 misc</option>
-            <option value="Competition">Competition</option>
-            <option value="Outreach + Fundraising">Outreach + Fundraising</option>
-            <option value="Budget Exempt">Budget Exempt</option>
-            <option value="Other">Other</option>
           </select>
           <small style="color: var(--text-secondary); margin-top: 0.25rem;">Selecting "Budget Exempt" excludes this item from budget totals</small>
         </div>
@@ -1515,23 +1512,20 @@
           <label for="misc-build">Project ID</label>
           <select id="misc-build" bind:value={miscProject} class="combo-input">
             <option value="">Select project…</option>
-            {#each buildOptions as b}
-              <option value={b.label}>{b.label}</option>
+            {#if buildOptions.length}
+              <optgroup label="Robot — builds">
+                {#each buildOptions as b}
+                  <option value={b.label}>{b.label}</option>
+                {/each}
+              </optgroup>
+            {/if}
+            {#each BUDGET_CATEGORY_GROUPS as group}
+              <optgroup label={group.budget}>
+                {#each group.categories as category}
+                  <option value={category}>{category}</option>
+                {/each}
+              </optgroup>
             {/each}
-            <option value="Mechanical Supply">Mechanical Supply</option>
-            <option value="Mechanical Consumable">Mechanical Consumable</option>
-            <option value="Electrical Supply">Electrical Supply</option>
-            <option value="Electrical Consumable">Electrical Consumable</option>
-            <option value="Lab Consumable">Lab Consumable</option>
-            <option value="Lab Supply">Lab Supply</option>
-            <option value="Software Consumable">Software Consumable</option>
-            <option value="Software Supply">Software Supply</option>
-            <option value="Manufacturing Stock">Manufacturing Stock</option>
-            <option value="9584 misc">9584 misc</option>
-            <option value="Competition">Competition</option>
-            <option value="Outreach + Fundraising">Outreach + Fundraising</option>
-            <option value="Budget Exempt">Budget Exempt</option>
-            <option value="Other">Other</option>
           </select>
           <small style="color: var(--text-secondary); margin-top: 0.25rem;">Selecting "Budget Exempt" excludes this item from budget totals</small>
         </div>
