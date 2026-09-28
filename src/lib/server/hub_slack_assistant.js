@@ -1169,6 +1169,7 @@ export async function askGeminiAboutHub(question, snapshot, options = {}) {
     { role: 'user', parts: [{ text: safeSlackText(question).slice(0, 1200) }] }
   ];
   try {
+    let emptyAnswerRetries = 0;
     for (let round = 0; round <= MAX_TOOL_ROUNDS; round += 1) {
       const offerTools = round < MAX_TOOL_ROUNDS;
       // The deployed generateContent model rejects a payload that combines
@@ -1247,6 +1248,16 @@ export async function askGeminiAboutHub(question, snapshot, options = {}) {
         .map((part) => part.text)
         .join(''));
       if (!answer) {
+        // A successful Gemini response can contain only hidden thinking or
+        // otherwise omit displayable text. Ask once more in the same bounded
+        // conversation rather than turning that transient provider shape into
+        // a Slack-visible failure.
+        if (emptyAnswerRetries < 1 && round < MAX_TOOL_ROUNDS) {
+          emptyAnswerRetries += 1;
+          if (parts.length) contents.push({ role: 'model', parts });
+          contents.push({ role: 'user', parts: [{ text: 'Your last response had no visible answer. Give a complete, user-facing answer to the original question now.' }] });
+          continue;
+        }
         const error = new Error('Gemini returned an empty answer');
         error.geminiReason = 'empty';
         throw error;
