@@ -107,6 +107,16 @@ class TubeFaceProgramTests(unittest.TestCase):
         # ...and the slot cut is what actually gets the geometry.
         self.assertIn('keep = _apply_chains(operation, "contours", shapes)', handler[slot_branch:])
 
+    def test_tube_chain_winding_comes_from_the_seed_edge_own_coedge(self):
+        # coedges[0] is not necessarily the co-edge of edges[0], and edges[0]
+        # is what seeds the chain. Reading the reversal from the wrong one
+        # silently traces a differently-sized chain - two identical slots on
+        # one wall, one right and one wrong.
+        handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
+        self.assertIn("is_reverted_for_seed_edge(", handler)
+        self.assertIn("edges[0].tempId", handler)
+        self.assertNotIn("is_reverted_for_loop_seed(coedges[0].isOpposedToEdge)", handler)
+
     def test_tube_shape_chains_come_from_the_material_bottom_face(self):
         # Fusion traces the real breakout contour on the wall's inner face;
         # selecting the exterior loop cuts from the wrong side. The shapes
