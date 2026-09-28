@@ -252,6 +252,17 @@ describe('Slack Hub assistant', () => {
     expect(text).not.toContain('9584 Item');
   });
 
+  it('filters a purchasing list by project, category, and approval status', () => {
+    const text = formatPurchasingList({ available: true, items: [
+      { name: 'Electrical breaker', project_id: '2026 Third Robot Electrical', vendor: 'REV', quantity: 1, price: 14, status: 'approved' },
+      { name: 'Mechanical bracket', project_id: '2026 Third Robot Mechanical', vendor: 'McMaster', quantity: 1, price: 4, status: 'approved' },
+      { name: 'Electrical wire', project_id: '2026 Third Robot Electrical', vendor: 'REV', quantity: 2, price: 3, status: 'pending' }
+    ] }, 'Which electrical parts have been approved for third robot?');
+    expect(text).toContain('Electrical breaker');
+    expect(text).not.toContain('Mechanical bracket');
+    expect(text).not.toContain('Electrical wire');
+  });
+
   it('formats live status and recent changes', () => {
     const text = formatHubStatus(snapshot);
     expect(text).toContain('*Spartans Hub status:* Operational');
