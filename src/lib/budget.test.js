@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { calculateBudgetSpent } from './budget.js';
+import { calculateBudgetSpent, BUDGET_CATEGORY_GROUPS, PURCHASING_CATEGORIES } from './budget.js';
 
 const overall = (extra = {}) => ({ scope_type: 'overall', ...extra });
 
@@ -129,5 +129,65 @@ describe('calculateBudgetSpent', () => {
       item({ project_id: '2026Slapdown-slapdowning', price: 30.5, quantity: 4, created_at: '2026-04-21T00:00:00Z' })
     ];
     expect(calculateBudgetSpent(offseason, parts)).toBeCloseTo(410.74);
+  });
+
+  describe('include_projects allowlist', () => {
+    it('counts only the listed projects', () => {
+      // What "General Supplies" needs and 'overall' could not express: a
+      // budget covering a named set of categories, not every purchase.
+      const generalSupplies = overall({
+        metadata: { include_projects: ['Lab Supply', 'Mechanical Consumable'] }
+      });
+      const spent = calculateBudgetSpent(generalSupplies, [
+        item({ project_id: 'Lab Supply', price: 100 }),
+        item({ project_id: 'Mechanical Consumable', price: 50 }),
+        item({ project_id: 'Competition', price: 5000 }),
+        item({ project_id: '2026Shooter-V146', price: 900 })
+      ]);
+      expect(spent).toBeCloseTo(150);
+    });
+
+    it('still counts everything when it is absent', () => {
+      const spent = calculateBudgetSpent(overall(), [
+        item({ project_id: 'Competition', price: 40 }),
+        item({ project_id: 'Lab Supply', price: 2 })
+      ]);
+      expect(spent).toBeCloseTo(42);
+    });
+
+    it('never overrides the exclusions that already applied', () => {
+      const budget = overall({
+        metadata: {
+          include_projects: ['Lab Supply', 'Budget Exempt'],
+          exclude_projects: ['Lab Supply']
+        }
+      });
+      const spent = calculateBudgetSpent(budget, [
+        item({ project_id: 'Lab Supply', price: 10 }),
+        item({ project_id: 'Budget Exempt', price: 999 }),
+        item({ project_id: 'Lab Supply', price: 10, status: 'rejected' })
+      ]);
+      expect(spent).toBe(0);
+    });
+  });
+
+  describe('BUDGET_CATEGORY_GROUPS', () => {
+    it('files every selectable category under exactly one budget', () => {
+      const seen = new Set();
+      for (const group of BUDGET_CATEGORY_GROUPS) {
+        for (const category of group.categories) {
+          expect(seen.has(category)).toBe(false);
+          seen.add(category);
+        }
+      }
+      expect(PURCHASING_CATEGORIES).toHaveLength(seen.size);
+    });
+
+    it('keeps Budget Exempt out of the real budget lines', () => {
+      const realLines = BUDGET_CATEGORY_GROUPS.filter(
+        (group) => group.budget !== 'Not tracked against a budget'
+      );
+      expect(realLines.flatMap((group) => group.categories)).not.toContain('Budget Exempt');
+    });
   });
 });
