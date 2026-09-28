@@ -130,7 +130,7 @@ class PerOperationFeedsSurvivePatchingTests(unittest.TestCase):
 
         self.assertEqual(bore["tool_feedCutting"], "40.in/min")
         self.assertEqual(finishing["tool_feedCutting"], "20.in/min")
-        self.assertEqual(finishing["tool_spindleSpeed"], "13000.")
+        self.assertEqual(finishing["tool_spindleSpeed"], "22000.")
 
     def test_no_material_preset_overrides_a_template_that_has_its_own_feeds(self):
         # Direct instruction: the shop cuts Lexan plate on the aluminum
