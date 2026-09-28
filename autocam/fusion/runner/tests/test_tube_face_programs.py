@@ -107,6 +107,26 @@ class TubeFaceProgramTests(unittest.TestCase):
         # ...and the slot cut is what actually gets the geometry.
         self.assertIn('keep = _apply_chains(operation, "contours", shapes)', handler[slot_branch:])
 
+    def test_the_wide_walls_are_labelled_12_and_6(self):
+        # The operator writes 3/6/9/12 on the tube and expects the big faces
+        # to be 12 and 6. Which pair got those numbers used to come out of
+        # body.faces discovery order - a property of how the part happened to
+        # be modelled, not of the tube - so the same tube could be labelled
+        # either way round. stepProfile.js already sorts its cross-section
+        # axes by span for the in-process path; this is the runner's half.
+        handler = (RUNNER_DIR / "commands" / "HandleTube.py").read_text()
+
+        # The two wall families are ordered by how far apart they sit, which
+        # is the width of the other pair - smaller separation means wider
+        # walls (a 2x1 tube's 2in walls stand 1in apart).
+        self.assertIn('separation = abs(planes[-1]["projection"] - planes[0]["projection"])', handler)
+        self.assertIn("exterior_pairs.sort(key=lambda entry: entry[0])", handler)
+
+        # ...and the first (wide) pair is what gets 12 and 6, with opposite
+        # walls staying opposite.
+        self.assertIn("faces = (pair_a[1], pair_b[1], pair_a[0], pair_b[0])", handler)
+        self.assertEqual(TUBE_FACE_CLOCKS, (12, 3, 6, 9))
+
     def test_tube_chain_winding_comes_from_the_seed_edge_own_coedge(self):
         # coedges[0] is not necessarily the co-edge of edges[0], and edges[0]
         # is what seeds the chain. Reading the reversal from the wrong one
