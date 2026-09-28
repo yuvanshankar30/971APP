@@ -202,7 +202,7 @@ export const HUB_FEATURES = [
     name: 'Purchasing', aliases: ['purchasing', 'orders', 'budgets', 'receiving'], route: '/cad/purchasing', location: 'Purchasing',
     summary: 'Tracks requested items through approval, ordering, receiving and delivery.',
     sections: ['Requests, vendors, quantities and prices', 'Budgets and approvals', 'Orders and receiving', 'Scan package/label to suggest an open item'],
-    details: 'The scan photo is not stored and confirmation is required before marking delivery. Permissions determine who can request, approve, order, manage vendors or edit budgets.'
+    details: 'The scan photo is not stored and confirmation is required before marking delivery. Admins, mentors, Purchasing Approvers, Purchasing Leads, and users with APPROVE_PURCHASES can approve or reject an item; the purchasing page shows its current status. Other permissions determine who can request, order, manage vendors, or edit budgets.'
   },
   {
     name: 'Planner', aliases: ['planner', 'gantt'], route: '/planner', location: 'Open /planner through search/direct navigation',

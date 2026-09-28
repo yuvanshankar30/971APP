@@ -42,6 +42,15 @@ describe('Slack Hub feature knowledge', () => {
     expect(answer).toContain('/autocam/fusion/jobs');
   });
 
+  it('answers every clause of the Purchasing workflow prompt', () => {
+    const answer = answerHubFeatureQuestion('Explain the purchasing workflow from request through delivery, tell me who can approve an item, and where I can check its current status.');
+    expect(answer).toContain('approval, ordering, receiving and delivery');
+    expect(answer).toContain('Purchasing Approvers');
+    expect(answer).toContain('APPROVE_PURCHASES');
+    expect(answer).toContain('purchasing page shows its current status');
+    expect(answer).toContain('/cad/purchasing');
+  });
+
   it('answers every named Hub feature in a multi-part question', () => {
     const question = 'How do Purchasing and Manufacturing work together, and where do I find each one?';
     expect(classifyHubFeatureQuestion(question)).toMatchObject({ kind: 'answer', feature: { name: 'Manufacturing' } });

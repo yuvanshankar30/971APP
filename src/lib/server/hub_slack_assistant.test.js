@@ -607,23 +607,27 @@ describe('Slack Hub assistant', () => {
     expect(postMessage.mock.calls[0][0].text).toBe('2');
   });
 
-  it('answers detailed Hub tab questions locally instead of sending product knowledge to Gemini', async () => {
+  it('gives Gemini the documented Hub context for detailed tab questions', async () => {
     const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
-    const fetchImpl = vi.fn();
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: 'Open the JProg *Settings* page at /jprog/settings.' }] } }] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify({ related: true, relevant: true, problem: '', requirements: ['JProg settings location'], missingRequirements: [] }) }] } }] }) });
     await handleHubAppMention({ channel: 'C1', user: 'U1', ts: '1.0', text: '<@U971> where are the JProg settings?' }, {
       supa: supabaseForStatus(),
       slack: { chat: { postMessage } },
       apiKey: 'test-secret',
       fetchImpl
     });
-    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(fetchImpl.mock.calls[0][1].body).system_instruction.parts[0].text).toContain('SITE ROUTES:');
     expect(postMessage.mock.calls[0][0].text).toContain('/jprog/settings');
-    expect(postMessage.mock.calls[0][0].text).toContain('*Settings — JProg*');
   });
 
-  it('keeps every named Hub topic in a multi-part question', async () => {
+  it('uses the reviewed model path for every requirement in a multi-part Hub question', async () => {
     const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
-    const fetchImpl = vi.fn();
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: 'Purchasing tracks vendor requests through approval, ordering, receiving, and delivery at /cad/purchasing. Manufacturing tracks fabricated work at /manufacture.' }] } }] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify({ related: true, relevant: true, problem: '', requirements: ['Purchasing workflow', 'Manufacturing workflow', 'location of both pages'], missingRequirements: [] }) }] } }] }) });
     await handleHubAppMention({
       channel: 'C1', user: 'U1', ts: '1.0',
       text: '<@U971> How do Purchasing and Manufacturing work together, and where do I find each one?'
@@ -633,9 +637,11 @@ describe('Slack Hub assistant', () => {
       apiKey: 'test-secret',
       fetchImpl
     });
-    expect(fetchImpl).not.toHaveBeenCalled();
-    expect(postMessage.mock.calls[0][0].text).toContain('*Purchasing* — Purchasing');
-    expect(postMessage.mock.calls[0][0].text).toContain('*Manufacturing* — Manufacturing → Manufacture');
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    const prompt = JSON.parse(fetchImpl.mock.calls[0][1].body).system_instruction.parts[0].text;
+    expect(prompt).toContain('every atomic answer requirement');
+    expect(postMessage.mock.calls[0][0].text).toContain('/cad/purchasing');
+    expect(postMessage.mock.calls[0][0].text).toContain('/manufacture');
   });
 
   it('answers an authorized named-person purchasing-history question locally', async () => {
@@ -1125,7 +1131,7 @@ describe('Slack Hub assistant', () => {
     expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ channel: 'C-ACE', thread_ts: '7.0' }));
   });
 
-  it('uses prior thread mentions locally to answer related Hub feature follow-ups with subtab links', async () => {
+  it('uses prior thread context when answering a multi-part Hub feature follow-up', async () => {
     const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '3.0' });
     const replies = vi.fn().mockResolvedValue({
       ok: true,
@@ -1135,7 +1141,9 @@ describe('Slack Hub assistant', () => {
         { ts: '2.5', user: 'U1', text: '<@U971> what subtabs does it have, and give me the links?' }
       ]
     });
-    const fetchImpl = vi.fn();
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: '*EPA* has Rankings, Events, Predict, and Accuracy. Open Accuracy: <https://spartanshub.spartanrobotics.org/epa?tab=accuracy|Accuracy>.' }] } }] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify({ related: true, relevant: true, problem: '', requirements: ['EPA subtabs', 'EPA subtab links'], missingRequirements: [] }) }] } }] }) });
     await handleHubAppMention({
       channel: 'C1', ts: '2.5', thread_ts: '1.0', user: 'U1',
       text: '<@U971> what subtabs does it have, and give me the links?'
@@ -1146,7 +1154,7 @@ describe('Slack Hub assistant', () => {
       fetchImpl
     });
     expect(replies).toHaveBeenCalledWith({ channel: 'C1', ts: '1.0', limit: 100 });
-    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
     const answer = postMessage.mock.calls[0][0].text;
     expect(answer).toContain('*EPA*');
     expect(answer).toContain('https://spartanshub.spartanrobotics.org/epa?tab=accuracy');
@@ -1170,10 +1178,13 @@ describe('Slack Hub assistant', () => {
     } };
     const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '3.0' });
     const replies = vi.fn().mockRejectedValue(new Error('missing_scope'));
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: '*EPA* has Rankings, Events, Predict, and Accuracy.' }] } }] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify({ related: true, relevant: true, problem: '', requirements: ['EPA subtabs'], missingRequirements: [] }) }] } }] }) });
     await handleHubAppMention({
       channel: 'C1', ts: '2.0', thread_ts: '1.0', user: 'U1',
       text: '<@U971> what subtabs does it have?'
-    }, { supa, slack: { chat: { postMessage }, conversations: { replies } } });
+    }, { supa, slack: { chat: { postMessage }, conversations: { replies } }, apiKey: 'test-secret', fetchImpl });
     expect(replies).not.toHaveBeenCalled();
     expect(postMessage.mock.calls[0][0].text).toContain('*EPA*');
   });

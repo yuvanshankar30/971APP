@@ -1429,11 +1429,6 @@ export async function handleHubAppMention(event, dependencies = {}) {
   } else if (isTeamReportStatusRequest(question)) {
     const teamSnapshot = await fetchTeamReportSnapshot(supa, teamNumberFromQuestion(question), snapshot.eventKey);
     text = formatTeamReportStatus(teamSnapshot);
-  } else if (featureIntent.kind === 'answer' && featureAnswer && !person.aboutPerson) {
-    // Help/workflow questions may contain words like “queue,” “status,” or
-    // “purchasing.” Prefer the documented feature answer over a narrow live
-    // list, so one keyword cannot consume the rest of a multi-part question.
-    text = featureAnswer;
   } else if (isScoutingAssignmentQuestion(question)) {
     const requestedEventKey = assignmentEventKey(question, snapshot.eventKey);
     const assignmentContext = await fetchScoutingAssignmentsForSlackUser(
@@ -1490,8 +1485,6 @@ export async function handleHubAppMention(event, dependencies = {}) {
   } else if (isFeatureFollowUp(question) && !person.members.length && !person.searchName && /\b(?:role|roles|permission|permissions|profile|account)\b/i.test(question)) {
     text = 'Whose Hub role or profile do you mean? Name the person, or ask about your own role.';
   } else if (featureIntent.kind === 'clarify' && !threadFeature && !person.aboutPerson && !person.requestedRole) {
-    text = featureAnswer;
-  } else if (featureAnswer && !person.aboutPerson) {
     text = featureAnswer;
   } else if (isHubGreeting(question)) {
     text = hubGreetingReply();
