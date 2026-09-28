@@ -161,6 +161,38 @@ class TubeFaceProgramTests(unittest.TestCase):
         self.assertIn('both_ways.expression = "false"', handler)
         self.assertIn("_cap_other_way_feedrate(setup)", handler)
 
+    def test_every_tube_operation_runs_at_22000_rpm(self):
+        # Direct instruction: tubes run 22000 across the board. 2D Slot Cut
+        # matters most - it is the operation that cuts a tube's shapes - but
+        # spindle speed is stored in three places per operation and Fusion's
+        # dialog disagrees with the posted G-code if they drift apart.
+        template = ET.parse(
+            RUNNER_DIR / "templates" / "971-real" / "Tubestock(with Cutter Comp).f3dhsm-template"
+        )
+        operations = [item for item in template.iter() if item.tag.endswith("template")]
+        self.assertEqual(len(operations), 7)
+
+        for operation in operations:
+            description = operation.get("description")
+            with self.subTest(operation=description):
+                motion = next(item for item in operation.iter() if item.tag.endswith("motion"))
+                self.assertEqual(motion.get("spindle-rpm"), "22000")
+                self.assertEqual(motion.get("ramp-spindle-rpm"), "22000")
+
+                preset = {
+                    item.get("key"): item.get("value")
+                    for item in operation.iter()
+                    if item.tag.endswith("parameter") and item.get("key")
+                }
+                self.assertEqual(preset.get("tool_spindleSpeed"), "22000")
+                self.assertEqual(preset.get("tool_rampSpindleSpeed"), "22000")
+
+                live = {
+                    item.get("name"): item.get("expression")
+                    for item in operation.findall("{*}parameter")
+                }
+                self.assertEqual(live.get("tool_spindleSpeed"), "22000.")
+
     def test_shape_through_templates_are_one_way_with_a_safe_fallback_feed(self):
         template = ET.parse(
             RUNNER_DIR / "templates" / "971-real" / "Tubestock(with Cutter Comp).f3dhsm-template"
