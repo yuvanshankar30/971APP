@@ -102,6 +102,29 @@ export function isScoutingAssignmentQuestion(question) {
     && /\b(scout|scouts|scouting|match|pit|prescout)\b/i.test(value);
 }
 
+// Intent handlers are intentionally narrow and authoritative, but they are
+// not a substitute for answering a compound request. Route a question with
+// multiple clauses through the model and its completeness review instead of
+// allowing the first matching keyword to consume the rest of the question.
+export function isMultiPartQuestion(question) {
+  const value = String(question || '').trim();
+  if (!value) return false;
+  return (value.match(/[?;]/g) || []).length > 1
+    || /\b(?:and|also|then|plus|additionally)\b/i.test(value);
+}
+
+function isAssignmentOnlyQuestion(question) {
+  if (!isScoutingAssignmentQuestion(question)) return false;
+  // This handler enforces per-user assignment visibility and already answers
+  // assignment status plus the requested next step. A second Hub topic means
+  // it is no longer safe to reduce the request to assignments alone.
+  return !/\b(?:purchas(?:e|ed|ing)?|order(?:ed|s)?|manufactur(?:e|ed|ing)|autocam|\bcad\b|planner|strategy|drive\s+team|robot\s+ratings?|epa|vision|pit\s+scouting|match\s+rankings?)\b/i.test(String(question || ''));
+}
+
+export function shouldUseReviewedCompoundPath(question) {
+  return isMultiPartQuestion(question) && !isAssignmentOnlyQuestion(question);
+}
+
 // Preserves the proven PR #979 behavior: let Gemini decide whether to use
 // Search only for questions where current public information is useful. TBA
 // remains available separately for public competition facts.
@@ -1367,12 +1390,13 @@ export async function handleHubAppMention(event, dependencies = {}) {
     || (threadFeature ? answerHubFeatureQuestion(`${question} ${threadFeature.name}`) : null);
   let text;
   let editStatusTs = null;
+  const useReviewedCompoundPath = shouldUseReviewedCompoundPath(question);
   // Gemini is the intent router for every mention. It chooses the live-data
   // domain before any keyword handler can select a nearby-but-wrong list.
   let partsIntent = null;
   const componentApprovalQuestion = /\bcomponents?\b/i.test(question)
     && /\b(?:approved|approve|ordered|delivered|pending|status)\b/i.test(question);
-  if (componentApprovalQuestion) {
+  if (componentApprovalQuestion && !useReviewedCompoundPath) {
     try {
       partsIntent = await classifyPartsIntent(question, dependencies);
     } catch (error) {
@@ -1426,15 +1450,10 @@ export async function handleHubAppMention(event, dependencies = {}) {
     }
   } else if (isHubStatusRequest(question)) {
     text = formatHubStatus(snapshot);
-  } else if (isTeamReportStatusRequest(question)) {
+  } else if (isTeamReportStatusRequest(question) && !useReviewedCompoundPath) {
     const teamSnapshot = await fetchTeamReportSnapshot(supa, teamNumberFromQuestion(question), snapshot.eventKey);
     text = formatTeamReportStatus(teamSnapshot);
-  } else if (featureIntent.kind === 'answer' && featureAnswer && !person.aboutPerson) {
-    // Help/workflow questions may contain words like “queue,” “status,” or
-    // “purchasing.” Prefer the documented feature answer over a narrow live
-    // list, so one keyword cannot consume the rest of a multi-part question.
-    text = featureAnswer;
-  } else if (isScoutingAssignmentQuestion(question)) {
+  } else if (isScoutingAssignmentQuestion(question) && !useReviewedCompoundPath) {
     const requestedEventKey = assignmentEventKey(question, snapshot.eventKey);
     const assignmentContext = await fetchScoutingAssignmentsForSlackUser(
       supa,
@@ -1443,10 +1462,10 @@ export async function handleHubAppMention(event, dependencies = {}) {
       { slack }
     );
     text = formatScoutingAssignments(assignmentContext, question);
-  } else if (isAdminProfileQuestion(question)) {
+  } else if (isAdminProfileQuestion(question) && !useReviewedCompoundPath) {
     const profileContext = await fetchAdminProfileForSlackUser(supa, event.user, question, { slack });
     text = formatAdminProfile(profileContext);
-  } else if (partsIntent === 'purchasing' || isPurchasingCompletionQuestion(question) || isPurchasingListQuestion(question)) {
+  } else if (!useReviewedCompoundPath && (partsIntent === 'purchasing' || isPurchasingCompletionQuestion(question) || isPurchasingListQuestion(question))) {
     const actorProfile = await resolveHubProfileForSlackUser(supa, event.user, slack);
     if (!actorProfile || actorProfile.banned) {
       text = 'Link your Slack account to an active Spartans Hub profile before asking about the purchasing list.';
@@ -1465,10 +1484,10 @@ export async function handleHubAppMention(event, dependencies = {}) {
         text = 'I could not load the purchasing list right now. Please try again shortly.';
       }
     }
-  } else if (isNamedPurchasingQuestion(question)) {
+  } else if (isNamedPurchasingQuestion(question) && !useReviewedCompoundPath) {
     const purchaseContext = await fetchNamedPurchasingRequest(supa, event.user, question, { slack });
     text = formatNamedPurchasingRequest(purchaseContext);
-  } else if (partsIntent === 'manufacturing' || isManufacturingQueueQuestion(question)) {
+  } else if (!useReviewedCompoundPath && (partsIntent === 'manufacturing' || isManufacturingQueueQuestion(question))) {
     const actorProfile = await resolveHubProfileForSlackUser(supa, event.user, slack);
     if (!actorProfile || actorProfile.banned) {
       text = 'Link your Slack account to an active Spartans Hub profile before asking about the manufacturing queue.';
@@ -1481,17 +1500,15 @@ export async function handleHubAppMention(event, dependencies = {}) {
         text = 'I could not load the manufacturing queue right now. Please try again shortly.';
       }
     }
-  } else if (componentApprovalQuestion) {
+  } else if (componentApprovalQuestion && !useReviewedCompoundPath) {
     text = 'I could not determine whether this is a Purchasing or Manufacturing question. Please try again shortly.';
-  } else if (componentApprovalQuestion) {
+  } else if (componentApprovalQuestion && !useReviewedCompoundPath) {
     text = 'I could not classify this as Purchasing or Manufacturing. Please try again shortly.';
-  } else if (isFusionRunnerSetupQuestion(question)) {
+  } else if (isFusionRunnerSetupQuestion(question) && !useReviewedCompoundPath) {
     text = await formatFusionRunnerSetupHelp(supa);
   } else if (isFeatureFollowUp(question) && !person.members.length && !person.searchName && /\b(?:role|roles|permission|permissions|profile|account)\b/i.test(question)) {
     text = 'Whose Hub role or profile do you mean? Name the person, or ask about your own role.';
-  } else if (featureIntent.kind === 'clarify' && !threadFeature && !person.aboutPerson && !person.requestedRole) {
-    text = featureAnswer;
-  } else if (featureAnswer && !person.aboutPerson) {
+  } else if (featureIntent.kind === 'clarify' && !useReviewedCompoundPath && !threadFeature && !person.aboutPerson && !person.requestedRole) {
     text = featureAnswer;
   } else if (isHubGreeting(question)) {
     text = hubGreetingReply();
@@ -1500,17 +1517,17 @@ export async function handleHubAppMention(event, dependencies = {}) {
   } else {
     try {
       const actorProfile = await resolveHubProfileForSlackUser(supa, event.user, slack);
-      if (person.aboutPerson && roster === null) {
+      if (person.aboutPerson && roster === null && !useReviewedCompoundPath) {
         text = 'I could not check the Hub roster right now. Please ask again shortly.';
-      } else if (person.aboutPerson && !person.members.length && !hasHubQuestionContext(question, threadFeature)) {
+      } else if (person.aboutPerson && !person.members.length && !hasHubQuestionContext(question, threadFeature) && !useReviewedCompoundPath) {
         text = 'I can only answer people questions that are grounded in a Spartans Hub roster record. Name a Hub role or ask about a documented Hub feature.';
-      } else if (person.members.length && (!actorProfile || actorProfile.banned)) {
+      } else if (person.members.length && (!actorProfile || actorProfile.banned) && !useReviewedCompoundPath) {
         text = 'Link your Slack account to an active Spartans Hub profile before asking about team roster members.';
-      } else if (person.requestedRole && !person.members.length) {
+      } else if (person.requestedRole && !person.members.length && !useReviewedCompoundPath) {
         text = `I could not find anyone assigned the ${person.requestedRole} role in the Hub roster.`;
-      } else if (person.requestedRole && person.members.length) {
+      } else if (person.requestedRole && person.members.length && !useReviewedCompoundPath) {
         text = safeSlackText(`*${person.requestedRole}:* ${person.members.map((member) => `${member.name} (${[member.teamRole, ...member.roles].filter(Boolean).join('; ')})`).join(', ')}`);
-      } else if (person.members.length > 1) {
+      } else if (person.members.length > 1 && !useReviewedCompoundPath) {
         text = `I found more than one possible Hub member: ${person.members.slice(0, 5).map((member) => member.name).join(', ')}. Which person do you mean?`;
       } else {
         text = await askGeminiAboutHub(question, snapshot, {

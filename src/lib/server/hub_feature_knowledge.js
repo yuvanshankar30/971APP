@@ -202,7 +202,7 @@ export const HUB_FEATURES = [
     name: 'Purchasing', aliases: ['purchasing', 'orders', 'budgets', 'receiving'], route: '/cad/purchasing', location: 'Purchasing',
     summary: 'Tracks requested items through approval, ordering, receiving and delivery.',
     sections: ['Requests, vendors, quantities and prices', 'Budgets and approvals', 'Orders and receiving', 'Scan package/label to suggest an open item'],
-    details: 'The scan photo is not stored and confirmation is required before marking delivery. Permissions determine who can request, approve, order, manage vendors or edit budgets.'
+    details: 'The scan photo is not stored and confirmation is required before marking delivery. Admins, mentors, Purchasing Approvers, Purchasing Leads, and users with APPROVE_PURCHASES can approve or reject an item; the purchasing page shows its current status. Other permissions determine who can request, order, manage vendors, or edit budgets.'
   },
   {
     name: 'Planner', aliases: ['planner', 'gantt'], route: '/planner', location: 'Open /planner through search/direct navigation',
@@ -277,6 +277,12 @@ function hasExplicitHubContext(value) {
   return /\b(?:spartans\s*hub|971\s*(?:hub|app)|this\s+(?:hub|app|site)|the\s+(?:hub|app|site)|in\s+(?:the\s+)?hub|on\s+(?:the\s+)?hub)\b/.test(value);
 }
 
+function matchingFeatures(value) {
+  return [...new Map(HUB_FEATURES.flatMap((feature) => feature.aliases
+    .filter((alias) => hasAlias(value, alias))
+    .map((alias) => [feature.name, { feature, alias }]))).values()];
+}
+
 export function classifyHubFeatureQuestion(question) {
   const value = normalized(question);
   if (!value) return { kind: 'none', feature: null };
@@ -285,9 +291,7 @@ export function classifyHubFeatureQuestion(question) {
   if (hasAlias(value, 'autocam') && /\b(?:job|jobs|queue|runner)\b/.test(value)) {
     return { kind: 'answer', feature: HUB_FEATURES.find((feature) => feature.name === 'Fusion AutoCAM') };
   }
-  const matches = HUB_FEATURES.flatMap((feature) => feature.aliases
-    .filter((alias) => hasAlias(value, alias))
-    .map((alias) => ({ feature, alias })));
+  const matches = matchingFeatures(value);
   if (!matches.length) return { kind: 'none', feature: null };
 
   const best = [...matches].sort((left, right) => normalized(right.alias).length - normalized(left.alias).length)[0];
@@ -297,7 +301,12 @@ export function classifyHubFeatureQuestion(question) {
   // not literally say “Spartans Hub.” Without this, “Explain the purchasing
   // approval workflow” becomes an unhelpful clarification or a raw list.
   const detailedWorkflowRequest = /\b(?:workflow|approval|approve|delivery|receiv|order|job|queue|runner)\b/.test(value);
-  if (exactTopic || (aliasesAreAmbiguous && !hasExplicitHubContext(value) && !detailedWorkflowRequest)) {
+  // Several named Hub features make the intended scope clear even if each
+  // individual alias is normally ambiguous (for example, “how do Purchasing
+  // and Manufacturing work together?”). Do not throw away one half by asking
+  // a clarification that only names the first matching feature.
+  const multipleFeatures = matches.length > 1;
+  if (exactTopic || (aliasesAreAmbiguous && !multipleFeatures && !hasExplicitHubContext(value) && !detailedWorkflowRequest)) {
     return { kind: 'clarify', feature: best.feature };
   }
   if (!asksForFeatureInformation(value) && !hasExplicitHubContext(value)) {
@@ -341,6 +350,19 @@ function formatSubtabAnswer(feature, section) {
   ].join('\n');
 }
 
+function formatFeatureAnswer(feature) {
+  return [
+    `*${feature.name}* — ${feature.location}`,
+    feature.summary,
+    '',
+    '*What is there:*',
+    ...feature.sections.map((section) => `• ${formatSectionWithLink(section)}`),
+    '',
+    feature.details,
+    `*Open:* <${absoluteHubUrl(feature.route)}|${feature.name}>`
+  ].join('\n');
+}
+
 export function answerHubFeatureQuestion(question) {
   const value = normalized(question);
   if (!value) return null;
@@ -376,17 +398,14 @@ export function answerHubFeatureQuestion(question) {
   }
   if (featureIntent.kind !== 'answer') return null;
   if (!candidates.length) return null;
+  // A single broad feature answer is not a valid answer to a question that
+  // explicitly names several Hub areas. Keep each subject distinct so the
+  // Slack reply cannot silently answer only the first matching alias.
+  if (candidates.length > 1) {
+    return candidates.map(({ feature }) => formatFeatureAnswer(feature)).join('\n\n──────────\n\n');
+  }
   const feature = featureIntent.feature || candidates[0].feature;
-  return [
-    `*${feature.name}* — ${feature.location}`,
-    feature.summary,
-    '',
-    '*What is there:*',
-    ...feature.sections.map((section) => `• ${formatSectionWithLink(section)}`),
-    '',
-    feature.details,
-    `*Open:* <${absoluteHubUrl(feature.route)}|${feature.name}>`
-  ].join('\n');
+  return formatFeatureAnswer(feature);
 }
 
 // A single-feature answer drops one side of a comparison question. Keep this
