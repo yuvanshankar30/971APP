@@ -42,6 +42,16 @@ describe('Slack Hub feature knowledge', () => {
     expect(answer).toContain('/autocam/fusion/jobs');
   });
 
+  it('answers every named Hub feature in a multi-part question', () => {
+    const question = 'How do Purchasing and Manufacturing work together, and where do I find each one?';
+    expect(classifyHubFeatureQuestion(question)).toMatchObject({ kind: 'answer', feature: { name: 'Manufacturing' } });
+    const answer = answerHubFeatureQuestion(question);
+    expect(answer).toContain('*Purchasing* — Purchasing');
+    expect(answer).toContain('*Manufacturing* — Manufacturing → Manufacture');
+    expect(answer).toContain('/cad/purchasing');
+    expect(answer).toContain('/manufacture');
+  });
+
   it('answers a uniquely named subtab even when the parent tab is omitted', () => {
     const answer = answerHubFeatureQuestion('What does the Accuracy subtab show?');
     expect(answer).toContain('*Accuracy — EPA*');

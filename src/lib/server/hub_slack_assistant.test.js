@@ -621,6 +621,23 @@ describe('Slack Hub assistant', () => {
     expect(postMessage.mock.calls[0][0].text).toContain('*Settings — JProg*');
   });
 
+  it('keeps every named Hub topic in a multi-part question', async () => {
+    const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
+    const fetchImpl = vi.fn();
+    await handleHubAppMention({
+      channel: 'C1', user: 'U1', ts: '1.0',
+      text: '<@U971> How do Purchasing and Manufacturing work together, and where do I find each one?'
+    }, {
+      supa: supabaseForStatus(),
+      slack: { chat: { postMessage } },
+      apiKey: 'test-secret',
+      fetchImpl
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(postMessage.mock.calls[0][0].text).toContain('*Purchasing* — Purchasing');
+    expect(postMessage.mock.calls[0][0].text).toContain('*Manufacturing* — Manufacturing → Manufacture');
+  });
+
   it('answers an authorized named-person purchasing-history question locally', async () => {
     const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
     const fetchImpl = vi.fn();
