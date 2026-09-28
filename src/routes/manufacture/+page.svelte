@@ -15,7 +15,7 @@
   import { searchFolderTree } from '$lib/fusionFolderSearch.js';
   import ROUTER_FLOW from '$lib/router_flow.json';
   import { convertGcodeToInches } from '$autocam/fusion/gcodeUnitConvert.js';
-  import { getDisplayStatus, BUTTONS, getBadgeClass, getWorkflowStatuses, WORKFLOW_STATUSES } from '$lib/statuses.js';
+  import { getDisplayStatus, BUTTONS, getBadgeClass, getWorkflowStatuses, WORKFLOW_STATUSES, routeStageIndex } from '$lib/statuses.js';
   import { summarizeRouterStages, isFullyKitted, buildRouterProgressUpdate } from '$lib/router_progress.js';
   import { isManufacturingLead, canCamReview as camReviewAllowed, canDeleteParts } from '$lib/permissions.js';
   import CadViewer from '$lib/components/CadViewer.svelte';
@@ -236,21 +236,7 @@
     const status = meta.step === 'cam_review'
       ? 'cam_review'
       : normalizedWorkflowStatus(part?.status);
-    let index = stages.findIndex((stage) => stage.value === status);
-    // Terminal status is spelled several ways across older rows.
-    if (index === -1 && (status === 'complete' || status === 'kitted' || status === 'done')) {
-      index = stages.length - 1;
-    }
-    // AutoCAM writes its own status over whatever the part had, but it does
-    // not move the part along the shop's route: the G-code still has to be
-    // reviewed by a person, from exactly where it was. So the badge reads
-    // Autocammed while the track stays put at pending. Without this the
-    // status isn't a route stage at all, findIndex returns -1, and the whole
-    // track disappears from the row the moment a part is autocammed.
-    if (index === -1 && status === 'autocammed') {
-      index = stages.findIndex((stage) => stage.value === 'pending');
-    }
-    return { stages, index };
+    return { stages, index: routeStageIndex(stages, status, meta) };
   }
 
   function nextProcessStep(part) {

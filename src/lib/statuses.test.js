@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getWorkflowStatuses, getDisplayStatus, getBadgeClass, isAutocamEligible, ALL_STATUSES, DISPLAY_ORDER, WORKFLOW_STATUSES } from './statuses.js';
+import { getWorkflowStatuses, getDisplayStatus, getBadgeClass, isAutocamEligible, ALL_STATUSES, DISPLAY_ORDER, WORKFLOW_STATUSES, routeStageIndex, normalizeRouteStatus } from './statuses.js';
 
 describe('getWorkflowStatuses', () => {
   it('keeps router stages separate from the compact shop workflows', () => {
@@ -103,5 +103,59 @@ describe('isAutocamEligible', () => {
 
   it('is not eligible for a null part', () => {
     expect(isAutocamEligible(null, stockData)).toBe(false);
+  });
+});
+
+describe('routeStageIndex', () => {
+  const router = WORKFLOW_STATUSES['router'];
+
+  it('places a part on its own stage', () => {
+    expect(routeStageIndex(router, 'pending', {})).toBe(0);
+    expect(routeStageIndex(router, 'in-progress', {})).toBe(1);
+    expect(routeStageIndex(router, 'machined', {})).toBe(5);
+  });
+
+  it('treats the several spellings of finished as the last stage', () => {
+    for (const status of ['complete', 'kitted', 'done']) {
+      expect(routeStageIndex(router, status, {})).toBe(router.length - 1);
+    }
+  });
+
+  describe('autocammed', () => {
+    // AutoCAM does not advance a part - a person still has to review the
+    // G-code from where the part already was - so the track must not move.
+    it('holds at pending when the part was pending', () => {
+      expect(routeStageIndex(router, 'autocammed', { autocam_from_status: 'pending' })).toBe(0);
+    });
+
+    it('holds at in progress when the part had been started', () => {
+      expect(routeStageIndex(router, 'autocammed', { autocam_from_status: 'in-progress' })).toBe(1);
+    });
+
+    it('never advances the part past where it was', () => {
+      const pendingIndex = routeStageIndex(router, 'autocammed', { autocam_from_status: 'pending' });
+      expect(pendingIndex).toBeLessThan(routeStageIndex(router, 'cammed', {}));
+    });
+
+    it('falls back to pending for rows autocammed before this was recorded', () => {
+      expect(routeStageIndex(router, 'autocammed', {})).toBe(0);
+      expect(routeStageIndex(router, 'autocammed', { autocam_from_status: '' })).toBe(0);
+    });
+
+    it('keeps the track on the row at all - the real bug was it vanishing', () => {
+      expect(routeStageIndex(router, 'autocammed', {})).toBeGreaterThanOrEqual(0);
+    });
+  });
+
+  it('returns -1 for a status with no place on this route', () => {
+    expect(routeStageIndex(router, 'not-a-status', {})).toBe(-1);
+  });
+});
+
+describe('normalizeRouteStatus', () => {
+  it('folds case, spaces and underscores the way the list does', () => {
+    expect(normalizeRouteStatus('In Progress')).toBe('in-progress');
+    expect(normalizeRouteStatus('  IN_PROGRESS ')).toBe('in-progress');
+    expect(normalizeRouteStatus(null)).toBe('');
   });
 });

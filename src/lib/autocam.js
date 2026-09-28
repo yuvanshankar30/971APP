@@ -213,14 +213,44 @@ export async function triggerAutocam(part, options = {}) {
         })
         .eq('id', job.id);
       
-      // Update part status to 'autocammed'
-      await supabase
+      // Update part status to 'autocammed', remembering the stage it was at.
+      //
+      // 'autocammed' replaces whatever the part's status was, and AutoCAM
+      // does not move a part along the shop route - a person still has to
+      // review the G-code, starting from where the part already was. The
+      // manufacture list therefore shows "Autocammed" while leaving the
+      // progress bar where it is, and that needs the stage this overwrote.
+      // Read from the row rather than the caller's copy, which can be stale.
+      const { data: current, error: currentError } = await supabase
         .from('parts')
-        .update({
-          status: 'autocammed',
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', part.id);
+        .select('status, file_url')
+        .eq('id', part.id)
+        .single();
+
+      const statusUpdate = { status: 'autocammed', updated_at: new Date().toISOString() };
+
+      // file_url is one JSON blob that also holds step_file/step_valid, so it
+      // is only rewritten from a row we actually read back. Writing a fresh
+      // object built from a failed read would drop the STEP file with it -
+      // losing the part's CAD is far worse than losing the progress bar's
+      // starting stage, which falls back to pending on its own.
+      if (!currentError && current) {
+        let fileMeta = {};
+        try {
+          fileMeta = JSON.parse(current.file_url || '{}') || {};
+        } catch {
+          fileMeta = {};
+        }
+        const previousStatus = current.status || 'pending';
+        // Re-running AutoCAM on an already-autocammed part must not record
+        // 'autocammed' as the stage it came from - keep the original.
+        if (previousStatus !== 'autocammed') {
+          fileMeta.router_meta = { ...(fileMeta.router_meta || {}), autocam_from_status: previousStatus };
+          statusUpdate.file_url = JSON.stringify(fileMeta);
+        }
+      }
+
+      await supabase.from('parts').update(statusUpdate).eq('id', part.id);
       
       return { success: true, jobId: job.id };
     } else {
