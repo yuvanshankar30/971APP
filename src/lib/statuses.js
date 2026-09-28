@@ -122,3 +122,45 @@ export default {
   getBadgeClass,
   isAutocamEligible
 };
+
+// Where a part sits on its workflow's route, as an index into `stages`, or
+// -1 when it has no place on the route at all (which hides the track).
+//
+// `status` is already normalized by the caller; `meta` is the part's
+// router_meta.
+export function routeStageIndex(stages, status, meta) {
+  let index = stages.findIndex((stage) => stage.value === status);
+
+  // Terminal status is spelled several ways across older rows.
+  if (index === -1 && (status === 'complete' || status === 'kitted' || status === 'done')) {
+    return stages.length - 1;
+  }
+
+  // AutoCAM writes its own status over whatever the part had, but it does
+  // not move the part along the shop's route: the G-code still has to be
+  // reviewed by a person, starting from where the part already was. So the
+  // badge reads Autocammed while the track stays on the stage it was at -
+  // AutoCAM records that in router_meta.autocam_from_status, since its own
+  // status overwrote it. In practice that is Pending or In Progress, the
+  // only stages a part gets autocammed from.
+  //
+  // Falls back to pending for rows autocammed before that was recorded.
+  // Without any of this 'autocammed' matches no stage, this returns -1, and
+  // the whole track disappears from the row the moment a part is
+  // autocammed - the opposite of leaving it where it was.
+  if (index === -1 && status === 'autocammed') {
+    const cameFrom = normalizeRouteStatus(meta?.autocam_from_status);
+    const cameFromIndex = stages.findIndex((stage) => stage.value === cameFrom);
+    return cameFromIndex >= 0
+      ? cameFromIndex
+      : stages.findIndex((stage) => stage.value === 'pending');
+  }
+
+  return index;
+}
+
+// Same spelling rules the manufacture list applies to a raw status before
+// matching it against a route stage.
+export function normalizeRouteStatus(status) {
+  return String(status || '').trim().toLowerCase().replace(/[\s_]+/g, '-');
+}

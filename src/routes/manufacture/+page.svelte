@@ -15,7 +15,7 @@
   import { searchFolderTree } from '$lib/fusionFolderSearch.js';
   import ROUTER_FLOW from '$lib/router_flow.json';
   import { convertGcodeToInches } from '$autocam/fusion/gcodeUnitConvert.js';
-  import { getDisplayStatus, BUTTONS, getBadgeClass, getWorkflowStatuses, WORKFLOW_STATUSES } from '$lib/statuses.js';
+  import { getDisplayStatus, BUTTONS, getBadgeClass, getWorkflowStatuses, WORKFLOW_STATUSES, routeStageIndex } from '$lib/statuses.js';
   import { summarizeRouterStages, isFullyKitted, buildRouterProgressUpdate } from '$lib/router_progress.js';
   import { isManufacturingLead, canCamReview as camReviewAllowed, canDeleteParts } from '$lib/permissions.js';
   import CadViewer from '$lib/components/CadViewer.svelte';
@@ -236,12 +236,7 @@
     const status = meta.step === 'cam_review'
       ? 'cam_review'
       : normalizedWorkflowStatus(part?.status);
-    let index = stages.findIndex((stage) => stage.value === status);
-    // Terminal status is spelled several ways across older rows.
-    if (index === -1 && (status === 'complete' || status === 'kitted' || status === 'done')) {
-      index = stages.length - 1;
-    }
-    return { stages, index };
+    return { stages, index: routeStageIndex(stages, status, meta) };
   }
 
   function nextProcessStep(part) {
@@ -2793,7 +2788,6 @@
           <th class="workflow-col">Workflow</th>
           <th class="route-col">Progress</th>
           <th class="quantity-col" class:hidden={assignMode}>Qty</th>
-          <th class="metadata-col" class:hidden={assignMode}>Due</th>
           <th class="actions-table-col" class:hidden={assignMode}>Actions</th>
         </tr>
       </thead>
@@ -2903,12 +2897,6 @@
               {/if}
             </td>
             <td class="quantity-col" class:hidden={assignMode}>{getQuantitySummary(part)}</td>
-            <!-- svelte-ignore a11y_no_static_element_interactions -->
-            <td class="metadata-col" class:hidden={assignMode} on:click|stopPropagation on:keydown|stopPropagation>
-              <div class="metadata-line">
-                <PartDueDate {part} on:update={() => loadParts()} />
-              </div>
-            </td>
             <td class="actions-table-col" class:hidden={assignMode}>
               <div class="row-actions">
                 {#if canViewCad(part)}
@@ -4004,11 +3992,13 @@
   .table td.name-col {
     /* The largest share - part names are the longest real content here,
        and this column also carries the project/stock/requester/date line
-       folded in beneath them. The six columns now sum to exactly 100%:
-       they previously summed to 69%, leaving nearly a third of the table
+       folded in beneath them. The five columns must sum to exactly 100%:
+       they once summed to 69%, leaving nearly a third of the table
        unallocated for the browser to scatter between columns, which is
-       what opened the wide empty gaps between them. */
-    width: 32%;
+       what opened the wide empty gaps between them. This carries the 12%
+       the Due column used to hold, so part names wrap onto a second line
+       less often instead of the table coming up short again. */
+    width: 44%;
     /* Part names wrap onto a second line rather than being cut off with
        an ellipsis - a truncated "P006950_Rev_x60 stiffn..." hides exactly
        the part of the name that distinguishes it from its neighbours.
@@ -4069,13 +4059,6 @@
     padding-left: var(--space-3);
   }
 
-  /* Due input, same treatment. PartDueDate is shared with other pages, so
-     this is scoped to this table rather than changed in the component. */
-  .table td.metadata-col :global(.due-input) {
-    height: 34px;
-    font-size: 0.85rem;
-    padding: 0 0.6rem;
-  }
   /* The anchor's metadata is deliberately two stable lines: project/stock,
      then requester/date. */
   .name-meta {
@@ -4175,27 +4158,6 @@
     font-size: 1rem;
     font-weight: 600;
   }
-  /* Status, Due, and Created all share this width so the three columns
-     stay horizontally even with equal spacing - sized to the longest real
-     content across the three ("CAM Review Pending" measures ~160px
-     rendered), not just Status's own longest label. */
-  .table th.metadata-col,
-  .table td.metadata-col {
-    width: 12%;
-    /* Centred, like every other column in the row (app.css's .table td
-       default). These four were the only cells pinned to the top, so on a
-       tall row - one with the full CAD action grid - Status, Due and
-       Created floated up against the top edge while the part name, workflow
-       tag and stock beside them sat centred. */
-    vertical-align: middle;
-    position: relative;
-    /* .metadata-line below centers the badge/date/text inside the cell -
-       the header label needs the same text-align or it sits at the base
-       .table th default (left) while its column's real content sits
-       centered underneath, reading as misaligned. Same fix quantity-col
-       already has for its own centered content. */
-    text-align: center;
-  }
   /* One shared first line for Status / Due / Created / Requested By. A
      pill badge, a date input and plain text all have different intrinsic
      box heights, so left to themselves they each sit at a different
@@ -4221,13 +4183,6 @@
        it belongs to the neighbouring column's controls. */
     padding: 0 0.35rem;
     box-sizing: border-box;
-  }
-  /* Keep the date field compact and centred within Due. A full-width native
-     date control visually spills into the Created column on wide screens. */
-  .metadata-col :global(.due-date) { width: auto; max-width: 100%; }
-  .metadata-col :global(.due-input) {
-    box-sizing: border-box;
-    width: min(10.75rem, 100%);
   }
   .table th.actions-table-col,
   .table td.actions-table-col {
