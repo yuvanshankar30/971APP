@@ -411,6 +411,28 @@ describe('Slack Hub assistant', () => {
     expect(JSON.parse(fetchImpl.mock.calls[2][1].body).system_instruction.parts[0].text).toContain('Wrong subject');
   });
 
+  it('revises a draft that answered only one clause of a multi-part question', async () => {
+    const reply = (text) => ({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text }] } }] }) });
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(reply('Power Rankings is a local team ranking.'))
+      .mockResolvedValueOnce(reply(JSON.stringify({
+        related: true, relevant: false,
+        problem: 'It explains Power Rankings but omits Robot Ratings and the comparison.',
+        requirements: ['Explain Power Rankings', 'Explain Robot Ratings', 'Compare their relationship'],
+        missingRequirements: ['Explain Robot Ratings', 'Compare their relationship']
+      })))
+      .mockResolvedValueOnce(reply('Power Rankings ranks teams from scouting evidence. Robot Ratings are scouts’ subjective scores; their average is display-only and does not alter Scout Power.'))
+      .mockResolvedValueOnce(reply(JSON.stringify({ related: true, relevant: true, problem: '', requirements: ['Explain both concepts and their relationship'], missingRequirements: [] })));
+    const answer = await askGeminiAboutHub('How do Power Rankings and Robot Ratings differ?', snapshot, {
+      apiKey: 'test-secret', fetchImpl, verifyRelevance: true, hubScopeConfirmed: true
+    });
+    expect(answer).toContain('Robot Ratings');
+    expect(answer).toContain('does not alter Scout Power');
+    const correction = JSON.parse(fetchImpl.mock.calls[2][1].body).system_instruction.parts[0].text;
+    expect(correction).toContain('Explain Robot Ratings');
+    expect(correction).toContain('Compare their relationship');
+  });
+
   it('checks the Admin roster before answering a named person question', async () => {
     const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
     const reply = (text) => ({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text }] } }] }) });
