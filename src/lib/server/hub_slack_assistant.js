@@ -93,6 +93,12 @@ export function isWatchCommand(question) {
   return /^\/watch\b/i.test(String(question || '').trim());
 }
 
+const CHANGE_WATCHER_NAMES = new Set(['yuvan shankar', 'arin rao', 'anton strougo']);
+
+export function canWatchChanges(profile) {
+  return Boolean(profile && !profile.banned && CHANGE_WATCHER_NAMES.has(String(profile.full_name || '').trim().toLowerCase()));
+}
+
 function firstSentence(value, maxLength = 420) {
   const compact = String(value || '').replace(/\s+/g, ' ').trim();
   const sentence = compact.match(/^.*?[.!?](?:\s|$)/)?.[0] || compact;
@@ -112,7 +118,7 @@ export function formatChangeWatchNotification({ requesterName, request, summary,
 }
 
 export async function addChangeWatcher(supa, profile) {
-  if (!profile?.id || profile.banned || !hasPermission(profile, 'REQUEST_CODE_CHANGES')) return false;
+  if (!profile?.id || !canWatchChanges(profile)) return false;
   const { error } = await supa.from('hub_change_watchers').upsert({ user_id: profile.id }, { onConflict: 'user_id' });
   if (error) throw error;
   return true;
@@ -129,11 +135,11 @@ export async function notifyChangeWatchers(supa, slack, details) {
     .in('id', ids);
   if (profileError) throw profileError;
   for (const rawProfile of profiles || []) {
-    // A role can change after a person subscribed. Re-check it at delivery so
-    // a former Change Lead cannot keep receiving change-request details.
+    // The watcher allowlist is re-checked at delivery so a stale subscription
+    // cannot keep receiving change-request details after access is revoked.
     // eslint-disable-next-line no-await-in-loop
     const profile = await attachRosterKeys(supa, rawProfile);
-    if (profile.banned || !profile.slack_user_id || !hasPermission(profile, 'REQUEST_CODE_CHANGES')) continue;
+    if (!profile.slack_user_id || !canWatchChanges(profile)) continue;
     try {
       // eslint-disable-next-line no-await-in-loop
       const conversation = await slack.conversations.open({ users: profile.slack_user_id });
@@ -1546,8 +1552,8 @@ export async function handleHubAppMention(event, dependencies = {}) {
     text = 'Ask me about Spartans Hub, or use `@Spartans Hub /status` for live status and recent changes.';
   } else if (isWatchCommand(question)) {
     const actorProfile = await resolveHubProfileForSlackUser(supa, event.user, slack);
-    if (!actorProfile || actorProfile.banned || !hasPermission(actorProfile, 'REQUEST_CODE_CHANGES')) {
-      text = 'Only Change Leads can watch changes.';
+    if (!canWatchChanges(actorProfile)) {
+      text = 'Only Yuvan Shankar, Arin Rao, and Anton Strougo can watch changes.';
     } else if (!isChangeWatchRequest(question)) {
       text = 'The only supported watch target is `changes`: `@Spartans Hub /watch changes`.';
     } else {

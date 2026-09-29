@@ -34,6 +34,7 @@ import {
   isAdminProfileQuestion,
   isFusionRunnerSetupQuestion,
   isBudgetQuestion,
+  canWatchChanges,
   isChangeWatchRequest,
   isManufacturingQueueQuestion,
   isMultiPartQuestion,
@@ -220,6 +221,9 @@ describe('Slack Hub assistant', () => {
     expect(isBudgetQuestion('Which budgets are over, and which purchases caused it?')).toBe(true);
     expect(isChangeWatchRequest('/watch changes')).toBe(true);
     expect(isWatchCommand('/watch manufacturing')).toBe(true);
+    expect(canWatchChanges({ full_name: 'Arin Rao', banned: false })).toBe(true);
+    expect(canWatchChanges({ full_name: 'Someone Else', banned: false })).toBe(false);
+    expect(canWatchChanges({ full_name: 'Anton Strougo', banned: true })).toBe(false);
     expect(assignmentEventKey('What was assigned for Chezy?', '2026mrcmp')).toBe('2026cc');
     expect(assignmentEventKey('What was assigned for 2025 Chezy?', '2026mrcmp')).toBe('2025cc');
   });
