@@ -27,12 +27,15 @@ import {
   formatPurchasingList,
   formatPurchasingCompletion,
   formatBudgetReport,
+  formatChangeWatchNotification,
   formatScoutingAssignments,
   formatTeamReportStatus,
   handleHubAppMention,
   isAdminProfileQuestion,
   isFusionRunnerSetupQuestion,
   isBudgetQuestion,
+  canWatchChanges,
+  isChangeWatchRequest,
   isManufacturingQueueQuestion,
   isMultiPartQuestion,
   isPurchasingCompletionQuestion,
@@ -41,6 +44,7 @@ import {
   shouldUseGoogleSearch,
   isHubStatusRequest,
   isTeamReportStatusRequest,
+  isWatchCommand,
   shouldUseReviewedCompoundPath,
   stripAppMention
 } from './hub_slack_assistant.js';
@@ -215,6 +219,11 @@ describe('Slack Hub assistant', () => {
     expect(isPurchasingListQuestion('Explain the purchasing workflow from request through delivery')).toBe(false);
     expect(isPurchasingCompletionQuestion('Are all parts for Electrical purchased/approved for Third Robot?')).toBe(true);
     expect(isBudgetQuestion('Which budgets are over, and which purchases caused it?')).toBe(true);
+    expect(isChangeWatchRequest('/watch changes')).toBe(true);
+    expect(isWatchCommand('/watch manufacturing')).toBe(true);
+    expect(canWatchChanges({ full_name: 'Arin Rao', banned: false })).toBe(true);
+    expect(canWatchChanges({ full_name: 'Someone Else', banned: false })).toBe(false);
+    expect(canWatchChanges({ full_name: 'Anton Strougo', banned: true })).toBe(false);
     expect(assignmentEventKey('What was assigned for Chezy?', '2026mrcmp')).toBe('2026cc');
     expect(assignmentEventKey('What was assigned for 2025 Chezy?', '2026mrcmp')).toBe('2025cc');
   });
@@ -276,6 +285,19 @@ describe('Slack Hub assistant', () => {
     expect(text).toContain('*Shooter:* $140.00 / $100.00 — *$40.00 over*');
     expect(text).toContain('Falcon motor — $100.00 — requested by Casey Scout');
     expect(text).toContain('Belt — $40.00 — requested by Arin Rao');
+  });
+
+  it('keeps change-watch notifications to four sentences and names the requester', () => {
+    const text = formatChangeWatchNotification({
+      requesterName: 'Arin Rao', request: 'Add a build approval gate.',
+      summary: 'Updated the build workflow and added tests. More detail that should not become another sentence.',
+      prUrl: 'https://github.com/frc971/spartanshub/pull/42', prNumber: 42
+    });
+    expect(text).toContain('Change request from *Arin Rao*');
+    expect(text).toContain('Gemini did: Updated the build workflow and added tests');
+    expect(text).toContain('Safety:');
+    expect(text).toContain('Review PR #42');
+    expect(text.match(/[.!?](?:\n|$)/g)).toHaveLength(4);
   });
 
   it('filters a purchasing list by project, category, and approval status', () => {
