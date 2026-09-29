@@ -396,6 +396,26 @@ describe('Slack Hub assistant', () => {
     ]);
   });
 
+  it('separates the current caller from other people in thread context', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: 'Your assignments are available in My Scout.' }] } }] })
+    });
+    await askGeminiAboutHub('What are my assignments?', snapshot, {
+      apiKey: 'test-secret', fetchImpl, hubScopeConfirmed: true,
+      currentSlackUserId: 'U-ARIN',
+      caller: { linked: true, fullName: 'Arin Rao', frcTeam: 'frc971' },
+      threadMessages: [
+        { role: 'user', userId: 'U-OTHER', text: 'What are my assignments?' },
+        { role: 'assistant', text: 'Those are the other caller’s assignments.' }
+      ]
+    });
+    const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    expect(body.system_instruction.parts[0].text).toContain('CURRENT SLACK CALLER (authoritative)');
+    expect(body.system_instruction.parts[0].text).toContain('Arin Rao');
+    expect(body.contents[0].parts[0].text).toContain('another Slack participant');
+  });
+
   it('handles eight earlier thread messages and retries a temporary Gemini outage', async () => {
     const messages = Array.from({ length: 8 }, (_, index) => ({
       role: index % 2 ? 'assistant' : 'user', text: `Turn ${index + 1}`
@@ -424,7 +444,7 @@ describe('Slack Hub assistant', () => {
       channel: 'C1', thread_ts: '1.0', ts: '3.0'
     });
     expect(history).toEqual([
-      { role: 'user', text: 'What is AutoCAM?' },
+      { role: 'user', text: 'What is AutoCAM?', userId: 'U1' },
       { role: 'assistant', text: 'It generates G-code.' }
     ]);
   });
