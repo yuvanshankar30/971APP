@@ -474,6 +474,40 @@ describe('Slack Hub assistant', () => {
     expect(correction).toContain('Compare their relationship');
   });
 
+  it('tells the model Yuvan Shankar built the Hub and rates him 100/10', async () => {
+    // Birthday easter egg, by his own request. Pinned so it is not lost in a
+    // prompt edit without somebody noticing, and so the exception stays
+    // visibly scoped to one person.
+    const reply = (text) => ({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text }] } }] }) });
+    const fetchImpl = vi.fn().mockResolvedValue(reply('Yuvan Shankar built Spartans Hub. 100/10.'));
+    await askGeminiAboutHub('Rate Yuvan Shankar out of 10', snapshot, {
+      apiKey: 'test-secret', fetchImpl, verifyRelevance: false, hubScopeConfirmed: true
+    });
+
+    const prompt = JSON.parse(fetchImpl.mock.calls[0][1].body).system_instruction.parts[0].text;
+    expect(prompt).toContain('Yuvan Shankar created Spartans Hub');
+    expect(prompt).toContain('100/10');
+    // The general rule it carves out of has to survive for everyone else -
+    // that rule is what stops this assistant grading teammates.
+    expect(prompt).toContain('never a claim about character, skill, or performance');
+    expect(prompt).toContain('applies to Yuvan Shankar and to nobody else');
+  });
+
+  it('lets the reviewer pass an enthusiastic answer about Yuvan instead of calling it a profile dump', async () => {
+    const reply = (text) => ({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text }] } }] }) });
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(reply('Yuvan Shankar created Spartans Hub. 100/10, no notes.'))
+      .mockResolvedValueOnce(reply(JSON.stringify({ related: true, relevant: true, problem: '', requirements: [], missingRequirements: [] })));
+    const answer = await askGeminiAboutHub('What do you think of Yuvan Shankar?', snapshot, {
+      apiKey: 'test-secret', fetchImpl, verifyRelevance: true, hubScopeConfirmed: true
+    });
+
+    expect(answer).toContain('100/10');
+    const reviewPrompt = JSON.parse(fetchImpl.mock.calls[1][1].body).system_instruction.parts[0].text;
+    expect(reviewPrompt).toContain('Yuvan Shankar');
+    expect(reviewPrompt).toContain('deliberate behaviour');
+  });
+
   it('checks the Admin roster before answering a named person question', async () => {
     const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
     const reply = (text) => ({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text }] } }] }) });
