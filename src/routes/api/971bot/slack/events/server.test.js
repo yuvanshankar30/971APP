@@ -54,15 +54,15 @@ describe('Slack app mention events', () => {
   });
 
   it('routes app_mention events to the Hub assistant', async () => {
-    const event = { type: 'app_mention', channel: 'C1', ts: '1.0', text: '<@U971> status' };
+    const event = { type: 'app_mention', channel: 'C1', user: 'U-ARIN', ts: '1.0', text: '<@U971> status' };
     const response = await POST({ request: slackRequest({ type: 'event_callback', event_id: 'Ev-one', event }) });
     expect(response.status).toBe(200);
     expect(handleHubAppMention).toHaveBeenCalledWith(event, { supa: { name: 'test-supabase' } });
     expect(recordSlackAssistantQuestion).toHaveBeenCalledWith({ name: 'test-supabase' }, 'Ev-one', {
-      ts: '1.0', threadTs: '1.0', question: '<@U971> status'
+      ts: '1.0', threadTs: '1.0', question: '<@U971> status', userId: 'U-ARIN'
     });
     expect(completeSlackEvent).toHaveBeenCalledWith({ name: 'test-supabase' }, 'Ev-one', {
-      ts: '1.0', threadTs: '1.0', question: '<@U971> status', answer: 'Answer'
+      ts: '1.0', threadTs: '1.0', question: '<@U971> status', answer: 'Answer', userId: 'U-ARIN'
     });
     expect(await response.json()).toMatchObject({ ok: true, handled: true });
   });

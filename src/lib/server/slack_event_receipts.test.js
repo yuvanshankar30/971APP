@@ -111,4 +111,18 @@ describe('Slack event receipts', () => {
     ]);
     expect(root.eq).toHaveBeenCalledWith('event_type', 'app_mention');
   });
+
+  it('preserves the Slack author of a new thread question', async () => {
+    const { client, table } = supabase();
+    await completeSlackEvent(client, 'Ev-author', {
+      ts: '1.0', question: 'What are my assignments?', answer: 'Your assignments are listed here.', userId: 'U-ARIN'
+    });
+    const context = table.update.mock.calls[0][0].last_error;
+    const recent = queryResult({ error: null, data: [] });
+    const root = queryResult({ error: null, data: { last_error: context } });
+    const history = await readSlackAssistantThread({ from: vi.fn().mockReturnValueOnce(recent).mockReturnValueOnce(root) }, {
+      channel: 'C1', threadTs: '1.0', beforeTs: '2.0'
+    });
+    expect(history[0]).toEqual({ role: 'user', text: 'What are my assignments?', userId: 'U-ARIN' });
+  });
 });

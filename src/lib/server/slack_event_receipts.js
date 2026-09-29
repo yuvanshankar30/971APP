@@ -1,12 +1,13 @@
 const DUPLICATE_KEY_CODE = '23505';
 const CONTEXT_PREFIX = 'assistant_context_v1:';
 
-function conversationContext({ ts, threadTs = ts, question, answer = null }) {
+function conversationContext({ ts, threadTs = ts, question, answer = null, userId = null }) {
   return `${CONTEXT_PREFIX}${JSON.stringify({
     ts: String(ts || ''),
     threadTs: String(threadTs || ts || ''),
     question: String(question || '').slice(0, 1200),
-    answer: answer === null ? null : String(answer).slice(0, 1500)
+    answer: answer === null ? null : String(answer).slice(0, 1500),
+    userId: userId ? String(userId).slice(0, 100) : null
   })}`;
 }
 
@@ -51,9 +52,9 @@ export async function claimSlackEvent(supa, { eventId, eventType, channelId = nu
 
 // The service-role-only receipt already exists in production. Its last_error
 // text holds context while processing/completed and an error when failed.
-export async function recordSlackAssistantQuestion(supa, eventId, { ts, threadTs = ts, question }) {
+export async function recordSlackAssistantQuestion(supa, eventId, { ts, threadTs = ts, question, userId = null }) {
   const result = await supa.from('slack_event_receipts')
-    .update({ last_error: conversationContext({ ts, threadTs, question }), updated_at: new Date().toISOString() })
+    .update({ last_error: conversationContext({ ts, threadTs, question, userId }), updated_at: new Date().toISOString() })
     .eq('event_id', eventId);
   if (result.error) throw new Error(`Could not remember Slack question: ${cleanError(result.error)}`);
 }
@@ -99,8 +100,8 @@ export async function readSlackAssistantThread(supa, { channel, threadTs, before
     .filter((context) => context && Number(context.ts) < Number(beforeTs));
   const unique = [...new Map(contexts.map((context) => [context.ts, context])).values()]
     .sort((a, b) => Number(a.ts) - Number(b.ts));
-  return unique.flatMap(({ question, answer }) => [
-    ...(question ? [{ role: 'user', text: question }] : []),
+  return unique.flatMap(({ question, answer, userId }) => [
+    ...(question ? [{ role: 'user', text: question, ...(userId ? { userId } : {}) }] : []),
     ...(answer ? [{ role: 'assistant', text: answer }] : [])
   ]);
 }

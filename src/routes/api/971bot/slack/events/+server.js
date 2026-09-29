@@ -34,7 +34,8 @@ async function processHubAssistantEvent({ event, eventId, eventType, supa }) {
   let result;
   try {
     await recordSlackAssistantQuestion(supa, eventId, {
-      ts: event.ts, threadTs: event.thread_ts || event.ts, question: event.text || ''
+      ts: event.ts, threadTs: event.thread_ts || event.ts, question: event.text || '',
+      ...(event.user ? { userId: event.user } : {})
     });
     result = await handleHubAppMention(event, { supa });
     if (!result.ok) throw new Error(`Slack did not accept the assistant reply (${result.reason || 'unknown reason'})`);
@@ -55,7 +56,7 @@ async function processHubAssistantEvent({ event, eventId, eventType, supa }) {
   try {
     await completeSlackEvent(supa, eventId, {
       ts: event.ts, threadTs: event.thread_ts || event.ts,
-      question: event.text || '', answer: result.text || ''
+      question: event.text || '', answer: result.text || '', ...(event.user ? { userId: event.user } : {})
     });
   } catch (error) {
     console.error('Failed to complete Slack event receipt', error?.message || error);
