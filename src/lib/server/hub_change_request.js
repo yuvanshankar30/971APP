@@ -252,6 +252,11 @@ export async function draftCodeChangePr(description, options = {}) {
   const repository = { paths: null };
 
   for (let round = 0; round < MAX_CHANGE_ROUNDS; round += 1) {
+    if (await options.shouldCancel?.()) {
+      const error = new Error('This /edit request was stopped before it created a pull request.');
+      error.code = 'EDIT_CANCELLED';
+      throw error;
+    }
     const finalRound = round === MAX_CHANGE_ROUNDS - 1;
     if (finalRound) contents.push({ role: 'user', parts: [{ text:
       'No tool calls remain. Summarize only files already staged with write_file. If none were staged, say no changes were made and explain what blocked you.'
@@ -290,6 +295,14 @@ export async function draftCodeChangePr(description, options = {}) {
 
     if (staged.size === 0) {
       return { prUrl: null, summary: summary || 'I could not find a safe, confident way to make that change, and did not stage anything.' };
+    }
+
+    // A stop may arrive while Gemini is producing its final response. Check again
+    // immediately before any GitHub mutation so it cannot result in a PR.
+    if (await options.shouldCancel?.()) {
+      const error = new Error('This /edit request was stopped before it created a pull request.');
+      error.code = 'EDIT_CANCELLED';
+      throw error;
     }
 
     const branch = `gemini-edit/${slugifyBranchSuffix(trimmedDescription)}`;

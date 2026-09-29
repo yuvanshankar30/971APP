@@ -40,6 +40,7 @@ import {
   isPurchasingCompletionQuestion,
   isPurchasingListQuestion,
   isScoutingAssignmentQuestion,
+  isStopEditRequest,
   shouldUseGoogleSearch,
   isHubStatusRequest,
   isTeamReportStatusRequest,
@@ -220,6 +221,8 @@ describe('Slack Hub assistant', () => {
     expect(isBudgetQuestion('Which budgets are over, and which purchases caused it?')).toBe(true);
     expect(isChangeWatchRequest('/watch changes')).toBe(true);
     expect(isWatchCommand('/watch manufacturing')).toBe(true);
+    expect(isStopEditRequest('/stop')).toBe(true);
+    expect(isStopEditRequest('/stop please')).toBe(false);
     expect(assignmentEventKey('What was assigned for Chezy?', '2026mrcmp')).toBe('2026cc');
     expect(assignmentEventKey('What was assigned for 2025 Chezy?', '2026mrcmp')).toBe('2025cc');
   });

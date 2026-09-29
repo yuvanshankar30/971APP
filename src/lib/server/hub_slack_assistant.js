@@ -93,6 +93,36 @@ export function isWatchCommand(question) {
   return /^\/watch\b/i.test(String(question || '').trim());
 }
 
+export function isStopEditRequest(question) {
+  return /^\/stop\s*$/i.test(String(question || '').trim());
+}
+
+const EDIT_CANCELLED_MARKER = 'hub_edit_cancelled_v1';
+
+export async function cancelActiveHubEdit(supa, channelId, threadTs) {
+  const result = await supa.from('slack_event_receipts')
+    .update({ last_error: EDIT_CANCELLED_MARKER, updated_at: new Date().toISOString() })
+    .eq('channel_id', channelId)
+    .eq('event_ts', threadTs)
+    .eq('event_type', 'app_mention')
+    .eq('status', 'processing')
+    .select('event_id')
+    .maybeSingle();
+  if (result.error) throw result.error;
+  return Boolean(result.data?.event_id);
+}
+
+export async function isHubEditCancelled(supa, channelId, threadTs) {
+  const result = await supa.from('slack_event_receipts')
+    .select('last_error')
+    .eq('channel_id', channelId)
+    .eq('event_ts', threadTs)
+    .eq('event_type', 'app_mention')
+    .maybeSingle();
+  if (result.error) throw result.error;
+  return result.data?.last_error === EDIT_CANCELLED_MARKER;
+}
+
 const TEST_CHANGE_NOTIFICATION_RECIPIENT = 'arin rao';
 
 function firstSentence(value, maxLength = 420) {
@@ -1523,6 +1553,21 @@ export async function handleHubAppMention(event, dependencies = {}) {
   }
   if (!question) {
     text = 'Ask me about Spartans Hub, or use `@Spartans Hub /status` for live status and recent changes.';
+  } else if (isStopEditRequest(question)) {
+    const actorProfile = await resolveHubProfileForSlackUser(supa, event.user, slack);
+    if (!actorProfile || actorProfile.banned || !hasPermission(actorProfile, 'REQUEST_CODE_CHANGES')) {
+      text = 'Only a Change Lead can stop a running `/edit` request.';
+    } else {
+      try {
+        const stopped = await cancelActiveHubEdit(supa, event.channel, event.thread_ts || event.ts);
+        text = stopped
+          ? 'Stop requested. The current `/edit` will halt after its in-flight Gemini step and will not create a pull request.'
+          : 'There is no running `/edit` request in this thread.';
+      } catch (error) {
+        console.error('Could not stop /edit request', error?.message || error);
+        text = 'I could not stop that `/edit` request right now.';
+      }
+    }
   } else if (isWatchCommand(question)) {
     text = 'Change watches are disabled during the current notification test.';
   } else if (isCodeChangeRequest(question)) {
@@ -1548,7 +1593,8 @@ export async function handleHubAppMention(event, dependencies = {}) {
           ...dependencies,
           supa,
           requesterName: actorProfile.full_name || null,
-          previewContext: { slackChannel: event.channel, slackThreadTs: event.thread_ts || event.ts }
+          previewContext: { slackChannel: event.channel, slackThreadTs: event.thread_ts || event.ts },
+          shouldCancel: () => isHubEditCancelled(supa, event.channel, event.thread_ts || event.ts)
         });
         // Real bug: Gemini's own summary text described a change in
         // completed past tense ("I have updated the login screen...")
