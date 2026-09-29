@@ -93,11 +93,7 @@ export function isWatchCommand(question) {
   return /^\/watch\b/i.test(String(question || '').trim());
 }
 
-const CHANGE_WATCHER_NAMES = new Set(['yuvan shankar', 'arin rao', 'anton strougo']);
-
-export function canWatchChanges(profile) {
-  return Boolean(profile && !profile.banned && CHANGE_WATCHER_NAMES.has(String(profile.full_name || '').trim().toLowerCase()));
-}
+const TEST_CHANGE_NOTIFICATION_RECIPIENT = 'arin rao';
 
 function firstSentence(value, maxLength = 420) {
   const compact = String(value || '').replace(/\s+/g, ' ').trim();
@@ -117,39 +113,16 @@ export function formatChangeWatchNotification({ requesterName, request, summary,
   ].join('\n');
 }
 
-export async function addChangeWatcher(supa, profile) {
-  if (!profile?.id || !canWatchChanges(profile)) return false;
-  const { error } = await supa.from('hub_change_watchers').upsert({ user_id: profile.id }, { onConflict: 'user_id' });
+export async function notifyTestChangeRecipient(supa, slack, details) {
+  const { data, error } = await supa.from('user_profiles').select('full_name, slack_user_id, banned');
   if (error) throw error;
-  return true;
-}
-
-export async function notifyChangeWatchers(supa, slack, details) {
-  const { data: watches, error: watchError } = await supa.from('hub_change_watchers').select('user_id');
-  if (watchError) throw watchError;
-  const ids = [...new Set((watches || []).map((watch) => watch.user_id).filter(Boolean))];
-  if (!ids.length) return;
-  const { data: profiles, error: profileError } = await supa
-    .from('user_profiles')
-    .select(PROFILE_COLUMNS + ', slack_user_id')
-    .in('id', ids);
-  if (profileError) throw profileError;
-  for (const rawProfile of profiles || []) {
-    // The watcher allowlist is re-checked at delivery so a stale subscription
-    // cannot keep receiving change-request details after access is revoked.
-    // eslint-disable-next-line no-await-in-loop
-    const profile = await attachRosterKeys(supa, rawProfile);
-    if (!profile.slack_user_id || !canWatchChanges(profile)) continue;
-    try {
-      // eslint-disable-next-line no-await-in-loop
-      const conversation = await slack.conversations.open({ users: profile.slack_user_id });
-      if (!conversation?.ok || !conversation.channel?.id) continue;
-      // eslint-disable-next-line no-await-in-loop
-      await slack.chat.postMessage({ channel: conversation.channel.id, text: formatChangeWatchNotification(details) });
-    } catch (error) {
-      console.warn('Could not notify change watcher', error?.message || error);
-    }
-  }
+  const recipient = (data || []).find((profile) => !profile.banned
+    && String(profile.full_name || '').trim().toLowerCase() === TEST_CHANGE_NOTIFICATION_RECIPIENT
+    && profile.slack_user_id);
+  if (!recipient) return;
+  const conversation = await slack.conversations.open({ users: recipient.slack_user_id });
+  if (!conversation?.ok || !conversation.channel?.id) return;
+  await slack.chat.postMessage({ channel: conversation.channel.id, text: formatChangeWatchNotification(details) });
 }
 
 export function teamNumberFromQuestion(question) {
@@ -1551,21 +1524,7 @@ export async function handleHubAppMention(event, dependencies = {}) {
   if (!question) {
     text = 'Ask me about Spartans Hub, or use `@Spartans Hub /status` for live status and recent changes.';
   } else if (isWatchCommand(question)) {
-    const actorProfile = await resolveHubProfileForSlackUser(supa, event.user, slack);
-    if (!canWatchChanges(actorProfile)) {
-      text = 'Only Yuvan Shankar, Arin Rao, and Anton Strougo can watch changes.';
-    } else if (!isChangeWatchRequest(question)) {
-      text = 'The only supported watch target is `changes`: `@Spartans Hub /watch changes`.';
-    } else {
-      try {
-        await addChangeWatcher(supa, actorProfile);
-        text = 'You are now watching bot-drafted code changes. I will DM you when `/edit` opens an unmerged pull request.';
-      } catch (error) {
-        console.error('Could not save change watch', error?.message || error);
-        requestError = error?.message || String(error);
-        text = 'I could not save that change watch right now.';
-      }
-    }
+    text = 'Change watches are disabled during the current notification test.';
   } else if (isCodeChangeRequest(question)) {
     const actorProfile = await resolveHubProfileForSlackUser(supa, event.user, slack);
     if (!actorProfile || actorProfile.banned || !hasPermission(actorProfile, 'REQUEST_CODE_CHANGES')) {
@@ -1605,7 +1564,7 @@ export async function handleHubAppMention(event, dependencies = {}) {
           : `I did not make any changes - no pull request was opened.\n${safeSlackText(result.summary)}`;
         if (result.prUrl) {
           try {
-            await notifyChangeWatchers(supa, slack, {
+            await notifyTestChangeRecipient(supa, slack, {
               requesterName: actorProfile.full_name || 'an unknown requester',
               request: parseCodeChangeRequest(question),
               summary: result.summary,
