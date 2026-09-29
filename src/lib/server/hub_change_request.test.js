@@ -70,6 +70,37 @@ describe('draftCodeChangePr Gemini model selection', () => {
       'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent'
     );
   });
+
+  it('stops before starting another edit round when cancellation is requested', async () => {
+    const fetchImpl = vi.fn();
+    await expect(draftCodeChangePr('rename the app', {
+      apiKey: 'test-key', fetchImpl, githubToken: 'test-token', shouldCancel: async () => true
+    })).rejects.toMatchObject({ code: 'EDIT_CANCELLED' });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('does not create a branch when cancellation arrives during Gemini output', async () => {
+    let geminiCalls = 0;
+    const fetchImpl = vi.fn(async (url) => {
+      if (url.includes('generativelanguage.googleapis.com')) {
+        geminiCalls += 1;
+        const part = geminiCalls === 1
+          ? { functionCall: { name: 'write_file', args: { path: 'example.txt', content: 'new text' } } }
+          : { text: 'Staged example.txt for review.' };
+        return { ok: true, json: async () => ({ candidates: [{ content: { parts: [part] } }] }) };
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    const shouldCancel = vi.fn()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+
+    await expect(draftCodeChangePr('create example', {
+      apiKey: 'test-key', githubToken: 'test-token', fetchImpl, shouldCancel
+    })).rejects.toMatchObject({ code: 'EDIT_CANCELLED' });
+    expect(fetchImpl.mock.calls.some(([url]) => url.endsWith('/git/refs'))).toBe(false);
+  });
 });
 
 describe('draftCodeChangePr round budget', () => {
