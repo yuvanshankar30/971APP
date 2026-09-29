@@ -497,6 +497,34 @@ describe('Slack Hub assistant', () => {
     expect(correction).toContain('Compare their relationship');
   });
 
+  it('keeps the birthday block out of prompts for everyone else', async () => {
+    // The block is sampled per question and only for the few people named,
+    // so an unrelated answer never carries somebody's compliments around.
+    const reply = (text) => ({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text }] } }] }) });
+    const fetchImpl = vi.fn().mockResolvedValue(reply('A router job records its machining status.'));
+    await askGeminiAboutHub('What does a Hub router job track?', snapshot, {
+      apiKey: 'test-secret', fetchImpl, verifyRelevance: false, hubScopeConfirmed: true
+    });
+
+    const prompt = JSON.parse(fetchImpl.mock.calls[0][1].body).system_instruction.parts[0].text;
+    expect(prompt).not.toContain('100/10');
+    expect(prompt).not.toContain('ABOUT YUVAN SHANKAR');
+  });
+
+  it('samples compliments for the other birthdays too', async () => {
+    const reply = (text) => ({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text }] } }] }) });
+    const fetchImpl = vi.fn().mockResolvedValue(reply('Arnav Gathani: 100/10.'));
+    await askGeminiAboutHub('What do you think of Arnav Gathani?', snapshot, {
+      apiKey: 'test-secret', fetchImpl, verifyRelevance: false, hubScopeConfirmed: true
+    });
+
+    const prompt = JSON.parse(fetchImpl.mock.calls[0][1].body).system_instruction.parts[0].text;
+    expect(prompt).toContain('ABOUT ARNAV GATHANI');
+    expect(prompt).toContain('100/10');
+    // Only Yuvan gets a factual claim attached; the others get compliments.
+    expect(prompt).not.toContain('created Spartans Hub');
+  });
+
   it('tells the model Yuvan Shankar built the Hub and rates him 100/10', async () => {
     // Birthday easter egg, by his own request. Pinned so it is not lost in a
     // prompt edit without somebody noticing, and so the exception stays
