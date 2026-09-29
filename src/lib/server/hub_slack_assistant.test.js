@@ -610,6 +610,19 @@ describe('Slack Hub assistant', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(postMessage.mock.calls[0][0].text).toContain('I can help with robotics');
     expect(postMessage.mock.calls[0][0].text).toContain('@Spartans Hub /status');
+    expect(postMessage.mock.calls[0][0].text).toContain('Gemini-powered');
+    expect(postMessage.mock.calls[0][0].text).toContain('Arin Rao');
+  });
+
+  it('credits Gemini and Arin Rao for an assistant identity question without calling Gemini', async () => {
+    const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
+    const fetchImpl = vi.fn();
+    await handleHubAppMention({ channel: 'C1', user: 'U1', ts: '1.0', text: '<@U971> Who made you and what model do you use?' }, {
+      supa: supabaseForStatus(), slack: { chat: { postMessage } }, apiKey: 'test-secret', fetchImpl
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(postMessage.mock.calls[0][0].text).toContain('Gemini-powered');
+    expect(postMessage.mock.calls[0][0].text).toContain('Arin Rao');
   });
 
   it('rejects prompt-injection and credential requests before they reach Gemini', async () => {
