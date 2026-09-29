@@ -85,6 +85,67 @@ export function isHubStatusRequest(question) {
   return /^\/?(?:hub\s+)?status\b/i.test(String(question || '').trim());
 }
 
+export function isChangeWatchRequest(question) {
+  return /^\/watch\s+changes\s*$/i.test(String(question || '').trim());
+}
+
+export function isWatchCommand(question) {
+  return /^\/watch\b/i.test(String(question || '').trim());
+}
+
+function firstSentence(value, maxLength = 420) {
+  const compact = String(value || '').replace(/\s+/g, ' ').trim();
+  const sentence = compact.match(/^.*?[.!?](?:\s|$)/)?.[0] || compact;
+  return safeSlackText(sentence.slice(0, maxLength)).replace(/[.!?]+$/, '');
+}
+
+// Keep this message intentionally compact: exactly four short sentences so a
+// Change Lead gets the request, Gemini's work, its safety boundary, and the
+// PR without turning a notification into a second review document.
+export function formatChangeWatchNotification({ requesterName, request, summary, prUrl, prNumber }) {
+  return [
+    `Change request from *${requesterName || 'an unknown requester'}*: ${firstSentence(request, 300)}.`,
+    `Gemini did: ${firstSentence(summary) || 'drafted the pull request'}.`,
+    'Safety: this is an unmerged draft and requires human review before deployment.',
+    `Extra: <${prUrl}|Review PR #${prNumber}>.`
+  ].join('\n');
+}
+
+export async function addChangeWatcher(supa, profile) {
+  if (!profile?.id || profile.banned || !hasPermission(profile, 'REQUEST_CODE_CHANGES')) return false;
+  const { error } = await supa.from('hub_change_watchers').upsert({ user_id: profile.id }, { onConflict: 'user_id' });
+  if (error) throw error;
+  return true;
+}
+
+export async function notifyChangeWatchers(supa, slack, details) {
+  const { data: watches, error: watchError } = await supa.from('hub_change_watchers').select('user_id');
+  if (watchError) throw watchError;
+  const ids = [...new Set((watches || []).map((watch) => watch.user_id).filter(Boolean))];
+  if (!ids.length) return;
+  const { data: profiles, error: profileError } = await supa
+    .from('user_profiles')
+    .select(PROFILE_COLUMNS + ', slack_user_id')
+    .in('id', ids);
+  if (profileError) throw profileError;
+  for (const rawProfile of profiles || []) {
+    // A role can change after a person subscribed. Re-check it at delivery so
+    // a former Change Lead cannot keep receiving change-request details.
+    // eslint-disable-next-line no-await-in-loop
+    const profile = await attachRosterKeys(supa, rawProfile);
+    if (profile.banned || !profile.slack_user_id || !hasPermission(profile, 'REQUEST_CODE_CHANGES')) continue;
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const conversation = await slack.conversations.open({ users: profile.slack_user_id });
+      if (!conversation?.ok || !conversation.channel?.id) continue;
+      // eslint-disable-next-line no-await-in-loop
+      await slack.chat.postMessage({ channel: conversation.channel.id, text: formatChangeWatchNotification(details) });
+    } catch (error) {
+      console.warn('Could not notify change watcher', error?.message || error);
+    }
+  }
+}
+
 export function teamNumberFromQuestion(question) {
   return String(question || '').match(/\b(?:team|frc)\s*#?\s*(\d{1,5})\b/i)?.[1] || null;
 }
@@ -1483,6 +1544,22 @@ export async function handleHubAppMention(event, dependencies = {}) {
   }
   if (!question) {
     text = 'Ask me about Spartans Hub, or use `@Spartans Hub /status` for live status and recent changes.';
+  } else if (isWatchCommand(question)) {
+    const actorProfile = await resolveHubProfileForSlackUser(supa, event.user, slack);
+    if (!actorProfile || actorProfile.banned || !hasPermission(actorProfile, 'REQUEST_CODE_CHANGES')) {
+      text = 'Only Change Leads can watch changes.';
+    } else if (!isChangeWatchRequest(question)) {
+      text = 'The only supported watch target is `changes`: `@Spartans Hub /watch changes`.';
+    } else {
+      try {
+        await addChangeWatcher(supa, actorProfile);
+        text = 'You are now watching bot-drafted code changes. I will DM you when `/edit` opens an unmerged pull request.';
+      } catch (error) {
+        console.error('Could not save change watch', error?.message || error);
+        requestError = error?.message || String(error);
+        text = 'I could not save that change watch right now.';
+      }
+    }
   } else if (isCodeChangeRequest(question)) {
     const actorProfile = await resolveHubProfileForSlackUser(supa, event.user, slack);
     if (!actorProfile || actorProfile.banned || !hasPermission(actorProfile, 'REQUEST_CODE_CHANGES')) {
@@ -1520,6 +1597,19 @@ export async function handleHubAppMention(event, dependencies = {}) {
         text = result.prUrl
           ? `${safeSlackText(result.summary)}\n\n*Unmerged pull request:* <${result.prUrl}|#${result.prNumber}> - please review before merging; no tests were run against this change locally (CI will run the suite on the PR).`
           : `I did not make any changes - no pull request was opened.\n${safeSlackText(result.summary)}`;
+        if (result.prUrl) {
+          try {
+            await notifyChangeWatchers(supa, slack, {
+              requesterName: actorProfile.full_name || 'an unknown requester',
+              request: parseCodeChangeRequest(question),
+              summary: result.summary,
+              prUrl: result.prUrl,
+              prNumber: result.prNumber
+            });
+          } catch (error) {
+            console.error('Could not notify change watchers', error?.message || error);
+          }
+        }
       } catch (error) {
         console.error('Code-change request failed', error?.message || error);
         requestError = error?.message || String(error);
