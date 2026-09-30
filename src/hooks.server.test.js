@@ -105,6 +105,18 @@ describe('csrfCheck', () => {
     expect(result).toBe('resolved');
   });
 
+  it('allows Slack actions without an Origin header to reach signature verification', async () => {
+    const resolve = vi.fn(() => 'resolved');
+    const event = makeEvent({
+      method: 'POST',
+      pathname: '/api/971bot/slack/actions',
+      contentType: 'application/x-www-form-urlencoded'
+    });
+    const result = await csrfCheck({ event, resolve });
+    expect(result).toBe('resolved');
+    expect(resolve).toHaveBeenCalledWith(event);
+  });
+
   it('still blocks a different form POST route that merely starts with the exempt path', async () => {
     const resolve = vi.fn();
     const event = makeEvent({
