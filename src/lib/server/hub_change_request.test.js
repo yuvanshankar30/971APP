@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach, vi } from 'vitest';
 
 vi.mock('$env/dynamic/private', () => ({ env: { GEMINI_API_KEY: 'test-key', GEMINI_MODEL: undefined } }));
 import { env } from '$env/dynamic/private';
-import { draftCodeChangePr, isCodeChangeRequest, parseCodeChangeRequest } from './hub_change_request.js';
+import { draftCodeChangePr, isCodeChangeRequest, parseCodeChangeRequest, rejectDraftCodeChangePr } from './hub_change_request.js';
 
 // A single-round response with no functionCall and no text ends the loop
 // immediately with { prUrl: null }, exercising the model-selection logic
@@ -20,6 +20,30 @@ describe('isCodeChangeRequest / parseCodeChangeRequest', () => {
     expect(isCodeChangeRequest('/EDIT change it')).toBe(true);
     expect(isCodeChangeRequest('edit change it')).toBe(false);
     expect(parseCodeChangeRequest('/edit  change the button label')).toBe('change the button label');
+  });
+});
+
+describe('rejectDraftCodeChangePr', () => {
+  it('closes and removes only an open bot-created draft branch', async () => {
+    const fetchImpl = vi.fn(async (url, options = {}) => {
+      if (url.endsWith('/pulls/42')) {
+        if (options.method === 'PATCH') return { ok: true, json: async () => ({ number: 42, state: 'closed', head: { ref: 'gemini-edit/login-copy' } }) };
+        return { ok: true, json: async () => ({ number: 42, state: 'open', head: { ref: 'gemini-edit/login-copy' } }) };
+      }
+      if (url.endsWith('/git/refs/heads/gemini-edit%2Flogin-copy')) return { ok: true, json: async () => ({}) };
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    await expect(rejectDraftCodeChangePr(42, { fetchImpl, githubToken: 'test-token' }))
+      .resolves.toMatchObject({ number: 42, state: 'closed' });
+    expect(fetchImpl.mock.calls.some(([url, options]) => url.endsWith('/pulls/42') && options.method === 'PATCH')).toBe(true);
+    expect(fetchImpl.mock.calls.some(([url, options]) => url.endsWith('/git/refs/heads/gemini-edit%2Flogin-copy') && options.method === 'DELETE')).toBe(true);
+  });
+
+  it('refuses to close a non-bot pull request', async () => {
+    const fetchImpl = vi.fn(async () => ({ ok: true, json: async () => ({ number: 42, state: 'open', head: { ref: 'feature/someone-elses-work' } }) }));
+    await expect(rejectDraftCodeChangePr(42, { fetchImpl, githubToken: 'test-token' }))
+      .rejects.toThrow('not an open Spartans Hub draft');
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 });
 

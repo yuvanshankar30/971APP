@@ -10,6 +10,7 @@ import { readSlackAssistantThread } from '$lib/server/slack_event_receipts.js';
 import { ROUTES } from '$lib/siteSearch.js';
 import { isCodeChangeRequest, parseCodeChangeRequest, draftCodeChangePr } from '$lib/server/hub_change_request.js';
 import { logBotRequest, classifyBotRequestType } from '$lib/server/hub_bot_request_log.js';
+import { changeLeadReviewBlocks } from '$lib/server/hub_edit_actions.js';
 
 export const HUB_RECENT_CHANGES = [
   'Drive Team now shows every completed 971 match with Win/Loss/Tie and the final score.',
@@ -124,8 +125,6 @@ export async function isHubEditCancelled(supa, channelId, threadTs) {
   return result.data?.last_error === EDIT_CANCELLED_MARKER;
 }
 
-const TEST_CHANGE_NOTIFICATION_RECIPIENT = 'arin rao';
-
 function firstSentence(value, maxLength = 420) {
   const compact = String(value || '').replace(/\s+/g, ' ').trim();
   const sentence = compact.match(/^.*?[.!?](?:\s|$)/)?.[0] || compact;
@@ -144,16 +143,21 @@ export function formatChangeWatchNotification({ requesterName, request, summary,
   ].join('\n');
 }
 
-export async function notifyTestChangeRecipient(supa, slack, details) {
-  const { data, error } = await supa.from('user_profiles').select('full_name, slack_user_id, banned');
+export async function notifyChangeLeads(supa, slack, details) {
+  const { data, error } = await supa.from('user_profiles')
+    .select('id, full_name, slack_user_id, banned, role, permissions, general_role, purchasing_role, team_role, frc_team');
   if (error) throw error;
-  const recipient = (data || []).find((profile) => !profile.banned
-    && String(profile.full_name || '').trim().toLowerCase() === TEST_CHANGE_NOTIFICATION_RECIPIENT
-    && profile.slack_user_id);
-  if (!recipient) return;
-  const conversation = await slack.conversations.open({ users: recipient.slack_user_id });
-  if (!conversation?.ok || !conversation.channel?.id) return;
-  await slack.chat.postMessage({ channel: conversation.channel.id, text: formatChangeWatchNotification(details) });
+  const profiles = await Promise.all((data || []).map((profile) => attachRosterKeys(supa, profile)));
+  const leads = profiles.filter((profile) => !profile.banned
+    && profile.slack_user_id && hasPermission(profile, 'REQUEST_CODE_CHANGES'));
+  const text = formatChangeWatchNotification(details);
+  const blocks = changeLeadReviewBlocks(details);
+  await Promise.allSettled(leads.map(async (lead) => {
+    const conversation = await slack.conversations.open({ users: lead.slack_user_id });
+    if (!conversation?.ok || !conversation.channel?.id) return;
+    await slack.chat.postMessage({ channel: conversation.channel.id, text, blocks });
+  }));
+  return leads.length;
 }
 
 export function teamNumberFromQuestion(question) {
@@ -1602,8 +1606,8 @@ export async function handleHubAppMention(event, dependencies = {}) {
     text = 'Change watches are disabled during the current notification test.';
   } else if (isCodeChangeRequest(question)) {
     const actorProfile = await resolveHubProfileForSlackUser(supa, event.user, slack);
-    if (!actorProfile || actorProfile.banned || !hasPermission(actorProfile, 'REQUEST_CODE_CHANGES')) {
-      text = 'Only a Change Lead can ask me to draft a code change.';
+    if (actorProfile?.banned) {
+      text = 'Your Hub account is disabled, so I cannot draft a code change.';
     } else {
       if (parseCodeChangeRequest(question)) {
         try {
@@ -1622,7 +1626,7 @@ export async function handleHubAppMention(event, dependencies = {}) {
         const result = await draftCodeChangePr(parseCodeChangeRequest(question), {
           ...dependencies,
           supa,
-          requesterName: actorProfile.full_name || null,
+          requesterName: actorProfile?.full_name || null,
           previewContext: { slackChannel: event.channel, slackThreadTs: event.thread_ts || event.ts },
           shouldCancel: () => isHubEditCancelled(supa, event.channel, event.thread_ts || event.ts)
         });
@@ -1640,8 +1644,8 @@ export async function handleHubAppMention(event, dependencies = {}) {
           : `I did not make any changes - no pull request was opened.\n${safeSlackText(result.summary)}`;
         if (result.prUrl) {
           try {
-            await notifyTestChangeRecipient(supa, slack, {
-              requesterName: actorProfile.full_name || 'an unknown requester',
+            await notifyChangeLeads(supa, slack, {
+              requesterName: actorProfile?.full_name || 'an unknown requester',
               request: parseCodeChangeRequest(question),
               summary: result.summary,
               prUrl: result.prUrl,

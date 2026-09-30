@@ -104,3 +104,24 @@ export async function createPullRequest(fetchImpl, token, { title, body, head, b
   });
   return { url: pr.html_url, number: pr.number };
 }
+
+// A rejected bot draft should disappear from reviewers' open queues and leave
+// no dangling branch. GitHub does not offer a "delete pull request" endpoint;
+// closing it and deleting its head ref is the closest durable equivalent.
+export async function closePullRequest(fetchImpl, token, number) {
+  const pr = await githubRequest(fetchImpl, token, `/repos/${OWNER}/${REPO}/pulls/${encodeURIComponent(number)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ state: 'closed' })
+  });
+  return { number: pr.number, state: pr.state, head: pr.head?.ref || null };
+}
+
+export async function getPullRequest(fetchImpl, token, number) {
+  return githubRequest(fetchImpl, token, `/repos/${OWNER}/${REPO}/pulls/${encodeURIComponent(number)}`);
+}
+
+export async function deleteBranch(fetchImpl, token, branchName) {
+  return githubRequest(fetchImpl, token, `/repos/${OWNER}/${REPO}/git/refs/heads/${encodeURIComponent(branchName)}`, {
+    method: 'DELETE'
+  });
+}

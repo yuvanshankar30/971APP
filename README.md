@@ -594,11 +594,13 @@ file: update its diagram alongside this section, not separately from it.
   each mention receipt by its own message timestamp while storing the thread
   parent separately, reports safe
   credential/model/quota/timeout failure categories, and durably deduplicates
-  Slack retry IDs in `slack_event_receipts`. Change Leads can use
+  Slack retry IDs in `slack_event_receipts`. Any Slack user can use
   `@Spartans Hub /edit` to draft an unmerged GitHub PR; Gemini can search
   repository paths directly and its final round summarizes staged files
-  without asking for more tools. Authorized `/edit` requests show a working
-  message in the Slack thread, which is updated with the result. Simple
+  without asking for more tools. `/edit` requests show a working
+  message in the Slack thread, which is updated with the result; every Change
+  Lead receives a DM with Review and Reject controls. Reject closes the draft
+  PR and deletes its bot-created branch. Simple
   greetings receive a compact list of the assistant's supported Hub tasks),
   Onshape API (CAD source of truth for parts - see the Onshape-key exposure
   note under **Known gaps** below), The Blue Alliance API (scouting), Sentry
@@ -972,7 +974,7 @@ AutoCAM's own code (engine, Drive watcher, `camJobs.js`, its components) is
   branch to refresh that preview; it requires the `TESTING_REPO_TOKEN` repo
   secret configured by an organization admin. It is separate from the
   canonical Cloud Run deployment and is never updated automatically by a PR
-  or push. Once an authorized Slack `/edit` request opens its unmerged PR,
+  or push. Once a Slack `/edit` request opens its unmerged PR,
   the app dispatches that same workflow and a two-minute cron sweep posts its
   Vercel result back into the original Slack thread.
 - **Vision GPU worker**: use the bare-metal `vision-runner.service` and
