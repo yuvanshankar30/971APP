@@ -40,9 +40,9 @@ class HandleHexShaftSourceTests(unittest.TestCase):
         # Confirmed live against a real hex shaft: a model grooved at both
         # ends needs two setups, since a lathe can only face/neck/groove the
         # end it's currently exposing - the operator re-chucks for the other.
-        self.assertIn("groove_instances = _groove_instances(body, origin_point, axis_unit, across_flats_cm)", self.source)
-        self.assertIn("groove_count = len(groove_instances)", self.source)
-        self.assertIn("two_ended = groove_count == 2", self.source)
+        self.assertIn("end_instances = _end_feature_instances(body, origin_point, axis_unit, across_flats_cm, end_feature)", self.source)
+        self.assertIn("end_count = len(end_instances)", self.source)
+        self.assertIn("two_ended = end_count == 2", self.source)
         self.assertIn("axis_unit_rev = tuple(-c for c in axis_unit)", self.source)
 
     def test_only_the_last_setup_parts_off_and_nothing_faces_the_excess(self):
@@ -51,8 +51,8 @@ class HandleHexShaftSourceTests(unittest.TestCase):
         # sequence machined away a real snap-ring groove, so no Face ever
         # targets the excess.
         self.assertIn('_input_with_tool(setup, "turning_part", groove_tool)', self.source)
-        self.assertIn("part_off=not two_ended,", self.source)
-        self.assertIn('setup_name="Hex Shaft - End 2", part_off=True,', self.source)
+        self.assertIn("part_off=not two_ended, end_feature=end_feature,", self.source)
+        self.assertIn('setup_name=_SETUP_LABELS[end_feature] + " - End 2", part_off=True, end_feature=end_feature,', self.source)
         self.assertNotIn("sever_length_cm", self.source)
         self.assertNotIn("tailstock_excess_cm", self.source)
         self.assertIn("_PART_OFF_ALLOWANCE_IN = 0.01", self.source)
@@ -132,7 +132,7 @@ class HandleHexShaftSourceTests(unittest.TestCase):
         # The sample OD Grooving insert is 0.125in wide; the snap-ring groove
         # is ~0.039in, so the default would cut a ~3x too wide groove.
         self.assertIn('"tool_insertWidth": width_expression', self.source)
-        self.assertIn("min(g[\"axialHigh\"] - g[\"axialLow\"] for g in groove_instances)", self.source)
+        self.assertIn("min(g[\"axialHigh\"] - g[\"axialLow\"] for g in end_instances)", self.source)
 
     def test_cutting_data_is_capped_for_the_tl1(self):
         self.assertIn("_TL1_MAX_SPINDLE_RPM = 2000", self.source)
@@ -176,7 +176,7 @@ class HandleHexShaftSourceTests(unittest.TestCase):
         self.assertIn('_input_with_tool(setup, "turning_single_groove", groove_tool)', self.source)
 
     def test_machines_whichever_groove_is_closest_to_the_tip(self):
-        self.assertIn('target = max(groove_instances, key=lambda g: g["axialHigh"])', self.source)
+        self.assertIn('target = max(end_instances, key=lambda g: g["axialHigh"])', self.source)
 
     def test_tailstock_length_defaults_to_a_fixed_allowance_but_is_overridable(self):
         # Direct instruction: "make sure the user input for tailstock works
@@ -184,12 +184,14 @@ class HandleHexShaftSourceTests(unittest.TestCase):
         # setups, and left permanently attached once CAM is done) is
         # driven directly by the operator's own tailstock_length_in when
         # given, not just measured/reported and otherwise ignored.
-        self.assertIn(
-            "tailstock_length_in * _CM_PER_IN if tailstock_length_in is not None\n"
-            "        else _DEFAULT_TAILSTOCK_LENGTH_IN * _CM_PER_IN",
-            self.source,
-        )
+        self.assertIn("grip_cm = resolve_grip_cm(", self.source)
+        self.assertIn('_cm_or_none(stock_input.get("length_in")),', self.source)
+        self.assertIn("_cm_or_none(tailstock_length_in),", self.source)
+        self.assertIn("_DEFAULT_TAILSTOCK_LENGTH_IN * _CM_PER_IN,", self.source)
         self.assertIn('"tailstockLength": grip_cm / _CM_PER_IN,', self.source)
+
+    def test_bar_size_the_operator_sets_is_checked_against_the_part(self):
+        self.assertIn('check_hex_across_flats(across_flats_cm, _cm_or_none(stock_input.get("across_flats_in")))', self.source)
 
     def test_retraction_is_forced_to_minimum_not_left_at_fusions_default(self):
         # Confirmed live: turning_face defaults to 'full' retraction, which
@@ -214,9 +216,9 @@ class HandleHexShaftSourceTests(unittest.TestCase):
         # instead would silently turn the ENTIRE bar round rather than a
         # short neck, with no error anywhere.
         self.assertIn("if not two_ended:", self.source)
-        self.assertIn("only_groove = groove_instances[0]", self.source)
-        self.assertIn('distance_to_max = axial_max - only_groove["axialHigh"]', self.source)
-        self.assertIn('distance_to_min = only_groove["axialLow"] - axial_min', self.source)
+        self.assertIn("only_end = end_instances[0]", self.source)
+        self.assertIn('distance_to_max = axial_max - only_end["axialHigh"]', self.source)
+        self.assertIn('distance_to_min = only_end["axialLow"] - axial_min', self.source)
         self.assertIn("if distance_to_min < distance_to_max:", self.source)
         self.assertIn("axis_unit = tuple(-c for c in axis_unit)", self.source)
 
@@ -228,7 +230,7 @@ class HandleHexShaftSourceTests(unittest.TestCase):
         # itself. The chuck needs SOME real material to hold through both
         # setups; this is a physical requirement, not a preference.
         self.assertIn("_MIN_TAILSTOCK_LENGTH_IN = 0.25", self.source)
-        self.assertIn("if grip_cm < _MIN_TAILSTOCK_LENGTH_IN * _CM_PER_IN:", self.source)
+        self.assertIn("_MIN_TAILSTOCK_LENGTH_IN * _CM_PER_IN,\n    )", self.source)
 
 
 if __name__ == "__main__":

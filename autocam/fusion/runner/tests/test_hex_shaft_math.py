@@ -10,12 +10,23 @@ from commands.HexShaftMath import (  # noqa: E402
     circumscribed_radius_cm,
     cluster_groove_faces,
     is_groove_floor_radius,
+    is_journal_radius,
     neck_radius_cm,
 )
 
 
 # A real reviewed 0.5in hex bar, confirmed live via Fusion MCP.
 _ACROSS_FLATS_CM = 1.27
+
+
+class JournalRadiusTests(unittest.TestCase):
+    def test_a_cylinder_at_the_inscribed_radius_is_a_journal(self):
+        # An internal shaft's real turned end: r = 0.635cm on a 1.27cm hex.
+        self.assertTrue(is_journal_radius(0.635, _ACROSS_FLATS_CM))
+
+    def test_corner_artifacts_and_groove_floors_are_not_journals(self):
+        self.assertFalse(is_journal_radius(0.6883, _ACROSS_FLATS_CM))  # hex corner artifact
+        self.assertFalse(is_journal_radius(0.5944, _ACROSS_FLATS_CM))  # snap-ring groove floor
 
 
 class NeckRadiusTests(unittest.TestCase):

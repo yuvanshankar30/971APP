@@ -58,8 +58,8 @@ class SpacerChuckWiringTests(unittest.TestCase):
         source = (COMMANDS_DIR / "HandleSpacer.py").read_text()
         self.assertIn("from .ChuckFixture import attach_chuck_at_chuck_front", source)
         attach = source.index("attach_chuck_at_chuck_front(\n")
-        self.assertGreater(attach, source.index("tailstock_length_cm = ("))
-        self.assertIn('itemByName("job_stockDiameter").value.value / 2.0', source)
+        self.assertGreater(attach, source.index("_apply_stock(setup, resolved)"))
+        self.assertIn('resolved["od_cm"] / 2.0, resolved["jaw_cm"]', source)
 
 
 if __name__ == "__main__":

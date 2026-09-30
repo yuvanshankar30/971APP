@@ -45,9 +45,17 @@ class HandleSpacerSourceTests(unittest.TestCase):
         bore_index = self.source.index("bore = _bore_face(body)")
         self.assertLess(template_index, bore_index)
 
-    def test_tailstock_length_defaults_from_measured_geometry_but_is_overridable(self):
-        self.assertIn("tailstock_length_in * _CM_PER_IN if tailstock_length_in is not None", self.source)
-        self.assertIn("else default_tailstock_length_cm(model_length_cm)", self.source)
+    def test_stock_and_tailstock_are_resolved_from_the_part_and_the_operators_choices(self):
+        # Blank fields are derived from the imported part (StockMath); set
+        # ones, including the tailstock length, change the stock itself.
+        self.assertIn("resolved = resolve_spacer_stock(", self.source)
+        self.assertIn('stock_od_cm=_cm_or_none(stock_input.get("od_in")),', self.source)
+        self.assertIn("tailstock_cm=_cm_or_none(tailstock_length_in),", self.source)
+        self.assertIn('parameters.itemByName("job_stockLengthMode").value.value = "front"', self.source)
+        self.assertIn('parameters.itemByName("job_stockDiameterInner").expression', self.source)
+
+    def test_drill_is_kept_only_when_the_stock_is_not_already_bored_to_size(self):
+        self.assertIn('if resolved["drill_needed"]:', self.source)
 
     def test_model_is_rebound_after_the_template_like_handle_tube_does_for_the_wcs(self):
         template_index = self.source.index("setup.createFromCAMTemplate2(template_input)")

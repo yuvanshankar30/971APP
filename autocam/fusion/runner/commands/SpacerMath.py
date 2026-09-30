@@ -18,14 +18,3 @@ HOLE_DIAMETER_EPSILON_CM = 0.001
 
 def has_hole(model_diameter_inner_cm):
     return model_diameter_inner_cm > HOLE_DIAMETER_EPSILON_CM
-
-
-def default_tailstock_length_cm(model_length_cm):
-    """The tailstock/live-center support length used when the operator
-    hasn't overridden it: the part's own full length, auto-detected from the
-    imported STEP body via Fusion's own modelLength. This is the "regular"
-    length - not a guess independent of the real part - and stays a plain
-    pass-through on purpose, so a future refinement (e.g. subtracting a grip
-    allowance) has exactly one place to change.
-    """
-    return model_length_cm

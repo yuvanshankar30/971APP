@@ -1,5 +1,6 @@
 """Lathe CAM workflow: downloads a turning part's STEP file, runs the
-appropriate handler (HandleSpacer.py or HandleHexShaft.py, chosen by the
+appropriate handler (HandleSpacer.py, HandleHexShaft.py or
+HandleInternalShaft.py, chosen by the
 job's own camType), and posts G-code back - the same claim/import/generate/
 export/complete shape camTube.py's start() uses for box tube stock, adapted
 for turning's own two real differences from that pipeline:
@@ -33,6 +34,7 @@ from ..commands.MultiImport import importFiles
 from ..commands.NewNCProgram import export
 from ..commands.HandleSpacer import handleSpacer
 from ..commands.HandleHexShaft import handleHexShaft, tool_by_type
+from ..commands.HandleInternalShaft import handleInternalShaft
 from ..commands.OperationDiagnostics import failed_operations, operation_warnings
 from ..config import (
     BASE_URL,
@@ -197,6 +199,26 @@ def _get(payload: dict, *keys: str, default=None):
     return default
 
 
+def _stock_from_payload(payload: dict) -> dict:
+    """The operator's queue-time stock choices (inches), each optional. A
+    blank/absent field stays absent so the handlers derive it from the STEP
+    file; anything present must be a positive number.
+    """
+    raw = payload.get("stock")
+    if not isinstance(raw, dict):
+        return {}
+    stock = {}
+    for key in ("length_in", "od_in", "id_in", "across_flats_in"):
+        value = raw.get(key)
+        if value in (None, ""):
+            continue
+        number = float(value)
+        if not number > 0:
+            raise ValueError(f"Stock {key} must be a positive number, got {value!r}")
+        stock[key] = number
+    return stock
+
+
 def _download_turning_part_file(
     session: requests.Session, turning_part_id: str, step_file_url: str, dest_dir: str
 ) -> str:
@@ -252,7 +274,7 @@ def start(data, session):
         turning_part_id = str(turning_part_id)
 
         cam_type = _get(payload, "cam_type")
-        if cam_type not in ("spacer", "hexShaft"):
+        if cam_type not in ("spacer", "hexShaft", "internalShaft"):
             raise ValueError(f"Payload has an unsupported 'cam_type': {cam_type!r}")
 
         step_file_url = _get(payload, "step_file_url")
@@ -277,20 +299,24 @@ def start(data, session):
             float(tailstock_length_in_raw) if tailstock_length_in_raw not in (None, "") else None
         )
 
+        stock = _stock_from_payload(payload)
+
         cam = _active_cam_product(app, doc)
 
         if cam_type == "spacer":
-            result = handleSpacer(_SPACER_TEMPLATE_PATH, tailstock_length_in)
+            result = handleSpacer(_SPACER_TEMPLATE_PATH, tailstock_length_in, stock)
             stats_geometry = {
                 "spacerOd": result["spacerOd"],
                 "spacerId": result["spacerId"],
                 "spacerLength": result["spacerLength"],
                 "hasHole": result["hasHole"],
                 "tailstockLength": result["tailstockLength"],
+                "stock": result["stock"],
             }
         else:
             _load_generic_turning_tools(cam)
-            result = handleHexShaft(tailstock_length_in)
+            handler = handleInternalShaft if cam_type == "internalShaft" else handleHexShaft
+            result = handler(tailstock_length_in, stock)
             stats_geometry = {
                 "acrossFlats": result["acrossFlats"],
                 "shaftLength": result["shaftLength"],

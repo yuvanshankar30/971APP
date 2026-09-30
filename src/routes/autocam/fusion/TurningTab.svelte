@@ -12,6 +12,7 @@
   import { formatPacificDateTime } from '$lib/timezone.js';
   import CadViewer from '$lib/components/CadViewer.svelte';
   import FolderTreeNode from './FolderTreeNode.svelte';
+  import TurningStockFields from './TurningStockFields.svelte';
   import { getAllSeasonBuckets, passesSeasonFilter } from '$lib/frcSeason.js';
   import { RotateCcw, Trash2, Send, X, Pencil, Check, Download, Upload, Folder } from 'lucide-svelte';
 
@@ -28,10 +29,15 @@
   let showAddForm = false;
   // Only the STEP file and which CAM program to run are actually required -
   // direct instruction: minimize what an operator has to type in. Name is
-  // auto-derived from the STEP filename (see handleFileChange); quantity and
-  // tailstock length both have sensible defaults (1, and "use the part's own
-  // measured length" - see HandleSpacer.py/HandleHexShaft.py).
-  let newTurningPart = { name: '', quantity: 1, camType: '', tailstockLengthIn: '', projectId: '' };
+  // auto-derived from the STEP filename (see handleFileChange); quantity has
+  // a default of 1, and every stock/tailstock dimension is optional - the
+  // Runner derives whatever is blank from the STEP file (StockMath.py).
+  const emptyStock = () => ({ odIn: '', idIn: '', lengthIn: '', acrossFlatsIn: '', tailstockLengthIn: '' });
+  let newTurningPart = { name: '', quantity: 1, camType: '', projectId: '' };
+  let newStock = emptyStock();
+  // Stock for the job being queued: starts from the part's saved values and
+  // can be changed per job without editing the part.
+  let queueStock = emptyStock();
   let stepFile = null;
   let submitting = false;
 
@@ -160,7 +166,8 @@
   }
 
   function cancelAdd() {
-    newTurningPart = { name: '', quantity: 1, camType: '', tailstockLengthIn: '', projectId: '' };
+    newTurningPart = { name: '', quantity: 1, camType: '', projectId: '' };
+    newStock = emptyStock();
     stepFile = null;
     showAddForm = false;
   }
@@ -200,10 +207,12 @@
     queuedTurningPartId = part.id;
   }
 
-  async function queueTurningCam(turningPart, machineId, fusionFileName, fusionFolderPath) {
+  async function queueTurningCam(turningPart, machineId, fusionFileName, fusionFolderPath, stock) {
     await queueFusionJob({
       fusionJobKind: 'turning',
       turningPartId: turningPart.id,
+      turningCamType: turningPart.cam_type,
+      turningStock: stock,
       machineId,
       requestedBy: user?.id,
       name: `Turning CAM: ${turningPart.name}`,
@@ -234,7 +243,8 @@
         name: newTurningPart.name,
         quantity: Number(newTurningPart.quantity),
         camType: newTurningPart.camType,
-        tailstockLengthIn: newTurningPart.tailstockLengthIn,
+        stock: newStock,
+        tailstockLengthIn: newStock.tailstockLengthIn,
         stepFile,
         createdBy: user?.id,
         projectId: newTurningPart.projectId || null
@@ -360,9 +370,29 @@
       return;
     }
     queueModalPart = turningPart;
+    queueStock = {
+      odIn: turningPart.stock_od_in ?? '',
+      idIn: turningPart.stock_id_in ?? '',
+      lengthIn: turningPart.stock_length_in ?? '',
+      acrossFlatsIn: turningPart.stock_across_flats_in ?? '',
+      tailstockLengthIn: turningPart.tailstock_length_in ?? ''
+    };
     queueFileName = turningPart.name.replace(/\s+/g, '');
     queueFolderPath = '';
     closeQueuePicker();
+  }
+
+  // "stock 0.5in OD x 3in, tailstock 1in" - only what was actually set; a
+  // blank stays blank because the Runner picks it from the STEP file.
+  function stockSummary(part) {
+    const parts = [];
+    if (part.stock_od_in != null) parts.push(`${part.stock_od_in}in OD`);
+    if (part.stock_id_in != null) parts.push(`${part.stock_id_in}in ID`);
+    if (part.stock_across_flats_in != null) parts.push(`${part.stock_across_flats_in}in across flats`);
+    if (part.stock_length_in != null) parts.push(`${part.stock_length_in}in long`);
+    const stock = parts.length ? `stock ${parts.join(', ')}` : '';
+    const tailstock = part.tailstock_length_in != null ? `tailstock ${part.tailstock_length_in}in` : '';
+    return [stock, tailstock].filter(Boolean).join(', ');
   }
 
   function closeQueueModal() {
@@ -380,7 +410,7 @@
     const machineId = turningMachineSelections[queueModalPart.id];
     queueSubmitting = true;
     try {
-      await queueTurningCam(queueModalPart, machineId, queueFileName, queueFolderPath);
+      await queueTurningCam(queueModalPart, machineId, queueFileName, queueFolderPath, queueStock);
       toastActions.show('Queued for the Fusion Runner');
       queueModalPart = null;
       queueFileName = '';
@@ -429,11 +459,8 @@
           <input id="tp-quantity" type="number" min="1" class="form-input" bind:value={newTurningPart.quantity} />
         </div>
       </div>
+      <TurningStockFields camType={newTurningPart.camType} bind:values={newStock} idPrefix="tp-stock" />
       <div class="form-row form-row-final">
-        <div class="form-group">
-          <label class="form-label" for="tp-tailstock">Tailstock length, inches (optional)</label>
-          <input id="tp-tailstock" type="number" min="0.25" step="0.01" class="form-input" bind:value={newTurningPart.tailstockLengthIn} placeholder="Auto-detected from the part" />
-        </div>
         <div class="form-group">
           <label class="form-label" for="tp-project-id">Project ID (optional)</label>
           <input id="tp-project-id" class="form-input" bind:value={newTurningPart.projectId} />
@@ -509,10 +536,10 @@
               </span>
             {/if}
           </p>
-          {#if turningPart.tailstock_length_in != null || turningPart.project_id}
+          {#if stockSummary(turningPart) || turningPart.project_id}
             <p class="cam-form-hint">
-              {#if turningPart.tailstock_length_in != null}tailstock {turningPart.tailstock_length_in}in{/if}
-              {#if turningPart.tailstock_length_in != null && turningPart.project_id} - {/if}
+              {stockSummary(turningPart)}
+              {#if stockSummary(turningPart) && turningPart.project_id} - {/if}
               {#if turningPart.project_id}project <strong>{turningPart.project_id}</strong>{/if}
             </p>
           {/if}
@@ -654,6 +681,8 @@
       </div>
       <div class="modal-body">
         <p class="cam-form-hint">This saves a new Fusion document for the turning job. Name it, or skip it for a name generated from the job id.</p>
+        <p class="cam-form-hint">Stock and tailstock for this job, starting from the part's saved values. These change the CAM (bar size, how much is left behind the part, where the chuck grips). Blank means chosen automatically from the STEP file.</p>
+        <TurningStockFields camType={queueModalPart.cam_type} bind:values={queueStock} idPrefix="queue-stock" />
         <div class="form-group">
           <label class="form-label" for="turning-queue-file-name">Fusion file name (optional)</label>
           <input id="turning-queue-file-name" class="form-input" value={queueFileName} on:input={(event) => (queueFileName = event.currentTarget.value.replace(/\s+/g, ''))} placeholder="e.g. GearboxSpacer" />

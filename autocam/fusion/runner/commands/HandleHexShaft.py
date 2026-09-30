@@ -38,10 +38,12 @@ import math
 import time
 
 from .ChuckFixture import attach_chuck, extrude_into_place, jaw_length_cm
+from .StockMath import check_hex_across_flats, resolve_grip_cm
 from .HexShaftMath import (
     circumscribed_radius_cm,
     cluster_groove_faces,
     is_groove_floor_radius,
+    is_journal_radius,
     neck_radius_cm,
 )
 _CM_PER_IN = 2.54
@@ -100,6 +102,15 @@ _GROOVE_TOOL_NUMBER = 2
 # safe Z exactly on the WCS origin (the tip), which sits inside the raw
 # stock's own tip-facing overage.
 _SAFE_Z_CLEARANCE_IN = 0.1
+# What each end of the shaft has: a snap-ring groove (a hex shaft) or a
+# plain round journal turned to the hex's inscribed diameter (an internal
+# shaft). Either way the end is faced, then neck-turned from the tip to where
+# the hex begins; only the groove type then cuts a groove.
+END_FEATURE_GROOVE = "groove"
+END_FEATURE_JOURNAL = "journal"
+# An internal shaft has no groove to size a tool from, and the last setup
+# still parts off, so the grooving insert is sized as a 2mm parting blade.
+_PART_OFF_BLADE_IN = 0.0787
 
 def _vec(v):
     return (v.x, v.y, v.z)
@@ -230,6 +241,19 @@ def _axial_bounds_cm(body, origin_point, axis_unit):
 
 
 def _groove_instances(body, origin_point, axis_unit, across_flats_cm):
+    return _axial_cylinder_instances(body, origin_point, axis_unit, across_flats_cm, is_groove_floor_radius)
+
+
+def _journal_instances(body, origin_point, axis_unit, across_flats_cm):
+    return _axial_cylinder_instances(body, origin_point, axis_unit, across_flats_cm, is_journal_radius)
+
+
+def _end_feature_instances(body, origin_point, axis_unit, across_flats_cm, end_feature):
+    finder = _groove_instances if end_feature == END_FEATURE_GROOVE else _journal_instances
+    return finder(body, origin_point, axis_unit, across_flats_cm)
+
+
+def _axial_cylinder_instances(body, origin_point, axis_unit, across_flats_cm, keep_radius):
     candidates = []
     for face in body.faces:
         if face.geometry.objectType != adsk.core.Cylinder.classType():
@@ -238,7 +262,7 @@ def _groove_instances(body, origin_point, axis_unit, across_flats_cm):
         if abs(abs(_dot(_vec(cylinder.axis), axis_unit)) - 1.0) > 1.0 - _PARALLEL_TOLERANCE:
             continue
         radius_cm = cylinder.radius
-        if not is_groove_floor_radius(radius_cm, across_flats_cm):
+        if not keep_radius(radius_cm, across_flats_cm):
             continue
         low, high = _axial_bounds_cm(face, origin_point, axis_unit)
         candidates.append((low, high, {"face": face, "radius": radius_cm}))
@@ -440,9 +464,14 @@ def _set_safe_z(op):
     op.parameters.itemByName("safeZ_offset").expression = "{} in".format(_SAFE_Z_CLEARANCE_IN)
 
 
+_END_FEATURE_NAMES = {END_FEATURE_GROOVE: "snap-ring groove", END_FEATURE_JOURNAL: "turned round end"}
+_SETUP_LABELS = {END_FEATURE_GROOVE: "Hex Shaft", END_FEATURE_JOURNAL: "Internal Shaft"}
+
+
 def _build_hex_end_setup(
     cam, root, body, long_edge, origin_point, axis_unit, across_flats_cm,
     stock_body, generic_tool, groove_tool, setup_name, part_off=False,
+    end_feature=END_FEATURE_GROOVE,
 ):
     """One Face -> Profile Roughing -> Profile Finishing -> Single Groove
     setup for whichever end axis_unit points toward (its own axial
@@ -467,12 +496,12 @@ def _build_hex_end_setup(
     """
     axial_min, axial_max = _axial_bounds_cm(body, origin_point, axis_unit)
 
-    groove_instances = _groove_instances(body, origin_point, axis_unit, across_flats_cm)
-    if not groove_instances:
-        raise ValueError("Hex shaft CAM found no snap-ring groove on this end")
-    # Machine whichever end's groove sits closer to the axial maximum -
-    # arbitrary but consistent given axis_unit already points at this end.
-    target = max(groove_instances, key=lambda g: g["axialHigh"])
+    end_instances = _end_feature_instances(body, origin_point, axis_unit, across_flats_cm, end_feature)
+    if not end_instances:
+        raise ValueError("Shaft CAM found no {} on this end".format(_END_FEATURE_NAMES[end_feature]))
+    # Machine whichever end's groove/journal sits closer to the axial maximum
+    # - arbitrary but consistent given axis_unit already points at this end.
+    target = max(end_instances, key=lambda g: g["axialHigh"])
     tip_axial = axial_max
     groove_distance_from_tip_cm = tip_axial - target["axialHigh"]
     groove_width_cm = target["axialHigh"] - target["axialLow"]
@@ -540,17 +569,20 @@ def _build_hex_end_setup(
         op.parameters.itemByName("backHeight_mode").value.value = "from wcs"
         # The part lies at negative Z (see the WCS comment above).
         op.parameters.itemByName("backHeight_offset").expression = "{:.6f} in".format(-neck_length_cm / _CM_PER_IN)
-        # The single-groove operation below owns the groove; without this the
-        # general turning insert tries to follow the ~0.04in groove profile
-        # too and Fusion warns of a lead-out gouge against the stock.
-        op.parameters.itemByName("useGrooveSuppression").value.value = True
-        op.parameters.itemByName("grooveSuppressionSelection").value.value = target["faces"]
+        if end_feature == END_FEATURE_GROOVE:
+            # The single-groove operation below owns the groove; without this
+            # the general turning insert tries to follow the ~0.04in groove
+            # profile too and Fusion warns of a lead-out gouge against the stock.
+            op.parameters.itemByName("useGrooveSuppression").value.value = True
+            op.parameters.itemByName("grooveSuppressionSelection").value.value = target["faces"]
 
-    groove_op = setup.operations.add(_input_with_tool(setup, "turning_single_groove", groove_tool))
-    groove_op.parameters.itemByName("grooves").value.value = [target["faces"][0].edges.item(0)]
-
-    operations = [face_op, rough_op, finish_op, groove_op]
-    strategies = ["turning_face", "turning_profile_roughing", "turning_profile_finishing", "turning_single_groove"]
+    operations = [face_op, rough_op, finish_op]
+    strategies = ["turning_face", "turning_profile_roughing", "turning_profile_finishing"]
+    if end_feature == END_FEATURE_GROOVE:
+        groove_op = setup.operations.add(_input_with_tool(setup, "turning_single_groove", groove_tool))
+        groove_op.parameters.itemByName("grooves").value.value = [target["faces"][0].edges.item(0)]
+        operations.append(groove_op)
+        strategies.append("turning_single_groove")
 
     if part_off:
         # Confirmed live: turning_part rejects a plain "turning general" tool,
@@ -567,6 +599,13 @@ def _build_hex_end_setup(
         _apply_cutting_data(op, strategy)
         _set_safe_z(op)
 
+    if end_feature == END_FEATURE_JOURNAL:
+        return {
+            "setup": setup,
+            "journalLength": neck_length_cm / _CM_PER_IN,
+            "journalDiameter": target["radius"] * 2 / _CM_PER_IN,
+            "operations": [op.name for op in operations],
+        }
     return {
         "setup": setup,
         "grooveDistanceFromEnd": groove_distance_from_tip_cm / _CM_PER_IN,
@@ -576,8 +615,10 @@ def _build_hex_end_setup(
     }
 
 
-def handleHexShaft(tailstock_length_in=None):
-    """Create the turning setup(s) that face, neck, and groove a hex shaft.
+def build_shaft_setups(tailstock_length_in, stock, end_feature):
+    """Create the turning setup(s) that face, neck, and (for a groove-type
+    shaft) groove a hex shaft. The shared core of handleHexShaft and
+    HandleInternalShaft.handleInternalShaft.
 
     A model grooved at only one end gets a single setup. A model grooved at
     both ends (the real, reviewed case) gets two: the first setup machines
@@ -589,6 +630,13 @@ def handleHexShaft(tailstock_length_in=None):
     tailstock_length_in, when given, is the operator's own override for how
     much raw stock is carried on the back (grip/tailstock-support) side
     through every setup - see _DEFAULT_TAILSTOCK_LENGTH_IN for the fallback.
+    ``stock`` (optional, inches: ``length_in`` bar length, ``across_flats_in``)
+    is the operator's queue-time bar: a set bar length defines that carried
+    excess instead, and a set across-flats must match the part.
+
+    end_feature picks what each end has: END_FEATURE_GROOVE (a snap-ring
+    groove) or END_FEATURE_JOURNAL (a round end turned to the hex's inscribed
+    diameter, no groove - see HandleInternalShaft.py).
 
     Returns a dict with the created setup(s), the measured geometry
     (inches), and the tailstock/live-center support length actually used.
@@ -615,15 +663,17 @@ def handleHexShaft(tailstock_length_in=None):
     axial_min, axial_max = _axial_bounds_cm(body, origin_point, axis_unit)
     model_length_cm = axial_max - axial_min
 
-    groove_instances = _groove_instances(body, origin_point, axis_unit, across_flats_cm)
-    groove_count = len(groove_instances)
-    if groove_count == 0:
-        raise ValueError("Hex shaft CAM found no snap-ring groove on this model")
-    if groove_count > 2:
+    end_instances = _end_feature_instances(body, origin_point, axis_unit, across_flats_cm, end_feature)
+    end_count = len(end_instances)
+    if end_count == 0:
+        raise ValueError("Shaft CAM found no {} on this model".format(_END_FEATURE_NAMES[end_feature]))
+    if end_count > 2:
         raise ValueError(
-            "Hex shaft CAM expects at most one groove per end (2 total); found {}".format(groove_count)
+            "Shaft CAM expects at most one {} per end (2 total); found {}".format(
+                _END_FEATURE_NAMES[end_feature], end_count
+            )
         )
-    two_ended = groove_count == 2
+    two_ended = end_count == 2
 
     if not two_ended:
         # axis_unit's own direction comes from _longest_edge's raw STEP
@@ -640,13 +690,13 @@ def handleHexShaft(tailstock_length_in=None):
         # untested gap - flip axis_unit here (same reversal two_ended
         # already does unconditionally for its own second setup) whenever
         # the single groove is actually closer to axial_min.
-        only_groove = groove_instances[0]
-        distance_to_max = axial_max - only_groove["axialHigh"]
-        distance_to_min = only_groove["axialLow"] - axial_min
+        only_end = end_instances[0]
+        distance_to_max = axial_max - only_end["axialHigh"]
+        distance_to_min = only_end["axialLow"] - axial_min
         if distance_to_min < distance_to_max:
             axis_unit = tuple(-c for c in axis_unit)
             axial_min, axial_max = _axial_bounds_cm(body, origin_point, axis_unit)
-            groove_instances = _groove_instances(body, origin_point, axis_unit, across_flats_cm)
+            end_instances = _end_feature_instances(body, origin_point, axis_unit, across_flats_cm, end_feature)
 
     flat_normal = _vec(_hex_flats(body, axis_unit)[0].geometry.normal)
     cam = _active_cam_product(app, doc)
@@ -660,22 +710,28 @@ def handleHexShaft(tailstock_length_in=None):
     # insert is the one tool-type detail that can't wait for later configuration.
     generic_tool = tool_by_type(lib, "turning general", "Right Hand") or lib.item(0)
     groove_tool = tool_by_type(lib, "turning grooving") or generic_tool
-    generic_tool, groove_tool = _configure_tools(
-        lib, generic_tool, groove_tool,
-        min(g["axialHigh"] - g["axialLow"] for g in groove_instances),
-    )
+    if end_feature == END_FEATURE_GROOVE:
+        insert_width_cm = min(g["axialHigh"] - g["axialLow"] for g in end_instances)
+    else:
+        insert_width_cm = _PART_OFF_BLADE_IN * _CM_PER_IN
+    generic_tool, groove_tool = _configure_tools(lib, generic_tool, groove_tool, insert_width_cm)
 
-    grip_cm = (
-        tailstock_length_in * _CM_PER_IN if tailstock_length_in is not None
-        else _DEFAULT_TAILSTOCK_LENGTH_IN * _CM_PER_IN
+    stock_input = stock or {}
+
+    def _cm_or_none(value):
+        return None if value is None else float(value) * _CM_PER_IN
+
+    check_hex_across_flats(across_flats_cm, _cm_or_none(stock_input.get("across_flats_in")))
+    # The bar's own length or the tailstock length sets how much raw material
+    # is carried behind the part through both setups (see StockMath.resolve_grip_cm).
+    grip_cm = resolve_grip_cm(
+        model_length_cm,
+        _TIP_FACE_ALLOWANCE_IN * _CM_PER_IN,
+        _cm_or_none(stock_input.get("length_in")),
+        _cm_or_none(tailstock_length_in),
+        _DEFAULT_TAILSTOCK_LENGTH_IN * _CM_PER_IN,
+        _MIN_TAILSTOCK_LENGTH_IN * _CM_PER_IN,
     )
-    if grip_cm < _MIN_TAILSTOCK_LENGTH_IN * _CM_PER_IN:
-        raise ValueError(
-            "Hex shaft CAM's tailstock/grip length must be at least {:.3f}in for the "
-            "chuck to have real material to hold through both setups - got {:.3f}in.".format(
-                _MIN_TAILSTOCK_LENGTH_IN, grip_cm / _CM_PER_IN
-            )
-        )
     tip_allowance_cm = _TIP_FACE_ALLOWANCE_IN * _CM_PER_IN
 
     # Every setup carries the SAME grip_cm excess on its own back side -
@@ -691,8 +747,8 @@ def handleHexShaft(tailstock_length_in=None):
     first_result = _build_hex_end_setup(
         cam, root, body, long_edge, origin_point, axis_unit, across_flats_cm,
         first_stock, generic_tool, groove_tool,
-        setup_name="Hex Shaft" if not two_ended else "Hex Shaft - End 1",
-        part_off=not two_ended,
+        setup_name=_SETUP_LABELS[end_feature] if not two_ended else _SETUP_LABELS[end_feature] + " - End 1",
+        part_off=not two_ended, end_feature=end_feature,
     )
 
     results = [first_result]
@@ -706,7 +762,7 @@ def handleHexShaft(tailstock_length_in=None):
         second_result = _build_hex_end_setup(
             cam, root, body, long_edge, origin_point, axis_unit_rev, across_flats_cm,
             second_stock, generic_tool, groove_tool,
-            setup_name="Hex Shaft - End 2", part_off=True,
+            setup_name=_SETUP_LABELS[end_feature] + " - End 2", part_off=True, end_feature=end_feature,
         )
         results.append(second_result)
 
@@ -729,13 +785,12 @@ def handleHexShaft(tailstock_length_in=None):
         "shaftLength": model_length_cm / _CM_PER_IN,
         "neckDiameter": neck_radius_cm(across_flats_cm) * 2 / _CM_PER_IN,
         "tailstockLength": grip_cm / _CM_PER_IN,
-        "ends": [
-            {
-                "grooveDistanceFromEnd": r["grooveDistanceFromEnd"],
-                "grooveWidth": r["grooveWidth"],
-                "grooveDiameter": r["grooveDiameter"],
-                "operations": r["operations"],
-            }
-            for r in results
-        ],
+        # Per-end measurements: the groove fields for a hex shaft, the journal
+        # fields for an internal shaft, plus the operations created.
+        "ends": [{key: value for key, value in r.items() if key != "setup"} for r in results],
     }
+
+
+def handleHexShaft(tailstock_length_in=None, stock=None):
+    """A hex shaft with a snap-ring groove at each end. See build_shaft_setups."""
+    return build_shaft_setups(tailstock_length_in, stock, END_FEATURE_GROOVE)

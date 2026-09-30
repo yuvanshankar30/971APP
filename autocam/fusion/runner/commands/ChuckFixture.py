@@ -169,7 +169,7 @@ def attach_chuck(root, setup, origin_point, axis_unit, x_reference, seat_radius_
     )
 
 
-def attach_chuck_at_chuck_front(root, setup, seat_radius_cm):
+def attach_chuck_at_chuck_front(root, setup, seat_radius_cm, jaw_cm):
     """Attach a chuck whose jaw tips sit on the setup's own chuck-front plane
     (Fusion's chuckFront_value, along the WCS Z axis), for
     setups whose stock and grip Fusion already defines (the Spacer template).
@@ -184,5 +184,5 @@ def attach_chuck_at_chuck_front(root, setup, seat_radius_cm):
     jaw_front_cm = setup.parameters.itemByName("chuckFront_value").value.value
     attach_chuck(
         root, setup, origin_cm, (z_axis.x, z_axis.y, z_axis.z), (x_axis.x, x_axis.y, x_axis.z),
-        seat_radius_cm, jaw_front_cm, _JAW_LENGTH_IN * _CM_PER_IN,
+        seat_radius_cm, jaw_front_cm, jaw_cm,
     )

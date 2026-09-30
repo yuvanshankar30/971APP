@@ -268,6 +268,36 @@ describe('Fusion turning payloads',()=>{
    value
   )).resolves.toMatchObject({fusion_file_name:null,fusion_folder_path:null});
  });
+ it('sends the part\'s saved stock to the runner, blank fields as null',async()=>{
+  const payload=await buildJobPayload(
+   turningDb({id:'s',cam_type:'spacer',stock_od_in:0.5,stock_id_in:null,stock_length_in:3,tailstock_length_in:1,step_file_name:'s.step'}),
+   turningJob()
+  );
+  expect(payload.stock).toEqual({length_in:3,od_in:0.5,id_in:null,across_flats_in:null});
+  expect(payload.tailstock_length_in).toBe(1);
+ });
+ it('lets stock chosen at queue time replace the part\'s saved values, blank meaning auto',async()=>{
+  const value=turningJob(); value.params.turningStock={odIn:0.75,lengthIn:''};
+  const payload=await buildJobPayload(
+   turningDb({id:'s',cam_type:'spacer',stock_od_in:0.5,stock_length_in:3,tailstock_length_in:1,step_file_name:'s.step'}),
+   value
+  );
+  expect(payload.stock).toEqual({length_in:null,od_in:0.75,id_in:null,across_flats_in:null});
+  expect(payload.tailstock_length_in).toBeNull();
+ });
+ it('re-validates queue-time stock on the server and only forwards fields that apply to the CAM type',async()=>{
+  const bad=turningJob(); bad.params.turningStock={odIn:-2};
+  await expect(buildJobPayload(turningDb({id:'s',cam_type:'spacer',step_file_name:'s.step'}),bad)).rejects.toThrow(/Stock OD/);
+  const hex=turningJob(); hex.params.turningStock={odIn:1,acrossFlatsIn:0.5,lengthIn:7};
+  const payload=await buildJobPayload(turningDb({id:'s',cam_type:'hexShaft',step_file_name:'s.step'}),hex);
+  expect(payload.stock).toEqual({length_in:7,od_in:null,id_in:null,across_flats_in:0.5});
+ });
+ it('sends an internal shaft as its own cam_type with hex-bar stock',async()=>{
+  const value=turningJob(); value.params.turningStock={acrossFlatsIn:0.5,lengthIn:8,odIn:3};
+  const payload=await buildJobPayload(turningDb({id:'s',cam_type:'internalShaft',step_file_name:'s.step'}),value);
+  expect(payload.cam_type).toBe('internalShaft');
+  expect(payload.stock).toEqual({length_in:8,od_in:null,id_in:null,across_flats_in:0.5});
+ });
  it('rejects a turning part that no longer exists',async()=>{
   await expect(buildJobPayload(turningDb(null),turningJob())).rejects.toThrow(/turning part not found/i);
  });

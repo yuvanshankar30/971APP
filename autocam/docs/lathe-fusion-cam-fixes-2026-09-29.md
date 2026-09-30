@@ -33,6 +33,34 @@ bundled `postprocessors/haas_turning.cps`, for the Haas TL-1.
   hand-made duplicate in that folder with the same `description` can still win
   the description match; delete it.
 
+## Internal shaft (third lathe CAM type)
+
+Hex bar stock with a plain round journal turned on each end (turned to the
+hex's inscribed diameter over a short length) and no grooves.
+`HandleInternalShaft.py` is its entry point; it shares
+`HandleHexShaft.build_shaft_setups` with the hex shaft (same hex-prism stock,
+WCS, tools, chuck and last-setup part-off) and differs only in the end feature:
+the journal cylinder is detected instead of a groove, the length of that
+journal is the neck-turning span, and there is no Single Groove operation.
+Verified live on `Internal Shaft - Part 1.step` (0.5in hex, 5.63in, 0.313in
+journals): 3 operations per end plus the part-off on the last setup, all valid.
+The `fusion_turning_parts.cam_type` check constraint needs
+`migrations/20260929_fusion_internal_shaft.sql` before an internal shaft part
+can be saved.
+
+## Stock and tailstock chosen at queue time
+
+The queue dialog and the New Turning Stock form take optional stock
+dimensions: spacer OD, ID (tube stock) and length; hex and internal shafts
+across-flats and bar length; and a tailstock length for all. Blank fields are
+derived from the STEP file (`StockMath.py`: auto OD is the part OD plus 1/16in
+rounded up to 1/16in, replacing Fusion's round-up to the next 10mm). They drive
+the CAM: the stock itself, how much material is carried behind the part, the
+chuck position, and whether a Drill is still needed for pre-bored tube stock. A
+set bar length and a set tailstock length must agree; a hex bar that does not
+match the part's across-flats is refused. Saved defaults live on
+`fusion_turning_parts` (`migrations/20260929_fusion_turning_stock.sql`).
+
 ## Chuck and jaws
 
 No vendor STEP is bundled or available to fetch, so `ChuckFixture.py` builds an

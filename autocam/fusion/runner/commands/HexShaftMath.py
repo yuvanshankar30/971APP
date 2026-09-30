@@ -42,6 +42,13 @@ def is_groove_floor_radius(candidate_radius_cm, across_flats_cm):
     return candidate_radius_cm < neck_radius_cm(across_flats_cm) - GROOVE_RADIUS_TOLERANCE_CM
 
 
+def is_journal_radius(candidate_radius_cm, across_flats_cm):
+    """An internal shaft's turned end: a cylinder at exactly the hex's own
+    inscribed radius. The corner-artifact cylinders sit at the (larger)
+    circumscribed radius, so the same tolerance keeps them out."""
+    return abs(candidate_radius_cm - neck_radius_cm(across_flats_cm)) <= GROOVE_RADIUS_TOLERANCE_CM
+
+
 # Two coplanar-split pieces of the same physical groove floor measure a
 # hair's breadth apart on a real STEP import - same reasoning and same
 # reused clustering tolerance as TubeHeightMath.PLANE_CLUSTER_TOLERANCE_CM.
