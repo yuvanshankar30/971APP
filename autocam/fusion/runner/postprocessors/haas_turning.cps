@@ -155,7 +155,7 @@ properties = {
     description: "The maximum spindle speed in RPM.",
     group      : "configuration",
     type       : "integer",
-    value      : 6000,
+    value      : 2000,
     scope      : "post"
   },
   useParametricFeed: {
@@ -211,7 +211,7 @@ properties = {
     description: "Enable to use the tail stock.",
     group      : "configuration",
     type       : "boolean",
-    value      : true,
+    value      : false,
     scope      : "post"
   },
   gotChipConveyor: {

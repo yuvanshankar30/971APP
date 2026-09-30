@@ -18,6 +18,7 @@
  */
 
 import { supabase } from '$lib/supabase.js';
+import { normalizeTurningStock } from '$autocam/fusion/turningStock.js';
 
 export const FUSION_JOB_KINDS = ['plate:arrange', 'plate:cam', 'box_tube', 'turning'];
 export const FUSION_OUTPUT_JOB_KINDS = ['plate:cam', 'box_tube', 'turning'];
@@ -28,7 +29,8 @@ export const FUSION_OUTPUT_JOB_KINDS = ['plate:cam', 'box_tube', 'turning'];
 // Runner can actually run.
 export const TURNING_CAM_TYPES = [
   { value: 'spacer', label: 'Spacer' },
-  { value: 'hexShaft', label: 'Hex Shaft' }
+  { value: 'hexShaft', label: 'Hex Shaft' },
+  { value: 'internalShaft', label: 'Internal Shaft' }
 ];
 
 export function isFusionOutputJob(job) {
@@ -405,13 +407,15 @@ export async function fetchTurningParts() {
 
 // partId (optional) links this turning part to a real manufacturing request -
 // see createPart's own doc comment, same reasoning. tailstockLengthIn is
-// optional - both HandleSpacer.py and HandleHexShaft.py default it to the
-// part's own measured length when not set, so leaving it blank is the normal
-// case, not a missing input.
-export async function createTurningPart({ name, epic, ticket, quantity, camType, tailstockLengthIn, stepFile, createdBy, partId, projectId, stockAssignment }) {
+// optional, as is every stock field (see autocam/fusion/turningStock.js) -
+// the Runner derives whatever is blank from the STEP file, so leaving them
+// blank is the normal case, not a missing input. What is saved here are the
+// defaults the queue dialog starts from; they can be changed per job.
+export async function createTurningPart({ name, epic, ticket, quantity, camType, tailstockLengthIn, stock, stepFile, createdBy, partId, projectId, stockAssignment }) {
   if (!TURNING_CAM_TYPES.some((t) => t.value === camType)) {
     throw new Error(`Invalid turning CAM type: ${camType}`);
   }
+  const normalizedStock = normalizeTurningStock(camType, { ...stock, tailstockLengthIn });
   const stepFileName = await uploadFusionStep({ name, fallback: 'turning', stepFile });
 
   const { data, error } = await supabase
@@ -422,7 +426,11 @@ export async function createTurningPart({ name, epic, ticket, quantity, camType,
       ticket: ticket || null,
       quantity: quantity ?? 1,
       cam_type: camType,
-      tailstock_length_in: tailstockLengthIn === '' || tailstockLengthIn == null ? null : Number(tailstockLengthIn),
+      tailstock_length_in: normalizedStock.tailstockLengthIn,
+      stock_length_in: normalizedStock.lengthIn,
+      stock_od_in: normalizedStock.odIn,
+      stock_id_in: normalizedStock.idIn,
+      stock_across_flats_in: normalizedStock.acrossFlatsIn,
       step_file_name: stepFileName,
       created_by: createdBy || null,
       part_id: partId || null,
@@ -790,7 +798,7 @@ async function requireLoadedTool(machineId, toolId, { requireEndmill = false } =
 
 // Direct helper for arrange and tube jobs. Plate CAM must use the atomic
 // assignment-and-queue function below.
-export async function queueFusionJob({ fusionJobKind, plateId, boxTubeId, turningPartId, machineId, materialId, toolId, requestedBy, name, partId, groupingMode, selectedPartId, selectedPartIds, fusionFileName, fusionFolderPath, tabCount, singleToolMode = false, multiToolMode = false, orientation = 'vertical' }) {
+export async function queueFusionJob({ fusionJobKind, plateId, boxTubeId, turningPartId, turningCamType, turningStock, machineId, materialId, toolId, requestedBy, name, partId, groupingMode, selectedPartId, selectedPartIds, fusionFileName, fusionFolderPath, tabCount, singleToolMode = false, multiToolMode = false, orientation = 'vertical' }) {
   if (!FUSION_JOB_KINDS.includes(fusionJobKind)) {
     throw new Error(`Invalid fusionJobKind: ${fusionJobKind}`);
   }
@@ -847,7 +855,13 @@ export async function queueFusionJob({ fusionJobKind, plateId, boxTubeId, turnin
       // Plate CAM only. Tube jobs have their own operation planner and must
       // retain their stable, minimal queue payload.
       multiToolMode: Boolean(multiToolMode)
-    } : fusionJobKind === 'turning' ? { turningPartId } : { boxTubeId, orientation: normalizedOrientation }),
+    } : fusionJobKind === 'turning' ? {
+      turningPartId,
+      // Stock and tailstock chosen for this job; blank fields mean "derive
+      // from the STEP file". Validated here for a fast error and again in
+      // buildJobPayload before the Runner ever sees it.
+      ...(turningStock ? { turningStock: normalizeTurningStock(turningCamType, turningStock) } : {})
+    } : { boxTubeId, orientation: normalizedOrientation }),
     // Where the saved Fusion document goes and what it's named - chosen at
     // queue time (Plates tab). Optional; camPlate.py falls back to its
     // existing defaults when these aren't set.

@@ -1,3 +1,4 @@
+import { normalizeTurningStock, turningStockPayload } from './turningStock.js';
 // TAB_COUNT_MIN mirrors TabPlacement.py's own MANUAL_TAB_COUNT_MIN, not
 // its DEFAULT_MIN_TABS - direct instruction: an operator physically at
 // the router can know a specific part (e.g. one with its own internal
@@ -171,14 +172,28 @@ export async function buildJobPayload(supabase, job) {
   if (params.fusionJobKind === 'turning') {
     const { data, error } = await supabase.from('fusion_turning_parts').select('*').eq('id', params.turningPartId).single();
     if (error || !data) throw new Error('Turning part not found');
+    // Stock chosen when this job was queued replaces the part's saved values
+    // wholesale (a blank there means "auto from the STEP file", not "use the
+    // saved value"); without it the part's own saved values apply. Either
+    // way it is re-validated here, not trusted from the browser.
+    const stock = normalizeTurningStock(
+      data.cam_type,
+      params.turningStock && typeof params.turningStock === 'object'
+        ? params.turningStock
+        : {
+            lengthIn: data.stock_length_in, odIn: data.stock_od_in, idIn: data.stock_id_in,
+            acrossFlatsIn: data.stock_across_flats_in, tailstockLengthIn: data.tailstock_length_in
+          }
+    );
     return {
       turning_part_id: data.id,
       cam_type: data.cam_type,
-      // null (the default) means "use the part's own measured length" -
-      // both HandleSpacer.py and HandleHexShaft.py already fall back to
-      // that when this is absent, so it is passed through as-is rather
-      // than resolved here.
-      tailstock_length_in: data.tailstock_length_in,
+      // null means "derive it from the part" - HandleSpacer.py and
+      // HandleHexShaft.py resolve every blank stock field and the tailstock
+      // length from the imported model (StockMath.py), so it is passed
+      // through as-is rather than resolved here.
+      tailstock_length_in: stock.tailstockLengthIn,
+      stock: turningStockPayload(stock),
       machine_id,
       step_file_url: await signedUrl(data.step_file_name, data.id),
       fusion_file_name: typeof params.fusionFileName === 'string' && params.fusionFileName.trim() ? params.fusionFileName.trim() : null,

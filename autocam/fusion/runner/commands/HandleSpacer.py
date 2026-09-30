@@ -22,10 +22,19 @@ import adsk.fusion
 import adsk.cam
 import time
 
-from .SpacerMath import default_tailstock_length_cm, has_hole
+from .ChuckFixture import attach_chuck_at_chuck_front, jaw_length_cm
+from .SpacerMath import has_hole
+from .StockMath import resolve_spacer_stock
 
 
 _CM_PER_IN = 2.54
+# Raw bar left ahead of the finished front face for the Face operation to
+# true up, and (default) behind the part for the chuck to hold and the Part
+# operation to cut through. Both are only defaults: an operator-set bar
+# length or tailstock length replaces the back allowance (see StockMath).
+_FRONT_ALLOWANCE_IN = 0.05
+_DEFAULT_GRIP_IN = 0.25
+_MIN_GRIP_IN = 0.1
 
 
 def _active_cam_product(app, doc):
@@ -101,13 +110,35 @@ def _apply_bore_face(operation, face):
     parameter.value.value = [face]
 
 
-def handleSpacer(template_filename, tailstock_length_in=None):
+def _apply_stock(setup, resolved):
+    """Set the setup's fixed-cylinder stock to the resolved bar, its front
+    ``_FRONT_ALLOWANCE_IN`` ahead of the part (Fusion's "front" stock
+    placement with a positive offset - confirmed live) and the rest behind,
+    and put Fusion's chuck-front plane at the jaw tips over the carried grip.
+    """
+    parameters = setup.parameters
+    parameters.itemByName("job_stockMode").value.value = "fixedcylinder"
+    parameters.itemByName("job_stockDiameter").expression = "{:.6f} in".format(resolved["od_cm"] / _CM_PER_IN)
+    parameters.itemByName("job_stockDiameterInner").expression = "{:.6f} in".format(resolved["id_cm"] / _CM_PER_IN)
+    parameters.itemByName("job_stockLength").expression = "{:.6f} in".format(resolved["length_cm"] / _CM_PER_IN)
+    parameters.itemByName("job_stockLengthMode").value.value = "front"
+    parameters.itemByName("job_stockLengthOffset").expression = "{:.6f} in".format(_FRONT_ALLOWANCE_IN)
+    resolved["jaw_cm"] = jaw_length_cm(resolved["grip_cm"])
+    parameters.itemByName("chuckFront_mode").value.value = "stock back"
+    parameters.itemByName("chuckFront_offset").expression = "{:.6f} in".format(resolved["jaw_cm"] / _CM_PER_IN)
+    adsk.doEvents()
+
+
+def handleSpacer(template_filename, tailstock_length_in=None, stock=None):
     """Create one turning setup for the imported spacer body.
 
     Returns a dict with the created setup, the measured spacer geometry (in
     inches, read back from Fusion's own auto-measurement), whether a bore
-    was found, and the tailstock/live-center support length actually used
-    (the caller's override, or the auto-detected default).
+    was found, and the stock actually used. ``stock`` (all optional, inches:
+    ``od_in``, ``id_in``, ``length_in``) and ``tailstock_length_in`` are the
+    operator's queue-time choices; anything left out is derived from the
+    imported spacer (see StockMath.resolve_spacer_stock). The tailstock length
+    is the material carried behind the part for the chuck to hold.
     """
     app = adsk.core.Application.get()
     doc = app.activeDocument
@@ -154,21 +185,45 @@ def handleSpacer(template_filename, tailstock_length_in=None):
     model_length_cm = _measured("modelLength")
     spacer_has_hole = has_hole(model_diameter_inner_cm)
 
+    stock_input = stock or {}
+
+    def _cm_or_none(value):
+        return None if value is None else float(value) * _CM_PER_IN
+
+    resolved = resolve_spacer_stock(
+        model_od_cm=model_diameter_cm,
+        model_id_cm=model_diameter_inner_cm if spacer_has_hole else 0.0,
+        model_length_cm=model_length_cm,
+        front_allowance_cm=_FRONT_ALLOWANCE_IN * _CM_PER_IN,
+        default_grip_cm=_DEFAULT_GRIP_IN * _CM_PER_IN,
+        minimum_grip_cm=_MIN_GRIP_IN * _CM_PER_IN,
+        stock_od_cm=_cm_or_none(stock_input.get("od_in")),
+        stock_id_cm=_cm_or_none(stock_input.get("id_in")),
+        stock_length_cm=_cm_or_none(stock_input.get("length_in")),
+        tailstock_cm=_cm_or_none(tailstock_length_in),
+    )
+    _apply_stock(setup, resolved)
+
     drill = _find_operation(setup, "drill")
     if spacer_has_hole:
         bore = _bore_face(body)
         if bore is None:
             raise RuntimeError("Spacer CAM measured a bore diameter but found no matching cylindrical face")
         if drill is not None:
-            _apply_bore_face(drill, bore)
+            if resolved["drill_needed"]:
+                _apply_bore_face(drill, bore)
+            else:
+                # Tube stock already bored to the part's own bore.
+                drill.deleteMe()
     elif drill is not None:
         # No bore on this spacer - a stale template selection can never be
         # left in an active operation with nothing to drill.
         drill.deleteMe()
 
-    tailstock_length_cm = (
-        tailstock_length_in * _CM_PER_IN if tailstock_length_in is not None
-        else default_tailstock_length_cm(model_length_cm)
+    # Last, after every parameter above has resolved: adding solids to the
+    # design earlier would disturb the template's own measured values.
+    attach_chuck_at_chuck_front(
+        design.rootComponent, setup, resolved["od_cm"] / 2.0, resolved["jaw_cm"]
     )
 
     return {
@@ -177,5 +232,10 @@ def handleSpacer(template_filename, tailstock_length_in=None):
         "spacerId": model_diameter_inner_cm / _CM_PER_IN if spacer_has_hole else None,
         "spacerLength": model_length_cm / _CM_PER_IN,
         "hasHole": spacer_has_hole,
-        "tailstockLength": tailstock_length_cm / _CM_PER_IN,
+        "tailstockLength": resolved["grip_cm"] / _CM_PER_IN,
+        "stock": {
+            "od": resolved["od_cm"] / _CM_PER_IN,
+            "id": resolved["id_cm"] / _CM_PER_IN if resolved["id_cm"] else None,
+            "length": resolved["length_cm"] / _CM_PER_IN,
+        },
     }
