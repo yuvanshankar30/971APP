@@ -14,11 +14,17 @@ import { env } from '$env/dynamic/public';
 // stranding the reader mid-install with no way to finish pairing. Every
 // other route in this app POSTs JSON over fetch(), never a real HTML
 // form (confirmed: no route uses SvelteKit's form-actions,
-// `export const actions`, anywhere) - CSRF_EXEMPT_PATHS names the one
-// genuine exception, and this hook otherwise re-implements SvelteKit's
-// own check faithfully for everything else.
+// `export const actions`, anywhere) - CSRF_EXEMPT_PATHS names the narrow
+// exceptions. Slack sends Block Kit actions as form-encoded callbacks without
+// a browser Origin header, so its actions route must also be exempt. That
+// route immediately verifies Slack's HMAC signature before parsing or changing
+// anything; unlike a browser form, it has a stronger sender-authentication
+// boundary.
 const FORM_CONTENT_TYPES = ['application/x-www-form-urlencoded', 'multipart/form-data', 'text/plain'];
-const CSRF_EXEMPT_PATHS = new Set(['/install/fusion-runner/setup']);
+const CSRF_EXEMPT_PATHS = new Set([
+  '/install/fusion-runner/setup',
+  '/api/971bot/slack/actions'
+]);
 
 export function csrfCheck({ event, resolve }) {
   const { request, url } = event;
