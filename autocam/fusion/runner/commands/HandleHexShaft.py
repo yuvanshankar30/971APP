@@ -39,6 +39,7 @@ import time
 
 from .ChuckFixture import attach_chuck, extrude_into_place, jaw_length_cm
 from .StockMath import check_hex_across_flats, resolve_grip_cm
+from .MachineLimits import TL1_MAX_SPINDLE_RPM
 from .HexShaftMath import (
     circumscribed_radius_cm,
     cluster_groove_faces,
@@ -79,7 +80,6 @@ _TIP_FACE_ALLOWANCE_IN = 0.005
 # TL-1 turning a 0.5in hex bar). Feeds are the team's reviewed Spacer
 # Turning template values (0.005 rough / 0.003 finish / 0.002 groove ipr); SFM
 # matches autocam/inprocess/turning.js's own default for the same machine.
-_TL1_MAX_SPINDLE_RPM = 2000
 _SURFACE_SPEED_SFM = 150
 _FEED_IPR = {
     "turning_face": 0.003,
@@ -450,7 +450,7 @@ def _configure_tools(lib, generic_tool, groove_tool, groove_width_cm):
 def _apply_cutting_data(op, strategy):
     for name, expression in (
         ("tool_surfaceSpeed", "{} in/min".format(_SURFACE_SPEED_SFM * 12)),
-        ("tool_maximumSpindleSpeed", "{} rpm".format(_TL1_MAX_SPINDLE_RPM)),
+        ("tool_maximumSpindleSpeed", "{} rpm".format(TL1_MAX_SPINDLE_RPM)),
         ("tool_feedCuttingRel", "{} in".format(_FEED_IPR[strategy])),
         ("tool_feedEntryRel", "{} in".format(_FEED_IPR[strategy])),
         ("tool_feedExitRel", "{} in".format(_FEED_IPR[strategy])),

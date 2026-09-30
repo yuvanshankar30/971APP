@@ -20,10 +20,12 @@ geometry after import, delete operations with no matching feature).
 import adsk.core
 import adsk.fusion
 import adsk.cam
+import json
 import time
 
 from .ChuckFixture import attach_chuck_at_chuck_front, jaw_length_cm
-from .SpacerMath import has_hole
+from .MachineLimits import TL1_MAX_SPINDLE_RPM
+from .SpacerMath import drill_cutting_data, has_hole
 from .StockMath import resolve_spacer_stock
 
 
@@ -105,9 +107,63 @@ def _find_operation(setup, name_lower):
     return None
 
 
-def _apply_bore_face(operation, face):
-    parameter = operation.parameters.itemByName("holeFaces")
-    parameter.value.value = [face]
+_DRILL_BREAKTHROUGH_IN = 0.05
+_DRILL_RETRACT_IPM = 40
+
+
+def _replace_template_drill(cam, setup, template_drill, bore_face, bore_diameter_cm, hole_depth_cm, roughing):
+    """Replace the template's Drill with one sized for this spacer's bore.
+
+    The template's drill is a fixed 0.159in, 1.125in-flute drill flagged as a
+    live tool and fed per minute: on a 0.230in, 2.16in bore it drills a hole
+    a third too small with flutes that cannot reach the depth (confirmed live
+    against a real spacer with a bore). A tool edit on an existing operation
+    does not stick (see HandleHexShaft._library_tool_with), so a new drill
+    tool is built from the template drill's own definition with the bore's
+    diameter, enough flute length, live tooling off, feed per revolution at a
+    fixed rpm, and a new Drill operation is put in the template's place: it
+    pecks when the hole is deep and breaks through the far end of a through
+    bore. The template's tool number (its turret position) is kept.
+    """
+    diameter_in = bore_diameter_cm / _CM_PER_IN
+    cutting = drill_cutting_data(diameter_in, hole_depth_cm / _CM_PER_IN, TL1_MAX_SPINDLE_RPM)
+
+    definition = json.loads(template_drill.toolJson)
+    geometry = definition["geometry"]
+    geometry["DC"] = geometry["SFDM"] = round(diameter_in, 4)
+    geometry["LCF"] = round(cutting["flute_in"], 4)
+    geometry["LB"] = round(geometry["LCF"] + 0.25, 4)
+    geometry["OAL"] = round(geometry["LB"] + 1.25, 4)
+    geometry["assemblyGaugeLength"] = geometry["LB"]
+    definition["post-process"]["live"] = False
+    definition["description"] = "Spacer bore drill"
+    preset = definition["start-values"]["presets"][0]
+    preset.update({
+        "n": cutting["rpm"],
+        "v_c": round(cutting["rpm"] * 3.141592653589793 * diameter_in / 12, 2),
+        "use-feed-per-revolution": True,
+        "f_n": cutting["feed_ipr"],
+        "tool-coolant": "flood",
+    })
+
+    library = cam.documentToolLibrary
+    library.add(adsk.cam.Tool.createFromJson(json.dumps(definition)))
+    operation_input = setup.operations.createInput("drill")
+    operation_input.tool = library.item(library.count - 1)
+    drill = setup.operations.add(operation_input)
+
+    parameters = drill.parameters
+    parameters.itemByName("holeFaces").value.value = [bore_face]
+    parameters.itemByName("cycleType").value.value = "deep-drilling" if cutting["deep"] else "drilling"
+    parameters.itemByName("peckingDepth").expression = "{:.4f} in".format(cutting["peck_in"])
+    parameters.itemByName("drillTipThroughBottom").expression = "true"
+    parameters.itemByName("breakThroughDepth").expression = "{} in".format(_DRILL_BREAKTHROUGH_IN)
+    # The preset carries no retract feed; without one Fusion refuses to generate.
+    parameters.itemByName("tool_feedRetract").expression = "{}in/min".format(_DRILL_RETRACT_IPM)
+
+    drill.moveAfter(roughing)
+    template_drill.deleteMe()
+    return drill
 
 
 def _apply_stock(setup, resolved):
@@ -211,7 +267,10 @@ def handleSpacer(template_filename, tailstock_length_in=None, stock=None):
             raise RuntimeError("Spacer CAM measured a bore diameter but found no matching cylindrical face")
         if drill is not None:
             if resolved["drill_needed"]:
-                _apply_bore_face(drill, bore)
+                _replace_template_drill(
+                    cam, setup, drill, bore, model_diameter_inner_cm, model_length_cm,
+                    _find_operation(setup, "profile roughing"),
+                )
             else:
                 # Tube stock already bored to the part's own bore.
                 drill.deleteMe()
