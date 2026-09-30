@@ -28,6 +28,7 @@ import {
   fusionNcDestinationName,
   queueFusionJob,
   queueFusionPlateJob,
+  createTurningPart,
   updatePartQuantity,
   updatePartStepFile,
   renameBoxTube,
@@ -128,6 +129,67 @@ describe('Fusion CAM queue query efficiency', () => {
     expect(inserted.tool_id).toBeNull();
     expect(inserted.material_id).toBeNull();
     expect(inserted.operation_type).toBe('milling');
+  });
+
+  describe('turning stock across every lathe CAM type', () => {
+    const cases = [
+      ['spacer', { odIn: '0.5', idIn: '0.23', lengthIn: '3', acrossFlatsIn: '9' }, { odIn: 0.5, idIn: 0.23, lengthIn: 3, acrossFlatsIn: null }],
+      ['hexShaft', { odIn: '9', idIn: '4', acrossFlatsIn: '0.5', lengthIn: '8' }, { odIn: null, idIn: null, acrossFlatsIn: 0.5, lengthIn: 8 }],
+      ['internalShaft', { odIn: '9', idIn: '4', acrossFlatsIn: '0.5', lengthIn: '8' }, { odIn: null, idIn: null, acrossFlatsIn: 0.5, lengthIn: 8 }]
+    ];
+
+    it.each(cases)('queues %s with only the stock fields that apply, as validated numbers', async (camType, stock, expected) => {
+      mocks.from.mockReturnValue(chain({ data: { id: 'job' }, error: null }));
+      await queueFusionJob({
+        fusionJobKind: 'turning', turningPartId: 'p', machineId: 'lathe-1', turningCamType: camType,
+        turningStock: { ...stock, tailstockLengthIn: '1.5' }
+      });
+      const inserted = mocks.queries[0].insert.mock.calls[0][0];
+      expect(inserted.params.turningStock).toEqual({ ...expected, tailstockLengthIn: 1.5 });
+    });
+
+    it.each(['spacer', 'hexShaft', 'internalShaft'])('treats a blank %s form as automatic, not zero', async (camType) => {
+      mocks.from.mockReturnValue(chain({ data: { id: 'job' }, error: null }));
+      await queueFusionJob({
+        fusionJobKind: 'turning', turningPartId: 'p', machineId: 'lathe-1', turningCamType: camType,
+        turningStock: { odIn: '', idIn: '', lengthIn: '', acrossFlatsIn: '', tailstockLengthIn: '' }
+      });
+      expect(mocks.queries[0].insert.mock.calls[0][0].params.turningStock).toEqual({
+        lengthIn: null, odIn: null, idIn: null, acrossFlatsIn: null, tailstockLengthIn: null
+      });
+    });
+
+    it.each(['spacer', 'hexShaft', 'internalShaft'])('rejects a bad %s stock value before anything is queued', async (camType) => {
+      await expect(queueFusionJob({
+        fusionJobKind: 'turning', turningPartId: 'p', machineId: 'lathe-1', turningCamType: camType,
+        turningStock: { lengthIn: -3 }
+      })).rejects.toThrow(/Stock length must be a positive number/);
+      expect(mocks.from).not.toHaveBeenCalledWith('cam_jobs');
+    });
+
+    it.each(cases)('saves %s stock on the part as columns, dropping fields that do not apply', async (camType, stock, expected) => {
+      mocks.from.mockReturnValue(chain({ data: { id: 'part' }, error: null }));
+      await createTurningPart({
+        name: 'Shaft', quantity: 1, camType, stock, tailstockLengthIn: '2', stepFile: new File(['x'], 's.step'), createdBy: 'u'
+      });
+      const inserted = mocks.queries[0].insert.mock.calls[0][0];
+      expect(inserted).toMatchObject({
+        cam_type: camType, stock_od_in: expected.odIn, stock_id_in: expected.idIn,
+        stock_across_flats_in: expected.acrossFlatsIn, stock_length_in: expected.lengthIn, tailstock_length_in: 2
+      });
+    });
+
+    it('rejects an invalid stock value before uploading the STEP file', async () => {
+      mocks.storageUpload.mockClear();
+      await expect(createTurningPart({
+        name: 'Shaft', camType: 'spacer', stock: { odIn: 0.5, idIn: 0.6 }, stepFile: new File(['x'], 's.step')
+      })).rejects.toThrow(/smaller than the stock OD/);
+      expect(mocks.storageUpload).not.toHaveBeenCalled();
+    });
+
+    it('rejects an unknown CAM type', async () => {
+      await expect(createTurningPart({ name: 'x', camType: 'tube', stepFile: new File(['x'], 's.step') })).rejects.toThrow(/Invalid turning CAM type/);
+    });
   });
 
   it('refuses a turning job without a turning part', async () => {

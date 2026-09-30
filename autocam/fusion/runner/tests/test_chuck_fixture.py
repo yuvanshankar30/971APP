@@ -28,6 +28,9 @@ class ChuckFixtureSourceTests(unittest.TestCase):
         # off the axis (confirmed live).
         self.assertNotIn("addByCenterRadius", self.source)
 
+    def test_chuck_body_is_never_narrower_than_its_jaws(self):
+        self.assertIn("max(_CHUCK_RADIUS_IN * _CM_PER_IN, jaw_top_cm + _JAW_OVERHANG_MARGIN_IN * _CM_PER_IN)", self.source)
+
     def test_three_jaws_at_120_degrees(self):
         self.assertIn("for k in range(3):", self.source)
         self.assertIn("2.0 * math.pi / 3.0", self.source)
