@@ -22,6 +22,7 @@ import adsk.fusion
 import adsk.cam
 import time
 
+from .ChuckFixture import attach_chuck_at_chuck_front
 from .SpacerMath import default_tailstock_length_cm, has_hole
 
 
@@ -169,6 +170,12 @@ def handleSpacer(template_filename, tailstock_length_in=None):
     tailstock_length_cm = (
         tailstock_length_in * _CM_PER_IN if tailstock_length_in is not None
         else default_tailstock_length_cm(model_length_cm)
+    )
+
+    # Last, after every parameter above has resolved: adding solids to the
+    # design earlier would disturb the template's own measured values.
+    attach_chuck_at_chuck_front(
+        design.rootComponent, setup, setup.parameters.itemByName("job_stockDiameter").value.value / 2.0
     )
 
     return {

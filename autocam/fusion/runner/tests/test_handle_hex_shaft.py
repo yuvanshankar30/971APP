@@ -45,20 +45,17 @@ class HandleHexShaftSourceTests(unittest.TestCase):
         self.assertIn("two_ended = groove_count == 2", self.source)
         self.assertIn("axis_unit_rev = tuple(-c for c in axis_unit)", self.source)
 
-    def test_no_setup_ever_parts_off_or_faces_off_the_grip_excess(self):
-        # Direct instruction, after an earlier version's own final
-        # staged-Face-plus-Part sequence machined away a real snap-ring
-        # groove even with a geometry-clearance check in place: "remove
-        # that facing operation... dont even cut off the part of the
-        # stock that makes it fall... IT SHOULD DO ANYTHING BUT THAT LAST
-        # FACING OPERATION BECAUSE THAT REMOVES THE GROOVES." Neither
-        # setup this module builds ever posts a turning_part operation, or
-        # any Face operation beyond the one light cleanup pass at its own
-        # tip - the carried grip/tailstock excess stays attached
-        # permanently once CAM is done.
-        self.assertNotIn("turning_part", self.source)
+    def test_only_the_last_setup_parts_off_and_nothing_faces_the_excess(self):
+        # The part-off severs the finished part from the carried excess after
+        # every groove is cut. An earlier version's staged Face-plus-Part
+        # sequence machined away a real snap-ring groove, so no Face ever
+        # targets the excess.
+        self.assertIn('_input_with_tool(setup, "turning_part", groove_tool)', self.source)
+        self.assertIn("part_off=not two_ended,", self.source)
+        self.assertIn('setup_name="Hex Shaft - End 2", part_off=True,', self.source)
         self.assertNotIn("sever_length_cm", self.source)
         self.assertNotIn("tailstock_excess_cm", self.source)
+        self.assertIn("_PART_OFF_ALLOWANCE_IN = 0.01", self.source)
 
     def test_second_setup_stock_carries_the_same_grip_allowance_as_the_first(self):
         # The raw bar is one continuous piece through both setups (see the
@@ -86,8 +83,10 @@ class HandleHexShaftSourceTests(unittest.TestCase):
         # default origin planes) does not - so the hex cross section is
         # sketched there and extruded/moved into place, rather than
         # approximated as a round cylinder at the circumscribed diameter.
-        self.assertIn("sketch = root.sketches.add(root.xZConstructionPlane)", self.source)
-        self.assertIn("sketch.sketchCurves.sketchLines", self.source)
+        chuck_source = (RUNNER_DIR / "commands" / "ChuckFixture.py").read_text()
+        self.assertIn("sketch = root.sketches.add(root.xZConstructionPlane)", chuck_source)
+        self.assertIn("sketch.sketchCurves.sketchLines", chuck_source)
+        self.assertIn("addByTwoPoints", self.source)
         self.assertNotIn("createCylinderOrCone", self.source)
 
     def test_stock_flats_are_aligned_to_the_real_bodys_own_flats(self):
@@ -96,7 +95,9 @@ class HandleHexShaftSourceTests(unittest.TestCase):
         # the axis would still pass every numeric check but wouldn't visually
         # or physically match a real hex bar's own corner/flat orientation.
         self.assertIn("flat_normal = _vec(_hex_flats(body, axis_unit)[0].geometry.normal)", self.source)
-        self.assertIn("target_x = _normalize(_sub_v(flat_normal,", self.source)
+        chuck_source = (RUNNER_DIR / "commands" / "ChuckFixture.py").read_text()
+        self.assertIn("target_x = _normalize(_sub(x_reference,", chuck_source)
+        self.assertIn("extrude_into_place(root, draw_hex, origin_point, axis_unit, flat_normal,", self.source)
 
     def test_wcs_origin_readback_is_converted_from_millimeters(self):
         # Confirmed live: Setup.workCoordinateSystem.getAsCoordinateSystem()
@@ -106,27 +107,72 @@ class HandleHexShaftSourceTests(unittest.TestCase):
         # a measurement taken from body geometry.
         self.assertIn("origin_cm = tuple(c / 10.0 for c in _vec(origin))", self.source)
 
-    def test_origin_choice_is_tried_both_ways_not_hardcoded(self):
-        # Confirmed live: which literal choice ("model front" vs "model
-        # back") actually lands on the measured tip depends on this body's
-        # own axis/flip resolution - Spacer's own body resolves "front" to
-        # its tip while this hex shaft resolves "back" to its tip instead,
-        # for the identical intent, so both are tried rather than assumed.
-        # "model" (not "stock") front/back specifically: this setup's own
-        # stock now deliberately extends past the model's own tip (the tip-
-        # facing overage, and on the final setup the carried grip/tailstock
-        # excess too), and only "model front"/"model back" stay anchored to
-        # the design body's own fixed geometry regardless of that.
-        front_index = self.source.index('"wcs_origin_turning").value.value = "model front"')
-        back_index = self.source.index('"wcs_origin_turning").value.value = "model back"')
-        self.assertLess(front_index, back_index)
+    def test_wcs_z_points_out_of_the_tip_and_origin_is_model_front(self):
+        # Confirmed live against Fusion's own default turning WCS (origin at
+        # stock front, +Z away from the part) and the Haas/turning.js
+        # convention (part at negative Z, toward the chuck). An earlier
+        # version pointed +Z into the chuck, which is why the origin only
+        # resolved as "model back", Fusion placed the chuck at the tip being
+        # machined, and posted Z was mirrored against the machine's axis.
+        self.assertIn("if _dot(got_z, axis_unit) < 0:", self.source)
+        self.assertIn('"wcs_origin_turning").value.value = "model front"', self.source)
+        self.assertNotIn('"wcs_origin_turning").value.value = "model back"', self.source)
+
+    def test_profile_back_height_is_negative_into_the_part(self):
+        self.assertIn('.format(-neck_length_cm / _CM_PER_IN)', self.source)
+
+    def test_turret_tools_get_distinct_nonzero_numbers(self):
+        # The post writes T<number*100 + offset>; the sample library ships
+        # both tools as number 0.
+        self.assertIn("_GENERAL_TOOL_NUMBER = 1", self.source)
+        self.assertIn("_GROOVE_TOOL_NUMBER = 2", self.source)
+        self.assertIn("lib.add(tool)", self.source)
+
+    def test_groove_insert_is_sized_to_the_modeled_groove(self):
+        # The sample OD Grooving insert is 0.125in wide; the snap-ring groove
+        # is ~0.039in, so the default would cut a ~3x too wide groove.
+        self.assertIn('"tool_insertWidth": width_expression', self.source)
+        self.assertIn("min(g[\"axialHigh\"] - g[\"axialLow\"] for g in groove_instances)", self.source)
+
+    def test_cutting_data_is_capped_for_the_tl1(self):
+        self.assertIn("_TL1_MAX_SPINDLE_RPM = 2000", self.source)
+        self.assertIn('("tool_maximumSpindleSpeed", "{} rpm".format(_TL1_MAX_SPINDLE_RPM))', self.source)
+        self.assertIn("_apply_cutting_data(op, strategy)", self.source)
+
+    def test_profile_operations_suppress_the_groove_owned_by_the_groove_operation(self):
+        self.assertIn('"useGrooveSuppression").value.value = True', self.source)
+        self.assertIn('"grooveSuppressionSelection").value.value = target["faces"]', self.source)
+
+    def test_safe_z_is_ahead_of_the_tip(self):
+        self.assertIn("_set_safe_z(op)", self.source)
+        self.assertIn('"overrideSafeZ").value.value = True', self.source)
+
+    def test_a_tl1_chuck_is_bound_as_each_setups_fixture_on_the_flats(self):
+        self.assertIn("from .ChuckFixture import attach_chuck", self.source)
+        self.assertIn("neck_radius_cm(across_flats_cm), stock_back_cm + jaw_cm, jaw_cm,", self.source)
+        self.assertIn('parameters.itemByName("chuckFront_mode").value.value = "stock back"', self.source)
+
+    def test_chucks_are_added_after_every_setups_wcs_has_resolved(self):
+        # Confirmed live: with chuck bodies already in the document, Fusion
+        # re-resolved the next setup's WCS Z axis to a wrong, non-axial
+        # direction, so both chucks are attached last.
+        last_setup = self.source.index("results.append(second_result)")
+        first_attach = self.source.index("_attach_hex_chuck(\n        root, first_result")
+        self.assertLess(last_setup, first_attach)
 
     def test_groove_operation_requires_a_grooving_type_tool(self):
         # Confirmed live: Fusion rejects toolpath generation for a groove
         # operation given a plain turning-general tool ("Tool (turning
         # general) is not supported for the strategy.") - the one tool-type
         # detail that can't wait for later configuration, unlike feeds/speeds.
-        self.assertIn('groove_tool = _tool_by_type(lib, "turning grooving") or generic_tool', self.source)
+        self.assertIn('groove_tool = tool_by_type(lib, "turning grooving") or generic_tool', self.source)
+
+    def test_general_tool_is_the_right_hand_insert_not_the_librarys_first_left_hand_one(self):
+        # The sample library lists 'CNMT Left Hand' before 'CNMT Right Hand';
+        # the left-hand insert is mirrored against a cut toward the chuck.
+        self.assertIn('tool_by_type(lib, "turning general", "Right Hand")', self.source)
+        turning = (RUNNER_DIR / "workflows" / "camTurning.py").read_text()
+        self.assertIn('tool_by_type(sample_library, "turning general", "Right Hand")', turning)
         self.assertIn('_input_with_tool(setup, "turning_single_groove", groove_tool)', self.source)
 
     def test_machines_whichever_groove_is_closest_to_the_tip(self):

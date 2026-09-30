@@ -1,5 +1,6 @@
 import adsk.core, adsk.fusion, adsk.cam
 from ..config import *
+import filecmp
 import os
 import json
 import re
@@ -86,11 +87,15 @@ def _ensure_post_registered_locally(cam, post_processor_path):
     postprocessors/ and resolve_local_post_processor()).
 
     Self-healing rather than a separate setup step: runs on every export()
-    so a fresh machine (or one where this got deleted) fixes itself on the
-    next job instead of failing with an opaque library-lookup error.
+    so a fresh machine (or one where this got deleted or went stale) fixes
+    itself on the next job instead of failing with an opaque library-lookup
+    error.
     """
     destination = os.path.join(cam.personalPostFolder, os.path.basename(post_processor_path))
-    if os.path.isfile(destination):
+    # Refreshed whenever the bundled file differs, not only when missing: the
+    # first copy was otherwise kept forever, so later edits to a bundled post
+    # (e.g. haas_turning.cps's spindle-speed clamp) never reached Fusion.
+    if os.path.isfile(destination) and filecmp.cmp(post_processor_path, destination, shallow=False):
         return
     os.makedirs(cam.personalPostFolder, exist_ok=True)
     shutil.copy2(post_processor_path, destination)

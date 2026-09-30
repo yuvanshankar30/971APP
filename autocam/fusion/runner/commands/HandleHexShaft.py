@@ -20,20 +20,15 @@ around whichever body is actually imported for a real job.
 
 Confirmed live (real hex shaft geometry, not an assumption): a model with a
 groove at each end needs two setups, not one - the operator chucks extra-
-length raw stock, faces/necks/grooves the first end, then re-chucks the
-now-finished end to expose and machine the second end. The raw excess
-stays attached PERMANENTLY through and after both setups (it is what the
-chuck grips throughout, and what a tailstock/live center can bear against)
-- CAM never faces it off and never parts the finished blank free. An
-earlier version of this module added a final staged-Face-plus-Part
-sequence to do exactly that, but confirmed live on a real job: even with
-an explicit geometry-clearance check in place, it still reached into and
-machined away a real snap-ring groove. Direct instruction after seeing
-that: "remove that facing operation... dont even cut off the part of the
-stock that makes it fall... IT SHOULD DO ANYTHING BUT THAT LAST FACING
-OPERATION BECAUSE THAT REMOVES THE GROOVES." Every setup now ends after
-its own light tip-face, roughing, finishing, and groove - see
-_build_hex_end_setup's own docstring.
+length raw stock, faces/necks/grooves the first end, then re-chucks to
+expose and machine the second end. The raw excess stays attached through
+both setups (it is what the chuck grips), and only the LAST setup ends with
+a Part (cutoff) operation, after every groove is already cut, to sever the
+finished part from that excess. An earlier version instead faced the excess
+off with a staged Face-plus-Part sequence and machined away a real snap-ring
+groove; the Face there is gone for good - the only cut at the far end now is
+the single part-off at the finished part's own back end (see
+_PART_OFF_ALLOWANCE_IN), never a facing pass.
 """
 
 import adsk.core
@@ -42,6 +37,7 @@ import adsk.cam
 import math
 import time
 
+from .ChuckFixture import attach_chuck, extrude_into_place, jaw_length_cm
 from .HexShaftMath import (
     circumscribed_radius_cm,
     cluster_groove_faces,
@@ -76,7 +72,34 @@ _MIN_TAILSTOCK_LENGTH_IN = 0.25
 # "try to make it remove 0.005" - deliberately tiny, nothing like the old
 # single deep facing plunge this replaces.
 _TIP_FACE_ALLOWANCE_IN = 0.005
-
+# Haas TL-1 cutting data. Fusion's bundled sample tools ship with a 5000 rpm
+# cap, 656 SFM and 0.039 ipr feeds (fine for a large CNC lathe, not for a
+# TL-1 turning a 0.5in hex bar). Feeds are the team's reviewed Spacer
+# Turning template values (0.005 rough / 0.003 finish / 0.002 groove ipr); SFM
+# matches autocam/inprocess/turning.js's own default for the same machine.
+_TL1_MAX_SPINDLE_RPM = 2000
+_SURFACE_SPEED_SFM = 150
+_FEED_IPR = {
+    "turning_face": 0.003,
+    "turning_profile_roughing": 0.005,
+    "turning_profile_finishing": 0.003,
+    "turning_single_groove": 0.002,
+    "turning_part": 0.002,
+}
+# How far past the finished part's back end the part-off cut lands, into the
+# carried excess: the parted-off part is left this much long (face it
+# afterward) instead of the blade sitting exactly on the part's own end,
+# where a cut placed a hair short would sever into the groove end lip.
+_PART_OFF_ALLOWANCE_IN = 0.01
+# The turret needs real, distinct tool numbers: the post writes T<number*100 +
+# offset>, and the sample library's tools are both number 0 (an invalid T0,
+# and no tool change between the turning insert and the grooving insert).
+_GENERAL_TOOL_NUMBER = 1
+_GROOVE_TOOL_NUMBER = 2
+# Approach/retract plane ahead of the finished tip. Fusion's default puts
+# safe Z exactly on the WCS origin (the tip), which sits inside the raw
+# stock's own tip-facing overage.
+_SAFE_Z_CLEARANCE_IN = 0.1
 
 def _vec(v):
     return (v.x, v.y, v.z)
@@ -254,10 +277,6 @@ def _sub_v(a, b):
     return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
 
 
-def _cross(a, b):
-    return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
-
-
 def _normalize(a):
     length = math.sqrt(_dot(a, a))
     return (a[0] / length, a[1] / length, a[2] / length)
@@ -287,49 +306,34 @@ def _build_hex_stock(root, origin_point, axis_unit, flat_normal, across_flats_cm
     not an arbitrary rotation about the axis.
     """
     circumradius_cm = circumscribed_radius_cm(across_flats_cm)
-    length_cm = end_cm - start_cm
 
-    sketch = root.sketches.add(root.xZConstructionPlane)
-    points = []
-    for k in range(6):
-        angle = math.pi / 6 + k * math.pi / 3
-        points.append(adsk.core.Point3D.create(
-            circumradius_cm * math.cos(angle), 0.0, circumradius_cm * math.sin(angle)
-        ))
-    lines = sketch.sketchCurves.sketchLines
-    for i in range(6):
-        lines.addByTwoPoints(points[i], points[(i + 1) % 6])
-    profile = sketch.profiles.item(0)
+    def draw_hex(lines):
+        points = []
+        for k in range(6):
+            angle = math.pi / 6 + k * math.pi / 3
+            points.append(adsk.core.Point3D.create(
+                circumradius_cm * math.cos(angle), 0.0, circumradius_cm * math.sin(angle)
+            ))
+        for i in range(6):
+            lines.addByTwoPoints(points[i], points[(i + 1) % 6])
 
-    extrude_input = root.features.extrudeFeatures.createInput(
-        profile, adsk.fusion.FeatureOperations.NewBodyFeatureOperation
+    return extrude_into_place(root, draw_hex, origin_point, axis_unit, flat_normal, start_cm, end_cm)
+
+
+def _attach_hex_chuck(root, setup, origin_point, axis_unit, flat_normal, across_flats_cm, stock_back_cm, grip_cm):
+    """Jaws seated flat against alternate hex flats over the carried excess,
+    the bar end flush with the chuck face. The chuck is added only after
+    every setup's WCS has resolved (see handleHexShaft)."""
+    jaw_cm = jaw_length_cm(grip_cm)
+    attach_chuck(
+        root, setup, origin_point, axis_unit, flat_normal,
+        neck_radius_cm(across_flats_cm), stock_back_cm + jaw_cm, jaw_cm,
     )
-    extrude_input.setDistanceExtent(False, adsk.core.ValueInput.createByReal(length_cm))
-    stock_body = root.features.extrudeFeatures.add(extrude_input).bodies.item(0)
-
-    # The extrude's own local frame has its exposed (undistanced) end at
-    # (0, 0, 0) and extends toward -Z by length_cm - confirmed live - so
-    # local origin/+Z aligns to the shaft's measured tip/axis_unit directly.
-    tip_point = tuple(origin_point[i] + axis_unit[i] * end_cm for i in range(3))
-    target_x = _normalize(_sub_v(flat_normal, tuple(_dot(flat_normal, axis_unit) * c for c in axis_unit)))
-    target_y = _cross(axis_unit, target_x)
-
-    matrix = adsk.core.Matrix3D.create()
-    matrix.setToAlignCoordinateSystems(
-        adsk.core.Point3D.create(0, 0, 0),
-        adsk.core.Vector3D.create(1, 0, 0),
-        adsk.core.Vector3D.create(0, 1, 0),
-        adsk.core.Vector3D.create(0, 0, 1),
-        adsk.core.Point3D.create(*tip_point),
-        adsk.core.Vector3D.create(*target_x),
-        adsk.core.Vector3D.create(*target_y),
-        adsk.core.Vector3D.create(*axis_unit),
-    )
-    move_input = root.features.moveFeatures.createInput(
-        adsk.core.ObjectCollection.createWithArray([stock_body]), matrix
-    )
-    root.features.moveFeatures.add(move_input)
-    return stock_body
+    parameters = setup.parameters
+    # Fusion's chuck-front plane is where the jaw tips end, i.e. jaw_cm
+    # forward of the bar's back end (the stock's own "back").
+    parameters.itemByName("chuckFront_mode").value.value = "stock back"
+    parameters.itemByName("chuckFront_offset").expression = "{:.6f} in".format(jaw_cm / _CM_PER_IN)
 
 
 def _set_minimum_retraction(op):
@@ -359,36 +363,99 @@ def _input_with_tool(setup, strategy, tool):
     return op_input
 
 
-def _tool_by_type(lib, wanted_type):
+def tool_by_type(lib, wanted_type, description_hint=None):
+    """First tool of wanted_type, preferring one whose description contains
+    description_hint. The bundled sample library lists 'CNMT Left Hand' ahead
+    of 'CNMT Right Hand'; a left-hand insert turning toward the chuck is
+    mirrored against the cut (odd Z tip reference, a sloped neck path and a
+    gouge highlight in Fusion's simulation), so the general tool is looked up
+    with the hint "Right Hand".
+    """
+    fallback = None
     for i in range(lib.count):
         tool = lib.item(i)
         type_param = tool.parameters.itemByName("tool_type")
-        if type_param is not None and type_param.value.value == wanted_type:
+        if type_param is None or type_param.value.value != wanted_type:
+            continue
+        if description_hint is None:
             return tool
-    return None
+        description = tool.parameters.itemByName("tool_description")
+        if description is not None and description_hint in description.value.value:
+            return tool
+        if fallback is None:
+            fallback = tool
+    return fallback
+
+
+def _library_tool_with(lib, source, expressions):
+    """A copy of `source` with the given parameter expressions applied, added
+    to the document library and returned as that library's own entry.
+
+    Confirmed live: editing a library tool object in place does not carry
+    into an operation created from it (the operation kept tool number 0); an
+    operation only picks up the values of an entry that was added to the
+    library with them already set.
+    """
+    tool = adsk.cam.Tool.createFromJson(source.toJson())
+    for name, expression in expressions.items():
+        tool.parameters.itemByName(name).expression = expression
+    if not lib.add(tool):
+        raise RuntimeError("Fusion refused to add the configured turning tool to the document library")
+    return lib.item(lib.count - 1)
+
+
+def _configure_tools(lib, generic_tool, groove_tool, groove_width_cm):
+    """Give each tool a real turret number and size the groove insert to the
+    model's own groove.
+
+    The sample OD Grooving insert is 0.125in wide; the snap-ring groove is
+    ~0.039in. A single-groove operation cuts at least the insert's own
+    width, so leaving the default would machine a groove ~3x too wide
+    (through the end lip) instead of the modeled one.
+    """
+    width_expression = "{:.4f} in".format(groove_width_cm / _CM_PER_IN)
+    configured_general = _library_tool_with(lib, generic_tool, {"tool_number": str(_GENERAL_TOOL_NUMBER)})
+    configured_groove = _library_tool_with(lib, groove_tool, {
+        "tool_number": str(_GROOVE_TOOL_NUMBER),
+        "tool_insertWidth": width_expression,
+        "tool_grooveWidth": width_expression,
+    })
+    return configured_general, configured_groove
+
+
+def _apply_cutting_data(op, strategy):
+    for name, expression in (
+        ("tool_surfaceSpeed", "{} in/min".format(_SURFACE_SPEED_SFM * 12)),
+        ("tool_maximumSpindleSpeed", "{} rpm".format(_TL1_MAX_SPINDLE_RPM)),
+        ("tool_feedCuttingRel", "{} in".format(_FEED_IPR[strategy])),
+        ("tool_feedEntryRel", "{} in".format(_FEED_IPR[strategy])),
+        ("tool_feedExitRel", "{} in".format(_FEED_IPR[strategy])),
+    ):
+        op.parameters.itemByName(name).expression = expression
+
+
+def _set_safe_z(op):
+    op.parameters.itemByName("overrideSafeZ").value.value = True
+    op.parameters.itemByName("safeZ_mode").value.value = "from wcs"
+    op.parameters.itemByName("safeZ_offset").expression = "{} in".format(_SAFE_Z_CLEARANCE_IN)
 
 
 def _build_hex_end_setup(
     cam, root, body, long_edge, origin_point, axis_unit, across_flats_cm,
-    stock_body, generic_tool, groove_tool, setup_name,
+    stock_body, generic_tool, groove_tool, setup_name, part_off=False,
 ):
     """One Face -> Profile Roughing -> Profile Finishing -> Single Groove
     setup for whichever end axis_unit points toward (its own axial
-    maximum). Nothing else, and nothing conditional on which setup this
-    is - every setup this function builds ends here.
+    maximum), followed by a Part (cutoff) operation only when part_off is
+    set - the last setup, so every groove is already cut when the finished
+    part is severed from the carried grip/tailstock excess.
 
-    Direct instruction, after an earlier version of this function added a
-    further staged Face-plus-Part sequence to face off and sever the
-    carried grip/tailstock excess as the FINAL setup's own last
-    operations, and that sequence machined away a real snap-ring groove on
-    a real job even with an explicit geometry-clearance check in place:
-    "remove that facing operation... dont even cut off the part of the
-    stock that makes it fall... IT SHOULD DO ANYTHING BUT THAT LAST FACING
-    OPERATION BECAUSE THAT REMOVES THE GROOVES." The grip/tailstock excess
-    (see handleHexShaft's own _build_hex_stock calls) now stays attached
-    permanently, on every setup this function builds - CAM's own job ends
-    once this end's neck and groove are cut; nothing here ever faces off
-    or parts the finished shape free of that excess.
+    Never a Face on the excess: an earlier version faced it off with a
+    staged Face-plus-Part sequence and machined away a real snap-ring
+    groove ("IT SHOULD DO ANYTHING BUT THAT LAST FACING OPERATION BECAUSE
+    THAT REMOVES THE GROOVES"). The part-off here is one cut at the
+    finished part's own back end, offset _PART_OFF_ALLOWANCE_IN into the
+    excess.
 
     The Face pass at this end's own working tip (WCS Z=0, the model's own
     real end) is a light cleanup cut only: the stock built for it (see
@@ -425,40 +492,33 @@ def _build_hex_end_setup(
     parameters.itemByName("wcs_orientation_axisZ").value.value = [long_edge]
     flip_z = parameters.itemByName("wcs_orientation_flipZ").value
     _, _got_x, _got_y, got_z = _wcs_frame(setup)
-    # WCS +Z must point from the exposed tip into the chuck (matches every
-    # other turning setup this codebase builds - see HandleSpacer.py's
-    # chuckFront_mode='model back'). The tip is this frame's own axial
-    # maximum, so +Z must point toward decreasing axial position here.
-    if _dot(got_z, axis_unit) > 0:
+    # Lathe convention (Fusion's own default turning WCS, the Haas post, and
+    # autocam/inprocess/turning.js): +Z points from the part OUT of the
+    # exposed tip, away from the chuck, so the part lies at negative Z and
+    # "front" is the highest-Z end. This frame's tip is its own axial
+    # maximum, so +Z must point toward increasing axial position. An
+    # earlier version pointed +Z into the chuck: the origin then only landed
+    # on the tip as "model back" (which is why it had to guess front vs
+    # back), Fusion placed the chuck at the tip being machined, and the
+    # posted Z coordinates were mirrored relative to the machine's own axis.
+    if _dot(got_z, axis_unit) < 0:
         flip_z.value = not flip_z.value
 
     # Explicit ConstructionPoints.add fails live with the same "Environment
     # is not supported" error setByPlane hit above, independent of workspace
-    # or design type. "Model front"/"model back" resolve against the design
-    # BODY's own fixed geometry, not the synthetic stock prism - unlike an
-    # earlier version of this function (which used "stock front"/"stock
-    # back", confirmed live equivalent back when stock's own tip always
-    # exactly coincided with the model's), this setup's stock now
-    # deliberately extends past the model's own tip on purpose (the tip-
-    # facing overage, and on the final setup the carried grip/tailstock
-    # excess too) - "model front"/"model back" stay correct regardless of
-    # how far the stock itself extends, confirmed live. Which literal label
-    # ("front" vs "back") lands on this end's own tip depends on this
-    # body's own axis/flip resolution, not something to hardcode - confirmed
-    # live, Spacer's own body resolves "front" to its tip while this hex
-    # shaft resolves "back" to its tip instead, for the identical intent.
-    # Try both and keep whichever matches.
+    # or design type. "Model front" resolves against the design BODY's own
+    # fixed geometry, not the synthetic stock prism, so it stays on the
+    # finished tip regardless of how far the stock extends past it (the
+    # tip-facing overage, and the carried grip/tailstock excess).
     parameters.itemByName("wcs_origin_turning").value.value = "model front"
-    origin, _, _, _ = _wcs_frame(setup)
+    origin, _, _, final_z = _wcs_frame(setup)
     offset = _sub_v(origin, tip_point)
-    if _dot(offset, offset) > 1e-4:
-        parameters.itemByName("wcs_origin_turning").value.value = "model back"
-        origin, _, _, _ = _wcs_frame(setup)
-        offset = _sub_v(origin, tip_point)
-    if _dot(offset, offset) > 1e-4:
+    if _dot(offset, offset) > 1e-4 or _dot(final_z, axis_unit) < 0.99:
         raise RuntimeError(
-            "Hex shaft CAM's WCS origin (model front/back) did not resolve to this end's "
-            "own measured tip - got {}, expected {}".format(origin, tip_point)
+            "Hex shaft CAM's WCS did not resolve to this end's own measured tip with +Z "
+            "pointing out of it - got origin {} Z {}, expected origin {} Z {}".format(
+                origin, final_z, tip_point, axis_unit
+            )
         )
 
     # Light cleanup pass at this end's own tip (WCS Z=0) - the small
@@ -478,15 +538,34 @@ def _build_hex_end_setup(
         op.parameters.itemByName("frontHeight_mode").value.value = "from wcs"
         op.parameters.itemByName("frontHeight_offset").expression = "0 in"
         op.parameters.itemByName("backHeight_mode").value.value = "from wcs"
-        op.parameters.itemByName("backHeight_offset").expression = "{:.6f} in".format(neck_length_cm / _CM_PER_IN)
+        # The part lies at negative Z (see the WCS comment above).
+        op.parameters.itemByName("backHeight_offset").expression = "{:.6f} in".format(-neck_length_cm / _CM_PER_IN)
+        # The single-groove operation below owns the groove; without this the
+        # general turning insert tries to follow the ~0.04in groove profile
+        # too and Fusion warns of a lead-out gouge against the stock.
+        op.parameters.itemByName("useGrooveSuppression").value.value = True
+        op.parameters.itemByName("grooveSuppressionSelection").value.value = target["faces"]
 
     groove_op = setup.operations.add(_input_with_tool(setup, "turning_single_groove", groove_tool))
     groove_op.parameters.itemByName("grooves").value.value = [target["faces"][0].edges.item(0)]
 
     operations = [face_op, rough_op, finish_op, groove_op]
+    strategies = ["turning_face", "turning_profile_roughing", "turning_profile_finishing", "turning_single_groove"]
 
-    for op in operations:
+    if part_off:
+        # Confirmed live: turning_part rejects a plain "turning general" tool,
+        # so it takes the grooving insert. Fusion's own default puts the cut
+        # at "model back" - the far end of the finished part, so this severs
+        # the carried grip excess there, after every groove is already cut.
+        part_op = setup.operations.add(_input_with_tool(setup, "turning_part", groove_tool))
+        part_op.parameters.itemByName("backHeight_offset").expression = "{} in".format(-_PART_OFF_ALLOWANCE_IN)
+        operations.append(part_op)
+        strategies.append("turning_part")
+
+    for op, strategy in zip(operations, strategies):
         _set_minimum_retraction(op)
+        _apply_cutting_data(op, strategy)
+        _set_safe_z(op)
 
     return {
         "setup": setup,
@@ -503,11 +582,9 @@ def handleHexShaft(tailstock_length_in=None):
     A model grooved at only one end gets a single setup. A model grooved at
     both ends (the real, reviewed case) gets two: the first setup machines
     whichever end is closer to the model's own axial maximum; the second
-    re-chucks the STILL-JOINED raw bar and machines the other end. Neither
-    setup ever faces off or parts off the carried grip/tailstock excess -
-    see _build_hex_end_setup's own docstring on why that final step was
-    removed. The excess stays attached permanently once CAM is done; a
-    human separates the finished part from it afterward, off the machine.
+    re-chucks the STILL-JOINED raw bar and machines the other end. Only the
+    last setup ends with a Part operation that severs the finished part from
+    the carried grip/tailstock excess, after every groove is cut.
 
     tailstock_length_in, when given, is the operator's own override for how
     much raw stock is carried on the back (grip/tailstock-support) side
@@ -581,8 +658,12 @@ def handleHexShaft(tailstock_length_in=None):
     # given a plain turning-general tool fails toolpath generation with
     # "Tool (turning general) is not supported for the strategy." A grooving
     # insert is the one tool-type detail that can't wait for later configuration.
-    generic_tool = _tool_by_type(lib, "turning general") or lib.item(0)
-    groove_tool = _tool_by_type(lib, "turning grooving") or generic_tool
+    generic_tool = tool_by_type(lib, "turning general", "Right Hand") or lib.item(0)
+    groove_tool = tool_by_type(lib, "turning grooving") or generic_tool
+    generic_tool, groove_tool = _configure_tools(
+        lib, generic_tool, groove_tool,
+        min(g["axialHigh"] - g["axialLow"] for g in groove_instances),
+    )
 
     grip_cm = (
         tailstock_length_in * _CM_PER_IN if tailstock_length_in is not None
@@ -611,6 +692,7 @@ def handleHexShaft(tailstock_length_in=None):
         cam, root, body, long_edge, origin_point, axis_unit, across_flats_cm,
         first_stock, generic_tool, groove_tool,
         setup_name="Hex Shaft" if not two_ended else "Hex Shaft - End 1",
+        part_off=not two_ended,
     )
 
     results = [first_result]
@@ -624,9 +706,22 @@ def handleHexShaft(tailstock_length_in=None):
         second_result = _build_hex_end_setup(
             cam, root, body, long_edge, origin_point, axis_unit_rev, across_flats_cm,
             second_stock, generic_tool, groove_tool,
-            setup_name="Hex Shaft - End 2",
+            setup_name="Hex Shaft - End 2", part_off=True,
         )
         results.append(second_result)
+
+    # Chucks are added only after every setup's WCS has resolved: with chuck
+    # bodies already in the document, Fusion re-resolved the next setup's WCS
+    # Z axis to a wrong, non-axial direction (confirmed live).
+    _attach_hex_chuck(
+        root, first_result["setup"], origin_point, axis_unit, flat_normal, across_flats_cm,
+        axial_min - grip_cm, grip_cm,
+    )
+    if two_ended:
+        _attach_hex_chuck(
+            root, second_result["setup"], origin_point, axis_unit_rev, flat_normal, across_flats_cm,
+            axial_min_rev - grip_cm, grip_cm,
+        )
 
     return {
         "setups": [r["setup"] for r in results],

@@ -32,7 +32,7 @@ from typing import Optional
 from ..commands.MultiImport import importFiles
 from ..commands.NewNCProgram import export
 from ..commands.HandleSpacer import handleSpacer
-from ..commands.HandleHexShaft import handleHexShaft
+from ..commands.HandleHexShaft import handleHexShaft, tool_by_type
 from ..commands.OperationDiagnostics import failed_operations, operation_warnings
 from ..config import (
     BASE_URL,
@@ -134,19 +134,10 @@ def _active_cam_product(app, doc):
     )
 
 
-def _tool_by_type(lib, wanted_type):
-    for i in range(lib.count):
-        tool = lib.item(i)
-        type_param = tool.parameters.itemByName("tool_type")
-        if type_param is not None and type_param.value.value == wanted_type:
-            return tool
-    return None
-
-
 def _load_generic_turning_tools(cam: adsk.cam.CAM) -> None:
     """Populate this document's own tool library with a generic turning and
     grooving tool, straight from Fusion's bundled sample library - what
-    HandleHexShaft.py's own _tool_by_type lookup needs to find before it can
+    HandleHexShaft.py's own tool_by_type lookup needs to find before it can
     build any operation at all. Spacer CAM never calls this: its template
     already carries a real tool from the reference setup it was exported
     from.
@@ -162,8 +153,8 @@ def _load_generic_turning_tools(cam: adsk.cam.CAM) -> None:
             f"Fusion's own '{_TURNING_SAMPLE_LIBRARY_NAME}' sample tool library is unavailable"
         )
     sample_library = tool_libraries.toolLibraryAtURL(sample_url)
-    general_tool = _tool_by_type(sample_library, "turning general")
-    groove_tool = _tool_by_type(sample_library, "turning grooving")
+    general_tool = tool_by_type(sample_library, "turning general", "Right Hand")
+    groove_tool = tool_by_type(sample_library, "turning grooving")
     if general_tool is None or groove_tool is None:
         raise RuntimeError(
             f"'{_TURNING_SAMPLE_LIBRARY_NAME}' is missing a general or grooving turning tool"
