@@ -57,6 +57,19 @@ class HandleSpacerSourceTests(unittest.TestCase):
     def test_drill_is_kept_only_when_the_stock_is_not_already_bored_to_size(self):
         self.assertIn('if resolved["drill_needed"]:', self.source)
 
+    def test_the_template_drill_is_replaced_by_one_sized_for_the_bore(self):
+        # Confirmed live on a real spacer with a bore: the template's fixed
+        # 0.159in drill (live-tool flag, 1.125in flutes, feed per minute)
+        # drilled a wrong-size hole for a 0.230in, 2.16in bore.
+        self.assertIn("_replace_template_drill(", self.source)
+        self.assertIn('geometry["DC"] = geometry["SFDM"] = round(diameter_in, 4)', self.source)
+        self.assertIn('definition["post-process"]["live"] = False', self.source)
+        self.assertIn('"use-feed-per-revolution": True,', self.source)
+        self.assertIn('parameters.itemByName("drillTipThroughBottom").expression = "true"', self.source)
+        self.assertIn("template_drill.deleteMe()", self.source)
+        self.assertIn("drill.moveAfter(roughing)", self.source)
+        self.assertNotIn("_apply_bore_face", self.source)
+
     def test_model_is_rebound_after_the_template_like_handle_tube_does_for_the_wcs(self):
         template_index = self.source.index("setup.createFromCAMTemplate2(template_input)")
         rebind_index = self.source.index("_bind_job_model(setup, body)", template_index)

@@ -135,8 +135,8 @@ class HandleHexShaftSourceTests(unittest.TestCase):
         self.assertIn("min(g[\"axialHigh\"] - g[\"axialLow\"] for g in end_instances)", self.source)
 
     def test_cutting_data_is_capped_for_the_tl1(self):
-        self.assertIn("_TL1_MAX_SPINDLE_RPM = 2000", self.source)
-        self.assertIn('("tool_maximumSpindleSpeed", "{} rpm".format(_TL1_MAX_SPINDLE_RPM))', self.source)
+        self.assertIn("from .MachineLimits import TL1_MAX_SPINDLE_RPM", self.source)
+        self.assertIn('("tool_maximumSpindleSpeed", "{} rpm".format(TL1_MAX_SPINDLE_RPM))', self.source)
         self.assertIn("_apply_cutting_data(op, strategy)", self.source)
 
     def test_profile_operations_suppress_the_groove_owned_by_the_groove_operation(self):
