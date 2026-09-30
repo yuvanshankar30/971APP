@@ -1,5 +1,5 @@
 import { env } from '$env/dynamic/private';
-import { getFileContent, listDirectory, listRepositoryPaths, createBranch, putFile, createPullRequest } from '$lib/server/github_repo.js';
+import { getFileContent, listDirectory, listRepositoryPaths, createBranch, putFile, createPullRequest, getPullRequest, closePullRequest, deleteBranch } from '$lib/server/github_repo.js';
 import { queryHubDataToolDeclaration, executeHubDataQuery } from '$lib/server/hub_data_query.js';
 import { queueEditPreview } from '$lib/server/edit_preview.js';
 
@@ -10,7 +10,7 @@ import { queueEditPreview } from '$lib/server/edit_preview.js';
 // with deploy-config access can read in plaintext). Fetched once per
 // request and threaded through explicitly rather than cached at module
 // scope, so it's never held longer than one /edit request needs it.
-async function fetchGithubToken(supa) {
+export async function fetchGithubToken(supa) {
   if (!supa) throw new Error('No Supabase client available to fetch the GitHub token from Vault');
   const { data, error } = await supa.rpc('get_app_secret', { secret_name: 'github_token' });
   if (error) throw new Error(`Could not read the GitHub token from Vault: ${error.message}`);
@@ -18,17 +18,40 @@ async function fetchGithubToken(supa) {
   return data;
 }
 
-// "@Spartans Hub /edit <description>" - lets a Change Lead ask Gemini to
-// draft an actual code change as a pull request. Gated by the
-// REQUEST_CODE_CHANGES permission (see permissions.js's "Change Lead" role/
-// roster key) in handleHubAppMention, not in here - this module assumes the
-// caller has already been authorized.
+// "@Spartans Hub /edit <description>" drafts an actual code change as a pull
+// request. Any Slack user may request one; a Change Lead reviews or rejects
+// the resulting unmerged PR before it can be merged.
 export function isCodeChangeRequest(question) {
   return /^\/edit\b/i.test(String(question || '').trim());
 }
 
 export function parseCodeChangeRequest(question) {
   return String(question || '').trim().replace(/^\/edit\b/i, '').trim();
+}
+
+export async function rejectDraftCodeChangePr(prNumber, options = {}) {
+  const number = Number(prNumber);
+  if (!Number.isSafeInteger(number) || number < 1) throw new Error('Invalid pull request number');
+  const supa = options.supa || null;
+  const fetchImpl = options.fetchImpl || fetch;
+  const githubToken = options.githubToken ?? await fetchGithubToken(supa);
+  const pr = await getPullRequest(fetchImpl, githubToken, number);
+
+  // Never let an action value turn this endpoint into a general-purpose PR
+  // deletion tool. It can only reject the bot's own still-open draft branches.
+  if (pr.state !== 'open' || !String(pr.head?.ref || '').startsWith('gemini-edit/')) {
+    throw new Error('This is not an open Spartans Hub draft pull request');
+  }
+
+  const closed = await closePullRequest(fetchImpl, githubToken, number);
+  try {
+    await deleteBranch(fetchImpl, githubToken, pr.head.ref);
+  } catch (error) {
+    // A closed PR is already rejected. Retaining an orphaned branch is not a
+    // reason to tell a reviewer the action failed.
+    console.warn('Could not delete rejected edit branch', error?.message || error);
+  }
+  return closed;
 }
 
 // Real bug this fixes: the Sept 25 03:28 and 04:00 failures (both AFTER the
@@ -103,7 +126,7 @@ function writeFileToolDeclaration() {
 
 function buildSystemPrompt() {
   return [
-    'You are Spartans Hub\'s code-change assistant, invoked by a Change Lead (a trusted, authorized team member) via "@Spartans Hub /edit <description>" in Slack.',
+    'You are Spartans Hub\'s code-change assistant, invoked by a Slack user via "@Spartans Hub /edit <description>". Any generated pull request will be reviewed by Change Leads before merging.',
     'You have read access to every file in the frc971/spartanshub repository via search_paths, read_file and list_directory. Search paths first when you do not know the file location. You also have read-only access to a small allowlisted set of database tables via query_hub_data (use it only to understand real data shapes, e.g. before writing a migration - never to justify skipping a real file read).',
     'Use write_file to stage the files your change needs, given the requester\'s description. Always read a file with read_file before writing a changed version of it, so your version is a real edit of the current content, not a guess. Match the existing code style, naming, and patterns you find in nearby files - do not introduce a new framework, library, or pattern the codebase does not already use.',
     'You may create or edit a SQL migration file under migrations/ exactly like any other file write - that is allowed and often correct for a schema change. But you must NEVER attempt to execute, run, or apply a migration, and you have no tool that could mutate the live database even if you tried - query_hub_data is strictly read-only. Writing a migration FILE is the entire extent of what you may do about the database; actually applying it is a deliberate separate step a human takes later.',
