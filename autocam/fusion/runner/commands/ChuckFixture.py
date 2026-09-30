@@ -31,6 +31,7 @@ _JAW_LENGTH_IN = 1.0
 _JAW_WIDTH_IN = 1.0
 _JAW_RADIAL_THICKNESS_IN = 1.5
 _MODEL_CLEARANCE_IN = 0.1
+_JAW_OVERHANG_MARGIN_IN = 0.5
 
 
 def _dot(a, b):
@@ -123,7 +124,8 @@ def build_chuck(root, origin_point, axis_unit, x_reference, seat_radius_cm, jaw_
     jaw_back_cm = jaw_front_cm - jaw_cm
 
     def draw_body(lines):
-        radius_cm = _CHUCK_RADIUS_IN * _CM_PER_IN
+        # Never narrower than the jaws it carries (large stock pushes them out).
+        radius_cm = max(_CHUCK_RADIUS_IN * _CM_PER_IN, jaw_top_cm + _JAW_OVERHANG_MARGIN_IN * _CM_PER_IN)
         points = [
             adsk.core.Point3D.create(
                 radius_cm * math.cos(2.0 * math.pi * k / _CHUCK_SIDES), 0.0,
