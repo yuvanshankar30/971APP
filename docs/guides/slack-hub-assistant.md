@@ -49,13 +49,16 @@ commands, regardless of how the request is phrased. Mentions using the old
 `@971app` or `@971hub` display names continue to work in existing messages
 because Slack identifies the app by ID rather than by its visible name.
 
-Change Leads can use `@Spartans Hub /edit <change>` to draft an unmerged pull
+Any Slack user can use `@Spartans Hub /edit <change>` to draft an unmerged pull
 request. Gemini can search repository paths by keyword before reading files,
 which avoids repeated directory walks. The last model round disables tool
 calls and asks for a summary of files actually staged. If none were staged,
-the bot says that no change was made. After checking Change Lead access, the
-bot posts a working message in the request's Slack thread and replaces that
-message with the PR link, no-change result, or error when drafting finishes.
+the bot says that no change was made. The bot posts a working message in the
+request's Slack thread and replaces that message with the PR link, no-change
+result, or error when drafting finishes. It DMs every active Change Lead a
+Review PR button and a confirmation-protected Reject & close PR button. Reject
+closes the generated PR and deletes its `gemini-edit/` source branch; GitHub
+does not support deleting a pull request record itself.
 
 Questions that name a Hub tab or ask where to find a page are resolved before
 Gemini from `src/lib/server/hub_feature_knowledge.js`. The local catalog covers
@@ -126,6 +129,8 @@ In the Slack app configuration at `api.slack.com/apps`:
    subscriptions. `message.channels` and `message.groups` are not needed for
    targeted assistant replies.
 6. Invite the app to each channel where direct-mention access is wanted.
+7. Under **Interactivity & Shortcuts**, turn on Interactivity and set its
+   Request URL to `https://spartanshub.spartanrobotics.org/api/971bot/slack/actions`.
 
 Gemini 3.5 Flash tool replies include the matching function-call ID so the
 model can continue after a Hub data lookup. The answer review uses a smaller

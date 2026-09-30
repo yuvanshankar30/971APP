@@ -28,6 +28,7 @@ import {
   formatPurchasingCompletion,
   formatBudgetReport,
   formatChangeWatchNotification,
+  notifyChangeLeads,
   formatScoutingAssignments,
   formatTeamReportStatus,
   handleHubAppMention,
@@ -297,6 +298,28 @@ describe('Slack Hub assistant', () => {
     expect(text).toContain('Safety:');
     expect(text).toContain('Review PR #42');
     expect(text.match(/[.!?](?:\n|$)/g)).toHaveLength(4);
+  });
+
+  it('DMs every active Change Lead with review and reject controls', async () => {
+    const open = vi.fn(async ({ users }) => ({ ok: true, channel: { id: `D-${users}` } }));
+    const postMessage = vi.fn().mockResolvedValue({ ok: true });
+    const supa = { from: (table) => {
+      if (table === 'roster_entries') return { select: () => ({ eq: async () => ({ data: [], error: null }) }) };
+      return { select: async () => ({ data: [
+        { id: 'lead', full_name: 'Casey Lead', slack_user_id: 'U-LEAD', banned: false, permissions: ['REQUEST_CODE_CHANGES'] },
+        { id: 'member', full_name: 'Regular Member', slack_user_id: 'U-MEMBER', banned: false, permissions: [] },
+        { id: 'disabled', full_name: 'Disabled Lead', slack_user_id: 'U-DISABLED', banned: true, permissions: ['REQUEST_CODE_CHANGES'] }
+      ], error: null }) };
+    } };
+    await expect(notifyChangeLeads(supa, { conversations: { open }, chat: { postMessage } }, {
+      requesterName: 'Arin Rao', request: 'Change the login copy.', summary: 'Updated the copy.',
+      prUrl: 'https://github.com/frc971/spartanshub/pull/42', prNumber: 42
+    })).resolves.toBe(1);
+    expect(open).toHaveBeenCalledWith({ users: 'U-LEAD' });
+    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({
+      channel: 'D-U-LEAD',
+      blocks: expect.arrayContaining([expect.objectContaining({ type: 'actions' })])
+    }));
   });
 
   it('filters a purchasing list by project, category, and approval status', () => {
@@ -978,15 +1001,16 @@ describe('Slack Hub assistant', () => {
     }));
   });
 
-  it('does not show a working message for an unauthorized edit request', async () => {
+  it('lets a regular Hub member submit an edit request for Change Lead review', async () => {
+    draftCodeChangePr.mockResolvedValueOnce({ prUrl: null, summary: 'No safe change was staged.' });
     const postMessage = vi.fn().mockResolvedValue({ ok: true, channel: 'C1', ts: '2.0' });
-    const update = vi.fn();
+    const update = vi.fn().mockResolvedValue({ ok: true });
     await handleHubAppMention({
       channel: 'C1', user: 'U-ADMIN', ts: '1.0', text: '<@U971> /edit update the login screen'
     }, { supa: supabaseForAssignments({ admin: false }), slack: { chat: { postMessage, update } } });
     expect(postMessage).toHaveBeenCalledTimes(1);
-    expect(postMessage.mock.calls[0][0].text).toBe('Only a Change Lead can ask me to draft a code change.');
-    expect(update).not.toHaveBeenCalled();
+    expect(postMessage.mock.calls[0][0].text).toContain('Working on your `/edit` request');
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ text: expect.stringContaining('I did not make any changes') }));
   });
 
   it('posts the final edit result if Slack cannot update the working message', async () => {
