@@ -55,10 +55,15 @@ which avoids repeated directory walks. The last model round disables tool
 calls and asks for a summary of files actually staged. If none were staged,
 the bot says that no change was made. The bot posts a working message in the
 request's Slack thread and replaces that message with the PR link, no-change
-result, or error when drafting finishes. It DMs every active Change Lead a
-Review PR button and a confirmation-protected Reject & close PR button. Reject
-closes the generated PR and deletes its `gemini-edit/` source branch; GitHub
-does not support deleting a pull request record itself.
+result, or error when drafting finishes. The request thread reports PR, preview,
+rejection, and merge state; anyone in that thread can use `/edit status` for
+the current GitHub-check and preview state. It DMs every active Change Lead an
+Approve & merge button and a confirmation-protected Reject & close PR button.
+Approve & merge is a guarded action: it refuses to merge unless every GitHub
+check has passed, Gemini completes an approving diff review, and the reviewed
+head commit is still current immediately before the squash merge. Reject closes
+the generated PR and deletes its `gemini-edit/` source branch; GitHub does not
+support deleting a pull request record itself.
 
 Questions that name a Hub tab or ask where to find a page are resolved before
 Gemini from `src/lib/server/hub_feature_knowledge.js`. The local catalog covers
