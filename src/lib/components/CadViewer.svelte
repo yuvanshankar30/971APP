@@ -101,7 +101,10 @@
 
         const isDark = typeof document !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'modern-dark';
         scene = new THREE.Scene();
-        scene.background = new THREE.Color(isDark ? 0x131109 : 0xf3f4f6);
+        // Keep the viewport close to the part's neutral gray instead of using a
+        // near-black dark-mode background. The former high-contrast pairing
+        // made specular shadows swallow up smaller faces and holes.
+        scene.background = new THREE.Color(isDark ? 0x2b2d31 : 0xe7e9ed);
         camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000000);
 
         renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -109,13 +112,10 @@
         renderer.setPixelRatio(thumbnail ? 1 : Math.min(window.devicePixelRatio, 2));
         container.appendChild(renderer.domElement);
 
-        // Gray, not the brand-gold accent color - this is the actual stock
-        // material being viewed, not a highlight/accent element. Matches
-        // the same gray + metalness/roughness the 3D toolpath simulator
-        // uses for its own stock (autocam/inprocess/components/ToolpathSimulator.svelte's
-        // createStockMaterial) so a part looks the same color whether it's
-        // open here or in the toolpath sim.
-        const material = new THREE.MeshStandardMaterial({ color: 0xb8bcc2, metalness: 0.75, roughness: 0.42 });
+        // Use a matte neutral finish instead of a highly reflective metal.
+        // Softer lighting preserves the small faces, pockets, and holes that
+        // get lost in hard specular highlights and shadows.
+        const material = new THREE.MeshStandardMaterial({ color: 0xaeb4bc, metalness: 0.18, roughness: 0.68 });
         const group = new THREE.Group();
         for (const geometry of geometries) {
           group.add(new THREE.Mesh(geometry, material));
@@ -133,11 +133,11 @@
         camera.position.set(dist, dist * 0.8, dist);
         camera.lookAt(0, 0, 0);
 
-        scene.add(new THREE.AmbientLight(0xffffff, 0.7));
-        const key = new THREE.DirectionalLight(0xffffff, 0.9);
+        scene.add(new THREE.HemisphereLight(0xffffff, 0x7b818a, 1.15));
+        const key = new THREE.DirectionalLight(0xffffff, 0.65);
         key.position.set(1, 1, 1);
         scene.add(key);
-        const fill = new THREE.DirectionalLight(0xffffff, 0.4);
+        const fill = new THREE.DirectionalLight(0xffffff, 0.55);
         fill.position.set(-1, -0.5, -1);
         scene.add(fill);
 
