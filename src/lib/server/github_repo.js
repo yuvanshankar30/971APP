@@ -120,6 +120,25 @@ export async function getPullRequest(fetchImpl, token, number) {
   return githubRequest(fetchImpl, token, `/repos/${OWNER}/${REPO}/pulls/${encodeURIComponent(number)}`);
 }
 
+export async function getPullRequestFiles(fetchImpl, token, number) {
+  return githubRequest(fetchImpl, token, `/repos/${OWNER}/${REPO}/pulls/${encodeURIComponent(number)}/files?per_page=100`);
+}
+
+export async function getCommitCheckRuns(fetchImpl, token, ref) {
+  return githubRequest(fetchImpl, token, `/repos/${OWNER}/${REPO}/commits/${encodeURIComponent(ref)}/check-runs?per_page=100`);
+}
+
+export async function getCombinedCommitStatus(fetchImpl, token, ref) {
+  return githubRequest(fetchImpl, token, `/repos/${OWNER}/${REPO}/commits/${encodeURIComponent(ref)}/status`);
+}
+
+export async function mergePullRequest(fetchImpl, token, number) {
+  return githubRequest(fetchImpl, token, `/repos/${OWNER}/${REPO}/pulls/${encodeURIComponent(number)}/merge`, {
+    method: 'PUT',
+    body: JSON.stringify({ merge_method: 'squash' })
+  });
+}
+
 export async function deleteBranch(fetchImpl, token, branchName) {
   return githubRequest(fetchImpl, token, `/repos/${OWNER}/${REPO}/git/refs/heads/${encodeURIComponent(branchName)}`, {
     method: 'DELETE'

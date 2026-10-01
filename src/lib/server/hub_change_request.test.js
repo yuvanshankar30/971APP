@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach, vi } from 'vitest';
 
 vi.mock('$env/dynamic/private', () => ({ env: { GEMINI_API_KEY: 'test-key', GEMINI_MODEL: undefined } }));
 import { env } from '$env/dynamic/private';
-import { draftCodeChangePr, isCodeChangeRequest, parseCodeChangeRequest, rejectDraftCodeChangePr } from './hub_change_request.js';
+import { approveDraftCodeChangePr, draftCodeChangePr, isCodeChangeRequest, parseCodeChangeRequest, rejectDraftCodeChangePr } from './hub_change_request.js';
 
 // A single-round response with no functionCall and no text ends the loop
 // immediately with { prUrl: null }, exercising the model-selection logic
@@ -44,6 +44,38 @@ describe('rejectDraftCodeChangePr', () => {
     await expect(rejectDraftCodeChangePr(42, { fetchImpl, githubToken: 'test-token' }))
       .rejects.toThrow('not an open Spartans Hub draft');
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('approveDraftCodeChangePr', () => {
+  const openDraft = { number: 42, state: 'open', title: 'Change copy', html_url: 'https://github.com/frc971/spartanshub/pull/42', head: { ref: 'gemini-edit/change-copy', sha: 'draft-sha' } };
+
+  it('never asks Gemini or merges while GitHub checks are pending', async () => {
+    const fetchImpl = vi.fn(async (url) => {
+      if (url.endsWith('/pulls/42')) return { ok: true, json: async () => openDraft };
+      if (url.includes('/check-runs')) return { ok: true, json: async () => ({ check_runs: [{ name: 'test', status: 'in_progress' }] }) };
+      if (url.endsWith('/status')) return { ok: true, json: async () => ({ state: 'pending' }) };
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    await expect(approveDraftCodeChangePr(42, { fetchImpl, githubToken: 'test-token', apiKey: 'test-key' }))
+      .resolves.toMatchObject({ merged: false, phase: 'checks', checks: { state: 'pending' } });
+    expect(fetchImpl.mock.calls.some(([url]) => url.includes('generativelanguage.googleapis.com'))).toBe(false);
+    expect(fetchImpl.mock.calls.some(([url]) => url.endsWith('/merge'))).toBe(false);
+  });
+
+  it('reviews a passing, unchanged draft before squash-merging it', async () => {
+    const fetchImpl = vi.fn(async (url, options = {}) => {
+      if (url.endsWith('/pulls/42')) return { ok: true, json: async () => openDraft };
+      if (url.includes('/check-runs')) return { ok: true, json: async () => ({ check_runs: [{ name: 'test', status: 'completed', conclusion: 'success' }] }) };
+      if (url.endsWith('/status')) return { ok: true, json: async () => ({ state: 'success' }) };
+      if (url.includes('/pulls/42/files')) return { ok: true, json: async () => ([{ filename: 'src/example.js', status: 'modified', patch: '+safe change' }]) };
+      if (url.includes('generativelanguage.googleapis.com')) return { ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: 'APPROVE - no blocking defects.' }] } }] }) };
+      if (url.endsWith('/merge') && options.method === 'PUT') return { ok: true, json: async () => ({ merged: true, sha: 'merge-sha' }) };
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    await expect(approveDraftCodeChangePr(42, { fetchImpl, githubToken: 'test-token', apiKey: 'test-key' }))
+      .resolves.toMatchObject({ merged: true, phase: 'merged', review: { approved: true } });
+    expect(fetchImpl.mock.calls.some(([url, options]) => url.endsWith('/merge') && options.method === 'PUT')).toBe(true);
   });
 });
 

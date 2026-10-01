@@ -20,6 +20,7 @@ import {
   fetchTeamReportSnapshot,
   formatAdminProfile,
   formatHubStatus,
+  formatEditStatus,
   formatFusionRunnerSetupHelp,
   fetchManufacturingQueue,
   fetchPurchasingList,
@@ -42,6 +43,7 @@ import {
   isPurchasingListQuestion,
   isScoutingAssignmentQuestion,
   isStopEditRequest,
+  isEditStatusRequest,
   shouldUseGoogleSearch,
   isHubStatusRequest,
   isTeamReportStatusRequest,
@@ -224,8 +226,17 @@ describe('Slack Hub assistant', () => {
     expect(isWatchCommand('/watch manufacturing')).toBe(true);
     expect(isStopEditRequest('/stop')).toBe(true);
     expect(isStopEditRequest('/stop please')).toBe(false);
+    expect(isEditStatusRequest('/edit status')).toBe(true);
+    expect(isEditStatusRequest('/edit change the logo')).toBe(false);
     expect(assignmentEventKey('What was assigned for Chezy?', '2026mrcmp')).toBe('2026cc');
     expect(assignmentEventKey('What was assigned for 2025 Chezy?', '2026mrcmp')).toBe('2025cc');
+  });
+
+  it('formats an edit status with live check and preview state', () => {
+    expect(formatEditStatus(
+      { pr_number: 42, status: 'sent' },
+      { pr: { html_url: 'https://github.com/frc971/spartanshub/pull/42', state: 'open' }, checks: { message: 'All 1 GitHub check passed.' } }
+    )).toContain('All 1 GitHub check passed.');
   });
 
   it('returns only active subsystem work from the asking team’s manufacturing queue', async () => {

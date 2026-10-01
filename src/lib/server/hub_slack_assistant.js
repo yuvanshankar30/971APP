@@ -8,9 +8,11 @@ import { answerHubFeatureComparison, answerHubFeatureQuestion, classifyHubFeatur
 import { identifyRosterQuestion, loadHubRoster } from '$lib/server/hub_slack_roster.js';
 import { readSlackAssistantThread } from '$lib/server/slack_event_receipts.js';
 import { ROUTES } from '$lib/siteSearch.js';
-import { isCodeChangeRequest, parseCodeChangeRequest, draftCodeChangePr } from '$lib/server/hub_change_request.js';
+import { isCodeChangeRequest, isEditStatusRequest, parseCodeChangeRequest, draftCodeChangePr, findDraftCodeChangeForThread, inspectDraftCodeChangePr } from '$lib/server/hub_change_request.js';
 import { logBotRequest, classifyBotRequestType } from '$lib/server/hub_bot_request_log.js';
 import { changeLeadReviewBlocks } from '$lib/server/hub_edit_actions.js';
+
+export { isEditStatusRequest };
 
 export const HUB_RECENT_CHANGES = [
   'Drive Team now shows every completed 971 match with Win/Loss/Tie and the final score.',
@@ -97,6 +99,18 @@ export function isWatchCommand(question) {
 
 export function isStopEditRequest(question) {
   return /^\/stop\s*$/i.test(String(question || '').trim());
+}
+
+export function formatEditStatus(context, inspection) {
+  const preview = context.status === 'sent' ? 'Preview: ready.'
+    : ['failed', 'timed_out', 'dispatch_failed'].includes(context.status) ? `Preview: ${context.status.replace(/_/g, ' ')}.`
+      : 'Preview: still processing or unavailable.';
+  return [
+    `*Edit PR:* <${inspection.pr.html_url}|#${context.pr_number}> is ${inspection.pr.state}.`,
+    `Checks: ${inspection.checks.message}`,
+    preview,
+    'Gemini code review runs when a Change Lead presses Approve & merge.'
+  ].join('\n');
 }
 
 const EDIT_CANCELLED_MARKER = 'hub_edit_cancelled_v1';
@@ -1604,6 +1618,19 @@ export async function handleHubAppMention(event, dependencies = {}) {
     }
   } else if (isWatchCommand(question)) {
     text = 'Change watches are disabled during the current notification test.';
+  } else if (isEditStatusRequest(question)) {
+    try {
+      const context = await findDraftCodeChangeForThread(supa, event.channel, event.thread_ts || event.ts);
+      if (!context) {
+        text = 'There is no Spartans Hub `/edit` pull request in this thread yet.';
+      } else {
+        const inspection = await inspectDraftCodeChangePr(context.pr_number, { supa });
+        text = formatEditStatus(context, inspection);
+      }
+    } catch (error) {
+      console.error('Could not load /edit status', error?.message || error);
+      text = 'I could not load the current `/edit` pull-request status right now.';
+    }
   } else if (isCodeChangeRequest(question)) {
     const actorProfile = await resolveHubProfileForSlackUser(supa, event.user, slack);
     if (actorProfile?.banned) {
@@ -1640,7 +1667,7 @@ export async function handleHubAppMention(event, dependencies = {}) {
         // as nothing having happened regardless of what the summary
         // text itself claims.
         text = result.prUrl
-          ? `${safeSlackText(result.summary)}\n\n*Unmerged pull request:* <${result.prUrl}|#${result.prNumber}> - please review before merging; no tests were run against this change locally (CI will run the suite on the PR).`
+          ? `${safeSlackText(result.summary)}\n\n*Unmerged pull request:* <${result.prUrl}|#${result.prNumber}>. GitHub checks are pending; use /edit status in this thread for the live state. A Change Lead can approve and merge only after every check passes and Gemini approves a code review.`
           : `I did not make any changes - no pull request was opened.\n${safeSlackText(result.summary)}`;
         if (result.prUrl) {
           try {
