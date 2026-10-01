@@ -112,6 +112,9 @@
   let quickPrintPartName = '';
   let quickPrintRequester = '';
   let quickPrintSubsystemId = '';
+  let quickPrintSubsystemQuery = '';
+  let quickPrintSubsystemMatches = [];
+  let quickPrintSubsystemSuggestion = null;
   let quickPrintMaterial = DEFAULT_PETG_STOCK;
   let quickPrintCustomMaterial = '';
   let quickPrintQuantity = 1;
@@ -477,6 +480,59 @@
     return subsystemOptions[0]?.id || '';
   }
 
+  function normalizeSubsystemName(value) {
+    return (value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+
+  function editDistance(left, right) {
+    let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+    for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+      const current = [leftIndex];
+      for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+        current[rightIndex] = Math.min(
+          current[rightIndex - 1] + 1,
+          previous[rightIndex] + 1,
+          previous[rightIndex - 1] + (left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1)
+        );
+      }
+      previous = current;
+    }
+    return previous[right.length];
+  }
+
+  function suggestedSubsystems(query) {
+    const needle = normalizeSubsystemName(query);
+    if (!needle) return [];
+    return subsystemOptions
+      .map((subsystem) => {
+        const name = normalizeSubsystemName(subsystem.name);
+        if (name === needle) return { subsystem, score: 0 };
+        if (name.startsWith(needle)) return { subsystem, score: 1 };
+        if (name.includes(needle)) return { subsystem, score: 2 };
+        const distance = editDistance(name, needle);
+        const maxDistance = Math.max(1, Math.floor(needle.length * 0.35));
+        return distance <= maxDistance ? { subsystem, score: 3 + distance } : null;
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.score - b.score || a.subsystem.name.localeCompare(b.subsystem.name))
+      .map(({ subsystem }) => subsystem)
+      .slice(0, 6);
+  }
+
+  function selectQuickPrintSubsystem(subsystem) {
+    quickPrintSubsystemId = subsystem.id;
+    quickPrintSubsystemQuery = subsystem.name || '';
+  }
+
+  function handleQuickPrintSubsystemInput(value) {
+    quickPrintSubsystemQuery = value;
+    const exactMatch = subsystemOptions.find((subsystem) => normalizeSubsystemName(subsystem.name) === normalizeSubsystemName(value));
+    quickPrintSubsystemId = exactMatch?.id || '';
+  }
+
+  $: quickPrintSubsystemMatches = suggestedSubsystems(quickPrintSubsystemQuery);
+  $: quickPrintSubsystemSuggestion = quickPrintSubsystemMatches[0] || null;
+
   async function loadSubsystemOptions() {
     try {
       // Quick Print Add is a team-wide intake path: any signed-in user can
@@ -498,6 +554,7 @@
     quickPrintPartName = '';
     quickPrintRequester = user?.full_name || user?.email || '';
     quickPrintSubsystemId = getDefaultQuickPrintSubsystemId();
+    quickPrintSubsystemQuery = subsystemOptions.find((subsystem) => subsystem.id === quickPrintSubsystemId)?.name || '';
     quickPrintMaterial = DEFAULT_PETG_STOCK;
     quickPrintCustomMaterial = '';
     quickPrintQuantity = 1;
@@ -3044,12 +3101,34 @@
         </div>
         <div class="form-group">
           <label class="form-label" for="quick-print-subsystem">Subsystem</label>
-          <select id="quick-print-subsystem" class="form-select" bind:value={quickPrintSubsystemId}>
-            <option value="" disabled selected={!quickPrintSubsystemId}>Select subsystem</option>
-            {#each subsystemOptions as subsystem}
-              <option value={subsystem.id}>{subsystem.name}</option>
+          <input
+            id="quick-print-subsystem"
+            class="form-input"
+            type="text"
+            list="quick-print-subsystem-options"
+            value={quickPrintSubsystemQuery}
+            placeholder="Start typing a subsystem…"
+            autocomplete="off"
+            aria-describedby="quick-print-subsystem-help"
+            on:input={(event) => handleQuickPrintSubsystemInput(event.currentTarget.value)}
+          />
+          <datalist id="quick-print-subsystem-options">
+            {#each quickPrintSubsystemMatches as subsystem}
+              <option value={subsystem.name}></option>
             {/each}
-          </select>
+          </datalist>
+          <div id="quick-print-subsystem-help" class="quick-print-subsystem-help">
+            {#if quickPrintSubsystemSuggestion && !quickPrintSubsystemId}
+              <span>Did you mean <strong>{quickPrintSubsystemSuggestion.name}</strong>?</span>
+              <button type="button" class="quick-print-subsystem-suggestion" on:click={() => selectQuickPrintSubsystem(quickPrintSubsystemSuggestion)}>
+                Use this subsystem
+              </button>
+            {:else if quickPrintSubsystemId}
+              <span>Selected: <strong>{quickPrintSubsystemQuery}</strong></span>
+            {:else}
+              <span>Type to find a subsystem.</span>
+            {/if}
+          </div>
         </div>
         <div class="form-group">
           <label class="form-label" for="quick-print-material">Material</label>
@@ -4294,6 +4373,27 @@
   .quick-print-note {
     color: var(--neutral-600);
     line-height: 1.4;
+  }
+
+  .quick-print-subsystem-help {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-top: 0.35rem;
+    color: var(--text-muted);
+    font-size: var(--font-xs);
+  }
+
+  .quick-print-subsystem-suggestion {
+    border: 0;
+    padding: 0;
+    color: var(--blue-base);
+    background: transparent;
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+    text-decoration: underline;
   }
 
   .file-hint {
