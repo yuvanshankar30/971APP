@@ -23,6 +23,7 @@ export const SPECIAL_THEME_GROUPS = [
     { id: 'theme-big-business', label: 'Big Business', preview: ['#111827', '#1d4ed8'], palette: ['#080f22', '#111c38', '#3d6fea', '#eaf0ff'] },
     { id: 'theme-mint-chip', label: 'Mint Chip', preview: ['#053b2c', '#264de4'], palette: ['#061817', '#0b2927', '#54d6b1', '#e5fff8'] },
     { id: 'theme-pbj', label: 'PB&J', preview: ['#5a2a0c', '#9d174d'], palette: ['#1b0d12', '#321722', '#cf4776', '#fbeaf0'] },
-    { id: 'theme-chill-vibes', label: 'Chill Vibes', preview: ['#003d36', '#006d77'], palette: ['#041719', '#082a2e', '#27a9b7', '#e2fbfd'] }
+    { id: 'theme-chill-vibes', label: 'Chill Vibes', preview: ['#003d36', '#006d77'], palette: ['#041719', '#082a2e', '#27a9b7', '#e2fbfd'] },
+    { id: 'theme-diggi', label: 'Diggi', preview: ['#111111', '#ff5a00'], palette: ['#050505', '#111111', '#ff5a00', '#fff2ec'] }
   ] }
 ];
