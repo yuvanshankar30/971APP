@@ -478,22 +478,15 @@
   }
 
   async function loadSubsystemOptions() {
-    if (!user?.id) {
-      subsystemOptions = [];
-      return;
-    }
-
     try {
+      // Quick Print Add is a team-wide intake path: any signed-in user can
+      // file a part against any subsystem, regardless of membership.
       const { data, error } = await supabase
-        .from('subsystem_members')
-        .select('subsystems(id, name)')
-        .eq('user_id', user.id);
-
+        .from('subsystems')
+        .select('id, name');
       if (error) throw error;
 
       subsystemOptions = (data || [])
-        .map((row) => row.subsystems)
-        .filter(Boolean)
         .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
     } catch (error) {
       console.error('Error loading subsystem options:', error);
@@ -579,6 +572,7 @@
           name: quickPrintPartName.trim(),
           requester: quickPrintRequester.trim(),
           project_id: selectedSubsystem.name,
+          subsystem_id: selectedSubsystem.id,
           workflow: '3d-print',
           quantity: Math.max(1, Number(quickPrintQuantity) || 1),
           material: matchingStock?.material || effectiveMaterial,
