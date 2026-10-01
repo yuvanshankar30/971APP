@@ -15,7 +15,8 @@ export const SPECIAL_THEME_GROUPS = [
     { id: 'theme-banana', label: 'Banana', preview: ['#3d2d00', '#d4a017'], palette: ['#181305', '#2c2208', '#e0b126', '#fff7d6'] },
     { id: 'theme-jade', label: 'Jade', preview: ['#023c2c', '#2a9d8f'], palette: ['#041914', '#092c23', '#37bd91', '#e1fbf1'] },
     { id: 'theme-lagoon', label: 'Lagoon', preview: ['#003049', '#00b4d8'], palette: ['#041722', '#082b3c', '#20b9d6', '#e1f8fc'] },
-    { id: 'theme-barbra', label: 'Barbra', preview: ['#5f0014', '#d90429'], palette: ['#1d0208', '#350610', '#e3264f', '#ffe8ed'] }
+    { id: 'theme-barbra', label: 'Barbra', preview: ['#5f0014', '#d90429'], palette: ['#1d0208', '#350610', '#e3264f', '#ffe8ed'] },
+    { id: 'theme-matcha', label: 'Matcha', preview: ['#293b21', '#8ca86e'], palette: ['#121a0f', '#1b2615', '#8ca86e', '#eff5ea'] }
   ] },
   { label: 'Fun and new', themes: [
     { id: 'theme-raspberry-beret', label: 'Raspberry Beret', preview: ['#3c001d', '#d0004b'], palette: ['#1b0612', '#330a1d', '#db2464', '#ffe9f1'] },
