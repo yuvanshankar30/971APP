@@ -17,7 +17,8 @@ browser confirmation or prompt popups.
 
 - **Manufacturing/CAM**: part tracking through the manufacturing pipeline
   (queued → in-progress → completed), STEP file 3D viewing with rendered
-  thumbnails for uploaded 3D-print files, BOM and build
+  thumbnails for uploaded 3D-print files, a Quick Print Add form whose
+  searchable subsystem field suggests likely matches as members type, BOM and build
   tracking, kitting, bins, post-processing, router-specific workflows,
   and a Completed-page action to duplicate a historical part as a fresh ToDo
   request while retaining its source/CAD references,
