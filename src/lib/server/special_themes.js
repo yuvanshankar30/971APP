@@ -6,7 +6,7 @@ export const DIGGI_THEME_ID = 'theme-diggi';
 // Diggi is a single global launch window, not a per-user trial. Once this
 // instant passes the server stops publishing it and there is no path that
 // can make it available again.
-export const DIGGI_THEME_AVAILABLE_AT = Date.parse('2026-10-01T03:27:03.000Z');
+export const DIGGI_THEME_AVAILABLE_AT = Date.parse('2026-10-01T03:30:05.000Z');
 export const DIGGI_THEME_EXPIRES_AT = DIGGI_THEME_AVAILABLE_AT + (20 * 60 * 1000);
 
 export const SPECIAL_THEME_GROUPS = [
