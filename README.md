@@ -310,7 +310,9 @@ browser confirmation or prompt popups.
 - **Account** (`profile/`): a consistently named Account tab on desktop and
   mobile for per-user profile settings and personal stats (attendance history,
   etc.), plus a Slack-style theme gallery available to every signed-in account
-  covering both the built-in themes and extra palette groups. Gallery themes
+  covering both the built-in themes and extra palette groups. Time-limited
+  gallery releases such as Diggi are removed globally at their published
+  expiry and cannot be selected again. Gallery themes
   also remap semantic success/error/progress/warning and operation badges onto
   palette-coordinated dark surfaces without changing their meanings. The page
   is divided into direct-linkable Account, Appearance, Navigation, and
