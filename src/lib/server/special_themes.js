@@ -6,7 +6,8 @@ export const SPECIAL_THEME_GROUPS = [
   { label: 'Atmosphere', themes: [
     { id: 'theme-kind-of-blue', label: 'Kind of Blue', preview: ['#18314a', '#277da1'], palette: ['#071827', '#102a40', '#4aa8d8', '#e7f4fb'] },
     { id: 'theme-funky-fresh', label: 'Funky Fresh', preview: ['#6d5b97', '#52b788'], palette: ['#17152a', '#282342', '#5ecf9a', '#f0ecff'] },
-    { id: 'theme-jazz-club', label: 'Jazz Club', preview: ['#8b0000', '#240046'], palette: ['#150510', '#280919', '#d42645', '#fae9ee'] }
+    { id: 'theme-jazz-club', label: 'Jazz Club', preview: ['#8b0000', '#240046'], palette: ['#150510', '#280919', '#d42645', '#fae9ee'] },
+    { id: 'theme-neon-night', label: 'Neon Night', preview: ['#1a053a', '#ff00aa'], palette: ['#0d021c', '#1a053a', '#ff00aa', '#ffe5f4'] }
   ] },
   { label: 'Single color', themes: [
     { id: 'theme-aubergine', label: 'Aubergine', preview: ['#2b0a3d', '#7b2cbf'], palette: ['#16091c', '#2a1033', '#b15bd1', '#f4e9f8'] },
