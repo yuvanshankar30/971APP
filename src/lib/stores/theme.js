@@ -13,7 +13,6 @@ let specialThemesAuthorized = false;
 export const specialThemesAllowed = writable(false);
 export const specialThemeGroups = writable([]);
 let specialThemePalettes = new Map();
-let specialThemeExpiryTimer = null;
 // A custom theme cannot be validated until the authenticated catalog arrives.
 // Keep its saved ID out-of-band so the initial default render does not
 // overwrite it in localStorage before registerSpecialThemes() can restore it.
@@ -93,26 +92,10 @@ export function setTheme(value) {
 }
 
 export function registerSpecialThemes(groups = []) {
-  const now = Date.now();
-  const activeGroups = groups
-    .map((group) => ({
-      ...group,
-      themes: (group.themes || []).filter((entry) => !entry.expiresAt || Date.parse(entry.expiresAt) > now)
-    }))
-    .filter((group) => group.themes.length > 0);
-  specialThemePalettes = new Map(activeGroups.flatMap((group) => group.themes).map((entry) => [entry.id, entry.palette]));
+  specialThemePalettes = new Map(groups.flatMap((group) => group.themes || []).map((entry) => [entry.id, entry.palette]));
   specialThemesAuthorized = specialThemePalettes.size > 0;
-  specialThemeGroups.set(specialThemesAuthorized ? activeGroups : []);
+  specialThemeGroups.set(specialThemesAuthorized ? groups : []);
   specialThemesAllowed.set(specialThemesAuthorized);
-  if (browser && specialThemeExpiryTimer) clearTimeout(specialThemeExpiryTimer);
-  const nextExpiry = activeGroups
-    .flatMap((group) => group.themes)
-    .map((entry) => Date.parse(entry.expiresAt))
-    .filter(Number.isFinite)
-    .sort((a, b) => a - b)[0];
-  if (browser && nextExpiry) {
-    specialThemeExpiryTimer = setTimeout(() => registerSpecialThemes(groups), Math.max(0, nextExpiry - now));
-  }
   if (!browser) return specialThemesAuthorized;
   const saved = pendingSavedTheme || localStorage.getItem(STORAGE_KEY);
   pendingSavedTheme = null;
