@@ -8,7 +8,7 @@
 // concept, see buildNavItems/toLinkItem in +layout.svelte, not new UI) per
 // direct feedback that a flat list of ~10 top-level tabs read as clutter for
 // anyone not touching most of them day to day. Order (Home, Manufacturing,
-// Competition, CAD, Purchasing, Admin) keeps the team's primary daily
+// Competition, CAD, Admin) keeps the team's primary daily
 // workflows at the front of the header.
 //   - Manufacturing: the shop-floor tools (manufacture tracking, Fusion
 //     AutoCAM, Kitting, COTS Stocking) - "whatever else we add" here later
@@ -34,11 +34,6 @@
 //     Match Scouting is listed again: #89 removed the route wholesale, and it
 //     has been restored and rewired to api/matchscout instead of the
 //     browser-local storage it originally used.
-//   - Purchasing: stands alone after the team-workflow folders. Docs is no
-//     longer in the default set (direct instruction) - still reachable at
-//     /docs by URL, and by anyone who already added it to their own saved
-//     nav, same as the other deliberately-hidden-but-not-deleted routes
-//     above.
 //
 // Home is rendered separately and always first; Admin is appended for
 // admins by the layout, always last.
@@ -126,8 +121,6 @@ export function defaultHeaderTabs(navConfig = navigation) {
   if (cadChildren.length) {
     tabs.push({ type: 'folder', label: 'CAD', children: cadChildren });
   }
-
-  tabs.push({ type: 'tab', key: 'purchasing', label: 'Purchasing' });
 
   return tabs;
 }
