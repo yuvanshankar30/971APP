@@ -4,7 +4,6 @@
     "build": true,
     "manufacture": true,
     "cad": true,
-    "purchasing": true,
     "scouting": true,
     "powerrankings": true,
     "matchrankings": true,
