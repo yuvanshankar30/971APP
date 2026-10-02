@@ -2,13 +2,6 @@ export function canAccessSpecialThemes(user) {
   return !!user;
 }
 
-export const DIGGI_THEME_ID = 'theme-diggi';
-// Diggi is a single global launch window, not a per-user trial. Once this
-// instant passes the server stops publishing it and there is no path that
-// can make it available again.
-export const DIGGI_THEME_AVAILABLE_AT = Date.parse('2026-10-01T03:30:05.000Z');
-export const DIGGI_THEME_EXPIRES_AT = DIGGI_THEME_AVAILABLE_AT + (20 * 60 * 1000);
-
 export const SPECIAL_THEME_GROUPS = [
   { label: 'Atmosphere', themes: [
     { id: 'theme-kind-of-blue', label: 'Kind of Blue', preview: ['#18314a', '#277da1'], palette: ['#071827', '#102a40', '#4aa8d8', '#e7f4fb'] },
@@ -31,15 +24,6 @@ export const SPECIAL_THEME_GROUPS = [
     { id: 'theme-mint-chip', label: 'Mint Chip', preview: ['#053b2c', '#264de4'], palette: ['#061817', '#0b2927', '#54d6b1', '#e5fff8'] },
     { id: 'theme-pbj', label: 'PB&J', preview: ['#5a2a0c', '#9d174d'], palette: ['#1b0d12', '#321722', '#cf4776', '#fbeaf0'] },
     { id: 'theme-chill-vibes', label: 'Chill Vibes', preview: ['#003d36', '#006d77'], palette: ['#041719', '#082a2e', '#27a9b7', '#e2fbfd'] },
-    { id: DIGGI_THEME_ID, label: 'Diggi', preview: ['#111111', '#ff5a00'], palette: ['#050505', '#111111', '#ff5a00', '#fff2ec'], expiresAt: new Date(DIGGI_THEME_EXPIRES_AT).toISOString() }
+    { id: 'theme-diggi', label: 'Diggi', preview: ['#111111', '#ff5a00'], palette: ['#050505', '#111111', '#ff5a00', '#fff2ec'] }
   ] }
 ];
-
-export function getSpecialThemeGroups(now = Date.now()) {
-  return SPECIAL_THEME_GROUPS
-    .map((group) => ({
-      ...group,
-      themes: group.themes.filter((theme) => theme.id !== DIGGI_THEME_ID || now < DIGGI_THEME_EXPIRES_AT)
-    }))
-    .filter((group) => group.themes.length > 0);
-}
